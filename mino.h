@@ -84,6 +84,16 @@ mino_val_t *mino_cdr(const mino_val_t *v);
 size_t mino_length(const mino_val_t *list);
 
 /* ------------------------------------------------------------------------- */
+/* Printer                                                                   */
+/* ------------------------------------------------------------------------- */
+
+#include <stdio.h>
+
+void mino_print(const mino_val_t *v);            /* to stdout, no newline */
+void mino_println(const mino_val_t *v);          /* to stdout, with newline */
+void mino_print_to(FILE *out, const mino_val_t *v);
+
+/* ------------------------------------------------------------------------- */
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
 

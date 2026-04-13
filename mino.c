@@ -172,6 +172,115 @@ size_t mino_length(const mino_val_t *list)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Printer                                                                   */
+/* ------------------------------------------------------------------------- */
+
+static void print_string_escaped(FILE *out, const char *s, size_t len)
+{
+    size_t i;
+    fputc('"', out);
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        switch (c) {
+        case '"':  fputs("\\\"", out); break;
+        case '\\': fputs("\\\\", out); break;
+        case '\n': fputs("\\n",  out); break;
+        case '\t': fputs("\\t",  out); break;
+        case '\r': fputs("\\r",  out); break;
+        case '\0': fputs("\\0",  out); break;
+        default:   fputc((int)c, out); break;
+        }
+    }
+    fputc('"', out);
+}
+
+void mino_print_to(FILE *out, const mino_val_t *v)
+{
+    if (v == NULL || v->type == MINO_NIL) {
+        fputs("nil", out);
+        return;
+    }
+    switch (v->type) {
+    case MINO_NIL:
+        fputs("nil", out);
+        return;
+    case MINO_BOOL:
+        fputs(v->as.b ? "true" : "false", out);
+        return;
+    case MINO_INT:
+        fprintf(out, "%lld", v->as.i);
+        return;
+    case MINO_FLOAT: {
+        /*
+         * Always include a decimal point so the printed form re-reads as a
+         * float, not an int. %g may drop the dot for whole numbers.
+         */
+        char buf[64];
+        int n = snprintf(buf, sizeof(buf), "%g", v->as.f);
+        int needs_dot = 1;
+        int i;
+        if (n < 0) {
+            fputs("nan", out);
+            return;
+        }
+        for (i = 0; i < n; i++) {
+            if (buf[i] == '.' || buf[i] == 'e' || buf[i] == 'E'
+                || buf[i] == 'n' || buf[i] == 'i') {
+                needs_dot = 0;
+                break;
+            }
+        }
+        fputs(buf, out);
+        if (needs_dot) {
+            fputs(".0", out);
+        }
+        return;
+    }
+    case MINO_STRING:
+        print_string_escaped(out, v->as.s.data, v->as.s.len);
+        return;
+    case MINO_SYMBOL:
+        fwrite(v->as.s.data, 1, v->as.s.len, out);
+        return;
+    case MINO_CONS: {
+        const mino_val_t *p = v;
+        fputc('(', out);
+        while (p != NULL && p->type == MINO_CONS) {
+            mino_print_to(out, p->as.cons.car);
+            p = p->as.cons.cdr;
+            if (p != NULL && p->type == MINO_CONS) {
+                fputc(' ', out);
+            } else if (p != NULL && p->type != MINO_NIL) {
+                fputs(" . ", out);
+                mino_print_to(out, p);
+                break;
+            }
+        }
+        fputc(')', out);
+        return;
+    }
+    case MINO_PRIM:
+        fputs("#<prim ", out);
+        if (v->as.prim.name != NULL) {
+            fputs(v->as.prim.name, out);
+        }
+        fputc('>', out);
+        return;
+    }
+}
+
+void mino_print(const mino_val_t *v)
+{
+    mino_print_to(stdout, v);
+}
+
+void mino_println(const mino_val_t *v)
+{
+    mino_print_to(stdout, v);
+    fputc('\n', stdout);
+}
+
+/* ------------------------------------------------------------------------- */
 /* Error reporting                                                           */
 /* ------------------------------------------------------------------------- */
 
