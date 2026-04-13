@@ -130,5 +130,64 @@ run "recur in fn"    '(def count-down (fn (n) (if (<= n 0) "done" (recur (- n 1)
 (count-down 1000)' '#<fn>
 "done"'
 
+# v0.3 — keywords
+run "keyword print" ':foo'            ':foo'
+run "keyword eq"    '(= :a :a)'       'true'
+run "keyword ne"    '(= :a :b)'       'false'
+run "keyword list"  '(list :a :b :c)' '(:a :b :c)'
+
+# v0.3 — vector literal and self-eval
+run "vec empty"    '[]'                        '[]'
+run "vec literal"  '[1 2 3]'                   '[1 2 3]'
+run "vec evals"    '(def x 7)
+[x (+ x 1) (* x x)]' '7
+[7 8 49]'
+run "vec nested"   '[[1 2] [3 4]]'             '[[1 2] [3 4]]'
+run "vec eq"       '(= [1 2 3] [1 2 3])'       'true'
+run "vec ne len"   '(= [1 2] [1 2 3])'         'false'
+
+# v0.3 — map literal and self-eval
+run "map empty"    '{}'                          '{}'
+run "map literal"  '{:a 1 :b 2}'                 '{:a 1, :b 2}'
+run "map commas"   '{:a 1, :b 2}'                '{:a 1, :b 2}'
+run "map evals"    '(def x 7)
+{:n x :sq (* x x)}' '7
+{:n 7, :sq 49}'
+run "map eq order" '(= {:a 1 :b 2} {:b 2 :a 1})' 'true'
+run "map ne val"   '(= {:a 1} {:a 2})'           'false'
+
+# v0.3 — collection primitives
+run "count vec"   '(count [1 2 3])'          '3'
+run "count map"   '(count {:a 1 :b 2})'      '2'
+run "count list"  '(count (list 1 2 3))'     '3'
+run "count nil"   '(count nil)'              '0'
+run "count str"   '(count "hello")'          '5'
+run "first vec"   '(first [10 20 30])'       '10'
+run "rest vec"    '(rest [10 20 30])'        '(20 30)'
+run "first nil"   '(first nil)'              'nil'
+run "rest nil"    '(rest nil)'               'nil'
+run "nth vec"     '(nth [10 20 30] 1)'       '20'
+run "nth default" '(nth [10 20] 99 :none)'   ':none'
+run "vector fn"   '(vector 1 2 3)'           '[1 2 3]'
+run "hash-map fn" '(hash-map :a 1 :b 2)'     '{:a 1, :b 2}'
+run "assoc map"   '(assoc {:a 1} :b 2)'      '{:a 1, :b 2}'
+run "assoc over"  '(assoc {:a 1} :a 99)'     '{:a 99}'
+run "assoc vec"   '(assoc [10 20 30] 1 99)'  '[10 99 30]'
+run "assoc append" '(assoc [10 20] 2 30)'    '[10 20 30]'
+run "get map"     '(get {:a 1 :b 2} :a)'     '1'
+run "get default" '(get {:a 1} :no :def)'    ':def'
+run "get vec"     '(get [10 20 30] 1)'       '20'
+run "conj list"   "(conj '(1 2) 3 4)"        '(4 3 1 2)'
+run "conj vec"    '(conj [1 2] 3 4)'         '[1 2 3 4]'
+run "conj map"    '(conj {:a 1} [:b 2])'     '{:a 1, :b 2}'
+run "update map"  '(update {:a 5} :a (fn (n) (* n 10)))' '{:a 50}'
+run "keys"        '(keys {:a 1 :b 2})'       '(:a :b)'
+run "vals"        '(vals {:a 1 :b 2})'       '(1 2)'
+
+# v0.3 — collections compose with closures
+run "build map"  '(def m (hash-map :x 1 :y 2))
+(get (update m :x (fn (n) (+ n 100))) :x)' '{:x 1, :y 2}
+101'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]
