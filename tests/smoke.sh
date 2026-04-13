@@ -189,6 +189,35 @@ run "build map"  '(def m (hash-map :x 1 :y 2))
 (get (update m :x (fn (n) (+ n 100))) :x)' '{:x 1, :y 2}
 101'
 
+# v0.6 — defmacro + quasiquote
+run "defmacro basic" '(defmacro twice (x) `(do ~x ~x))
+(def n 0)
+(def inc (fn () (def n (+ n 1)) n))
+(twice (inc))' '#<macro>
+0
+#<fn>
+2'
+run "quasiquote splice" '(defmacro my-list (& xs) `(list ~@xs))
+(my-list 1 2 3)' '#<macro>
+(1 2 3)'
+run "variadic rest"      '((fn (a & b) (list a b)) 1 2 3 4)' '(1 (2 3 4))'
+run "macroexpand-1"      "(defmacro unless (c t f) (list 'if c f t))
+(macroexpand-1 '(unless x 1 2))" '#<macro>
+(if x 2 1)'
+run "gensym fresh"       '(= (gensym) (gensym))' 'false'
+
+# v0.6 — stdlib macros
+run "when true"  '(when true 1 2 3)'       '3'
+run "when false" '(when false :no)'        'nil'
+run "cond"       '(cond false :a true :b)' ':b'
+run "cond none"  '(cond false :a false :b)' 'nil'
+run "and values" '(and 1 2 3)'             '3'
+run "and short"  '(and 1 false 3)'         'false'
+run "or values"  '(or nil nil 42)'         '42'
+run "or none"    '(or false false false)'  'false'
+run "thread ->"  '(-> 10 (- 3) (- 2))'     '5'
+run "thread ->>" '(->> 10 (- 3) (- 2))'    '9'
+
 # v0.5 — map iteration follows insertion order, not hash layout
 run "map order preserved"    '(keys {:z 1 :a 2 :m 3 :b 4})' '(:z :a :m :b)'
 run "map rebind keeps order" '(keys (assoc {:z 1 :a 2 :m 3} :a 99))' '(:z :a :m)'

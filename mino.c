@@ -3398,6 +3398,26 @@ static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
     return head;
 }
 
+static mino_val_t *prim_cons_p(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("cons? requires one argument");
+        return NULL;
+    }
+    return mino_is_cons(args->as.cons.car) ? mino_true() : mino_false();
+}
+
+static mino_val_t *prim_nil_p(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("nil? requires one argument");
+        return NULL;
+    }
+    return mino_is_nil(args->as.cons.car) ? mino_true() : mino_false();
+}
+
 static mino_val_t *prim_macroexpand_1(mino_val_t *args, mino_env_t *env)
 {
     int expanded;
@@ -3457,6 +3477,82 @@ static mino_val_t *prim_gensym(mino_val_t *args, mino_env_t *env)
     }
 }
 
+/*
+ * Stdlib macros defined in mino itself. Each form is read + evaluated in
+ * order against the installing env during mino_install_core, so downstream
+ * code can depend on them as if they were primitives.
+ *
+ * Hygiene: macro writers introduce temporaries via (gensym) to avoid
+ * capturing names from the caller's environment. 0.x makes no automatic
+ * hygiene promise; gensym is the convention.
+ */
+static const char *stdlib_mino_src =
+    "(defmacro when (c & body)\n"
+    "  `(if ~c (do ~@body)))\n"
+    "\n"
+    "(defmacro cond (& clauses)\n"
+    "  (if (< (count clauses) 2)\n"
+    "    nil\n"
+    "    `(if ~(first clauses)\n"
+    "         ~(first (rest clauses))\n"
+    "         (cond ~@(rest (rest clauses))))))\n"
+    "\n"
+    "(defmacro and (& xs)\n"
+    "  (if (= 0 (count xs))\n"
+    "    true\n"
+    "    (if (= 1 (count xs))\n"
+    "      (first xs)\n"
+    "      (let (g (gensym))\n"
+    "        `(let (~g ~(first xs))\n"
+    "           (if ~g (and ~@(rest xs)) ~g))))))\n"
+    "\n"
+    "(defmacro or (& xs)\n"
+    "  (if (= 0 (count xs))\n"
+    "    nil\n"
+    "    (if (= 1 (count xs))\n"
+    "      (first xs)\n"
+    "      (let (g (gensym))\n"
+    "        `(let (~g ~(first xs))\n"
+    "           (if ~g ~g (or ~@(rest xs))))))))\n"
+    "\n"
+    "(defmacro -> (x & forms)\n"
+    "  (if (= 0 (count forms))\n"
+    "    x\n"
+    "    (let (step (first forms))\n"
+    "      (if (cons? step)\n"
+    "        `(-> (~(first step) ~x ~@(rest step)) ~@(rest forms))\n"
+    "        `(-> (~step ~x) ~@(rest forms))))))\n"
+    "\n"
+    "(defmacro ->> (x & forms)\n"
+    "  (if (= 0 (count forms))\n"
+    "    x\n"
+    "    (let (step (first forms))\n"
+    "      (if (cons? step)\n"
+    "        `(->> (~(first step) ~@(rest step) ~x) ~@(rest forms))\n"
+    "        `(->> (~step ~x) ~@(rest forms))))))\n";
+
+static void install_stdlib_macros(mino_env_t *env)
+{
+    const char *src = stdlib_mino_src;
+    while (*src != '\0') {
+        const char *end  = NULL;
+        mino_val_t *form = mino_read(src, &end);
+        if (form == NULL) {
+            if (mino_last_error() != NULL) {
+                /* Hardcoded source — a parse error here is a build-time bug. */
+                fprintf(stderr, "stdlib parse error: %s\n", mino_last_error());
+                abort();
+            }
+            break;
+        }
+        if (mino_eval(form, env) == NULL) {
+            fprintf(stderr, "stdlib eval error: %s\n", mino_last_error());
+            abort();
+        }
+        src = end;
+    }
+}
+
 void mino_install_core(mino_env_t *env)
 {
     mino_env_set(env, "+",        mino_prim("+",        prim_add));
@@ -3489,4 +3585,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "macroexpand",
                  mino_prim("macroexpand", prim_macroexpand));
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
+    mino_env_set(env, "cons?",    mino_prim("cons?",    prim_cons_p));
+    mino_env_set(env, "nil?",     mino_prim("nil?",     prim_nil_p));
+    install_stdlib_macros(env);
 }
