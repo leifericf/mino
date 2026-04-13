@@ -593,10 +593,15 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
 /* ------------------------------------------------------------------------- */
 
 /*
- * v0.1 environment: a single global frame stored as a flat dynamic array
- * of (name, value) pairs. Linear search is fine for the walking-skeleton
- * milestone; later versions can swap in a hash map without changing the
- * external API.
+ * Environment: a chain of frames. Each frame is a flat (name, value) array
+ * with linear search. The root frame has parent == NULL and holds globals;
+ * child frames are created by let, fn application, and loop. Lookup walks
+ * parents; binding always writes to the current frame so that let and fn
+ * parameters shadow rather than mutate outer bindings.
+ *
+ * Frames created for locals are currently never freed — v0.7 introduces a
+ * tracing collector that owns environment lifetimes. Only the root frame
+ * passed to mino_env_free is reclaimed.
  */
 
 typedef struct {
@@ -608,15 +613,22 @@ struct mino_env {
     env_binding_t *bindings;
     size_t         len;
     size_t         cap;
+    mino_env_t    *parent;
 };
 
-mino_env_t *mino_env_new(void)
+static mino_env_t *env_alloc(mino_env_t *parent)
 {
     mino_env_t *env = (mino_env_t *)calloc(1, sizeof(*env));
     if (env == NULL) {
         abort();
     }
+    env->parent = parent;
     return env;
+}
+
+mino_env_t *mino_env_new(void)
+{
+    return env_alloc(NULL);
 }
 
 void mino_env_free(mino_env_t *env)
@@ -632,7 +644,7 @@ void mino_env_free(mino_env_t *env)
     free(env);
 }
 
-static env_binding_t *env_find(mino_env_t *env, const char *name)
+static env_binding_t *env_find_here(mino_env_t *env, const char *name)
 {
     size_t i;
     for (i = 0; i < env->len; i++) {
@@ -643,9 +655,9 @@ static env_binding_t *env_find(mino_env_t *env, const char *name)
     return NULL;
 }
 
-void mino_env_set(mino_env_t *env, const char *name, mino_val_t *val)
+static void env_bind(mino_env_t *env, const char *name, mino_val_t *val)
 {
-    env_binding_t *b = env_find(env, name);
+    env_binding_t *b = env_find_here(env, name);
     if (b != NULL) {
         b->val = val;
         return;
@@ -665,10 +677,29 @@ void mino_env_set(mino_env_t *env, const char *name, mino_val_t *val)
     env->len++;
 }
 
+static mino_env_t *env_root(mino_env_t *env)
+{
+    while (env->parent != NULL) {
+        env = env->parent;
+    }
+    return env;
+}
+
+void mino_env_set(mino_env_t *env, const char *name, mino_val_t *val)
+{
+    env_bind(env, name, val);
+}
+
 mino_val_t *mino_env_get(mino_env_t *env, const char *name)
 {
-    env_binding_t *b = env_find(env, name);
-    return b != NULL ? b->val : NULL;
+    while (env != NULL) {
+        env_binding_t *b = env_find_here(env, name);
+        if (b != NULL) {
+            return b->val;
+        }
+        env = env->parent;
+    }
+    return NULL;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -778,7 +809,7 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             if (value == NULL) {
                 return NULL;
             }
-            mino_env_set(env, buf, value);
+            env_bind(env_root(env), buf, value);
             return value;
         }
 
