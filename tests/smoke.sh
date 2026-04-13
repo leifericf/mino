@@ -189,5 +189,16 @@ run "build map"  '(def m (hash-map :x 1 :y 2))
 (get (update m :x (fn (n) (+ n 100))) :x)' '{:x 1, :y 2}
 101'
 
+# v0.4 — vectors scale beyond one leaf (crosses trie level boundaries)
+run "vec 2000 build+nth" '(let (big (loop (i 0 v [])
+  (if (< i 2000) (recur (+ i 1) (conj v i)) v)))
+  (list (count big)
+        (+ (nth big 0) (nth big 31) (nth big 32) (nth big 1023)
+           (nth big 1024) (nth big 1999))))' '(2000 4109)'
+run "vec assoc shares source" '(let (big (loop (i 0 v [])
+                                    (if (< i 2000) (recur (+ i 1) (conj v i)) v))
+                               big2 (assoc big 500 :x))
+  (list (nth big 500) (nth big2 500) (= (count big) (count big2))))' '(500 :x true)'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]

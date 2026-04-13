@@ -368,18 +368,88 @@ static mino_val_t *vec_assoc1(const mino_val_t *v, size_t i, mino_val_t *item)
 }
 
 /*
- * Vector construction from a flat array. Uses repeated conj for now; the
- * internal bulk-build path (v0.4 transient) replaces this in a follow-up
- * commit. Caller retains ownership of the source array and elements.
+ * Bulk build from a flat source array — the internal "transient" path.
+ *
+ * Per-element vec_conj1 is O(log32 n) per append, so a naïve build walks
+ * O(n log32 n) work and churns a path-copy on every boundary. vec_from_array
+ * skips that: it freezes the last 1..32 elements as the tail, splits the rest
+ * into full 32-slot leaves, and folds leaves into the spine layer by layer
+ * (32 → 1 each pass). Every node is mutated in place during construction and
+ * only becomes part of a persistent vector when vec_assemble returns, so no
+ * transient state is observable outside this call.
+ *
+ * Total work is O(n): one pass writing leaves, then n/32 + n/1024 + ... ≤ n/31
+ * more writes up the spine. Caller retains ownership of `items` and elements.
  */
+static mino_val_t *vec_from_array(mino_val_t **items, size_t len)
+{
+    mino_vec_node_t  *tail;
+    unsigned          tail_len;
+    size_t            trie_count;
+    size_t            num_leaves;
+    mino_vec_node_t **layer;
+    size_t            layer_n;
+    unsigned          shift;
+    size_t            i;
+    if (len == 0) {
+        return vec_assemble(NULL, NULL, 0u, 0u, 0);
+    }
+    tail_len = (unsigned)(len % MINO_VEC_WIDTH);
+    if (tail_len == 0) {
+        tail_len = MINO_VEC_WIDTH;
+    }
+    trie_count = len - tail_len;
+    tail = vnode_new(tail_len);
+    memcpy(tail->slots, items + trie_count, tail_len * sizeof(*items));
+    if (trie_count == 0) {
+        return vec_assemble(NULL, tail, tail_len, 0u, len);
+    }
+    num_leaves = trie_count / MINO_VEC_WIDTH;
+    layer = (mino_vec_node_t **)malloc(num_leaves * sizeof(*layer));
+    if (layer == NULL) {
+        abort();
+    }
+    for (i = 0; i < num_leaves; i++) {
+        mino_vec_node_t *leaf = vnode_new(MINO_VEC_WIDTH);
+        memcpy(leaf->slots, items + i * MINO_VEC_WIDTH,
+               MINO_VEC_WIDTH * sizeof(*items));
+        layer[i] = leaf;
+    }
+    layer_n = num_leaves;
+    shift   = 0;
+    while (layer_n > 1) {
+        size_t            next_n = (layer_n + MINO_VEC_WIDTH - 1) / MINO_VEC_WIDTH;
+        mino_vec_node_t **next   = (mino_vec_node_t **)malloc(
+                                       next_n * sizeof(*next));
+        if (next == NULL) {
+            abort();
+        }
+        for (i = 0; i < next_n; i++) {
+            size_t           base = i * MINO_VEC_WIDTH;
+            size_t           take = layer_n - base;
+            mino_vec_node_t *node;
+            if (take > MINO_VEC_WIDTH) {
+                take = MINO_VEC_WIDTH;
+            }
+            node = vnode_new((unsigned)take);
+            memcpy(node->slots, layer + base, take * sizeof(*layer));
+            next[i] = node;
+        }
+        free(layer);
+        layer   = next;
+        layer_n = next_n;
+        shift  += MINO_VEC_B;
+    }
+    {
+        mino_vec_node_t *root = layer[0];
+        free(layer);
+        return vec_assemble(root, tail, tail_len, shift, len);
+    }
+}
+
 mino_val_t *mino_vector(mino_val_t **items, size_t len)
 {
-    mino_val_t *v = vec_assemble(NULL, NULL, 0u, 0u, 0);
-    size_t      i;
-    for (i = 0; i < len; i++) {
-        v = vec_conj1(v, items[i]);
-    }
-    return v;
+    return vec_from_array(items, len);
 }
 
 /*
