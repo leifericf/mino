@@ -161,6 +161,29 @@ mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr)
     return v;
 }
 
+/*
+ * Vector construction copies the element pointers into a freshly-allocated
+ * backing array. Caller retains ownership of the source array and elements.
+ * v0.3 representation is a flat array with linear indexing — replaced by a
+ * persistent 32-way trie in v0.4 without changing the public API.
+ */
+mino_val_t *mino_vector(mino_val_t **items, size_t len)
+{
+    mino_val_t *v = alloc_val(MINO_VECTOR);
+    if (len == 0) {
+        v->as.vec.data = NULL;
+        v->as.vec.len  = 0;
+        return v;
+    }
+    v->as.vec.data = (mino_val_t **)malloc(len * sizeof(*v->as.vec.data));
+    if (v->as.vec.data == NULL) {
+        abort();
+    }
+    memcpy(v->as.vec.data, items, len * sizeof(*items));
+    v->as.vec.len = len;
+    return v;
+}
+
 mino_val_t *mino_prim(const char *name, mino_prim_fn fn)
 {
     mino_val_t *v = alloc_val(MINO_PRIM);
@@ -325,6 +348,18 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         fputc(')', out);
         return;
     }
+    case MINO_VECTOR: {
+        size_t i;
+        fputc('[', out);
+        for (i = 0; i < v->as.vec.len; i++) {
+            if (i > 0) {
+                fputc(' ', out);
+            }
+            mino_print_to(out, v->as.vec.data[i]);
+        }
+        fputc(']', out);
+        return;
+    }
     case MINO_PRIM:
         fputs("#<prim ", out);
         if (v->as.prim.name != NULL) {
@@ -390,8 +425,8 @@ static int is_ws(char c)
 
 static int is_terminator(char c)
 {
-    return c == '\0' || c == '(' || c == ')' || c == '\'' || c == '"'
-        || c == ';' || is_ws(c);
+    return c == '\0' || c == '(' || c == ')' || c == '[' || c == ']'
+        || c == '\'' || c == '"' || c == ';' || is_ws(c);
 }
 
 static void skip_ws(const char **p)
@@ -506,6 +541,49 @@ static mino_val_t *read_list_form(const char **p)
     }
 }
 
+static mino_val_t *read_vector_form(const char **p)
+{
+    /* Caller has positioned *p on the opening '['. */
+    mino_val_t **buf = NULL;
+    size_t       cap = 0;
+    size_t       len = 0;
+    mino_val_t  *result;
+    (*p)++; /* skip '[' */
+    for (;;) {
+        skip_ws(p);
+        if (**p == '\0') {
+            free(buf);
+            set_error("unterminated vector");
+            return NULL;
+        }
+        if (**p == ']') {
+            (*p)++;
+            break;
+        }
+        {
+            mino_val_t *elem = read_form(p);
+            if (elem == NULL) {
+                free(buf);
+                if (mino_last_error() == NULL) {
+                    set_error("unterminated vector");
+                }
+                return NULL;
+            }
+            if (len == cap) {
+                cap = cap == 0 ? 8 : cap * 2;
+                buf = (mino_val_t **)realloc(buf, cap * sizeof(*buf));
+                if (buf == NULL) {
+                    abort();
+                }
+            }
+            buf[len++] = elem;
+        }
+    }
+    result = mino_vector(buf, len);
+    free(buf);
+    return result;
+}
+
 static mino_val_t *read_atom(const char **p)
 {
     const char *start = *p;
@@ -591,6 +669,13 @@ static mino_val_t *read_form(const char **p)
         set_error("unexpected ')'");
         return NULL;
     }
+    if (**p == '[') {
+        return read_vector_form(p);
+    }
+    if (**p == ']') {
+        set_error("unexpected ']'");
+        return NULL;
+    }
     if (**p == '"') {
         return read_string_form(p);
     }
@@ -664,6 +749,18 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_CONS:
         return mino_eq(a->as.cons.car, b->as.cons.car)
             && mino_eq(a->as.cons.cdr, b->as.cons.cdr);
+    case MINO_VECTOR: {
+        size_t i;
+        if (a->as.vec.len != b->as.vec.len) {
+            return 0;
+        }
+        for (i = 0; i < a->as.vec.len; i++) {
+            if (!mino_eq(a->as.vec.data[i], b->as.vec.data[i])) {
+                return 0;
+            }
+        }
+        return 1;
+    }
     case MINO_PRIM:
         return a->as.prim.fn == b->as.prim.fn;
     case MINO_FN:
@@ -934,6 +1031,32 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             return NULL;
         }
         return v;
+    }
+    case MINO_VECTOR: {
+        /* Vector literals evaluate each element in order, producing a new
+         * vector whose shape matches the source. */
+        size_t i;
+        size_t n = form->as.vec.len;
+        mino_val_t **tmp;
+        mino_val_t  *result;
+        if (n == 0) {
+            return form;
+        }
+        tmp = (mino_val_t **)malloc(n * sizeof(*tmp));
+        if (tmp == NULL) {
+            abort();
+        }
+        for (i = 0; i < n; i++) {
+            mino_val_t *ev = eval_value(form->as.vec.data[i], env);
+            if (ev == NULL) {
+                free(tmp);
+                return NULL;
+            }
+            tmp[i] = ev;
+        }
+        result = mino_vector(tmp, n);
+        free(tmp);
+        return result;
     }
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;

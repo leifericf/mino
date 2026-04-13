@@ -26,6 +26,7 @@ typedef enum {
     MINO_SYMBOL,
     MINO_KEYWORD,
     MINO_CONS,
+    MINO_VECTOR,
     MINO_PRIM,
     MINO_FN,
     MINO_RECUR    /* internal tail-call trampoline sentinel */
@@ -50,6 +51,10 @@ struct mino_val {
             mino_val_t *car;
             mino_val_t *cdr;
         } cons;
+        struct {          /* MINO_VECTOR */
+            mino_val_t **data;
+            size_t       len;
+        } vec;
         struct {          /* MINO_PRIM */
             const char *name;
             mino_prim_fn fn;
@@ -81,6 +86,7 @@ mino_val_t *mino_symbol_n(const char *s, size_t len);
 mino_val_t *mino_keyword(const char *s);
 mino_val_t *mino_keyword_n(const char *s, size_t len);
 mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr);
+mino_val_t *mino_vector(mino_val_t **items, size_t len);
 mino_val_t *mino_prim(const char *name, mino_prim_fn fn);
 
 /* ------------------------------------------------------------------------- */
