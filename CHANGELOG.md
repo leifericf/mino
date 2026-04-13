@@ -4,6 +4,78 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — Tracing garbage collection
+
+Replaces the per-allocation `malloc`/`free` discipline with a stop-the-world
+mark-and-sweep collector. Every heap object the runtime produces — values,
+environments, persistent-collection internals, and scratch arrays — is now
+tracked by a single registry and reclaimed automatically once it becomes
+unreachable. The surface language is unchanged.
+
+### Added
+
+- `gc_hdr_t`-prefixed universal allocation path. Every internal allocation
+  (values, vec/HAMT nodes, HAMT entries, env frames, env binding arrays,
+  name strings, reader scratch buffers) carries a header with a type tag,
+  mark bit, size, and registry link. `gc_alloc_typed` is the single entry;
+  no path creates an unmanaged mino object.
+- Mark phase traces objects according to their type tag, following every
+  owned pointer the walker knows about. Vector trie leaves versus branches
+  are distinguished by a `is_leaf` bit on each node so the walker knows
+  what its slots hold. HAMT nodes drive their own walk via `bitmap`,
+  `subnode_mask`, and `collision_count`. Scratch ptr-arrays (reader
+  buffers, eval temps, prim_vector/hash-map temps) are walked as arrays of
+  gc-managed pointers so partial fills survive allocation mid-loop.
+- Conservative stack scan, driven by a sorted index of allocation bounds
+  built at the start of each collection. `setjmp` flushes callee-saved
+  registers into the collector's frame; the scan walks every aligned
+  machine word between the saved host frame and the collector's own
+  frame, marking any word that lands inside a managed payload (interior
+  pointers supported). Public API entry points — `mino_env_new`,
+  `mino_eval`, `mino_read`, `mino_install_core` — each record their local
+  stack address so the scan's upper bound always dominates the full
+  host-to-mino call chain even when control re-enters from a shallower
+  frame.
+- Root set: all `mino_env_t` returned by `mino_env_new` (tracked in a
+  dedicated registry until `mino_env_free`), plus the symbol and keyword
+  intern tables, plus the conservative stack scan.
+- Adaptive collection trigger. The threshold starts at 1 MiB and grows to
+  2× live-bytes after each sweep, so steady-state programs see amortized
+  constant-factor collection work.
+- `MINO_GC_STRESS=1` env var forces collection on every allocation. This
+  is how we validate that no caller holds unrooted pointers across any
+  allocation site. `make test-gc-stress` runs the full smoke suite under
+  this mode.
+- 4 new smoke cases exercise long-tail recursion, vector churn, map
+  churn, and closure churn — each allocates orders of magnitude more
+  transient values than any single collection's threshold, so the
+  collector is invoked repeatedly and the live set must survive intact
+  (117 cases total). All pass under stress mode across `-O0`, `-O1`,
+  `-O2`, and `-O3`.
+
+### Changed
+
+- `mino_env_free` no longer frees memory synchronously. It unregisters
+  the env from the root set; the next collection reclaims the frame and
+  every value that was reachable only through it. Header docstring
+  updated to reflect the new ownership model.
+- Every internal `free()` call on mino-owned memory has been removed.
+  The collector is the sole path to reclamation. Plain `malloc`/`free`
+  remain for host-owned scratch (`main.c`'s line buffer, the root-env
+  list node, the collector's own range-index cache).
+- `mino_vec_node_t` gains a one-byte `is_leaf` flag set by the
+  constructors so the mark walker can interpret slot contents without
+  external context.
+
+### Notes
+
+The collector is non-incremental and non-generational; the entire heap
+is scanned on each cycle. For the sizes this runtime is meant to embed
+at, linear scan over a sorted range index is a good fit, and the 2×
+live-bytes threshold keeps mean pause time bounded. The v0.12 release
+candidate will profile realistic workloads and decide whether to layer
+on an incremental pass.
+
 ## [0.6.0] — Macros
 
 Lifts the surface language above its primitives. `defmacro`, quasiquote,
