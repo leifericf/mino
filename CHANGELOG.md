@@ -4,6 +4,50 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — Persistent vectors
+
+Replaces the vector layout with a persistent 32-way trie without
+changing the surface language. Every vector primitive from v0.3 behaves
+identically; the work lives entirely behind the API.
+
+### Changed
+
+- Vector representation is now a 32-way persistent trie with a tail
+  buffer. Leaves hold exactly 32 elements; the tail holds the trailing
+  1..32 so tail appends are O(1) amortized. `conj` and `assoc`
+  path-copy only the walked spine, so successor vectors share
+  structure with their source. `nth` walks at most log₃₂ n internal
+  nodes.
+- `mino.h` exposes the new vector shape as `{ root, tail, tail_len,
+  shift, len }` with `mino_vec_node_t` as an opaque forward
+  declaration; the header is still marked UNSTABLE until v1.0.
+- Element access across all collection primitives — `nth`, `first`,
+  `rest`, `get`, `count`, `assoc`, `conj`, `update`, vector self-eval,
+  structural equality, printer — routes through internal
+  `vec_nth`/`vec_conj1`/`vec_assoc1` helpers. No caller sees the
+  trie layout.
+
+### Added
+
+- `vec_from_array`: a bulk build path that freezes the last 1..32
+  elements as the tail, packs the rest into full leaves, and folds
+  layers 32-to-1 up the spine in a single O(n) pass. Nodes are mutated
+  freely during construction and only become visible as part of the
+  persistent vector when the build completes — the internal
+  "transient" path with no public API.
+- `bench/vector_bench.c`: a standalone measurement program for bulk
+  build, `nth`, and `assoc` at sizes 32, 1024, 32768, and 2^20. Wired
+  as `make bench`; not run by CI.
+- 2 additional smoke cases that cross the 32- and 1024-element
+  boundaries and demonstrate structural sharing on a 2000-element
+  `assoc` (93 cases total).
+
+### Notes
+
+The naïve map layout from v0.3 is still in place. v0.5 replaces it
+with a HAMT, again without changing the surface API. The semantics
+are the contract, not the layout.
+
 ## [0.3.0] — Literal vectors, maps, and keywords
 
 Brings the value-oriented data model to the surface language. Programs
