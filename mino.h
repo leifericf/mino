@@ -25,7 +25,8 @@ typedef enum {
     MINO_STRING,
     MINO_SYMBOL,
     MINO_CONS,
-    MINO_PRIM
+    MINO_PRIM,
+    MINO_FN
 } mino_type_t;
 
 typedef struct mino_val mino_val_t;
@@ -51,6 +52,11 @@ struct mino_val {
             const char *name;
             mino_prim_fn fn;
         } prim;
+        struct {          /* MINO_FN: user-defined closure */
+            mino_val_t *params;
+            mino_val_t *body;
+            mino_env_t *env;
+        } fn;
     } as;
 };
 

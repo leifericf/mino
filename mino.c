@@ -117,6 +117,16 @@ mino_val_t *mino_prim(const char *name, mino_prim_fn fn)
     return v;
 }
 
+static mino_val_t *make_fn(mino_val_t *params, mino_val_t *body,
+                           mino_env_t *env)
+{
+    mino_val_t *v = alloc_val(MINO_FN);
+    v->as.fn.params = params;
+    v->as.fn.body   = body;
+    v->as.fn.env    = env;
+    return v;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */
 /* ------------------------------------------------------------------------- */
@@ -265,6 +275,9 @@ void mino_print_to(FILE *out, const mino_val_t *v)
             fputs(v->as.prim.name, out);
         }
         fputc('>', out);
+        return;
+    case MINO_FN:
+        fputs("#<fn>", out);
         return;
     }
 }
@@ -584,6 +597,10 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             && mino_eq(a->as.cons.cdr, b->as.cons.cdr);
     case MINO_PRIM:
         return a->as.prim.fn == b->as.prim.fn;
+    case MINO_FN:
+        /* Closures compare by identity. Structural equality on bodies and
+         * captured environments is neither cheap nor especially meaningful. */
+        return a == b;
     }
     return 0;
 }
@@ -768,6 +785,7 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
     case MINO_FLOAT:
     case MINO_STRING:
     case MINO_PRIM:
+    case MINO_FN:
         return form;
     case MINO_SYMBOL: {
         char buf[256];
@@ -899,6 +917,29 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             }
             return eval_implicit_do(body, local);
         }
+        if (sym_eq(head, "fn")) {
+            mino_val_t *params;
+            mino_val_t *body;
+            mino_val_t *p;
+            if (!mino_is_cons(args)) {
+                set_error("fn requires a parameter list");
+                return NULL;
+            }
+            params = args->as.cons.car;
+            body   = args->as.cons.cdr;
+            if (!mino_is_cons(params) && !mino_is_nil(params)) {
+                set_error("fn parameter list must be a list");
+                return NULL;
+            }
+            for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
+                mino_val_t *name = p->as.cons.car;
+                if (name == NULL || name->type != MINO_SYMBOL) {
+                    set_error("fn parameter must be a symbol");
+                    return NULL;
+                }
+            }
+            return make_fn(params, body, env);
+        }
 
         /* Function application. */
         {
@@ -907,7 +948,7 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             if (fn == NULL) {
                 return NULL;
             }
-            if (fn->type != MINO_PRIM) {
+            if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
                 set_error("not a function");
                 return NULL;
             }
@@ -915,7 +956,33 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             if (evaled == NULL && mino_last_error() != NULL) {
                 return NULL;
             }
-            return fn->as.prim.fn(evaled, env);
+            if (fn->type == MINO_PRIM) {
+                return fn->as.prim.fn(evaled, env);
+            }
+            {
+                mino_env_t *local = env_child(fn->as.fn.env);
+                mino_val_t *p = fn->as.fn.params;
+                mino_val_t *a = evaled;
+                while (mino_is_cons(p) && mino_is_cons(a)) {
+                    mino_val_t *name = p->as.cons.car;
+                    char   buf[256];
+                    size_t n = name->as.s.len;
+                    if (n >= sizeof(buf)) {
+                        set_error("fn parameter name too long");
+                        return NULL;
+                    }
+                    memcpy(buf, name->as.s.data, n);
+                    buf[n] = '\0';
+                    env_bind(local, buf, a->as.cons.car);
+                    p = p->as.cons.cdr;
+                    a = a->as.cons.cdr;
+                }
+                if (mino_is_cons(p) || mino_is_cons(a)) {
+                    set_error("fn arity mismatch");
+                    return NULL;
+                }
+                return eval_implicit_do(fn->as.fn.body, local);
+            }
         }
     }
     }
