@@ -35,7 +35,8 @@ typedef enum {
 
 typedef struct mino_val mino_val_t;
 typedef struct mino_env mino_env_t;
-typedef struct mino_vec_node mino_vec_node_t;  /* opaque; see mino.c */
+typedef struct mino_vec_node  mino_vec_node_t;   /* opaque; see mino.c */
+typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque; see mino.c */
 
 typedef mino_val_t *(*mino_prim_fn)(mino_val_t *args, mino_env_t *env);
 
@@ -60,10 +61,10 @@ struct mino_val {
             unsigned         shift;    /* height of root in multiples of 5 */
             size_t           len;      /* total element count */
         } vec;
-        struct {          /* MINO_MAP */
-            mino_val_t **keys;
-            mino_val_t **vals;
-            size_t       len;
+        struct {          /* MINO_MAP: HAMT keyed by hash(key) */
+            mino_hamt_node_t *root;      /* HAMT root (NULL when len == 0) */
+            mino_val_t       *key_order; /* MINO_VECTOR of keys, insertion order */
+            size_t            len;       /* number of entries */
         } map;
         struct {          /* MINO_PRIM */
             const char *name;

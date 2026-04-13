@@ -8,6 +8,7 @@
 #include "mino.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -452,46 +453,510 @@ mino_val_t *mino_vector(mino_val_t **items, size_t len)
     return vec_from_array(items, len);
 }
 
+/* ------------------------------------------------------------------------- */
+/* Persistent map: 32-wide HAMT + insertion-order companion vector           */
+/* ------------------------------------------------------------------------- */
 /*
- * Map construction copies the key and value pointers into freshly-allocated
- * parallel arrays. Duplicate keys are resolved by last-write-wins so the
- * reader, constructors, and assoc all produce canonical shapes.
- * v0.3 uses O(n) linear scan for every lookup — replaced by a HAMT in v0.5
- * without changing the public API. The semantics are the contract.
+ * Each map value carries a HAMT root (for O(log32 n) lookup) and a companion
+ * MINO_VECTOR of keys in insertion order (for iteration). assoc consults the
+ * HAMT to decide whether the key is new (append to key_order) or a rebinding
+ * (leave key_order alone; only the HAMT value changes).
+ *
+ * HAMT nodes come in two shapes, distinguished by collision_count:
+ *   - Bitmap node (collision_count == 0):
+ *       bitmap — which of 32 hash-digit slots are populated.
+ *       subnode_mask — of populated slots, which hold a child node (the rest
+ *         hold a direct (key, value) entry).
+ *       slots — length popcount(bitmap), packed by slot index.
+ *   - Collision bucket (collision_count > 0):
+ *       bucket of full-hash-equal entries; slots[] holds hamt_entry_t*.
+ *
+ * Splitting and merging handle the depth-bounded hash: descent through five
+ * bits per level admits up to seven levels before the 32-bit hash is
+ * exhausted; past that, same-hash keys coexist in a collision bucket.
+ *
+ * The public map struct is immutable once assembled — every assoc returns a
+ * fresh root that shares unmodified subtrees with its predecessor.
+ */
+
+#define HAMT_B     5u
+#define HAMT_W     (1u << HAMT_B)
+#define HAMT_MASK  (HAMT_W - 1u)
+
+typedef struct {
+    mino_val_t *key;
+    mino_val_t *val;
+} hamt_entry_t;
+
+struct mino_hamt_node {
+    uint32_t        bitmap;          /* bitmap mode: populated slot mask */
+    uint32_t        subnode_mask;    /* bitmap mode: of populated, which are subnodes */
+    uint32_t        collision_hash;  /* collision mode: shared hash of all entries */
+    unsigned        collision_count; /* 0 in bitmap mode; >0 in collision mode */
+    void          **slots;           /* length = popcount(bitmap) or collision_count */
+};
+
+static unsigned popcount32(uint32_t x)
+{
+    unsigned c = 0;
+    while (x != 0) {
+        x &= x - 1u;
+        c++;
+    }
+    return c;
+}
+
+static hamt_entry_t *hamt_entry_new(mino_val_t *key, mino_val_t *val)
+{
+    hamt_entry_t *e = (hamt_entry_t *)malloc(sizeof(*e));
+    if (e == NULL) {
+        abort();
+    }
+    e->key = key;
+    e->val = val;
+    return e;
+}
+
+/* Forward declaration for mutual recursion. */
+static uint32_t hash_val(const mino_val_t *v);
+
+static uint32_t fnv_mix(uint32_t h, unsigned char b)
+{
+    h ^= (uint32_t)b;
+    h *= 16777619u;
+    return h;
+}
+
+static uint32_t fnv_bytes(uint32_t h, const unsigned char *p, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        h = fnv_mix(h, p[i]);
+    }
+    return h;
+}
+
+/*
+ * Hash function compatible with mino_eq:
+ *   - Integral floats hash the same as the equivalent int so (= 1 1.0) ⇒ 1.
+ *   - Strings, symbols, and keywords each carry a distinct type tag so byte-
+ *     equal values of different types hash differently (and compare unequal).
+ *   - Collections hash their contents; maps XOR-fold entry hashes for
+ *     order-insensitivity.
+ *   - Non-hashable types (PRIM, FN) fall back to pointer identity.
+ */
+static uint32_t hash_val(const mino_val_t *v)
+{
+    uint32_t h = 2166136261u;   /* FNV-1a offset basis */
+    if (v == NULL || v->type == MINO_NIL) {
+        return fnv_mix(h, 0x01);
+    }
+    switch (v->type) {
+    case MINO_NIL:
+        return fnv_mix(h, 0x01);
+    case MINO_BOOL:
+        h = fnv_mix(h, 0x02);
+        return fnv_mix(h, (unsigned char)(v->as.b ? 1 : 0));
+    case MINO_INT: {
+        long long n = v->as.i;
+        unsigned  i;
+        h = fnv_mix(h, 0x03);
+        for (i = 0; i < 8; i++) {
+            h = fnv_mix(h, (unsigned char)(n & 0xFFu));
+            n >>= 8;
+        }
+        return h;
+    }
+    case MINO_FLOAT: {
+        double    d  = v->as.f;
+        long long ll = (long long)d;
+        if ((double)ll == d) {
+            /* Same tag as MINO_INT so (= 1 1.0) matches in hash too. */
+            unsigned i;
+            h = fnv_mix(h, 0x03);
+            for (i = 0; i < 8; i++) {
+                h = fnv_mix(h, (unsigned char)(ll & 0xFFu));
+                ll >>= 8;
+            }
+            return h;
+        }
+        h = fnv_mix(h, 0x04);
+        {
+            unsigned char buf[sizeof(double)];
+            memcpy(buf, &d, sizeof(d));
+            return fnv_bytes(h, buf, sizeof(d));
+        }
+    }
+    case MINO_STRING:
+        h = fnv_mix(h, 0x05);
+        return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);
+    case MINO_SYMBOL:
+        h = fnv_mix(h, 0x06);
+        return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);
+    case MINO_KEYWORD:
+        h = fnv_mix(h, 0x07);
+        return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);
+    case MINO_CONS: {
+        uint32_t hc = hash_val(v->as.cons.car);
+        uint32_t hd = hash_val(v->as.cons.cdr);
+        unsigned i;
+        h = fnv_mix(h, 0x08);
+        for (i = 0; i < 4; i++) { h = fnv_mix(h, (unsigned char)(hc & 0xFFu)); hc >>= 8; }
+        for (i = 0; i < 4; i++) { h = fnv_mix(h, (unsigned char)(hd & 0xFFu)); hd >>= 8; }
+        return h;
+    }
+    case MINO_VECTOR: {
+        size_t n = v->as.vec.len;
+        size_t i;
+        h = fnv_mix(h, 0x09);
+        for (i = 0; i < n; i++) {
+            uint32_t hi = hash_val(vec_nth(v, i));
+            unsigned k;
+            for (k = 0; k < 4; k++) {
+                h = fnv_mix(h, (unsigned char)(hi & 0xFFu));
+                hi >>= 8;
+            }
+        }
+        return h;
+    }
+    case MINO_MAP: {
+        /* XOR-fold of per-entry hashes for order independence. Each entry's
+         * hash mixes key and value hashes with a prime to avoid (k ^ v)
+         * self-cancellation when k == v. */
+        uint32_t acc = 0;
+        size_t   n   = v->as.map.len;
+        size_t   i;
+        unsigned k;
+        for (i = 0; i < n; i++) {
+            mino_val_t *key = vec_nth(v->as.map.key_order, i);
+            mino_val_t *val;
+            uint32_t    hk  = hash_val(key);
+            uint32_t    hv;
+            val = (mino_val_t *)(size_t)0; /* silence warnings */
+            (void)val;
+            /* Look up the value via the HAMT at the root. Use identity
+             * equality via the same hash path. */
+            {
+                const mino_hamt_node_t *n2 = v->as.map.root;
+                uint32_t                hh = hk;
+                unsigned                shift = 0;
+                mino_val_t             *found = NULL;
+                while (n2 != NULL) {
+                    if (n2->collision_count > 0) {
+                        unsigned j;
+                        for (j = 0; j < n2->collision_count; j++) {
+                            hamt_entry_t *e = (hamt_entry_t *)n2->slots[j];
+                            if (mino_eq(e->key, key)) { found = e->val; break; }
+                        }
+                        break;
+                    } else {
+                        uint32_t bit  = 1u << ((hh >> shift) & HAMT_MASK);
+                        unsigned phys;
+                        if ((n2->bitmap & bit) == 0) break;
+                        phys = popcount32(n2->bitmap & (bit - 1u));
+                        if (n2->subnode_mask & bit) {
+                            n2 = (const mino_hamt_node_t *)n2->slots[phys];
+                            shift += HAMT_B;
+                        } else {
+                            hamt_entry_t *e = (hamt_entry_t *)n2->slots[phys];
+                            if (mino_eq(e->key, key)) { found = e->val; }
+                            break;
+                        }
+                    }
+                }
+                hv = hash_val(found);
+            }
+            hk ^= hv * 2654435761u;
+            acc ^= hk;
+            (void)k;
+        }
+        h = fnv_mix(h, 0x0a);
+        {
+            unsigned i2;
+            for (i2 = 0; i2 < 4; i2++) {
+                h = fnv_mix(h, (unsigned char)(acc & 0xFFu));
+                acc >>= 8;
+            }
+        }
+        return h;
+    }
+    default: {
+        /* PRIM, FN, RECUR: identity-based. */
+        uintptr_t p = (uintptr_t)v;
+        unsigned  i;
+        h = fnv_mix(h, 0x0b);
+        for (i = 0; i < sizeof(uintptr_t); i++) {
+            h = fnv_mix(h, (unsigned char)(p & 0xFFu));
+            p >>= 8;
+        }
+        return h;
+    }
+    }
+}
+
+static mino_hamt_node_t *hamt_bitmap_node(uint32_t bitmap, uint32_t subnode_mask,
+                                           void **slots)
+{
+    mino_hamt_node_t *n = (mino_hamt_node_t *)calloc(1, sizeof(*n));
+    if (n == NULL) {
+        abort();
+    }
+    n->bitmap       = bitmap;
+    n->subnode_mask = subnode_mask;
+    n->slots        = slots;
+    return n;
+}
+
+static mino_hamt_node_t *hamt_collision_node(uint32_t hash, void **slots,
+                                              unsigned count)
+{
+    mino_hamt_node_t *n = (mino_hamt_node_t *)calloc(1, sizeof(*n));
+    if (n == NULL) {
+        abort();
+    }
+    n->collision_hash  = hash;
+    n->collision_count = count;
+    n->slots           = slots;
+    return n;
+}
+
+/*
+ * merge_entries: build the smallest subtree that separates two leaf entries
+ * whose hashes collide at `shift - HAMT_B` (the parent level). The returned
+ * subtree lives at level `shift`.
+ */
+static mino_hamt_node_t *merge_entries(hamt_entry_t *e1, uint32_t h1,
+                                        hamt_entry_t *e2, uint32_t h2,
+                                        unsigned shift)
+{
+    if (h1 == h2 || shift >= 32u) {
+        /* Can't separate further: collision bucket. */
+        void **slots = (void **)malloc(2 * sizeof(*slots));
+        if (slots == NULL) { abort(); }
+        slots[0] = e1;
+        slots[1] = e2;
+        return hamt_collision_node(h1, slots, 2);
+    }
+    {
+        unsigned i1 = (unsigned)((h1 >> shift) & HAMT_MASK);
+        unsigned i2 = (unsigned)((h2 >> shift) & HAMT_MASK);
+        if (i1 == i2) {
+            mino_hamt_node_t *child = merge_entries(e1, h1, e2, h2,
+                                                     shift + HAMT_B);
+            void **slots = (void **)malloc(sizeof(*slots));
+            if (slots == NULL) { abort(); }
+            slots[0] = child;
+            return hamt_bitmap_node(1u << i1, 1u << i1, slots);
+        } else {
+            void **slots = (void **)malloc(2 * sizeof(*slots));
+            if (slots == NULL) { abort(); }
+            if (i1 < i2) {
+                slots[0] = e1; slots[1] = e2;
+            } else {
+                slots[0] = e2; slots[1] = e1;
+            }
+            return hamt_bitmap_node((1u << i1) | (1u << i2), 0u, slots);
+        }
+    }
+}
+
+/*
+ * hamt_assoc: insert or rebind `new_entry` in the subtree rooted at `n`.
+ * Sets *replaced = 1 when the key was already present (so the map's len
+ * and key_order don't grow).
+ */
+static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
+                                     hamt_entry_t *new_entry, uint32_t h,
+                                     unsigned shift, int *replaced)
+{
+    if (n == NULL) {
+        unsigned  i     = (unsigned)((h >> shift) & HAMT_MASK);
+        void    **slots = (void **)malloc(sizeof(*slots));
+        if (slots == NULL) { abort(); }
+        slots[0] = new_entry;
+        return hamt_bitmap_node(1u << i, 0u, slots);
+    }
+    if (n->collision_count > 0) {
+        /* Either hash matches the bucket's (update or append) or it doesn't
+         * (promote to a bitmap node that routes them separately). */
+        if (h == n->collision_hash) {
+            unsigned j;
+            for (j = 0; j < n->collision_count; j++) {
+                hamt_entry_t *e = (hamt_entry_t *)n->slots[j];
+                if (mino_eq(e->key, new_entry->key)) {
+                    void **slots = (void **)malloc(n->collision_count * sizeof(*slots));
+                    unsigned k;
+                    if (slots == NULL) { abort(); }
+                    for (k = 0; k < n->collision_count; k++) { slots[k] = n->slots[k]; }
+                    slots[j] = new_entry;
+                    *replaced = 1;
+                    return hamt_collision_node(h, slots, n->collision_count);
+                }
+            }
+            {
+                void **slots = (void **)malloc((n->collision_count + 1u) * sizeof(*slots));
+                unsigned k;
+                if (slots == NULL) { abort(); }
+                for (k = 0; k < n->collision_count; k++) { slots[k] = n->slots[k]; }
+                slots[n->collision_count] = new_entry;
+                return hamt_collision_node(h, slots, n->collision_count + 1u);
+            }
+        }
+        {
+            /* Promote: wrap the collision bucket so it lives in one slot of
+             * a bitmap node at this level, then insert the new entry. */
+            unsigned  ib     = (unsigned)((n->collision_hash >> shift) & HAMT_MASK);
+            unsigned  in     = (unsigned)((h               >> shift) & HAMT_MASK);
+            if (ib == in) {
+                /* Deeper shared prefix: descend. */
+                mino_hamt_node_t *sub   = hamt_assoc(n, new_entry, h,
+                                                      shift + HAMT_B, replaced);
+                void            **slots = (void **)malloc(sizeof(*slots));
+                if (slots == NULL) { abort(); }
+                slots[0] = sub;
+                return hamt_bitmap_node(1u << ib, 1u << ib, slots);
+            } else {
+                void **slots = (void **)malloc(2 * sizeof(*slots));
+                uint32_t bitmap       = (1u << ib) | (1u << in);
+                uint32_t subnode_mask = 1u << ib;
+                if (slots == NULL) { abort(); }
+                if (ib < in) {
+                    slots[0] = (void *)n;
+                    slots[1] = new_entry;
+                } else {
+                    slots[0] = new_entry;
+                    slots[1] = (void *)n;
+                }
+                return hamt_bitmap_node(bitmap, subnode_mask, slots);
+            }
+        }
+    }
+    {
+        unsigned  i    = (unsigned)((h >> shift) & HAMT_MASK);
+        uint32_t  bit  = 1u << i;
+        unsigned  phys = popcount32(n->bitmap & (bit - 1u));
+        unsigned  pop  = popcount32(n->bitmap);
+        if ((n->bitmap & bit) == 0) {
+            /* Empty slot: insert directly. */
+            void **slots = (void **)malloc((pop + 1u) * sizeof(*slots));
+            unsigned k;
+            if (slots == NULL) { abort(); }
+            for (k = 0; k < phys; k++)        { slots[k]        = n->slots[k];       }
+            slots[phys] = new_entry;
+            for (k = phys; k < pop; k++)      { slots[k + 1]    = n->slots[k];       }
+            return hamt_bitmap_node(n->bitmap | bit, n->subnode_mask, slots);
+        }
+        if (n->subnode_mask & bit) {
+            /* Child subtree: recurse, then rewrap. */
+            mino_hamt_node_t *new_child = hamt_assoc(
+                (const mino_hamt_node_t *)n->slots[phys], new_entry, h,
+                shift + HAMT_B, replaced);
+            void **slots = (void **)malloc(pop * sizeof(*slots));
+            unsigned k;
+            if (slots == NULL) { abort(); }
+            for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
+            slots[phys] = new_child;
+            return hamt_bitmap_node(n->bitmap, n->subnode_mask, slots);
+        }
+        {
+            /* Leaf entry in slot. Same key → replace. Different key → split. */
+            hamt_entry_t *existing = (hamt_entry_t *)n->slots[phys];
+            if (mino_eq(existing->key, new_entry->key)) {
+                void **slots = (void **)malloc(pop * sizeof(*slots));
+                unsigned k;
+                if (slots == NULL) { abort(); }
+                for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
+                slots[phys] = new_entry;
+                *replaced = 1;
+                return hamt_bitmap_node(n->bitmap, n->subnode_mask, slots);
+            }
+            {
+                uint32_t          eh   = hash_val(existing->key);
+                mino_hamt_node_t *sub  = merge_entries(existing, eh,
+                                                        new_entry, h,
+                                                        shift + HAMT_B);
+                void            **slots = (void **)malloc(pop * sizeof(*slots));
+                unsigned k;
+                if (slots == NULL) { abort(); }
+                for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
+                slots[phys] = sub;
+                return hamt_bitmap_node(n->bitmap,
+                                         n->subnode_mask | bit, slots);
+            }
+        }
+    }
+}
+
+/* Look up a key; returns NULL if absent. */
+static mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
+                             uint32_t h, unsigned shift)
+{
+    while (n != NULL) {
+        if (n->collision_count > 0) {
+            unsigned i;
+            if (h != n->collision_hash) {
+                return NULL;
+            }
+            for (i = 0; i < n->collision_count; i++) {
+                hamt_entry_t *e = (hamt_entry_t *)n->slots[i];
+                if (mino_eq(e->key, key)) {
+                    return e->val;
+                }
+            }
+            return NULL;
+        }
+        {
+            uint32_t bit = 1u << ((h >> shift) & HAMT_MASK);
+            unsigned phys;
+            if ((n->bitmap & bit) == 0) {
+                return NULL;
+            }
+            phys = popcount32(n->bitmap & (bit - 1u));
+            if (n->subnode_mask & bit) {
+                n = (const mino_hamt_node_t *)n->slots[phys];
+                shift += HAMT_B;
+            } else {
+                hamt_entry_t *e = (hamt_entry_t *)n->slots[phys];
+                return mino_eq(e->key, key) ? e->val : NULL;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Convenience: look up a key in a map value. */
+static mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key)
+{
+    uint32_t h = hash_val(key);
+    return hamt_get(m->as.map.root, key, h, 0u);
+}
+
+/*
+ * Map construction. The semantics remain: duplicate keys resolve
+ * last-write-wins, and the resulting map iterates keys in the order they
+ * first appeared in the source sequence. Caller retains ownership of the
+ * source arrays.
  */
 mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len)
 {
-    mino_val_t *v = alloc_val(MINO_MAP);
-    size_t      out = 0;
-    size_t      i;
-    if (len == 0) {
-        v->as.map.keys = NULL;
-        v->as.map.vals = NULL;
-        v->as.map.len  = 0;
-        return v;
-    }
-    v->as.map.keys = (mino_val_t **)malloc(len * sizeof(*v->as.map.keys));
-    v->as.map.vals = (mino_val_t **)malloc(len * sizeof(*v->as.map.vals));
-    if (v->as.map.keys == NULL || v->as.map.vals == NULL) {
-        abort();
-    }
+    mino_val_t       *v        = alloc_val(MINO_MAP);
+    mino_hamt_node_t *root     = NULL;
+    mino_val_t       *order    = mino_vector(NULL, 0);
+    size_t            len_out  = 0;
+    size_t            i;
     for (i = 0; i < len; i++) {
-        size_t j;
-        int    replaced = 0;
-        for (j = 0; j < out; j++) {
-            if (mino_eq(v->as.map.keys[j], keys[i])) {
-                v->as.map.vals[j] = vals[i];
-                replaced = 1;
-                break;
-            }
-        }
+        hamt_entry_t *e        = hamt_entry_new(keys[i], vals[i]);
+        uint32_t      h        = hash_val(keys[i]);
+        int           replaced = 0;
+        root = hamt_assoc(root, e, h, 0u, &replaced);
         if (!replaced) {
-            v->as.map.keys[out] = keys[i];
-            v->as.map.vals[out] = vals[i];
-            out++;
+            order = vec_conj1(order, keys[i]);
+            len_out++;
         }
     }
-    v->as.map.len = out;
+    v->as.map.root      = root;
+    v->as.map.key_order = order;
+    v->as.map.len       = len_out;
     return v;
 }
 
@@ -675,12 +1140,13 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         size_t i;
         fputc('{', out);
         for (i = 0; i < v->as.map.len; i++) {
+            mino_val_t *key = vec_nth(v->as.map.key_order, i);
             if (i > 0) {
                 fputs(", ", out);
             }
-            mino_print_to(out, v->as.map.keys[i]);
+            mino_print_to(out, key);
             fputc(' ', out);
-            mino_print_to(out, v->as.map.vals[i]);
+            mino_print_to(out, map_get_val(v, key));
         }
         fputc('}', out);
         return;
@@ -1157,24 +1623,20 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return 1;
     }
     case MINO_MAP: {
-        /* Map equality is order-insensitive: same key set, same values.
-         * O(n*m) scan — fine for naïve impl, HAMT in v0.5 will fix this. */
-        size_t i, j;
+        /* Map equality ignores iteration order: same key set with the same
+         * values, regardless of when each was inserted. */
+        size_t i;
         if (a->as.map.len != b->as.map.len) {
             return 0;
         }
         for (i = 0; i < a->as.map.len; i++) {
-            int found = 0;
-            for (j = 0; j < b->as.map.len; j++) {
-                if (mino_eq(a->as.map.keys[i], b->as.map.keys[j])) {
-                    if (!mino_eq(a->as.map.vals[i], b->as.map.vals[j])) {
-                        return 0;
-                    }
-                    found = 1;
-                    break;
-                }
+            mino_val_t *key = vec_nth(a->as.map.key_order, i);
+            mino_val_t *bv  = map_get_val(b, key);
+            mino_val_t *av  = map_get_val(a, key);
+            if (bv == NULL) {
+                return 0;
             }
-            if (!found) {
+            if (!mino_eq(av, bv)) {
                 return 0;
             }
         }
@@ -1496,10 +1958,12 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             abort();
         }
         for (i = 0; i < n; i++) {
-            mino_val_t *k = eval_value(form->as.map.keys[i], env);
+            mino_val_t *form_key = vec_nth(form->as.map.key_order, i);
+            mino_val_t *form_val = map_get_val(form, form_key);
+            mino_val_t *k = eval_value(form_key, env);
             mino_val_t *v;
             if (k == NULL) { free(ks); free(vs); return NULL; }
-            v = eval_value(form->as.map.vals[i], env);
+            v = eval_value(form_val, env);
             if (v == NULL) { free(ks); free(vs); return NULL; }
             ks[i] = k;
             vs[i] = v;
@@ -2340,17 +2804,53 @@ static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+/* Layer n k/v pairs onto an existing map, returning a new map value that
+ * shares structure with `coll`. Nil is treated as an empty map. */
+static mino_val_t *map_assoc_pairs(mino_val_t *coll, mino_val_t *p,
+                                    size_t extra_pairs)
+{
+    mino_hamt_node_t *root;
+    mino_val_t       *order;
+    size_t            len_out;
+    size_t            i;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        root    = NULL;
+        order   = mino_vector(NULL, 0);
+        len_out = 0;
+    } else {
+        root    = coll->as.map.root;
+        order   = coll->as.map.key_order;
+        len_out = coll->as.map.len;
+    }
+    for (i = 0; i < extra_pairs; i++) {
+        mino_val_t   *k = p->as.cons.car;
+        mino_val_t   *v = p->as.cons.cdr->as.cons.car;
+        hamt_entry_t *e = hamt_entry_new(k, v);
+        uint32_t      h = hash_val(k);
+        int           replaced = 0;
+        root = hamt_assoc(root, e, h, 0u, &replaced);
+        if (!replaced) {
+            order = vec_conj1(order, k);
+            len_out++;
+        }
+        p = p->as.cons.cdr->as.cons.cdr;
+    }
+    {
+        mino_val_t *out = alloc_val(MINO_MAP);
+        out->as.map.root      = root;
+        out->as.map.key_order = order;
+        out->as.map.len       = len_out;
+        return out;
+    }
+}
+
 static mino_val_t *prim_assoc(mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t  *coll;
-    size_t       n;
-    size_t       extra_pairs;
-    mino_val_t **ks;
-    mino_val_t **vs;
-    size_t       base;
-    size_t       i;
-    mino_val_t  *p;
-    mino_val_t  *result;
+    mino_val_t *coll;
+    size_t      n;
+    size_t      extra_pairs;
+    size_t      i;
+    mino_val_t *p;
     (void)env;
     arg_count(args, &n);
     if (n < 3 || (n - 1) % 2 != 0) {
@@ -2359,11 +2859,7 @@ static mino_val_t *prim_assoc(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     extra_pairs = (n - 1) / 2;
-    if (coll == NULL || coll->type == MINO_NIL) {
-        base = 0;
-    } else if (coll->type == MINO_MAP) {
-        base = coll->as.map.len;
-    } else if (coll->type == MINO_VECTOR) {
+    if (coll != NULL && coll->type == MINO_VECTOR) {
         /* Vector assoc: each key must be an integer index in [0, len]; an
          * index == len is a one-past-end append. Apply pairs in order on
          * successively-derived vectors so each update shares structure with
@@ -2387,30 +2883,12 @@ static mino_val_t *prim_assoc(mino_val_t *args, mino_env_t *env)
             p = p->as.cons.cdr->as.cons.cdr;
         }
         return acc;
-    } else {
-        set_error("assoc: unsupported collection");
-        return NULL;
     }
-    /* Map path: copy existing entries, then overlay extras and let the
-     * constructor do last-write-wins duplicate resolution. */
-    ks = (mino_val_t **)malloc((base + extra_pairs) * sizeof(*ks));
-    vs = (mino_val_t **)malloc((base + extra_pairs) * sizeof(*vs));
-    if (ks == NULL || vs == NULL) {
-        abort();
+    if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_MAP) {
+        return map_assoc_pairs(coll, args->as.cons.cdr, extra_pairs);
     }
-    if (base > 0) {
-        memcpy(ks, coll->as.map.keys, base * sizeof(*ks));
-        memcpy(vs, coll->as.map.vals, base * sizeof(*vs));
-    }
-    p = args->as.cons.cdr;
-    for (i = 0; i < extra_pairs; i++) {
-        ks[base + i] = p->as.cons.car;
-        vs[base + i] = p->as.cons.cdr->as.cons.car;
-        p = p->as.cons.cdr->as.cons.cdr;
-    }
-    result = mino_map(ks, vs, base + extra_pairs);
-    free(ks); free(vs);
-    return result;
+    set_error("assoc: unsupported collection");
+    return NULL;
 }
 
 static mino_val_t *prim_get(mino_val_t *args, mino_env_t *env)
@@ -2434,13 +2912,8 @@ static mino_val_t *prim_get(mino_val_t *args, mino_env_t *env)
         return def_val;
     }
     if (coll->type == MINO_MAP) {
-        size_t i;
-        for (i = 0; i < coll->as.map.len; i++) {
-            if (mino_eq(coll->as.map.keys[i], key)) {
-                return coll->as.map.vals[i];
-            }
-        }
-        return def_val;
+        mino_val_t *v = map_get_val(coll, key);
+        return v == NULL ? def_val : v;
     }
     if (coll->type == MINO_VECTOR) {
         long long idx;
@@ -2490,37 +2963,25 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
         return acc;
     }
     if (coll->type == MINO_MAP) {
-        /* Each added item must be a 2-element vector [k v]. */
-        size_t extra = n - 1;
-        size_t base  = coll->as.map.len;
-        mino_val_t **ks;
-        mino_val_t **vs;
-        mino_val_t  *result;
-        size_t       i;
-        ks = (mino_val_t **)malloc((base + extra) * sizeof(*ks));
-        vs = (mino_val_t **)malloc((base + extra) * sizeof(*vs));
-        if (ks == NULL || vs == NULL) {
-            abort();
-        }
-        if (base > 0) {
-            memcpy(ks, coll->as.map.keys, base * sizeof(*ks));
-            memcpy(vs, coll->as.map.vals, base * sizeof(*vs));
-        }
+        /* Each added item must be a 2-element vector [k v]. Assoc each onto
+         * the accumulator so successor maps share structure with the source. */
+        size_t      extra = n - 1;
+        mino_val_t *acc   = coll;
+        size_t      i;
         for (i = 0; i < extra; i++) {
             mino_val_t *item = p->as.cons.car;
+            mino_val_t *pair_args;
             if (item == NULL || item->type != MINO_VECTOR
                 || item->as.vec.len != 2) {
-                free(ks); free(vs);
                 set_error("conj on map requires 2-element vectors");
                 return NULL;
             }
-            ks[base + i] = vec_nth(item, 0);
-            vs[base + i] = vec_nth(item, 1);
+            pair_args = mino_cons(vec_nth(item, 0),
+                                   mino_cons(vec_nth(item, 1), mino_nil()));
+            acc = map_assoc_pairs(acc, pair_args, 1);
             p = p->as.cons.cdr;
         }
-        result = mino_map(ks, vs, base + extra);
-        free(ks); free(vs);
-        return result;
+        return acc;
     }
     set_error("conj: unsupported collection");
     return NULL;
@@ -2549,12 +3010,9 @@ static mino_val_t *prim_update(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (coll != NULL && coll->type == MINO_MAP) {
-        size_t i;
-        for (i = 0; i < coll->as.map.len; i++) {
-            if (mino_eq(coll->as.map.keys[i], key)) {
-                old_val = coll->as.map.vals[i];
-                break;
-            }
+        mino_val_t *found = map_get_val(coll, key);
+        if (found != NULL) {
+            old_val = found;
         }
     } else if (coll != NULL && coll->type == MINO_VECTOR
                && key != NULL && key->type == MINO_INT) {
@@ -2602,7 +3060,8 @@ static mino_val_t *prim_keys(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     for (i = 0; i < coll->as.map.len; i++) {
-        mino_val_t *cell = mino_cons(coll->as.map.keys[i], mino_nil());
+        mino_val_t *cell = mino_cons(vec_nth(coll->as.map.key_order, i),
+                                      mino_nil());
         if (tail == NULL) {
             head = cell;
         } else {
@@ -2633,7 +3092,8 @@ static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     for (i = 0; i < coll->as.map.len; i++) {
-        mino_val_t *cell = mino_cons(coll->as.map.vals[i], mino_nil());
+        mino_val_t *key  = vec_nth(coll->as.map.key_order, i);
+        mino_val_t *cell = mino_cons(map_get_val(coll, key), mino_nil());
         if (tail == NULL) {
             head = cell;
         } else {
