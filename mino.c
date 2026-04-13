@@ -631,6 +631,11 @@ mino_env_t *mino_env_new(void)
     return env_alloc(NULL);
 }
 
+static mino_env_t *env_child(mino_env_t *parent)
+{
+    return env_alloc(parent);
+}
+
 void mino_env_free(mino_env_t *env)
 {
     size_t i;
@@ -714,6 +719,19 @@ static int sym_eq(const mino_val_t *v, const char *s)
     }
     n = strlen(s);
     return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
+}
+
+static mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env)
+{
+    mino_val_t *last = mino_nil();
+    while (mino_is_cons(body)) {
+        last = mino_eval(body->as.cons.car, env);
+        if (last == NULL) {
+            return NULL;
+        }
+        body = body->as.cons.cdr;
+    }
+    return last;
 }
 
 static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
@@ -834,15 +852,52 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
                              env);
         }
         if (sym_eq(head, "do")) {
-            mino_val_t *last = mino_nil();
-            while (mino_is_cons(args)) {
-                last = mino_eval(args->as.cons.car, env);
-                if (last == NULL) {
+            return eval_implicit_do(args, env);
+        }
+        if (sym_eq(head, "let")) {
+            mino_val_t *bindings;
+            mino_val_t *body;
+            mino_env_t *local;
+            if (!mino_is_cons(args)) {
+                set_error("let requires a binding list and body");
+                return NULL;
+            }
+            bindings = args->as.cons.car;
+            body     = args->as.cons.cdr;
+            if (!mino_is_cons(bindings) && !mino_is_nil(bindings)) {
+                set_error("let bindings must be a list");
+                return NULL;
+            }
+            local = env_child(env);
+            while (mino_is_cons(bindings)) {
+                mino_val_t *name_form = bindings->as.cons.car;
+                mino_val_t *rest_pair = bindings->as.cons.cdr;
+                mino_val_t *val;
+                char        buf[256];
+                size_t      n;
+                if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+                    set_error("let binding name must be a symbol");
                     return NULL;
                 }
-                args = args->as.cons.cdr;
+                if (!mino_is_cons(rest_pair)) {
+                    set_error("let binding missing value");
+                    return NULL;
+                }
+                n = name_form->as.s.len;
+                if (n >= sizeof(buf)) {
+                    set_error("let name too long");
+                    return NULL;
+                }
+                memcpy(buf, name_form->as.s.data, n);
+                buf[n] = '\0';
+                val = mino_eval(rest_pair->as.cons.car, local);
+                if (val == NULL) {
+                    return NULL;
+                }
+                env_bind(local, buf, val);
+                bindings = rest_pair->as.cons.cdr;
             }
-            return last;
+            return eval_implicit_do(body, local);
         }
 
         /* Function application. */
