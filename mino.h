@@ -26,7 +26,8 @@ typedef enum {
     MINO_SYMBOL,
     MINO_CONS,
     MINO_PRIM,
-    MINO_FN
+    MINO_FN,
+    MINO_RECUR    /* internal tail-call trampoline sentinel */
 } mino_type_t;
 
 typedef struct mino_val mino_val_t;
@@ -57,6 +58,9 @@ struct mino_val {
             mino_val_t *body;
             mino_env_t *env;
         } fn;
+        struct {          /* MINO_RECUR: carries rebind args for trampoline */
+            mino_val_t *args;
+        } recur;
     } as;
 };
 

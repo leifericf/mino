@@ -279,6 +279,10 @@ void mino_print_to(FILE *out, const mino_val_t *v)
     case MINO_FN:
         fputs("#<fn>", out);
         return;
+    case MINO_RECUR:
+        /* Internal sentinel; should not escape to user-visible output. */
+        fputs("#<recur>", out);
+        return;
     }
 }
 
@@ -601,6 +605,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         /* Closures compare by identity. Structural equality on bodies and
          * captured environments is neither cheap nor especially meaningful. */
         return a == b;
+    case MINO_RECUR:
+        return a == b;
     }
     return 0;
 }
@@ -738,17 +744,43 @@ static int sym_eq(const mino_val_t *v, const char *s)
     return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
 }
 
+static mino_val_t *eval(mino_val_t *form, mino_env_t *env);
+
+/*
+ * Evaluate `form` for its value. Any MINO_RECUR escaping here is a
+ * non-tail recur and is rejected. Use plain eval() in positions where
+ * a recur is legitimately in tail position (if branches, implicit-do
+ * trailing expression, fn/loop body through the trampoline).
+ */
+static mino_val_t *eval_value(mino_val_t *form, mino_env_t *env)
+{
+    mino_val_t *v = eval(form, env);
+    if (v == NULL) {
+        return NULL;
+    }
+    if (v->type == MINO_RECUR) {
+        set_error("recur must be in tail position");
+        return NULL;
+    }
+    return v;
+}
+
 static mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env)
 {
-    mino_val_t *last = mino_nil();
-    while (mino_is_cons(body)) {
-        last = mino_eval(body->as.cons.car, env);
-        if (last == NULL) {
+    if (!mino_is_cons(body)) {
+        return mino_nil();
+    }
+    for (;;) {
+        mino_val_t *rest = body->as.cons.cdr;
+        if (!mino_is_cons(rest)) {
+            /* Last expression: tail position, propagate recur. */
+            return eval(body->as.cons.car, env);
+        }
+        if (eval_value(body->as.cons.car, env) == NULL) {
             return NULL;
         }
-        body = body->as.cons.cdr;
+        body = rest;
     }
-    return last;
 }
 
 static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
@@ -756,7 +788,7 @@ static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
     mino_val_t *head = mino_nil();
     mino_val_t *tail = NULL;
     while (mino_is_cons(args)) {
-        mino_val_t *v = mino_eval(args->as.cons.car, env);
+        mino_val_t *v = eval_value(args->as.cons.car, env);
         mino_val_t *cell;
         if (v == NULL) {
             return NULL;
@@ -773,7 +805,37 @@ static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
     return head;
 }
 
-mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
+/*
+ * Bind a list of parameter symbols to a list of values in `env`.
+ * Returns 1 on success, 0 on arity mismatch or over-long name (with error set).
+ */
+static int bind_params(mino_env_t *env, mino_val_t *params, mino_val_t *args,
+                       const char *ctx)
+{
+    while (mino_is_cons(params) && mino_is_cons(args)) {
+        mino_val_t *name = params->as.cons.car;
+        char        buf[256];
+        size_t      n = name->as.s.len;
+        if (n >= sizeof(buf)) {
+            set_error("parameter name too long");
+            return 0;
+        }
+        memcpy(buf, name->as.s.data, n);
+        buf[n] = '\0';
+        env_bind(env, buf, args->as.cons.car);
+        params = params->as.cons.cdr;
+        args   = args->as.cons.cdr;
+    }
+    if (mino_is_cons(params) || mino_is_cons(args)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
+        set_error(msg);
+        return 0;
+    }
+    return 1;
+}
+
+static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
 {
     if (form == NULL) {
         return mino_nil();
@@ -786,6 +848,7 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
     case MINO_STRING:
     case MINO_PRIM:
     case MINO_FN:
+    case MINO_RECUR:
         return form;
     case MINO_SYMBOL: {
         char buf[256];
@@ -841,7 +904,7 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             }
             memcpy(buf, name_form->as.s.data, n);
             buf[n] = '\0';
-            value = mino_eval(value_form, env);
+            value = eval_value(value_form, env);
             if (value == NULL) {
                 return NULL;
             }
@@ -862,12 +925,12 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
                 else_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;
             }
-            cond = mino_eval(cond_form, env);
+            cond = eval_value(cond_form, env);
             if (cond == NULL) {
                 return NULL;
             }
-            return mino_eval(mino_is_truthy(cond) ? then_form : else_form,
-                             env);
+            /* Branch is tail position: propagate recur up to trampoline. */
+            return eval(mino_is_truthy(cond) ? then_form : else_form, env);
         }
         if (sym_eq(head, "do")) {
             return eval_implicit_do(args, env);
@@ -908,7 +971,7 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
                 }
                 memcpy(buf, name_form->as.s.data, n);
                 buf[n] = '\0';
-                val = mino_eval(rest_pair->as.cons.car, local);
+                val = eval_value(rest_pair->as.cons.car, local);
                 if (val == NULL) {
                     return NULL;
                 }
@@ -940,10 +1003,87 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             }
             return make_fn(params, body, env);
         }
+        if (sym_eq(head, "recur")) {
+            mino_val_t *evaled = eval_args(args, env);
+            mino_val_t *r;
+            if (evaled == NULL && mino_last_error() != NULL) {
+                return NULL;
+            }
+            r = alloc_val(MINO_RECUR);
+            r->as.recur.args = evaled;
+            return r;
+        }
+        if (sym_eq(head, "loop")) {
+            mino_val_t *bindings;
+            mino_val_t *body;
+            mino_val_t *params      = mino_nil();
+            mino_val_t *params_tail = NULL;
+            mino_env_t *local;
+            if (!mino_is_cons(args)) {
+                set_error("loop requires a binding list and body");
+                return NULL;
+            }
+            bindings = args->as.cons.car;
+            body     = args->as.cons.cdr;
+            if (!mino_is_cons(bindings) && !mino_is_nil(bindings)) {
+                set_error("loop bindings must be a list");
+                return NULL;
+            }
+            local = env_child(env);
+            while (mino_is_cons(bindings)) {
+                mino_val_t *name_form = bindings->as.cons.car;
+                mino_val_t *rest_pair = bindings->as.cons.cdr;
+                mino_val_t *val;
+                char        buf[256];
+                size_t      n;
+                mino_val_t *cell;
+                if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+                    set_error("loop binding name must be a symbol");
+                    return NULL;
+                }
+                if (!mino_is_cons(rest_pair)) {
+                    set_error("loop binding missing value");
+                    return NULL;
+                }
+                n = name_form->as.s.len;
+                if (n >= sizeof(buf)) {
+                    set_error("loop name too long");
+                    return NULL;
+                }
+                memcpy(buf, name_form->as.s.data, n);
+                buf[n] = '\0';
+                val = eval_value(rest_pair->as.cons.car, local);
+                if (val == NULL) {
+                    return NULL;
+                }
+                env_bind(local, buf, val);
+                cell = mino_cons(name_form, mino_nil());
+                if (params_tail == NULL) {
+                    params = cell;
+                } else {
+                    params_tail->as.cons.cdr = cell;
+                }
+                params_tail = cell;
+                bindings = rest_pair->as.cons.cdr;
+            }
+            for (;;) {
+                mino_val_t *result = eval_implicit_do(body, local);
+                if (result == NULL) {
+                    return NULL;
+                }
+                if (result->type != MINO_RECUR) {
+                    return result;
+                }
+                if (!bind_params(local, params, result->as.recur.args,
+                                 "recur")) {
+                    return NULL;
+                }
+            }
+        }
 
         /* Function application. */
         {
-            mino_val_t *fn = mino_eval(head, env);
+            mino_val_t *fn = eval_value(head, env);
             mino_val_t *evaled;
             if (fn == NULL) {
                 return NULL;
@@ -961,33 +1101,38 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             }
             {
                 mino_env_t *local = env_child(fn->as.fn.env);
-                mino_val_t *p = fn->as.fn.params;
-                mino_val_t *a = evaled;
-                while (mino_is_cons(p) && mino_is_cons(a)) {
-                    mino_val_t *name = p->as.cons.car;
-                    char   buf[256];
-                    size_t n = name->as.s.len;
-                    if (n >= sizeof(buf)) {
-                        set_error("fn parameter name too long");
+                mino_val_t *call_args = evaled;
+                for (;;) {
+                    mino_val_t *result;
+                    if (!bind_params(local, fn->as.fn.params, call_args,
+                                     "fn")) {
                         return NULL;
                     }
-                    memcpy(buf, name->as.s.data, n);
-                    buf[n] = '\0';
-                    env_bind(local, buf, a->as.cons.car);
-                    p = p->as.cons.cdr;
-                    a = a->as.cons.cdr;
+                    result = eval_implicit_do(fn->as.fn.body, local);
+                    if (result == NULL) {
+                        return NULL;
+                    }
+                    if (result->type != MINO_RECUR) {
+                        return result;
+                    }
+                    call_args = result->as.recur.args;
                 }
-                if (mino_is_cons(p) || mino_is_cons(a)) {
-                    set_error("fn arity mismatch");
-                    return NULL;
-                }
-                return eval_implicit_do(fn->as.fn.body, local);
             }
         }
     }
     }
     set_error("eval: unknown value type");
     return NULL;
+}
+
+mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
+{
+    mino_val_t *v = eval(form, env);
+    if (v != NULL && v->type == MINO_RECUR) {
+        set_error("recur must be in tail position");
+        return NULL;
+    }
+    return v;
 }
 
 /* ------------------------------------------------------------------------- */
