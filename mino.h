@@ -30,6 +30,7 @@ typedef enum {
     MINO_MAP,
     MINO_PRIM,
     MINO_FN,
+    MINO_MACRO,   /* user-defined macro (shares the fn struct layout) */
     MINO_RECUR    /* internal tail-call trampoline sentinel */
 } mino_type_t;
 
@@ -158,9 +159,10 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   list       car cdr cons list
  *   collection count nth first rest vector hash-map assoc get conj update
  *              keys vals
- * Special forms (quote, def, if, do, let, fn, loop, recur) are recognized
- * directly by the evaluator and do not need to be installed. Safe to call
- * on a fresh env.
+ *   macros     macroexpand macroexpand-1 gensym
+ * Special forms (quote, quasiquote, unquote, unquote-splicing, def,
+ * defmacro, if, do, let, fn, loop, recur) are recognized directly by the
+ * evaluator and do not need to be installed. Safe to call on a fresh env.
  */
 void        mino_install_core(mino_env_t *env);
 

@@ -1161,6 +1161,9 @@ void mino_print_to(FILE *out, const mino_val_t *v)
     case MINO_FN:
         fputs("#<fn>", out);
         return;
+    case MINO_MACRO:
+        fputs("#<macro>", out);
+        return;
     case MINO_RECUR:
         /* Internal sentinel; should not escape to user-visible output. */
         fputs("#<recur>", out);
@@ -1218,6 +1221,7 @@ static int is_terminator(char c)
 {
     return c == '\0' || c == '(' || c == ')' || c == '[' || c == ']'
         || c == '{' || c == '}' || c == '\'' || c == '"' || c == ';'
+        || c == '`'  || c == '~'
         || is_ws(c);
 }
 
@@ -1554,6 +1558,39 @@ static mino_val_t *read_form(const char **p)
                              mino_cons(quoted, mino_nil()));
         }
     }
+    if (**p == '`') {
+        (*p)++;
+        {
+            mino_val_t *qq = read_form(p);
+            if (qq == NULL) {
+                if (mino_last_error() == NULL) {
+                    set_error("expected form after `");
+                }
+                return NULL;
+            }
+            return mino_cons(mino_symbol("quasiquote"),
+                             mino_cons(qq, mino_nil()));
+        }
+    }
+    if (**p == '~') {
+        const char *name = "unquote";
+        (*p)++;
+        if (**p == '@') {
+            name = "unquote-splicing";
+            (*p)++;
+        }
+        {
+            mino_val_t *uq = read_form(p);
+            if (uq == NULL) {
+                if (mino_last_error() == NULL) {
+                    set_error("expected form after ~");
+                }
+                return NULL;
+            }
+            return mino_cons(mino_symbol(name),
+                             mino_cons(uq, mino_nil()));
+        }
+    }
     return read_atom(p);
 }
 
@@ -1645,7 +1682,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_PRIM:
         return a->as.prim.fn == b->as.prim.fn;
     case MINO_FN:
-        /* Closures compare by identity. Structural equality on bodies and
+    case MINO_MACRO:
+        /* Callables compare by identity. Structural equality on bodies and
          * captured environments is neither cheap nor especially meaningful. */
         return a == b;
     case MINO_RECUR:
@@ -1788,8 +1826,164 @@ static int sym_eq(const mino_val_t *v, const char *s)
 }
 
 static mino_val_t *eval(mino_val_t *form, mino_env_t *env);
+static mino_val_t *eval_value(mino_val_t *form, mino_env_t *env);
 static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
                                   mino_env_t *env);
+
+/*
+ * macroexpand1: if `form` is a call whose head resolves to a macro in env,
+ * expand it once and return the new form. If not a macro call, return the
+ * input unchanged and set *expanded = 0.
+ */
+static mino_val_t *macroexpand1(mino_val_t *form, mino_env_t *env,
+                                 int *expanded)
+{
+    char        buf[256];
+    size_t      n;
+    mino_val_t *head;
+    mino_val_t *mac;
+    *expanded = 0;
+    if (!mino_is_cons(form)) {
+        return form;
+    }
+    head = form->as.cons.car;
+    if (head == NULL || head->type != MINO_SYMBOL) {
+        return form;
+    }
+    n = head->as.s.len;
+    if (n >= sizeof(buf)) {
+        return form;
+    }
+    memcpy(buf, head->as.s.data, n);
+    buf[n] = '\0';
+    mac = mino_env_get(env, buf);
+    if (mac == NULL || mac->type != MINO_MACRO) {
+        return form;
+    }
+    *expanded = 1;
+    return apply_callable(mac, form->as.cons.cdr, env);
+}
+
+/* Expand repeatedly until `form` is no longer a macro call at the top. */
+static mino_val_t *macroexpand_all(mino_val_t *form, mino_env_t *env)
+{
+    for (;;) {
+        int         expanded = 0;
+        mino_val_t *next     = macroexpand1(form, env, &expanded);
+        if (next == NULL) {
+            return NULL;
+        }
+        if (!expanded) {
+            return form;
+        }
+        form = next;
+    }
+}
+
+/*
+ * quasiquote_expand: walk `form` as a template. Sublists, subvectors, and
+ * submaps are recursed into; (unquote x) evaluates x and uses its value;
+ * (unquote-splicing x) evaluates x (expected to yield a list) and splices
+ * its elements into the enclosing list.
+ */
+static mino_val_t *quasiquote_expand(mino_val_t *form, mino_env_t *env)
+{
+    if (form != NULL && form->type == MINO_VECTOR) {
+        size_t       nn  = form->as.vec.len;
+        mino_val_t **tmp;
+        mino_val_t  *result;
+        size_t       i;
+        if (nn == 0) { return form; }
+        tmp = (mino_val_t **)malloc(nn * sizeof(*tmp));
+        if (tmp == NULL) { abort(); }
+        for (i = 0; i < nn; i++) {
+            mino_val_t *e = quasiquote_expand(vec_nth(form, i), env);
+            if (e == NULL) { free(tmp); return NULL; }
+            tmp[i] = e;
+        }
+        result = mino_vector(tmp, nn);
+        free(tmp);
+        return result;
+    }
+    if (form != NULL && form->type == MINO_MAP) {
+        size_t        nn = form->as.map.len;
+        mino_val_t  **ks;
+        mino_val_t  **vs;
+        mino_val_t   *result;
+        size_t        i;
+        if (nn == 0) { return form; }
+        ks = (mino_val_t **)malloc(nn * sizeof(*ks));
+        vs = (mino_val_t **)malloc(nn * sizeof(*vs));
+        if (ks == NULL || vs == NULL) { abort(); }
+        for (i = 0; i < nn; i++) {
+            mino_val_t *key = vec_nth(form->as.map.key_order, i);
+            mino_val_t *val = map_get_val(form, key);
+            mino_val_t *kk  = quasiquote_expand(key, env);
+            mino_val_t *vv;
+            if (kk == NULL) { free(ks); free(vs); return NULL; }
+            vv = quasiquote_expand(val, env);
+            if (vv == NULL) { free(ks); free(vs); return NULL; }
+            ks[i] = kk; vs[i] = vv;
+        }
+        result = mino_map(ks, vs, nn);
+        free(ks); free(vs);
+        return result;
+    }
+    if (!mino_is_cons(form)) {
+        return form;
+    }
+    {
+        mino_val_t *head = form->as.cons.car;
+        if (sym_eq(head, "unquote")) {
+            mino_val_t *arg = form->as.cons.cdr;
+            if (!mino_is_cons(arg)) {
+                set_error("unquote requires one argument");
+                return NULL;
+            }
+            return eval_value(arg->as.cons.car, env);
+        }
+        if (sym_eq(head, "unquote-splicing")) {
+            set_error("unquote-splicing must appear inside a list");
+            return NULL;
+        }
+    }
+    {
+        mino_val_t *out  = mino_nil();
+        mino_val_t *tail = NULL;
+        mino_val_t *p    = form;
+        while (mino_is_cons(p)) {
+            mino_val_t *elem = p->as.cons.car;
+            if (mino_is_cons(elem)
+                && sym_eq(elem->as.cons.car, "unquote-splicing")) {
+                mino_val_t *arg = elem->as.cons.cdr;
+                mino_val_t *spliced;
+                mino_val_t *sp;
+                if (!mino_is_cons(arg)) {
+                    set_error("unquote-splicing requires one argument");
+                    return NULL;
+                }
+                spliced = eval_value(arg->as.cons.car, env);
+                if (spliced == NULL) { return NULL; }
+                sp = spliced;
+                while (mino_is_cons(sp)) {
+                    mino_val_t *cell = mino_cons(sp->as.cons.car, mino_nil());
+                    if (tail == NULL) { out = cell; } else { tail->as.cons.cdr = cell; }
+                    tail = cell;
+                    sp = sp->as.cons.cdr;
+                }
+            } else {
+                mino_val_t *expanded = quasiquote_expand(elem, env);
+                mino_val_t *cell;
+                if (expanded == NULL) { return NULL; }
+                cell = mino_cons(expanded, mino_nil());
+                if (tail == NULL) { out = cell; } else { tail->as.cons.cdr = cell; }
+                tail = cell;
+            }
+            p = p->as.cons.cdr;
+        }
+        return out;
+    }
+}
 
 /*
  * Evaluate `form` for its value. Any MINO_RECUR escaping here is a
@@ -1857,10 +2051,43 @@ static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
 static int bind_params(mino_env_t *env, mino_val_t *params, mino_val_t *args,
                        const char *ctx)
 {
-    while (mino_is_cons(params) && mino_is_cons(args)) {
+    while (mino_is_cons(params)) {
         mino_val_t *name = params->as.cons.car;
         char        buf[256];
-        size_t      n = name->as.s.len;
+        size_t      n;
+        /* `&` marks a rest-parameter: the next symbol binds to the remainder
+         * of args as a list (possibly empty). */
+        if (sym_eq(name, "&")) {
+            mino_val_t *rest_param;
+            params = params->as.cons.cdr;
+            if (!mino_is_cons(params)
+                || params->as.cons.car == NULL
+                || params->as.cons.car->type != MINO_SYMBOL) {
+                set_error("& must be followed by a single parameter name");
+                return 0;
+            }
+            rest_param = params->as.cons.car;
+            if (mino_is_cons(params->as.cons.cdr)) {
+                set_error("& parameter must be last");
+                return 0;
+            }
+            n = rest_param->as.s.len;
+            if (n >= sizeof(buf)) {
+                set_error("parameter name too long");
+                return 0;
+            }
+            memcpy(buf, rest_param->as.s.data, n);
+            buf[n] = '\0';
+            env_bind(env, buf, args);  /* args is the remainder (may be nil) */
+            return 1;
+        }
+        if (!mino_is_cons(args)) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
+            set_error(msg);
+            return 0;
+        }
+        n = name->as.s.len;
         if (n >= sizeof(buf)) {
             set_error("parameter name too long");
             return 0;
@@ -1871,7 +2098,7 @@ static int bind_params(mino_env_t *env, mino_val_t *params, mino_val_t *args,
         params = params->as.cons.cdr;
         args   = args->as.cons.cdr;
     }
-    if (mino_is_cons(params) || mino_is_cons(args)) {
+    if (mino_is_cons(args)) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
         set_error(msg);
@@ -1894,6 +2121,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
     case MINO_KEYWORD:
     case MINO_PRIM:
     case MINO_FN:
+    case MINO_MACRO:
     case MINO_RECUR:
         return form;
     case MINO_SYMBOL: {
@@ -1983,6 +2211,62 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 return NULL;
             }
             return args->as.cons.car;
+        }
+        if (sym_eq(head, "quasiquote")) {
+            if (!mino_is_cons(args)) {
+                set_error("quasiquote requires one argument");
+                return NULL;
+            }
+            return quasiquote_expand(args->as.cons.car, env);
+        }
+        if (sym_eq(head, "unquote")
+            || sym_eq(head, "unquote-splicing")) {
+            set_error("unquote outside of quasiquote");
+            return NULL;
+        }
+        if (sym_eq(head, "defmacro")) {
+            mino_val_t *name_form;
+            mino_val_t *params;
+            mino_val_t *body;
+            mino_val_t *mac;
+            mino_val_t *p;
+            char        buf[256];
+            size_t      n;
+            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+                set_error("defmacro requires a name, parameters, and body");
+                return NULL;
+            }
+            name_form = args->as.cons.car;
+            params    = args->as.cons.cdr->as.cons.car;
+            body      = args->as.cons.cdr->as.cons.cdr;
+            if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+                set_error("defmacro name must be a symbol");
+                return NULL;
+            }
+            if (!mino_is_cons(params) && !mino_is_nil(params)) {
+                set_error("defmacro parameter list must be a list");
+                return NULL;
+            }
+            for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
+                mino_val_t *pn = p->as.cons.car;
+                if (pn == NULL || pn->type != MINO_SYMBOL) {
+                    set_error("defmacro parameter must be a symbol");
+                    return NULL;
+                }
+            }
+            mac = alloc_val(MINO_MACRO);
+            mac->as.fn.params = params;
+            mac->as.fn.body   = body;
+            mac->as.fn.env    = env;
+            n = name_form->as.s.len;
+            if (n >= sizeof(buf)) {
+                set_error("defmacro name too long");
+                return NULL;
+            }
+            memcpy(buf, name_form->as.s.data, n);
+            buf[n] = '\0';
+            env_bind(env_root(env), buf, mac);
+            return mac;
         }
         if (sym_eq(head, "def")) {
             mino_val_t *name_form;
@@ -2184,12 +2468,21 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             }
         }
 
-        /* Function application. */
+        /* Function or macro application. */
         {
             mino_val_t *fn = eval_value(head, env);
             mino_val_t *evaled;
             if (fn == NULL) {
                 return NULL;
+            }
+            if (fn->type == MINO_MACRO) {
+                /* Expand with unevaluated args; re-eval the resulting form
+                 * in the caller's environment. */
+                mino_val_t *expanded = apply_callable(fn, args, env);
+                if (expanded == NULL) {
+                    return NULL;
+                }
+                return eval(expanded, env);
             }
             if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
                 set_error("not a function");
@@ -2222,12 +2515,13 @@ static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
     if (fn->type == MINO_PRIM) {
         return fn->as.prim.fn(args, env);
     }
-    if (fn->type == MINO_FN) {
-        mino_env_t *local = env_child(fn->as.fn.env);
+    if (fn->type == MINO_FN || fn->type == MINO_MACRO) {
+        const char *tag       = fn->type == MINO_MACRO ? "macro" : "fn";
+        mino_env_t *local     = env_child(fn->as.fn.env);
         mino_val_t *call_args = args;
         for (;;) {
             mino_val_t *result;
-            if (!bind_params(local, fn->as.fn.params, call_args, "fn")) {
+            if (!bind_params(local, fn->as.fn.params, call_args, tag)) {
                 return NULL;
             }
             result = eval_implicit_do(fn->as.fn.body, local);
@@ -3104,6 +3398,65 @@ static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
     return head;
 }
 
+static mino_val_t *prim_macroexpand_1(mino_val_t *args, mino_env_t *env)
+{
+    int expanded;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("macroexpand-1 requires one argument");
+        return NULL;
+    }
+    return macroexpand1(args->as.cons.car, env, &expanded);
+}
+
+static mino_val_t *prim_macroexpand(mino_val_t *args, mino_env_t *env)
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("macroexpand requires one argument");
+        return NULL;
+    }
+    return macroexpand_all(args->as.cons.car, env);
+}
+
+static long gensym_counter = 0;
+
+static mino_val_t *prim_gensym(mino_val_t *args, mino_env_t *env)
+{
+    const char *prefix_src = "G__";
+    size_t      prefix_len = 3;
+    char        buf[256];
+    size_t      nargs;
+    (void)env;
+    arg_count(args, &nargs);
+    if (nargs > 1) {
+        set_error("gensym takes 0 or 1 arguments");
+        return NULL;
+    }
+    if (nargs == 1) {
+        mino_val_t *p = args->as.cons.car;
+        if (p == NULL || p->type != MINO_STRING) {
+            set_error("gensym prefix must be a string");
+            return NULL;
+        }
+        prefix_src = p->as.s.data;
+        prefix_len = p->as.s.len;
+        if (prefix_len >= sizeof(buf) - 32) {
+            set_error("gensym prefix too long");
+            return NULL;
+        }
+    }
+    {
+        int used;
+        memcpy(buf, prefix_src, prefix_len);
+        used = snprintf(buf + prefix_len, sizeof(buf) - prefix_len,
+                        "%ld", ++gensym_counter);
+        if (used < 0) {
+            set_error("gensym formatting failed");
+            return NULL;
+        }
+        return mino_symbol_n(buf, prefix_len + (size_t)used);
+    }
+}
+
 void mino_install_core(mino_env_t *env)
 {
     mino_env_set(env, "+",        mino_prim("+",        prim_add));
@@ -3131,4 +3484,9 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "update",   mino_prim("update",   prim_update));
     mino_env_set(env, "keys",     mino_prim("keys",     prim_keys));
     mino_env_set(env, "vals",     mino_prim("vals",     prim_vals));
+    mino_env_set(env, "macroexpand-1",
+                 mino_prim("macroexpand-1", prim_macroexpand_1));
+    mino_env_set(env, "macroexpand",
+                 mino_prim("macroexpand", prim_macroexpand));
+    mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
 }
