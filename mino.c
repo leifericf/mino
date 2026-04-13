@@ -7,6 +7,8 @@
 
 #include "mino.h"
 
+#include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -168,6 +170,272 @@ size_t mino_length(const mino_val_t *list)
     }
     return n;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Error reporting                                                           */
+/* ------------------------------------------------------------------------- */
+
+static char error_buf[256] = { 0 };
+
+const char *mino_last_error(void)
+{
+    return error_buf[0] ? error_buf : NULL;
+}
+
+static void set_error(const char *msg)
+{
+    size_t n = strlen(msg);
+    if (n >= sizeof(error_buf)) {
+        n = sizeof(error_buf) - 1;
+    }
+    memcpy(error_buf, msg, n);
+    error_buf[n] = '\0';
+}
+
+static void clear_error(void)
+{
+    error_buf[0] = '\0';
+}
+
+/* ------------------------------------------------------------------------- */
+/* Reader                                                                    */
+/* ------------------------------------------------------------------------- */
+
+static int is_ws(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',';
+}
+
+static int is_terminator(char c)
+{
+    return c == '\0' || c == '(' || c == ')' || c == '\'' || c == '"'
+        || c == ';' || is_ws(c);
+}
+
+static void skip_ws(const char **p)
+{
+    while (**p) {
+        char c = **p;
+        if (is_ws(c)) {
+            (*p)++;
+        } else if (c == ';') {
+            while (**p && **p != '\n') {
+                (*p)++;
+            }
+        } else {
+            return;
+        }
+    }
+}
+
+static mino_val_t *read_form(const char **p);
+
+static mino_val_t *read_string_form(const char **p)
+{
+    /* Caller has positioned *p on the opening '"'. */
+    char *buf;
+    size_t cap = 16;
+    size_t len = 0;
+    (*p)++; /* skip opening quote */
+    buf = (char *)malloc(cap);
+    if (buf == NULL) {
+        abort();
+    }
+    while (**p && **p != '"') {
+        char c = **p;
+        if (c == '\\') {
+            (*p)++;
+            switch (**p) {
+            case 'n':  c = '\n'; break;
+            case 't':  c = '\t'; break;
+            case 'r':  c = '\r'; break;
+            case '\\': c = '\\'; break;
+            case '"':  c = '"';  break;
+            case '0':  c = '\0'; break;
+            case '\0':
+                free(buf);
+                set_error("unterminated string literal");
+                return NULL;
+            default:
+                /* Unknown escape: keep the character literally. */
+                c = **p;
+                break;
+            }
+        }
+        if (len + 1 >= cap) {
+            cap *= 2;
+            buf = (char *)realloc(buf, cap);
+            if (buf == NULL) {
+                abort();
+            }
+        }
+        buf[len++] = c;
+        (*p)++;
+    }
+    if (**p != '"') {
+        free(buf);
+        set_error("unterminated string literal");
+        return NULL;
+    }
+    (*p)++; /* skip closing quote */
+    {
+        mino_val_t *v = mino_string_n(buf, len);
+        free(buf);
+        return v;
+    }
+}
+
+static mino_val_t *read_list_form(const char **p)
+{
+    /* Caller has positioned *p on the opening '('. */
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    (*p)++; /* skip '(' */
+    for (;;) {
+        skip_ws(p);
+        if (**p == '\0') {
+            set_error("unterminated list");
+            return NULL;
+        }
+        if (**p == ')') {
+            (*p)++;
+            return head;
+        }
+        {
+            mino_val_t *elem = read_form(p);
+            if (elem == NULL && mino_last_error() != NULL) {
+                return NULL;
+            }
+            if (elem == NULL) {
+                /* EOF mid-list */
+                set_error("unterminated list");
+                return NULL;
+            }
+            {
+                mino_val_t *cell = mino_cons(elem, mino_nil());
+                if (tail == NULL) {
+                    head = cell;
+                } else {
+                    tail->as.cons.cdr = cell;
+                }
+                tail = cell;
+            }
+        }
+    }
+}
+
+static mino_val_t *read_atom(const char **p)
+{
+    const char *start = *p;
+    size_t len = 0;
+    while (!is_terminator((*p)[len])) {
+        len++;
+    }
+    *p += len;
+
+    if (len == 3 && memcmp(start, "nil", 3) == 0) {
+        return mino_nil();
+    }
+    if (len == 4 && memcmp(start, "true", 4) == 0) {
+        return mino_true();
+    }
+    if (len == 5 && memcmp(start, "false", 5) == 0) {
+        return mino_false();
+    }
+
+    /* Try numeric. */
+    {
+        char buf[64];
+        char *endp = NULL;
+        if (len < sizeof(buf)) {
+            int has_dot_or_exp = 0;
+            int looks_numeric = 1;
+            size_t i = 0;
+            size_t scan_start = 0;
+            memcpy(buf, start, len);
+            buf[len] = '\0';
+            if (buf[0] == '+' || buf[0] == '-') {
+                scan_start = 1;
+            }
+            if (scan_start == len) {
+                looks_numeric = 0;
+            }
+            for (i = scan_start; i < len; i++) {
+                char c = buf[i];
+                if (c == '.' || c == 'e' || c == 'E') {
+                    has_dot_or_exp = 1;
+                } else if (!isdigit((unsigned char)c)) {
+                    looks_numeric = 0;
+                    break;
+                }
+            }
+            if (looks_numeric) {
+                if (has_dot_or_exp) {
+                    double d = strtod(buf, &endp);
+                    if (endp == buf + len) {
+                        return mino_float(d);
+                    }
+                } else {
+                    long long n = strtoll(buf, &endp, 10);
+                    if (endp == buf + len) {
+                        return mino_int(n);
+                    }
+                }
+            }
+        }
+    }
+
+    return mino_symbol_n(start, len);
+}
+
+static mino_val_t *read_form(const char **p)
+{
+    skip_ws(p);
+    if (**p == '\0') {
+        return NULL;
+    }
+    if (**p == '(') {
+        return read_list_form(p);
+    }
+    if (**p == ')') {
+        set_error("unexpected ')'");
+        return NULL;
+    }
+    if (**p == '"') {
+        return read_string_form(p);
+    }
+    if (**p == '\'') {
+        (*p)++;
+        {
+            mino_val_t *quoted = read_form(p);
+            if (quoted == NULL) {
+                if (mino_last_error() == NULL) {
+                    set_error("expected form after quote");
+                }
+                return NULL;
+            }
+            return mino_cons(mino_symbol("quote"),
+                             mino_cons(quoted, mino_nil()));
+        }
+    }
+    return read_atom(p);
+}
+
+mino_val_t *mino_read(const char *src, const char **end)
+{
+    const char *p = src;
+    mino_val_t *v;
+    clear_error();
+    v = read_form(&p);
+    if (end != NULL) {
+        *end = p;
+    }
+    return v;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Equality                                                                  */
+/* ------------------------------------------------------------------------- */
 
 int mino_eq(const mino_val_t *a, const mino_val_t *b)
 {

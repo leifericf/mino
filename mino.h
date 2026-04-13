@@ -83,6 +83,21 @@ mino_val_t *mino_car(const mino_val_t *v);
 mino_val_t *mino_cdr(const mino_val_t *v);
 size_t mino_length(const mino_val_t *list);
 
+/* ------------------------------------------------------------------------- */
+/* Reader                                                                    */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Read one form from `src`. On success returns a value and writes a pointer
+ * just past the consumed input to `*end` (when `end` is non-NULL). On EOF
+ * (only whitespace / comments remaining) returns NULL with `*end` advanced
+ * past the trailing whitespace. On parse error returns NULL and writes a
+ * human-readable message via `mino_last_error()`.
+ */
+mino_val_t *mino_read(const char *src, const char **end);
+
+const char *mino_last_error(void);
+
 #ifdef __cplusplus
 }
 #endif
