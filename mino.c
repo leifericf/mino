@@ -812,6 +812,38 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
             env_bind(env_root(env), buf, value);
             return value;
         }
+        if (sym_eq(head, "if")) {
+            mino_val_t *cond_form;
+            mino_val_t *then_form;
+            mino_val_t *else_form = mino_nil();
+            mino_val_t *cond;
+            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+                set_error("if requires a condition and a then-branch");
+                return NULL;
+            }
+            cond_form = args->as.cons.car;
+            then_form = args->as.cons.cdr->as.cons.car;
+            if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+                else_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+            }
+            cond = mino_eval(cond_form, env);
+            if (cond == NULL) {
+                return NULL;
+            }
+            return mino_eval(mino_is_truthy(cond) ? then_form : else_form,
+                             env);
+        }
+        if (sym_eq(head, "do")) {
+            mino_val_t *last = mino_nil();
+            while (mino_is_cons(args)) {
+                last = mino_eval(args->as.cons.car, env);
+                if (last == NULL) {
+                    return NULL;
+                }
+                args = args->as.cons.cdr;
+            }
+            return last;
+        }
 
         /* Function application. */
         {
