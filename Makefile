@@ -8,7 +8,7 @@ SRCS    := mino.c main.c
 OBJS    := $(SRCS:.c=.o)
 TARGET  := mino
 
-.PHONY: all clean test
+.PHONY: all clean test bench
 
 all: $(TARGET)
 
@@ -19,7 +19,14 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -f $(OBJS) $(TARGET) bench/vector_bench bench/vector_bench.o
 
 test: $(TARGET)
 	./tests/smoke.sh
+
+# Bench targets are built on demand; not wired into `all` or CI.
+bench: bench/vector_bench
+	./bench/vector_bench
+
+bench/vector_bench: bench/vector_bench.c mino.o mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ bench/vector_bench.c mino.o
