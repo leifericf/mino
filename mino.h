@@ -144,6 +144,13 @@ const char *mino_last_error(void);
 /* Environment and evaluator                                                 */
 /* ------------------------------------------------------------------------- */
 
+/*
+ * Allocate a fresh root environment and register it with the collector so
+ * every value reachable through it survives collection. The runtime holds
+ * the returned env weakly: mino_env_free unregisters it and lets the next
+ * sweep reclaim the frame and any closures that were reachable only from
+ * within it. The host does not free any mino-owned pointers directly.
+ */
 mino_env_t *mino_env_new(void);
 void        mino_env_free(mino_env_t *env);
 

@@ -8,37 +8,112 @@
 #include "mino.h"
 
 #include <ctype.h>
+#include <setjmp.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------------- */
-/* Allocation                                                                */
+/* Allocation and garbage collection                                         */
 /* ------------------------------------------------------------------------- */
-
 /*
- * v0.1 uses a simple per-allocation malloc with no reclamation. A real
- * collector arrives later in the roadmap; the API treats values as opaque
- * handles so the representation can change without breaking embedders.
+ * Every managed allocation carries a prepended gc_hdr_t and is threaded onto
+ * a global singly-linked registry. All heap allocators in this file route
+ * through gc_alloc_typed. A periodic stop-the-world mark-and-sweep walks the
+ * registry: roots are traced, survivors marked, and the list is then filtered
+ * in place to drop unmarked entries.
+ *
+ * Roots come from three sources:
+ *   - every mino_env_t returned by mino_env_new, registered in root_envs;
+ *   - the symbol and keyword intern tables, which pin every interned name;
+ *   - a conservative scan of the C stack between the saved `gc_stack_bottom`
+ *     (captured at the first mino_eval entry) and the collector's own frame.
+ *     setjmp flushes registers onto that range so register-resident pointers
+ *     are visible to the scan. Any aligned machine word whose value falls
+ *     inside an allocated payload [p, p+size) pins that object.
+ *
+ * A collection runs when the gap between bytes allocated and bytes live at
+ * the last sweep crosses a threshold, or on every allocation when the env
+ * var MINO_GC_STRESS is set — the stress mode validates that no caller holds
+ * unrooted pointers across any allocation site. `gc_depth` guards against
+ * re-entrant collection during the collector's own bookkeeping allocations.
  */
-static mino_val_t *alloc_val(mino_type_t type)
+
+enum {
+    GC_T_RAW        = 1,  /* opaque bytes: strings, env binding arrays         */
+    GC_T_VAL        = 2,  /* mino_val_t                                        */
+    GC_T_ENV        = 3,  /* mino_env_t                                        */
+    GC_T_VEC_NODE   = 4,  /* mino_vec_node_t (vector trie node; leaf flag set
+                           *                  on leaves)                        */
+    GC_T_HAMT_NODE  = 5,  /* mino_hamt_node_t                                  */
+    GC_T_HAMT_ENTRY = 6,  /* hamt_entry_t                                      */
+    GC_T_PTRARR     = 7,  /* void** slots inside a HAMT node                   */
+    GC_T_VALARR     = 8   /* mino_val_t** scratch during collection building  */
+};
+
+typedef struct gc_hdr {
+    unsigned char  type_tag;
+    unsigned char  mark;
+    size_t         size;      /* payload byte count                            */
+    struct gc_hdr *next;      /* registry link (all allocated objects)         */
+} gc_hdr_t;
+
+static gc_hdr_t *gc_all          = NULL;
+static size_t    gc_bytes_alloc  = 0;
+static size_t    gc_bytes_live   = 0;           /* after last sweep            */
+static size_t    gc_threshold    = 1u << 20;    /* 1 MiB default               */
+static int       gc_stress       = -1;          /* -1 unset, 0 off, 1 on       */
+static int       gc_depth        = 0;           /* re-entrancy guard           */
+static void     *gc_stack_bottom = NULL;        /* set at first mino_eval      */
+
+static void gc_collect(void);
+
+/* Record a stack address from a host-called entry point so the collector's
+ * conservative scan covers the entire host-to-mino call chain. We keep the
+ * maximum address (shallowest frame on a downward-growing stack). */
+static void gc_note_host_frame(void *addr)
 {
-    mino_val_t *v = (mino_val_t *)calloc(1, sizeof(*v));
-    if (v == NULL) {
-        /* Fatal: out of memory during construction. v0.1 has no recovery. */
+    if (gc_stack_bottom == NULL
+        || (char *)addr > (char *)gc_stack_bottom) {
+        gc_stack_bottom = addr;
+    }
+}
+
+static void *gc_alloc_typed(unsigned char tag, size_t size)
+{
+    gc_hdr_t *h;
+    if (gc_stress == -1) {
+        const char *e = getenv("MINO_GC_STRESS");
+        gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
+    }
+    if (gc_depth == 0 && gc_stack_bottom != NULL
+        && (gc_stress || gc_bytes_alloc - gc_bytes_live > gc_threshold)) {
+        gc_collect();
+    }
+    h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
+    if (h == NULL) {
         abort();
     }
+    h->type_tag      = tag;
+    h->mark          = 0;
+    h->size          = size;
+    h->next          = gc_all;
+    gc_all           = h;
+    gc_bytes_alloc  += size;
+    return (void *)(h + 1);
+}
+
+static mino_val_t *alloc_val(mino_type_t type)
+{
+    mino_val_t *v = (mino_val_t *)gc_alloc_typed(GC_T_VAL, sizeof(*v));
     v->type = type;
     return v;
 }
 
 static char *dup_n(const char *s, size_t len)
 {
-    char *out = (char *)malloc(len + 1);
-    if (out == NULL) {
-        abort();
-    }
+    char *out = (char *)gc_alloc_typed(GC_T_RAW, len + 1);
     if (len > 0) {
         memcpy(out, s, len);
     }
@@ -185,26 +260,24 @@ mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr)
 #define MINO_VEC_MASK  (MINO_VEC_WIDTH - 1u)
 
 struct mino_vec_node {
-    unsigned count;                    /* number of used slots */
-    void    *slots[MINO_VEC_WIDTH];    /* mino_val_t* at leaves; mino_vec_node_t* at branches */
+    unsigned char is_leaf;             /* 1 at level-0 leaves, 0 at branches */
+    unsigned      count;               /* number of used slots */
+    void         *slots[MINO_VEC_WIDTH]; /* mino_val_t* at leaves; mino_vec_node_t* at branches */
 };
 
-static mino_vec_node_t *vnode_new(unsigned count)
+static mino_vec_node_t *vnode_new(unsigned count, int is_leaf)
 {
-    mino_vec_node_t *n = (mino_vec_node_t *)calloc(1, sizeof(*n));
-    if (n == NULL) {
-        abort();
-    }
-    n->count = count;
+    mino_vec_node_t *n = (mino_vec_node_t *)gc_alloc_typed(
+        GC_T_VEC_NODE, sizeof(*n));
+    n->is_leaf = (unsigned char)(is_leaf ? 1 : 0);
+    n->count   = count;
     return n;
 }
 
 static mino_vec_node_t *vnode_clone(const mino_vec_node_t *src)
 {
-    mino_vec_node_t *n = (mino_vec_node_t *)malloc(sizeof(*n));
-    if (n == NULL) {
-        abort();
-    }
+    mino_vec_node_t *n = (mino_vec_node_t *)gc_alloc_typed(
+        GC_T_VEC_NODE, sizeof(*n));
     memcpy(n, src, sizeof(*n));
     return n;
 }
@@ -219,7 +292,7 @@ static mino_vec_node_t *new_path(unsigned shift, mino_vec_node_t *leaf)
     if (shift == 0) {
         return leaf;
     }
-    n = vnode_new(1);
+    n = vnode_new(1, 0);
     n->slots[0] = new_path(shift - MINO_VEC_B, leaf);
     return n;
 }
@@ -310,7 +383,7 @@ static mino_val_t *vec_conj1(const mino_val_t *v, mino_val_t *item)
     if (v->as.vec.tail_len < MINO_VEC_WIDTH) {
         /* Tail has room: copy it and append. */
         if (v->as.vec.tail == NULL) {
-            new_tail = vnode_new(1);
+            new_tail = vnode_new(1, 1);
             new_tail->slots[0] = item;
         } else {
             new_tail = vnode_clone(v->as.vec.tail);
@@ -322,7 +395,7 @@ static mino_val_t *vec_conj1(const mino_val_t *v, mino_val_t *item)
                             v->as.vec.shift, v->as.vec.len + 1u);
     }
     /* Tail is full: push it into the trie, start a fresh tail with the new item. */
-    new_tail = vnode_new(1);
+    new_tail = vnode_new(1, 1);
     new_tail->slots[0] = item;
     trie_count = v->as.vec.len - v->as.vec.tail_len; /* before incorporation */
     new_shift  = v->as.vec.shift;
@@ -332,7 +405,7 @@ static mino_val_t *vec_conj1(const mino_val_t *v, mino_val_t *item)
         new_shift = 0;
     } else if (trie_count == ((size_t)1u << (v->as.vec.shift + MINO_VEC_B))) {
         /* Root is full at the current height: add a level. */
-        mino_vec_node_t *grown = vnode_new(2);
+        mino_vec_node_t *grown = vnode_new(2, 0);
         grown->slots[0] = v->as.vec.root;
         grown->slots[1] = new_path(v->as.vec.shift, v->as.vec.tail);
         new_root  = grown;
@@ -399,10 +472,16 @@ static mino_val_t *vec_from_array(mino_val_t **items, size_t len)
     if (tail_len == 0) {
         tail_len = MINO_VEC_WIDTH;
     }
+    /* Internal construction: suppress collection across the whole build so
+     * intermediate layer arrays (plain malloc'd; not visible to the GC) stay
+     * consistent. No user code runs inside; the next allocation after return
+     * will re-enable periodic collection. */
+    gc_depth++;
     trie_count = len - tail_len;
-    tail = vnode_new(tail_len);
+    tail = vnode_new(tail_len, 1);
     memcpy(tail->slots, items + trie_count, tail_len * sizeof(*items));
     if (trie_count == 0) {
+        gc_depth--;
         return vec_assemble(NULL, tail, tail_len, 0u, len);
     }
     num_leaves = trie_count / MINO_VEC_WIDTH;
@@ -411,7 +490,7 @@ static mino_val_t *vec_from_array(mino_val_t **items, size_t len)
         abort();
     }
     for (i = 0; i < num_leaves; i++) {
-        mino_vec_node_t *leaf = vnode_new(MINO_VEC_WIDTH);
+        mino_vec_node_t *leaf = vnode_new(MINO_VEC_WIDTH, 1);
         memcpy(leaf->slots, items + i * MINO_VEC_WIDTH,
                MINO_VEC_WIDTH * sizeof(*items));
         layer[i] = leaf;
@@ -432,7 +511,7 @@ static mino_val_t *vec_from_array(mino_val_t **items, size_t len)
             if (take > MINO_VEC_WIDTH) {
                 take = MINO_VEC_WIDTH;
             }
-            node = vnode_new((unsigned)take);
+            node = vnode_new((unsigned)take, 0);
             memcpy(node->slots, layer + base, take * sizeof(*layer));
             next[i] = node;
         }
@@ -444,6 +523,7 @@ static mino_val_t *vec_from_array(mino_val_t **items, size_t len)
     {
         mino_vec_node_t *root = layer[0];
         free(layer);
+        gc_depth--;
         return vec_assemble(root, tail, tail_len, shift, len);
     }
 }
@@ -508,10 +588,8 @@ static unsigned popcount32(uint32_t x)
 
 static hamt_entry_t *hamt_entry_new(mino_val_t *key, mino_val_t *val)
 {
-    hamt_entry_t *e = (hamt_entry_t *)malloc(sizeof(*e));
-    if (e == NULL) {
-        abort();
-    }
+    hamt_entry_t *e = (hamt_entry_t *)gc_alloc_typed(
+        GC_T_HAMT_ENTRY, sizeof(*e));
     e->key = key;
     e->val = val;
     return e;
@@ -697,10 +775,8 @@ static uint32_t hash_val(const mino_val_t *v)
 static mino_hamt_node_t *hamt_bitmap_node(uint32_t bitmap, uint32_t subnode_mask,
                                            void **slots)
 {
-    mino_hamt_node_t *n = (mino_hamt_node_t *)calloc(1, sizeof(*n));
-    if (n == NULL) {
-        abort();
-    }
+    mino_hamt_node_t *n = (mino_hamt_node_t *)gc_alloc_typed(
+        GC_T_HAMT_NODE, sizeof(*n));
     n->bitmap       = bitmap;
     n->subnode_mask = subnode_mask;
     n->slots        = slots;
@@ -710,10 +786,8 @@ static mino_hamt_node_t *hamt_bitmap_node(uint32_t bitmap, uint32_t subnode_mask
 static mino_hamt_node_t *hamt_collision_node(uint32_t hash, void **slots,
                                               unsigned count)
 {
-    mino_hamt_node_t *n = (mino_hamt_node_t *)calloc(1, sizeof(*n));
-    if (n == NULL) {
-        abort();
-    }
+    mino_hamt_node_t *n = (mino_hamt_node_t *)gc_alloc_typed(
+        GC_T_HAMT_NODE, sizeof(*n));
     n->collision_hash  = hash;
     n->collision_count = count;
     n->slots           = slots;
@@ -731,7 +805,7 @@ static mino_hamt_node_t *merge_entries(hamt_entry_t *e1, uint32_t h1,
 {
     if (h1 == h2 || shift >= 32u) {
         /* Can't separate further: collision bucket. */
-        void **slots = (void **)malloc(2 * sizeof(*slots));
+        void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, 2 * sizeof(*slots));
         if (slots == NULL) { abort(); }
         slots[0] = e1;
         slots[1] = e2;
@@ -743,12 +817,12 @@ static mino_hamt_node_t *merge_entries(hamt_entry_t *e1, uint32_t h1,
         if (i1 == i2) {
             mino_hamt_node_t *child = merge_entries(e1, h1, e2, h2,
                                                      shift + HAMT_B);
-            void **slots = (void **)malloc(sizeof(*slots));
+            void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, sizeof(*slots));
             if (slots == NULL) { abort(); }
             slots[0] = child;
             return hamt_bitmap_node(1u << i1, 1u << i1, slots);
         } else {
-            void **slots = (void **)malloc(2 * sizeof(*slots));
+            void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, 2 * sizeof(*slots));
             if (slots == NULL) { abort(); }
             if (i1 < i2) {
                 slots[0] = e1; slots[1] = e2;
@@ -771,7 +845,7 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
 {
     if (n == NULL) {
         unsigned  i     = (unsigned)((h >> shift) & HAMT_MASK);
-        void    **slots = (void **)malloc(sizeof(*slots));
+        void    **slots = (void **)gc_alloc_typed(GC_T_PTRARR, sizeof(*slots));
         if (slots == NULL) { abort(); }
         slots[0] = new_entry;
         return hamt_bitmap_node(1u << i, 0u, slots);
@@ -784,7 +858,7 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
             for (j = 0; j < n->collision_count; j++) {
                 hamt_entry_t *e = (hamt_entry_t *)n->slots[j];
                 if (mino_eq(e->key, new_entry->key)) {
-                    void **slots = (void **)malloc(n->collision_count * sizeof(*slots));
+                    void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, n->collision_count * sizeof(*slots));
                     unsigned k;
                     if (slots == NULL) { abort(); }
                     for (k = 0; k < n->collision_count; k++) { slots[k] = n->slots[k]; }
@@ -794,7 +868,7 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
                 }
             }
             {
-                void **slots = (void **)malloc((n->collision_count + 1u) * sizeof(*slots));
+                void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, (n->collision_count + 1u) * sizeof(*slots));
                 unsigned k;
                 if (slots == NULL) { abort(); }
                 for (k = 0; k < n->collision_count; k++) { slots[k] = n->slots[k]; }
@@ -811,12 +885,12 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
                 /* Deeper shared prefix: descend. */
                 mino_hamt_node_t *sub   = hamt_assoc(n, new_entry, h,
                                                       shift + HAMT_B, replaced);
-                void            **slots = (void **)malloc(sizeof(*slots));
+                void            **slots = (void **)gc_alloc_typed(GC_T_PTRARR, sizeof(*slots));
                 if (slots == NULL) { abort(); }
                 slots[0] = sub;
                 return hamt_bitmap_node(1u << ib, 1u << ib, slots);
             } else {
-                void **slots = (void **)malloc(2 * sizeof(*slots));
+                void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, 2 * sizeof(*slots));
                 uint32_t bitmap       = (1u << ib) | (1u << in);
                 uint32_t subnode_mask = 1u << ib;
                 if (slots == NULL) { abort(); }
@@ -838,7 +912,7 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
         unsigned  pop  = popcount32(n->bitmap);
         if ((n->bitmap & bit) == 0) {
             /* Empty slot: insert directly. */
-            void **slots = (void **)malloc((pop + 1u) * sizeof(*slots));
+            void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, (pop + 1u) * sizeof(*slots));
             unsigned k;
             if (slots == NULL) { abort(); }
             for (k = 0; k < phys; k++)        { slots[k]        = n->slots[k];       }
@@ -851,7 +925,7 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
             mino_hamt_node_t *new_child = hamt_assoc(
                 (const mino_hamt_node_t *)n->slots[phys], new_entry, h,
                 shift + HAMT_B, replaced);
-            void **slots = (void **)malloc(pop * sizeof(*slots));
+            void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, pop * sizeof(*slots));
             unsigned k;
             if (slots == NULL) { abort(); }
             for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
@@ -862,7 +936,7 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
             /* Leaf entry in slot. Same key → replace. Different key → split. */
             hamt_entry_t *existing = (hamt_entry_t *)n->slots[phys];
             if (mino_eq(existing->key, new_entry->key)) {
-                void **slots = (void **)malloc(pop * sizeof(*slots));
+                void **slots = (void **)gc_alloc_typed(GC_T_PTRARR, pop * sizeof(*slots));
                 unsigned k;
                 if (slots == NULL) { abort(); }
                 for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
@@ -875,7 +949,7 @@ static mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
                 mino_hamt_node_t *sub  = merge_entries(existing, eh,
                                                         new_entry, h,
                                                         shift + HAMT_B);
-                void            **slots = (void **)malloc(pop * sizeof(*slots));
+                void            **slots = (void **)gc_alloc_typed(GC_T_PTRARR, pop * sizeof(*slots));
                 unsigned k;
                 if (slots == NULL) { abort(); }
                 for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
@@ -1339,16 +1413,17 @@ static mino_val_t *read_list_form(const char **p)
 
 static mino_val_t *read_vector_form(const char **p)
 {
-    /* Caller has positioned *p on the opening '['. */
+    /* Caller has positioned *p on the opening '['. `buf` accumulates the
+     * partially-built element list and is tracked by the GC so intermediate
+     * allocations inside nested read_form calls don't collect the entries
+     * that have already been parsed. */
     mino_val_t **buf = NULL;
     size_t       cap = 0;
     size_t       len = 0;
-    mino_val_t  *result;
     (*p)++; /* skip '[' */
     for (;;) {
         skip_ws(p);
         if (**p == '\0') {
-            free(buf);
             set_error("unterminated vector");
             return NULL;
         }
@@ -1359,43 +1434,43 @@ static mino_val_t *read_vector_form(const char **p)
         {
             mino_val_t *elem = read_form(p);
             if (elem == NULL) {
-                free(buf);
                 if (mino_last_error() == NULL) {
                     set_error("unterminated vector");
                 }
                 return NULL;
             }
             if (len == cap) {
-                cap = cap == 0 ? 8 : cap * 2;
-                buf = (mino_val_t **)realloc(buf, cap * sizeof(*buf));
-                if (buf == NULL) {
-                    abort();
+                size_t       new_cap = cap == 0 ? 8 : cap * 2;
+                mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(
+                    GC_T_VALARR, new_cap * sizeof(*nb));
+                if (buf != NULL && len > 0) {
+                    memcpy(nb, buf, len * sizeof(*nb));
                 }
+                buf = nb;
+                cap = new_cap;
             }
             buf[len++] = elem;
         }
     }
-    result = mino_vector(buf, len);
-    free(buf);
-    return result;
+    return mino_vector(buf, len);
 }
 
 static mino_val_t *read_map_form(const char **p)
 {
     /* Caller has positioned *p on the opening '{'. Elements alternate as
-     * key, value, key, value. An odd count is a parse error. */
+     * key, value, key, value. An odd count is a parse error. The key and
+     * value buffers are GC-tracked so parsed entries survive allocations
+     * performed by later nested read_form calls. */
     mino_val_t **kbuf = NULL;
     mino_val_t **vbuf = NULL;
     size_t       cap  = 0;
     size_t       len  = 0;
-    mino_val_t  *result;
     (*p)++; /* skip '{' */
     for (;;) {
         mino_val_t *key;
         mino_val_t *val;
         skip_ws(p);
         if (**p == '\0') {
-            free(kbuf); free(vbuf);
             set_error("unterminated map");
             return NULL;
         }
@@ -1405,7 +1480,6 @@ static mino_val_t *read_map_form(const char **p)
         }
         key = read_form(p);
         if (key == NULL) {
-            free(kbuf); free(vbuf);
             if (mino_last_error() == NULL) {
                 set_error("unterminated map");
             }
@@ -1413,33 +1487,35 @@ static mino_val_t *read_map_form(const char **p)
         }
         skip_ws(p);
         if (**p == '}' || **p == '\0') {
-            free(kbuf); free(vbuf);
             set_error("map literal has odd number of forms");
             return NULL;
         }
         val = read_form(p);
         if (val == NULL) {
-            free(kbuf); free(vbuf);
             if (mino_last_error() == NULL) {
                 set_error("unterminated map");
             }
             return NULL;
         }
         if (len == cap) {
-            cap = cap == 0 ? 8 : cap * 2;
-            kbuf = (mino_val_t **)realloc(kbuf, cap * sizeof(*kbuf));
-            vbuf = (mino_val_t **)realloc(vbuf, cap * sizeof(*vbuf));
-            if (kbuf == NULL || vbuf == NULL) {
-                abort();
+            size_t       new_cap = cap == 0 ? 8 : cap * 2;
+            mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(
+                GC_T_VALARR, new_cap * sizeof(*nk));
+            mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(
+                GC_T_VALARR, new_cap * sizeof(*nv));
+            if (kbuf != NULL && len > 0) {
+                memcpy(nk, kbuf, len * sizeof(*nk));
+                memcpy(nv, vbuf, len * sizeof(*nv));
             }
+            kbuf = nk;
+            vbuf = nv;
+            cap  = new_cap;
         }
         kbuf[len] = key;
         vbuf[len] = val;
         len++;
     }
-    result = mino_map(kbuf, vbuf, len);
-    free(kbuf); free(vbuf);
-    return result;
+    return mino_map(kbuf, vbuf, len);
 }
 
 static mino_val_t *read_atom(const char **p)
@@ -1596,8 +1672,13 @@ static mino_val_t *read_form(const char **p)
 
 mino_val_t *mino_read(const char *src, const char **end)
 {
-    const char *p = src;
-    mino_val_t *v;
+    volatile char probe = 0;
+    const char   *p = src;
+    mino_val_t   *v;
+    /* Record this frame as a host-level stack bottom so the collector's
+     * conservative scan covers the reader's call chain in full. */
+    gc_note_host_frame((void *)&probe);
+    (void)probe;
     clear_error();
     v = read_form(&p);
     if (end != NULL) {
@@ -1703,9 +1784,11 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
  * parents; binding always writes to the current frame so that let and fn
  * parameters shadow rather than mutate outer bindings.
  *
- * Frames created for locals are currently never freed — v0.7 introduces a
- * tracing collector that owns environment lifetimes. Only the root frame
- * passed to mino_env_free is reclaimed.
+ * Envs and their binding arrays are GC-managed. `mino_env_new` registers
+ * the returned env as a persistent root so the whole chain (and everything
+ * reachable from its bindings) survives collection; `mino_env_free` unroots
+ * it, letting the next sweep reclaim the frame and any closures that were
+ * only reachable through it.
  */
 
 typedef struct {
@@ -1720,19 +1803,42 @@ struct mino_env {
     mino_env_t    *parent;
 };
 
+/* Registry of root environments returned by mino_env_new. Tracing starts
+ * from every env on this list. The list node itself is ordinary malloc-
+ * allocated and freed on mino_env_free; the env it references is GC-owned. */
+typedef struct root_env {
+    mino_env_t      *env;
+    struct root_env *next;
+} root_env_t;
+
+static root_env_t *gc_root_envs = NULL;
+
 static mino_env_t *env_alloc(mino_env_t *parent)
 {
-    mino_env_t *env = (mino_env_t *)calloc(1, sizeof(*env));
-    if (env == NULL) {
-        abort();
-    }
+    mino_env_t *env = (mino_env_t *)gc_alloc_typed(GC_T_ENV, sizeof(*env));
     env->parent = parent;
     return env;
 }
 
 mino_env_t *mino_env_new(void)
 {
-    return env_alloc(NULL);
+    volatile char probe = 0;
+    mino_env_t   *env;
+    root_env_t   *r;
+    /* Record the host's stack frame: this is typically the earliest point
+     * the host calls into mino, so it fixes a generous stack bottom before
+     * any allocator runs. */
+    gc_note_host_frame((void *)&probe);
+    (void)probe;
+    env = env_alloc(NULL);
+    r   = (root_env_t *)malloc(sizeof(*r));
+    if (r == NULL) {
+        abort();
+    }
+    r->env       = env;
+    r->next      = gc_root_envs;
+    gc_root_envs = r;
+    return env;
 }
 
 static mino_env_t *env_child(mino_env_t *parent)
@@ -1742,15 +1848,21 @@ static mino_env_t *env_child(mino_env_t *parent)
 
 void mino_env_free(mino_env_t *env)
 {
-    size_t i;
+    /* Unroot the env. Its memory, along with any closures and bindings
+     * reachable only through it, is reclaimed at the next collection. */
+    root_env_t **pp = &gc_root_envs;
     if (env == NULL) {
         return;
     }
-    for (i = 0; i < env->len; i++) {
-        free(env->bindings[i].name);
+    while (*pp != NULL) {
+        if ((*pp)->env == env) {
+            root_env_t *dead = *pp;
+            *pp = dead->next;
+            free(dead);
+            return;
+        }
+        pp = &(*pp)->next;
     }
-    free(env->bindings);
-    free(env);
 }
 
 static env_binding_t *env_find_here(mino_env_t *env, const char *name)
@@ -1772,14 +1884,14 @@ static void env_bind(mino_env_t *env, const char *name, mino_val_t *val)
         return;
     }
     if (env->len == env->cap) {
-        size_t new_cap = env->cap == 0 ? 16 : env->cap * 2;
-        env_binding_t *nb = (env_binding_t *)realloc(
-            env->bindings, new_cap * sizeof(*nb));
-        if (nb == NULL) {
-            abort();
+        size_t         new_cap = env->cap == 0 ? 16 : env->cap * 2;
+        env_binding_t *nb      = (env_binding_t *)gc_alloc_typed(
+            GC_T_RAW, new_cap * sizeof(*nb));
+        if (env->bindings != NULL && env->len > 0) {
+            memcpy(nb, env->bindings, env->len * sizeof(*nb));
         }
         env->bindings = nb;
-        env->cap = new_cap;
+        env->cap      = new_cap;
     }
     env->bindings[env->len].name = dup_n(name, strlen(name));
     env->bindings[env->len].val  = val;
@@ -1809,6 +1921,338 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name)
         env = env->parent;
     }
     return NULL;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Garbage collector: mark-and-sweep                                         */
+/* ------------------------------------------------------------------------- */
+/*
+ * Marking is driven by three root sources: the registry of user-held envs
+ * (`gc_root_envs`), the symbol and keyword intern tables, and a conservative
+ * scan of the C stack between `gc_stack_bottom` (saved on the first
+ * mino_eval call) and the collector's own frame.
+ *
+ * The marker traces each object according to its type tag, following every
+ * owned pointer it knows about. Conservative stack scan treats every aligned
+ * machine word as a candidate pointer and consults a sorted range index
+ * built from the allocation registry to check, in O(log n), whether the
+ * word falls inside any managed payload. Interior pointers (into the middle
+ * of a payload) count; this keeps the scan correct under normal compiler
+ * optimizations that may retain base+offset forms in registers.
+ *
+ * Sweep walks the registry in place, freeing every allocation whose mark
+ * bit is clear and resetting the mark bit on survivors. The live-byte tally
+ * becomes the next cycle's baseline; the threshold grows to 2× live so the
+ * collector's amortized cost stays bounded under steady-state programs.
+ */
+
+typedef struct {
+    uintptr_t  start;  /* inclusive payload byte address */
+    uintptr_t  end;    /* exclusive payload byte address */
+    gc_hdr_t  *h;
+} gc_range_t;
+
+static gc_range_t *gc_ranges     = NULL;
+static size_t      gc_ranges_len = 0;
+static size_t      gc_ranges_cap = 0;
+
+static int gc_range_cmp(const void *a, const void *b)
+{
+    const gc_range_t *ra = (const gc_range_t *)a;
+    const gc_range_t *rb = (const gc_range_t *)b;
+    if (ra->start < rb->start) return -1;
+    if (ra->start > rb->start) return 1;
+    return 0;
+}
+
+static void gc_build_range_index(void)
+{
+    gc_hdr_t *h;
+    size_t    n = 0;
+    for (h = gc_all; h != NULL; h = h->next) {
+        n++;
+    }
+    if (n > gc_ranges_cap) {
+        size_t      new_cap = n * 2 + 16;
+        gc_range_t *nr      = (gc_range_t *)realloc(
+            gc_ranges, new_cap * sizeof(*nr));
+        if (nr == NULL) {
+            abort();
+        }
+        gc_ranges     = nr;
+        gc_ranges_cap = new_cap;
+    }
+    gc_ranges_len = 0;
+    for (h = gc_all; h != NULL; h = h->next) {
+        gc_ranges[gc_ranges_len].start = (uintptr_t)(h + 1);
+        gc_ranges[gc_ranges_len].end   = (uintptr_t)(h + 1) + h->size;
+        gc_ranges[gc_ranges_len].h     = h;
+        gc_ranges_len++;
+    }
+    qsort(gc_ranges, gc_ranges_len, sizeof(*gc_ranges), gc_range_cmp);
+}
+
+static gc_hdr_t *gc_find_header_for_ptr(const void *p)
+{
+    uintptr_t u  = (uintptr_t)p;
+    size_t    lo = 0;
+    size_t    hi = gc_ranges_len;
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (u < gc_ranges[mid].start) {
+            hi = mid;
+        } else if (u >= gc_ranges[mid].end) {
+            lo = mid + 1;
+        } else {
+            return gc_ranges[mid].h;
+        }
+    }
+    return NULL;
+}
+
+static void gc_mark_header(gc_hdr_t *h);
+
+static void gc_mark_interior(const void *p)
+{
+    gc_hdr_t *h;
+    if (p == NULL) {
+        return;
+    }
+    h = gc_find_header_for_ptr(p);
+    if (h != NULL) {
+        gc_mark_header(h);
+    }
+}
+
+static void gc_mark_val(mino_val_t *v)
+{
+    if (v == NULL) {
+        return;
+    }
+    switch (v->type) {
+    case MINO_STRING:
+    case MINO_SYMBOL:
+    case MINO_KEYWORD:
+        gc_mark_interior(v->as.s.data);
+        break;
+    case MINO_CONS:
+        gc_mark_interior(v->as.cons.car);
+        gc_mark_interior(v->as.cons.cdr);
+        break;
+    case MINO_VECTOR:
+        gc_mark_interior(v->as.vec.root);
+        gc_mark_interior(v->as.vec.tail);
+        break;
+    case MINO_MAP:
+        gc_mark_interior(v->as.map.root);
+        gc_mark_interior(v->as.map.key_order);
+        break;
+    case MINO_FN:
+    case MINO_MACRO:
+        gc_mark_interior(v->as.fn.params);
+        gc_mark_interior(v->as.fn.body);
+        gc_mark_interior(v->as.fn.env);
+        break;
+    case MINO_RECUR:
+        gc_mark_interior(v->as.recur.args);
+        break;
+    default:
+        /* NIL, BOOL, INT, FLOAT, PRIM: no owned children. prim.name is a
+         * static C string passed in by the caller of mino_prim. */
+        break;
+    }
+}
+
+static void gc_mark_env(mino_env_t *env)
+{
+    size_t i;
+    if (env == NULL) {
+        return;
+    }
+    gc_mark_interior(env->parent);
+    if (env->bindings != NULL) {
+        gc_mark_interior(env->bindings);
+        for (i = 0; i < env->len; i++) {
+            gc_mark_interior(env->bindings[i].name);
+            gc_mark_interior(env->bindings[i].val);
+        }
+    }
+}
+
+static void gc_mark_vec_node(mino_vec_node_t *n)
+{
+    unsigned i;
+    if (n == NULL) {
+        return;
+    }
+    /* Leaf slots hold mino_val_t*; branch slots hold mino_vec_node_t*.
+     * gc_mark_interior dispatches on the header's type tag either way. */
+    for (i = 0; i < n->count; i++) {
+        gc_mark_interior(n->slots[i]);
+    }
+}
+
+static void gc_mark_hamt_node(mino_hamt_node_t *n)
+{
+    unsigned count;
+    unsigned i;
+    if (n == NULL) {
+        return;
+    }
+    gc_mark_interior(n->slots);
+    count = (n->collision_count > 0) ? n->collision_count
+                                     : popcount32(n->bitmap);
+    if (n->slots != NULL) {
+        for (i = 0; i < count; i++) {
+            gc_mark_interior(n->slots[i]);
+        }
+    }
+}
+
+static void gc_mark_hamt_entry(hamt_entry_t *e)
+{
+    if (e == NULL) {
+        return;
+    }
+    gc_mark_interior(e->key);
+    gc_mark_interior(e->val);
+}
+
+static void gc_mark_ptr_array(void **arr, size_t bytes)
+{
+    size_t n = bytes / sizeof(*arr);
+    size_t i;
+    if (arr == NULL) {
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        gc_mark_interior(arr[i]);
+    }
+}
+
+static void gc_mark_header(gc_hdr_t *h)
+{
+    if (h == NULL || h->mark) {
+        return;
+    }
+    h->mark = 1;
+    switch (h->type_tag) {
+    case GC_T_VAL:
+        gc_mark_val((mino_val_t *)(h + 1));
+        break;
+    case GC_T_ENV:
+        gc_mark_env((mino_env_t *)(h + 1));
+        break;
+    case GC_T_VEC_NODE:
+        gc_mark_vec_node((mino_vec_node_t *)(h + 1));
+        break;
+    case GC_T_HAMT_NODE:
+        gc_mark_hamt_node((mino_hamt_node_t *)(h + 1));
+        break;
+    case GC_T_HAMT_ENTRY:
+        gc_mark_hamt_entry((hamt_entry_t *)(h + 1));
+        break;
+    case GC_T_VALARR:
+    case GC_T_PTRARR:
+        gc_mark_ptr_array((void **)(h + 1), h->size);
+        break;
+    case GC_T_RAW:
+    default:
+        /* Leaf allocation: no children. */
+        break;
+    }
+}
+
+static void gc_scan_stack(void)
+{
+    volatile char probe = 0;
+    char         *lo;
+    char         *hi;
+    char         *cur;
+    if (gc_stack_bottom == NULL) {
+        return;
+    }
+    if ((char *)&probe < (char *)gc_stack_bottom) {
+        lo = (char *)&probe;
+        hi = (char *)gc_stack_bottom;
+    } else {
+        lo = (char *)gc_stack_bottom;
+        hi = (char *)&probe;
+    }
+    while (((uintptr_t)lo % sizeof(void *)) != 0 && lo < hi) {
+        lo++;
+    }
+    for (cur = lo; cur + sizeof(void *) <= hi; cur += sizeof(void *)) {
+        void *word;
+        memcpy(&word, cur, sizeof(word));
+        gc_mark_interior(word);
+    }
+    (void)probe;
+}
+
+static void gc_mark_intern_table(const intern_table_t *tbl)
+{
+    size_t i;
+    for (i = 0; i < tbl->len; i++) {
+        gc_mark_interior(tbl->entries[i]);
+    }
+}
+
+static void gc_mark_roots(void)
+{
+    root_env_t *r;
+    for (r = gc_root_envs; r != NULL; r = r->next) {
+        gc_mark_interior(r->env);
+    }
+    gc_mark_intern_table(&sym_intern);
+    gc_mark_intern_table(&kw_intern);
+}
+
+static void gc_sweep(void)
+{
+    gc_hdr_t **pp   = &gc_all;
+    size_t     live = 0;
+    while (*pp != NULL) {
+        gc_hdr_t *h = *pp;
+        if (h->mark) {
+            h->mark = 0;
+            live += h->size;
+            pp = &h->next;
+        } else {
+            *pp = h->next;
+            free(h);
+        }
+    }
+    gc_bytes_live  = live;
+    gc_bytes_alloc = live;
+    /* Next cycle triggers after another threshold's worth of growth above
+     * the live set; threshold grows to keep collection amortized. */
+    if (live * 2 > gc_threshold) {
+        gc_threshold = live * 2;
+    }
+}
+
+static void gc_collect(void)
+{
+    jmp_buf jb;
+    if (gc_depth > 0) {
+        return;
+    }
+    gc_depth++;
+    /* setjmp spills callee-saved registers into jb, which lives in this
+     * stack frame. gc_scan_stack scans from a deeper frame up through ours,
+     * so any pointer that was register-resident at entry is visible. */
+    if (setjmp(jb) != 0) {
+        /* We never longjmp; a nonzero return indicates a jump from
+         * somewhere unexpected. Surface the bug. */
+        abort();
+    }
+    (void)jb;
+    gc_build_range_index();
+    gc_mark_roots();
+    gc_scan_stack();
+    gc_sweep();
+    gc_depth--;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1891,43 +2335,37 @@ static mino_val_t *quasiquote_expand(mino_val_t *form, mino_env_t *env)
     if (form != NULL && form->type == MINO_VECTOR) {
         size_t       nn  = form->as.vec.len;
         mino_val_t **tmp;
-        mino_val_t  *result;
         size_t       i;
         if (nn == 0) { return form; }
-        tmp = (mino_val_t **)malloc(nn * sizeof(*tmp));
-        if (tmp == NULL) { abort(); }
+        /* GC_T_VALARR: scratch buffer whose slots the collector traces as
+         * mino_val_t*, so partial fills survive allocation mid-loop. */
+        tmp = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, nn * sizeof(*tmp));
         for (i = 0; i < nn; i++) {
             mino_val_t *e = quasiquote_expand(vec_nth(form, i), env);
-            if (e == NULL) { free(tmp); return NULL; }
+            if (e == NULL) { return NULL; }
             tmp[i] = e;
         }
-        result = mino_vector(tmp, nn);
-        free(tmp);
-        return result;
+        return mino_vector(tmp, nn);
     }
     if (form != NULL && form->type == MINO_MAP) {
         size_t        nn = form->as.map.len;
         mino_val_t  **ks;
         mino_val_t  **vs;
-        mino_val_t   *result;
         size_t        i;
         if (nn == 0) { return form; }
-        ks = (mino_val_t **)malloc(nn * sizeof(*ks));
-        vs = (mino_val_t **)malloc(nn * sizeof(*vs));
-        if (ks == NULL || vs == NULL) { abort(); }
+        ks = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, nn * sizeof(*ks));
+        vs = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, nn * sizeof(*vs));
         for (i = 0; i < nn; i++) {
             mino_val_t *key = vec_nth(form->as.map.key_order, i);
             mino_val_t *val = map_get_val(form, key);
             mino_val_t *kk  = quasiquote_expand(key, env);
             mino_val_t *vv;
-            if (kk == NULL) { free(ks); free(vs); return NULL; }
+            if (kk == NULL) { return NULL; }
             vv = quasiquote_expand(val, env);
-            if (vv == NULL) { free(ks); free(vs); return NULL; }
+            if (vv == NULL) { return NULL; }
             ks[i] = kk; vs[i] = vv;
         }
-        result = mino_map(ks, vs, nn);
-        free(ks); free(vs);
-        return result;
+        return mino_map(ks, vs, nn);
     }
     if (!mino_is_cons(form)) {
         return form;
@@ -2149,25 +2587,18 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
         size_t i;
         size_t n = form->as.vec.len;
         mino_val_t **tmp;
-        mino_val_t  *result;
         if (n == 0) {
             return form;
         }
-        tmp = (mino_val_t **)malloc(n * sizeof(*tmp));
-        if (tmp == NULL) {
-            abort();
-        }
+        tmp = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n * sizeof(*tmp));
         for (i = 0; i < n; i++) {
             mino_val_t *ev = eval_value(vec_nth(form, i), env);
             if (ev == NULL) {
-                free(tmp);
                 return NULL;
             }
             tmp[i] = ev;
         }
-        result = mino_vector(tmp, n);
-        free(tmp);
-        return result;
+        return mino_vector(tmp, n);
     }
     case MINO_MAP: {
         /* Map literals evaluate keys and values in read order; the
@@ -2176,29 +2607,23 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
         size_t n = form->as.map.len;
         mino_val_t **ks;
         mino_val_t **vs;
-        mino_val_t  *result;
         if (n == 0) {
             return form;
         }
-        ks = (mino_val_t **)malloc(n * sizeof(*ks));
-        vs = (mino_val_t **)malloc(n * sizeof(*vs));
-        if (ks == NULL || vs == NULL) {
-            abort();
-        }
+        ks = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n * sizeof(*ks));
+        vs = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n * sizeof(*vs));
         for (i = 0; i < n; i++) {
             mino_val_t *form_key = vec_nth(form->as.map.key_order, i);
             mino_val_t *form_val = map_get_val(form, form_key);
             mino_val_t *k = eval_value(form_key, env);
             mino_val_t *v;
-            if (k == NULL) { free(ks); free(vs); return NULL; }
+            if (k == NULL) { return NULL; }
             v = eval_value(form_val, env);
-            if (v == NULL) { free(ks); free(vs); return NULL; }
+            if (v == NULL) { return NULL; }
             ks[i] = k;
             vs[i] = v;
         }
-        result = mino_map(ks, vs, n);
-        free(ks); free(vs);
-        return result;
+        return mino_map(ks, vs, n);
     }
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;
@@ -2540,7 +2965,16 @@ static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
 
 mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
 {
-    mino_val_t *v = eval(form, env);
+    volatile char probe = 0;
+    mino_val_t   *v;
+    /* Record this frame as a potential host-level stack bottom. The
+     * collector's scan spans every address up to the maximum we've ever
+     * seen, so any pointer that lives anywhere in the host-to-mino call
+     * chain — whether we entered via mino_env_new, mino_install_core, or
+     * mino_eval — falls inside the scanned range. */
+    gc_note_host_frame((void *)&probe);
+    (void)probe;
+    v = eval(form, env);
     if (v != NULL && v->type == MINO_RECUR) {
         set_error("recur must be in tail position");
         return NULL;
@@ -2917,25 +3351,22 @@ static mino_val_t *prim_vector(mino_val_t *args, mino_env_t *env)
     size_t n;
     size_t i;
     mino_val_t **tmp;
-    mino_val_t *result;
     mino_val_t *p;
     (void)env;
     arg_count(args, &n);
     if (n == 0) {
         return mino_vector(NULL, 0);
     }
-    tmp = (mino_val_t **)malloc(n * sizeof(*tmp));
-    if (tmp == NULL) {
-        abort();
-    }
+    /* GC_T_VALARR keeps partially-gathered pointers visible to the collector;
+     * without this, the optimizer may drop the `args` parameter and the cons
+     * cells holding the element values become unreachable mid-construction. */
+    tmp = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n * sizeof(*tmp));
     p = args;
     for (i = 0; i < n; i++) {
         tmp[i] = p->as.cons.car;
         p = p->as.cons.cdr;
     }
-    result = mino_vector(tmp, n);
-    free(tmp);
-    return result;
+    return mino_vector(tmp, n);
 }
 
 static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
@@ -2945,7 +3376,6 @@ static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
     size_t i;
     mino_val_t **ks;
     mino_val_t **vs;
-    mino_val_t *result;
     mino_val_t *p;
     (void)env;
     arg_count(args, &n);
@@ -2957,11 +3387,8 @@ static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
         return mino_map(NULL, NULL, 0);
     }
     pairs = n / 2;
-    ks = (mino_val_t **)malloc(pairs * sizeof(*ks));
-    vs = (mino_val_t **)malloc(pairs * sizeof(*vs));
-    if (ks == NULL || vs == NULL) {
-        abort();
-    }
+    ks = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, pairs * sizeof(*ks));
+    vs = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, pairs * sizeof(*vs));
     p = args;
     for (i = 0; i < pairs; i++) {
         ks[i] = p->as.cons.car;
@@ -2969,9 +3396,7 @@ static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
         vs[i] = p->as.cons.car;
         p = p->as.cons.cdr;
     }
-    result = mino_map(ks, vs, pairs);
-    free(ks); free(vs);
-    return result;
+    return mino_map(ks, vs, pairs);
 }
 
 static mino_val_t *prim_nth(mino_val_t *args, mino_env_t *env)
@@ -3555,6 +3980,9 @@ static void install_stdlib_macros(mino_env_t *env)
 
 void mino_install_core(mino_env_t *env)
 {
+    volatile char probe = 0;
+    gc_note_host_frame((void *)&probe);
+    (void)probe;
     mino_env_set(env, "+",        mino_prim("+",        prim_add));
     mino_env_set(env, "-",        mino_prim("-",        prim_sub));
     mino_env_set(env, "*",        mino_prim("*",        prim_mul));
