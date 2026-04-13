@@ -1058,6 +1058,8 @@ static int sym_eq(const mino_val_t *v, const char *s)
 }
 
 static mino_val_t *eval(mino_val_t *form, mino_env_t *env);
+static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
+                                  mino_env_t *env);
 
 /*
  * Evaluate `form` for its value. Any MINO_RECUR escaping here is a
@@ -1465,32 +1467,48 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             if (evaled == NULL && mino_last_error() != NULL) {
                 return NULL;
             }
-            if (fn->type == MINO_PRIM) {
-                return fn->as.prim.fn(evaled, env);
-            }
-            {
-                mino_env_t *local = env_child(fn->as.fn.env);
-                mino_val_t *call_args = evaled;
-                for (;;) {
-                    mino_val_t *result;
-                    if (!bind_params(local, fn->as.fn.params, call_args,
-                                     "fn")) {
-                        return NULL;
-                    }
-                    result = eval_implicit_do(fn->as.fn.body, local);
-                    if (result == NULL) {
-                        return NULL;
-                    }
-                    if (result->type != MINO_RECUR) {
-                        return result;
-                    }
-                    call_args = result->as.recur.args;
-                }
-            }
+            return apply_callable(fn, evaled, env);
         }
     }
     }
     set_error("eval: unknown value type");
+    return NULL;
+}
+
+/*
+ * Invoke `fn` with an already-evaluated argument list. Used both by the
+ * evaluator's function-call path and by primitives (e.g. update) that
+ * need to call back into user-defined code.
+ */
+static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    if (fn == NULL) {
+        set_error("cannot apply null");
+        return NULL;
+    }
+    if (fn->type == MINO_PRIM) {
+        return fn->as.prim.fn(args, env);
+    }
+    if (fn->type == MINO_FN) {
+        mino_env_t *local = env_child(fn->as.fn.env);
+        mino_val_t *call_args = args;
+        for (;;) {
+            mino_val_t *result;
+            if (!bind_params(local, fn->as.fn.params, call_args, "fn")) {
+                return NULL;
+            }
+            result = eval_implicit_do(fn->as.fn.body, local);
+            if (result == NULL) {
+                return NULL;
+            }
+            if (result->type != MINO_RECUR) {
+                return result;
+            }
+            call_args = result->as.recur.args;
+        }
+    }
+    set_error("not a function");
     return NULL;
 }
 
@@ -1820,19 +1838,595 @@ static mino_val_t *prim_list(mino_val_t *args, mino_env_t *env)
     return args == NULL ? mino_nil() : args;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Collection primitives                                                     */
+/*                                                                           */
+/* All collection ops treat values as immutable: every operation that        */
+/* "modifies" a collection returns a freshly allocated value. v0.3 uses      */
+/* naïve array-backed representations; persistent tries arrive in v0.4/v0.5 */
+/* without changing the public primitive contracts.                          */
+/* ------------------------------------------------------------------------- */
+
+static size_t list_length(mino_val_t *list)
+{
+    size_t n = 0;
+    while (mino_is_cons(list)) {
+        n++;
+        list = list->as.cons.cdr;
+    }
+    return n;
+}
+
+static int arg_count(mino_val_t *args, size_t *out)
+{
+    *out = list_length(args);
+    return 1;
+}
+
+static mino_val_t *prim_count(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("count requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_int(0);
+    }
+    switch (coll->type) {
+    case MINO_CONS:   return mino_int((long long)list_length(coll));
+    case MINO_VECTOR: return mino_int((long long)coll->as.vec.len);
+    case MINO_MAP:    return mino_int((long long)coll->as.map.len);
+    case MINO_STRING: return mino_int((long long)coll->as.s.len);
+    default:
+        set_error("count: unsupported collection");
+        return NULL;
+    }
+}
+
+static mino_val_t *prim_vector(mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    size_t i;
+    mino_val_t **tmp;
+    mino_val_t *result;
+    mino_val_t *p;
+    (void)env;
+    arg_count(args, &n);
+    if (n == 0) {
+        return mino_vector(NULL, 0);
+    }
+    tmp = (mino_val_t **)malloc(n * sizeof(*tmp));
+    if (tmp == NULL) {
+        abort();
+    }
+    p = args;
+    for (i = 0; i < n; i++) {
+        tmp[i] = p->as.cons.car;
+        p = p->as.cons.cdr;
+    }
+    result = mino_vector(tmp, n);
+    free(tmp);
+    return result;
+}
+
+static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    size_t pairs;
+    size_t i;
+    mino_val_t **ks;
+    mino_val_t **vs;
+    mino_val_t *result;
+    mino_val_t *p;
+    (void)env;
+    arg_count(args, &n);
+    if (n % 2 != 0) {
+        set_error("hash-map requires an even number of arguments");
+        return NULL;
+    }
+    if (n == 0) {
+        return mino_map(NULL, NULL, 0);
+    }
+    pairs = n / 2;
+    ks = (mino_val_t **)malloc(pairs * sizeof(*ks));
+    vs = (mino_val_t **)malloc(pairs * sizeof(*vs));
+    if (ks == NULL || vs == NULL) {
+        abort();
+    }
+    p = args;
+    for (i = 0; i < pairs; i++) {
+        ks[i] = p->as.cons.car;
+        p = p->as.cons.cdr;
+        vs[i] = p->as.cons.car;
+        p = p->as.cons.cdr;
+    }
+    result = mino_map(ks, vs, pairs);
+    free(ks); free(vs);
+    return result;
+}
+
+static mino_val_t *prim_nth(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *idx_val;
+    mino_val_t *def_val = NULL;
+    size_t      n;
+    long long   idx;
+    (void)env;
+    arg_count(args, &n);
+    if (n != 2 && n != 3) {
+        set_error("nth requires 2 or 3 arguments");
+        return NULL;
+    }
+    coll    = args->as.cons.car;
+    idx_val = args->as.cons.cdr->as.cons.car;
+    if (n == 3) {
+        def_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    }
+    if (idx_val == NULL || idx_val->type != MINO_INT) {
+        set_error("nth index must be an integer");
+        return NULL;
+    }
+    idx = idx_val->as.i;
+    if (idx < 0) {
+        if (def_val != NULL) return def_val;
+        set_error("nth index out of range");
+        return NULL;
+    }
+    if (coll == NULL || coll->type == MINO_NIL) {
+        if (def_val != NULL) return def_val;
+        set_error("nth index out of range");
+        return NULL;
+    }
+    if (coll->type == MINO_VECTOR) {
+        if ((size_t)idx >= coll->as.vec.len) {
+            if (def_val != NULL) return def_val;
+            set_error("nth index out of range");
+            return NULL;
+        }
+        return coll->as.vec.data[idx];
+    }
+    if (coll->type == MINO_CONS) {
+        mino_val_t *p = coll;
+        long long   i;
+        for (i = 0; i < idx; i++) {
+            if (!mino_is_cons(p)) {
+                if (def_val != NULL) return def_val;
+                set_error("nth index out of range");
+                return NULL;
+            }
+            p = p->as.cons.cdr;
+        }
+        if (!mino_is_cons(p)) {
+            if (def_val != NULL) return def_val;
+            set_error("nth index out of range");
+            return NULL;
+        }
+        return p->as.cons.car;
+    }
+    set_error("nth: unsupported collection");
+    return NULL;
+}
+
+static mino_val_t *prim_first(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("first requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    if (coll->type == MINO_CONS) {
+        return coll->as.cons.car;
+    }
+    if (coll->type == MINO_VECTOR) {
+        if (coll->as.vec.len == 0) {
+            return mino_nil();
+        }
+        return coll->as.vec.data[0];
+    }
+    set_error("first: unsupported collection");
+    return NULL;
+}
+
+static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("rest requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    if (coll->type == MINO_CONS) {
+        return coll->as.cons.cdr;
+    }
+    if (coll->type == MINO_VECTOR) {
+        /* Rest of a vector is a list of the trailing elements. v0.11 will
+         * promote this to a seq abstraction. */
+        mino_val_t *head = mino_nil();
+        mino_val_t *tail = NULL;
+        size_t i;
+        for (i = 1; i < coll->as.vec.len; i++) {
+            mino_val_t *cell = mino_cons(coll->as.vec.data[i], mino_nil());
+            if (tail == NULL) {
+                head = cell;
+            } else {
+                tail->as.cons.cdr = cell;
+            }
+            tail = cell;
+        }
+        return head;
+    }
+    set_error("rest: unsupported collection");
+    return NULL;
+}
+
+static mino_val_t *prim_assoc(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t  *coll;
+    size_t       n;
+    size_t       extra_pairs;
+    mino_val_t **ks;
+    mino_val_t **vs;
+    size_t       base;
+    size_t       i;
+    mino_val_t  *p;
+    mino_val_t  *result;
+    (void)env;
+    arg_count(args, &n);
+    if (n < 3 || (n - 1) % 2 != 0) {
+        set_error("assoc requires a collection and an even number of k/v pairs");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    extra_pairs = (n - 1) / 2;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        base = 0;
+    } else if (coll->type == MINO_MAP) {
+        base = coll->as.map.len;
+    } else if (coll->type == MINO_VECTOR) {
+        /* Vector assoc: each key must be an integer index in [0, len]; an
+         * index == len is a one-past-end append. */
+        mino_val_t **data;
+        size_t       vlen = coll->as.vec.len;
+        p = args->as.cons.cdr;
+        data = (mino_val_t **)malloc((vlen + extra_pairs)
+                                     * sizeof(*data));
+        if (data == NULL) {
+            abort();
+        }
+        if (vlen > 0) {
+            memcpy(data, coll->as.vec.data, vlen * sizeof(*data));
+        }
+        for (i = 0; i < extra_pairs; i++) {
+            mino_val_t *k = p->as.cons.car;
+            mino_val_t *v = p->as.cons.cdr->as.cons.car;
+            long long   idx;
+            if (k == NULL || k->type != MINO_INT) {
+                free(data);
+                set_error("assoc on vector requires integer indices");
+                return NULL;
+            }
+            idx = k->as.i;
+            if (idx < 0 || (size_t)idx > vlen) {
+                free(data);
+                set_error("assoc on vector: index out of range");
+                return NULL;
+            }
+            if ((size_t)idx == vlen) {
+                data[vlen++] = v;
+            } else {
+                data[idx] = v;
+            }
+            p = p->as.cons.cdr->as.cons.cdr;
+        }
+        result = mino_vector(data, vlen);
+        free(data);
+        return result;
+    } else {
+        set_error("assoc: unsupported collection");
+        return NULL;
+    }
+    /* Map path: copy existing entries, then overlay extras and let the
+     * constructor do last-write-wins duplicate resolution. */
+    ks = (mino_val_t **)malloc((base + extra_pairs) * sizeof(*ks));
+    vs = (mino_val_t **)malloc((base + extra_pairs) * sizeof(*vs));
+    if (ks == NULL || vs == NULL) {
+        abort();
+    }
+    if (base > 0) {
+        memcpy(ks, coll->as.map.keys, base * sizeof(*ks));
+        memcpy(vs, coll->as.map.vals, base * sizeof(*vs));
+    }
+    p = args->as.cons.cdr;
+    for (i = 0; i < extra_pairs; i++) {
+        ks[base + i] = p->as.cons.car;
+        vs[base + i] = p->as.cons.cdr->as.cons.car;
+        p = p->as.cons.cdr->as.cons.cdr;
+    }
+    result = mino_map(ks, vs, base + extra_pairs);
+    free(ks); free(vs);
+    return result;
+}
+
+static mino_val_t *prim_get(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *key;
+    mino_val_t *def_val = mino_nil();
+    size_t      n;
+    (void)env;
+    arg_count(args, &n);
+    if (n != 2 && n != 3) {
+        set_error("get requires 2 or 3 arguments");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    key  = args->as.cons.cdr->as.cons.car;
+    if (n == 3) {
+        def_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    }
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return def_val;
+    }
+    if (coll->type == MINO_MAP) {
+        size_t i;
+        for (i = 0; i < coll->as.map.len; i++) {
+            if (mino_eq(coll->as.map.keys[i], key)) {
+                return coll->as.map.vals[i];
+            }
+        }
+        return def_val;
+    }
+    if (coll->type == MINO_VECTOR) {
+        long long idx;
+        if (key == NULL || key->type != MINO_INT) {
+            return def_val;
+        }
+        idx = key->as.i;
+        if (idx < 0 || (size_t)idx >= coll->as.vec.len) {
+            return def_val;
+        }
+        return coll->as.vec.data[idx];
+    }
+    return def_val;
+}
+
+static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    size_t      n;
+    mino_val_t *p;
+    (void)env;
+    arg_count(args, &n);
+    if (n < 2) {
+        set_error("conj requires a collection and at least one item");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    p    = args->as.cons.cdr;
+    if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_CONS) {
+        /* List/nil: prepend each item so (conj '(1 2) 3 4) => (4 3 1 2). */
+        mino_val_t *out = (coll == NULL || coll->type == MINO_NIL)
+            ? mino_nil() : coll;
+        while (mino_is_cons(p)) {
+            out = mino_cons(p->as.cons.car, out);
+            p = p->as.cons.cdr;
+        }
+        return out;
+    }
+    if (coll->type == MINO_VECTOR) {
+        size_t extra = n - 1;
+        size_t vlen  = coll->as.vec.len;
+        mino_val_t **data = (mino_val_t **)malloc(
+            (vlen + extra) * sizeof(*data));
+        mino_val_t *result;
+        size_t      i;
+        if (data == NULL) {
+            abort();
+        }
+        if (vlen > 0) {
+            memcpy(data, coll->as.vec.data, vlen * sizeof(*data));
+        }
+        for (i = 0; i < extra; i++) {
+            data[vlen + i] = p->as.cons.car;
+            p = p->as.cons.cdr;
+        }
+        result = mino_vector(data, vlen + extra);
+        free(data);
+        return result;
+    }
+    if (coll->type == MINO_MAP) {
+        /* Each added item must be a 2-element vector [k v]. */
+        size_t extra = n - 1;
+        size_t base  = coll->as.map.len;
+        mino_val_t **ks;
+        mino_val_t **vs;
+        mino_val_t  *result;
+        size_t       i;
+        ks = (mino_val_t **)malloc((base + extra) * sizeof(*ks));
+        vs = (mino_val_t **)malloc((base + extra) * sizeof(*vs));
+        if (ks == NULL || vs == NULL) {
+            abort();
+        }
+        if (base > 0) {
+            memcpy(ks, coll->as.map.keys, base * sizeof(*ks));
+            memcpy(vs, coll->as.map.vals, base * sizeof(*vs));
+        }
+        for (i = 0; i < extra; i++) {
+            mino_val_t *item = p->as.cons.car;
+            if (item == NULL || item->type != MINO_VECTOR
+                || item->as.vec.len != 2) {
+                free(ks); free(vs);
+                set_error("conj on map requires 2-element vectors");
+                return NULL;
+            }
+            ks[base + i] = item->as.vec.data[0];
+            vs[base + i] = item->as.vec.data[1];
+            p = p->as.cons.cdr;
+        }
+        result = mino_map(ks, vs, base + extra);
+        free(ks); free(vs);
+        return result;
+    }
+    set_error("conj: unsupported collection");
+    return NULL;
+}
+
+static mino_val_t *prim_update(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *key;
+    mino_val_t *fn;
+    mino_val_t *old_val = mino_nil();
+    mino_val_t *new_val;
+    mino_val_t *call_args;
+    size_t      n;
+    (void)env;
+    arg_count(args, &n);
+    if (n != 3) {
+        set_error("update requires a collection, key, and function");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    key  = args->as.cons.cdr->as.cons.car;
+    fn   = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    if (fn == NULL || (fn->type != MINO_PRIM && fn->type != MINO_FN)) {
+        set_error("update: third argument must be a function");
+        return NULL;
+    }
+    if (coll != NULL && coll->type == MINO_MAP) {
+        size_t i;
+        for (i = 0; i < coll->as.map.len; i++) {
+            if (mino_eq(coll->as.map.keys[i], key)) {
+                old_val = coll->as.map.vals[i];
+                break;
+            }
+        }
+    } else if (coll != NULL && coll->type == MINO_VECTOR
+               && key != NULL && key->type == MINO_INT) {
+        long long idx = key->as.i;
+        if (idx >= 0 && (size_t)idx < coll->as.vec.len) {
+            old_val = coll->as.vec.data[idx];
+        }
+    } else if (coll == NULL || coll->type == MINO_NIL) {
+        /* Update on nil behaves like update on an empty map. */
+    } else {
+        set_error("update: unsupported collection");
+        return NULL;
+    }
+    call_args = mino_cons(old_val, mino_nil());
+    new_val = apply_callable(fn, call_args, env);
+    if (new_val == NULL) {
+        return NULL;
+    }
+    {
+        mino_val_t *assoc_args;
+        assoc_args = mino_cons(
+            coll == NULL ? mino_nil() : coll,
+            mino_cons(key, mino_cons(new_val, mino_nil())));
+        return prim_assoc(assoc_args, env);
+    }
+}
+
+static mino_val_t *prim_keys(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    size_t i;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("keys requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    if (coll->type != MINO_MAP) {
+        set_error("keys: argument must be a map");
+        return NULL;
+    }
+    for (i = 0; i < coll->as.map.len; i++) {
+        mino_val_t *cell = mino_cons(coll->as.map.keys[i], mino_nil());
+        if (tail == NULL) {
+            head = cell;
+        } else {
+            tail->as.cons.cdr = cell;
+        }
+        tail = cell;
+    }
+    return head;
+}
+
+static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    size_t i;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("vals requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    if (coll->type != MINO_MAP) {
+        set_error("vals: argument must be a map");
+        return NULL;
+    }
+    for (i = 0; i < coll->as.map.len; i++) {
+        mino_val_t *cell = mino_cons(coll->as.map.vals[i], mino_nil());
+        if (tail == NULL) {
+            head = cell;
+        } else {
+            tail->as.cons.cdr = cell;
+        }
+        tail = cell;
+    }
+    return head;
+}
+
 void mino_install_core(mino_env_t *env)
 {
-    mino_env_set(env, "+",    mino_prim("+",    prim_add));
-    mino_env_set(env, "-",    mino_prim("-",    prim_sub));
-    mino_env_set(env, "*",    mino_prim("*",    prim_mul));
-    mino_env_set(env, "/",    mino_prim("/",    prim_div));
-    mino_env_set(env, "=",    mino_prim("=",    prim_eq));
-    mino_env_set(env, "<",    mino_prim("<",    prim_lt));
-    mino_env_set(env, "<=",   mino_prim("<=",   prim_le));
-    mino_env_set(env, ">",    mino_prim(">",    prim_gt));
-    mino_env_set(env, ">=",   mino_prim(">=",   prim_ge));
-    mino_env_set(env, "car",  mino_prim("car",  prim_car));
-    mino_env_set(env, "cdr",  mino_prim("cdr",  prim_cdr));
-    mino_env_set(env, "cons", mino_prim("cons", prim_cons));
-    mino_env_set(env, "list", mino_prim("list", prim_list));
+    mino_env_set(env, "+",        mino_prim("+",        prim_add));
+    mino_env_set(env, "-",        mino_prim("-",        prim_sub));
+    mino_env_set(env, "*",        mino_prim("*",        prim_mul));
+    mino_env_set(env, "/",        mino_prim("/",        prim_div));
+    mino_env_set(env, "=",        mino_prim("=",        prim_eq));
+    mino_env_set(env, "<",        mino_prim("<",        prim_lt));
+    mino_env_set(env, "<=",       mino_prim("<=",       prim_le));
+    mino_env_set(env, ">",        mino_prim(">",        prim_gt));
+    mino_env_set(env, ">=",       mino_prim(">=",       prim_ge));
+    mino_env_set(env, "car",      mino_prim("car",      prim_car));
+    mino_env_set(env, "cdr",      mino_prim("cdr",      prim_cdr));
+    mino_env_set(env, "cons",     mino_prim("cons",     prim_cons));
+    mino_env_set(env, "list",     mino_prim("list",     prim_list));
+    mino_env_set(env, "count",    mino_prim("count",    prim_count));
+    mino_env_set(env, "nth",      mino_prim("nth",      prim_nth));
+    mino_env_set(env, "first",    mino_prim("first",    prim_first));
+    mino_env_set(env, "rest",     mino_prim("rest",     prim_rest));
+    mino_env_set(env, "vector",   mino_prim("vector",   prim_vector));
+    mino_env_set(env, "hash-map", mino_prim("hash-map", prim_hash_map));
+    mino_env_set(env, "assoc",    mino_prim("assoc",    prim_assoc));
+    mino_env_set(env, "get",      mino_prim("get",      prim_get));
+    mino_env_set(env, "conj",     mino_prim("conj",     prim_conj));
+    mino_env_set(env, "update",   mino_prim("update",   prim_update));
+    mino_env_set(env, "keys",     mino_prim("keys",     prim_keys));
+    mino_env_set(env, "vals",     mino_prim("vals",     prim_vals));
 }

@@ -147,10 +147,15 @@ void        mino_env_set(mino_env_t *env, const char *name, mino_val_t *val);
 mino_val_t *mino_env_get(mino_env_t *env, const char *name);
 
 /*
- * Install the core primitive bindings (+ - * / = < <= > >= car cdr cons list)
- * into `env`. Special forms (quote, def, if, do, let, fn, loop, recur) are
- * recognized directly by the evaluator and do not need to be installed.
- * Safe to call on a fresh env.
+ * Install the core primitive bindings into `env`:
+ *   arithmetic + - * /
+ *   comparison = < <= > >=
+ *   list       car cdr cons list
+ *   collection count nth first rest vector hash-map assoc get conj update
+ *              keys vals
+ * Special forms (quote, def, if, do, let, fn, loop, recur) are recognized
+ * directly by the evaluator and do not need to be installed. Safe to call
+ * on a fresh env.
  */
 void        mino_install_core(mino_env_t *env);
 
