@@ -4,6 +4,49 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — Persistent maps
+
+Replaces the map layout with a 32-wide hash array mapped trie. `get`,
+`assoc`, and `update` are now sub-linear; maps can be used as map keys,
+equality between maps no longer scales quadratically, and lookup no
+longer depends on key arity.
+
+### Changed
+
+- Map representation is now a HAMT plus a companion insertion-order
+  key vector. Lookup walks the trie for O(log₃₂ n) `get`; iteration
+  walks the key vector so `keys`, `vals`, and the printer emit
+  entries in the order they were first inserted — a rebind leaves
+  the slot's position alone. Iteration order is part of the contract.
+- Equality between maps is O(n log₃₂ n): walk one map's keys and
+  look each up in the other.
+- `mino.h` exposes `{ root, key_order, len }` with `mino_hamt_node_t`
+  as an opaque forward declaration; header still UNSTABLE until v1.0.
+
+### Added
+
+- Hash function compatible with `=`. Integral floats hash as the
+  equivalent int so `(= 1 1.0)` stays consistent between equality and
+  the hash table. Strings, symbols, and keywords carry distinct type
+  tags so byte-equal values of different types hash apart. Vectors
+  hash element-wise; maps XOR-fold entry hashes for order-independent
+  structural hashing. Non-hashable values (primitives, closures) fall
+  back to pointer identity.
+- Collision handling: when two distinct keys hit the same 32-bit
+  hash, a collision bucket holds them as a linear list at the depth
+  where trie descent can no longer discriminate. Inserting a key
+  whose hash doesn't match the bucket promotes the bucket into a
+  bitmap node that routes the two subtrees separately.
+- 5 additional smoke cases locking down map iteration order across
+  literals, rebinds, new-key assoc, printing, and a 200-entry map
+  that crosses several levels of the trie (98 cases total).
+
+### Notes
+
+The v0.5 HAMT is the last structural replacement before the GC work
+in v0.7; from here the layout stays but the allocator underneath
+changes. Semantics remain the contract.
+
 ## [0.4.0] — Persistent vectors
 
 Replaces the vector layout with a persistent 32-way trie without
