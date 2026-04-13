@@ -8,6 +8,7 @@
 build/
 bin/
 mino
+bench/vector_bench
 
 # Test artifacts
 *.gcda
