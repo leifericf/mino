@@ -229,6 +229,23 @@ run "map 200 entries" '(let (m (loop (i 0 m {})
                                 (if (< i 200) (recur (+ i 1) (assoc m i (* i 10))) m)))
   (list (count m) (get m 0) (get m 100) (get m 199) (get m 300 :miss)))' '(200 0 1000 1990 :miss)'
 
+# v0.7 — GC stability: each case allocates far more than a single generation's
+# worth of transient values, so the collector must be invoked and must leave
+# the live set intact. Also run under `make test-gc-stress` which collects on
+# every allocation.
+run "gc long tail"    '(loop (i 0) (if (< i 50000) (recur (+ i 1)) i))' '50000'
+run "gc vec churn"    '(count (loop (i 0 acc [])
+                        (if (< i 2000) (recur (+ i 1) (conj acc i)) acc)))' '2000'
+run "gc map churn"    '(get (loop (i 0 m {})
+                        (if (< i 300) (recur (+ i 1) (assoc m i (* i 3))) m))
+                       150)' '450'
+run "gc closure churn" '(def make-inc (fn (n) (fn (x) (+ x n))))
+(loop (i 0 acc 0)
+  (if (< i 1000)
+      (recur (+ i 1) ((make-inc i) acc))
+      acc))' '#<fn>
+499500'
+
 # v0.4 — vectors scale beyond one leaf (crosses trie level boundaries)
 run "vec 2000 build+nth" '(let (big (loop (i 0 v [])
   (if (< i 2000) (recur (+ i 1) (conj v i)) v)))
