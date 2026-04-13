@@ -184,6 +184,49 @@ mino_val_t *mino_vector(mino_val_t **items, size_t len)
     return v;
 }
 
+/*
+ * Map construction copies the key and value pointers into freshly-allocated
+ * parallel arrays. Duplicate keys are resolved by last-write-wins so the
+ * reader, constructors, and assoc all produce canonical shapes.
+ * v0.3 uses O(n) linear scan for every lookup — replaced by a HAMT in v0.5
+ * without changing the public API. The semantics are the contract.
+ */
+mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len)
+{
+    mino_val_t *v = alloc_val(MINO_MAP);
+    size_t      out = 0;
+    size_t      i;
+    if (len == 0) {
+        v->as.map.keys = NULL;
+        v->as.map.vals = NULL;
+        v->as.map.len  = 0;
+        return v;
+    }
+    v->as.map.keys = (mino_val_t **)malloc(len * sizeof(*v->as.map.keys));
+    v->as.map.vals = (mino_val_t **)malloc(len * sizeof(*v->as.map.vals));
+    if (v->as.map.keys == NULL || v->as.map.vals == NULL) {
+        abort();
+    }
+    for (i = 0; i < len; i++) {
+        size_t j;
+        int    replaced = 0;
+        for (j = 0; j < out; j++) {
+            if (mino_eq(v->as.map.keys[j], keys[i])) {
+                v->as.map.vals[j] = vals[i];
+                replaced = 1;
+                break;
+            }
+        }
+        if (!replaced) {
+            v->as.map.keys[out] = keys[i];
+            v->as.map.vals[out] = vals[i];
+            out++;
+        }
+    }
+    v->as.map.len = out;
+    return v;
+}
+
 mino_val_t *mino_prim(const char *name, mino_prim_fn fn)
 {
     mino_val_t *v = alloc_val(MINO_PRIM);
@@ -360,6 +403,20 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         fputc(']', out);
         return;
     }
+    case MINO_MAP: {
+        size_t i;
+        fputc('{', out);
+        for (i = 0; i < v->as.map.len; i++) {
+            if (i > 0) {
+                fputs(", ", out);
+            }
+            mino_print_to(out, v->as.map.keys[i]);
+            fputc(' ', out);
+            mino_print_to(out, v->as.map.vals[i]);
+        }
+        fputc('}', out);
+        return;
+    }
     case MINO_PRIM:
         fputs("#<prim ", out);
         if (v->as.prim.name != NULL) {
@@ -426,7 +483,8 @@ static int is_ws(char c)
 static int is_terminator(char c)
 {
     return c == '\0' || c == '(' || c == ')' || c == '[' || c == ']'
-        || c == '\'' || c == '"' || c == ';' || is_ws(c);
+        || c == '{' || c == '}' || c == '\'' || c == '"' || c == ';'
+        || is_ws(c);
 }
 
 static void skip_ws(const char **p)
@@ -584,6 +642,68 @@ static mino_val_t *read_vector_form(const char **p)
     return result;
 }
 
+static mino_val_t *read_map_form(const char **p)
+{
+    /* Caller has positioned *p on the opening '{'. Elements alternate as
+     * key, value, key, value. An odd count is a parse error. */
+    mino_val_t **kbuf = NULL;
+    mino_val_t **vbuf = NULL;
+    size_t       cap  = 0;
+    size_t       len  = 0;
+    mino_val_t  *result;
+    (*p)++; /* skip '{' */
+    for (;;) {
+        mino_val_t *key;
+        mino_val_t *val;
+        skip_ws(p);
+        if (**p == '\0') {
+            free(kbuf); free(vbuf);
+            set_error("unterminated map");
+            return NULL;
+        }
+        if (**p == '}') {
+            (*p)++;
+            break;
+        }
+        key = read_form(p);
+        if (key == NULL) {
+            free(kbuf); free(vbuf);
+            if (mino_last_error() == NULL) {
+                set_error("unterminated map");
+            }
+            return NULL;
+        }
+        skip_ws(p);
+        if (**p == '}' || **p == '\0') {
+            free(kbuf); free(vbuf);
+            set_error("map literal has odd number of forms");
+            return NULL;
+        }
+        val = read_form(p);
+        if (val == NULL) {
+            free(kbuf); free(vbuf);
+            if (mino_last_error() == NULL) {
+                set_error("unterminated map");
+            }
+            return NULL;
+        }
+        if (len == cap) {
+            cap = cap == 0 ? 8 : cap * 2;
+            kbuf = (mino_val_t **)realloc(kbuf, cap * sizeof(*kbuf));
+            vbuf = (mino_val_t **)realloc(vbuf, cap * sizeof(*vbuf));
+            if (kbuf == NULL || vbuf == NULL) {
+                abort();
+            }
+        }
+        kbuf[len] = key;
+        vbuf[len] = val;
+        len++;
+    }
+    result = mino_map(kbuf, vbuf, len);
+    free(kbuf); free(vbuf);
+    return result;
+}
+
 static mino_val_t *read_atom(const char **p)
 {
     const char *start = *p;
@@ -676,6 +796,13 @@ static mino_val_t *read_form(const char **p)
         set_error("unexpected ']'");
         return NULL;
     }
+    if (**p == '{') {
+        return read_map_form(p);
+    }
+    if (**p == '}') {
+        set_error("unexpected '}'");
+        return NULL;
+    }
     if (**p == '"') {
         return read_string_form(p);
     }
@@ -756,6 +883,30 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         }
         for (i = 0; i < a->as.vec.len; i++) {
             if (!mino_eq(a->as.vec.data[i], b->as.vec.data[i])) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    case MINO_MAP: {
+        /* Map equality is order-insensitive: same key set, same values.
+         * O(n*m) scan — fine for naïve impl, HAMT in v0.5 will fix this. */
+        size_t i, j;
+        if (a->as.map.len != b->as.map.len) {
+            return 0;
+        }
+        for (i = 0; i < a->as.map.len; i++) {
+            int found = 0;
+            for (j = 0; j < b->as.map.len; j++) {
+                if (mino_eq(a->as.map.keys[i], b->as.map.keys[j])) {
+                    if (!mino_eq(a->as.map.vals[i], b->as.map.vals[j])) {
+                        return 0;
+                    }
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found) {
                 return 0;
             }
         }
@@ -1056,6 +1207,35 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
         }
         result = mino_vector(tmp, n);
         free(tmp);
+        return result;
+    }
+    case MINO_MAP: {
+        /* Map literals evaluate keys and values in read order; the
+         * constructor handles duplicate-key resolution. */
+        size_t i;
+        size_t n = form->as.map.len;
+        mino_val_t **ks;
+        mino_val_t **vs;
+        mino_val_t  *result;
+        if (n == 0) {
+            return form;
+        }
+        ks = (mino_val_t **)malloc(n * sizeof(*ks));
+        vs = (mino_val_t **)malloc(n * sizeof(*vs));
+        if (ks == NULL || vs == NULL) {
+            abort();
+        }
+        for (i = 0; i < n; i++) {
+            mino_val_t *k = eval_value(form->as.map.keys[i], env);
+            mino_val_t *v;
+            if (k == NULL) { free(ks); free(vs); return NULL; }
+            v = eval_value(form->as.map.vals[i], env);
+            if (v == NULL) { free(ks); free(vs); return NULL; }
+            ks[i] = k;
+            vs[i] = v;
+        }
+        result = mino_map(ks, vs, n);
+        free(ks); free(vs);
         return result;
     }
     case MINO_CONS: {
