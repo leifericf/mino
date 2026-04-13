@@ -189,6 +189,17 @@ run "build map"  '(def m (hash-map :x 1 :y 2))
 (get (update m :x (fn (n) (+ n 100))) :x)' '{:x 1, :y 2}
 101'
 
+# v0.5 — map iteration follows insertion order, not hash layout
+run "map order preserved"    '(keys {:z 1 :a 2 :m 3 :b 4})' '(:z :a :m :b)'
+run "map rebind keeps order" '(keys (assoc {:z 1 :a 2 :m 3} :a 99))' '(:z :a :m)'
+run "map new key appends"    '(keys (assoc {:z 1 :a 2} :b 3 :c 4))' '(:z :a :b :c)'
+run "map print order"        '{:c 3 :a 1 :b 2}' '{:c 3, :a 1, :b 2}'
+
+# v0.5 — HAMT scales; exercises tree depth beyond one bitmap node
+run "map 200 entries" '(let (m (loop (i 0 m {})
+                                (if (< i 200) (recur (+ i 1) (assoc m i (* i 10))) m)))
+  (list (count m) (get m 0) (get m 100) (get m 199) (get m 300 :miss)))' '(200 0 1000 1990 :miss)'
+
 # v0.4 — vectors scale beyond one leaf (crosses trie level boundaries)
 run "vec 2000 build+nth" '(let (big (loop (i 0 v [])
   (if (< i 2000) (recur (+ i 1) (conj v i)) v)))
