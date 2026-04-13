@@ -4,6 +4,54 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — Macros
+
+Lifts the surface language above its primitives. `defmacro`, quasiquote,
+and a small set of in-language threading and short-circuit forms mean
+that new control shapes can land without growing the C evaluator.
+
+### Added
+
+- `MINO_MACRO` value type. Shares the closure layout (params, body,
+  captured env) so the same bind/apply path serves both. Printer
+  emits `#<macro>`; equality is identity.
+- `defmacro` special form binds a macro in the root frame. When the
+  evaluator encounters a call whose head resolves to a macro, it
+  applies the macro body to the *unevaluated* arguments and then
+  evaluates the returned form in the caller's environment.
+- Reader gains `` ` ``, `~`, `~@` as shorthands for `(quasiquote x)`,
+  `(unquote x)`, `(unquote-splicing x)`. Both backtick and tilde are
+  treated as word breaks so symbols no longer absorb them.
+- `quasiquote` special form walks its template. Vectors and maps are
+  recursed into; `(unquote x)` evaluates `x` and uses the value;
+  `(unquote-splicing x)` evaluates `x` (expected to yield a list) and
+  inlines the elements into the enclosing list.
+- Variadic parameter lists: a trailing `& rest` binds `rest` to the
+  list of remaining arguments (possibly empty). Works for `fn`,
+  `defmacro`, and `loop`.
+- `macroexpand-1` (single step) and `macroexpand` (to fixed point)
+  primitives expose the expander for inspection.
+- `gensym` primitive with an optional string prefix (default `G__`)
+  and a monotonic counter. Macro authors use this to introduce
+  temporaries that won't capture caller-visible names — the 0.x
+  hygiene convention.
+- `cons?` and `nil?` predicates. The threading macros use `cons?` to
+  tell whether a step is a bare symbol or a call form.
+- In-language stdlib macros defined in mino itself, read + eval'd at
+  core install: `when`, `cond`, `and`, `or`, `->`, `->>`. Each ships
+  as mino source embedded in the runtime; they are bindings in the
+  root env, not special forms.
+- 15 additional smoke cases covering `defmacro`, quasiquote splicing,
+  variadic params, `macroexpand-1`, `gensym` freshness, and every
+  stdlib macro (113 cases total).
+
+### Notes
+
+0.x makes no automatic hygiene promise; macro writers should reach
+for `gensym` when they need an identifier that can't capture anything
+the caller introduced. The decision whether to keep gensym-only or
+add full hygiene lands in v1.0 triage.
+
 ## [0.5.0] — Persistent maps
 
 Replaces the map layout with a 32-wide hash array mapped trie. `get`,
