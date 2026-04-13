@@ -74,5 +74,61 @@ run "quote nested" "'(a (b c) d)" "(a (b c) d)"
 run "line comment" "; ignore me
 (+ 1 1)" "2"
 
+# v0.2 — conditional, sequencing, truthiness
+run "if true"        '(if true 1 2)'           '1'
+run "if false"       '(if false 1 2)'          '2'
+run "if nil"         '(if nil 1 2)'            '2'
+run "if zero truthy" '(if 0 "t" "f")'          '"t"'
+run "if empty str"   '(if "" "t" "f")'         '"t"'
+run "if no-else"     '(if false 1)'            'nil'
+run "do last"        '(do 1 2 3)'              '3'
+run "do side"        '(do (def d 7) d)'        '7'
+
+# v0.2 — let and lexical scope
+run "let single"     '(let (x 5) x)'           '5'
+run "let multi"      '(let (x 1 y 2) (+ x y))' '3'
+run "let sequential" '(let (x 1 y (+ x 10)) y)' '11'
+run "let shadow"     '(def a 1)
+(let (a 99) a)
+a' '1
+99
+1'
+
+# v0.2 — extended comparisons
+run "<= chain"  '(<= 1 2 2 3)' 'true'
+run ">  chain"  '(> 3 2 1)'    'true'
+run ">= chain"  '(>= 3 3 1)'   'true'
+run ">  false"  '(> 1 2)'      'false'
+
+# v0.2 — fn, closures, higher-order
+run "fn lambda"   '((fn (x) (* x x)) 7)' '49'
+run "fn no-arg"   '((fn () 42))'          '42'
+run "fn def"      '(def sq (fn (x) (* x x)))
+(sq 9)' '#<fn>
+81'
+run "closure"     '(def adder (fn (n) (fn (x) (+ x n))))
+(def add5 (adder 5))
+(add5 10)' '#<fn>
+#<fn>
+15'
+run "higher order" '(def apply-twice (fn (f x) (f (f x))))
+(apply-twice (fn (n) (+ n 1)) 10)' '#<fn>
+12'
+
+# v0.2 — loop and recur
+run "loop countdown" '(loop (n 5 acc 1)
+  (if (<= n 1) acc (recur (- n 1) (* acc n))))' '120'
+run "factorial"      '(def fact (fn (n)
+  (loop (i n acc 1) (if (<= i 1) acc (recur (- i 1) (* acc i))))))
+(fact 10)' '#<fn>
+3628800'
+run "fib"            '(def fib (fn (n)
+  (loop (i 0 a 0 b 1) (if (< i n) (recur (+ i 1) b (+ a b)) a))))
+(fib 20)' '#<fn>
+6765'
+run "recur in fn"    '(def count-down (fn (n) (if (<= n 0) "done" (recur (- n 1)))))
+(count-down 1000)' '#<fn>
+"done"'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]
