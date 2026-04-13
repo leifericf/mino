@@ -1,0 +1,36 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+build/
+bin/
+mino
+
+# Test artifacts
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.*.swp
+.*.swo
+
+# Local-only design notes (kept out of the repo intentionally)
+/*.md
+!README.md
+!CHANGELOG.md
+/design-notes/
+
