@@ -161,26 +161,224 @@ mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr)
     return v;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Persistent vector: 32-way trie with tail                                  */
+/* ------------------------------------------------------------------------- */
 /*
- * Vector construction copies the element pointers into a freshly-allocated
- * backing array. Caller retains ownership of the source array and elements.
- * v0.3 representation is a flat array with linear indexing — replaced by a
- * persistent 32-way trie in v0.4 without changing the public API.
+ * Layout (Bagwell persistent vector):
+ *   - tail holds the trailing 1..32 elements; appends that fit in the tail
+ *     are O(1) amortized (one 32-slot copy, no trie walk).
+ *   - root is a trie whose leaves each hold exactly 32 values; the rightmost
+ *     spine may be partially filled (branches store a `count`).
+ *   - shift encodes height: 0 means the root is itself a leaf; otherwise a
+ *     branch whose children live at shift - 5.
+ *   - All node mutations are path-copies: conj/assoc return fresh nodes along
+ *     the walked path, leaving structural sharing with the source vector.
+ *
+ * Nodes are untyped unions of child pointers; the active variant is dictated
+ * by the node's level during traversal rather than a per-node tag.
+ */
+
+#define MINO_VEC_B     5u
+#define MINO_VEC_WIDTH (1u << MINO_VEC_B)
+#define MINO_VEC_MASK  (MINO_VEC_WIDTH - 1u)
+
+struct mino_vec_node {
+    unsigned count;                    /* number of used slots */
+    void    *slots[MINO_VEC_WIDTH];    /* mino_val_t* at leaves; mino_vec_node_t* at branches */
+};
+
+static mino_vec_node_t *vnode_new(unsigned count)
+{
+    mino_vec_node_t *n = (mino_vec_node_t *)calloc(1, sizeof(*n));
+    if (n == NULL) {
+        abort();
+    }
+    n->count = count;
+    return n;
+}
+
+static mino_vec_node_t *vnode_clone(const mino_vec_node_t *src)
+{
+    mino_vec_node_t *n = (mino_vec_node_t *)malloc(sizeof(*n));
+    if (n == NULL) {
+        abort();
+    }
+    memcpy(n, src, sizeof(*n));
+    return n;
+}
+
+/*
+ * new_path: build a spine from a branch at level `shift` down to `leaf`,
+ * placing the leaf in slot 0 at every level along the way.
+ */
+static mino_vec_node_t *new_path(unsigned shift, mino_vec_node_t *leaf)
+{
+    mino_vec_node_t *n;
+    if (shift == 0) {
+        return leaf;
+    }
+    n = vnode_new(1);
+    n->slots[0] = new_path(shift - MINO_VEC_B, leaf);
+    return n;
+}
+
+/*
+ * push_tail: insert `leaf` into the subtree rooted at `node` (level `shift`),
+ * at the position implied by `subindex` (the leaf's first element's flat
+ * index into the trie). Path-copies the walked spine; returns the new root.
+ * Caller ensures `subindex` fits within the current tree (no root overflow).
+ */
+static mino_vec_node_t *push_tail(const mino_vec_node_t *node, unsigned shift,
+                                  size_t subindex, mino_vec_node_t *leaf)
+{
+    unsigned         digit = (unsigned)((subindex >> shift) & MINO_VEC_MASK);
+    mino_vec_node_t *clone = vnode_clone(node);
+    if (shift == MINO_VEC_B) {
+        /* Children are leaves: place the tail directly. */
+        clone->slots[digit] = leaf;
+    } else {
+        mino_vec_node_t *child = (mino_vec_node_t *)node->slots[digit];
+        mino_vec_node_t *new_child = (child == NULL)
+            ? new_path(shift - MINO_VEC_B, leaf)
+            : push_tail(child, shift - MINO_VEC_B, subindex, leaf);
+        clone->slots[digit] = new_child;
+    }
+    if (digit + 1u > clone->count) {
+        clone->count = digit + 1u;
+    }
+    return clone;
+}
+
+/*
+ * trie_assoc: path-copy update of the element at flat index `i`. Requires
+ * i to refer to the trie (not the tail).
+ */
+static mino_vec_node_t *trie_assoc(const mino_vec_node_t *node, unsigned shift,
+                                    size_t i, mino_val_t *item)
+{
+    mino_vec_node_t *clone = vnode_clone(node);
+    if (shift == 0) {
+        clone->slots[i & MINO_VEC_MASK] = item;
+    } else {
+        unsigned digit = (unsigned)((i >> shift) & MINO_VEC_MASK);
+        clone->slots[digit] = trie_assoc((mino_vec_node_t *)node->slots[digit],
+                                          shift - MINO_VEC_B, i, item);
+    }
+    return clone;
+}
+
+/* Construct a vector value from an already-built trie and tail. */
+static mino_val_t *vec_assemble(mino_vec_node_t *root, mino_vec_node_t *tail,
+                                 unsigned tail_len, unsigned shift, size_t len)
+{
+    mino_val_t *v = alloc_val(MINO_VECTOR);
+    v->as.vec.root     = root;
+    v->as.vec.tail     = tail;
+    v->as.vec.tail_len = tail_len;
+    v->as.vec.shift    = shift;
+    v->as.vec.len      = len;
+    return v;
+}
+
+/* Read one element by flat index; undefined if i >= len. */
+static mino_val_t *vec_nth(const mino_val_t *v, size_t i)
+{
+    size_t                  trie_count = v->as.vec.len - v->as.vec.tail_len;
+    const mino_vec_node_t  *node;
+    unsigned                shift;
+    if (i >= trie_count) {
+        return (mino_val_t *)v->as.vec.tail->slots[i - trie_count];
+    }
+    node  = v->as.vec.root;
+    shift = v->as.vec.shift;
+    while (shift > 0) {
+        node = (const mino_vec_node_t *)node->slots[(i >> shift) & MINO_VEC_MASK];
+        shift -= MINO_VEC_B;
+    }
+    return (mino_val_t *)node->slots[i & MINO_VEC_MASK];
+}
+
+/* Append one element. O(log32 n) worst case, O(1) amortized for tail appends. */
+static mino_val_t *vec_conj1(const mino_val_t *v, mino_val_t *item)
+{
+    mino_vec_node_t *new_tail;
+    mino_vec_node_t *new_root;
+    unsigned         new_shift;
+    size_t           trie_count;
+    if (v->as.vec.tail_len < MINO_VEC_WIDTH) {
+        /* Tail has room: copy it and append. */
+        if (v->as.vec.tail == NULL) {
+            new_tail = vnode_new(1);
+            new_tail->slots[0] = item;
+        } else {
+            new_tail = vnode_clone(v->as.vec.tail);
+            new_tail->slots[v->as.vec.tail_len] = item;
+            new_tail->count = v->as.vec.tail_len + 1u;
+        }
+        return vec_assemble(v->as.vec.root, new_tail,
+                            v->as.vec.tail_len + 1u,
+                            v->as.vec.shift, v->as.vec.len + 1u);
+    }
+    /* Tail is full: push it into the trie, start a fresh tail with the new item. */
+    new_tail = vnode_new(1);
+    new_tail->slots[0] = item;
+    trie_count = v->as.vec.len - v->as.vec.tail_len; /* before incorporation */
+    new_shift  = v->as.vec.shift;
+    if (v->as.vec.root == NULL) {
+        /* Trie was empty: old tail becomes the leaf root. */
+        new_root  = v->as.vec.tail;
+        new_shift = 0;
+    } else if (trie_count == ((size_t)1u << (v->as.vec.shift + MINO_VEC_B))) {
+        /* Root is full at the current height: add a level. */
+        mino_vec_node_t *grown = vnode_new(2);
+        grown->slots[0] = v->as.vec.root;
+        grown->slots[1] = new_path(v->as.vec.shift, v->as.vec.tail);
+        new_root  = grown;
+        new_shift = v->as.vec.shift + MINO_VEC_B;
+    } else {
+        new_root = push_tail(v->as.vec.root, v->as.vec.shift, trie_count,
+                             v->as.vec.tail);
+    }
+    return vec_assemble(new_root, new_tail, 1u, new_shift, v->as.vec.len + 1u);
+}
+
+/* Update index i. Index equal to len appends; any other out-of-range call is
+ * the caller's responsibility to guard against. */
+static mino_val_t *vec_assoc1(const mino_val_t *v, size_t i, mino_val_t *item)
+{
+    size_t           trie_count;
+    mino_vec_node_t *new_tail;
+    mino_vec_node_t *new_root;
+    if (i == v->as.vec.len) {
+        return vec_conj1(v, item);
+    }
+    trie_count = v->as.vec.len - v->as.vec.tail_len;
+    if (i >= trie_count) {
+        /* In the tail: copy and overwrite one slot. */
+        new_tail = vnode_clone(v->as.vec.tail);
+        new_tail->slots[i - trie_count] = item;
+        return vec_assemble(v->as.vec.root, new_tail, v->as.vec.tail_len,
+                            v->as.vec.shift, v->as.vec.len);
+    }
+    /* In the trie: path-copy the spine. */
+    new_root = trie_assoc(v->as.vec.root, v->as.vec.shift, i, item);
+    return vec_assemble(new_root, v->as.vec.tail, v->as.vec.tail_len,
+                        v->as.vec.shift, v->as.vec.len);
+}
+
+/*
+ * Vector construction from a flat array. Uses repeated conj for now; the
+ * internal bulk-build path (v0.4 transient) replaces this in a follow-up
+ * commit. Caller retains ownership of the source array and elements.
  */
 mino_val_t *mino_vector(mino_val_t **items, size_t len)
 {
-    mino_val_t *v = alloc_val(MINO_VECTOR);
-    if (len == 0) {
-        v->as.vec.data = NULL;
-        v->as.vec.len  = 0;
-        return v;
+    mino_val_t *v = vec_assemble(NULL, NULL, 0u, 0u, 0);
+    size_t      i;
+    for (i = 0; i < len; i++) {
+        v = vec_conj1(v, items[i]);
     }
-    v->as.vec.data = (mino_val_t **)malloc(len * sizeof(*v->as.vec.data));
-    if (v->as.vec.data == NULL) {
-        abort();
-    }
-    memcpy(v->as.vec.data, items, len * sizeof(*items));
-    v->as.vec.len = len;
     return v;
 }
 
@@ -398,7 +596,7 @@ void mino_print_to(FILE *out, const mino_val_t *v)
             if (i > 0) {
                 fputc(' ', out);
             }
-            mino_print_to(out, v->as.vec.data[i]);
+            mino_print_to(out, vec_nth(v, i));
         }
         fputc(']', out);
         return;
@@ -882,7 +1080,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             return 0;
         }
         for (i = 0; i < a->as.vec.len; i++) {
-            if (!mino_eq(a->as.vec.data[i], b->as.vec.data[i])) {
+            if (!mino_eq(vec_nth(a, i), vec_nth(b, i))) {
                 return 0;
             }
         }
@@ -1200,7 +1398,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             abort();
         }
         for (i = 0; i < n; i++) {
-            mino_val_t *ev = eval_value(form->as.vec.data[i], env);
+            mino_val_t *ev = eval_value(vec_nth(form, i), env);
             if (ev == NULL) {
                 free(tmp);
                 return NULL;
@@ -1987,7 +2185,7 @@ static mino_val_t *prim_nth(mino_val_t *args, mino_env_t *env)
             set_error("nth index out of range");
             return NULL;
         }
-        return coll->as.vec.data[idx];
+        return vec_nth(coll, (size_t)idx);
     }
     if (coll->type == MINO_CONS) {
         mino_val_t *p = coll;
@@ -2030,7 +2228,7 @@ static mino_val_t *prim_first(mino_val_t *args, mino_env_t *env)
         if (coll->as.vec.len == 0) {
             return mino_nil();
         }
-        return coll->as.vec.data[0];
+        return vec_nth(coll, 0);
     }
     set_error("first: unsupported collection");
     return NULL;
@@ -2058,7 +2256,7 @@ static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
         mino_val_t *tail = NULL;
         size_t i;
         for (i = 1; i < coll->as.vec.len; i++) {
-            mino_val_t *cell = mino_cons(coll->as.vec.data[i], mino_nil());
+            mino_val_t *cell = mino_cons(vec_nth(coll, i), mino_nil());
             if (tail == NULL) {
                 head = cell;
             } else {
@@ -2097,43 +2295,28 @@ static mino_val_t *prim_assoc(mino_val_t *args, mino_env_t *env)
         base = coll->as.map.len;
     } else if (coll->type == MINO_VECTOR) {
         /* Vector assoc: each key must be an integer index in [0, len]; an
-         * index == len is a one-past-end append. */
-        mino_val_t **data;
-        size_t       vlen = coll->as.vec.len;
+         * index == len is a one-past-end append. Apply pairs in order on
+         * successively-derived vectors so each update shares structure with
+         * its predecessor. */
+        mino_val_t *acc = coll;
         p = args->as.cons.cdr;
-        data = (mino_val_t **)malloc((vlen + extra_pairs)
-                                     * sizeof(*data));
-        if (data == NULL) {
-            abort();
-        }
-        if (vlen > 0) {
-            memcpy(data, coll->as.vec.data, vlen * sizeof(*data));
-        }
         for (i = 0; i < extra_pairs; i++) {
             mino_val_t *k = p->as.cons.car;
             mino_val_t *v = p->as.cons.cdr->as.cons.car;
             long long   idx;
             if (k == NULL || k->type != MINO_INT) {
-                free(data);
                 set_error("assoc on vector requires integer indices");
                 return NULL;
             }
             idx = k->as.i;
-            if (idx < 0 || (size_t)idx > vlen) {
-                free(data);
+            if (idx < 0 || (size_t)idx > acc->as.vec.len) {
                 set_error("assoc on vector: index out of range");
                 return NULL;
             }
-            if ((size_t)idx == vlen) {
-                data[vlen++] = v;
-            } else {
-                data[idx] = v;
-            }
+            acc = vec_assoc1(acc, (size_t)idx, v);
             p = p->as.cons.cdr->as.cons.cdr;
         }
-        result = mino_vector(data, vlen);
-        free(data);
-        return result;
+        return acc;
     } else {
         set_error("assoc: unsupported collection");
         return NULL;
@@ -2198,7 +2381,7 @@ static mino_val_t *prim_get(mino_val_t *args, mino_env_t *env)
         if (idx < 0 || (size_t)idx >= coll->as.vec.len) {
             return def_val;
         }
-        return coll->as.vec.data[idx];
+        return vec_nth(coll, (size_t)idx);
     }
     return def_val;
 }
@@ -2228,24 +2411,13 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
     }
     if (coll->type == MINO_VECTOR) {
         size_t extra = n - 1;
-        size_t vlen  = coll->as.vec.len;
-        mino_val_t **data = (mino_val_t **)malloc(
-            (vlen + extra) * sizeof(*data));
-        mino_val_t *result;
-        size_t      i;
-        if (data == NULL) {
-            abort();
-        }
-        if (vlen > 0) {
-            memcpy(data, coll->as.vec.data, vlen * sizeof(*data));
-        }
+        mino_val_t *acc = coll;
+        size_t i;
         for (i = 0; i < extra; i++) {
-            data[vlen + i] = p->as.cons.car;
+            acc = vec_conj1(acc, p->as.cons.car);
             p = p->as.cons.cdr;
         }
-        result = mino_vector(data, vlen + extra);
-        free(data);
-        return result;
+        return acc;
     }
     if (coll->type == MINO_MAP) {
         /* Each added item must be a 2-element vector [k v]. */
@@ -2272,8 +2444,8 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
                 set_error("conj on map requires 2-element vectors");
                 return NULL;
             }
-            ks[base + i] = item->as.vec.data[0];
-            vs[base + i] = item->as.vec.data[1];
+            ks[base + i] = vec_nth(item, 0);
+            vs[base + i] = vec_nth(item, 1);
             p = p->as.cons.cdr;
         }
         result = mino_map(ks, vs, base + extra);
@@ -2318,7 +2490,7 @@ static mino_val_t *prim_update(mino_val_t *args, mino_env_t *env)
                && key != NULL && key->type == MINO_INT) {
         long long idx = key->as.i;
         if (idx >= 0 && (size_t)idx < coll->as.vec.len) {
-            old_val = coll->as.vec.data[idx];
+            old_val = vec_nth(coll, (size_t)idx);
         }
     } else if (coll == NULL || coll->type == MINO_NIL) {
         /* Update on nil behaves like update on an empty map. */

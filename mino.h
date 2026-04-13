@@ -35,6 +35,7 @@ typedef enum {
 
 typedef struct mino_val mino_val_t;
 typedef struct mino_env mino_env_t;
+typedef struct mino_vec_node mino_vec_node_t;  /* opaque; see mino.c */
 
 typedef mino_val_t *(*mino_prim_fn)(mino_val_t *args, mino_env_t *env);
 
@@ -52,9 +53,12 @@ struct mino_val {
             mino_val_t *car;
             mino_val_t *cdr;
         } cons;
-        struct {          /* MINO_VECTOR */
-            mino_val_t **data;
-            size_t       len;
+        struct {          /* MINO_VECTOR: persistent 32-way trie with tail */
+            mino_vec_node_t *root;     /* trie spine (NULL when len <= 32) */
+            mino_vec_node_t *tail;     /* partial leaf, 1..32 slots used */
+            unsigned         tail_len; /* number of valid slots in tail */
+            unsigned         shift;    /* height of root in multiples of 5 */
+            size_t           len;      /* total element count */
         } vec;
         struct {          /* MINO_MAP */
             mino_val_t **keys;
