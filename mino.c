@@ -1347,31 +1347,71 @@ static mino_val_t *prim_eq(mino_val_t *args, mino_env_t *env)
     return mino_true();
 }
 
-static mino_val_t *prim_lt(mino_val_t *args, mino_env_t *env)
+/*
+ * Chained numeric comparison. `op` selects the relation:
+ *   0: <    1: <=    2: >    3: >=
+ * Returns true if each successive pair satisfies the relation (and
+ * trivially true on zero or one argument).
+ */
+static mino_val_t *compare_chain(mino_val_t *args, const char *name, int op)
 {
     double prev;
-    (void)env;
     if (!mino_is_cons(args)) {
         return mino_true();
     }
     if (!as_double(args->as.cons.car, &prev)) {
-        set_error("< expects numbers");
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%s expects numbers", name);
+        set_error(msg);
         return NULL;
     }
     args = args->as.cons.cdr;
     while (mino_is_cons(args)) {
         double x;
+        int    ok;
         if (!as_double(args->as.cons.car, &x)) {
-            set_error("< expects numbers");
+            char msg[64];
+            snprintf(msg, sizeof(msg), "%s expects numbers", name);
+            set_error(msg);
             return NULL;
         }
-        if (!(prev < x)) {
+        switch (op) {
+        case 0:  ok = prev <  x; break;
+        case 1:  ok = prev <= x; break;
+        case 2:  ok = prev >  x; break;
+        default: ok = prev >= x; break;
+        }
+        if (!ok) {
             return mino_false();
         }
         prev = x;
         args = args->as.cons.cdr;
     }
     return mino_true();
+}
+
+static mino_val_t *prim_lt(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return compare_chain(args, "<", 0);
+}
+
+static mino_val_t *prim_le(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return compare_chain(args, "<=", 1);
+}
+
+static mino_val_t *prim_gt(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return compare_chain(args, ">", 2);
+}
+
+static mino_val_t *prim_ge(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return compare_chain(args, ">=", 3);
 }
 
 static mino_val_t *prim_car(mino_val_t *args, mino_env_t *env)
@@ -1419,6 +1459,9 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "/",    mino_prim("/",    prim_div));
     mino_env_set(env, "=",    mino_prim("=",    prim_eq));
     mino_env_set(env, "<",    mino_prim("<",    prim_lt));
+    mino_env_set(env, "<=",   mino_prim("<=",   prim_le));
+    mino_env_set(env, ">",    mino_prim(">",    prim_gt));
+    mino_env_set(env, ">=",   mino_prim(">=",   prim_ge));
     mino_env_set(env, "car",  mino_prim("car",  prim_car));
     mino_env_set(env, "cdr",  mino_prim("cdr",  prim_cdr));
     mino_env_set(env, "cons", mino_prim("cons", prim_cons));
