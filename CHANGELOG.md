@@ -4,6 +4,50 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — Literal vectors, maps, and keywords
+
+Brings the value-oriented data model to the surface language. Programs
+can now express structured data literally and manipulate it through
+immutable collection primitives.
+
+### Added
+
+- `MINO_KEYWORD` value type. Reader parses `:foo` as a keyword
+  (self-evaluating, prints as `:foo`). Symbols and keywords are
+  interned through process-wide tables so that repeated reads of the
+  same name share storage; equality still falls through to length +
+  byte compare so externally-constructed values compare equal too.
+- `MINO_VECTOR` value type with an array-backed representation.
+  Reader parses `[a b c]`; printer round-trips the same shape.
+  A vector literal is a form, not a datum: the evaluator walks it in
+  order and produces a fresh vector of evaluated elements.
+- `MINO_MAP` value type with parallel (keys, vals) flat arrays.
+  Reader parses `{k1 v1 k2 v2}`; commas are whitespace. Odd-form
+  contents are a parse error. Map literals self-evaluate keys and
+  values in read order; the constructor resolves duplicate keys by
+  last-write-wins. Equality is structural and order-insensitive.
+- Collection primitives: `count`, `nth`, `first`, `rest`, `vector`,
+  `hash-map`, `assoc`, `get`, `conj`, `update`, `keys`, `vals`.
+  `first`, `rest`, and `count` are polymorphic across cons, vector,
+  map, string, and nil where meaningful. `assoc` works on both maps
+  and vectors (vector indices may extend one past the end to append).
+  `conj` prepends to lists, appends to vectors, and accepts `[k v]`
+  vectors when the target is a map.
+- `apply_callable` factored out of the evaluator so primitives
+  (starting with `update`) can call back into user-defined functions
+  with the same trampoline semantics as direct application.
+- 43 additional smoke-test cases covering keywords, vector and map
+  literals, self-evaluation, and every collection primitive across
+  the shapes they support (91 cases total).
+
+### Notes
+
+The v0.3 representations (flat arrays for vectors and maps, linear
+scan for map lookup) are intentionally naïve. The public contract is
+the primitive signatures and semantics; v0.4 replaces the vector
+layout with a persistent 32-way trie and v0.5 replaces the map with a
+HAMT, both without changes to the surface API.
+
 ## [0.2.0] — Core special forms and closures
 
 Locks in lexical scope, first-class functions, and bounded-stack tail
