@@ -555,7 +555,15 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return 0;
     }
     if (a->type != b->type) {
-        /* Allow int/float numeric comparison to be added later. */
+        /*
+         * Cross-type numeric equality: int and float compare by value.
+         */
+        if (a->type == MINO_INT && b->type == MINO_FLOAT) {
+            return (double)a->as.i == b->as.f;
+        }
+        if (a->type == MINO_FLOAT && b->type == MINO_INT) {
+            return a->as.f == (double)b->as.i;
+        }
         return 0;
     }
     switch (a->type) {
@@ -578,4 +586,511 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a->as.prim.fn == b->as.prim.fn;
     }
     return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Environment                                                               */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * v0.1 environment: a single global frame stored as a flat dynamic array
+ * of (name, value) pairs. Linear search is fine for the walking-skeleton
+ * milestone; later versions can swap in a hash map without changing the
+ * external API.
+ */
+
+typedef struct {
+    char       *name;
+    mino_val_t *val;
+} env_binding_t;
+
+struct mino_env {
+    env_binding_t *bindings;
+    size_t         len;
+    size_t         cap;
+};
+
+mino_env_t *mino_env_new(void)
+{
+    mino_env_t *env = (mino_env_t *)calloc(1, sizeof(*env));
+    if (env == NULL) {
+        abort();
+    }
+    return env;
+}
+
+void mino_env_free(mino_env_t *env)
+{
+    size_t i;
+    if (env == NULL) {
+        return;
+    }
+    for (i = 0; i < env->len; i++) {
+        free(env->bindings[i].name);
+    }
+    free(env->bindings);
+    free(env);
+}
+
+static env_binding_t *env_find(mino_env_t *env, const char *name)
+{
+    size_t i;
+    for (i = 0; i < env->len; i++) {
+        if (strcmp(env->bindings[i].name, name) == 0) {
+            return &env->bindings[i];
+        }
+    }
+    return NULL;
+}
+
+void mino_env_set(mino_env_t *env, const char *name, mino_val_t *val)
+{
+    env_binding_t *b = env_find(env, name);
+    if (b != NULL) {
+        b->val = val;
+        return;
+    }
+    if (env->len == env->cap) {
+        size_t new_cap = env->cap == 0 ? 16 : env->cap * 2;
+        env_binding_t *nb = (env_binding_t *)realloc(
+            env->bindings, new_cap * sizeof(*nb));
+        if (nb == NULL) {
+            abort();
+        }
+        env->bindings = nb;
+        env->cap = new_cap;
+    }
+    env->bindings[env->len].name = dup_n(name, strlen(name));
+    env->bindings[env->len].val  = val;
+    env->len++;
+}
+
+mino_val_t *mino_env_get(mino_env_t *env, const char *name)
+{
+    env_binding_t *b = env_find(env, name);
+    return b != NULL ? b->val : NULL;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Evaluator                                                                 */
+/* ------------------------------------------------------------------------- */
+
+static int sym_eq(const mino_val_t *v, const char *s)
+{
+    size_t n;
+    if (v == NULL || v->type != MINO_SYMBOL) {
+        return 0;
+    }
+    n = strlen(s);
+    return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
+}
+
+static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    while (mino_is_cons(args)) {
+        mino_val_t *v = mino_eval(args->as.cons.car, env);
+        mino_val_t *cell;
+        if (v == NULL) {
+            return NULL;
+        }
+        cell = mino_cons(v, mino_nil());
+        if (tail == NULL) {
+            head = cell;
+        } else {
+            tail->as.cons.cdr = cell;
+        }
+        tail = cell;
+        args = args->as.cons.cdr;
+    }
+    return head;
+}
+
+mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
+{
+    if (form == NULL) {
+        return mino_nil();
+    }
+    switch (form->type) {
+    case MINO_NIL:
+    case MINO_BOOL:
+    case MINO_INT:
+    case MINO_FLOAT:
+    case MINO_STRING:
+    case MINO_PRIM:
+        return form;
+    case MINO_SYMBOL: {
+        char buf[256];
+        size_t n = form->as.s.len;
+        mino_val_t *v;
+        if (n >= sizeof(buf)) {
+            set_error("symbol name too long");
+            return NULL;
+        }
+        memcpy(buf, form->as.s.data, n);
+        buf[n] = '\0';
+        v = mino_env_get(env, buf);
+        if (v == NULL) {
+            char msg[300];
+            snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
+            set_error(msg);
+            return NULL;
+        }
+        return v;
+    }
+    case MINO_CONS: {
+        mino_val_t *head = form->as.cons.car;
+        mino_val_t *args = form->as.cons.cdr;
+
+        /* Special forms. */
+        if (sym_eq(head, "quote")) {
+            if (!mino_is_cons(args)) {
+                set_error("quote requires one argument");
+                return NULL;
+            }
+            return args->as.cons.car;
+        }
+        if (sym_eq(head, "def")) {
+            mino_val_t *name_form;
+            mino_val_t *value_form;
+            mino_val_t *value;
+            char buf[256];
+            size_t n;
+            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+                set_error("def requires a name and a value");
+                return NULL;
+            }
+            name_form  = args->as.cons.car;
+            value_form = args->as.cons.cdr->as.cons.car;
+            if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+                set_error("def name must be a symbol");
+                return NULL;
+            }
+            n = name_form->as.s.len;
+            if (n >= sizeof(buf)) {
+                set_error("def name too long");
+                return NULL;
+            }
+            memcpy(buf, name_form->as.s.data, n);
+            buf[n] = '\0';
+            value = mino_eval(value_form, env);
+            if (value == NULL) {
+                return NULL;
+            }
+            mino_env_set(env, buf, value);
+            return value;
+        }
+
+        /* Function application. */
+        {
+            mino_val_t *fn = mino_eval(head, env);
+            mino_val_t *evaled;
+            if (fn == NULL) {
+                return NULL;
+            }
+            if (fn->type != MINO_PRIM) {
+                set_error("not a function");
+                return NULL;
+            }
+            evaled = eval_args(args, env);
+            if (evaled == NULL && mino_last_error() != NULL) {
+                return NULL;
+            }
+            return fn->as.prim.fn(evaled, env);
+        }
+    }
+    }
+    set_error("eval: unknown value type");
+    return NULL;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Core primitives                                                           */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Numeric coercion: if any argument is a float, the result is a float.
+ * Otherwise integer arithmetic is used end-to-end.
+ */
+
+static int args_have_float(mino_val_t *args)
+{
+    while (mino_is_cons(args)) {
+        mino_val_t *a = args->as.cons.car;
+        if (a != NULL && a->type == MINO_FLOAT) {
+            return 1;
+        }
+        args = args->as.cons.cdr;
+    }
+    return 0;
+}
+
+static int as_double(const mino_val_t *v, double *out)
+{
+    if (v == NULL) {
+        return 0;
+    }
+    if (v->type == MINO_INT) {
+        *out = (double)v->as.i;
+        return 1;
+    }
+    if (v->type == MINO_FLOAT) {
+        *out = v->as.f;
+        return 1;
+    }
+    return 0;
+}
+
+static int as_long(const mino_val_t *v, long long *out)
+{
+    if (v == NULL || v->type != MINO_INT) {
+        return 0;
+    }
+    *out = v->as.i;
+    return 1;
+}
+
+static mino_val_t *prim_add(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (args_have_float(args)) {
+        double acc = 0.0;
+        while (mino_is_cons(args)) {
+            double x;
+            if (!as_double(args->as.cons.car, &x)) {
+                set_error("+ expects numbers");
+                return NULL;
+            }
+            acc += x;
+            args = args->as.cons.cdr;
+        }
+        return mino_float(acc);
+    } else {
+        long long acc = 0;
+        while (mino_is_cons(args)) {
+            long long x;
+            if (!as_long(args->as.cons.car, &x)) {
+                set_error("+ expects numbers");
+                return NULL;
+            }
+            acc += x;
+            args = args->as.cons.cdr;
+        }
+        return mino_int(acc);
+    }
+}
+
+static mino_val_t *prim_sub(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args)) {
+        set_error("- requires at least one argument");
+        return NULL;
+    }
+    if (args_have_float(args)) {
+        double acc;
+        if (!as_double(args->as.cons.car, &acc)) {
+            set_error("- expects numbers");
+            return NULL;
+        }
+        args = args->as.cons.cdr;
+        if (!mino_is_cons(args)) {
+            return mino_float(-acc);
+        }
+        while (mino_is_cons(args)) {
+            double x;
+            if (!as_double(args->as.cons.car, &x)) {
+                set_error("- expects numbers");
+                return NULL;
+            }
+            acc -= x;
+            args = args->as.cons.cdr;
+        }
+        return mino_float(acc);
+    } else {
+        long long acc;
+        if (!as_long(args->as.cons.car, &acc)) {
+            set_error("- expects numbers");
+            return NULL;
+        }
+        args = args->as.cons.cdr;
+        if (!mino_is_cons(args)) {
+            return mino_int(-acc);
+        }
+        while (mino_is_cons(args)) {
+            long long x;
+            if (!as_long(args->as.cons.car, &x)) {
+                set_error("- expects numbers");
+                return NULL;
+            }
+            acc -= x;
+            args = args->as.cons.cdr;
+        }
+        return mino_int(acc);
+    }
+}
+
+static mino_val_t *prim_mul(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (args_have_float(args)) {
+        double acc = 1.0;
+        while (mino_is_cons(args)) {
+            double x;
+            if (!as_double(args->as.cons.car, &x)) {
+                set_error("* expects numbers");
+                return NULL;
+            }
+            acc *= x;
+            args = args->as.cons.cdr;
+        }
+        return mino_float(acc);
+    } else {
+        long long acc = 1;
+        while (mino_is_cons(args)) {
+            long long x;
+            if (!as_long(args->as.cons.car, &x)) {
+                set_error("* expects numbers");
+                return NULL;
+            }
+            acc *= x;
+            args = args->as.cons.cdr;
+        }
+        return mino_int(acc);
+    }
+}
+
+static mino_val_t *prim_div(mino_val_t *args, mino_env_t *env)
+{
+    /* Division always yields a float result for now. */
+    double acc;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        set_error("/ requires at least one argument");
+        return NULL;
+    }
+    if (!as_double(args->as.cons.car, &acc)) {
+        set_error("/ expects numbers");
+        return NULL;
+    }
+    args = args->as.cons.cdr;
+    if (!mino_is_cons(args)) {
+        if (acc == 0.0) {
+            set_error("division by zero");
+            return NULL;
+        }
+        return mino_float(1.0 / acc);
+    }
+    while (mino_is_cons(args)) {
+        double x;
+        if (!as_double(args->as.cons.car, &x)) {
+            set_error("/ expects numbers");
+            return NULL;
+        }
+        if (x == 0.0) {
+            set_error("division by zero");
+            return NULL;
+        }
+        acc /= x;
+        args = args->as.cons.cdr;
+    }
+    return mino_float(acc);
+}
+
+static mino_val_t *prim_eq(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return mino_true();
+    }
+    {
+        mino_val_t *first = args->as.cons.car;
+        args = args->as.cons.cdr;
+        while (mino_is_cons(args)) {
+            if (!mino_eq(first, args->as.cons.car)) {
+                return mino_false();
+            }
+            args = args->as.cons.cdr;
+        }
+    }
+    return mino_true();
+}
+
+static mino_val_t *prim_lt(mino_val_t *args, mino_env_t *env)
+{
+    double prev;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return mino_true();
+    }
+    if (!as_double(args->as.cons.car, &prev)) {
+        set_error("< expects numbers");
+        return NULL;
+    }
+    args = args->as.cons.cdr;
+    while (mino_is_cons(args)) {
+        double x;
+        if (!as_double(args->as.cons.car, &x)) {
+            set_error("< expects numbers");
+            return NULL;
+        }
+        if (!(prev < x)) {
+            return mino_false();
+        }
+        prev = x;
+        args = args->as.cons.cdr;
+    }
+    return mino_true();
+}
+
+static mino_val_t *prim_car(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args)) {
+        set_error("car requires one argument");
+        return NULL;
+    }
+    return mino_car(args->as.cons.car);
+}
+
+static mino_val_t *prim_cdr(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args)) {
+        set_error("cdr requires one argument");
+        return NULL;
+    }
+    return mino_cdr(args->as.cons.car);
+}
+
+static mino_val_t *prim_cons(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("cons requires two arguments");
+        return NULL;
+    }
+    return mino_cons(args->as.cons.car, args->as.cons.cdr->as.cons.car);
+}
+
+static mino_val_t *prim_list(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    /* Args are already a list of evaluated values. */
+    return args == NULL ? mino_nil() : args;
+}
+
+void mino_install_core(mino_env_t *env)
+{
+    mino_env_set(env, "+",    mino_prim("+",    prim_add));
+    mino_env_set(env, "-",    mino_prim("-",    prim_sub));
+    mino_env_set(env, "*",    mino_prim("*",    prim_mul));
+    mino_env_set(env, "/",    mino_prim("/",    prim_div));
+    mino_env_set(env, "=",    mino_prim("=",    prim_eq));
+    mino_env_set(env, "<",    mino_prim("<",    prim_lt));
+    mino_env_set(env, "car",  mino_prim("car",  prim_car));
+    mino_env_set(env, "cdr",  mino_prim("cdr",  prim_cdr));
+    mino_env_set(env, "cons", mino_prim("cons", prim_cons));
+    mino_env_set(env, "list", mino_prim("list", prim_list));
 }

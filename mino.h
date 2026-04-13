@@ -108,6 +108,30 @@ mino_val_t *mino_read(const char *src, const char **end);
 
 const char *mino_last_error(void);
 
+/* ------------------------------------------------------------------------- */
+/* Environment and evaluator                                                 */
+/* ------------------------------------------------------------------------- */
+
+mino_env_t *mino_env_new(void);
+void        mino_env_free(mino_env_t *env);
+
+/* Define or replace a binding in `env`. */
+void        mino_env_set(mino_env_t *env, const char *name, mino_val_t *val);
+/* Look up `name`. Returns NULL if unbound. */
+mino_val_t *mino_env_get(mino_env_t *env, const char *name);
+
+/*
+ * Install + - * / = < car cdr cons list and the def/quote special-form
+ * bindings into `env`. Safe to call on a fresh env.
+ */
+void        mino_install_core(mino_env_t *env);
+
+/*
+ * Evaluate one form. Returns NULL on error and writes a message via
+ * mino_last_error(). Returns mino_nil() for an explicit nil result.
+ */
+mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env);
+
 #ifdef __cplusplus
 }
 #endif
