@@ -88,17 +88,69 @@ mino_val_t *mino_string(const char *s)
     return mino_string_n(s, strlen(s));
 }
 
-mino_val_t *mino_symbol_n(const char *s, size_t len)
+/*
+ * Symbols and keywords are interned through small process-wide tables so
+ * that identity comparison is pointer-equal after lookup. The tables are
+ * flat arrays with linear scan — adequate until the v0.5 HAMT arrives and
+ * the collector reclaims names. Entries live for the life of the process.
+ */
+
+typedef struct {
+    mino_val_t **entries;
+    size_t       len;
+    size_t       cap;
+} intern_table_t;
+
+static intern_table_t sym_intern = { NULL, 0, 0 };
+static intern_table_t kw_intern  = { NULL, 0, 0 };
+
+static mino_val_t *intern_lookup_or_create(intern_table_t *tbl,
+                                           mino_type_t type,
+                                           const char *s, size_t len)
 {
-    mino_val_t *v = alloc_val(MINO_SYMBOL);
+    size_t i;
+    mino_val_t *v;
+    for (i = 0; i < tbl->len; i++) {
+        mino_val_t *e = tbl->entries[i];
+        if (e->as.s.len == len && memcmp(e->as.s.data, s, len) == 0) {
+            return e;
+        }
+    }
+    if (tbl->len == tbl->cap) {
+        size_t new_cap = tbl->cap == 0 ? 64 : tbl->cap * 2;
+        mino_val_t **ne = (mino_val_t **)realloc(
+            tbl->entries, new_cap * sizeof(*ne));
+        if (ne == NULL) {
+            abort();
+        }
+        tbl->entries = ne;
+        tbl->cap = new_cap;
+    }
+    v = alloc_val(type);
     v->as.s.data = dup_n(s, len);
     v->as.s.len  = len;
+    tbl->entries[tbl->len++] = v;
     return v;
+}
+
+mino_val_t *mino_symbol_n(const char *s, size_t len)
+{
+    return intern_lookup_or_create(&sym_intern, MINO_SYMBOL, s, len);
 }
 
 mino_val_t *mino_symbol(const char *s)
 {
     return mino_symbol_n(s, strlen(s));
+}
+
+mino_val_t *mino_keyword_n(const char *s, size_t len)
+{
+    return intern_lookup_or_create(&kw_intern, MINO_KEYWORD, s, len);
+}
+
+mino_val_t *mino_keyword(const char *s)
+{
+    return mino_keyword_n(s, strlen(s));
 }
 
 mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr)
@@ -250,6 +302,10 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         print_string_escaped(out, v->as.s.data, v->as.s.len);
         return;
     case MINO_SYMBOL:
+        fwrite(v->as.s.data, 1, v->as.s.len, out);
+        return;
+    case MINO_KEYWORD:
+        fputc(':', out);
         fwrite(v->as.s.data, 1, v->as.s.len, out);
         return;
     case MINO_CONS: {
@@ -459,6 +515,14 @@ static mino_val_t *read_atom(const char **p)
     }
     *p += len;
 
+    if (len >= 2 && start[0] == ':') {
+        return mino_keyword_n(start + 1, len - 1);
+    }
+    if (len == 1 && start[0] == ':') {
+        set_error("keyword missing name");
+        return NULL;
+    }
+
     if (len == 3 && memcmp(start, "nil", 3) == 0) {
         return mino_nil();
     }
@@ -594,6 +658,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a->as.f == b->as.f;
     case MINO_STRING:
     case MINO_SYMBOL:
+    case MINO_KEYWORD:
         return a->as.s.len == b->as.s.len
             && memcmp(a->as.s.data, b->as.s.data, a->as.s.len) == 0;
     case MINO_CONS:
@@ -846,6 +911,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
     case MINO_INT:
     case MINO_FLOAT:
     case MINO_STRING:
+    case MINO_KEYWORD:
     case MINO_PRIM:
     case MINO_FN:
     case MINO_RECUR:

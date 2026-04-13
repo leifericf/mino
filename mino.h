@@ -24,6 +24,7 @@ typedef enum {
     MINO_FLOAT,
     MINO_STRING,
     MINO_SYMBOL,
+    MINO_KEYWORD,
     MINO_CONS,
     MINO_PRIM,
     MINO_FN,
@@ -41,7 +42,7 @@ struct mino_val {
         int b;            /* MINO_BOOL: 0 or 1 */
         long long i;      /* MINO_INT */
         double f;         /* MINO_FLOAT */
-        struct {          /* MINO_STRING, MINO_SYMBOL */
+        struct {          /* MINO_STRING, MINO_SYMBOL, MINO_KEYWORD */
             char *data;
             size_t len;
         } s;
@@ -77,6 +78,8 @@ mino_val_t *mino_string(const char *s);
 mino_val_t *mino_string_n(const char *s, size_t len);
 mino_val_t *mino_symbol(const char *s);
 mino_val_t *mino_symbol_n(const char *s, size_t len);
+mino_val_t *mino_keyword(const char *s);
+mino_val_t *mino_keyword_n(const char *s, size_t len);
 mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr);
 mino_val_t *mino_prim(const char *name, mino_prim_fn fn);
 
