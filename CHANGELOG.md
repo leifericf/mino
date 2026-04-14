@@ -4,6 +4,33 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.13.0] — Atoms, spit, stdlib architecture
+
+Establishes the three-tier architecture: C runtime (irreducible
+primitives), bundled mino stdlib (macros and compositions), and
+future mino-std package. Delivers atoms and spit.
+
+### Added
+- **Atoms** (`MINO_ATOM`): mutable reference cells for managed state.
+  C API: `mino_atom()`, `mino_atom_deref()`, `mino_atom_reset()`,
+  `mino_is_atom()`. Primitives: `atom`, `deref`, `reset!`, `atom?`.
+  Reader macro: `@form` expands to `(deref form)`.
+- **`swap!`**: stdlib function. `(swap! a f x y)` sets atom to
+  `(f @a x y)`.
+- **`defn`**: stdlib macro. `(defn name (params) body)` expands to
+  `(def name (fn (params) body))`. Single-arity.
+- **`spit`**: I/O primitive. `(spit "path" content)` writes to file.
+  Strings write raw bytes; other values write their printed form.
+
+### Changed
+- **stdlib.mino**: the standard library is now a standalone `.mino`
+  file compiled into the binary at build time (was an inline C string).
+- **Stdlib migration**: `not`, `not=`, `identity`, `list`, `empty?`,
+  `>`, `<=`, `>=`, and all ten type predicates (`nil?`, `cons?`,
+  `string?`, `number?`, `keyword?`, `symbol?`, `vector?`, `map?`,
+  `fn?`, `set?`) moved from C to mino. C primitive count reduced
+  from 72 to 57.
+
 ## [0.12.0] — Release candidate (alpha)
 
 Quality, polish, and documentation pass. No new language features.

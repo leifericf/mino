@@ -8,12 +8,7 @@ language and embedding API items.
 
 ### Critical
 
-**Atoms** -- mutable reference type for managed state.
-
-New type `MINO_ATOM` wrapping a `mino_val_t` pointer. Primitives:
-`atom`, `deref`, `swap!`, `reset!`, `atom?`. Reader macro: `@form` as
-sugar for `(deref form)`. Even single-threaded embedded use needs
-managed state for counters, caches, and configuration. ~200 lines.
+~~**Atoms**~~ -- Done in v0.13.0.
 
 **Destructuring** -- pattern matching in binding forms.
 
@@ -38,17 +33,10 @@ to force evaluation. Currently all sequence operations are strict
 `(fn ([x] ...) ([x y] ...) ([x y & rest] ...))`. Dispatch by argument
 count at call time. Common pattern for default arguments. ~150 lines.
 
-**`defn` macro** -- syntactic sugar for defining named functions.
+~~**`defn` macro**~~ -- Done in v0.13.0 (single-arity). Multi-arity
+and docstring support deferred to multi-arity fn.
 
-`(defn name "doc" [params] body)` expands to `(def name (fn ...))` with
-docstring attached. Every file uses this. Easy to add as a stdlib
-macro (like `when` and `cond`). ~30 lines. Benefits from multi-arity
-if implemented first.
-
-**`spit`** -- write string to file.
-
-Counterpart to existing `slurp`. `(spit "path" content)`. Goes in
-`mino_install_io()` alongside `println`, `prn`, `slurp`. ~40 lines.
+~~**`spit`**~~ -- Done in v0.13.0.
 
 ### Nice-to-have
 
@@ -142,3 +130,24 @@ Expose the internal `throw_val` mechanism: `mino_throw(val)`. ~30 lines.
 through mino's eval (C has no unwinding). C++ primitives must wrap in
 try/catch. A thin `mino.hpp` header with RAII wrappers for
 `mino_env_t*` and pinned values would help C++ adoption. ~100 lines.
+
+## Architecture
+
+### mino-std package
+
+Separate repo for rich mino library code loadable via `require`.
+Candidates: lazy sequence combinators (once the C type exists),
+protocols, transducers. Create when enough content justifies it.
+
+### C primitive migration (phase 2)
+
+Sequence ops (`map`, `filter`, `reduce`, `take`, `drop`, `range`,
+`repeat`, `concat`, `into`, `reverse`, `some`, `every?`) can move
+from C to mino once lazy sequences provide an efficient foundation.
+~12 primitives; would drop the C core to ~45 primitives.
+
+### Imperative-style standard library
+
+Separate package providing familiar API names for users coming from
+imperative embedded scripting backgrounds. Backed by mino's
+persistent data structures. Separate repo, low priority.
