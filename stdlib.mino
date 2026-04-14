@@ -1,0 +1,54 @@
+;; mino standard library
+;; Compiled into the binary at build time via stdlib_mino.h.
+
+;; --- Macros ---
+
+(defmacro when (c & body)
+  `(if ~c (do ~@body)))
+
+(defmacro cond (& clauses)
+  (if (< (count clauses) 2)
+    nil
+    `(if ~(first clauses)
+         ~(first (rest clauses))
+         (cond ~@(rest (rest clauses))))))
+
+(defmacro and (& xs)
+  (if (= 0 (count xs))
+    true
+    (if (= 1 (count xs))
+      (first xs)
+      (let (g (gensym))
+        `(let (~g ~(first xs))
+           (if ~g (and ~@(rest xs)) ~g))))))
+
+(defmacro or (& xs)
+  (if (= 0 (count xs))
+    nil
+    (if (= 1 (count xs))
+      (first xs)
+      (let (g (gensym))
+        `(let (~g ~(first xs))
+           (if ~g ~g (or ~@(rest xs))))))))
+
+(defmacro -> (x & forms)
+  (if (= 0 (count forms))
+    x
+    (let (step (first forms))
+      (if (cons? step)
+        `(-> (~(first step) ~x ~@(rest step)) ~@(rest forms))
+        `(-> (~step ~x) ~@(rest forms))))))
+
+(defmacro ->> (x & forms)
+  (if (= 0 (count forms))
+    x
+    (let (step (first forms))
+      (if (cons? step)
+        `(->> (~(first step) ~@(rest step) ~x) ~@(rest forms))
+        `(->> (~step ~x) ~@(rest forms))))))
+
+;; --- Higher-order functions ---
+
+(def comp (fn (f g) (fn (& args) (f (apply g args)))))
+(def partial (fn (f & bound) (fn (& args) (apply f (concat bound args)))))
+(def complement (fn (f) (fn (& args) (not (apply f args)))))

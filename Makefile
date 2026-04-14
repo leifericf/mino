@@ -15,11 +15,19 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
 
+# stdlib.mino is compiled into a C header so it can be #included.
+stdlib_mino.h: stdlib.mino
+	@printf 'static const char *stdlib_mino_src =\n' > $@
+	@sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$$/\\n"/' $< >> $@
+	@printf '    ;\n' >> $@
+
+mino.o: mino.c mino.h stdlib_mino.h
+
 %.o: %.c mino.h
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(OBJS) $(TARGET) bench/vector_bench bench/vector_bench.o \
+	rm -f $(OBJS) $(TARGET) stdlib_mino.h bench/vector_bench bench/vector_bench.o \
 	      bench/map_bench bench/map_bench.o bench/seq_bench bench/seq_bench.o \
 	      fuzz/fuzz_reader fuzz/fuzz_reader.o \
 	      examples/embed examples/embed.o \
