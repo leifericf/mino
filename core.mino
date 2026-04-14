@@ -485,3 +485,19 @@
 
 (def str-replace (fn (s match replacement)
   (join replacement (split s match))))
+
+;; --- Bitwise compositions ---
+
+(def bit-and-not (fn (x y) (bit-and x (bit-not y))))
+(def bit-test    (fn (x n) (not (= 0 (bit-and x (bit-shift-left 1 n))))))
+(def bit-set     (fn (x n) (bit-or x (bit-shift-left 1 n))))
+(def bit-clear   (fn (x n) (bit-and x (bit-not (bit-shift-left 1 n)))))
+(def bit-flip    (fn (x n) (bit-xor x (bit-shift-left 1 n))))
+
+;; --- Misc utilities ---
+
+(def blank? (fn (s)
+  (or (nil? s) (= (trim s) ""))))
+
+(def comparator (fn (pred)
+  (fn (a b) (cond (pred a b) -1 (pred b a) 1 true 0))))
