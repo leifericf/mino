@@ -4,6 +4,48 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.17.0] — Proper tail calls and core library
+
+Proper tail call optimization in the evaluator. All function calls in
+tail position run in constant stack space, including mutual recursion.
+Plus ~80 new core.mino definitions bringing the standard library close
+to feature parity with core language functions.
+
+### Added
+- **Proper tail calls**: `MINO_TAIL_CALL` evaluator type. The
+  evaluator tracks tail position and returns a trampoline sentinel
+  instead of recursing. `apply_callable` handles both `MINO_RECUR`
+  (self-recursion) and `MINO_TAIL_CALL` (general tail calls).
+  `loop`/`recur`/`trampoline` remain as convenient iteration
+  constructs.
+- **Type predicates**: `true?`, `false?`, `boolean?`, `int?`,
+  `float?`, `some?`, `list?`, `atom?`, `not-any?`, `not-every?`.
+- **Sequence navigation**: `next`, `nfirst`, `fnext`, `nnext`.
+- **Map entry accessors**: `key`, `val`.
+- **Control flow macros**: `if-not`, `when-not`, `if-let`, `when-let`,
+  `if-some`, `when-some`.
+- **Sequence functions**: `last`, `butlast`, `nthrest`, `nthnext`,
+  `take-last`, `drop-last`, `split-at`, `split-with`, `mapv`,
+  `filterv`, `sort-by`.
+- **Collection utilities**: `get-in`, `assoc-in`, `update-in`,
+  `merge-with`, `reduce-kv`, `replace`, `str-replace`.
+- **Bitwise compositions**: `bit-and-not`, `bit-test`, `bit-set`,
+  `bit-clear`, `bit-flip`.
+- **Lazy combinators**: `keep`, `keep-indexed`, `map-indexed`,
+  `partition-all`, `reductions`, `dedupe`.
+- **Higher-order**: `every-pred`, `some-fn`, `fnil`, `memoize`,
+  `trampoline`.
+- **Threading macros**: `as->`, `cond->`, `cond->>`.
+- **Iteration**: `doto`, `dotimes`, `doseq`.
+- **Utilities**: `remove`, `vec`, `rand-int`, `rand-nth`, `run!`,
+  `blank?`, `comparator`, `shuffle`, `time`.
+- **Tree walking**: `flatten`, `tree-seq`, `walk`, `postwalk`,
+  `prewalk`, `postwalk-replace`, `prewalk-replace`.
+- **Regex**: `re-seq`.
+- **Complex macros**: `condp`, `case`, `for` (single binding with
+  `:when`).
+- **Test suite**: 300 tests, 664 assertions (up from 228/511).
+
 ## [0.16.0] — Complete C primitive layer
 
 Adds every C primitive needed to implement the non-JVM parts of

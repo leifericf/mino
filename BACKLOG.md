@@ -21,6 +21,13 @@ Refactor `bind_params` to recursively destructure. ~300 lines.
 ~~**Lazy sequences**~~ -- Done in v0.14.0. `MINO_LAZY` type, `lazy-seq`
 special form, `seq`, `realized?`. Seven sequence ops moved to lazy mino.
 
+**Named anonymous functions** -- optional name in `fn` form.
+
+`(fn name (x) (name (- x 1)))` for self-referencing anonymous
+functions. The name is only bound in the function's own body. Common
+in recursive anonymous fns and matches the form supported by most
+Lisps. Small change to the `fn` special form parser. ~30 lines.
+
 ### Important
 
 **Multi-arity functions** -- multiple parameter lists per function.
@@ -39,9 +46,8 @@ and docstring support deferred to multi-arity fn.
 `defprotocol`, `extend-type`, `extend-protocol`. Enables extensible
 abstractions. ~400 lines.
 
-**Regex** -- regular expression matching. `re-find`, `re-matches`,
-`re-seq`, `re-pattern`. Depends on a regex engine (POSIX `regex.h` or
-a small embedded library). ~200 lines plus engine.
+~~**Regex**~~ -- Done in v0.16.0. `re-find`, `re-matches` via bundled
+tiny-regex-c. `re-seq` implemented in core.mino.
 
 **Value metadata** -- arbitrary key-value metadata on any value.
 `with-meta`, `meta`, `vary-meta`. Reader syntax `^{:key val} form`.
@@ -51,6 +57,29 @@ Currently only docstrings on `def`/`defmacro` via the internal
 
 ~~**String formatting**~~ -- Done in v0.14.0. `format` with `%s`, `%d`,
 `%f`, `%%`.
+
+**`identical?`** -- pointer identity comparison. C primitive checking
+`a == b` without value comparison. ~10 lines.
+
+**`declare`** -- forward declaration. `(def x)` without a value, or
+`(declare x y z)`. Needed for mutually recursive definitions without
+`defn`. ~20 lines.
+
+**`with-open`** -- resource management. `(with-open (f (open path)) body)`.
+Needs `try/finally` in the evaluator. ~50 lines for `finally` + ~20
+for the macro.
+
+**Dynamic bindings** -- `binding` form for thread-local dynamic vars.
+`(def ^:dynamic *x* 1)` + `(binding (*x* 2) ...)`. Requires metadata
+or a dedicated dynamic var mechanism. ~200 lines.
+
+**Transducers** -- `transduce`, `eduction`, `into` with xform.
+Composable algorithmic transformations. Requires protocol-level
+abstractions or a simpler approach. ~400 lines.
+
+**Multi-binding `doseq`/`for`** -- nested iteration with multiple
+bindings. Currently single-binding only. Requires destructuring or
+recursive macro expansion over binding pairs. ~100 lines.
 
 ## C/C++ Interop
 
