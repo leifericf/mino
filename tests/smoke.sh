@@ -380,7 +380,7 @@ run "defmacro docstring" '(defmacro my-id "identity macro" (x) x)
 (doc (quote my-id))' '#<macro>
 "identity macro"'
 
-run "apropos finds" '(apropos "co")' '(cons count conj cons? contains? concat cond comp complement)'
+run "apropos finds" '(apropos "co")' '(cons count conj contains? concat cond cons? comp complement)'
 
 run "apropos empty" '(apropos "zzzznotfound")' 'nil'
 

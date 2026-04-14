@@ -61,6 +61,19 @@
 (def <= (fn (a b & more) (if (< b a)  false (if (nil? more) true (apply <= b more)))))
 (def >= (fn (a b & more) (if (< a b)  false (if (nil? more) true (apply >= b more)))))
 
+;; --- Type predicates (built on type) ---
+
+(def nil?     (fn (x) (= (type x) :nil)))
+(def cons?    (fn (x) (= (type x) :list)))
+(def string?  (fn (x) (= (type x) :string)))
+(def number?  (fn (x) (let (t (type x)) (or (= t :int) (= t :float)))))
+(def keyword? (fn (x) (= (type x) :keyword)))
+(def symbol?  (fn (x) (= (type x) :symbol)))
+(def vector?  (fn (x) (= (type x) :vector)))
+(def map?     (fn (x) (= (type x) :map)))
+(def fn?      (fn (x) (= (type x) :fn)))
+(def set?     (fn (x) (= (type x) :set)))
+
 ;; --- Higher-order functions ---
 
 (def comp (fn (f g) (fn (& args) (f (apply g args)))))

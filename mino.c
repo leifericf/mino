@@ -5891,48 +5891,6 @@ static mino_val_t *prim_every_p(mino_val_t *args, mino_env_t *env)
     return mino_true();
 }
 
-static mino_val_t *prim_cons_p(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error("cons? requires one argument");
-        return NULL;
-    }
-    return mino_is_cons(args->as.cons.car) ? mino_true() : mino_false();
-}
-
-static mino_val_t *prim_nil_p(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error("nil? requires one argument");
-        return NULL;
-    }
-    return mino_is_nil(args->as.cons.car) ? mino_true() : mino_false();
-}
-
-/* Type predicate helpers: each takes one arg, returns true/false. */
-#define DEFINE_TYPE_PRED(name, test)                                        \
-    static mino_val_t *name(mino_val_t *args, mino_env_t *env) {           \
-        (void)env;                                                         \
-        if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {      \
-            set_error(#name " requires one argument");                     \
-            return NULL;                                                   \
-        }                                                                  \
-        return (test) ? mino_true() : mino_false();                        \
-    }
-
-DEFINE_TYPE_PRED(prim_string_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_STRING)
-DEFINE_TYPE_PRED(prim_number_p,  args->as.cons.car != NULL && (args->as.cons.car->type == MINO_INT || args->as.cons.car->type == MINO_FLOAT))
-DEFINE_TYPE_PRED(prim_keyword_p, args->as.cons.car != NULL && args->as.cons.car->type == MINO_KEYWORD)
-DEFINE_TYPE_PRED(prim_symbol_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_SYMBOL)
-DEFINE_TYPE_PRED(prim_vector_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_VECTOR)
-DEFINE_TYPE_PRED(prim_map_p,     args->as.cons.car != NULL && args->as.cons.car->type == MINO_MAP)
-DEFINE_TYPE_PRED(prim_set_p,     args->as.cons.car != NULL && args->as.cons.car->type == MINO_SET)
-DEFINE_TYPE_PRED(prim_fn_p,      args->as.cons.car != NULL && (args->as.cons.car->type == MINO_FN || args->as.cons.car->type == MINO_PRIM))
-
-#undef DEFINE_TYPE_PRED
-
 static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -6468,15 +6426,6 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "macroexpand",
                  mino_prim("macroexpand", prim_macroexpand));
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
-    mino_env_set(env, "cons?",    mino_prim("cons?",    prim_cons_p));
-    mino_env_set(env, "nil?",     mino_prim("nil?",     prim_nil_p));
-    mino_env_set(env, "string?",  mino_prim("string?",  prim_string_p));
-    mino_env_set(env, "number?",  mino_prim("number?",  prim_number_p));
-    mino_env_set(env, "keyword?", mino_prim("keyword?", prim_keyword_p));
-    mino_env_set(env, "symbol?",  mino_prim("symbol?",  prim_symbol_p));
-    mino_env_set(env, "vector?",  mino_prim("vector?",  prim_vector_p));
-    mino_env_set(env, "map?",     mino_prim("map?",     prim_map_p));
-    mino_env_set(env, "fn?",      mino_prim("fn?",      prim_fn_p));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "str",      mino_prim("str",      prim_str));
     mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
@@ -6486,7 +6435,6 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "apropos",  mino_prim("apropos",  prim_apropos));
     /* set operations */
     mino_env_set(env, "hash-set", mino_prim("hash-set", prim_hash_set));
-    mino_env_set(env, "set?",     mino_prim("set?",     prim_set_p));
     mino_env_set(env, "contains?",mino_prim("contains?",prim_contains_p));
     mino_env_set(env, "disj",     mino_prim("disj",     prim_disj));
     /* sequence operations */
