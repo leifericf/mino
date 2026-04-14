@@ -4199,13 +4199,6 @@ static mino_val_t *prim_cons(mino_val_t *args, mino_env_t *env)
     return mino_cons(args->as.cons.car, args->as.cons.cdr->as.cons.car);
 }
 
-static mino_val_t *prim_list(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    /* Args are already a list of evaluated values. */
-    return args == NULL ? mino_nil() : args;
-}
-
 /* ------------------------------------------------------------------------- */
 /* Collection primitives                                                     */
 /*                                                                           */
@@ -5868,57 +5861,6 @@ static mino_val_t *prim_trim(mino_val_t *args, mino_env_t *env)
 /* Utility primitives                                                        */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *prim_not(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error("not requires one argument");
-        return NULL;
-    }
-    return mino_is_truthy(args->as.cons.car) ? mino_false() : mino_true();
-}
-
-static mino_val_t *prim_not_eq(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *a, *b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("not= requires two arguments");
-        return NULL;
-    }
-    a = args->as.cons.car;
-    b = args->as.cons.cdr->as.cons.car;
-    return mino_eq(a, b) ? mino_false() : mino_true();
-}
-
-static mino_val_t *prim_empty_p(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *coll;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error("empty? requires one argument");
-        return NULL;
-    }
-    coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_true();
-    switch (coll->type) {
-    case MINO_CONS:   return mino_false(); /* a cons is never empty */
-    case MINO_VECTOR: return coll->as.vec.len == 0 ? mino_true() : mino_false();
-    case MINO_MAP:    return coll->as.map.len == 0 ? mino_true() : mino_false();
-    case MINO_SET:    return coll->as.set.len == 0 ? mino_true() : mino_false();
-    case MINO_STRING: return coll->as.s.len == 0 ? mino_true() : mino_false();
-    default:
-        {
-            char msg[96];
-            snprintf(msg, sizeof(msg),
-                     "empty?: expected a collection, got %s",
-                     type_tag_str(coll));
-            set_error(msg);
-        }
-        return NULL;
-    }
-}
-
 static mino_val_t *prim_some(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pred;
@@ -5965,16 +5907,6 @@ static mino_val_t *prim_every_p(mino_val_t *args, mino_env_t *env)
         seq_iter_next(&it);
     }
     return mino_true();
-}
-
-static mino_val_t *prim_identity(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error("identity requires one argument");
-        return NULL;
-    }
-    return args->as.cons.car;
 }
 
 static mino_val_t *prim_cons_p(mino_val_t *args, mino_env_t *env)
@@ -6540,7 +6472,6 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "car",      mino_prim("car",      prim_car));
     mino_env_set(env, "cdr",      mino_prim("cdr",      prim_cdr));
     mino_env_set(env, "cons",     mino_prim("cons",     prim_cons));
-    mino_env_set(env, "list",     mino_prim("list",     prim_list));
     mino_env_set(env, "count",    mino_prim("count",    prim_count));
     mino_env_set(env, "nth",      mino_prim("nth",      prim_nth));
     mino_env_set(env, "first",    mino_prim("first",    prim_first));
@@ -6608,12 +6539,8 @@ void mino_install_core(mino_env_t *env)
                  mino_prim("lower-case", prim_lower_case));
     mino_env_set(env, "trim",     mino_prim("trim",     prim_trim));
     /* utility */
-    mino_env_set(env, "not",      mino_prim("not",      prim_not));
-    mino_env_set(env, "not=",     mino_prim("not=",     prim_not_eq));
-    mino_env_set(env, "empty?",   mino_prim("empty?",   prim_empty_p));
     mino_env_set(env, "some",     mino_prim("some",     prim_some));
     mino_env_set(env, "every?",   mino_prim("every?",   prim_every_p));
-    mino_env_set(env, "identity", mino_prim("identity", prim_identity));
     install_stdlib_macros(env);
 }
 

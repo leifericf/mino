@@ -47,6 +47,14 @@
         `(->> (~(first step) ~@(rest step) ~x) ~@(rest forms))
         `(->> (~step ~x) ~@(rest forms))))))
 
+;; --- Logic and utilities ---
+
+(def not      (fn (x) (if x false true)))
+(def not=     (fn (a b) (not (= a b))))
+(def identity (fn (x) x))
+(def list     (fn (& args) args))
+(def empty?   (fn (coll) (= (count coll) 0)))
+
 ;; --- Higher-order functions ---
 
 (def comp (fn (f g) (fn (& args) (f (apply g args)))))
