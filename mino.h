@@ -217,7 +217,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   predicates   cons? nil? string? number? keyword? symbol? vector? map?
  *                set? fn? empty?
  *   utility      not identity some every?
- *   reflection   type doc source apropos
+ *   reflection   type name doc source apropos
  *   strings      str subs split join starts-with? ends-with? includes?
  *                upper-case lower-case trim
  *   exceptions   throw

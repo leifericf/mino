@@ -4335,6 +4335,23 @@ static mino_val_t *prim_bit_shift_right(mino_val_t *args, mino_env_t *env)
     return mino_int(a >> b);
 }
 
+static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("name requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type == MINO_NIL) return mino_nil();
+    if (v->type == MINO_STRING)  return v;
+    if (v->type == MINO_KEYWORD) return mino_string_n(v->as.s.data, v->as.s.len);
+    if (v->type == MINO_SYMBOL)  return mino_string_n(v->as.s.data, v->as.s.len);
+    set_error("name: expected a keyword, symbol, or string");
+    return NULL;
+}
+
 static mino_val_t *prim_eq(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -6834,6 +6851,7 @@ void mino_install_core(mino_env_t *env)
                  mino_prim("macroexpand", prim_macroexpand));
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
+    mino_env_set(env, "name",     mino_prim("name",     prim_name));
     mino_env_set(env, "str",      mino_prim("str",      prim_str));
     mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
     mino_env_set(env, "require",  mino_prim("require",  prim_require));

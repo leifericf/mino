@@ -503,6 +503,12 @@ run "quot positive"     '(quot 10 3)'                          '3'
 run "quot negative"     '(quot -10 3)'                         '-3'
 run "mod float"         '(mod 5.5 2.0)'                        '1.5'
 
+# v0.14 — name
+run "name keyword"      '(name :hello)'                        '"hello"'
+run "name symbol"       "(name 'world)"                        '"world"'
+run "name string"       '(name "str")'                         '"str"'
+run "name nil"          '(name nil)'                           'nil'
+
 # v0.14 — bitwise
 run "bit-and"           '(bit-and 12 10)'                      '8'
 run "bit-or"            '(bit-or 12 10)'                       '14'
