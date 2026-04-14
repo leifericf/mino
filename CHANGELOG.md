@@ -4,12 +4,12 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.14.0] — Lazy sequences, complete C core, stdlib expansion
+## [0.14.0] — Lazy sequences, complete C core, core.mino expansion
 
 Lazy sequences land as a first-class type, enabling infinite data
 structures and demand-driven evaluation. The C core gains its final
 set of primitives; seven sequence operations move from C to lazy mino
-implementations. The stdlib nearly doubles in size.
+implementations. core.mino nearly doubles in size.
 
 ### Added
 - **Lazy sequences** (`MINO_LAZY`): deferred computation with cached
@@ -30,7 +30,7 @@ implementations. The stdlib nearly doubles in size.
 - **`pr-str`**: print values to string in readable form.
 - **`read-string`**: parse one mino form from a string.
 - **`format`**: string formatting with `%s`, `%d`, `%f`, `%%`.
-- **Stdlib definitions** (~40 new): `second`, `ffirst`, `inc`, `dec`,
+- **core.mino definitions** (~40 new): `second`, `ffirst`, `inc`, `dec`,
   `zero?`, `pos?`, `neg?`, `even?`, `odd?`, `abs`, `max`, `min`,
   `not-empty`, `constantly`, `boolean`, `seq?`, `merge`, `select-keys`,
   `find`, `zipmap`, `frequencies`, `group-by`, `juxt`, `mapcat`,
@@ -38,13 +38,22 @@ implementations. The stdlib nearly doubles in size.
   `interleave`, `interpose`, `distinct`, `partition`, `partition-by`,
   `doall`, `dorun`.
 
-### Changed
-- **Lazy sequence operations**: `map`, `filter`, `take`, `drop`,
-  `concat`, `range`, `repeat` moved from strict C to lazy mino in
-  core.mino. Infinite sequences now work:
-  `(take 5 (iterate inc 0))` produces `(0 1 2 3 4)`.
-- **`update`**, **`some`**, **`every?`** moved from C to core.mino.
-  `update` now supports extra args.
+### Breaking
+- **`stdlib.mino` renamed to `core.mino`**. The bundled mino source
+  file, Makefile build rule, generated header, and all internal
+  references now use `core.mino` / `core_mino.h`. Embedders that
+  reference the generated header by name must update.
+- **`map`, `filter`, `take`, `drop`, `concat`, `range`, `repeat`
+  moved from C to core.mino** and are now lazy. Code that relied on
+  these being strict (fully realized on return) may behave differently.
+  Use `doall` to force eager evaluation where needed.
+- **`update`, `some`, `every?` moved from C to core.mino**. These
+  are no longer available as C primitives. `update` now accepts extra
+  args: `(update m :k f arg1 arg2)`.
+- **`range` and `repeat` signatures changed**. `repeat` now takes
+  `(repeat n x)` instead of the old `(repeat count value)` (same
+  args, but now returns a lazy seq). `range` with no args is no longer
+  supported (was an error before too).
 - **C primitive count**: 57 to 50 (net: +11 new, -18 moved to mino).
 - Cons printer forces lazy tails for correct output.
 - `list_length` forces lazy tails for correct `count`.
@@ -52,7 +61,7 @@ implementations. The stdlib nearly doubles in size.
 ## [0.13.0] — Atoms, spit, stdlib architecture
 
 Establishes the three-tier architecture: C runtime (irreducible
-primitives), bundled mino stdlib (macros and compositions), and
+primitives), bundled stdlib.mino (macros and compositions), and
 future mino-std package. Delivers atoms and spit.
 
 ### Added
@@ -68,7 +77,7 @@ future mino-std package. Delivers atoms and spit.
   Strings write raw bytes; other values write their printed form.
 
 ### Changed
-- **core.mino**: the standard library is now a standalone `.mino`
+- **stdlib.mino**: the standard library is now a standalone `.mino`
   file compiled into the binary at build time (was an inline C string).
 - **Stdlib migration**: `not`, `not=`, `identity`, `list`, `empty?`,
   `>`, `<=`, `>=`, and all ten type predicates (`nil?`, `cons?`,
