@@ -590,3 +590,97 @@
   (let (result (apply f args)
         bounce (fn (r) (if (fn? r) (bounce (r)) r)))
     (bounce result))))
+
+;; --- Threading macros ---
+
+(defmacro as-> (expr sym & forms)
+  (if (= 0 (count forms))
+    expr
+    `(let (~sym ~expr)
+       (as-> ~(first forms) ~sym ~@(rest forms)))))
+
+(defmacro cond-> (expr & clauses)
+  (if (< (count clauses) 2)
+    expr
+    (let (g    (gensym)
+          test (first clauses)
+          step (first (rest clauses)))
+      `(let (~g ~expr)
+         (cond-> (if ~test
+                   ~(if (cons? step)
+                      `(~(first step) ~g ~@(rest step))
+                      `(~step ~g))
+                   ~g)
+                 ~@(rest (rest clauses)))))))
+
+(defmacro cond->> (expr & clauses)
+  (if (< (count clauses) 2)
+    expr
+    (let (g    (gensym)
+          test (first clauses)
+          step (first (rest clauses)))
+      `(let (~g ~expr)
+         (cond->> (if ~test
+                    ~(if (cons? step)
+                       `(~(first step) ~@(rest step) ~g)
+                       `(~step ~g))
+                    ~g)
+                  ~@(rest (rest clauses)))))))
+
+;; --- Iteration macros ---
+
+(defmacro doto (x & forms)
+  (let (g (gensym))
+    `(let (~g ~x)
+       ~@(map (fn (f) (if (cons? f)
+                         `(~(first f) ~g ~@(rest f))
+                         `(~f ~g)))
+              forms)
+       ~g)))
+
+(defmacro dotimes (bindings & body)
+  (let (sym (first bindings)
+        n   (first (rest bindings))
+        gn  (gensym)
+        go  (gensym))
+    `(let (~gn ~n
+           ~go (fn (~sym)
+                 (when (< ~sym ~gn)
+                   ~@body
+                   (~go (inc ~sym)))))
+       (~go 0))))
+
+(defmacro doseq (bindings & body)
+  (let (sym  (first bindings)
+        coll (first (rest bindings))
+        gs   (gensym)
+        go   (gensym))
+    `(let (~go (fn (~gs)
+                 (when ~gs
+                   (let (~sym (first ~gs))
+                     ~@body
+                     (~go (next ~gs))))))
+       (~go (seq ~coll)))))
+
+;; --- Shuffle (Fisher-Yates) ---
+
+(def shuffle (fn (coll)
+  (let (v   (vec coll)
+        n   (count v)
+        step (fn (v i)
+               (if (= i 0)
+                 v
+                 (let (j (rand-int (inc i)))
+                   (step (assoc (assoc v i (nth v j)) j (nth v i))
+                         (dec i))))))
+    (into [] (step v (dec n))))))
+
+;; --- Timing ---
+
+(defmacro time (& body)
+  (let (start  (gensym)
+        result (gensym))
+    `(let (~start  (time-ms)
+           ~result (do ~@body))
+       (println (str "Elapsed time: " (- (time-ms) ~start) " ms"))
+       ~result)))
