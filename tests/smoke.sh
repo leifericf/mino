@@ -257,5 +257,46 @@ run "vec assoc shares source" '(let (big (loop (i 0 v [])
                                big2 (assoc big 500 :x))
   (list (nth big 500) (nth big2 500) (= (count big) (count big2))))' '(500 :x true)'
 
+# v0.8 — type predicates
+run "string? yes"  '(string? "hi")'        'true'
+run "string? no"   '(string? 42)'          'false'
+run "number? int"  '(number? 42)'          'true'
+run "number? flt"  '(number? 3.14)'        'true'
+run "number? no"   '(number? "x")'         'false'
+run "keyword? yes" '(keyword? :k)'         'true'
+run "keyword? no"  '(keyword? "k")'        'false'
+run "symbol? yes"  "(symbol? 'x)"          'true'
+run "symbol? no"   '(symbol? :x)'          'false'
+run "vector? yes"  '(vector? [1 2])'       'true'
+run "vector? no"   '(vector? 1)'           'false'
+run "map? yes"     '(map? {:a 1})'         'true'
+run "map? no"      '(map? [1])'            'false'
+run "fn? prim"     '(fn? +)'               'true'
+run "fn? closure"  '(fn? (fn (x) x))'      'true'
+run "fn? no"       '(fn? 42)'              'false'
+
+# v0.8 — type reflection
+run "type int"     '(type 42)'             ':int'
+run "type string"  '(type "hi")'           ':string'
+run "type nil"     '(type nil)'            ':nil'
+run "type list"    "(type '(1 2))"         ':list'
+run "type fn"      '(type +)'              ':fn'
+run "type vec"     '(type [1 2])'          ':vector'
+run "type map"     '(type {:a 1})'         ':map'
+run "type kw"      '(type :foo)'           ':keyword'
+
+# v0.8 — str (string concatenation / coercion)
+run "str cat"      '(str "hello" " " "world")'  '"hello world"'
+run "str num"      '(str "n=" 42)'               '"n=42"'
+run "str mixed"    '(str :hi " " 3.14)'          '":hi 3.14"'
+run "str empty"    '(str)'                        '""'
+run "str nil"      '(str "a" nil "b")'            '"ab"'
+
+# v0.8 — I/O: println and prn return nil (output goes to stdout)
+run "println ret"  '(println "test")'      'test
+nil'
+run "prn ret"      '(prn 1 2 3)'           '1 2 3
+nil'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]
