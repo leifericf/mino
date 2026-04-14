@@ -62,6 +62,16 @@
   (is (= "str" (name "str")))
   (is (= nil (name nil))))
 
+(deftest symbol-constructor
+  (is (= 'hello (symbol "hello")))
+  (is (symbol? (symbol "x")))
+  (is (= "abc" (name (symbol "abc")))))
+
+(deftest keyword-constructor
+  (is (= :world (keyword "world")))
+  (is (keyword? (keyword "foo")))
+  (is (= "bar" (name (keyword "bar")))))
+
 (deftest read-string-fn
   (is (= 42 (read-string "42")))
   (is (= '(+ 1 2) (read-string "(+ 1 2)")))

@@ -4790,6 +4790,40 @@ static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+/* (symbol str) — create a symbol from a string. */
+static mino_val_t *prim_symbol(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("symbol requires one string argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_STRING) {
+        set_error("symbol: argument must be a string");
+        return NULL;
+    }
+    return mino_symbol_n(v->as.s.data, v->as.s.len);
+}
+
+/* (keyword str) — create a keyword from a string. */
+static mino_val_t *prim_keyword(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("keyword requires one string argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_STRING) {
+        set_error("keyword: argument must be a string");
+        return NULL;
+    }
+    return mino_keyword_n(v->as.s.data, v->as.s.len);
+}
+
 /* (hash val) — return the integer hash code of any value. */
 static mino_val_t *prim_hash(mino_val_t *args, mino_env_t *env)
 {
@@ -7220,6 +7254,8 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "name",     mino_prim("name",     prim_name));
+    mino_env_set(env, "symbol",   mino_prim("symbol",   prim_symbol));
+    mino_env_set(env, "keyword",  mino_prim("keyword",  prim_keyword));
     mino_env_set(env, "hash",     mino_prim("hash",     prim_hash));
     mino_env_set(env, "compare",  mino_prim("compare",  prim_compare));
     mino_env_set(env, "int",      mino_prim("int",      prim_int));
