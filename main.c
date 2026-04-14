@@ -15,6 +15,29 @@
 
 #define MINO_LINE_MAX 4096
 
+/* ---- CWD-relative module resolver ---- */
+
+static const char *cwd_resolve(const char *name, void *ctx)
+{
+    static char path_buf[4096];
+    size_t nlen;
+    (void)ctx;
+    if (name == NULL) return NULL;
+    nlen = strlen(name);
+    /* If name already ends with ".mino", use as-is; otherwise append. */
+    if (nlen >= 5 && strcmp(name + nlen - 5, ".mino") == 0) {
+        if (nlen >= sizeof(path_buf)) return NULL;
+        memcpy(path_buf, name, nlen + 1);
+    } else {
+        if (nlen + 5 >= sizeof(path_buf)) return NULL;
+        memcpy(path_buf, name, nlen);
+        memcpy(path_buf + nlen, ".mino", 6);
+    }
+    return path_buf;
+}
+
+/* ---- helpers ---- */
+
 static int is_unterminated_error(const char *msg)
 {
     return msg != NULL && strstr(msg, "unterminated") != NULL;
@@ -42,6 +65,7 @@ int main(int argc, char **argv)
 
     mino_install_core(env);
     mino_install_io(env);
+    mino_set_resolver(cwd_resolve, NULL);
 
     /* File mode: evaluate a script and exit. */
     if (argc > 1) {
