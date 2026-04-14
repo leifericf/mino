@@ -74,6 +74,15 @@
 (def fn?      (fn (x) (= (type x) :fn)))
 (def set?     (fn (x) (= (type x) :set)))
 
+;; --- Atoms ---
+
+(def swap! (fn (a f & args) (reset! a (apply f (deref a) args))))
+
+;; --- Definitions ---
+
+(defmacro defn (name params & body)
+  `(def ~name (fn ~params ~@body)))
+
 ;; --- Higher-order functions ---
 
 (def comp (fn (f g) (fn (& args) (f (apply g args)))))
