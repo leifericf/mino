@@ -35,7 +35,8 @@ typedef enum {
     MINO_HANDLE,  /* opaque host object: pointer + type tag string */
     MINO_ATOM,    /* mutable reference cell: wraps a single value */
     MINO_LAZY,    /* lazy sequence: thunk body + env, cached on first force */
-    MINO_RECUR    /* internal tail-call trampoline sentinel */
+    MINO_RECUR,   /* internal tail-call trampoline sentinel */
+    MINO_TAIL_CALL /* proper tail call: carries {fn, args} for trampoline */
 } mino_type_t;
 
 typedef struct mino_val mino_val_t;
@@ -103,6 +104,10 @@ struct mino_val {
         struct {          /* MINO_RECUR: carries rebind args for trampoline */
             mino_val_t *args;
         } recur;
+        struct {          /* MINO_TAIL_CALL: proper tail call trampoline */
+            mino_val_t *fn;
+            mino_val_t *args;
+        } tail_call;
     } as;
 };
 

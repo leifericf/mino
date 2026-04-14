@@ -1568,6 +1568,9 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         /* Internal sentinel; should not escape to user-visible output. */
         fputs("#<recur>", out);
         return;
+    case MINO_TAIL_CALL:
+        fputs("#<tail-call>", out);
+        return;
     }
 }
 
@@ -1644,7 +1647,8 @@ static const char *type_tag_str(const mino_val_t *v)
     case MINO_HANDLE:  return "handle";
     case MINO_ATOM:    return "atom";
     case MINO_LAZY:    return "lazy-seq";
-    case MINO_RECUR:   return "recur";
+    case MINO_RECUR:     return "recur";
+    case MINO_TAIL_CALL: return "tail-call";
     }
     return "unknown";
 }
@@ -2346,6 +2350,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return 0;
     case MINO_RECUR:
         return a == b;
+    case MINO_TAIL_CALL:
+        return a == b;
     }
     return 0;
 }
@@ -2648,6 +2654,10 @@ static void gc_mark_val(mino_val_t *v)
     case MINO_RECUR:
         gc_mark_interior(v->as.recur.args);
         break;
+    case MINO_TAIL_CALL:
+        gc_mark_interior(v->as.tail_call.fn);
+        gc_mark_interior(v->as.tail_call.args);
+        break;
     default:
         /* NIL, BOOL, INT, FLOAT, PRIM, HANDLE: no owned children. prim.name
          * and handle.tag are static/host-owned C strings. */
@@ -2879,6 +2889,7 @@ static int sym_eq(const mino_val_t *v, const char *s)
     return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
 }
 
+static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail);
 static mino_val_t *eval(mino_val_t *form, mino_env_t *env);
 static mino_val_t *eval_value(mino_val_t *form, mino_env_t *env);
 static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
@@ -3049,10 +3060,15 @@ static mino_val_t *eval_value(mino_val_t *form, mino_env_t *env)
         set_error("recur must be in tail position");
         return NULL;
     }
+    if (v->type == MINO_TAIL_CALL) {
+        set_error("tail call in non-tail position");
+        return NULL;
+    }
     return v;
 }
 
-static mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env)
+static mino_val_t *eval_implicit_do_impl(mino_val_t *body, mino_env_t *env,
+                                         int tail)
 {
     if (!mino_is_cons(body)) {
         return mino_nil();
@@ -3060,14 +3076,19 @@ static mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env)
     for (;;) {
         mino_val_t *rest = body->as.cons.cdr;
         if (!mino_is_cons(rest)) {
-            /* Last expression: tail position, propagate recur. */
-            return eval(body->as.cons.car, env);
+            /* Last expression: tail position, propagate recur/tail-call. */
+            return eval_impl(body->as.cons.car, env, tail);
         }
         if (eval_value(body->as.cons.car, env) == NULL) {
             return NULL;
         }
         body = rest;
     }
+}
+
+static mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env)
+{
+    return eval_implicit_do_impl(body, env, 0);
 }
 
 /*
@@ -3195,7 +3216,7 @@ static int bind_params(mino_env_t *env, mino_val_t *params, mino_val_t *args,
  * set_error_at to include source location in error messages. */
 static const mino_val_t *eval_current_form = NULL;
 
-static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
+static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
 {
     if (limit_exceeded) {
         return NULL;
@@ -3227,6 +3248,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
     case MINO_ATOM:
     case MINO_LAZY:
     case MINO_RECUR:
+    case MINO_TAIL_CALL:
         return form;
     case MINO_SYMBOL: {
         char buf[256];
@@ -3457,11 +3479,12 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             if (cond == NULL) {
                 return NULL;
             }
-            /* Branch is tail position: propagate recur up to trampoline. */
-            return eval(mino_is_truthy(cond) ? then_form : else_form, env);
+            /* Branch is tail position: propagate recur/tail-call. */
+            return eval_impl(mino_is_truthy(cond) ? then_form : else_form,
+                             env, tail);
         }
         if (sym_eq(head, "do")) {
-            return eval_implicit_do(args, env);
+            return eval_implicit_do_impl(args, env, tail);
         }
         if (sym_eq(head, "let")) {
             mino_val_t *bindings;
@@ -3506,7 +3529,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 env_bind(local, buf, val);
                 bindings = rest_pair->as.cons.cdr;
             }
-            return eval_implicit_do(body, local);
+            return eval_implicit_do_impl(body, local, tail);
         }
         if (sym_eq(head, "fn")) {
             mino_val_t *params;
@@ -3595,7 +3618,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 bindings = rest_pair->as.cons.cdr;
             }
             for (;;) {
-                mino_val_t *result = eval_implicit_do(body, local);
+                mino_val_t *result = eval_implicit_do_impl(body, local, tail);
                 if (result == NULL) {
                     return NULL;
                 }
@@ -3702,7 +3725,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 if (expanded == NULL) {
                     return NULL;
                 }
-                return eval(expanded, env);
+                return eval_impl(expanded, env, tail);
             }
             if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
                 {
@@ -3717,12 +3740,25 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             if (evaled == NULL && mino_last_error() != NULL) {
                 return NULL;
             }
+            /* Proper tail calls: in tail position, return a trampoline
+             * sentinel instead of growing the C stack. */
+            if (tail && fn->type == MINO_FN) {
+                mino_val_t *tc = alloc_val(MINO_TAIL_CALL);
+                tc->as.tail_call.fn   = fn;
+                tc->as.tail_call.args = evaled;
+                return tc;
+            }
             return apply_callable(fn, evaled, env);
         }
     }
     }
     set_error("eval: unknown value type");
     return NULL;
+}
+
+static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
+{
+    return eval_impl(form, env, 0);
 }
 
 /*
@@ -3771,15 +3807,24 @@ static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
             if (!bind_params(local, fn->as.fn.params, call_args, tag)) {
                 return NULL; /* leave frame for trace */
             }
-            result = eval_implicit_do(fn->as.fn.body, local);
+            result = eval_implicit_do_impl(fn->as.fn.body, local, 1);
             if (result == NULL) {
                 return NULL; /* leave frame for trace */
             }
-            if (result->type != MINO_RECUR) {
-                pop_frame();
-                return result;
+            if (result->type == MINO_RECUR) {
+                /* Self-recursion: rebind params and loop. */
+                call_args = result->as.recur.args;
+                continue;
             }
-            call_args = result->as.recur.args;
+            if (result->type == MINO_TAIL_CALL) {
+                /* Proper tail call: switch to the target function. */
+                fn        = result->as.tail_call.fn;
+                call_args = result->as.tail_call.args;
+                local     = env_child(fn->as.fn.env);
+                continue;
+            }
+            pop_frame();
+            return result;
         }
     }
     {
@@ -3809,6 +3854,11 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
     }
     if (v->type == MINO_RECUR) {
         set_error("recur must be in tail position");
+        call_depth = 0;
+        return NULL;
+    }
+    if (v->type == MINO_TAIL_CALL) {
+        set_error("tail call escaped to top level");
         call_depth = 0;
         return NULL;
     }
@@ -6520,7 +6570,8 @@ static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
     case MINO_HANDLE:  return mino_keyword("handle");
     case MINO_ATOM:    return mino_keyword("atom");
     case MINO_LAZY:    return mino_keyword("lazy-seq");
-    case MINO_RECUR:   return mino_keyword("recur");
+    case MINO_RECUR:     return mino_keyword("recur");
+    case MINO_TAIL_CALL: return mino_keyword("tail-call");
     }
     return mino_keyword("unknown");
 }
