@@ -33,6 +33,7 @@ typedef enum {
     MINO_FN,
     MINO_MACRO,   /* user-defined macro (shares the fn struct layout) */
     MINO_HANDLE,  /* opaque host object: pointer + type tag string */
+    MINO_ATOM,    /* mutable reference cell: wraps a single value */
     MINO_RECUR    /* internal tail-call trampoline sentinel */
 } mino_type_t;
 
@@ -89,6 +90,9 @@ struct mino_val {
             void       *ptr;
             const char *tag;    /* static or interned; not GC-owned */
         } handle;
+        struct {          /* MINO_ATOM: mutable reference cell */
+            mino_val_t *val;
+        } atom;
         struct {          /* MINO_RECUR: carries rebind args for trampoline */
             mino_val_t *args;
         } recur;
@@ -116,11 +120,17 @@ mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len);
 mino_val_t *mino_set(mino_val_t **items, size_t len);
 mino_val_t *mino_prim(const char *name, mino_prim_fn fn);
 mino_val_t *mino_handle(void *ptr, const char *tag);
+mino_val_t *mino_atom(mino_val_t *val);
 
 /* Handle accessors — return NULL/0 if the value is not a handle. */
 int         mino_is_handle(const mino_val_t *v);
 void       *mino_handle_ptr(const mino_val_t *v);
 const char *mino_handle_tag(const mino_val_t *v);
+
+/* Atom accessors — mutable reference cells. */
+int         mino_is_atom(const mino_val_t *v);
+mino_val_t *mino_atom_deref(const mino_val_t *a);
+void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
 
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */

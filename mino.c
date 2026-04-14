@@ -881,6 +881,17 @@ static uint32_t hash_val(const mino_val_t *v)
         }
         return h;
     }
+    case MINO_ATOM: {
+        /* Atoms are identity-based (each atom is unique). */
+        uintptr_t p = (uintptr_t)v;
+        unsigned  i;
+        h = fnv_mix(h, 0x0e);
+        for (i = 0; i < sizeof(uintptr_t); i++) {
+            h = fnv_mix(h, (unsigned char)(p & 0xFFu));
+            p >>= 8;
+        }
+        return h;
+    }
     default: {
         /* PRIM, FN, RECUR: identity-based. */
         uintptr_t p = (uintptr_t)v;
@@ -1219,6 +1230,31 @@ const char *mino_handle_tag(const mino_val_t *v)
     return v->as.handle.tag;
 }
 
+mino_val_t *mino_atom(mino_val_t *val)
+{
+    mino_val_t *v = alloc_val(MINO_ATOM);
+    v->as.atom.val = val;
+    return v;
+}
+
+int mino_is_atom(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_ATOM;
+}
+
+mino_val_t *mino_atom_deref(const mino_val_t *a)
+{
+    if (a == NULL || a->type != MINO_ATOM) return NULL;
+    return a->as.atom.val;
+}
+
+void mino_atom_reset(mino_val_t *a, mino_val_t *val)
+{
+    if (a != NULL && a->type == MINO_ATOM) {
+        a->as.atom.val = val;
+    }
+}
+
 static mino_val_t *make_fn(mino_val_t *params, mino_val_t *body,
                            mino_env_t *env)
 {
@@ -1498,6 +1534,13 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         }
         fputc('>', out);
         return;
+    case MINO_ATOM:
+        fputs("#atom[", out);
+        print_depth++;
+        mino_print_to(out, v->as.atom.val);
+        print_depth--;
+        fputc(']', out);
+        return;
     case MINO_RECUR:
         /* Internal sentinel; should not escape to user-visible output. */
         fputs("#<recur>", out);
@@ -1576,6 +1619,7 @@ static const char *type_tag_str(const mino_val_t *v)
     case MINO_FN:      return "fn";
     case MINO_MACRO:   return "macro";
     case MINO_HANDLE:  return "handle";
+    case MINO_ATOM:    return "atom";
     case MINO_RECUR:   return "recur";
     }
     return "unknown";
@@ -1685,7 +1729,7 @@ static int is_terminator(char c)
 {
     return c == '\0' || c == '(' || c == ')' || c == '[' || c == ']'
         || c == '{' || c == '}' || c == '\'' || c == '"' || c == ';'
-        || c == '`'  || c == '~'
+        || c == '`'  || c == '~' || c == '@'
         || is_ws(c);
 }
 
@@ -2102,6 +2146,25 @@ static mino_val_t *read_form(const char **p)
             return outer;
         }
     }
+    if (**p == '@') {
+        int q_line = reader_line;
+        (*p)++;
+        {
+            mino_val_t *target = read_form(p);
+            mino_val_t *outer;
+            if (target == NULL) {
+                if (mino_last_error() == NULL) {
+                    set_error("expected form after @");
+                }
+                return NULL;
+            }
+            outer = mino_cons(mino_symbol("deref"),
+                              mino_cons(target, mino_nil()));
+            outer->as.cons.file = reader_file;
+            outer->as.cons.line = q_line;
+            return outer;
+        }
+    }
     if (**p == '~') {
         int         q_line = reader_line;
         const char *name = "unquote";
@@ -2246,6 +2309,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a == b;
     case MINO_HANDLE:
         return a->as.handle.ptr == b->as.handle.ptr;
+    case MINO_ATOM:
+        return a == b;
     case MINO_RECUR:
         return a == b;
     }
@@ -2535,6 +2600,9 @@ static void gc_mark_val(mino_val_t *v)
         gc_mark_interior(v->as.fn.params);
         gc_mark_interior(v->as.fn.body);
         gc_mark_interior(v->as.fn.env);
+        break;
+    case MINO_ATOM:
+        gc_mark_interior(v->as.atom.val);
         break;
     case MINO_RECUR:
         gc_mark_interior(v->as.recur.args);
@@ -3079,6 +3147,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
     case MINO_FN:
     case MINO_MACRO:
     case MINO_HANDLE:
+    case MINO_ATOM:
     case MINO_RECUR:
         return form;
     case MINO_SYMBOL: {
@@ -5917,6 +5986,7 @@ static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
     case MINO_FN:      return mino_keyword("fn");
     case MINO_MACRO:   return mino_keyword("macro");
     case MINO_HANDLE:  return mino_keyword("handle");
+    case MINO_ATOM:    return mino_keyword("atom");
     case MINO_RECUR:   return mino_keyword("recur");
     }
     return mino_keyword("unknown");
@@ -6395,6 +6465,63 @@ static void install_stdlib_macros(mino_env_t *env)
     reader_line = saved_line;
 }
 
+/* --- Atom primitives --------------------------------------------------- */
+
+static mino_val_t *prim_atom(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("atom requires one argument");
+        return NULL;
+    }
+    return mino_atom(args->as.cons.car);
+}
+
+static mino_val_t *prim_deref(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *a;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("deref requires one argument");
+        return NULL;
+    }
+    a = args->as.cons.car;
+    if (a == NULL || a->type != MINO_ATOM) {
+        set_error("deref: expected an atom");
+        return NULL;
+    }
+    return a->as.atom.val;
+}
+
+static mino_val_t *prim_reset_bang(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *a, *val;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("reset! requires two arguments");
+        return NULL;
+    }
+    a   = args->as.cons.car;
+    val = args->as.cons.cdr->as.cons.car;
+    if (a == NULL || a->type != MINO_ATOM) {
+        set_error("reset!: first argument must be an atom");
+        return NULL;
+    }
+    a->as.atom.val = val;
+    return val;
+}
+
+static mino_val_t *prim_atom_p(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("atom? requires one argument");
+        return NULL;
+    }
+    return mino_is_atom(args->as.cons.car) ? mino_true() : mino_false();
+}
+
 void mino_install_core(mino_env_t *env)
 {
     volatile char probe = 0;
@@ -6468,6 +6595,11 @@ void mino_install_core(mino_env_t *env)
     /* utility */
     mino_env_set(env, "some",     mino_prim("some",     prim_some));
     mino_env_set(env, "every?",   mino_prim("every?",   prim_every_p));
+    /* atoms */
+    mino_env_set(env, "atom",     mino_prim("atom",     prim_atom));
+    mino_env_set(env, "deref",    mino_prim("deref",    prim_deref));
+    mino_env_set(env, "reset!",   mino_prim("reset!",   prim_reset_bang));
+    mino_env_set(env, "atom?",    mino_prim("atom?",    prim_atom_p));
     install_stdlib_macros(env);
 }
 
