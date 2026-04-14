@@ -1556,6 +1556,31 @@ static void set_error_at(const mino_val_t *form, const char *msg)
     }
 }
 
+/* Return a short human-readable label for a value's type. */
+static const char *type_tag_str(const mino_val_t *v)
+{
+    if (v == NULL) return "nil";
+    switch (v->type) {
+    case MINO_NIL:     return "nil";
+    case MINO_BOOL:    return "bool";
+    case MINO_INT:     return "int";
+    case MINO_FLOAT:   return "float";
+    case MINO_STRING:  return "string";
+    case MINO_SYMBOL:  return "symbol";
+    case MINO_KEYWORD: return "keyword";
+    case MINO_CONS:    return "list";
+    case MINO_VECTOR:  return "vector";
+    case MINO_MAP:     return "map";
+    case MINO_SET:     return "set";
+    case MINO_PRIM:    return "fn";
+    case MINO_FN:      return "fn";
+    case MINO_MACRO:   return "macro";
+    case MINO_HANDLE:  return "handle";
+    case MINO_RECUR:   return "recur";
+    }
+    return "unknown";
+}
+
 /* ------------------------------------------------------------------------- */
 /* Call stack (for stack traces on error)                                     */
 /* ------------------------------------------------------------------------- */
@@ -3302,7 +3327,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             bindings = args->as.cons.car;
             body     = args->as.cons.cdr;
             if (!mino_is_cons(bindings) && !mino_is_nil(bindings)) {
-                set_error("let bindings must be a list");
+                set_error_at(form, "let bindings must be a list");
                 return NULL;
             }
             local = env_child(env);
@@ -3313,16 +3338,16 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 char        buf[256];
                 size_t      n;
                 if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-                    set_error("let binding name must be a symbol");
+                    set_error_at(form, "let binding name must be a symbol");
                     return NULL;
                 }
                 if (!mino_is_cons(rest_pair)) {
-                    set_error("let binding missing value");
+                    set_error_at(form, "let binding missing value");
                     return NULL;
                 }
                 n = name_form->as.s.len;
                 if (n >= sizeof(buf)) {
-                    set_error("let name too long");
+                    set_error_at(form, "let name too long");
                     return NULL;
                 }
                 memcpy(buf, name_form->as.s.data, n);
@@ -3376,13 +3401,13 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             mino_val_t *params_tail = NULL;
             mino_env_t *local;
             if (!mino_is_cons(args)) {
-                set_error("loop requires a binding list and body");
+                set_error_at(form, "loop requires a binding list and body");
                 return NULL;
             }
             bindings = args->as.cons.car;
             body     = args->as.cons.cdr;
             if (!mino_is_cons(bindings) && !mino_is_nil(bindings)) {
-                set_error("loop bindings must be a list");
+                set_error_at(form, "loop bindings must be a list");
                 return NULL;
             }
             local = env_child(env);
@@ -3394,16 +3419,16 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 size_t      n;
                 mino_val_t *cell;
                 if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-                    set_error("loop binding name must be a symbol");
+                    set_error_at(form, "loop binding name must be a symbol");
                     return NULL;
                 }
                 if (!mino_is_cons(rest_pair)) {
-                    set_error("loop binding missing value");
+                    set_error_at(form, "loop binding missing value");
                     return NULL;
                 }
                 n = name_form->as.s.len;
                 if (n >= sizeof(buf)) {
-                    set_error("loop name too long");
+                    set_error_at(form, "loop name too long");
                     return NULL;
                 }
                 memcpy(buf, name_form->as.s.data, n);
@@ -3524,7 +3549,12 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 return eval(expanded, env);
             }
             if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
-                set_error_at(form, "not a function");
+                {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "not a function (got %s)",
+                             type_tag_str(fn));
+                    set_error_at(form, msg);
+                }
                 return NULL;
             }
             evaled = eval_args(args, env);
@@ -3596,7 +3626,12 @@ static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
             call_args = result->as.recur.args;
         }
     }
-    set_error("not a function");
+    {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "not a function (got %s)",
+                 type_tag_str(fn));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -4218,7 +4253,12 @@ static mino_val_t *prim_count(mino_val_t *args, mino_env_t *env)
     case MINO_SET:    return mino_int((long long)coll->as.set.len);
     case MINO_STRING: return mino_int((long long)coll->as.s.len);
     default:
-        set_error("count: unsupported collection");
+        {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "count: expected a collection, got %s",
+                     type_tag_str(coll));
+            set_error(msg);
+        }
         return NULL;
     }
 }
@@ -4335,7 +4375,12 @@ static mino_val_t *prim_nth(mino_val_t *args, mino_env_t *env)
         }
         return p->as.cons.car;
     }
-    set_error("nth: unsupported collection");
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "nth: expected a list, vector, or string, got %s",
+                 type_tag_str(coll));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -4360,7 +4405,12 @@ static mino_val_t *prim_first(mino_val_t *args, mino_env_t *env)
         }
         return vec_nth(coll, 0);
     }
-    set_error("first: unsupported collection");
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
+                 type_tag_str(coll));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -4396,7 +4446,12 @@ static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
         }
         return head;
     }
-    set_error("rest: unsupported collection");
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "rest: expected a list or vector, got %s",
+                 type_tag_str(coll));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -4483,7 +4538,12 @@ static mino_val_t *prim_assoc(mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_MAP) {
         return map_assoc_pairs(coll, args->as.cons.cdr, extra_pairs);
     }
-    set_error("assoc: unsupported collection");
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "assoc: expected a map or vector, got %s",
+                 type_tag_str(coll));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -4592,7 +4652,13 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
-    set_error("conj: unsupported collection");
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "conj: expected a list, vector, map, or set, got %s",
+                 type_tag_str(coll));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -4632,7 +4698,12 @@ static mino_val_t *prim_update(mino_val_t *args, mino_env_t *env)
     } else if (coll == NULL || coll->type == MINO_NIL) {
         /* Update on nil behaves like update on an empty map. */
     } else {
-        set_error("update: unsupported collection");
+        {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "update: expected a map, got %s",
+                     type_tag_str(coll));
+            set_error(msg);
+        }
         return NULL;
     }
     call_args = mino_cons(old_val, mino_nil());
@@ -4782,7 +4853,13 @@ static mino_val_t *prim_contains_p(mino_val_t *args, mino_env_t *env)
         }
         return mino_false();
     }
-    set_error("contains?: unsupported collection");
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "contains?: expected a map, set, or vector, got %s",
+                 type_tag_str(coll));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -5266,7 +5343,13 @@ static mino_val_t *prim_into(mino_val_t *args, mino_env_t *env)
         }
         return out;
     }
-    set_error("into: unsupported target collection");
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "into: expected a list, vector, map, or set as target, got %s",
+                 type_tag_str(to));
+        set_error(msg);
+    }
     return NULL;
 }
 
@@ -5825,7 +5908,13 @@ static mino_val_t *prim_empty_p(mino_val_t *args, mino_env_t *env)
     case MINO_SET:    return coll->as.set.len == 0 ? mino_true() : mino_false();
     case MINO_STRING: return coll->as.s.len == 0 ? mino_true() : mino_false();
     default:
-        set_error("empty?: unsupported collection");
+        {
+            char msg[96];
+            snprintf(msg, sizeof(msg),
+                     "empty?: expected a collection, got %s",
+                     type_tag_str(coll));
+            set_error(msg);
+        }
         return NULL;
     }
 }
