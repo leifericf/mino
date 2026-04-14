@@ -4790,6 +4790,52 @@ static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+/* (hash val) — return the integer hash code of any value. */
+static mino_val_t *prim_hash(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("hash requires one argument");
+        return NULL;
+    }
+    return mino_int((long long)hash_val(args->as.cons.car));
+}
+
+/* (compare a b) — general comparison returning -1, 0, or 1.
+ * Compares numbers, strings, keywords, symbols, and nil. */
+static mino_val_t *prim_compare(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *a, *b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("compare requires two arguments");
+        return NULL;
+    }
+    a = args->as.cons.car;
+    b = args->as.cons.cdr->as.cons.car;
+    /* nil sorts before everything */
+    if ((a == NULL || (a->type == MINO_NIL)) &&
+        (b == NULL || (b->type == MINO_NIL))) return mino_int(0);
+    if (a == NULL || a->type == MINO_NIL) return mino_int(-1);
+    if (b == NULL || b->type == MINO_NIL) return mino_int(1);
+    /* numbers */
+    {
+        double da, db;
+        if (as_double(a, &da) && as_double(b, &db)) {
+            return mino_int(da < db ? -1 : da > db ? 1 : 0);
+        }
+    }
+    /* strings, keywords, symbols — lexicographic */
+    if ((a->type == MINO_STRING || a->type == MINO_KEYWORD ||
+         a->type == MINO_SYMBOL) && a->type == b->type) {
+        int cmp = strcmp(a->as.s.data, b->as.s.data);
+        return mino_int(cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
+    }
+    set_error("compare: cannot compare values of different types");
+    return NULL;
+}
+
 static mino_val_t *prim_eq(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -7133,6 +7179,8 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "name",     mino_prim("name",     prim_name));
+    mino_env_set(env, "hash",     mino_prim("hash",     prim_hash));
+    mino_env_set(env, "compare",  mino_prim("compare",  prim_compare));
     mino_env_set(env, "int",      mino_prim("int",      prim_int));
     mino_env_set(env, "float",    mino_prim("float",    prim_float));
     mino_env_set(env, "str",      mino_prim("str",      prim_str));

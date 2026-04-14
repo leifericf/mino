@@ -1,0 +1,43 @@
+(require "test")
+
+;; hash and compare primitives.
+
+(deftest hash-consistency
+  (testing "same value produces same hash"
+    (is (= (hash 42) (hash 42)))
+    (is (= (hash "hello") (hash "hello")))
+    (is (= (hash :foo) (hash :foo)))
+    (is (= (hash [1 2 3]) (hash [1 2 3]))))
+  (testing "different values usually differ"
+    (is (not= (hash 1) (hash 2)))
+    (is (not= (hash "a") (hash "b")))))
+
+(deftest hash-types
+  (is (number? (hash 42)))
+  (is (number? (hash nil)))
+  (is (number? (hash "str")))
+  (is (number? (hash :kw)))
+  (is (number? (hash [1 2])))
+  (is (number? (hash {:a 1}))))
+
+(deftest compare-numbers
+  (is (= -1 (compare 1 2)))
+  (is (= 0 (compare 5 5)))
+  (is (= 1 (compare 10 3)))
+  (is (= -1 (compare 1.5 2.5)))
+  (is (= 0 (compare 1 1.0))))
+
+(deftest compare-strings
+  (is (= -1 (compare "a" "b")))
+  (is (= 0 (compare "hello" "hello")))
+  (is (= 1 (compare "z" "a"))))
+
+(deftest compare-keywords
+  (is (= -1 (compare :a :b)))
+  (is (= 0 (compare :foo :foo)))
+  (is (= 1 (compare :z :a))))
+
+(deftest compare-nil
+  (is (= 0 (compare nil nil)))
+  (is (= -1 (compare nil 1)))
+  (is (= 1 (compare 1 nil))))
