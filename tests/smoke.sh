@@ -503,6 +503,13 @@ run "quot positive"     '(quot 10 3)'                          '3'
 run "quot negative"     '(quot -10 3)'                         '-3'
 run "mod float"         '(mod 5.5 2.0)'                        '1.5'
 
+# v0.14 — pr-str
+run "pr-str int"        '(pr-str 42)'                          '"42"'
+run "pr-str string"     '(pr-str "hi")'                        '"\"hi\""'
+run "pr-str multi"      '(pr-str 1 :a "b")'                    '"1 :a \"b\""'
+run "pr-str nil"        '(pr-str nil)'                         '"nil"'
+run "pr-str list"       "(pr-str '(1 2))"                      '"(1 2)"'
+
 # v0.14 — char-at
 run "char-at first"     '(char-at "hello" 0)'                  '"h"'
 run "char-at last"      '(char-at "hello" 4)'                  '"o"'

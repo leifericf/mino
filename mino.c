@@ -4365,6 +4365,74 @@ static mino_val_t *prim_float(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+/*
+ * Helper: print a value to a string buffer using the standard printer.
+ * Returns a mino string. Uses tmpfile() for ANSI C portability.
+ */
+static mino_val_t *print_to_string(const mino_val_t *v)
+{
+    FILE  *f = tmpfile();
+    long   n;
+    char  *buf;
+    mino_val_t *result;
+    if (f == NULL) {
+        set_error("pr-str: tmpfile failed");
+        return NULL;
+    }
+    mino_print_to(f, v);
+    n = ftell(f);
+    if (n < 0) n = 0;
+    rewind(f);
+    buf = (char *)malloc((size_t)n + 1);
+    if (buf == NULL) {
+        fclose(f);
+        set_error("out of memory");
+        return NULL;
+    }
+    if (n > 0) {
+        fread(buf, 1, (size_t)n, f);
+    }
+    buf[n] = '\0';
+    fclose(f);
+    result = mino_string_n(buf, (size_t)n);
+    free(buf);
+    return result;
+}
+
+static mino_val_t *prim_pr_str(mino_val_t *args, mino_env_t *env)
+{
+    char  *buf = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    int    first = 1;
+    (void)env;
+    while (mino_is_cons(args)) {
+        mino_val_t *printed = print_to_string(args->as.cons.car);
+        size_t      need;
+        if (printed == NULL) {
+            free(buf);
+            return NULL;
+        }
+        need = len + (!first ? 1 : 0) + printed->as.s.len + 1;
+        if (need > cap) {
+            cap = cap == 0 ? 128 : cap;
+            while (cap < need) cap *= 2;
+            buf = (char *)realloc(buf, cap);
+            if (buf == NULL) { set_error("out of memory"); return NULL; }
+        }
+        if (!first) buf[len++] = ' ';
+        memcpy(buf + len, printed->as.s.data, printed->as.s.len);
+        len += printed->as.s.len;
+        first = 0;
+        args = args->as.cons.cdr;
+    }
+    {
+        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", len);
+        free(buf);
+        return result;
+    }
+}
+
 static mino_val_t *prim_char_at(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s;
@@ -6911,6 +6979,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "int",      mino_prim("int",      prim_int));
     mino_env_set(env, "float",    mino_prim("float",    prim_float));
     mino_env_set(env, "str",      mino_prim("str",      prim_str));
+    mino_env_set(env, "pr-str",   mino_prim("pr-str",   prim_pr_str));
     mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
     mino_env_set(env, "require",  mino_prim("require",  prim_require));
     mino_env_set(env, "doc",      mino_prim("doc",      prim_doc));
