@@ -34,6 +34,7 @@ typedef enum {
     MINO_MACRO,   /* user-defined macro (shares the fn struct layout) */
     MINO_HANDLE,  /* opaque host object: pointer + type tag string */
     MINO_ATOM,    /* mutable reference cell: wraps a single value */
+    MINO_LAZY,    /* lazy sequence: thunk body + env, cached on first force */
     MINO_RECUR    /* internal tail-call trampoline sentinel */
 } mino_type_t;
 
@@ -93,6 +94,12 @@ struct mino_val {
         struct {          /* MINO_ATOM: mutable reference cell */
             mino_val_t *val;
         } atom;
+        struct {          /* MINO_LAZY: deferred sequence */
+            mino_val_t *body;     /* unevaluated form list (NULL after force) */
+            mino_env_t *env;      /* captured environment (NULL after force) */
+            mino_val_t *cached;   /* realized cons/nil (valid after force) */
+            int         realized; /* 0 = pending, 1 = forced */
+        } lazy;
         struct {          /* MINO_RECUR: carries rebind args for trampoline */
             mino_val_t *args;
         } recur;
@@ -212,8 +219,8 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   collection   count nth first rest vector hash-map assoc dissoc get conj
  *                keys vals
  *   sets         hash-set set? contains? disj
- *   sequences    map filter reduce take drop range repeat concat into apply
- *                reverse sort
+ *   sequences    seq realized? map filter reduce take drop range repeat
+ *                concat into apply reverse sort
  *   predicates   cons? nil? string? number? keyword? symbol? vector? map?
  *                set? fn? empty?
  *   utility      not identity
@@ -228,7 +235,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   stdlib (mino-defined): when cond and or -> ->> update some every?
  *                          comp partial complement
  * Special forms (quote, quasiquote, unquote, unquote-splicing, def,
- * defmacro, if, do, let, fn, loop, recur, try) are recognized directly by
+ * defmacro, if, do, let, fn, loop, recur, try, lazy-seq) are recognized by
  * the evaluator and do not need to be installed.
  *
  * NOTE: no I/O primitives are installed by this function. Call

@@ -1365,6 +1365,10 @@ int mino_to_bool(const mino_val_t *v)
 /* Printer                                                                   */
 /* ------------------------------------------------------------------------- */
 
+/* Forward declaration: lazy_force is defined after the evaluator. */
+static mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env);
+static mino_val_t *lazy_force(mino_val_t *v);
+
 static void print_string_escaped(FILE *out, const char *s, size_t len)
 {
     size_t i;
@@ -1542,6 +1546,16 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         print_depth--;
         fputc(']', out);
         return;
+    case MINO_LAZY: {
+        /* Force the lazy seq and print as a list. */
+        mino_val_t *forced = lazy_force((mino_val_t *)v);
+        if (forced == NULL || forced->type == MINO_NIL) {
+            fputs("()", out);
+        } else {
+            mino_print_to(out, forced);
+        }
+        return;
+    }
     case MINO_RECUR:
         /* Internal sentinel; should not escape to user-visible output. */
         fputs("#<recur>", out);
@@ -1621,6 +1635,7 @@ static const char *type_tag_str(const mino_val_t *v)
     case MINO_MACRO:   return "macro";
     case MINO_HANDLE:  return "handle";
     case MINO_ATOM:    return "atom";
+    case MINO_LAZY:    return "lazy-seq";
     case MINO_RECUR:   return "recur";
     }
     return "unknown";
@@ -2225,6 +2240,12 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     if (a == NULL || b == NULL) {
         return 0;
     }
+    /* Force lazy seqs before comparison. */
+    if (a->type == MINO_LAZY) a = lazy_force((mino_val_t *)a);
+    if (b->type == MINO_LAZY) b = lazy_force((mino_val_t *)b);
+    if (a == NULL) a = mino_nil();
+    if (b == NULL) b = mino_nil();
+    if (a == b) return 1;
     if (a->type != b->type) {
         /*
          * Cross-type numeric equality: int and float compare by value.
@@ -2312,6 +2333,9 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a->as.handle.ptr == b->as.handle.ptr;
     case MINO_ATOM:
         return a == b;
+    case MINO_LAZY:
+        /* Should not reach here — lazy seqs are forced above. */
+        return 0;
     case MINO_RECUR:
         return a == b;
     }
@@ -2604,6 +2628,14 @@ static void gc_mark_val(mino_val_t *v)
         break;
     case MINO_ATOM:
         gc_mark_interior(v->as.atom.val);
+        break;
+    case MINO_LAZY:
+        if (v->as.lazy.realized) {
+            gc_mark_interior(v->as.lazy.cached);
+        } else {
+            gc_mark_interior(v->as.lazy.body);
+            gc_mark_interior(v->as.lazy.env);
+        }
         break;
     case MINO_RECUR:
         gc_mark_interior(v->as.recur.args);
@@ -3030,6 +3062,42 @@ static mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env)
     }
 }
 
+/*
+ * Force a lazy sequence: evaluate the body in the captured environment,
+ * cache the result, and release the thunk for GC. Iteratively unwraps
+ * nested lazy seqs to avoid stack overflow.
+ */
+static mino_val_t *lazy_force(mino_val_t *v)
+{
+    if (v->as.lazy.realized) {
+        return v->as.lazy.cached;
+    }
+    {
+        mino_val_t *result = eval_implicit_do(v->as.lazy.body, v->as.lazy.env);
+        if (result == NULL) return NULL;
+        /* Iteratively unwrap nested lazy seqs. */
+        while (result != NULL && result->type == MINO_LAZY) {
+            if (result->as.lazy.realized) {
+                result = result->as.lazy.cached;
+            } else {
+                mino_val_t *inner = eval_implicit_do(
+                    result->as.lazy.body, result->as.lazy.env);
+                result->as.lazy.cached  = inner;
+                result->as.lazy.realized = 1;
+                result->as.lazy.body    = NULL;
+                result->as.lazy.env     = NULL;
+                result = inner;
+                if (result == NULL) return NULL;
+            }
+        }
+        v->as.lazy.cached   = result;
+        v->as.lazy.realized = 1;
+        v->as.lazy.body     = NULL;
+        v->as.lazy.env      = NULL;
+        return result;
+    }
+}
+
 static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *head = mino_nil();
@@ -3149,6 +3217,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
     case MINO_MACRO:
     case MINO_HANDLE:
     case MINO_ATOM:
+    case MINO_LAZY:
     case MINO_RECUR:
         return form;
     case MINO_SYMBOL: {
@@ -3600,6 +3669,15 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 env_bind(local, var_buf, ex != NULL ? ex : mino_nil());
                 return eval_implicit_do(catch_body, local);
             }
+        }
+
+        if (sym_eq(head, "lazy-seq")) {
+            mino_val_t *lz = alloc_val(MINO_LAZY);
+            lz->as.lazy.body     = args;
+            lz->as.lazy.env      = env;
+            lz->as.lazy.cached   = NULL;
+            lz->as.lazy.realized = 0;
+            return lz;
         }
 
         /* Function or macro application. */
@@ -4768,6 +4846,13 @@ static mino_val_t *prim_count(mino_val_t *args, mino_env_t *env)
     case MINO_MAP:    return mino_int((long long)coll->as.map.len);
     case MINO_SET:    return mino_int((long long)coll->as.set.len);
     case MINO_STRING: return mino_int((long long)coll->as.s.len);
+    case MINO_LAZY: {
+        /* Force the entire lazy seq and count it. */
+        mino_val_t *forced = lazy_force(coll);
+        if (forced == NULL) return NULL;
+        if (forced->type == MINO_NIL) return mino_int(0);
+        return mino_int((long long)list_length(forced));
+    }
     default:
         {
             char msg[96];
@@ -4921,6 +5006,13 @@ static mino_val_t *prim_first(mino_val_t *args, mino_env_t *env)
         }
         return vec_nth(coll, 0);
     }
+    if (coll->type == MINO_LAZY) {
+        mino_val_t *s = lazy_force(coll);
+        if (s == NULL) return NULL;
+        if (s->type == MINO_NIL || s == NULL) return mino_nil();
+        if (s->type == MINO_CONS) return s->as.cons.car;
+        return mino_nil();
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
@@ -4961,6 +5053,13 @@ static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
             tail = cell;
         }
         return head;
+    }
+    if (coll->type == MINO_LAZY) {
+        mino_val_t *s = lazy_force(coll);
+        if (s == NULL) return NULL;
+        if (s->type == MINO_NIL || s == NULL) return mino_nil();
+        if (s->type == MINO_CONS) return s->as.cons.cdr;
+        return mino_nil();
     }
     {
         char msg[96];
@@ -5444,6 +5543,10 @@ typedef struct {
 
 static void seq_iter_init(seq_iter_t *it, const mino_val_t *coll)
 {
+    /* Force lazy seqs so they behave as cons lists. */
+    if (coll != NULL && coll->type == MINO_LAZY) {
+        coll = lazy_force((mino_val_t *)coll);
+    }
     it->coll  = coll;
     it->idx   = 0;
     it->cons_p = (coll != NULL && coll->type == MINO_CONS) ? coll : NULL;
@@ -5488,7 +5591,12 @@ static void seq_iter_next(seq_iter_t *it)
 {
     if (it->coll != NULL && it->coll->type == MINO_CONS) {
         if (it->cons_p != NULL && it->cons_p->type == MINO_CONS) {
-            it->cons_p = it->cons_p->as.cons.cdr;
+            const mino_val_t *next = it->cons_p->as.cons.cdr;
+            /* Force lazy tail if present. */
+            if (next != NULL && next->type == MINO_LAZY) {
+                next = lazy_force((mino_val_t *)next);
+            }
+            it->cons_p = next;
         }
     } else {
         it->idx++;
@@ -6404,6 +6512,7 @@ static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
     case MINO_MACRO:   return mino_keyword("macro");
     case MINO_HANDLE:  return mino_keyword("handle");
     case MINO_ATOM:    return mino_keyword("atom");
+    case MINO_LAZY:    return mino_keyword("lazy-seq");
     case MINO_RECUR:   return mino_keyword("recur");
     }
     return mino_keyword("unknown");
@@ -6919,6 +7028,111 @@ static void install_stdlib_macros(mino_env_t *env)
 
 /* --- Atom primitives --------------------------------------------------- */
 
+/*
+ * (seq coll) — coerce a collection to a sequence (cons chain).
+ * Returns nil for empty collections. Forces lazy sequences.
+ */
+static mino_val_t *prim_seq(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("seq requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_nil();
+    if (coll->type == MINO_LAZY) {
+        mino_val_t *forced = lazy_force(coll);
+        if (forced == NULL) return NULL;
+        if (forced->type == MINO_NIL) return mino_nil();
+        return forced;
+    }
+    if (coll->type == MINO_CONS) return coll;
+    if (coll->type == MINO_VECTOR) {
+        mino_val_t *head = mino_nil();
+        mino_val_t *tail = NULL;
+        size_t i;
+        if (coll->as.vec.len == 0) return mino_nil();
+        for (i = 0; i < coll->as.vec.len; i++) {
+            mino_val_t *cell = mino_cons(vec_nth(coll, i), mino_nil());
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_MAP) {
+        mino_val_t *head = mino_nil();
+        mino_val_t *tail = NULL;
+        size_t i;
+        if (coll->as.map.len == 0) return mino_nil();
+        for (i = 0; i < coll->as.map.len; i++) {
+            mino_val_t *key = vec_nth(coll->as.map.key_order, i);
+            mino_val_t *val = map_get_val(coll, key);
+            mino_val_t *kv[2];
+            mino_val_t *cell;
+            kv[0] = key; kv[1] = val;
+            cell = mino_cons(mino_vector(kv, 2), mino_nil());
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_SET) {
+        mino_val_t *head = mino_nil();
+        mino_val_t *tail = NULL;
+        size_t i;
+        if (coll->as.set.len == 0) return mino_nil();
+        for (i = 0; i < coll->as.set.len; i++) {
+            mino_val_t *elem = vec_nth(coll->as.set.key_order, i);
+            mino_val_t *cell = mino_cons(elem, mino_nil());
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_STRING) {
+        mino_val_t *head = mino_nil();
+        mino_val_t *tail = NULL;
+        size_t i;
+        if (coll->as.s.len == 0) return mino_nil();
+        for (i = 0; i < coll->as.s.len; i++) {
+            mino_val_t *ch = mino_string_n(coll->as.s.data + i, 1);
+            mino_val_t *cell = mino_cons(ch, mino_nil());
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "seq: cannot coerce %s to a sequence",
+                 type_tag_str(coll));
+        set_error(msg);
+    }
+    return NULL;
+}
+
+static mino_val_t *prim_realized_p(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("realized? requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v != NULL && v->type == MINO_LAZY) {
+        return v->as.lazy.realized ? mino_true() : mino_false();
+    }
+    /* Non-lazy values are always realized. */
+    return mino_true();
+}
+
 static mino_val_t *prim_atom(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -7064,6 +7278,9 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "trim",     mino_prim("trim",     prim_trim));
     mino_env_set(env, "char-at",  mino_prim("char-at",  prim_char_at));
     /* (some and every? are now in stdlib.mino) */
+    /* sequences */
+    mino_env_set(env, "seq",       mino_prim("seq",       prim_seq));
+    mino_env_set(env, "realized?", mino_prim("realized?", prim_realized_p));
     /* atoms */
     mino_env_set(env, "atom",     mino_prim("atom",     prim_atom));
     mino_env_set(env, "deref",    mino_prim("deref",    prim_deref));
