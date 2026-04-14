@@ -4,6 +4,67 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] — Complete C primitive layer
+
+Adds every C primitive needed to implement the non-JVM parts of
+clojure.core. The pure mino compositions come in a later version;
+this version focuses on the C foundation.
+
+### Added
+- **Math functions**: `math-floor`, `math-ceil`, `math-round`,
+  `math-sqrt`, `math-pow`, `math-log`, `math-exp`, `math-sin`,
+  `math-cos`, `math-tan`, `math-atan2`. All thin wrappers around
+  `<math.h>`. Constant `math-pi`.
+- **`hash`**: exposes the internal FNV-1a hash used by HAMT and sets.
+- **`compare`**: general comparison returning -1, 0, or 1 for
+  numbers, strings, keywords, and symbols. nil sorts first.
+- **`sort` with comparator**: `(sort comp coll)` accepts a boolean
+  comparator (like `<`) or a three-way comparator (like `compare`).
+- **`symbol`** and **`keyword`** constructors from strings (reverse
+  of `name`).
+- **`eval`**: evaluate a form at runtime, exposing `mino_eval` to
+  mino code.
+- **`rand`**: random float in [0.0, 1.0) via ANSI C `rand()`.
+- **`time-ms`**: monotonic milliseconds via `clock_gettime`.
+  Registered in `mino_install_io`.
+- **Regex**: `re-find` and `re-matches` via bundled tiny-regex-c
+  (public domain, ANSI C, all platforms). Supports `.`, `*`, `+`,
+  `?`, `^`, `$`, character classes, and `\d`, `\w`, `\s` shorthand.
+
+### Changed
+- `mino-fs` noted in backlog: file system operations belong in a
+  separate library following the babashka/fs pattern. `slurp`/`spit`
+  marked for eventual migration.
+- Makefile builds `re.o` from vendored `re.c`.
+
+## [0.15.0] — Test framework and dogfooding
+
+Replaces all shell test scripts with mino-based tests. The language
+now tests itself.
+
+### Added
+- **File argument support**: `./mino script.mino` evaluates a file
+  and exits. Exit code 1 on eval failure.
+- **CWD-relative module resolver**: `(require "test")` resolves to
+  `./test.mino`. Wired in `main.c` via `mino_set_resolver`.
+- **`exit` primitive**: `(exit code)` terminates the process.
+  Registered in `mino_install_io`.
+- **`test.mino`**: test framework written in mino itself. Implements
+  `deftest`, `is`, `testing`, and `run-tests` following clojure.test
+  conventions.
+- **Mino test suite**: 203 tests with 427 assertions across 16 files,
+  replacing the 371-line smoke.sh and 131-line crash_test.sh.
+- **Reader fuzz tests**: 51 adversarial reader tests in mino using
+  `read-string` + `try/catch`.
+
+### Changed
+- **`read-string` throws catchable exceptions** on parse errors.
+  Previously propagated as fatal C-level errors; now caught by
+  `try/catch` when inside a `try` block.
+- **Makefile**: `make test` runs `./mino tests/run.mino`.
+- **Shell scripts removed**: `tests/smoke.sh` and
+  `fuzz/crash_test.sh` deleted. No `.sh` files in test infra.
+
 ## [0.14.0] — Lazy sequences, complete C core, core.mino expansion
 
 Lazy sequences land as a first-class type, enabling infinite data
