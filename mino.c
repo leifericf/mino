@@ -4335,6 +4335,36 @@ static mino_val_t *prim_bit_shift_right(mino_val_t *args, mino_env_t *env)
     return mino_int(a >> b);
 }
 
+static mino_val_t *prim_int(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("int requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v != NULL && v->type == MINO_INT) return v;
+    if (v != NULL && v->type == MINO_FLOAT) return mino_int((long long)v->as.f);
+    set_error("int: expected a number");
+    return NULL;
+}
+
+static mino_val_t *prim_float(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("float requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v != NULL && v->type == MINO_FLOAT) return v;
+    if (v != NULL && v->type == MINO_INT) return mino_float((double)v->as.i);
+    set_error("float: expected a number");
+    return NULL;
+}
+
 static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -6852,6 +6882,8 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "name",     mino_prim("name",     prim_name));
+    mino_env_set(env, "int",      mino_prim("int",      prim_int));
+    mino_env_set(env, "float",    mino_prim("float",    prim_float));
     mino_env_set(env, "str",      mino_prim("str",      prim_str));
     mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
     mino_env_set(env, "require",  mino_prim("require",  prim_require));

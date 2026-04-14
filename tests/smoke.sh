@@ -503,6 +503,12 @@ run "quot positive"     '(quot 10 3)'                          '3'
 run "quot negative"     '(quot -10 3)'                         '-3'
 run "mod float"         '(mod 5.5 2.0)'                        '1.5'
 
+# v0.14 — int/float coercion
+run "int from float"    '(int 3.7)'                            '3'
+run "int from int"      '(int 5)'                              '5'
+run "float from int"    '(float 5)'                            '5.0'
+run "float from float"  '(float 3.14)'                         '3.14'
+
 # v0.14 — name
 run "name keyword"      '(name :hello)'                        '"hello"'
 run "name symbol"       "(name 'world)"                        '"world"'
