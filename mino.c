@@ -4320,6 +4320,71 @@ static mino_val_t *prim_quot(mino_val_t *args, mino_env_t *env)
     return mino_float(q);
 }
 
+/* --- Math functions (thin wrappers around math.h) --- */
+
+#define MATH_UNARY(cname, cfn, label)                                  \
+    static mino_val_t *cname(mino_val_t *args, mino_env_t *env)        \
+    {                                                                   \
+        double x;                                                       \
+        (void)env;                                                      \
+        if (!mino_is_cons(args) ||                                      \
+            mino_is_cons(args->as.cons.cdr)) {                          \
+            set_error(label " requires one argument");                  \
+            return NULL;                                                \
+        }                                                               \
+        if (!as_double(args->as.cons.car, &x)) {                       \
+            set_error(label " expects a number");                       \
+            return NULL;                                                \
+        }                                                               \
+        return mino_float(cfn(x));                                      \
+    }
+
+MATH_UNARY(prim_math_floor, floor, "math-floor")
+MATH_UNARY(prim_math_ceil,  ceil,  "math-ceil")
+MATH_UNARY(prim_math_round, round, "math-round")
+MATH_UNARY(prim_math_sqrt,  sqrt,  "math-sqrt")
+MATH_UNARY(prim_math_log,   log,   "math-log")
+MATH_UNARY(prim_math_exp,   exp,   "math-exp")
+MATH_UNARY(prim_math_sin,   sin,   "math-sin")
+MATH_UNARY(prim_math_cos,   cos,   "math-cos")
+MATH_UNARY(prim_math_tan,   tan,   "math-tan")
+
+#undef MATH_UNARY
+
+static mino_val_t *prim_math_pow(mino_val_t *args, mino_env_t *env)
+{
+    double base, exponent;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("math-pow requires two arguments");
+        return NULL;
+    }
+    if (!as_double(args->as.cons.car, &base) ||
+        !as_double(args->as.cons.cdr->as.cons.car, &exponent)) {
+        set_error("math-pow expects numbers");
+        return NULL;
+    }
+    return mino_float(pow(base, exponent));
+}
+
+static mino_val_t *prim_math_atan2(mino_val_t *args, mino_env_t *env)
+{
+    double y, x;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("math-atan2 requires two arguments");
+        return NULL;
+    }
+    if (!as_double(args->as.cons.car, &y) ||
+        !as_double(args->as.cons.cdr->as.cons.car, &x)) {
+        set_error("math-atan2 expects numbers");
+        return NULL;
+    }
+    return mino_float(atan2(y, x));
+}
+
 static mino_val_t *prim_bit_and(mino_val_t *args, mino_env_t *env)
 {
     long long a, b;
@@ -7026,6 +7091,19 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "mod",      mino_prim("mod",      prim_mod));
     mino_env_set(env, "rem",      mino_prim("rem",      prim_rem));
     mino_env_set(env, "quot",     mino_prim("quot",     prim_quot));
+    /* math */
+    mino_env_set(env, "math-floor", mino_prim("math-floor", prim_math_floor));
+    mino_env_set(env, "math-ceil",  mino_prim("math-ceil",  prim_math_ceil));
+    mino_env_set(env, "math-round", mino_prim("math-round", prim_math_round));
+    mino_env_set(env, "math-sqrt",  mino_prim("math-sqrt",  prim_math_sqrt));
+    mino_env_set(env, "math-pow",   mino_prim("math-pow",   prim_math_pow));
+    mino_env_set(env, "math-log",   mino_prim("math-log",   prim_math_log));
+    mino_env_set(env, "math-exp",   mino_prim("math-exp",   prim_math_exp));
+    mino_env_set(env, "math-sin",   mino_prim("math-sin",   prim_math_sin));
+    mino_env_set(env, "math-cos",   mino_prim("math-cos",   prim_math_cos));
+    mino_env_set(env, "math-tan",   mino_prim("math-tan",   prim_math_tan));
+    mino_env_set(env, "math-atan2", mino_prim("math-atan2", prim_math_atan2));
+    mino_env_set(env, "math-pi",    mino_float(3.14159265358979323846));
     mino_env_set(env, "bit-and", mino_prim("bit-and", prim_bit_and));
     mino_env_set(env, "bit-or",  mino_prim("bit-or",  prim_bit_or));
     mino_env_set(env, "bit-xor", mino_prim("bit-xor", prim_bit_xor));

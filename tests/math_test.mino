@@ -1,0 +1,51 @@
+(require "test")
+
+;; Math functions: wrappers around math.h
+
+(deftest math-floor-fn
+  (is (= 3.0 (math-floor 3.7)))
+  (is (= 3.0 (math-floor 3.0)))
+  (is (= -4.0 (math-floor -3.2))))
+
+(deftest math-ceil-fn
+  (is (= 4.0 (math-ceil 3.2)))
+  (is (= 3.0 (math-ceil 3.0)))
+  (is (= -3.0 (math-ceil -3.2))))
+
+(deftest math-round-fn
+  (is (= 4.0 (math-round 3.5)))
+  (is (= 3.0 (math-round 3.4)))
+  (is (= -4.0 (math-round -3.5))))
+
+(deftest math-sqrt-fn
+  (is (= 4.0 (math-sqrt 16)))
+  (is (= 0.0 (math-sqrt 0)))
+  (is (= 1.0 (math-sqrt 1))))
+
+(deftest math-pow-fn
+  (is (= 1024.0 (math-pow 2 10)))
+  (is (= 1.0 (math-pow 5 0)))
+  (is (= 8.0 (math-pow 2 3))))
+
+(deftest math-log-exp
+  (is (= 0.0 (math-log 1)))
+  (is (= 1.0 (math-exp 0)))
+  ;; log and exp are inverses
+  (is (< (abs (- 5.0 (math-exp (math-log 5)))) 0.0001)))
+
+(deftest math-trig
+  (is (= 0.0 (math-sin 0)))
+  (is (= 1.0 (math-cos 0)))
+  (is (= 0.0 (math-tan 0)))
+  ;; sin(pi/2) ~ 1
+  (is (< (abs (- 1.0 (math-sin (/ math-pi 2)))) 0.0001)))
+
+(deftest math-atan2-fn
+  ;; atan2(1, 1) = pi/4
+  (is (< (abs (- (/ math-pi 4) (math-atan2 1 1))) 0.0001))
+  ;; atan2(0, 1) = 0
+  (is (= 0.0 (math-atan2 0 1))))
+
+(deftest math-pi-constant
+  (is (> math-pi 3.14159))
+  (is (< math-pi 3.14160)))
