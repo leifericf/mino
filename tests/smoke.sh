@@ -494,6 +494,15 @@ run "map over map"      '(map (fn (kv) (nth kv 1)) {:a 1 :b 2})' '(1 2)'
 # v0.11 — into with lists
 run "into list"         '(into (list) [1 2 3])'                '(3 2 1)'
 
+# v0.14 — mod, rem, quot
+run "mod positive"      '(mod 10 3)'                           '1'
+run "mod negative"      '(mod -10 3)'                          '2'
+run "rem positive"      '(rem 10 3)'                           '1'
+run "rem negative"      '(rem -10 3)'                          '-1'
+run "quot positive"     '(quot 10 3)'                          '3'
+run "quot negative"     '(quot -10 3)'                         '-3'
+run "mod float"         '(mod 5.5 2.0)'                        '1.5'
+
 # v0.14 — dissoc
 run "dissoc single"     '(dissoc {:a 1 :b 2 :c 3} :b)'        '{:a 1, :c 3}'
 run "dissoc multi"      '(dissoc {:a 1 :b 2 :c 3} :a :c)'     '{:b 2}'

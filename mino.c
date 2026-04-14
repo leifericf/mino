@@ -8,6 +8,7 @@
 #include "mino.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <setjmp.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -4152,6 +4153,88 @@ static mino_val_t *prim_div(mino_val_t *args, mino_env_t *env)
     return mino_float(acc);
 }
 
+static mino_val_t *prim_mod(mino_val_t *args, mino_env_t *env)
+{
+    double a, b, r;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("mod requires two arguments");
+        return NULL;
+    }
+    if (!as_double(args->as.cons.car, &a) ||
+        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("mod expects numbers");
+        return NULL;
+    }
+    if (b == 0.0) {
+        set_error("mod: division by zero");
+        return NULL;
+    }
+    r = fmod(a, b);
+    /* Floored modulo: result has same sign as divisor. */
+    if (r != 0.0 && ((r < 0.0) != (b < 0.0))) r += b;
+    /* Return int if both args are ints. */
+    if (args->as.cons.car->type == MINO_INT &&
+        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
+        return mino_int((long long)r);
+    }
+    return mino_float(r);
+}
+
+static mino_val_t *prim_rem(mino_val_t *args, mino_env_t *env)
+{
+    double a, b, r;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("rem requires two arguments");
+        return NULL;
+    }
+    if (!as_double(args->as.cons.car, &a) ||
+        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("rem expects numbers");
+        return NULL;
+    }
+    if (b == 0.0) {
+        set_error("rem: division by zero");
+        return NULL;
+    }
+    r = fmod(a, b);
+    if (args->as.cons.car->type == MINO_INT &&
+        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
+        return mino_int((long long)r);
+    }
+    return mino_float(r);
+}
+
+static mino_val_t *prim_quot(mino_val_t *args, mino_env_t *env)
+{
+    double a, b, q;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("quot requires two arguments");
+        return NULL;
+    }
+    if (!as_double(args->as.cons.car, &a) ||
+        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("quot expects numbers");
+        return NULL;
+    }
+    if (b == 0.0) {
+        set_error("quot: division by zero");
+        return NULL;
+    }
+    q = a / b;
+    q = q >= 0 ? floor(q) : ceil(q);
+    if (args->as.cons.car->type == MINO_INT &&
+        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
+        return mino_int((long long)q);
+    }
+    return mino_float(q);
+}
+
 static mino_val_t *prim_eq(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -6619,6 +6702,9 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "/",        mino_prim("/",        prim_div));
     mino_env_set(env, "=",        mino_prim("=",        prim_eq));
     mino_env_set(env, "<",        mino_prim("<",        prim_lt));
+    mino_env_set(env, "mod",      mino_prim("mod",      prim_mod));
+    mino_env_set(env, "rem",      mino_prim("rem",      prim_rem));
+    mino_env_set(env, "quot",     mino_prim("quot",     prim_quot));
     mino_env_set(env, "car",      mino_prim("car",      prim_car));
     mino_env_set(env, "cdr",      mino_prim("cdr",      prim_cdr));
     mino_env_set(env, "cons",     mino_prim("cons",     prim_cons));

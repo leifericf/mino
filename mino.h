@@ -204,7 +204,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
 
 /*
  * Install the core primitive bindings into `env`:
- *   arithmetic   + - * /
+ *   arithmetic   + - * / mod rem quot
  *   comparison   = < <= > >= not=
  *   list         car cdr cons list
  *   collection   count nth first rest vector hash-map assoc dissoc get conj
