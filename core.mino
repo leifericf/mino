@@ -501,3 +501,92 @@
 
 (def comparator (fn (pred)
   (fn (a b) (cond (pred a b) -1 (pred b a) 1 true 0))))
+
+;; --- Lazy combinators ---
+
+(def keep (fn (f coll)
+  (lazy-seq
+    (let (s (seq coll))
+      (when s
+        (let (v (f (first s)))
+          (if (nil? v)
+            (keep f (rest s))
+            (cons v (keep f (rest s))))))))))
+
+(def keep-indexed (fn (f coll)
+  (let (step (fn (i s)
+               (lazy-seq
+                 (when (seq s)
+                   (let (v (f i (first s)))
+                     (if (nil? v)
+                       (step (inc i) (rest s))
+                       (cons v (step (inc i) (rest s)))))))))
+    (step 0 coll))))
+
+(def map-indexed (fn (f coll)
+  (let (step (fn (i s)
+               (lazy-seq
+                 (when (seq s)
+                   (cons (f i (first s))
+                         (step (inc i) (rest s)))))))
+    (step 0 coll))))
+
+(def partition-all (fn (n coll)
+  (lazy-seq
+    (let (s (seq coll))
+      (when s
+        (cons (into [] (take n s))
+              (partition-all n (drop n s))))))))
+
+(def reductions (fn (f & args)
+  (let (init (if (= (count args) 2) (first args) (first (first args)))
+        coll (if (= (count args) 2) (second args) (rest (first args)))
+        step (fn (acc s)
+               (lazy-seq
+                 (when (seq s)
+                   (let (v (f acc (first s)))
+                     (cons v (step v (rest s))))))))
+    (cons init (step init coll)))))
+
+(def dedupe (fn (coll)
+  (let (step (fn (prev s)
+               (lazy-seq
+                 (when (seq s)
+                   (let (x (first s))
+                     (if (= x prev)
+                       (step prev (rest s))
+                       (cons x (step x (rest s)))))))))
+    (lazy-seq
+      (when (seq coll)
+        (cons (first coll) (step (first coll) (rest coll))))))))
+
+;; --- Higher-order combinators ---
+
+(def every-pred (fn (& preds)
+  (fn (& args)
+    (every? (fn (p) (every? p args)) preds))))
+
+(def some-fn (fn (& preds)
+  (fn (& args)
+    (some (fn (p) (some p args)) preds))))
+
+(def fnil (fn (f default)
+  (fn (& args)
+    (apply f (cons (if (nil? (first args)) default (first args))
+                   (rest args))))))
+
+(def memoize (fn (f)
+  (let (cache (atom {}))
+    (fn (& args)
+      (let (key args
+            hit (get (deref cache) key))
+        (if (not (nil? hit))
+          hit
+          (let (v (apply f args))
+            (swap! cache assoc key v)
+            v)))))))
+
+(def trampoline (fn (f & args)
+  (let (result (apply f args)
+        bounce (fn (r) (if (fn? r) (bounce (r)) r)))
+    (bounce result))))
