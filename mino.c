@@ -4365,6 +4365,32 @@ static mino_val_t *prim_float(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+static mino_val_t *prim_char_at(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s;
+    long long   idx;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("char-at requires two arguments");
+        return NULL;
+    }
+    s = args->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING) {
+        set_error("char-at: first argument must be a string");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.cdr->as.cons.car, &idx)) {
+        set_error("char-at: second argument must be an integer");
+        return NULL;
+    }
+    if (idx < 0 || (size_t)idx >= s->as.s.len) {
+        set_error("char-at: index out of range");
+        return NULL;
+    }
+    return mino_string_n(s->as.s.data + idx, 1);
+}
+
 static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -6923,6 +6949,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "lower-case",
                  mino_prim("lower-case", prim_lower_case));
     mino_env_set(env, "trim",     mino_prim("trim",     prim_trim));
+    mino_env_set(env, "char-at",  mino_prim("char-at",  prim_char_at));
     /* utility */
     mino_env_set(env, "some",     mino_prim("some",     prim_some));
     mino_env_set(env, "every?",   mino_prim("every?",   prim_every_p));

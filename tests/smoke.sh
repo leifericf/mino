@@ -503,6 +503,10 @@ run "quot positive"     '(quot 10 3)'                          '3'
 run "quot negative"     '(quot -10 3)'                         '-3'
 run "mod float"         '(mod 5.5 2.0)'                        '1.5'
 
+# v0.14 — char-at
+run "char-at first"     '(char-at "hello" 0)'                  '"h"'
+run "char-at last"      '(char-at "hello" 4)'                  '"o"'
+
 # v0.14 — int/float coercion
 run "int from float"    '(int 3.7)'                            '3'
 run "int from int"      '(int 5)'                              '5'
