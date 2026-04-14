@@ -4399,6 +4399,27 @@ static mino_val_t *print_to_string(const mino_val_t *v)
     return result;
 }
 
+static mino_val_t *prim_read_string(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s;
+    mino_val_t *result;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("read-string requires one string argument");
+        return NULL;
+    }
+    s = args->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING) {
+        set_error("read-string: argument must be a string");
+        return NULL;
+    }
+    result = mino_read(s->as.s.data, NULL);
+    if (result == NULL && mino_last_error()[0] != '\0') {
+        return NULL;
+    }
+    return result != NULL ? result : mino_nil();
+}
+
 static mino_val_t *prim_pr_str(mino_val_t *args, mino_env_t *env)
 {
     char  *buf = NULL;
@@ -6980,6 +7001,8 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "float",    mino_prim("float",    prim_float));
     mino_env_set(env, "str",      mino_prim("str",      prim_str));
     mino_env_set(env, "pr-str",   mino_prim("pr-str",   prim_pr_str));
+    mino_env_set(env, "read-string",
+                 mino_prim("read-string", prim_read_string));
     mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
     mino_env_set(env, "require",  mino_prim("require",  prim_require));
     mino_env_set(env, "doc",      mino_prim("doc",      prim_doc));

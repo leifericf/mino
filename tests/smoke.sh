@@ -503,6 +503,12 @@ run "quot positive"     '(quot 10 3)'                          '3'
 run "quot negative"     '(quot -10 3)'                         '-3'
 run "mod float"         '(mod 5.5 2.0)'                        '1.5'
 
+# v0.14 — read-string
+run "read-string int"   '(read-string "42")'                   '42'
+run "read-string list"  '(read-string "(+ 1 2)")'              '(+ 1 2)'
+run "read-string kw"    '(read-string ":foo")'                 ':foo'
+run "read-string empty" '(read-string "")'                     'nil'
+
 # v0.14 — pr-str
 run "pr-str int"        '(pr-str 42)'                          '"42"'
 run "pr-str string"     '(pr-str "hi")'                        '"\"hi\""'

@@ -219,8 +219,9 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   utility      not identity some every?
  *   coercion     int float
  *   reflection   type name doc source apropos
- *   strings      str pr-str subs split join char-at starts-with?
- *                ends-with? includes? upper-case lower-case trim
+ *   strings      str pr-str read-string subs split join char-at
+ *                starts-with? ends-with? includes? upper-case lower-case
+ *                trim
  *   exceptions   throw
  *   modules      require
  *   macros       macroexpand macroexpand-1 gensym
