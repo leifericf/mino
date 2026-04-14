@@ -380,7 +380,7 @@ run "defmacro docstring" '(defmacro my-id "identity macro" (x) x)
 (doc (quote my-id))' '#<macro>
 "identity macro"'
 
-run "apropos finds" '(apropos "co")' '(cons count conj contains? cond cons? concat comp complement)'
+run "apropos finds" '(apropos "co")' '(cons count conj contains? cond cons? concat comp complement second constantly)'
 
 run "apropos empty" '(apropos "zzzznotfound")' 'nil'
 
@@ -571,6 +571,52 @@ run "dissoc single"     '(dissoc {:a 1 :b 2 :c 3} :b)'        '{:a 1, :c 3}'
 run "dissoc multi"      '(dissoc {:a 1 :b 2 :c 3} :a :c)'     '{:b 2}'
 run "dissoc missing"    '(dissoc {:a 1} :z)'                   '{:a 1}'
 run "dissoc nil"        '(dissoc nil :a)'                      'nil'
+
+# v0.14 — trivial compositions
+run "second"            '(second [1 2 3])'                     '2'
+run "ffirst"            "(ffirst '((1 2) (3 4)))"              '1'
+run "inc"               '(inc 5)'                              '6'
+run "dec"               '(dec 5)'                              '4'
+run "zero?"             '(zero? 0)'                            'true'
+run "pos?"              '(pos? 5)'                             'true'
+run "neg?"              '(neg? -1)'                            'true'
+run "even?"             '(even? 4)'                            'true'
+run "odd?"              '(odd? 3)'                             'true'
+run "abs"               '(abs -5)'                             '5'
+run "max"               '(max 3 7)'                            '7'
+run "min"               '(min 3 7)'                            '3'
+run "not-empty"         '(not-empty [1])'                      '[1]'
+run "not-empty nil"     '(not-empty [])'                       'nil'
+run "constantly"        '((constantly 42) :a :b)'              '42'
+run "boolean"           '(boolean 1)'                          'true'
+run "boolean nil"       '(boolean nil)'                        'false'
+
+# v0.14 — collection utilities
+run "merge"             '(merge {:a 1} {:b 2} {:a 3})'        '{:a 3, :b 2}'
+run "select-keys"       '(select-keys {:a 1 :b 2 :c 3} [:a :c])' '{:a 1, :c 3}'
+run "find"              '(find {:a 1 :b 2} :a)'               '[:a 1]'
+run "find missing"      '(find {:a 1} :z)'                    'nil'
+run "zipmap"            '(zipmap [:a :b] [1 2])'              '{:a 1, :b 2}'
+run "frequencies"       '(frequencies [1 2 1 3 2 1])'         '{1 3, 2 2, 3 1}'
+run "group-by"          '(group-by even? [1 2 3 4])'          '{false [1 3], true [2 4]}'
+
+# v0.14 — higher-order
+run "juxt"              '((juxt inc dec) 5)'                   '(6 4)'
+run "mapcat"            '(mapcat (fn (x) [x (* x 10)]) [1 2 3])' '(1 10 2 20 3 30)'
+
+# v0.14 — lazy combinators
+run "take-while"        '(take-while (fn (x) (< x 3)) [1 2 3 4])' '(1 2)'
+run "drop-while"        '(drop-while (fn (x) (< x 3)) [1 2 3 4])' '(3 4)'
+run "iterate"           '(take 5 (iterate inc 0))'             '(0 1 2 3 4)'
+run "repeatedly"        '(take 3 (repeatedly (fn () 42)))'     '(42 42 42)'
+run "interleave"        '(interleave [1 2 3] [:a :b :c])'     '(1 :a 2 :b 3 :c)'
+run "interpose"         '(interpose :sep [1 2 3])'             '(1 :sep 2 :sep 3)'
+run "distinct"          '(distinct [1 2 1 3 2])'              '(1 2 3)'
+run "cycle"             '(take 5 (cycle [1 2]))'               '(1 2 1 2 1)'
+run "partition"         '(partition 2 [1 2 3 4 5 6])'          '([1 2] [3 4] [5 6])'
+
+# v0.14 — forcing
+run "doall"             '(count (doall (map inc [1 2 3])))'    '3'
 
 # v0.13 — atoms
 run "atom create"       '(atom 42)'                                    '#atom[42]'

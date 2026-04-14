@@ -4815,9 +4815,16 @@ static mino_val_t *prim_str(mino_val_t *args, mino_env_t *env);
 static size_t list_length(mino_val_t *list)
 {
     size_t n = 0;
+    while (list != NULL && list->type == MINO_LAZY) {
+        list = lazy_force(list);
+    }
     while (mino_is_cons(list)) {
         n++;
         list = list->as.cons.cdr;
+        /* Force lazy tails. */
+        while (list != NULL && list->type == MINO_LAZY) {
+            list = lazy_force(list);
+        }
     }
     return n;
 }
