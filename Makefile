@@ -9,7 +9,7 @@ SRCS    := mino.c main.c
 OBJS    := $(SRCS:.c=.o)
 TARGET  := mino
 
-.PHONY: all clean test test-gc-stress bench bench-map bench-seq fuzz-stdin fuzz-crash
+.PHONY: all clean test test-gc-stress bench bench-map bench-seq fuzz-stdin
 
 all: $(TARGET)
 
@@ -36,13 +36,13 @@ clean:
 	      cookbook/plugin cookbook/pipeline cookbook/console
 
 test: $(TARGET)
-	./tests/smoke.sh
+	./mino tests/run.mino
 
 # Collect on every allocation: exercises the marker and sweeper on each
 # alloc site and catches any caller that holds unrooted pointers across
 # allocation boundaries. Slower than `test` but the same suite.
 test-gc-stress: $(TARGET)
-	MINO_GC_STRESS=1 ./tests/smoke.sh
+	MINO_GC_STRESS=1 ./mino tests/run.mino
 
 # Bench targets are built on demand; not wired into `all` or CI.
 bench: bench/vector_bench
@@ -76,6 +76,3 @@ fuzz-stdin: fuzz/fuzz_reader
 
 fuzz/fuzz_reader: fuzz/fuzz_reader.c mino.c mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -DFUZZ_STDIN -I. -o $@ fuzz/fuzz_reader.c mino.c
-
-fuzz-crash: fuzz/fuzz_reader
-	./fuzz/crash_test.sh
