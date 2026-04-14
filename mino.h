@@ -28,6 +28,7 @@ typedef enum {
     MINO_CONS,
     MINO_VECTOR,
     MINO_MAP,
+    MINO_SET,     /* persistent set: HAMT of keys with sentinel values */
     MINO_PRIM,
     MINO_FN,
     MINO_MACRO,   /* user-defined macro (shares the fn struct layout) */
@@ -70,6 +71,11 @@ struct mino_val {
             mino_val_t       *key_order; /* MINO_VECTOR of keys, insertion order */
             size_t            len;       /* number of entries */
         } map;
+        struct {          /* MINO_SET: HAMT with sentinel values */
+            mino_hamt_node_t *root;      /* HAMT root (NULL when len == 0) */
+            mino_val_t       *key_order; /* MINO_VECTOR of elements */
+            size_t            len;       /* number of elements */
+        } set;
         struct {          /* MINO_PRIM */
             const char *name;
             mino_prim_fn fn;
@@ -107,6 +113,7 @@ mino_val_t *mino_keyword_n(const char *s, size_t len);
 mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr);
 mino_val_t *mino_vector(mino_val_t **items, size_t len);
 mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len);
+mino_val_t *mino_set(mino_val_t **items, size_t len);
 mino_val_t *mino_prim(const char *name, mino_prim_fn fn);
 mino_val_t *mino_handle(void *ptr, const char *tag);
 
@@ -187,17 +194,24 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
 
 /*
  * Install the core primitive bindings into `env`:
- *   arithmetic  + - * /
- *   comparison  = < <= > >=
- *   list        car cdr cons list
- *   collection  count nth first rest vector hash-map assoc get conj update
- *               keys vals
- *   predicates  cons? nil? string? number? keyword? symbol? vector? map? fn?
- *   reflection  type doc source apropos
- *   strings     str
- *   exceptions  throw
- *   modules     require
- *   macros      macroexpand macroexpand-1 gensym
+ *   arithmetic   + - * /
+ *   comparison   = < <= > >= not=
+ *   list         car cdr cons list
+ *   collection   count nth first rest vector hash-map assoc get conj update
+ *                keys vals
+ *   sets         hash-set set? contains? disj
+ *   sequences    map filter reduce take drop range repeat concat into apply
+ *                reverse sort
+ *   predicates   cons? nil? string? number? keyword? symbol? vector? map?
+ *                set? fn? empty?
+ *   utility      not identity some every?
+ *   reflection   type doc source apropos
+ *   strings      str subs split join starts-with? ends-with? includes?
+ *                upper-case lower-case trim
+ *   exceptions   throw
+ *   modules      require
+ *   macros       macroexpand macroexpand-1 gensym
+ *   stdlib (mino-defined): when cond and or -> ->> comp partial complement
  * Special forms (quote, quasiquote, unquote, unquote-splicing, def,
  * defmacro, if, do, let, fn, loop, recur, try) are recognized directly by
  * the evaluator and do not need to be installed.

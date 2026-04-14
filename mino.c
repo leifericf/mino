@@ -853,6 +853,23 @@ static uint32_t hash_val(const mino_val_t *v)
         }
         return h;
     }
+    case MINO_SET: {
+        /* XOR-fold of element hashes for order independence. */
+        uint32_t acc = 0;
+        size_t   n   = v->as.set.len;
+        size_t   i;
+        unsigned k;
+        for (i = 0; i < n; i++) {
+            mino_val_t *elem = vec_nth(v->as.set.key_order, i);
+            acc ^= hash_val(elem);
+        }
+        h = fnv_mix(h, 0x0d);
+        for (k = 0; k < 4; k++) {
+            h = fnv_mix(h, (unsigned char)(acc & 0xFFu));
+            acc >>= 8;
+        }
+        return h;
+    }
     case MINO_HANDLE: {
         /* Handles compare by their host pointer, so we hash that. */
         uintptr_t p = (uintptr_t)v->as.handle.ptr;
@@ -1140,6 +1157,31 @@ mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len)
     return v;
 }
 
+mino_val_t *mino_set(mino_val_t **items, size_t len)
+{
+    mino_val_t       *v        = alloc_val(MINO_SET);
+    mino_hamt_node_t *root     = NULL;
+    mino_val_t       *order    = mino_vector(NULL, 0);
+    size_t            len_out  = 0;
+    size_t            i;
+    /* Sentinel value: all set entries map to true. */
+    mino_val_t       *sentinel = mino_true();
+    for (i = 0; i < len; i++) {
+        hamt_entry_t *e        = hamt_entry_new(items[i], sentinel);
+        uint32_t      h        = hash_val(items[i]);
+        int           replaced = 0;
+        root = hamt_assoc(root, e, h, 0u, &replaced);
+        if (!replaced) {
+            order = vec_conj1(order, items[i]);
+            len_out++;
+        }
+    }
+    v->as.set.root      = root;
+    v->as.set.key_order = order;
+    v->as.set.len       = len_out;
+    return v;
+}
+
 mino_val_t *mino_prim(const char *name, mino_prim_fn fn)
 {
     mino_val_t *v = alloc_val(MINO_PRIM);
@@ -1416,6 +1458,20 @@ void mino_print_to(FILE *out, const mino_val_t *v)
             mino_print_to(out, key);
             fputc(' ', out);
             mino_print_to(out, map_get_val(v, key));
+        }
+        print_depth--;
+        fputc('}', out);
+        return;
+    }
+    case MINO_SET: {
+        size_t i;
+        fputs("#{", out);
+        print_depth++;
+        for (i = 0; i < v->as.set.len; i++) {
+            if (i > 0) {
+                fputc(' ', out);
+            }
+            mino_print_to(out, vec_nth(v->as.set.key_order, i));
         }
         print_depth--;
         fputc('}', out);
@@ -1837,6 +1893,46 @@ static mino_val_t *read_map_form(const char **p)
     return mino_map(kbuf, vbuf, len);
 }
 
+static mino_val_t *read_set_form(const char **p)
+{
+    /* Caller has positioned *p on the opening '{' after '#'. */
+    mino_val_t **buf = NULL;
+    size_t       cap = 0;
+    size_t       len = 0;
+    (*p)++; /* skip '{' */
+    for (;;) {
+        mino_val_t *elem;
+        skip_ws(p);
+        if (**p == '\0') {
+            set_error("unterminated set");
+            return NULL;
+        }
+        if (**p == '}') {
+            (*p)++;
+            break;
+        }
+        elem = read_form(p);
+        if (elem == NULL) {
+            if (mino_last_error() == NULL) {
+                set_error("unterminated set");
+            }
+            return NULL;
+        }
+        if (len == cap) {
+            size_t       new_cap = cap == 0 ? 8 : cap * 2;
+            mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(
+                GC_T_VALARR, new_cap * sizeof(*nb));
+            if (buf != NULL && len > 0) {
+                memcpy(nb, buf, len * sizeof(*nb));
+            }
+            buf = nb;
+            cap = new_cap;
+        }
+        buf[len++] = elem;
+    }
+    return mino_set(buf, len);
+}
+
 static mino_val_t *read_atom(const char **p)
 {
     const char *start = *p;
@@ -1935,6 +2031,10 @@ static mino_val_t *read_form(const char **p)
     if (**p == '}') {
         set_error("unexpected '}'");
         return NULL;
+    }
+    if (**p == '#' && *(*p + 1) == '{') {
+        (*p)++; /* skip '#', read_set_form will skip '{' */
+        return read_set_form(p);
     }
     if (**p == '"') {
         return read_string_form(p);
@@ -2092,6 +2192,21 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
                 return 0;
             }
             if (!mino_eq(av, bv)) {
+                return 0;
+            }
+        }
+        return 1;
+    }
+    case MINO_SET: {
+        /* Set equality: same elements regardless of insertion order. */
+        size_t i;
+        if (a->as.set.len != b->as.set.len) {
+            return 0;
+        }
+        for (i = 0; i < a->as.set.len; i++) {
+            mino_val_t *elem = vec_nth(a->as.set.key_order, i);
+            uint32_t    h    = hash_val(elem);
+            if (hamt_get(b->as.set.root, elem, h, 0u) == NULL) {
                 return 0;
             }
         }
@@ -2385,6 +2500,10 @@ static void gc_mark_val(mino_val_t *v)
     case MINO_MAP:
         gc_mark_interior(v->as.map.root);
         gc_mark_interior(v->as.map.key_order);
+        break;
+    case MINO_SET:
+        gc_mark_interior(v->as.set.root);
+        gc_mark_interior(v->as.set.key_order);
         break;
     case MINO_FN:
     case MINO_MACRO:
@@ -2999,6 +3118,24 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             vs[i] = v;
         }
         return mino_map(ks, vs, n);
+    }
+    case MINO_SET: {
+        /* Set literals evaluate each element in order. */
+        size_t i;
+        size_t n = form->as.set.len;
+        mino_val_t **tmp;
+        if (n == 0) {
+            return form;
+        }
+        tmp = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n * sizeof(*tmp));
+        for (i = 0; i < n; i++) {
+            mino_val_t *ev = eval_value(vec_nth(form->as.set.key_order, i), env);
+            if (ev == NULL) {
+                return NULL;
+            }
+            tmp[i] = ev;
+        }
+        return mino_set(tmp, n);
     }
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;
@@ -4043,6 +4180,9 @@ static mino_val_t *prim_list(mino_val_t *args, mino_env_t *env)
 /* without changing the public primitive contracts.                          */
 /* ------------------------------------------------------------------------- */
 
+static mino_val_t *set_conj1(const mino_val_t *s, mino_val_t *elem);
+static mino_val_t *prim_str(mino_val_t *args, mino_env_t *env);
+
 static size_t list_length(mino_val_t *list)
 {
     size_t n = 0;
@@ -4075,6 +4215,7 @@ static mino_val_t *prim_count(mino_val_t *args, mino_env_t *env)
     case MINO_CONS:   return mino_int((long long)list_length(coll));
     case MINO_VECTOR: return mino_int((long long)coll->as.vec.len);
     case MINO_MAP:    return mino_int((long long)coll->as.map.len);
+    case MINO_SET:    return mino_int((long long)coll->as.set.len);
     case MINO_STRING: return mino_int((long long)coll->as.s.len);
     default:
         set_error("count: unsupported collection");
@@ -4381,6 +4522,11 @@ static mino_val_t *prim_get(mino_val_t *args, mino_env_t *env)
         }
         return vec_nth(coll, (size_t)idx);
     }
+    if (coll->type == MINO_SET) {
+        uint32_t h = hash_val(key);
+        mino_val_t *found = hamt_get(coll->as.set.root, key, h, 0u);
+        return found != NULL ? key : def_val;
+    }
     return def_val;
 }
 
@@ -4434,6 +4580,14 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
             pair_args = mino_cons(vec_nth(item, 0),
                                    mino_cons(vec_nth(item, 1), mino_nil()));
             acc = map_assoc_pairs(acc, pair_args, 1);
+            p = p->as.cons.cdr;
+        }
+        return acc;
+    }
+    if (coll->type == MINO_SET) {
+        mino_val_t *acc = coll;
+        while (mino_is_cons(p)) {
+            acc = set_conj1(acc, p->as.cons.car);
             p = p->as.cons.cdr;
         }
         return acc;
@@ -4559,6 +4713,1181 @@ static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
     return head;
 }
 
+/* Set helper: add one element to a set, returning a new set. */
+static mino_val_t *set_conj1(const mino_val_t *s, mino_val_t *elem)
+{
+    mino_val_t       *v        = alloc_val(MINO_SET);
+    mino_val_t       *sentinel = mino_true();
+    hamt_entry_t     *e        = hamt_entry_new(elem, sentinel);
+    uint32_t          h        = hash_val(elem);
+    int               replaced = 0;
+    mino_hamt_node_t *root     = hamt_assoc(s->as.set.root, e, h, 0u, &replaced);
+    v->as.set.root      = root;
+    if (replaced) {
+        v->as.set.key_order = s->as.set.key_order;
+        v->as.set.len       = s->as.set.len;
+    } else {
+        v->as.set.key_order = vec_conj1(s->as.set.key_order, elem);
+        v->as.set.len       = s->as.set.len + 1;
+    }
+    return v;
+}
+
+static mino_val_t *prim_hash_set(mino_val_t *args, mino_env_t *env)
+{
+    size_t      n;
+    size_t      i;
+    mino_val_t **tmp;
+    mino_val_t *p;
+    (void)env;
+    arg_count(args, &n);
+    tmp = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, (n > 0 ? n : 1) * sizeof(*tmp));
+    p = args;
+    for (i = 0; i < n; i++) {
+        tmp[i] = p->as.cons.car;
+        p = p->as.cons.cdr;
+    }
+    return mino_set(tmp, n);
+}
+
+static mino_val_t *prim_contains_p(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *key;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("contains? requires two arguments");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    key  = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_false();
+    }
+    if (coll->type == MINO_MAP) {
+        return map_get_val(coll, key) != NULL ? mino_true() : mino_false();
+    }
+    if (coll->type == MINO_SET) {
+        uint32_t h = hash_val(key);
+        return hamt_get(coll->as.set.root, key, h, 0u) != NULL
+            ? mino_true() : mino_false();
+    }
+    if (coll->type == MINO_VECTOR) {
+        /* For vectors, key is an index. */
+        if (key != NULL && key->type == MINO_INT) {
+            long long idx = key->as.i;
+            return (idx >= 0 && (size_t)idx < coll->as.vec.len)
+                ? mino_true() : mino_false();
+        }
+        return mino_false();
+    }
+    set_error("contains?: unsupported collection");
+    return NULL;
+}
+
+static mino_val_t *prim_disj(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *p;
+    size_t      n;
+    (void)env;
+    arg_count(args, &n);
+    if (n < 2) {
+        set_error("disj requires a set and at least one key");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    if (coll->type != MINO_SET) {
+        set_error("disj: first argument must be a set");
+        return NULL;
+    }
+    /* Rebuild set excluding the specified elements. Not the most efficient
+     * approach, but keeps the code simple and correct. */
+    p = args->as.cons.cdr;
+    while (mino_is_cons(p)) {
+        mino_val_t *key = p->as.cons.car;
+        uint32_t    h   = hash_val(key);
+        if (hamt_get(coll->as.set.root, key, h, 0u) != NULL) {
+            /* Element exists; rebuild without it. */
+            mino_val_t *new_set = alloc_val(MINO_SET);
+            mino_val_t *order   = mino_vector(NULL, 0);
+            mino_hamt_node_t *root = NULL;
+            size_t i;
+            size_t new_len = 0;
+            for (i = 0; i < coll->as.set.len; i++) {
+                mino_val_t *elem = vec_nth(coll->as.set.key_order, i);
+                if (!mino_eq(elem, key)) {
+                    hamt_entry_t *e2 = hamt_entry_new(elem, mino_true());
+                    uint32_t h2 = hash_val(elem);
+                    int rep = 0;
+                    root = hamt_assoc(root, e2, h2, 0u, &rep);
+                    order = vec_conj1(order, elem);
+                    new_len++;
+                }
+            }
+            new_set->as.set.root      = root;
+            new_set->as.set.key_order = order;
+            new_set->as.set.len       = new_len;
+            coll = new_set;
+        }
+        p = p->as.cons.cdr;
+    }
+    return coll;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Sequence primitives (strict — no lazy seqs)                               */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Helper: build a freshly consed list from a collection. Works on lists,
+ * vectors, maps (key-value vectors), and sets. Returns a (head, tail) pair
+ * through pointers so the caller can append efficiently.
+ */
+
+/* Iterator abstraction over any sequential collection. */
+typedef struct {
+    const mino_val_t *coll;
+    size_t            idx;       /* for vectors, maps, sets */
+    const mino_val_t *cons_p;   /* for cons lists */
+} seq_iter_t;
+
+static void seq_iter_init(seq_iter_t *it, const mino_val_t *coll)
+{
+    it->coll  = coll;
+    it->idx   = 0;
+    it->cons_p = (coll != NULL && coll->type == MINO_CONS) ? coll : NULL;
+}
+
+static int seq_iter_done(const seq_iter_t *it)
+{
+    const mino_val_t *c = it->coll;
+    if (c == NULL || c->type == MINO_NIL) return 1;
+    switch (c->type) {
+    case MINO_CONS:   return it->cons_p == NULL || it->cons_p->type != MINO_CONS;
+    case MINO_VECTOR: return it->idx >= c->as.vec.len;
+    case MINO_MAP:    return it->idx >= c->as.map.len;
+    case MINO_SET:    return it->idx >= c->as.set.len;
+    case MINO_STRING: return it->idx >= c->as.s.len;
+    default:          return 1;
+    }
+}
+
+static mino_val_t *seq_iter_val(const seq_iter_t *it)
+{
+    const mino_val_t *c = it->coll;
+    switch (c->type) {
+    case MINO_CONS:   return it->cons_p->as.cons.car;
+    case MINO_VECTOR: return vec_nth(c, it->idx);
+    case MINO_MAP: {
+        /* Yield [key value] vectors for maps. */
+        mino_val_t *key = vec_nth(c->as.map.key_order, it->idx);
+        mino_val_t *val = map_get_val(c, key);
+        mino_val_t *kv[2];
+        kv[0] = key;
+        kv[1] = val;
+        return mino_vector(kv, 2);
+    }
+    case MINO_SET:    return vec_nth(c->as.set.key_order, it->idx);
+    case MINO_STRING: return mino_string_n(c->as.s.data + it->idx, 1);
+    default:          return mino_nil();
+    }
+}
+
+static void seq_iter_next(seq_iter_t *it)
+{
+    if (it->coll != NULL && it->coll->type == MINO_CONS) {
+        if (it->cons_p != NULL && it->cons_p->type == MINO_CONS) {
+            it->cons_p = it->cons_p->as.cons.cdr;
+        }
+    } else {
+        it->idx++;
+    }
+}
+
+static mino_val_t *prim_map(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fn;
+    mino_val_t *coll;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    seq_iter_t  it;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("map requires a function and a collection");
+        return NULL;
+    }
+    fn   = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem    = seq_iter_val(&it);
+        mino_val_t *call_a  = mino_cons(elem, mino_nil());
+        mino_val_t *result  = apply_callable(fn, call_a, env);
+        mino_val_t *cell;
+        if (result == NULL) return NULL;
+        cell = mino_cons(result, mino_nil());
+        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+        tail = cell;
+        seq_iter_next(&it);
+    }
+    return head;
+}
+
+static mino_val_t *prim_filter(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pred;
+    mino_val_t *coll;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    seq_iter_t  it;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("filter requires a predicate and a collection");
+        return NULL;
+    }
+    pred = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem   = seq_iter_val(&it);
+        mino_val_t *call_a = mino_cons(elem, mino_nil());
+        mino_val_t *result = apply_callable(pred, call_a, env);
+        if (result == NULL) return NULL;
+        if (mino_is_truthy(result)) {
+            mino_val_t *cell = mino_cons(elem, mino_nil());
+            if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+            tail = cell;
+        }
+        seq_iter_next(&it);
+    }
+    return head;
+}
+
+static mino_val_t *prim_reduce(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fn;
+    mino_val_t *acc;
+    mino_val_t *coll;
+    seq_iter_t  it;
+    size_t      n;
+    arg_count(args, &n);
+    if (n == 2) {
+        /* (reduce f coll) — first element is the initial accumulator. */
+        fn   = args->as.cons.car;
+        coll = args->as.cons.cdr->as.cons.car;
+        if (coll == NULL || coll->type == MINO_NIL) {
+            /* (reduce f nil) → (f) */
+            return apply_callable(fn, mino_nil(), env);
+        }
+        seq_iter_init(&it, coll);
+        if (seq_iter_done(&it)) {
+            return apply_callable(fn, mino_nil(), env);
+        }
+        acc = seq_iter_val(&it);
+        seq_iter_next(&it);
+    } else if (n == 3) {
+        /* (reduce f init coll) */
+        fn   = args->as.cons.car;
+        acc  = args->as.cons.cdr->as.cons.car;
+        coll = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        if (coll == NULL || coll->type == MINO_NIL) {
+            return acc;
+        }
+        seq_iter_init(&it, coll);
+    } else {
+        set_error("reduce requires 2 or 3 arguments");
+        return NULL;
+    }
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem   = seq_iter_val(&it);
+        mino_val_t *call_a = mino_cons(acc, mino_cons(elem, mino_nil()));
+        acc = apply_callable(fn, call_a, env);
+        if (acc == NULL) return NULL;
+        seq_iter_next(&it);
+    }
+    return acc;
+}
+
+static mino_val_t *prim_take(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    long long   n_take;
+    long long   i = 0;
+    seq_iter_t  it;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("take requires a count and a collection");
+        return NULL;
+    }
+    if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
+        set_error("take: first argument must be an integer");
+        return NULL;
+    }
+    n_take = args->as.cons.car->as.i;
+    coll   = args->as.cons.cdr->as.cons.car;
+    if (n_take <= 0 || coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it) && i < n_take) {
+        mino_val_t *elem = seq_iter_val(&it);
+        mino_val_t *cell = mino_cons(elem, mino_nil());
+        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+        tail = cell;
+        seq_iter_next(&it);
+        i++;
+    }
+    return head;
+}
+
+static mino_val_t *prim_drop(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    long long   n_drop;
+    long long   i = 0;
+    seq_iter_t  it;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("drop requires a count and a collection");
+        return NULL;
+    }
+    if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
+        set_error("drop: first argument must be an integer");
+        return NULL;
+    }
+    n_drop = args->as.cons.car->as.i;
+    coll   = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it) && i < n_drop) {
+        seq_iter_next(&it);
+        i++;
+    }
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(&it);
+        mino_val_t *cell = mino_cons(elem, mino_nil());
+        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+        tail = cell;
+        seq_iter_next(&it);
+    }
+    return head;
+}
+
+static mino_val_t *prim_range(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    long long   start = 0, end_val, step = 1;
+    long long   i;
+    size_t      n;
+    (void)env;
+    arg_count(args, &n);
+    if (n == 0) {
+        set_error("range requires at least one argument");
+        return NULL;
+    }
+    if (n == 1) {
+        if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
+            set_error("range: arguments must be integers");
+            return NULL;
+        }
+        end_val = args->as.cons.car->as.i;
+    } else if (n == 2) {
+        if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT
+            || args->as.cons.cdr->as.cons.car == NULL
+            || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
+            set_error("range: arguments must be integers");
+            return NULL;
+        }
+        start   = args->as.cons.car->as.i;
+        end_val = args->as.cons.cdr->as.cons.car->as.i;
+    } else if (n == 3) {
+        if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT
+            || args->as.cons.cdr->as.cons.car == NULL
+            || args->as.cons.cdr->as.cons.car->type != MINO_INT
+            || args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
+            || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
+            set_error("range: arguments must be integers");
+            return NULL;
+        }
+        start   = args->as.cons.car->as.i;
+        end_val = args->as.cons.cdr->as.cons.car->as.i;
+        step    = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
+    } else {
+        set_error("range requires 1, 2, or 3 arguments");
+        return NULL;
+    }
+    if (step == 0) {
+        set_error("range: step cannot be zero");
+        return NULL;
+    }
+    for (i = start; step > 0 ? i < end_val : i > end_val; i += step) {
+        mino_val_t *cell = mino_cons(mino_int(i), mino_nil());
+        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+        tail = cell;
+    }
+    return head;
+}
+
+static mino_val_t *prim_repeat(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    long long   count;
+    mino_val_t *val;
+    long long   i;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("repeat requires a count and a value");
+        return NULL;
+    }
+    if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
+        set_error("repeat: first argument must be an integer");
+        return NULL;
+    }
+    count = args->as.cons.car->as.i;
+    val   = args->as.cons.cdr->as.cons.car;
+    for (i = 0; i < count; i++) {
+        mino_val_t *cell = mino_cons(val, mino_nil());
+        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+        tail = cell;
+    }
+    return head;
+}
+
+static mino_val_t *prim_concat(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    (void)env;
+    while (mino_is_cons(args)) {
+        mino_val_t *coll = args->as.cons.car;
+        seq_iter_t  it;
+        if (coll != NULL && coll->type != MINO_NIL) {
+            seq_iter_init(&it, coll);
+            while (!seq_iter_done(&it)) {
+                mino_val_t *elem = seq_iter_val(&it);
+                mino_val_t *cell = mino_cons(elem, mino_nil());
+                if (tail == NULL) { head = cell; }
+                else              { tail->as.cons.cdr = cell; }
+                tail = cell;
+                seq_iter_next(&it);
+            }
+        }
+        args = args->as.cons.cdr;
+    }
+    return head;
+}
+
+static mino_val_t *prim_into(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *to;
+    mino_val_t *from;
+    seq_iter_t  it;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("into requires two arguments");
+        return NULL;
+    }
+    to   = args->as.cons.car;
+    from = args->as.cons.cdr->as.cons.car;
+    if (from == NULL || from->type == MINO_NIL) {
+        return to;
+    }
+    /* Conj each element of `from` into `to`. The type of `to` determines
+     * the conj semantics (vector appends, list prepends, map/set merges). */
+    if (to == NULL || to->type == MINO_NIL) {
+        /* Into nil: build a list. */
+        mino_val_t *out = mino_nil();
+        seq_iter_init(&it, from);
+        while (!seq_iter_done(&it)) {
+            out = mino_cons(seq_iter_val(&it), out);
+            seq_iter_next(&it);
+        }
+        return out;
+    }
+    if (to->type == MINO_VECTOR) {
+        mino_val_t *acc = to;
+        seq_iter_init(&it, from);
+        while (!seq_iter_done(&it)) {
+            acc = vec_conj1(acc, seq_iter_val(&it));
+            seq_iter_next(&it);
+        }
+        return acc;
+    }
+    if (to->type == MINO_MAP) {
+        mino_val_t *acc = to;
+        seq_iter_init(&it, from);
+        while (!seq_iter_done(&it)) {
+            mino_val_t *item = seq_iter_val(&it);
+            mino_val_t *pair_args;
+            if (item == NULL || item->type != MINO_VECTOR
+                || item->as.vec.len != 2) {
+                set_error("into map: each element must be a 2-element vector");
+                return NULL;
+            }
+            pair_args = mino_cons(vec_nth(item, 0),
+                                   mino_cons(vec_nth(item, 1), mino_nil()));
+            acc = map_assoc_pairs(acc, pair_args, 1);
+            seq_iter_next(&it);
+        }
+        return acc;
+    }
+    if (to->type == MINO_SET) {
+        mino_val_t *acc = to;
+        seq_iter_init(&it, from);
+        while (!seq_iter_done(&it)) {
+            acc = set_conj1(acc, seq_iter_val(&it));
+            seq_iter_next(&it);
+        }
+        return acc;
+    }
+    if (to->type == MINO_CONS) {
+        mino_val_t *out = to;
+        seq_iter_init(&it, from);
+        while (!seq_iter_done(&it)) {
+            out = mino_cons(seq_iter_val(&it), out);
+            seq_iter_next(&it);
+        }
+        return out;
+    }
+    set_error("into: unsupported target collection");
+    return NULL;
+}
+
+static mino_val_t *prim_apply(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fn;
+    mino_val_t *last;
+    mino_val_t *call_args;
+    mino_val_t *p;
+    size_t      n;
+    arg_count(args, &n);
+    if (n < 2) {
+        set_error("apply requires a function and arguments");
+        return NULL;
+    }
+    fn = args->as.cons.car;
+    if (n == 2) {
+        /* (apply f coll) — spread coll as args. */
+        last = args->as.cons.cdr->as.cons.car;
+    } else {
+        /* (apply f a b ... coll) — prepend individual args, then spread coll. */
+        mino_val_t *head = mino_nil();
+        mino_val_t *tail2 = NULL;
+        p = args->as.cons.cdr;
+        /* Collect all but the last arg as individual args. */
+        while (mino_is_cons(p) && mino_is_cons(p->as.cons.cdr)) {
+            mino_val_t *cell = mino_cons(p->as.cons.car, mino_nil());
+            if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
+            tail2 = cell;
+            p = p->as.cons.cdr;
+        }
+        last = p->as.cons.car; /* the final collection argument */
+        /* Append elements from `last` collection. */
+        if (last != NULL && last->type != MINO_NIL) {
+            seq_iter_t it;
+            seq_iter_init(&it, last);
+            while (!seq_iter_done(&it)) {
+                mino_val_t *cell = mino_cons(seq_iter_val(&it), mino_nil());
+                if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
+                tail2 = cell;
+                seq_iter_next(&it);
+            }
+        }
+        return apply_callable(fn, head, env);
+    }
+    /* (apply f coll) — convert coll to a cons arg list. */
+    if (last == NULL || last->type == MINO_NIL) {
+        return apply_callable(fn, mino_nil(), env);
+    }
+    if (last->type == MINO_CONS) {
+        return apply_callable(fn, last, env);
+    }
+    /* Convert non-list collection to cons list. */
+    {
+        mino_val_t *head = mino_nil();
+        mino_val_t *tail2 = NULL;
+        seq_iter_t it;
+        seq_iter_init(&it, last);
+        while (!seq_iter_done(&it)) {
+            mino_val_t *cell = mino_cons(seq_iter_val(&it), mino_nil());
+            if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
+            tail2 = cell;
+            seq_iter_next(&it);
+        }
+        call_args = head;
+    }
+    return apply_callable(fn, call_args, env);
+}
+
+static mino_val_t *prim_reverse(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *out = mino_nil();
+    seq_iter_t  it;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("reverse requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) {
+        out = mino_cons(seq_iter_val(&it), out);
+        seq_iter_next(&it);
+    }
+    return out;
+}
+
+static mino_val_t *prim_sort(mino_val_t *args, mino_env_t *env);
+
+/* Simple comparison function for sorting: numbers by value, strings
+ * lexicographically, other types by type tag then identity. */
+static int val_compare(const mino_val_t *a, const mino_val_t *b)
+{
+    if (a == b) return 0;
+    if (a == NULL || a->type == MINO_NIL) return -1;
+    if (b == NULL || b->type == MINO_NIL) return 1;
+    if (a->type == MINO_INT && b->type == MINO_INT) {
+        return a->as.i < b->as.i ? -1 : a->as.i > b->as.i ? 1 : 0;
+    }
+    if (a->type == MINO_FLOAT && b->type == MINO_FLOAT) {
+        return a->as.f < b->as.f ? -1 : a->as.f > b->as.f ? 1 : 0;
+    }
+    if (a->type == MINO_INT && b->type == MINO_FLOAT) {
+        double da = (double)a->as.i;
+        return da < b->as.f ? -1 : da > b->as.f ? 1 : 0;
+    }
+    if (a->type == MINO_FLOAT && b->type == MINO_INT) {
+        double db = (double)b->as.i;
+        return a->as.f < db ? -1 : a->as.f > db ? 1 : 0;
+    }
+    if ((a->type == MINO_STRING || a->type == MINO_SYMBOL || a->type == MINO_KEYWORD)
+        && a->type == b->type) {
+        size_t min_len = a->as.s.len < b->as.s.len ? a->as.s.len : b->as.s.len;
+        int c = memcmp(a->as.s.data, b->as.s.data, min_len);
+        if (c != 0) return c;
+        return a->as.s.len < b->as.s.len ? -1 : a->as.s.len > b->as.s.len ? 1 : 0;
+    }
+    /* Fall back to type tag ordering. */
+    return a->type < b->type ? -1 : a->type > b->type ? 1 : 0;
+}
+
+/* Merge sort for mino_val_t* arrays. */
+static void merge_sort_vals(mino_val_t **arr, mino_val_t **tmp, size_t len)
+{
+    size_t mid, i, j, k;
+    if (len <= 1) return;
+    mid = len / 2;
+    merge_sort_vals(arr, tmp, mid);
+    merge_sort_vals(arr + mid, tmp, len - mid);
+    memcpy(tmp, arr, mid * sizeof(*tmp));
+    i = 0; j = mid; k = 0;
+    while (i < mid && j < len) {
+        if (val_compare(tmp[i], arr[j]) <= 0) {
+            arr[k++] = tmp[i++];
+        } else {
+            arr[k++] = arr[j++];
+        }
+    }
+    while (i < mid) { arr[k++] = tmp[i++]; }
+}
+
+static mino_val_t *prim_sort(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t **arr;
+    mino_val_t **tmp;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    size_t      n_items, i;
+    seq_iter_t  it;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("sort requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    /* Collect elements into an array. */
+    n_items = 0;
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) { n_items++; seq_iter_next(&it); }
+    if (n_items == 0) return mino_nil();
+    arr = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n_items * sizeof(*arr));
+    tmp = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n_items * sizeof(*tmp));
+    i = 0;
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) { arr[i++] = seq_iter_val(&it); seq_iter_next(&it); }
+    merge_sort_vals(arr, tmp, n_items);
+    for (i = 0; i < n_items; i++) {
+        mino_val_t *cell = mino_cons(arr[i], mino_nil());
+        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+        tail = cell;
+    }
+    return head;
+}
+
+/* ------------------------------------------------------------------------- */
+/* String primitives                                                         */
+/* ------------------------------------------------------------------------- */
+
+static mino_val_t *prim_subs(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s_val;
+    long long   start, end_idx;
+    size_t      n;
+    (void)env;
+    arg_count(args, &n);
+    if (n != 2 && n != 3) {
+        set_error("subs requires 2 or 3 arguments");
+        return NULL;
+    }
+    s_val = args->as.cons.car;
+    if (s_val == NULL || s_val->type != MINO_STRING) {
+        set_error("subs: first argument must be a string");
+        return NULL;
+    }
+    if (args->as.cons.cdr->as.cons.car == NULL
+        || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
+        set_error("subs: start index must be an integer");
+        return NULL;
+    }
+    start = args->as.cons.cdr->as.cons.car->as.i;
+    if (n == 3) {
+        if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
+            || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
+            set_error("subs: end index must be an integer");
+            return NULL;
+        }
+        end_idx = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
+    } else {
+        end_idx = (long long)s_val->as.s.len;
+    }
+    if (start < 0 || end_idx < start || (size_t)end_idx > s_val->as.s.len) {
+        set_error("subs: index out of range");
+        return NULL;
+    }
+    return mino_string_n(s_val->as.s.data + start, (size_t)(end_idx - start));
+}
+
+static mino_val_t *prim_split(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t  *s_val;
+    mino_val_t  *sep_val;
+    const char  *s;
+    size_t       slen;
+    const char  *sep;
+    size_t       sep_len;
+    mino_val_t **buf = NULL;
+    size_t       cap = 0, len = 0;
+    const char  *p;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("split requires a string and a separator");
+        return NULL;
+    }
+    s_val   = args->as.cons.car;
+    sep_val = args->as.cons.cdr->as.cons.car;
+    if (s_val == NULL || s_val->type != MINO_STRING
+        || sep_val == NULL || sep_val->type != MINO_STRING) {
+        set_error("split: both arguments must be strings");
+        return NULL;
+    }
+    s       = s_val->as.s.data;
+    slen    = s_val->as.s.len;
+    sep     = sep_val->as.s.data;
+    sep_len = sep_val->as.s.len;
+    p       = s;
+    if (sep_len == 0) {
+        /* Split into individual characters. */
+        size_t i;
+        buf = (mino_val_t **)gc_alloc_typed(GC_T_VALARR,
+              (slen > 0 ? slen : 1) * sizeof(*buf));
+        for (i = 0; i < slen; i++) {
+            buf[i] = mino_string_n(s + i, 1);
+        }
+        return mino_vector(buf, slen);
+    }
+    while (p <= s + slen) {
+        const char *found = NULL;
+        const char *q;
+        for (q = p; q + sep_len <= s + slen; q++) {
+            if (memcmp(q, sep, sep_len) == 0) {
+                found = q;
+                break;
+            }
+        }
+        if (len == cap) {
+            size_t new_cap = cap == 0 ? 8 : cap * 2;
+            mino_val_t **nb = (mino_val_t **)gc_alloc_typed(
+                GC_T_VALARR, new_cap * sizeof(*nb));
+            if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
+            buf = nb;
+            cap = new_cap;
+        }
+        if (found != NULL) {
+            buf[len++] = mino_string_n(p, (size_t)(found - p));
+            p = found + sep_len;
+        } else {
+            buf[len++] = mino_string_n(p, (size_t)(s + slen - p));
+            break;
+        }
+    }
+    return mino_vector(buf, len);
+}
+
+static mino_val_t *prim_join(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t  *sep_val;
+    mino_val_t  *coll;
+    const char  *sep = "";
+    size_t       sep_len = 0;
+    char        *buf = NULL;
+    size_t       buf_len = 0, buf_cap = 0;
+    int          first = 1;
+    seq_iter_t   it;
+    size_t       n;
+    (void)env;
+    arg_count(args, &n);
+    if (n == 1) {
+        /* (join coll) — no separator. */
+        coll = args->as.cons.car;
+    } else if (n == 2) {
+        /* (join sep coll) */
+        sep_val = args->as.cons.car;
+        coll    = args->as.cons.cdr->as.cons.car;
+        if (sep_val == NULL || sep_val->type != MINO_STRING) {
+            set_error("join: separator must be a string");
+            return NULL;
+        }
+        sep     = sep_val->as.s.data;
+        sep_len = sep_val->as.s.len;
+    } else {
+        set_error("join requires 1 or 2 arguments");
+        return NULL;
+    }
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_string("");
+    }
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(&it);
+        const char *part;
+        size_t      part_len;
+        size_t      need;
+        if (elem == NULL || elem->type == MINO_NIL) {
+            seq_iter_next(&it);
+            continue;
+        }
+        if (elem->type == MINO_STRING) {
+            part     = elem->as.s.data;
+            part_len = elem->as.s.len;
+        } else {
+            /* Convert to string. */
+            mino_val_t *str_a = mino_cons(elem, mino_nil());
+            mino_val_t *str   = prim_str(str_a, env);
+            if (str == NULL) return NULL;
+            part     = str->as.s.data;
+            part_len = str->as.s.len;
+        }
+        need = buf_len + (first ? 0 : sep_len) + part_len + 1;
+        if (need > buf_cap) {
+            buf_cap = buf_cap == 0 ? 128 : buf_cap;
+            while (buf_cap < need) buf_cap *= 2;
+            buf = (char *)realloc(buf, buf_cap);
+            if (buf == NULL) { set_error("out of memory"); return NULL; }
+        }
+        if (!first && sep_len > 0) {
+            memcpy(buf + buf_len, sep, sep_len);
+            buf_len += sep_len;
+        }
+        memcpy(buf + buf_len, part, part_len);
+        buf_len += part_len;
+        first = 0;
+        seq_iter_next(&it);
+    }
+    {
+        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", buf_len);
+        free(buf);
+        return result;
+    }
+}
+
+static mino_val_t *prim_starts_with_p(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s, *prefix;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("starts-with? requires two string arguments");
+        return NULL;
+    }
+    s      = args->as.cons.car;
+    prefix = args->as.cons.cdr->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING
+        || prefix == NULL || prefix->type != MINO_STRING) {
+        set_error("starts-with? requires two string arguments");
+        return NULL;
+    }
+    if (prefix->as.s.len > s->as.s.len) return mino_false();
+    return memcmp(s->as.s.data, prefix->as.s.data, prefix->as.s.len) == 0
+        ? mino_true() : mino_false();
+}
+
+static mino_val_t *prim_ends_with_p(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s, *suffix;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("ends-with? requires two string arguments");
+        return NULL;
+    }
+    s      = args->as.cons.car;
+    suffix = args->as.cons.cdr->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING
+        || suffix == NULL || suffix->type != MINO_STRING) {
+        set_error("ends-with? requires two string arguments");
+        return NULL;
+    }
+    if (suffix->as.s.len > s->as.s.len) return mino_false();
+    return memcmp(s->as.s.data + s->as.s.len - suffix->as.s.len,
+                  suffix->as.s.data, suffix->as.s.len) == 0
+        ? mino_true() : mino_false();
+}
+
+static mino_val_t *prim_includes_p(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s, *sub;
+    const char *p;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("includes? requires two string arguments");
+        return NULL;
+    }
+    s   = args->as.cons.car;
+    sub = args->as.cons.cdr->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING
+        || sub == NULL || sub->type != MINO_STRING) {
+        set_error("includes? requires two string arguments");
+        return NULL;
+    }
+    if (sub->as.s.len == 0) return mino_true();
+    if (sub->as.s.len > s->as.s.len) return mino_false();
+    for (p = s->as.s.data; p + sub->as.s.len <= s->as.s.data + s->as.s.len; p++) {
+        if (memcmp(p, sub->as.s.data, sub->as.s.len) == 0) {
+            return mino_true();
+        }
+    }
+    return mino_false();
+}
+
+static mino_val_t *prim_upper_case(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s;
+    char       *buf;
+    size_t      i;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("upper-case requires one string argument");
+        return NULL;
+    }
+    s = args->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING) {
+        set_error("upper-case requires one string argument");
+        return NULL;
+    }
+    buf = (char *)malloc(s->as.s.len);
+    if (buf == NULL && s->as.s.len > 0) {
+        set_error("out of memory"); return NULL;
+    }
+    for (i = 0; i < s->as.s.len; i++) {
+        buf[i] = (char)toupper((unsigned char)s->as.s.data[i]);
+    }
+    {
+        mino_val_t *result = mino_string_n(buf, s->as.s.len);
+        free(buf);
+        return result;
+    }
+}
+
+static mino_val_t *prim_lower_case(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s;
+    char       *buf;
+    size_t      i;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("lower-case requires one string argument");
+        return NULL;
+    }
+    s = args->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING) {
+        set_error("lower-case requires one string argument");
+        return NULL;
+    }
+    buf = (char *)malloc(s->as.s.len);
+    if (buf == NULL && s->as.s.len > 0) {
+        set_error("out of memory"); return NULL;
+    }
+    for (i = 0; i < s->as.s.len; i++) {
+        buf[i] = (char)tolower((unsigned char)s->as.s.data[i]);
+    }
+    {
+        mino_val_t *result = mino_string_n(buf, s->as.s.len);
+        free(buf);
+        return result;
+    }
+}
+
+static mino_val_t *prim_trim(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s;
+    const char *start, *end_ptr;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("trim requires one string argument");
+        return NULL;
+    }
+    s = args->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING) {
+        set_error("trim requires one string argument");
+        return NULL;
+    }
+    start   = s->as.s.data;
+    end_ptr = s->as.s.data + s->as.s.len;
+    while (start < end_ptr && isspace((unsigned char)*start)) start++;
+    while (end_ptr > start && isspace((unsigned char)*(end_ptr - 1))) end_ptr--;
+    return mino_string_n(start, (size_t)(end_ptr - start));
+}
+
+/* ------------------------------------------------------------------------- */
+/* Utility primitives                                                        */
+/* ------------------------------------------------------------------------- */
+
+static mino_val_t *prim_not(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("not requires one argument");
+        return NULL;
+    }
+    return mino_is_truthy(args->as.cons.car) ? mino_false() : mino_true();
+}
+
+static mino_val_t *prim_not_eq(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *a, *b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("not= requires two arguments");
+        return NULL;
+    }
+    a = args->as.cons.car;
+    b = args->as.cons.cdr->as.cons.car;
+    return mino_eq(a, b) ? mino_false() : mino_true();
+}
+
+static mino_val_t *prim_empty_p(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("empty? requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_true();
+    switch (coll->type) {
+    case MINO_CONS:   return mino_false(); /* a cons is never empty */
+    case MINO_VECTOR: return coll->as.vec.len == 0 ? mino_true() : mino_false();
+    case MINO_MAP:    return coll->as.map.len == 0 ? mino_true() : mino_false();
+    case MINO_SET:    return coll->as.set.len == 0 ? mino_true() : mino_false();
+    case MINO_STRING: return coll->as.s.len == 0 ? mino_true() : mino_false();
+    default:
+        set_error("empty?: unsupported collection");
+        return NULL;
+    }
+}
+
+static mino_val_t *prim_some(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pred;
+    mino_val_t *coll;
+    seq_iter_t  it;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("some requires a predicate and a collection");
+        return NULL;
+    }
+    pred = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_nil();
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem   = seq_iter_val(&it);
+        mino_val_t *call_a = mino_cons(elem, mino_nil());
+        mino_val_t *result = apply_callable(pred, call_a, env);
+        if (result == NULL) return NULL;
+        if (mino_is_truthy(result)) return result;
+        seq_iter_next(&it);
+    }
+    return mino_nil();
+}
+
+static mino_val_t *prim_every_p(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pred;
+    mino_val_t *coll;
+    seq_iter_t  it;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("every? requires a predicate and a collection");
+        return NULL;
+    }
+    pred = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_true();
+    seq_iter_init(&it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem   = seq_iter_val(&it);
+        mino_val_t *call_a = mino_cons(elem, mino_nil());
+        mino_val_t *result = apply_callable(pred, call_a, env);
+        if (result == NULL) return NULL;
+        if (!mino_is_truthy(result)) return mino_false();
+        seq_iter_next(&it);
+    }
+    return mino_true();
+}
+
+static mino_val_t *prim_identity(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("identity requires one argument");
+        return NULL;
+    }
+    return args->as.cons.car;
+}
+
 static mino_val_t *prim_cons_p(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -4596,6 +5925,7 @@ DEFINE_TYPE_PRED(prim_keyword_p, args->as.cons.car != NULL && args->as.cons.car-
 DEFINE_TYPE_PRED(prim_symbol_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_SYMBOL)
 DEFINE_TYPE_PRED(prim_vector_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_VECTOR)
 DEFINE_TYPE_PRED(prim_map_p,     args->as.cons.car != NULL && args->as.cons.car->type == MINO_MAP)
+DEFINE_TYPE_PRED(prim_set_p,     args->as.cons.car != NULL && args->as.cons.car->type == MINO_SET)
 DEFINE_TYPE_PRED(prim_fn_p,      args->as.cons.car != NULL && (args->as.cons.car->type == MINO_FN || args->as.cons.car->type == MINO_PRIM))
 
 #undef DEFINE_TYPE_PRED
@@ -4621,6 +5951,7 @@ static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
     case MINO_CONS:    return mino_keyword("list");
     case MINO_VECTOR:  return mino_keyword("vector");
     case MINO_MAP:     return mino_keyword("map");
+    case MINO_SET:     return mino_keyword("set");
     case MINO_PRIM:    return mino_keyword("fn");
     case MINO_FN:      return mino_keyword("fn");
     case MINO_MACRO:   return mino_keyword("macro");
@@ -5116,7 +6447,11 @@ static const char *stdlib_mino_src =
     "    (let (step (first forms))\n"
     "      (if (cons? step)\n"
     "        `(->> (~(first step) ~@(rest step) ~x) ~@(rest forms))\n"
-    "        `(->> (~step ~x) ~@(rest forms))))))\n";
+    "        `(->> (~step ~x) ~@(rest forms))))))\n"
+    "\n"
+    "(def comp (fn (f g) (fn (& args) (f (apply g args)))))\n"
+    "(def partial (fn (f & bound) (fn (& args) (apply f (concat bound args)))))\n"
+    "(def complement (fn (f) (fn (& args) (not (apply f args)))))\n";
 
 static void install_stdlib_macros(mino_env_t *env)
 {
@@ -5197,6 +6532,46 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "doc",      mino_prim("doc",      prim_doc));
     mino_env_set(env, "source",   mino_prim("source",   prim_source));
     mino_env_set(env, "apropos",  mino_prim("apropos",  prim_apropos));
+    /* set operations */
+    mino_env_set(env, "hash-set", mino_prim("hash-set", prim_hash_set));
+    mino_env_set(env, "set?",     mino_prim("set?",     prim_set_p));
+    mino_env_set(env, "contains?",mino_prim("contains?",prim_contains_p));
+    mino_env_set(env, "disj",     mino_prim("disj",     prim_disj));
+    /* sequence operations */
+    mino_env_set(env, "map",      mino_prim("map",      prim_map));
+    mino_env_set(env, "filter",   mino_prim("filter",   prim_filter));
+    mino_env_set(env, "reduce",   mino_prim("reduce",   prim_reduce));
+    mino_env_set(env, "take",     mino_prim("take",     prim_take));
+    mino_env_set(env, "drop",     mino_prim("drop",     prim_drop));
+    mino_env_set(env, "range",    mino_prim("range",    prim_range));
+    mino_env_set(env, "repeat",   mino_prim("repeat",   prim_repeat));
+    mino_env_set(env, "concat",   mino_prim("concat",   prim_concat));
+    mino_env_set(env, "into",     mino_prim("into",     prim_into));
+    mino_env_set(env, "apply",    mino_prim("apply",    prim_apply));
+    mino_env_set(env, "reverse",  mino_prim("reverse",  prim_reverse));
+    mino_env_set(env, "sort",     mino_prim("sort",     prim_sort));
+    /* string operations */
+    mino_env_set(env, "subs",     mino_prim("subs",     prim_subs));
+    mino_env_set(env, "split",    mino_prim("split",    prim_split));
+    mino_env_set(env, "join",     mino_prim("join",     prim_join));
+    mino_env_set(env, "starts-with?",
+                 mino_prim("starts-with?", prim_starts_with_p));
+    mino_env_set(env, "ends-with?",
+                 mino_prim("ends-with?", prim_ends_with_p));
+    mino_env_set(env, "includes?",
+                 mino_prim("includes?", prim_includes_p));
+    mino_env_set(env, "upper-case",
+                 mino_prim("upper-case", prim_upper_case));
+    mino_env_set(env, "lower-case",
+                 mino_prim("lower-case", prim_lower_case));
+    mino_env_set(env, "trim",     mino_prim("trim",     prim_trim));
+    /* utility */
+    mino_env_set(env, "not",      mino_prim("not",      prim_not));
+    mino_env_set(env, "not=",     mino_prim("not=",     prim_not_eq));
+    mino_env_set(env, "empty?",   mino_prim("empty?",   prim_empty_p));
+    mino_env_set(env, "some",     mino_prim("some",     prim_some));
+    mino_env_set(env, "every?",   mino_prim("every?",   prim_every_p));
+    mino_env_set(env, "identity", mino_prim("identity", prim_identity));
     install_stdlib_macros(env);
 }
 
