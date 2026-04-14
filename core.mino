@@ -630,12 +630,13 @@
 ;; --- Iteration macros ---
 
 (defmacro doto (x & forms)
-  (let (g (gensym))
+  (let (g       (gensym)
+        stmts   (apply list (map (fn (f) (if (cons? f)
+                                            `(~(first f) ~g ~@(rest f))
+                                            `(~f ~g)))
+                                  forms)))
     `(let (~g ~x)
-       ~@(map (fn (f) (if (cons? f)
-                         `(~(first f) ~g ~@(rest f))
-                         `(~f ~g)))
-              forms)
+       ~@stmts
        ~g)))
 
 (defmacro dotimes (bindings & body)

@@ -1,0 +1,333 @@
+(require "test")
+
+;; Tests for core.mino functions added beyond the original set.
+
+;; --- Type predicates ---
+
+(deftest type-predicates
+  (is (true? true))
+  (is (not (true? false)))
+  (is (not (true? 1)))
+  (is (false? false))
+  (is (not (false? true)))
+  (is (not (false? nil)))
+  (is (boolean? true))
+  (is (boolean? false))
+  (is (not (boolean? 1)))
+  (is (int? 42))
+  (is (not (int? 3.14)))
+  (is (float? 3.14))
+  (is (not (float? 42)))
+  (is (some? 0))
+  (is (some? false))
+  (is (not (some? nil)))
+  (is (list? (list 1 2)))
+  (is (not (list? [1 2])))
+  (is (atom? (atom 0)))
+  (is (not (atom? 0))))
+
+(deftest not-any-not-every
+  (is (not-any? even? [1 3 5]))
+  (is (not (not-any? even? [1 2 3])))
+  (is (not-every? even? [1 2 3]))
+  (is (not (not-every? even? [2 4 6]))))
+
+;; --- Sequence navigation ---
+
+(deftest seq-navigation
+  (is (= '(2 3) (next [1 2 3])))
+  (is (= nil (next [1])))
+  (is (= '(2) (nfirst [[1 2] [3 4]])))
+  (is (= 3 (fnext [1 3 5])))
+  (is (= '(3) (nnext [1 2 3])))
+  (is (= nil (nnext [1 2]))))
+
+;; --- Map entry accessors ---
+
+(deftest key-val-fns
+  (is (= :a (key [:a 1])))
+  (is (= 1 (val [:a 1]))))
+
+;; --- Collection conversions ---
+
+(deftest remove-fn
+  (is (= [1 3 5] (into [] (remove even? [1 2 3 4 5])))))
+
+(deftest vec-fn
+  (is (= [1 2 3] (vec (list 1 2 3))))
+  (is (= [] (vec nil))))
+
+;; --- Random ---
+
+(deftest rand-int-fn
+  (let (n (rand-int 10))
+    (is (and (>= n 0) (< n 10)))))
+
+(deftest rand-nth-fn
+  (let (x (rand-nth [:a :b :c]))
+    (is (contains? #{:a :b :c} x))))
+
+;; --- Side-effecting traversal ---
+
+(deftest run-fn
+  (let (a (atom []))
+    (run! (fn (x) (swap! a conj x)) [1 2 3])
+    (is (= [1 2 3] (deref a)))))
+
+;; --- Control flow macros ---
+
+(deftest if-not-macro
+  (is (= :yes (if-not false :yes :no)))
+  (is (= :no  (if-not true :yes :no)))
+  (is (= :yes (if-not nil :yes))))
+
+(deftest when-not-macro
+  (is (= :ok (when-not false :ok)))
+  (is (= nil (when-not true :ok))))
+
+(deftest if-let-macro
+  (is (= 42 (if-let (x 42) x :none)))
+  (is (= :none (if-let (x nil) x :none)))
+  (is (= :none (if-let (x false) x :none))))
+
+(deftest when-let-macro
+  (is (= "hi!" (when-let (x "hi") (str x "!"))))
+  (is (= nil (when-let (x nil) :nope))))
+
+(deftest if-some-macro
+  (is (= false (if-some (x false) x :none)))
+  (is (= :none (if-some (x nil) x :none)))
+  (is (= 42 (if-some (x 42) x :none))))
+
+(deftest when-some-macro
+  (is (= "got 0" (when-some (x 0) (str "got " x))))
+  (is (= nil (when-some (x nil) :nope))))
+
+;; --- Sequence functions ---
+
+(deftest last-fn
+  (is (= 3 (last [1 2 3])))
+  (is (= 1 (last [1])))
+  (is (= nil (last nil))))
+
+(deftest butlast-fn
+  (is (= '(1 2) (butlast [1 2 3])))
+  (is (= nil (butlast [1]))))
+
+(deftest nthrest-fn
+  (is (= [3 4 5] (into [] (nthrest [1 2 3 4 5] 2))))
+  (is (= [1 2] (into [] (nthrest [1 2] 0)))))
+
+(deftest nthnext-fn
+  (is (= '(3 4 5) (nthnext [1 2 3 4 5] 2)))
+  (is (= nil (nthnext [1 2] 3))))
+
+(deftest take-last-fn
+  (is (= '(4 5) (take-last 2 [1 2 3 4 5])))
+  (is (= '(1 2 3) (take-last 5 [1 2 3]))))
+
+(deftest drop-last-fn
+  (is (= [1 2 3] (into [] (drop-last [1 2 3 4]))))
+  (is (= [1 2] (into [] (drop-last 2 [1 2 3 4])))))
+
+(deftest split-at-fn
+  (is (= [[1 2] [3 4 5]] (split-at 2 [1 2 3 4 5]))))
+
+(deftest split-with-fn
+  (is (= [[1 3] [4 2 5]] (split-with odd? [1 3 4 2 5]))))
+
+(deftest mapv-fn
+  (is (= [2 4 6] (mapv (fn (x) (* x 2)) [1 2 3])))
+  (is (vector? (mapv inc [1]))))
+
+(deftest filterv-fn
+  (is (= [2 4] (filterv even? [1 2 3 4 5])))
+  (is (vector? (filterv even? [1 2]))))
+
+(deftest sort-by-fn
+  (is (= '("a" "bb" "ccc") (sort-by count ["ccc" "a" "bb"])))
+  (is (= '("ccc" "bb" "a") (sort-by count > ["a" "bb" "ccc"]))))
+
+;; --- Collection utilities ---
+
+(deftest get-in-fn
+  (is (= 42 (get-in {:a {:b 42}} [:a :b])))
+  (is (= nil (get-in {:a 1} [:b :c]))))
+
+(deftest assoc-in-fn
+  (is (= {:a {:b 42}} (assoc-in {} [:a :b] 42)))
+  (is (= {:a {:b 2}} (assoc-in {:a {:b 1}} [:a :b] 2))))
+
+(deftest update-in-fn
+  (is (= {:a {:b 2}} (update-in {:a {:b 1}} [:a :b] inc))))
+
+(deftest merge-with-fn
+  (is (= {:a 4 :b 2 :c 4}
+         (merge-with + {:a 1 :b 2} {:a 3 :c 4}))))
+
+(deftest reduce-kv-fn
+  (is (= {:a 2 :b 4}
+         (reduce-kv (fn (acc k v) (assoc acc k (* v 2)))
+                    {} {:a 1 :b 2}))))
+
+(deftest replace-fn
+  (is (= [1 :c 2] (into [] (replace {:a 1 :b 2} [:a :c :b])))))
+
+(deftest str-replace-fn
+  (is (= "hello-world" (str-replace "hello world" " " "-")))
+  (is (= "abc" (str-replace "a.b.c" "." ""))))
+
+;; --- Bitwise ---
+
+(deftest bitwise-fns
+  (is (= 8 (bit-set 0 3)))
+  (is (= 0 (bit-clear 8 3)))
+  (is (bit-test 8 3))
+  (is (not (bit-test 8 2)))
+  (is (= 0 (bit-flip 8 3)))
+  (is (= 8 (bit-flip 0 3)))
+  (is (= 6 (bit-and-not 7 1))))
+
+;; --- Misc utilities ---
+
+(deftest blank-fn
+  (is (blank? nil))
+  (is (blank? ""))
+  (is (blank? "  "))
+  (is (not (blank? "hi"))))
+
+(deftest comparator-fn
+  (is (= -1 ((comparator <) 1 2)))
+  (is (= 1  ((comparator <) 2 1)))
+  (is (= 0  ((comparator <) 1 1))))
+
+;; --- Lazy combinators ---
+
+(deftest keep-fn
+  (is (= [20 40] (into [] (keep (fn (x) (when (even? x) (* x 10)))
+                                [1 2 3 4 5])))))
+
+(deftest keep-indexed-fn
+  (is (= [:a :c :e] (into [] (keep-indexed
+                                (fn (i x) (when (even? i) x))
+                                [:a :b :c :d :e])))))
+
+(deftest map-indexed-fn
+  (is (= [[0 :a] [1 :b] [2 :c]]
+         (into [] (map-indexed vector [:a :b :c])))))
+
+(deftest partition-all-fn
+  (is (= [[1 2 3] [4 5 6] [7 8]]
+         (into [] (partition-all 3 [1 2 3 4 5 6 7 8])))))
+
+(deftest reductions-fn
+  (is (= [1 3 6 10 15] (into [] (reductions + [1 2 3 4 5]))))
+  (is (= [100 101 103 106] (into [] (reductions + 100 [1 2 3])))))
+
+(deftest dedupe-fn
+  (is (= [1 2 3 4 1] (into [] (dedupe [1 1 2 3 3 3 4 4 1])))))
+
+;; --- Higher-order combinators ---
+
+(deftest every-pred-fn
+  (is ((every-pred even? pos?) 2 4 6))
+  (is (not ((every-pred even? pos?) 2 -4 6))))
+
+(deftest some-fn-fn
+  (is ((some-fn even? neg?) 3 -1))
+  (is (not ((some-fn even? neg?) 3 5))))
+
+(deftest fnil-fn
+  (is (= 5 ((fnil + 0) nil 5)))
+  (is (= 7 ((fnil + 0) 3 4))))
+
+(deftest memoize-fn
+  (let (call-count (atom 0)
+        f (memoize (fn (x) (swap! call-count inc) (* x x))))
+    (is (= 9 (f 3)))
+    (is (= 9 (f 3)))
+    ;; called once: second call uses cached result
+    (is (= 1 (deref call-count)))))
+
+(deftest trampoline-fn
+  (defn my-bounce (n)
+    (if (= n 0) :done (fn () (my-bounce (- n 1)))))
+  (is (= :done (trampoline my-bounce 1000))))
+
+;; --- Threading macros ---
+
+(deftest as-thread
+  (is (= 9 (as-> 1 x (+ x 2) (* x 3)))))
+
+(deftest cond-thread
+  (is (= 4 (cond-> 1 true inc false (* 100) true (* 2)))))
+
+(deftest cond-thread-last
+  (is (= '(1 2 3 4)
+         (cond->> [4 3 2 1] true (sort <)))))
+
+;; --- Iteration ---
+
+(deftest doto-macro
+  (let (a (atom []))
+    (doto a
+      (swap! conj 1)
+      (swap! conj 2))
+    (is (= [1 2] (deref a)))))
+
+(deftest dotimes-macro
+  (let (a (atom []))
+    (dotimes (i 5) (swap! a conj i))
+    (is (= [0 1 2 3 4] (deref a)))))
+
+(deftest doseq-macro
+  (let (a (atom []))
+    (doseq (x [10 20 30]) (swap! a conj (* x 2)))
+    (is (= [20 40 60] (deref a)))))
+
+;; --- Shuffle ---
+
+(deftest shuffle-fn
+  (let (v (shuffle [1 2 3 4 5]))
+    (is (= 5 (count v)))
+    (is (= #{1 2 3 4 5} (into #{} v)))))
+
+;; --- Tree walking ---
+
+(deftest flatten-fn
+  (is (= [1 2 3 4 5 6] (into [] (flatten [[1 2] [3 [4 5]] 6]))))
+  (is (= [1 2 3] (into [] (flatten [1 2 3])))))
+
+(deftest tree-seq-fn
+  (is (= [[1 [2 [3]]] 1 [2 [3]] 2 [3] 3]
+         (into [] (tree-seq vector? seq [1 [2 [3]]])))))
+
+(deftest walk-fns
+  (is (= '(2 (3 4))
+         (postwalk (fn (x) (if (number? x) (inc x) x)) '(1 (2 3)))))
+  (is (= [1 [2 :c]]
+         (postwalk-replace {:a 1 :b 2} [:a [:b :c]])))
+  (is (= [1 [2 :c]]
+         (prewalk-replace {:a 1 :b 2} [:a [:b :c]]))))
+
+;; --- Regex ---
+
+(deftest re-seq-fn
+  (is (= ["123" "456"]
+         (into [] (re-seq "\\d+" "abc123def456ghi"))))
+  (is (= ["a" "b" "c"]
+         (into [] (re-seq "[a-z]" "a1b2c3")))))
+
+;; --- Complex macros ---
+
+(deftest condp-macro
+  (is (= "two" (condp = 2 1 "one" 2 "two" 3 "three")))
+  (is (= "default" (condp = 99 1 "one" "default"))))
+
+(deftest case-macro
+  (is (= 2 (case :b :a 1 :b 2 :c 3)))
+  (is (= :default (case :z :a 1 :default))))
+
+(deftest for-macro
+  (is (= [1 4 9 16 25] (into [] (for (x [1 2 3 4 5]) (* x x)))))
+  (is (= [4 16] (into [] (for (x [1 2 3 4 5] :when (even? x)) (* x x))))))
