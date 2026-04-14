@@ -83,6 +83,25 @@
 (defmacro defn (name params & body)
   `(def ~name (fn ~params ~@body)))
 
+;; --- Collection utilities ---
+
+(def update (fn (m k f & args)
+  (assoc m k (apply f (get m k) args))))
+
+;; --- Utility functions ---
+
+(def some (fn (pred coll)
+  (when (not (empty? coll))
+    (or (pred (first coll))
+        (some pred (rest coll))))))
+
+(def every? (fn (pred coll)
+  (if (empty? coll)
+    true
+    (if (pred (first coll))
+      (every? pred (rest coll))
+      false))))
+
 ;; --- Higher-order functions ---
 
 (def comp (fn (f g) (fn (& args) (f (apply g args)))))

@@ -5178,64 +5178,6 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
-static mino_val_t *prim_update(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *coll;
-    mino_val_t *key;
-    mino_val_t *fn;
-    mino_val_t *old_val = mino_nil();
-    mino_val_t *new_val;
-    mino_val_t *call_args;
-    size_t      n;
-    (void)env;
-    arg_count(args, &n);
-    if (n != 3) {
-        set_error("update requires a collection, key, and function");
-        return NULL;
-    }
-    coll = args->as.cons.car;
-    key  = args->as.cons.cdr->as.cons.car;
-    fn   = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-    if (fn == NULL || (fn->type != MINO_PRIM && fn->type != MINO_FN)) {
-        set_error("update: third argument must be a function");
-        return NULL;
-    }
-    if (coll != NULL && coll->type == MINO_MAP) {
-        mino_val_t *found = map_get_val(coll, key);
-        if (found != NULL) {
-            old_val = found;
-        }
-    } else if (coll != NULL && coll->type == MINO_VECTOR
-               && key != NULL && key->type == MINO_INT) {
-        long long idx = key->as.i;
-        if (idx >= 0 && (size_t)idx < coll->as.vec.len) {
-            old_val = vec_nth(coll, (size_t)idx);
-        }
-    } else if (coll == NULL || coll->type == MINO_NIL) {
-        /* Update on nil behaves like update on an empty map. */
-    } else {
-        {
-            char msg[96];
-            snprintf(msg, sizeof(msg), "update: expected a map, got %s",
-                     type_tag_str(coll));
-            set_error(msg);
-        }
-        return NULL;
-    }
-    call_args = mino_cons(old_val, mino_nil());
-    new_val = apply_callable(fn, call_args, env);
-    if (new_val == NULL) {
-        return NULL;
-    }
-    {
-        mino_val_t *assoc_args;
-        assoc_args = mino_cons(
-            coll == NULL ? mino_nil() : coll,
-            mino_cons(key, mino_cons(new_val, mino_nil())));
-        return prim_assoc(assoc_args, env);
-    }
-}
-
 static mino_val_t *prim_keys(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
@@ -6435,54 +6377,6 @@ static mino_val_t *prim_trim(mino_val_t *args, mino_env_t *env)
 /* Utility primitives                                                        */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *prim_some(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *pred;
-    mino_val_t *coll;
-    seq_iter_t  it;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("some requires a predicate and a collection");
-        return NULL;
-    }
-    pred = args->as.cons.car;
-    coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_nil();
-    seq_iter_init(&it, coll);
-    while (!seq_iter_done(&it)) {
-        mino_val_t *elem   = seq_iter_val(&it);
-        mino_val_t *call_a = mino_cons(elem, mino_nil());
-        mino_val_t *result = apply_callable(pred, call_a, env);
-        if (result == NULL) return NULL;
-        if (mino_is_truthy(result)) return result;
-        seq_iter_next(&it);
-    }
-    return mino_nil();
-}
-
-static mino_val_t *prim_every_p(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *pred;
-    mino_val_t *coll;
-    seq_iter_t  it;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("every? requires a predicate and a collection");
-        return NULL;
-    }
-    pred = args->as.cons.car;
-    coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_true();
-    seq_iter_init(&it, coll);
-    while (!seq_iter_done(&it)) {
-        mino_val_t *elem   = seq_iter_val(&it);
-        mino_val_t *call_a = mino_cons(elem, mino_nil());
-        mino_val_t *result = apply_callable(pred, call_a, env);
-        if (result == NULL) return NULL;
-        if (!mino_is_truthy(result)) return mino_false();
-        seq_iter_next(&it);
-    }
-    return mino_true();
-}
-
 static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -7114,7 +7008,6 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "assoc",    mino_prim("assoc",    prim_assoc));
     mino_env_set(env, "get",      mino_prim("get",      prim_get));
     mino_env_set(env, "conj",     mino_prim("conj",     prim_conj));
-    mino_env_set(env, "update",   mino_prim("update",   prim_update));
     mino_env_set(env, "keys",     mino_prim("keys",     prim_keys));
     mino_env_set(env, "vals",     mino_prim("vals",     prim_vals));
     mino_env_set(env, "macroexpand-1",
@@ -7170,9 +7063,7 @@ void mino_install_core(mino_env_t *env)
                  mino_prim("lower-case", prim_lower_case));
     mino_env_set(env, "trim",     mino_prim("trim",     prim_trim));
     mino_env_set(env, "char-at",  mino_prim("char-at",  prim_char_at));
-    /* utility */
-    mino_env_set(env, "some",     mino_prim("some",     prim_some));
-    mino_env_set(env, "every?",   mino_prim("every?",   prim_every_p));
+    /* (some and every? are now in stdlib.mino) */
     /* atoms */
     mino_env_set(env, "atom",     mino_prim("atom",     prim_atom));
     mino_env_set(env, "deref",    mino_prim("deref",    prim_deref));

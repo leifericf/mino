@@ -210,13 +210,13 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   comparison   = < <= > >= not=
  *   list         car cdr cons list
  *   collection   count nth first rest vector hash-map assoc dissoc get conj
- *                update keys vals
+ *                keys vals
  *   sets         hash-set set? contains? disj
  *   sequences    map filter reduce take drop range repeat concat into apply
  *                reverse sort
  *   predicates   cons? nil? string? number? keyword? symbol? vector? map?
  *                set? fn? empty?
- *   utility      not identity some every?
+ *   utility      not identity
  *   coercion     int float
  *   reflection   type name doc source apropos
  *   strings      str pr-str read-string format subs split join char-at
@@ -225,7 +225,8 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   exceptions   throw
  *   modules      require
  *   macros       macroexpand macroexpand-1 gensym
- *   stdlib (mino-defined): when cond and or -> ->> comp partial complement
+ *   stdlib (mino-defined): when cond and or -> ->> update some every?
+ *                          comp partial complement
  * Special forms (quote, quasiquote, unquote, unquote-splicing, def,
  * defmacro, if, do, let, fn, loop, recur, try) are recognized directly by
  * the evaluator and do not need to be installed.
