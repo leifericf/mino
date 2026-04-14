@@ -4,6 +4,41 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.12.0] — Release candidate (alpha)
+
+Quality, polish, and documentation pass. No new language features.
+
+### Changed
+- Error messages in `let` and `loop` now include source file and line
+  when available (promoted to `set_error_at`).
+- "Unsupported collection" errors now name the type that was actually
+  passed (e.g., `count: expected a collection, got int`).
+- "Not a function" errors now report the received type
+  (e.g., `not a function (got string)`).
+- Internal `type_tag_str` helper added for diagnostic formatting.
+
+### Added
+- **Embedding cookbook** (`cookbook/`): six worked examples demonstrating
+  real-world embedding patterns — config loader, rules engine,
+  REPL-on-socket, plugin host, data pipeline, and game scripting console.
+- **Fuzz harness** (`fuzz/`): libFuzzer-compatible reader target plus a
+  57-case adversarial crash test suite (`make fuzz-crash`).
+- **Map and sequence benchmarks** (`bench/map_bench.c`,
+  `bench/seq_bench.c`): HAMT get/assoc scaling, and map/filter/reduce/sort
+  throughput. Invoke via `make bench-map` and `make bench-seq`.
+
+### Verified
+- 258/258 smoke tests pass in all four modes (O0, O0+GC\_STRESS, O2,
+  O2+GC\_STRESS).
+- 57/57 adversarial reader inputs handled without crashes.
+- All six cookbook examples compile warning-free and produce correct
+  output.
+- Benchmark results show expected O(log32 n) scaling for vectors and
+  maps, consistent sequence throughput.
+- API review: all 40+ public symbols consistently named, no orphaned
+  declarations, UNSTABLE marker retained (alpha).
+- LOC: mino.c ~6,672, mino.h ~352 (within 15k–25k budget).
+
 ## [0.11.0] — Sequences & remainder of stdlib
 
 Sets, sequence transformations, string operations, and utility functions
