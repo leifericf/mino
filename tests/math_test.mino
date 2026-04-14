@@ -57,6 +57,14 @@
     (let (values (map (fn (_) (rand)) (range 10)))
       (is (> (count (distinct values)) 1)))))
 
+(deftest time-ms-fn
+  (is (number? (time-ms)))
+  (is (> (time-ms) 0))
+  (testing "elapsed time is positive"
+    (let (start (time-ms))
+      (loop (i 0) (if (< i 100000) (recur (+ i 1)) nil))
+      (is (>= (- (time-ms) start) 0)))))
+
 (deftest math-pi-constant
   (is (> math-pi 3.14159))
   (is (< math-pi 3.14160)))
