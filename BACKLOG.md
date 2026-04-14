@@ -18,13 +18,8 @@ destructuring: `(let [{:keys [a b]} m] ...)` and
 `defmacro` parameter lists. Currently only symbol bindings work.
 Refactor `bind_params` to recursively destructure. ~300 lines.
 
-**Lazy sequences** -- deferred computation over collections.
-
-New type or convention for thunks that produce cons cells on demand.
-`lazy-seq` special form or macro. Update `map`, `filter`, `range`,
-`concat`, `take`, `drop` to return lazy seqs. Add `doall` and `dorun`
-to force evaluation. Currently all sequence operations are strict
-(noted at mino.c:4920). Largest single change. ~500 lines.
+~~**Lazy sequences**~~ -- Done in v0.14.0. `MINO_LAZY` type, `lazy-seq`
+special form, `seq`, `realized?`. Seven sequence ops moved to lazy mino.
 
 ### Important
 
@@ -54,8 +49,8 @@ Currently only docstrings on `def`/`defmacro` via the internal
 `meta_table`. Requires adding a metadata pointer to `mino_val_t`.
 ~300 lines.
 
-**String formatting** -- `(format "Hello %s, you are %d" name age)`.
-Can wrap C's `sprintf`. ~100 lines.
+~~**String formatting**~~ -- Done in v0.14.0. `format` with `%s`, `%d`,
+`%f`, `%%`.
 
 ## C/C++ Interop
 
@@ -139,12 +134,12 @@ Separate repo for rich mino library code loadable via `require`.
 Candidates: lazy sequence combinators (once the C type exists),
 protocols, transducers. Create when enough content justifies it.
 
-### C primitive migration (phase 2)
+~~### C primitive migration (phase 2)~~ -- Done in v0.14.0.
 
-Sequence ops (`map`, `filter`, `reduce`, `take`, `drop`, `range`,
-`repeat`, `concat`, `into`, `reverse`, `some`, `every?`) can move
-from C to mino once lazy sequences provide an efficient foundation.
-~12 primitives; would drop the C core to ~45 primitives.
+`map`, `filter`, `take`, `drop`, `range`, `repeat`, `concat` moved to
+lazy mino. `update`, `some`, `every?` also moved. C core at ~50
+primitives. `reduce`, `into`, `reverse`, `sort` remain in C (strict,
+efficient).
 
 ### Imperative-style standard library
 

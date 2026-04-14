@@ -6767,7 +6767,14 @@ void mino_set_resolver(mino_resolve_fn fn, void *ctx)
  * capturing names from the caller's environment. 0.x makes no automatic
  * hygiene promise; gensym is the convention.
  */
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverlength-strings"
+#endif
 #include "stdlib_mino.h"
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 static void install_stdlib_macros(mino_env_t *env)
 {

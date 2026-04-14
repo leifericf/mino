@@ -4,6 +4,51 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.14.0] — Lazy sequences, complete C core, stdlib expansion
+
+Lazy sequences land as a first-class type, enabling infinite data
+structures and demand-driven evaluation. The C core gains its final
+set of primitives; seven sequence operations move from C to lazy mino
+implementations. The stdlib nearly doubles in size.
+
+### Added
+- **Lazy sequences** (`MINO_LAZY`): deferred computation with cached
+  results. `lazy-seq` special form captures body and environment;
+  forced on first access via `first`, `rest`, `count`, or printing.
+  Thunk and captured env released after forcing for GC.
+- **`seq`**: coerce any collection (list, vector, map, set, string,
+  lazy-seq) to a cons sequence. Returns nil for empty collections.
+- **`realized?`**: check if a lazy sequence has been forced.
+- **`dissoc`**: remove key(s) from a map.
+- **`mod`**, **`rem`**, **`quot`**: arithmetic primitives. `mod` uses
+  floored division, `rem` uses truncated division.
+- **Bitwise operations**: `bit-and`, `bit-or`, `bit-xor`, `bit-not`,
+  `bit-shift-left`, `bit-shift-right`. Integer-only.
+- **`name`**: extract string from keyword or symbol.
+- **`int`**, **`float`**: type coercion between integer and float.
+- **`char-at`**: character access by index (returns single-char string).
+- **`pr-str`**: print values to string in readable form.
+- **`read-string`**: parse one mino form from a string.
+- **`format`**: string formatting with `%s`, `%d`, `%f`, `%%`.
+- **Stdlib definitions** (~40 new): `second`, `ffirst`, `inc`, `dec`,
+  `zero?`, `pos?`, `neg?`, `even?`, `odd?`, `abs`, `max`, `min`,
+  `not-empty`, `constantly`, `boolean`, `seq?`, `merge`, `select-keys`,
+  `find`, `zipmap`, `frequencies`, `group-by`, `juxt`, `mapcat`,
+  `take-while`, `drop-while`, `iterate`, `cycle`, `repeatedly`,
+  `interleave`, `interpose`, `distinct`, `partition`, `partition-by`,
+  `doall`, `dorun`.
+
+### Changed
+- **Lazy sequence operations**: `map`, `filter`, `take`, `drop`,
+  `concat`, `range`, `repeat` moved from strict C to lazy mino in
+  stdlib.mino. Infinite sequences now work:
+  `(take 5 (iterate inc 0))` produces `(0 1 2 3 4)`.
+- **`update`**, **`some`**, **`every?`** moved from C to stdlib.mino.
+  `update` now supports extra args.
+- **C primitive count**: 57 to 50 (net: +11 new, -18 moved to mino).
+- Cons printer forces lazy tails for correct output.
+- `list_length` forces lazy tails for correct `count`.
+
 ## [0.13.0] — Atoms, spit, stdlib architecture
 
 Establishes the three-tier architecture: C runtime (irreducible
