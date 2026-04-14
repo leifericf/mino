@@ -19,7 +19,8 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f $(OBJS) $(TARGET) bench/vector_bench bench/vector_bench.o
+	rm -f $(OBJS) $(TARGET) bench/vector_bench bench/vector_bench.o \
+	      examples/embed examples/embed.o
 
 test: $(TARGET)
 	./tests/smoke.sh
@@ -36,3 +37,10 @@ bench: bench/vector_bench
 
 bench/vector_bench: bench/vector_bench.c mino.o mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ bench/vector_bench.c mino.o
+
+# Example embedding program.
+example: examples/embed
+	./examples/embed
+
+examples/embed: examples/embed.c mino.o mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ examples/embed.c mino.o

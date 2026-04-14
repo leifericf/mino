@@ -67,6 +67,12 @@ static int       gc_stress       = -1;          /* -1 unset, 0 off, 1 on       *
 static int       gc_depth        = 0;           /* re-entrancy guard           */
 static void     *gc_stack_bottom = NULL;        /* set at first mino_eval      */
 
+/* Execution limits (global; set via mino_set_limit). */
+static size_t    limit_steps     = 0;           /* 0 = unlimited               */
+static size_t    limit_heap      = 0;           /* 0 = unlimited               */
+static size_t    eval_steps      = 0;           /* current step count          */
+static int       limit_exceeded  = 0;           /* sticky flag for this eval   */
+
 static void gc_collect(void);
 
 /* Record a stack address from a host-called entry point so the collector's
@@ -758,6 +764,17 @@ static uint32_t hash_val(const mino_val_t *v)
         }
         return h;
     }
+    case MINO_HANDLE: {
+        /* Handles compare by their host pointer, so we hash that. */
+        uintptr_t p = (uintptr_t)v->as.handle.ptr;
+        unsigned  i;
+        h = fnv_mix(h, 0x0c);
+        for (i = 0; i < sizeof(uintptr_t); i++) {
+            h = fnv_mix(h, (unsigned char)(p & 0xFFu));
+            p >>= 8;
+        }
+        return h;
+    }
     default: {
         /* PRIM, FN, RECUR: identity-based. */
         uintptr_t p = (uintptr_t)v;
@@ -1042,6 +1059,35 @@ mino_val_t *mino_prim(const char *name, mino_prim_fn fn)
     return v;
 }
 
+mino_val_t *mino_handle(void *ptr, const char *tag)
+{
+    mino_val_t *v = alloc_val(MINO_HANDLE);
+    v->as.handle.ptr = ptr;
+    v->as.handle.tag = tag;
+    return v;
+}
+
+int mino_is_handle(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_HANDLE;
+}
+
+void *mino_handle_ptr(const mino_val_t *v)
+{
+    if (v == NULL || v->type != MINO_HANDLE) {
+        return NULL;
+    }
+    return v->as.handle.ptr;
+}
+
+const char *mino_handle_tag(const mino_val_t *v)
+{
+    if (v == NULL || v->type != MINO_HANDLE) {
+        return NULL;
+    }
+    return v->as.handle.tag;
+}
+
 static mino_val_t *make_fn(mino_val_t *params, mino_val_t *body,
                            mino_env_t *env)
 {
@@ -1104,6 +1150,47 @@ size_t mino_length(const mino_val_t *list)
         list = list->as.cons.cdr;
     }
     return n;
+}
+
+int mino_to_int(const mino_val_t *v, long long *out)
+{
+    if (v == NULL || v->type != MINO_INT) {
+        return 0;
+    }
+    if (out != NULL) {
+        *out = v->as.i;
+    }
+    return 1;
+}
+
+int mino_to_float(const mino_val_t *v, double *out)
+{
+    if (v == NULL || v->type != MINO_FLOAT) {
+        return 0;
+    }
+    if (out != NULL) {
+        *out = v->as.f;
+    }
+    return 1;
+}
+
+int mino_to_string(const mino_val_t *v, const char **out, size_t *len)
+{
+    if (v == NULL || v->type != MINO_STRING) {
+        return 0;
+    }
+    if (out != NULL) {
+        *out = v->as.s.data;
+    }
+    if (len != NULL) {
+        *len = v->as.s.len;
+    }
+    return 1;
+}
+
+int mino_to_bool(const mino_val_t *v)
+{
+    return mino_is_truthy(v);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1237,6 +1324,14 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         return;
     case MINO_MACRO:
         fputs("#<macro>", out);
+        return;
+    case MINO_HANDLE:
+        fputs("#<handle", out);
+        if (v->as.handle.tag != NULL) {
+            fputc(':', out);
+            fputs(v->as.handle.tag, out);
+        }
+        fputc('>', out);
         return;
     case MINO_RECUR:
         /* Internal sentinel; should not escape to user-visible output. */
@@ -1767,6 +1862,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         /* Callables compare by identity. Structural equality on bodies and
          * captured environments is neither cheap nor especially meaningful. */
         return a == b;
+    case MINO_HANDLE:
+        return a->as.handle.ptr == b->as.handle.ptr;
     case MINO_RECUR:
         return a == b;
     }
@@ -2057,8 +2154,8 @@ static void gc_mark_val(mino_val_t *v)
         gc_mark_interior(v->as.recur.args);
         break;
     default:
-        /* NIL, BOOL, INT, FLOAT, PRIM: no owned children. prim.name is a
-         * static C string passed in by the caller of mino_prim. */
+        /* NIL, BOOL, INT, FLOAT, PRIM, HANDLE: no owned children. prim.name
+         * and handle.tag are static/host-owned C strings. */
         break;
     }
 }
@@ -2547,6 +2644,19 @@ static int bind_params(mino_env_t *env, mino_val_t *params, mino_val_t *args,
 
 static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
 {
+    if (limit_exceeded) {
+        return NULL;
+    }
+    if (limit_steps > 0 && ++eval_steps > limit_steps) {
+        limit_exceeded = 1;
+        set_error("step limit exceeded");
+        return NULL;
+    }
+    if (limit_heap > 0 && gc_bytes_alloc > limit_heap) {
+        limit_exceeded = 1;
+        set_error("heap limit exceeded");
+        return NULL;
+    }
     if (form == NULL) {
         return mino_nil();
     }
@@ -2560,6 +2670,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
     case MINO_PRIM:
     case MINO_FN:
     case MINO_MACRO:
+    case MINO_HANDLE:
     case MINO_RECUR:
         return form;
     case MINO_SYMBOL: {
@@ -2967,19 +3078,121 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
 {
     volatile char probe = 0;
     mino_val_t   *v;
-    /* Record this frame as a potential host-level stack bottom. The
-     * collector's scan spans every address up to the maximum we've ever
-     * seen, so any pointer that lives anywhere in the host-to-mino call
-     * chain — whether we entered via mino_env_new, mino_install_core, or
-     * mino_eval — falls inside the scanned range. */
     gc_note_host_frame((void *)&probe);
     (void)probe;
+    eval_steps     = 0;
+    limit_exceeded = 0;
     v = eval(form, env);
     if (v != NULL && v->type == MINO_RECUR) {
         set_error("recur must be in tail position");
         return NULL;
     }
     return v;
+}
+
+mino_val_t *mino_eval_string(const char *src, mino_env_t *env)
+{
+    volatile char  probe = 0;
+    mino_val_t    *last  = mino_nil();
+    gc_note_host_frame((void *)&probe);
+    (void)probe;
+    eval_steps     = 0;
+    limit_exceeded = 0;
+    while (*src != '\0') {
+        const char *end  = NULL;
+        mino_val_t *form = mino_read(src, &end);
+        if (form == NULL) {
+            if (mino_last_error() != NULL) {
+                return NULL;
+            }
+            break; /* EOF */
+        }
+        last = mino_eval(form, env);
+        if (last == NULL) {
+            return NULL;
+        }
+        src = end;
+    }
+    return last;
+}
+
+mino_val_t *mino_load_file(const char *path, mino_env_t *env)
+{
+    FILE  *f;
+    char  *buf;
+    long   sz;
+    size_t rd;
+    mino_val_t *result;
+    if (path == NULL || env == NULL) {
+        set_error("mino_load_file: NULL argument");
+        return NULL;
+    }
+    f = fopen(path, "rb");
+    if (f == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "cannot open file: %s", path);
+        set_error(msg);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    sz = ftell(f);
+    if (sz < 0) {
+        fclose(f);
+        set_error("cannot determine file size");
+        return NULL;
+    }
+    fseek(f, 0, SEEK_SET);
+    buf = (char *)malloc((size_t)sz + 1);
+    if (buf == NULL) {
+        fclose(f);
+        set_error("out of memory loading file");
+        return NULL;
+    }
+    rd = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    buf[rd] = '\0';
+    result = mino_eval_string(buf, env);
+    free(buf);
+    return result;
+}
+
+mino_env_t *mino_new(void)
+{
+    mino_env_t *env = mino_env_new();
+    mino_install_core(env);
+    return env;
+}
+
+void mino_register_fn(mino_env_t *env, const char *name, mino_prim_fn fn)
+{
+    mino_env_set(env, name, mino_prim(name, fn));
+}
+
+mino_val_t *mino_call(mino_val_t *fn, mino_val_t *args, mino_env_t *env)
+{
+    volatile char probe = 0;
+    gc_note_host_frame((void *)&probe);
+    (void)probe;
+    return apply_callable(fn, args, env);
+}
+
+int mino_pcall(mino_val_t *fn, mino_val_t *args, mino_env_t *env,
+               mino_val_t **out)
+{
+    mino_val_t *result = mino_call(fn, args, env);
+    if (out != NULL) {
+        *out = result;
+    }
+    return result == NULL ? -1 : 0;
+}
+
+void mino_set_limit(int kind, size_t value)
+{
+    switch (kind) {
+    case MINO_LIMIT_STEPS: limit_steps = value; break;
+    case MINO_LIMIT_HEAP:  limit_heap  = value; break;
+    default: break;
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -3843,6 +4056,178 @@ static mino_val_t *prim_nil_p(mino_val_t *args, mino_env_t *env)
     return mino_is_nil(args->as.cons.car) ? mino_true() : mino_false();
 }
 
+/* Type predicate helpers: each takes one arg, returns true/false. */
+#define DEFINE_TYPE_PRED(name, test)                                        \
+    static mino_val_t *name(mino_val_t *args, mino_env_t *env) {           \
+        (void)env;                                                         \
+        if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {      \
+            set_error(#name " requires one argument");                     \
+            return NULL;                                                   \
+        }                                                                  \
+        return (test) ? mino_true() : mino_false();                        \
+    }
+
+DEFINE_TYPE_PRED(prim_string_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_STRING)
+DEFINE_TYPE_PRED(prim_number_p,  args->as.cons.car != NULL && (args->as.cons.car->type == MINO_INT || args->as.cons.car->type == MINO_FLOAT))
+DEFINE_TYPE_PRED(prim_keyword_p, args->as.cons.car != NULL && args->as.cons.car->type == MINO_KEYWORD)
+DEFINE_TYPE_PRED(prim_symbol_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_SYMBOL)
+DEFINE_TYPE_PRED(prim_vector_p,  args->as.cons.car != NULL && args->as.cons.car->type == MINO_VECTOR)
+DEFINE_TYPE_PRED(prim_map_p,     args->as.cons.car != NULL && args->as.cons.car->type == MINO_MAP)
+DEFINE_TYPE_PRED(prim_fn_p,      args->as.cons.car != NULL && (args->as.cons.car->type == MINO_FN || args->as.cons.car->type == MINO_PRIM))
+
+#undef DEFINE_TYPE_PRED
+
+static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("type requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type == MINO_NIL)  return mino_keyword("nil");
+    switch (v->type) {
+    case MINO_NIL:     return mino_keyword("nil");
+    case MINO_BOOL:    return mino_keyword("bool");
+    case MINO_INT:     return mino_keyword("int");
+    case MINO_FLOAT:   return mino_keyword("float");
+    case MINO_STRING:  return mino_keyword("string");
+    case MINO_SYMBOL:  return mino_keyword("symbol");
+    case MINO_KEYWORD: return mino_keyword("keyword");
+    case MINO_CONS:    return mino_keyword("list");
+    case MINO_VECTOR:  return mino_keyword("vector");
+    case MINO_MAP:     return mino_keyword("map");
+    case MINO_PRIM:    return mino_keyword("fn");
+    case MINO_FN:      return mino_keyword("fn");
+    case MINO_MACRO:   return mino_keyword("macro");
+    case MINO_HANDLE:  return mino_keyword("handle");
+    case MINO_RECUR:   return mino_keyword("recur");
+    }
+    return mino_keyword("unknown");
+}
+
+/*
+ * (str & args) — concatenate printed representations. Strings contribute
+ * their raw content (no quotes); everything else uses the printer form.
+ */
+static mino_val_t *prim_str(mino_val_t *args, mino_env_t *env)
+{
+    char  *buf = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    (void)env;
+    while (mino_is_cons(args)) {
+        mino_val_t *a = args->as.cons.car;
+        if (a != NULL && a->type == MINO_STRING) {
+            /* Append raw string content without quotes. */
+            size_t need = len + a->as.s.len + 1;
+            if (need > cap) {
+                cap = cap == 0 ? 128 : cap;
+                while (cap < need) cap *= 2;
+                buf = (char *)realloc(buf, cap);
+                if (buf == NULL) { set_error("out of memory"); return NULL; }
+            }
+            memcpy(buf + len, a->as.s.data, a->as.s.len);
+            len += a->as.s.len;
+        } else if (a != NULL && a->type == MINO_NIL) {
+            /* nil contributes nothing. */
+        } else if (a == NULL) {
+            /* NULL treated as nil. */
+        } else {
+            /* Print to a temp buffer using the standard printer. */
+            char tmp[256];
+            int  n;
+            switch (a->type) {
+            case MINO_BOOL:
+                n = snprintf(tmp, sizeof(tmp), "%s", a->as.b ? "true" : "false");
+                break;
+            case MINO_INT:
+                n = snprintf(tmp, sizeof(tmp), "%lld", a->as.i);
+                break;
+            case MINO_FLOAT: {
+                char fb[64];
+                int fn2 = snprintf(fb, sizeof(fb), "%g", a->as.f);
+                int needs_dot = 1, k;
+                for (k = 0; k < fn2; k++) {
+                    if (fb[k] == '.' || fb[k] == 'e' || fb[k] == 'E'
+                        || fb[k] == 'n' || fb[k] == 'i') {
+                        needs_dot = 0; break;
+                    }
+                }
+                if (needs_dot) {
+                    fb[fn2] = '.'; fb[fn2+1] = '0'; fb[fn2+2] = '\0';
+                    fn2 += 2;
+                }
+                n = fn2;
+                memcpy(tmp, fb, (size_t)n + 1);
+                break;
+            }
+            case MINO_SYMBOL:
+            case MINO_KEYWORD: {
+                size_t slen = a->as.s.len;
+                int    off  = a->type == MINO_KEYWORD ? 1 : 0;
+                if (off + slen + 1 > sizeof(tmp)) slen = sizeof(tmp) - off - 1;
+                if (off) tmp[0] = ':';
+                memcpy(tmp + off, a->as.s.data, slen);
+                n = (int)(off + slen);
+                tmp[n] = '\0';
+                break;
+            }
+            default:
+                n = snprintf(tmp, sizeof(tmp), "#<%s>",
+                             a->type == MINO_PRIM ? "prim" :
+                             a->type == MINO_FN   ? "fn" :
+                             a->type == MINO_MACRO ? "macro" :
+                             a->type == MINO_HANDLE ? "handle" : "?");
+                break;
+            }
+            if (n > 0) {
+                size_t need = len + (size_t)n + 1;
+                if (need > cap) {
+                    cap = cap == 0 ? 128 : cap;
+                    while (cap < need) cap *= 2;
+                    buf = (char *)realloc(buf, cap);
+                    if (buf == NULL) { set_error("out of memory"); return NULL; }
+                }
+                memcpy(buf + len, tmp, (size_t)n);
+                len += (size_t)n;
+            }
+        }
+        args = args->as.cons.cdr;
+    }
+    {
+        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", len);
+        free(buf);
+        return result;
+    }
+}
+
+static mino_val_t *prim_println(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *result = prim_str(args, env);
+    if (result == NULL) return NULL;
+    fwrite(result->as.s.data, 1, result->as.s.len, stdout);
+    fputc('\n', stdout);
+    fflush(stdout);
+    return mino_nil();
+}
+
+static mino_val_t *prim_prn(mino_val_t *args, mino_env_t *env)
+{
+    int first = 1;
+    (void)env;
+    while (mino_is_cons(args)) {
+        if (!first) fputc(' ', stdout);
+        mino_print(args->as.cons.car);
+        first = 0;
+        args = args->as.cons.cdr;
+    }
+    fputc('\n', stdout);
+    fflush(stdout);
+    return mino_nil();
+}
+
 static mino_val_t *prim_macroexpand_1(mino_val_t *args, mino_env_t *env)
 {
     int expanded;
@@ -4015,5 +4400,16 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
     mino_env_set(env, "cons?",    mino_prim("cons?",    prim_cons_p));
     mino_env_set(env, "nil?",     mino_prim("nil?",     prim_nil_p));
+    mino_env_set(env, "string?",  mino_prim("string?",  prim_string_p));
+    mino_env_set(env, "number?",  mino_prim("number?",  prim_number_p));
+    mino_env_set(env, "keyword?", mino_prim("keyword?", prim_keyword_p));
+    mino_env_set(env, "symbol?",  mino_prim("symbol?",  prim_symbol_p));
+    mino_env_set(env, "vector?",  mino_prim("vector?",  prim_vector_p));
+    mino_env_set(env, "map?",     mino_prim("map?",     prim_map_p));
+    mino_env_set(env, "fn?",      mino_prim("fn?",      prim_fn_p));
+    mino_env_set(env, "type",     mino_prim("type",     prim_type));
+    mino_env_set(env, "str",      mino_prim("str",      prim_str));
+    mino_env_set(env, "println",  mino_prim("println",  prim_println));
+    mino_env_set(env, "prn",      mino_prim("prn",      prim_prn));
     install_stdlib_macros(env);
 }
