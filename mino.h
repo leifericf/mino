@@ -55,6 +55,8 @@ struct mino_val {
         struct {          /* MINO_CONS */
             mino_val_t *car;
             mino_val_t *cdr;
+            const char *file;  /* source file (NULL if unknown) */
+            int         line;  /* source line (0 if unknown) */
         } cons;
         struct {          /* MINO_VECTOR: persistent 32-way trie with tail */
             mino_vec_node_t *root;     /* trie spine (NULL when len <= 32) */
@@ -193,13 +195,25 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   predicates  cons? nil? string? number? keyword? symbol? vector? map? fn?
  *   reflection  type
  *   strings     str
- *   I/O         println prn
+ *   exceptions  throw
+ *   modules     require
  *   macros      macroexpand macroexpand-1 gensym
  * Special forms (quote, quasiquote, unquote, unquote-splicing, def,
- * defmacro, if, do, let, fn, loop, recur) are recognized directly by the
- * evaluator and do not need to be installed. Safe to call on a fresh env.
+ * defmacro, if, do, let, fn, loop, recur, try) are recognized directly by
+ * the evaluator and do not need to be installed.
+ *
+ * NOTE: no I/O primitives are installed by this function. Call
+ * mino_install_io to opt in to println, prn, and slurp.
+ * Safe to call on a fresh env.
  */
 void        mino_install_core(mino_env_t *env);
+
+/*
+ * Install I/O primitives: println, prn, slurp. These are kept separate
+ * from mino_install_core so that sandboxed environments start with no
+ * I/O capability; the host opts in by calling this function.
+ */
+void        mino_install_io(mino_env_t *env);
 
 /*
  * Evaluate one form. Returns NULL on error and writes a message via
@@ -238,6 +252,25 @@ mino_val_t *mino_call(mino_val_t *fn, mino_val_t *args, mino_env_t *env);
  */
 int mino_pcall(mino_val_t *fn, mino_val_t *args, mino_env_t *env,
                mino_val_t **out);
+
+/* ------------------------------------------------------------------------- */
+/* Modules                                                                   */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Module resolver callback. Given a module name (the argument to `require`),
+ * return a file path to load, or NULL on failure. `ctx` is the opaque
+ * pointer passed to mino_set_resolver.
+ */
+typedef const char *(*mino_resolve_fn)(const char *name, void *ctx);
+
+/*
+ * Register a module resolver. When mino code calls (require "name"), the
+ * resolver is invoked to map the name to a file path. The file is loaded
+ * once; subsequent requires of the same name return the cached value.
+ * Pass NULL to remove the resolver.
+ */
+void mino_set_resolver(mino_resolve_fn fn, void *ctx);
 
 /* ------------------------------------------------------------------------- */
 /* Execution limits                                                          */

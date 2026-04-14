@@ -41,6 +41,7 @@ int main(void)
     int    exit_code = 0;
 
     mino_install_core(env);
+    mino_install_io(env);
     fputs("mino> ", stderr);
     fflush(stderr);
 
@@ -76,8 +77,8 @@ int main(void)
             mino_val_t *result;
 
             if (has_only_whitespace(buf)) {
-                len = 0;
-                buf[0] = '\0';
+                /* Don't discard trailing whitespace: newlines in it feed
+                 * the reader's line counter on the next call. */
                 awaiting_continuation = 0;
                 break;
             }

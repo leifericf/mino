@@ -73,6 +73,30 @@ static size_t    limit_heap      = 0;           /* 0 = unlimited               *
 static size_t    eval_steps      = 0;           /* current step count          */
 static int       limit_exceeded  = 0;           /* sticky flag for this eval   */
 
+/* Exception handling: setjmp/longjmp stack for try/catch. */
+#define MAX_TRY_DEPTH 64
+
+typedef struct {
+    jmp_buf     buf;
+    mino_val_t *exception;
+} try_frame_t;
+
+static try_frame_t try_stack[MAX_TRY_DEPTH];
+static int         try_depth = 0;
+
+/* Module resolver (set via mino_set_resolver). */
+static mino_resolve_fn module_resolver     = NULL;
+static void           *module_resolver_ctx = NULL;
+
+typedef struct {
+    char       *name;
+    mino_val_t *value;
+} module_entry_t;
+
+static module_entry_t *module_cache     = NULL;
+static size_t          module_cache_len = 0;
+static size_t          module_cache_cap = 0;
+
 static void gc_collect(void);
 
 /* Record a stack address from a host-called entry point so the collector's
@@ -1355,7 +1379,7 @@ void mino_println(const mino_val_t *v)
 /* Error reporting                                                           */
 /* ------------------------------------------------------------------------- */
 
-static char error_buf[256] = { 0 };
+static char error_buf[2048] = { 0 };
 
 const char *mino_last_error(void)
 {
@@ -1377,9 +1401,114 @@ static void clear_error(void)
     error_buf[0] = '\0';
 }
 
+/* Location-aware error: prepend file:line when the form has source info. */
+static void set_error_at(const mino_val_t *form, const char *msg)
+{
+    if (form != NULL && form->type == MINO_CONS
+        && form->as.cons.file != NULL && form->as.cons.line > 0) {
+        char buf[2048];
+        snprintf(buf, sizeof(buf), "%s:%d: %s",
+                 form->as.cons.file, form->as.cons.line, msg);
+        set_error(buf);
+    } else {
+        set_error(msg);
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Call stack (for stack traces on error)                                     */
+/* ------------------------------------------------------------------------- */
+
+#define MAX_CALL_DEPTH 256
+
+typedef struct {
+    const char *name;
+    const char *file;
+    int         line;
+} call_frame_t;
+
+static call_frame_t call_stack[MAX_CALL_DEPTH];
+static int          call_depth  = 0;
+static int          trace_added = 0;  /* set after trace is appended */
+
+static void push_frame(const char *name, const char *file, int line)
+{
+    if (call_depth < MAX_CALL_DEPTH) {
+        call_stack[call_depth].name = name;
+        call_stack[call_depth].file = file;
+        call_stack[call_depth].line = line;
+        call_depth++;
+    }
+}
+
+static void pop_frame(void)
+{
+    if (call_depth > 0) {
+        call_depth--;
+    }
+}
+
+/* Append the current call stack to error_buf. Called once per error. */
+static void append_trace(void)
+{
+    size_t pos;
+    int    i;
+    if (trace_added || call_depth == 0) {
+        return;
+    }
+    trace_added = 1;
+    pos = strlen(error_buf);
+    for (i = call_depth - 1; i >= 0 && pos + 80 < sizeof(error_buf); i--) {
+        pos += (size_t)snprintf(
+            error_buf + pos, sizeof(error_buf) - pos, "\n  in %s",
+            call_stack[i].name ? call_stack[i].name : "<fn>");
+        if (call_stack[i].file != NULL && pos + 40 < sizeof(error_buf)) {
+            pos += (size_t)snprintf(
+                error_buf + pos, sizeof(error_buf) - pos, " (%s:%d)",
+                call_stack[i].file, call_stack[i].line);
+        }
+    }
+}
+
 /* ------------------------------------------------------------------------- */
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
+
+/*
+ * Reader state: file name and line number for source-location tracking.
+ * File names are interned so the const char* stored in cons cells remains
+ * valid for the lifetime of the process.
+ */
+static const char *reader_file = NULL;
+static int         reader_line = 1;
+
+#define MAX_INTERNED_FILES 64
+
+static const char *intern_filename(const char *name)
+{
+    static const char *files[MAX_INTERNED_FILES];
+    static size_t      file_count = 0;
+    size_t i;
+    if (name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < file_count; i++) {
+        if (strcmp(files[i], name) == 0) {
+            return files[i];
+        }
+    }
+    if (file_count < MAX_INTERNED_FILES) {
+        size_t len = strlen(name);
+        char  *dup = (char *)malloc(len + 1);
+        if (dup == NULL) {
+            return name;
+        }
+        memcpy(dup, name, len + 1);
+        files[file_count++] = dup;
+        return dup;
+    }
+    return name;
+}
 
 static int is_ws(char c)
 {
@@ -1398,7 +1527,10 @@ static void skip_ws(const char **p)
 {
     while (**p) {
         char c = **p;
-        if (is_ws(c)) {
+        if (c == '\n') {
+            reader_line++;
+            (*p)++;
+        } else if (is_ws(c)) {
             (*p)++;
         } else if (c == ';') {
             while (**p && **p != '\n') {
@@ -1425,6 +1557,9 @@ static mino_val_t *read_string_form(const char **p)
     }
     while (**p && **p != '"') {
         char c = **p;
+        if (c == '\n') {
+            reader_line++;
+        }
         if (c == '\\') {
             (*p)++;
             switch (**p) {
@@ -1470,6 +1605,7 @@ static mino_val_t *read_string_form(const char **p)
 static mino_val_t *read_list_form(const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
+    int         list_line = reader_line;
     mino_val_t *head = mino_nil();
     mino_val_t *tail = NULL;
     (*p)++; /* skip '(' */
@@ -1484,6 +1620,7 @@ static mino_val_t *read_list_form(const char **p)
             return head;
         }
         {
+            int         elem_line = reader_line;
             mino_val_t *elem = read_form(p);
             if (elem == NULL && mino_last_error() != NULL) {
                 return NULL;
@@ -1495,6 +1632,8 @@ static mino_val_t *read_list_form(const char **p)
             }
             {
                 mino_val_t *cell = mino_cons(elem, mino_nil());
+                cell->as.cons.file = reader_file;
+                cell->as.cons.line = (tail == NULL) ? list_line : elem_line;
                 if (tail == NULL) {
                     head = cell;
                 } else {
@@ -1716,34 +1855,45 @@ static mino_val_t *read_form(const char **p)
         return read_string_form(p);
     }
     if (**p == '\'') {
+        int q_line = reader_line;
         (*p)++;
         {
             mino_val_t *quoted = read_form(p);
+            mino_val_t *outer;
             if (quoted == NULL) {
                 if (mino_last_error() == NULL) {
                     set_error("expected form after quote");
                 }
                 return NULL;
             }
-            return mino_cons(mino_symbol("quote"),
-                             mino_cons(quoted, mino_nil()));
+            outer = mino_cons(mino_symbol("quote"),
+                              mino_cons(quoted, mino_nil()));
+            outer->as.cons.file = reader_file;
+            outer->as.cons.line = q_line;
+            return outer;
         }
     }
     if (**p == '`') {
+        int q_line = reader_line;
         (*p)++;
         {
             mino_val_t *qq = read_form(p);
+            mino_val_t *outer;
             if (qq == NULL) {
                 if (mino_last_error() == NULL) {
                     set_error("expected form after `");
                 }
                 return NULL;
             }
-            return mino_cons(mino_symbol("quasiquote"),
-                             mino_cons(qq, mino_nil()));
+            outer = mino_cons(mino_symbol("quasiquote"),
+                              mino_cons(qq, mino_nil()));
+            outer->as.cons.file = reader_file;
+            outer->as.cons.line = q_line;
+            return outer;
         }
     }
     if (**p == '~') {
+        int         q_line = reader_line;
         const char *name = "unquote";
         (*p)++;
         if (**p == '@') {
@@ -1752,14 +1902,18 @@ static mino_val_t *read_form(const char **p)
         }
         {
             mino_val_t *uq = read_form(p);
+            mino_val_t *outer;
             if (uq == NULL) {
                 if (mino_last_error() == NULL) {
                     set_error("expected form after ~");
                 }
                 return NULL;
             }
-            return mino_cons(mino_symbol(name),
-                             mino_cons(uq, mino_nil()));
+            outer = mino_cons(mino_symbol(name),
+                              mino_cons(uq, mino_nil()));
+            outer->as.cons.file = reader_file;
+            outer->as.cons.line = q_line;
+            return outer;
         }
     }
     return read_atom(p);
@@ -1774,6 +1928,9 @@ mino_val_t *mino_read(const char *src, const char **end)
      * conservative scan covers the reader's call chain in full. */
     gc_note_host_frame((void *)&probe);
     (void)probe;
+    if (reader_file == NULL) {
+        reader_file = intern_filename("<input>");
+    }
     clear_error();
     v = read_form(&p);
     if (end != NULL) {
@@ -2298,11 +2455,22 @@ static void gc_mark_intern_table(const intern_table_t *tbl)
 static void gc_mark_roots(void)
 {
     root_env_t *r;
+    int i;
     for (r = gc_root_envs; r != NULL; r = r->next) {
         gc_mark_interior(r->env);
     }
     gc_mark_intern_table(&sym_intern);
     gc_mark_intern_table(&kw_intern);
+    /* Pin try/catch exception values and module cache results. */
+    for (i = 0; i < try_depth; i++) {
+        gc_mark_interior(try_stack[i].exception);
+    }
+    {
+        size_t mi;
+        for (mi = 0; mi < module_cache_len; mi++) {
+            gc_mark_interior(module_cache[mi].value);
+        }
+    }
 }
 
 static void gc_sweep(void)
@@ -2642,6 +2810,10 @@ static int bind_params(mino_env_t *env, mino_val_t *params, mino_val_t *args,
     return 1;
 }
 
+/* Tracks the most recent cons-cell form being evaluated; used by
+ * set_error_at to include source location in error messages. */
+static const mino_val_t *eval_current_form = NULL;
+
 static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
 {
     if (limit_exceeded) {
@@ -2678,7 +2850,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
         size_t n = form->as.s.len;
         mino_val_t *v;
         if (n >= sizeof(buf)) {
-            set_error("symbol name too long");
+            set_error_at(eval_current_form, "symbol name too long");
             return NULL;
         }
         memcpy(buf, form->as.s.data, n);
@@ -2687,7 +2859,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
         if (v == NULL) {
             char msg[300];
             snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
-            set_error(msg);
+            set_error_at(eval_current_form, msg);
             return NULL;
         }
         return v;
@@ -2739,25 +2911,26 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;
         mino_val_t *args = form->as.cons.cdr;
+        eval_current_form = form;
 
         /* Special forms. */
         if (sym_eq(head, "quote")) {
             if (!mino_is_cons(args)) {
-                set_error("quote requires one argument");
+                set_error_at(form, "quote requires one argument");
                 return NULL;
             }
             return args->as.cons.car;
         }
         if (sym_eq(head, "quasiquote")) {
             if (!mino_is_cons(args)) {
-                set_error("quasiquote requires one argument");
+                set_error_at(form, "quasiquote requires one argument");
                 return NULL;
             }
             return quasiquote_expand(args->as.cons.car, env);
         }
         if (sym_eq(head, "unquote")
             || sym_eq(head, "unquote-splicing")) {
-            set_error("unquote outside of quasiquote");
+            set_error_at(form, "unquote outside of quasiquote");
             return NULL;
         }
         if (sym_eq(head, "defmacro")) {
@@ -2769,24 +2942,24 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             char        buf[256];
             size_t      n;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-                set_error("defmacro requires a name, parameters, and body");
+                set_error_at(form, "defmacro requires a name, parameters, and body");
                 return NULL;
             }
             name_form = args->as.cons.car;
             params    = args->as.cons.cdr->as.cons.car;
             body      = args->as.cons.cdr->as.cons.cdr;
             if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-                set_error("defmacro name must be a symbol");
+                set_error_at(form, "defmacro name must be a symbol");
                 return NULL;
             }
             if (!mino_is_cons(params) && !mino_is_nil(params)) {
-                set_error("defmacro parameter list must be a list");
+                set_error_at(form, "defmacro parameter list must be a list");
                 return NULL;
             }
             for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
                 mino_val_t *pn = p->as.cons.car;
                 if (pn == NULL || pn->type != MINO_SYMBOL) {
-                    set_error("defmacro parameter must be a symbol");
+                    set_error_at(form, "defmacro parameter must be a symbol");
                     return NULL;
                 }
             }
@@ -2796,7 +2969,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             mac->as.fn.env    = env;
             n = name_form->as.s.len;
             if (n >= sizeof(buf)) {
-                set_error("defmacro name too long");
+                set_error_at(form, "defmacro name too long");
                 return NULL;
             }
             memcpy(buf, name_form->as.s.data, n);
@@ -2811,18 +2984,18 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             char buf[256];
             size_t n;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-                set_error("def requires a name and a value");
+                set_error_at(form, "def requires a name and a value");
                 return NULL;
             }
             name_form  = args->as.cons.car;
             value_form = args->as.cons.cdr->as.cons.car;
             if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-                set_error("def name must be a symbol");
+                set_error_at(form, "def name must be a symbol");
                 return NULL;
             }
             n = name_form->as.s.len;
             if (n >= sizeof(buf)) {
-                set_error("def name too long");
+                set_error_at(form, "def name too long");
                 return NULL;
             }
             memcpy(buf, name_form->as.s.data, n);
@@ -2840,7 +3013,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             mino_val_t *else_form = mino_nil();
             mino_val_t *cond;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-                set_error("if requires a condition and a then-branch");
+                set_error_at(form, "if requires a condition and a then-branch");
                 return NULL;
             }
             cond_form = args->as.cons.car;
@@ -2863,7 +3036,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             mino_val_t *body;
             mino_env_t *local;
             if (!mino_is_cons(args)) {
-                set_error("let requires a binding list and body");
+                set_error_at(form, "let requires a binding list and body");
                 return NULL;
             }
             bindings = args->as.cons.car;
@@ -2908,19 +3081,19 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             mino_val_t *body;
             mino_val_t *p;
             if (!mino_is_cons(args)) {
-                set_error("fn requires a parameter list");
+                set_error_at(form, "fn requires a parameter list");
                 return NULL;
             }
             params = args->as.cons.car;
             body   = args->as.cons.cdr;
             if (!mino_is_cons(params) && !mino_is_nil(params)) {
-                set_error("fn parameter list must be a list");
+                set_error_at(form, "fn parameter list must be a list");
                 return NULL;
             }
             for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
                 mino_val_t *name = p->as.cons.car;
                 if (name == NULL || name->type != MINO_SYMBOL) {
-                    set_error("fn parameter must be a symbol");
+                    set_error_at(form, "fn parameter must be a symbol");
                     return NULL;
                 }
             }
@@ -3004,6 +3177,76 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             }
         }
 
+        /*
+         * try / catch: (try body (catch e handler...))
+         * Script-level exceptions thrown by `throw` are caught; fatal
+         * runtime errors (NULL returns without longjmp) propagate to host.
+         */
+        if (sym_eq(head, "try")) {
+            mino_val_t *body_form;
+            mino_val_t *catch_clause;
+            mino_val_t *catch_var;
+            mino_val_t *catch_body;
+            char        var_buf[256];
+            size_t      var_len;
+            int         saved_try   = try_depth;
+            int         saved_call  = call_depth;
+            int         saved_trace = trace_added;
+            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+                set_error_at(form, "try requires a body and a (catch e ...) clause");
+                return NULL;
+            }
+            body_form    = args->as.cons.car;
+            catch_clause = args->as.cons.cdr->as.cons.car;
+            /* Parse (catch e handler-body ...) */
+            if (!mino_is_cons(catch_clause)
+                || !sym_eq(catch_clause->as.cons.car, "catch")
+                || !mino_is_cons(catch_clause->as.cons.cdr)) {
+                set_error_at(form, "try: second form must be (catch e ...)");
+                return NULL;
+            }
+            catch_var = catch_clause->as.cons.cdr->as.cons.car;
+            if (catch_var == NULL || catch_var->type != MINO_SYMBOL) {
+                set_error_at(form, "catch binding must be a symbol");
+                return NULL;
+            }
+            var_len = catch_var->as.s.len;
+            if (var_len >= sizeof(var_buf)) {
+                set_error_at(form, "catch variable name too long");
+                return NULL;
+            }
+            memcpy(var_buf, catch_var->as.s.data, var_len);
+            var_buf[var_len] = '\0';
+            catch_body = catch_clause->as.cons.cdr->as.cons.cdr;
+            if (try_depth >= MAX_TRY_DEPTH) {
+                set_error_at(form, "try nesting too deep");
+                return NULL;
+            }
+            try_stack[try_depth].exception = NULL;
+            if (setjmp(try_stack[try_depth].buf) == 0) {
+                mino_val_t *result;
+                try_depth++;
+                result = eval(body_form, env);
+                try_depth = saved_try;
+                if (result == NULL) {
+                    /* Fatal runtime error — propagate to host. */
+                    return NULL;
+                }
+                return result;
+            } else {
+                /* longjmp'd from throw. */
+                mino_val_t *ex = try_stack[saved_try].exception;
+                mino_env_t *local;
+                try_depth   = saved_try;
+                call_depth  = saved_call;
+                trace_added = saved_trace;
+                clear_error();
+                local = env_child(env);
+                env_bind(local, var_buf, ex != NULL ? ex : mino_nil());
+                return eval_implicit_do(catch_body, local);
+            }
+        }
+
         /* Function or macro application. */
         {
             mino_val_t *fn = eval_value(head, env);
@@ -3021,7 +3264,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 return eval(expanded, env);
             }
             if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
-                set_error("not a function");
+                set_error_at(form, "not a function");
                 return NULL;
             }
             evaled = eval_args(args, env);
@@ -3049,22 +3292,45 @@ static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
         return NULL;
     }
     if (fn->type == MINO_PRIM) {
-        return fn->as.prim.fn(args, env);
+        const char *file = NULL;
+        int         line = 0;
+        mino_val_t *result;
+        if (eval_current_form != NULL
+            && eval_current_form->type == MINO_CONS) {
+            file = eval_current_form->as.cons.file;
+            line = eval_current_form->as.cons.line;
+        }
+        push_frame(fn->as.prim.name, file, line);
+        result = fn->as.prim.fn(args, env);
+        if (result == NULL) {
+            return NULL; /* leave frame for trace */
+        }
+        pop_frame();
+        return result;
     }
     if (fn->type == MINO_FN || fn->type == MINO_MACRO) {
         const char *tag       = fn->type == MINO_MACRO ? "macro" : "fn";
         mino_env_t *local     = env_child(fn->as.fn.env);
         mino_val_t *call_args = args;
+        const char *file      = NULL;
+        int         line      = 0;
+        mino_val_t *result;
+        if (eval_current_form != NULL
+            && eval_current_form->type == MINO_CONS) {
+            file = eval_current_form->as.cons.file;
+            line = eval_current_form->as.cons.line;
+        }
+        push_frame(tag, file, line);
         for (;;) {
-            mino_val_t *result;
             if (!bind_params(local, fn->as.fn.params, call_args, tag)) {
-                return NULL;
+                return NULL; /* leave frame for trace */
             }
             result = eval_implicit_do(fn->as.fn.body, local);
             if (result == NULL) {
-                return NULL;
+                return NULL; /* leave frame for trace */
             }
             if (result->type != MINO_RECUR) {
+                pop_frame();
                 return result;
             }
             call_args = result->as.recur.args;
@@ -3082,37 +3348,58 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
     (void)probe;
     eval_steps     = 0;
     limit_exceeded = 0;
+    trace_added    = 0;
+    call_depth     = 0;
     v = eval(form, env);
-    if (v != NULL && v->type == MINO_RECUR) {
-        set_error("recur must be in tail position");
+    if (v == NULL) {
+        append_trace();
+        call_depth = 0;
         return NULL;
     }
+    if (v->type == MINO_RECUR) {
+        set_error("recur must be in tail position");
+        call_depth = 0;
+        return NULL;
+    }
+    call_depth = 0;
     return v;
 }
 
 mino_val_t *mino_eval_string(const char *src, mino_env_t *env)
 {
-    volatile char  probe = 0;
-    mino_val_t    *last  = mino_nil();
+    volatile char   probe = 0;
+    mino_val_t     *last  = mino_nil();
+    const char     *saved_file = reader_file;
+    int             saved_line = reader_line;
     gc_note_host_frame((void *)&probe);
     (void)probe;
     eval_steps     = 0;
     limit_exceeded = 0;
+    if (reader_file == NULL) {
+        reader_file = intern_filename("<string>");
+    }
+    reader_line = 1;
     while (*src != '\0') {
         const char *end  = NULL;
         mino_val_t *form = mino_read(src, &end);
         if (form == NULL) {
             if (mino_last_error() != NULL) {
+                reader_file = saved_file;
+                reader_line = saved_line;
                 return NULL;
             }
             break; /* EOF */
         }
         last = mino_eval(form, env);
         if (last == NULL) {
+            reader_file = saved_file;
+            reader_line = saved_line;
             return NULL;
         }
         src = end;
     }
+    reader_file = saved_file;
+    reader_line = saved_line;
     return last;
 }
 
@@ -3122,7 +3409,8 @@ mino_val_t *mino_load_file(const char *path, mino_env_t *env)
     char  *buf;
     long   sz;
     size_t rd;
-    mino_val_t *result;
+    mino_val_t    *result;
+    const char    *saved_file;
     if (path == NULL || env == NULL) {
         set_error("mino_load_file: NULL argument");
         return NULL;
@@ -3151,7 +3439,10 @@ mino_val_t *mino_load_file(const char *path, mino_env_t *env)
     rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[rd] = '\0';
+    saved_file  = reader_file;
+    reader_file = intern_filename(path);
     result = mino_eval_string(buf, env);
+    reader_file = saved_file;
     free(buf);
     return result;
 }
@@ -3160,6 +3451,7 @@ mino_env_t *mino_new(void)
 {
     mino_env_t *env = mino_env_new();
     mino_install_core(env);
+    mino_install_io(env);
     return env;
 }
 
@@ -4287,6 +4579,160 @@ static mino_val_t *prim_gensym(mino_val_t *args, mino_env_t *env)
     }
 }
 
+/* (throw value) — raise a script exception. Caught by try/catch; if no
+ * enclosing try, becomes a fatal runtime error. */
+static mino_val_t *prim_throw(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ex;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        set_error("throw requires one argument");
+        return NULL;
+    }
+    ex = args->as.cons.car;
+    if (try_depth <= 0) {
+        /* No enclosing try — format as fatal error. */
+        char msg[512];
+        if (ex != NULL && ex->type == MINO_STRING) {
+            snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
+                     (int)ex->as.s.len, ex->as.s.data);
+        } else {
+            snprintf(msg, sizeof(msg), "unhandled exception");
+        }
+        set_error(msg);
+        return NULL;
+    }
+    try_stack[try_depth - 1].exception = ex;
+    longjmp(try_stack[try_depth - 1].buf, 1);
+    return NULL; /* unreachable */
+}
+
+/* (slurp path) — read a file's entire contents as a string. I/O capability;
+ * only installed by mino_install_io, not mino_install_core. */
+static mino_val_t *prim_slurp(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *path_val;
+    const char *path;
+    FILE       *f;
+    long        sz;
+    size_t      rd;
+    char       *buf;
+    mino_val_t *result;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("slurp requires one argument");
+        return NULL;
+    }
+    path_val = args->as.cons.car;
+    if (path_val == NULL || path_val->type != MINO_STRING) {
+        set_error("slurp: argument must be a string");
+        return NULL;
+    }
+    path = path_val->as.s.data;
+    f = fopen(path, "rb");
+    if (f == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "slurp: cannot open file: %s", path);
+        set_error(msg);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    sz = ftell(f);
+    if (sz < 0) {
+        fclose(f);
+        set_error("slurp: cannot determine file size");
+        return NULL;
+    }
+    fseek(f, 0, SEEK_SET);
+    buf = (char *)malloc((size_t)sz + 1);
+    if (buf == NULL) {
+        fclose(f);
+        set_error("slurp: out of memory");
+        return NULL;
+    }
+    rd = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    buf[rd] = '\0';
+    result = mino_string_n(buf, rd);
+    free(buf);
+    return result;
+}
+
+/* (require name) — load a module by name using the host-supplied resolver.
+ * Returns the cached value on subsequent calls with the same name. */
+static mino_val_t *prim_require(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *name_val;
+    const char *name;
+    const char *path;
+    size_t      i;
+    mino_val_t *result;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("require requires one argument");
+        return NULL;
+    }
+    name_val = args->as.cons.car;
+    if (name_val == NULL || name_val->type != MINO_STRING) {
+        set_error("require: argument must be a string");
+        return NULL;
+    }
+    name = name_val->as.s.data;
+    /* Check cache. */
+    for (i = 0; i < module_cache_len; i++) {
+        if (strcmp(module_cache[i].name, name) == 0) {
+            return module_cache[i].value;
+        }
+    }
+    /* Resolve. */
+    if (module_resolver == NULL) {
+        set_error("require: no module resolver configured");
+        return NULL;
+    }
+    path = module_resolver(name, module_resolver_ctx);
+    if (path == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "require: cannot resolve module: %s", name);
+        set_error(msg);
+        return NULL;
+    }
+    /* Load. */
+    result = mino_load_file(path, env);
+    if (result == NULL) {
+        return NULL;
+    }
+    /* Cache. */
+    if (module_cache_len == module_cache_cap) {
+        size_t         new_cap = module_cache_cap == 0 ? 8 : module_cache_cap * 2;
+        module_entry_t *nb     = (module_entry_t *)realloc(
+            module_cache, new_cap * sizeof(*nb));
+        if (nb == NULL) {
+            set_error("require: out of memory");
+            return NULL;
+        }
+        module_cache     = nb;
+        module_cache_cap = new_cap;
+    }
+    {
+        size_t nlen = strlen(name);
+        char *dup   = (char *)malloc(nlen + 1);
+        if (dup == NULL) {
+            set_error("require: out of memory");
+            return NULL;
+        }
+        memcpy(dup, name, nlen + 1);
+        module_cache[module_cache_len].name  = dup;
+        module_cache[module_cache_len].value = result;
+        module_cache_len++;
+    }
+    return result;
+}
+
+void mino_set_resolver(mino_resolve_fn fn, void *ctx)
+{
+    module_resolver     = fn;
+    module_resolver_ctx = ctx;
+}
+
 /*
  * Stdlib macros defined in mino itself. Each form is read + evaluated in
  * order against the installing env during mino_install_core, so downstream
@@ -4343,7 +4789,11 @@ static const char *stdlib_mino_src =
 
 static void install_stdlib_macros(mino_env_t *env)
 {
-    const char *src = stdlib_mino_src;
+    const char *src        = stdlib_mino_src;
+    const char *saved_file = reader_file;
+    int         saved_line = reader_line;
+    reader_file = intern_filename("<stdlib>");
+    reader_line = 1;
     while (*src != '\0') {
         const char *end  = NULL;
         mino_val_t *form = mino_read(src, &end);
@@ -4361,6 +4811,8 @@ static void install_stdlib_macros(mino_env_t *env)
         }
         src = end;
     }
+    reader_file = saved_file;
+    reader_line = saved_line;
 }
 
 void mino_install_core(mino_env_t *env)
@@ -4409,7 +4861,14 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "fn?",      mino_prim("fn?",      prim_fn_p));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "str",      mino_prim("str",      prim_str));
+    mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
+    mino_env_set(env, "require",  mino_prim("require",  prim_require));
+    install_stdlib_macros(env);
+}
+
+void mino_install_io(mino_env_t *env)
+{
     mino_env_set(env, "println",  mino_prim("println",  prim_println));
     mino_env_set(env, "prn",      mino_prim("prn",      prim_prn));
-    install_stdlib_macros(env);
+    mino_env_set(env, "slurp",    mino_prim("slurp",    prim_slurp));
 }
