@@ -21,5 +21,6 @@
 (require "tests/hash_compare_test")
 (require "tests/regex_test")
 (require "tests/reader_fuzz_test")
+(require "tests/tco_test")
 
 (run-tests)
