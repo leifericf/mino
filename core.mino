@@ -314,3 +314,45 @@
   (let (walk (fn (s) (when (seq s) (walk (rest s)))))
     (walk coll)
     nil)))
+
+;; --- Type predicates and trivial compositions ---
+
+(def true?     (fn (x) (= x true)))
+(def false?    (fn (x) (= x false)))
+(def boolean?  (fn (x) (or (= x true) (= x false))))
+(def int?      (fn (x) (= (type x) :int)))
+(def float?    (fn (x) (= (type x) :float)))
+(def some?     (fn (x) (not (nil? x))))
+(def list?     cons?)
+(def atom?     (fn (x) (= (type x) :atom)))
+(def not-any?  (fn (pred coll) (not (some pred coll))))
+(def not-every? (fn (pred coll) (not (every? pred coll))))
+
+;; --- Sequence navigation ---
+
+(def next      (fn (coll) (seq (rest coll))))
+(def nfirst    (fn (coll) (next (first coll))))
+(def fnext     (fn (coll) (first (next coll))))
+(def nnext     (fn (coll) (next (next coll))))
+
+;; --- Map entry accessors ---
+
+(def key       (fn (entry) (first entry)))
+(def val       (fn (entry) (second entry)))
+
+;; --- Collection conversions ---
+
+(def remove    (fn (pred coll) (filter (complement pred) coll)))
+(def vec       (fn (coll) (into [] coll)))
+
+;; --- Random utilities ---
+
+(def rand-int  (fn (n) (int (* (rand) n))))
+(def rand-nth  (fn (coll) (nth coll (rand-int (count coll)))))
+
+;; --- Side-effecting traversal ---
+
+(def run!      (fn (f coll)
+  (let (go (fn (s) (when (seq s) (f (first s)) (go (rest s)))))
+    (go coll)
+    nil)))
