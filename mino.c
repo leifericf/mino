@@ -4151,24 +4151,6 @@ static mino_val_t *prim_lt(mino_val_t *args, mino_env_t *env)
     return compare_chain(args, "<", 0);
 }
 
-static mino_val_t *prim_le(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    return compare_chain(args, "<=", 1);
-}
-
-static mino_val_t *prim_gt(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    return compare_chain(args, ">", 2);
-}
-
-static mino_val_t *prim_ge(mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    return compare_chain(args, ">=", 3);
-}
-
 static mino_val_t *prim_car(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -6466,9 +6448,6 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "/",        mino_prim("/",        prim_div));
     mino_env_set(env, "=",        mino_prim("=",        prim_eq));
     mino_env_set(env, "<",        mino_prim("<",        prim_lt));
-    mino_env_set(env, "<=",       mino_prim("<=",       prim_le));
-    mino_env_set(env, ">",        mino_prim(">",        prim_gt));
-    mino_env_set(env, ">=",       mino_prim(">=",       prim_ge));
     mino_env_set(env, "car",      mino_prim("car",      prim_car));
     mino_env_set(env, "cdr",      mino_prim("cdr",      prim_cdr));
     mino_env_set(env, "cons",     mino_prim("cons",     prim_cons));

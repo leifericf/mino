@@ -55,6 +55,12 @@
 (def list     (fn (& args) args))
 (def empty?   (fn (coll) (= (count coll) 0)))
 
+;; --- Comparison (chained, built on <) ---
+
+(def >  (fn (a b & more) (if (< b a)  (if (nil? more) true (apply >  b more)) false)))
+(def <= (fn (a b & more) (if (< b a)  false (if (nil? more) true (apply <= b more)))))
+(def >= (fn (a b & more) (if (< a b)  false (if (nil? more) true (apply >= b more)))))
+
 ;; --- Higher-order functions ---
 
 (def comp (fn (f g) (fn (& args) (f (apply g args)))))
