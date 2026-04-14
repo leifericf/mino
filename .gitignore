@@ -9,6 +9,15 @@ build/
 bin/
 mino
 bench/vector_bench
+bench/map_bench
+bench/seq_bench
+fuzz/fuzz_reader
+cookbook/config
+cookbook/rules
+cookbook/repl_socket
+cookbook/plugin
+cookbook/pipeline
+cookbook/console
 
 # Test artifacts
 *.gcda

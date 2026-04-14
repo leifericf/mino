@@ -8,7 +8,7 @@ SRCS    := mino.c main.c
 OBJS    := $(SRCS:.c=.o)
 TARGET  := mino
 
-.PHONY: all clean test test-gc-stress bench
+.PHONY: all clean test test-gc-stress bench bench-map bench-seq fuzz-stdin fuzz-crash
 
 all: $(TARGET)
 
@@ -20,7 +20,11 @@ $(TARGET): $(OBJS)
 
 clean:
 	rm -f $(OBJS) $(TARGET) bench/vector_bench bench/vector_bench.o \
-	      examples/embed examples/embed.o
+	      bench/map_bench bench/map_bench.o bench/seq_bench bench/seq_bench.o \
+	      fuzz/fuzz_reader fuzz/fuzz_reader.o \
+	      examples/embed examples/embed.o \
+	      cookbook/config cookbook/rules cookbook/repl_socket \
+	      cookbook/plugin cookbook/pipeline cookbook/console
 
 test: $(TARGET)
 	./tests/smoke.sh
@@ -38,9 +42,31 @@ bench: bench/vector_bench
 bench/vector_bench: bench/vector_bench.c mino.o mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ bench/vector_bench.c mino.o
 
+bench-map: bench/map_bench
+	./bench/map_bench
+
+bench/map_bench: bench/map_bench.c mino.o mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ bench/map_bench.c mino.o
+
+bench-seq: bench/seq_bench
+	./bench/seq_bench
+
+bench/seq_bench: bench/seq_bench.c mino.o mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ bench/seq_bench.c mino.o
+
 # Example embedding program.
 example: examples/embed
 	./examples/embed
 
 examples/embed: examples/embed.c mino.o mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ examples/embed.c mino.o
+
+# Fuzz targets: stdin mode for crash_test.sh; libFuzzer for CI.
+fuzz-stdin: fuzz/fuzz_reader
+	@echo "fuzz_reader built (stdin mode). Run: ./fuzz/crash_test.sh"
+
+fuzz/fuzz_reader: fuzz/fuzz_reader.c mino.c mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -DFUZZ_STDIN -I. -o $@ fuzz/fuzz_reader.c mino.c
+
+fuzz-crash: fuzz/fuzz_reader
+	./fuzz/crash_test.sh
