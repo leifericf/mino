@@ -31,7 +31,7 @@ static int has_only_whitespace(const char *s)
     return 1;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     mino_env_t *env = mino_env_new();
     char *buf  = NULL;
@@ -42,6 +42,19 @@ int main(void)
 
     mino_install_core(env);
     mino_install_io(env);
+
+    /* File mode: evaluate a script and exit. */
+    if (argc > 1) {
+        mino_val_t *result = mino_load_file(argv[1], env);
+        if (result == NULL) {
+            const char *err = mino_last_error();
+            fprintf(stderr, "mino: %s\n", err ? err : "unknown error");
+            exit_code = 1;
+        }
+        mino_env_free(env);
+        return exit_code;
+    }
+
     fputs("mino> ", stderr);
     fflush(stderr);
 
