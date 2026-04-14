@@ -380,7 +380,7 @@ run "defmacro docstring" '(defmacro my-id "identity macro" (x) x)
 (doc (quote my-id))' '#<macro>
 "identity macro"'
 
-run "apropos finds" '(apropos "co")' '(cons count conj cons? cond)'
+run "apropos finds" '(apropos "co")' '(cons count conj cons? contains? concat cond comp complement)'
 
 run "apropos empty" '(apropos "zzzznotfound")' 'nil'
 
@@ -393,6 +393,106 @@ run "deep nest safe" '(def build (fn (n acc)
     (build (- n 1) (list acc)))))
 (cons? (build 200 42))' '#<fn>
 true'
+
+# v0.11 — sets
+run "set literal"       '#{1 2 3}'                              '#{1 2 3}'
+run "set dedup"         '#{1 2 2 3}'                            '#{1 2 3}'
+run "set count"         '(count #{1 2 3})'                      '3'
+run "set equality"      '(= #{1 2 3} #{3 2 1})'                'true'
+run "set type"          '(type #{1})'                           ':set'
+run "set conj"          '(conj #{1 2} 3)'                       '#{1 2 3}'
+run "set conj dedup"    '(conj #{1 2} 2 3)'                     '#{1 2 3}'
+run "hash-set"          '(hash-set 1 2 3)'                      '#{1 2 3}'
+run "set?"              '(set? #{1 2})'                         'true'
+run "set? false"        '(set? [1 2])'                          'false'
+run "contains? set"     '(contains? #{1 2 3} 2)'                'true'
+run "contains? set neg" '(contains? #{1 2 3} 4)'                'false'
+run "contains? map"     '(contains? {:a 1} :a)'                 'true'
+run "contains? vec"     '(contains? [10 20 30] 1)'              'true'
+run "disj"              '(disj #{1 2 3} 2)'                     '#{1 3}'
+run "disj multi"        '(disj #{1 2 3 4} 2 4)'                 '#{1 3}'
+run "get set"           '(get #{:a :b} :a)'                     ':a'
+run "get set miss"      '(get #{:a :b} :c)'                     'nil'
+run "set empty"         '(empty? #{})'                          'true'
+
+# v0.11 — sequence operations
+run "map list"          '(map (fn (x) (* x 2)) (list 1 2 3))'  '(2 4 6)'
+run "map vector"        '(map (fn (x) (+ x 1)) [10 20 30])'    '(11 21 31)'
+run "map nil"           '(map (fn (x) x) nil)'                  'nil'
+run "filter"            '(filter (fn (x) (> x 2)) [1 2 3 4 5])' '(3 4 5)'
+run "filter empty"      '(filter (fn (x) false) [1 2 3])'      'nil'
+run "reduce 3-arg"      '(reduce + 0 [1 2 3 4 5])'             '15'
+run "reduce 2-arg"      '(reduce + [1 2 3])'                   '6'
+run "reduce single"     '(reduce + [42])'                       '42'
+run "take"              '(take 3 [1 2 3 4 5])'                  '(1 2 3)'
+run "take past end"     '(take 10 [1 2])'                       '(1 2)'
+run "take zero"         '(take 0 [1 2 3])'                      'nil'
+run "drop"              '(drop 2 [1 2 3 4 5])'                  '(3 4 5)'
+run "drop past end"     '(drop 10 [1 2])'                       'nil'
+run "range 1"           '(range 5)'                             '(0 1 2 3 4)'
+run "range 2"           '(range 2 5)'                           '(2 3 4)'
+run "range 3"           '(range 0 10 3)'                        '(0 3 6 9)'
+run "range neg step"    '(range 5 0 -1)'                        '(5 4 3 2 1)'
+run "repeat"            '(repeat 3 "x")'                        '("x" "x" "x")'
+run "repeat zero"       '(repeat 0 "x")'                        'nil'
+run "concat"            '(concat [1 2] [3 4])'                  '(1 2 3 4)'
+run "concat multi"      '(concat [1] [2] [3])'                  '(1 2 3)'
+run "concat empty"      '(concat [] [1 2])'                     '(1 2)'
+run "into vec"          '(into [] (range 3))'                   '[0 1 2]'
+run "into set"          '(into #{} [1 2 2 3])'                  '#{1 2 3}'
+run "into map"          '(into {} [[:a 1] [:b 2]])'             '{:a 1, :b 2}'
+run "apply"             '(apply + [1 2 3])'                     '6'
+run "apply prefix"      '(apply + 1 2 [3 4])'                  '10'
+run "reverse list"      '(reverse (list 1 2 3))'                '(3 2 1)'
+run "reverse vec"       '(reverse [1 2 3])'                     '(3 2 1)'
+run "reverse nil"       '(reverse nil)'                         'nil'
+run "sort"              '(sort [3 1 4 1 5])'                    '(1 1 3 4 5)'
+run "sort strings"      '(sort ["c" "a" "b"])'                  '("a" "b" "c")'
+run "sort empty"        '(sort [])'                             'nil'
+
+# v0.11 — string operations
+run "subs"              '(subs "hello" 1 3)'                    '"el"'
+run "subs no end"       '(subs "hello" 2)'                      '"llo"'
+run "split"             '(split "a,b,c" ",")'                   '["a" "b" "c"]'
+run "split empty sep"   '(split "abc" "")'                      '["a" "b" "c"]'
+run "join sep"          '(join "-" ["a" "b" "c"])'              '"a-b-c"'
+run "join no sep"       '(join ["a" "b" "c"])'                  '"abc"'
+run "starts-with?"      '(starts-with? "hello" "he")'           'true'
+run "starts-with? neg"  '(starts-with? "hello" "lo")'           'false'
+run "ends-with?"        '(ends-with? "hello" "lo")'             'true'
+run "ends-with? neg"    '(ends-with? "hello" "he")'             'false'
+run "includes?"         '(includes? "hello" "ell")'             'true'
+run "includes? neg"     '(includes? "hello" "xyz")'             'false'
+run "upper-case"        '(upper-case "hello")'                  '"HELLO"'
+run "lower-case"        '(lower-case "HELLO")'                  '"hello"'
+run "trim"              '(trim "  hi  ")'                       '"hi"'
+run "trim noop"         '(trim "hi")'                           '"hi"'
+
+# v0.11 — utility
+run "not true"          '(not true)'                            'false'
+run "not false"         '(not false)'                           'true'
+run "not nil"           '(not nil)'                             'true'
+run "not="              '(not= 1 2)'                            'true'
+run "not= eq"           '(not= 1 1)'                            'false'
+run "empty? vec"        '(empty? [])'                           'true'
+run "empty? nonempty"   '(empty? [1])'                          'false'
+run "empty? nil"        '(empty? nil)'                          'true'
+run "empty? str"        '(empty? "")'                           'true'
+run "some"              '(some (fn (x) (> x 3)) [1 2 3 4 5])'  'true'
+run "some nil"          '(some (fn (x) (> x 10)) [1 2 3])'     'nil'
+run "every?"            '(every? (fn (x) (> x 0)) [1 2 3])'    'true'
+run "every? false"      '(every? (fn (x) (> x 2)) [1 2 3])'    'false'
+run "identity"          '(identity 42)'                         '42'
+run "comp"              '((comp not nil?) nil)'                  'false'
+run "partial"           '((partial + 10) 5)'                    '15'
+run "complement"        '((complement nil?) 42)'                'true'
+run "complement nil"    '((complement nil?) nil)'               'false'
+
+# v0.11 — map over maps yields [k v] pairs
+run "map over map"      '(map (fn (kv) (nth kv 1)) {:a 1 :b 2})' '(1 2)'
+
+# v0.11 — into with lists
+run "into list"         '(into (list) [1 2 3])'                '(3 2 1)'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]
