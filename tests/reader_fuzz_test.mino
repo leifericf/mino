@@ -1,0 +1,113 @@
+(require "test")
+
+;; Reader robustness: feed adversarial inputs through read-string and verify
+;; the reader handles them gracefully (throws or returns a value, never crashes).
+;; If any input causes a segfault, the test runner process dies and CI fails.
+
+;; Helper: assert that read-string doesn't crash. It may return a value or
+;; throw — both are fine. A crash (segfault) is the failure mode.
+(defmacro reader-survives (desc input)
+  `(deftest ~desc
+     (try
+       (do (read-string ~input)
+           (assert-pass!))
+       (catch __e (assert-pass!)))))
+
+;; --- Unterminated forms ---
+
+(reader-survives unterminated-list "(1 2 3")
+(reader-survives unterminated-vector "[1 2 3")
+(reader-survives unterminated-map "{:a 1")
+(reader-survives unterminated-set "#{1 2")
+(reader-survives unterminated-string "\"hello")
+
+;; --- Mismatched delimiters ---
+
+(reader-survives close-paren-only ")")
+(reader-survives close-bracket-only "]")
+(reader-survives close-brace-only "}")
+(reader-survives paren-bracket-mismatch "(1 2]")
+(reader-survives bracket-paren-mismatch "[1 2)")
+(reader-survives brace-paren-mismatch "{:a 1)")
+
+;; --- Empty / whitespace ---
+
+(reader-survives empty-input "")
+(reader-survives only-whitespace "   ")
+(reader-survives only-newlines "\n\n\n")
+(reader-survives only-comment "; just a comment")
+
+;; --- Edge-case atoms ---
+
+(reader-survives lone-colon ":")
+(reader-survives lone-hash "#")
+(reader-survives hash-no-brace "#x")
+(reader-survives lone-tilde "~")
+(reader-survives lone-backtick "`")
+(reader-survives lone-quote "'")
+(reader-survives lone-at "@")
+(reader-survives tilde-at "~@")
+
+;; --- Deeply nested ---
+
+(reader-survives deep-parens
+  "((((((((((((((((((((((((((((((1))))))))))))))))))))))))))))))")
+
+(reader-survives deep-vectors
+  "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]")
+
+(reader-survives deep-maps
+  "{:a {:b {:c {:d {:e {:f {:g {:h {:i {:j 1}}}}}}}}}}")
+
+;; --- Odd map forms ---
+
+(reader-survives map-odd-count "{:a 1 :b}")
+(reader-survives map-empty "{}")
+(reader-survives set-empty "#{}")
+
+;; --- Long strings ---
+
+(reader-survives long-string
+  (str "\"" (apply str (repeat 10000 "a")) "\""))
+
+(reader-survives long-symbol
+  (apply str (repeat 5000 "x")))
+
+;; --- Quote edge cases ---
+
+(reader-survives quote-eof "'")
+(reader-survives quasiquote-eof "`")
+(reader-survives unquote-eof "~")
+(reader-survives splice-eof "~@")
+(reader-survives quote-in-list "(')")
+(reader-survives double-quote-list "(''x)")
+
+;; --- Numbers ---
+
+(reader-survives just-minus "-")
+(reader-survives just-dot ".")
+(reader-survives leading-zeros "007")
+(reader-survives huge-integer "999999999999999999999999999999999999999999")
+(reader-survives many-decimals "3.14159265358979323846264338327950288")
+(reader-survives negative-zero "-0.0")
+(reader-survives exponent "1e999")
+
+;; --- Repeated specials ---
+
+(reader-survives many-quotes "''''''''x")
+(reader-survives many-tildes "~~~~~~~~x")
+(reader-survives alternating-delims "([{([{([{([{")
+
+;; --- Corpus files (positive tests: these should parse without error) ---
+
+(deftest corpus-atoms
+  (is (read-string (slurp "fuzz/corpus/atoms.mino"))))
+
+(deftest corpus-collections
+  (is (read-string (slurp "fuzz/corpus/collections.mino"))))
+
+(deftest corpus-nested
+  (is (read-string (slurp "fuzz/corpus/nested.mino"))))
+
+(deftest corpus-quotes
+  (is (read-string (slurp "fuzz/corpus/quotes.mino"))))

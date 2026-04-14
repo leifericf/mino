@@ -17,5 +17,6 @@
 (require "tests/io_test")
 (require "tests/reflection_test")
 (require "tests/gc_test")
+(require "tests/reader_fuzz_test")
 
 (run-tests)
