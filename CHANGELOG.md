@@ -4,6 +4,50 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] — Interactive development
+
+The printer is now cycle-safe, `def`/`defmacro` record metadata for
+introspection, and a new in-process REPL handle lets a host drive
+read-eval-print one line at a time with no thread required.
+
+### Added
+
+- **Cycle-safe printing**: `mino_print_to` tracks recursion depth and
+  emits `#<...>` when the depth exceeds 128, preventing stack overflow
+  on deeply nested structures.
+- **`doc`**: `(doc 'name)` returns the docstring attached to a
+  `def`/`defmacro` binding, or `nil` if none was provided.
+- **`source`**: `(source 'name)` returns the original source form of a
+  `def`/`defmacro` binding.
+- **`apropos`**: `(apropos "substring")` returns a list of symbols whose
+  names contain the given substring, searched across the current
+  environment chain.
+- **Docstring support in `def` and `defmacro`**: An optional string
+  literal between the name and the value/params is recorded as the
+  binding's docstring: `(def name "docstring" value)`,
+  `(defmacro name "docstring" (params) body)`.
+- **`mino_repl_t` — in-process REPL handle**: `mino_repl_new(env)`
+  creates a handle; `mino_repl_feed(repl, line, &out)` accumulates
+  input and evaluates when a form is complete. Returns `MINO_REPL_OK`,
+  `MINO_REPL_MORE`, or `MINO_REPL_ERROR`. `mino_repl_free` releases
+  the handle. No thread required — the host controls the call cadence.
+- **Var redefinition with live reference update**: Closures that
+  reference root-level vars see updated values after `def` redefines
+  them (already the case due to env-chain lookup, now tested
+  explicitly).
+
+### Changed
+
+- `mino_install_core` docstring updated to list `doc`, `source`, and
+  `apropos` under reflection primitives.
+- `examples/embed.c` updated to demonstrate the REPL handle API.
+
+### Notes
+
+- LOC: mino.c ~5,210, mino.h ~338 (within the 15k–25k budget).
+- 170 smoke tests, all passing under normal and `MINO_GC_STRESS=1`
+  modes at both `-O0` and `-O2`.
+
 ## [0.9.0] — Sandbox, modules, diagnostics
 
 Runtime errors now carry source locations and call-stack traces. Script
