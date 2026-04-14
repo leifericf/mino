@@ -494,5 +494,30 @@ run "map over map"      '(map (fn (kv) (nth kv 1)) {:a 1 :b 2})' '(1 2)'
 # v0.11 — into with lists
 run "into list"         '(into (list) [1 2 3])'                '(3 2 1)'
 
+# v0.13 — atoms
+run "atom create"       '(atom 42)'                                    '#atom[42]'
+run "deref"             '(deref (atom 42))'                            '42'
+run "@ reader macro"    '@(atom 42)'                                   '42'
+run "reset!"            '(let (a (atom 0)) (reset! a 10) @a)'         '10'
+run "swap!"             '(let (a (atom 0)) (swap! a + 1) @a)'         '1'
+run "swap! extra args"  '(let (a (atom 10)) (swap! a + 5 3) @a)'      '18'
+run "atom?"             '(atom? (atom nil))'                           'true'
+run "atom? false"       '(atom? 42)'                                   'false'
+run "atom identity eq"  '(let (a (atom 1)) (= a a))'                  'true'
+run "atom value neq"    '(let (a (atom 1) b (atom 1)) (= a b))'       'false'
+run "atom type"         '(type (atom 1))'                              ':atom'
+run "atom nested"       '(let (a (atom (atom 1))) @@a)'               '1'
+run "atom nil"          '@(atom nil)'                                  'nil'
+run "atom swap! conj"   '(let (a (atom [1 2])) (swap! a conj 3) @a)'  '[1 2 3]'
+run_err "deref non-atom" '(deref 42)' 'deref: expected an atom'
+
+# v0.13 — defn
+run "defn basic"        '(do (defn inc1 (x) (+ x 1)) (inc1 5))'       '6'
+run "defn multi-body"   '(do (defn f (x) (+ x 1) (+ x 2)) (f 10))'   '12'
+
+# v0.13 — spit
+run "spit and slurp"    '(do (spit "/tmp/mino_test_spit.txt" "hello") (slurp "/tmp/mino_test_spit.txt"))' '"hello"'
+run "spit non-string"   '(do (spit "/tmp/mino_test_spit2.txt" 42) (slurp "/tmp/mino_test_spit2.txt"))'   '"42"'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]
