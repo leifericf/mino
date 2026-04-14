@@ -4,6 +4,50 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] — Sequences & remainder of stdlib
+
+Sets, sequence transformations, string operations, and utility functions
+round out the core standard library. Strict (non-lazy) semantics
+throughout — every sequence operation returns a concrete list or
+collection.
+
+### Added
+
+- **Sets** (`MINO_SET`): persistent HAMT-backed set type. Reader literal
+  `#{...}`, printer `#{...}`, value-based equality, hashing.
+  - `hash-set`, `set?`, `contains?`, `disj`, `get` on sets, `conj` on
+    sets.
+- **Sequence operations** (strict, return lists):
+  - `map`, `filter`, `reduce` (2- and 3-arg), `take`, `drop`, `range`
+    (1/2/3-arg), `repeat`, `concat`, `into`, `apply` (2+-arg with
+    spread), `reverse`, `sort` (natural ordering via merge sort).
+  - All sequence ops work uniformly over lists, vectors, maps (yielding
+    `[key value]` vectors), sets, and strings (yielding 1-char strings).
+- **String operations**: `subs`, `split`, `join` (1- and 2-arg),
+  `starts-with?`, `ends-with?`, `includes?`, `upper-case`, `lower-case`,
+  `trim`.
+- **Utility primitives**: `not`, `not=`, `empty?`, `some`, `every?`,
+  `identity`.
+- **Stdlib (mino-defined)**: `comp`, `partial`, `complement`.
+
+### Changed
+
+- `mino_install_core` docstring updated to list all new bindings.
+- `conj` extended to support sets.
+- `get` extended to support sets (returns the element itself if present).
+- `count` extended to support sets.
+- `mino.h` gains `MINO_SET` in the type enum and `mino_set()` constructor.
+- Existing `apropos` test updated for expanded binding set.
+
+### Notes
+
+- LOC: mino.c ~6,583, mino.h ~352 (well within the 15k–25k budget).
+- 258 smoke tests, all passing under normal and `MINO_GC_STRESS=1`
+  modes at both `-O0` and `-O2`.
+- Lazy sequences were evaluated and deferred: strict semantics are
+  simpler, more predictable, and a better fit for the embeddable
+  runtime identity. The deviation from the host language is documented.
+
 ## [0.10.0] — Interactive development
 
 The printer is now cycle-safe, `def`/`defmacro` record metadata for
