@@ -352,5 +352,47 @@ run_err "trace in error"   '(def f (fn (x) (+ x z)))
 # just confirms throw propagates correctly without an enclosing try.
 run_err "throw no try" '(throw "boom")' 'unhandled exception: boom'
 
+# v0.10 — var redefinition with live reference update
+run "var redef closure" '(def f (fn () x))
+(def x 10)
+(f)
+(def x 20)
+(f)' '#<fn>
+10
+10
+20
+20'
+
+# v0.10 — doc / source / apropos
+run "doc with docstring" '(def inc "increment by one" (fn (x) (+ x 1)))
+(doc (quote inc))' '#<fn>
+"increment by one"'
+
+run "doc no docstring" '(def y 42)
+(doc (quote y))' '42
+nil'
+
+run "source returns form" '(def sq "square" (fn (x) (* x x)))
+(car (source (quote sq)))' '#<fn>
+def'
+
+run "defmacro docstring" '(defmacro my-id "identity macro" (x) x)
+(doc (quote my-id))' '#<macro>
+"identity macro"'
+
+run "apropos finds" '(apropos "co")' '(cons count conj cons? cond)'
+
+run "apropos empty" '(apropos "zzzznotfound")' 'nil'
+
+# v0.10 — cycle-safe printing (depth guard)
+# Build a deeply nested list that exceeds 128-depth guard; verify
+# the REPL does not crash and the value is still a cons.
+run "deep nest safe" '(def build (fn (n acc)
+  (if (= n 0)
+    acc
+    (build (- n 1) (list acc)))))
+(cons? (build 200 42))' '#<fn>
+true'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]
