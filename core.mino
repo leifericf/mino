@@ -447,3 +447,41 @@
   (let (cmp  (if (= (count args) 2) (first args) compare)
         coll (last args))
     (sort (fn (a b) (cmp (keyfn a) (keyfn b))) coll))))
+
+;; --- Collection utilities ---
+
+(def get-in (fn (m ks)
+  (reduce get m ks)))
+
+(def assoc-in (fn (m ks v)
+  (let (k (first ks))
+    (if (next ks)
+      (assoc m k (assoc-in (get m k) (rest ks) v))
+      (assoc m k v)))))
+
+(def update-in (fn (m ks f & args)
+  (let (k (first ks))
+    (if (next ks)
+      (assoc m k (apply update-in (get m k) (rest ks) f args))
+      (assoc m k (apply f (get m k) args))))))
+
+(def merge-with (fn (f & maps)
+  (reduce (fn (acc m)
+    (reduce (fn (a kv)
+      (let (k (first kv)
+            v (second kv))
+        (if (contains? a k)
+          (assoc a k (f (get a k) v))
+          (assoc a k v))))
+      acc (seq m)))
+    {} maps)))
+
+(def reduce-kv (fn (f init m)
+  (reduce (fn (acc kv) (f acc (first kv) (second kv)))
+          init (seq m))))
+
+(def replace (fn (smap coll)
+  (map (fn (x) (if (contains? smap x) (get smap x) x)) coll)))
+
+(def str-replace (fn (s match replacement)
+  (join replacement (split s match))))
