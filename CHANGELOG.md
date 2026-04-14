@@ -4,6 +4,61 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — Sandbox, modules, diagnostics
+
+Runtime errors now carry source locations and call-stack traces. Script
+code gains `try`/`catch`/`throw` for recoverable exceptions. The core
+environment is sandboxed by default — I/O primitives are installed
+separately via `mino_install_io`. A host-supplied module resolver
+enables `require` for file-based modules.
+
+### Added
+
+- **Source locations**: The reader tracks file name and line number;
+  cons cells produced by reading carry `file` / `line` annotations.
+  Eval errors include a `file:line:` prefix, and function call errors
+  append a stack trace showing the active call chain.
+- **`try` / `catch` / `throw`**: `try` is a special form:
+  `(try body (catch e handler...))`. `throw` raises a script-level
+  exception caught by the nearest enclosing `try`; an unhandled `throw`
+  becomes a fatal runtime error. Uses `setjmp`/`longjmp` internally.
+- **`mino_install_io(env)`**: Installs `println`, `prn`, and `slurp`.
+  `mino_install_core` no longer installs any I/O primitives — the host
+  opts in by calling `mino_install_io`. `mino_new()` installs both for
+  convenience.
+- **`slurp`**: `(slurp path)` reads a file's contents as a string.
+  Only available when `mino_install_io` has been called.
+- **`require`**: `(require "name")` loads a module by name using a
+  host-supplied resolver. Results are cached so subsequent requires of
+  the same name return instantly.
+- **`mino_set_resolver(fn, ctx)`**: Registers the host resolver
+  callback for `require`.
+- **`run_err`** test helper in `smoke.sh` for testing error messages.
+
+### Changed
+
+- **Error buffer** enlarged from 256 to 2048 bytes to accommodate
+  stack traces.
+- **`mino_install_core`** no longer installs `println` or `prn`.
+  Existing embedders using `mino_new()` are unaffected (it calls both
+  `mino_install_core` and `mino_install_io`). Embedders calling
+  `mino_install_core` directly must add `mino_install_io` to restore
+  the prior behaviour.
+- **REPL** (`main.c`) calls `mino_install_io` after `mino_install_core`
+  and preserves inter-form whitespace so the reader's line counter
+  stays accurate across forms.
+
+### Notes
+
+- Stack traces are appended to the error message returned by
+  `mino_last_error()`. A future version may expose structured trace
+  access.
+- `try`/`catch` catches only values raised by `throw`. Fatal runtime
+  errors (NULL returns from `mino_eval`) propagate to the host
+  unmodified.
+- The module cache and resolver are global (not per-env). Thread
+  safety is not a goal pre-v1.0.
+
 ## [0.8.0] — Host C API
 
 First draft of the embedding API. An external C program can now create a
