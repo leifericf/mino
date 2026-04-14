@@ -6251,6 +6251,41 @@ static mino_val_t *prim_slurp(mino_val_t *args, mino_env_t *env)
     return result;
 }
 
+static mino_val_t *prim_spit(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *path_val;
+    mino_val_t *content;
+    const char *path;
+    FILE       *f;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("spit requires two arguments");
+        return NULL;
+    }
+    path_val = args->as.cons.car;
+    content  = args->as.cons.cdr->as.cons.car;
+    if (path_val == NULL || path_val->type != MINO_STRING) {
+        set_error("spit: first argument must be a string path");
+        return NULL;
+    }
+    path = path_val->as.s.data;
+    f = fopen(path, "wb");
+    if (f == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "spit: cannot open file: %s", path);
+        set_error(msg);
+        return NULL;
+    }
+    if (content != NULL && content->type == MINO_STRING) {
+        fwrite(content->as.s.data, 1, content->as.s.len, f);
+    } else {
+        mino_print_to(f, content);
+    }
+    fclose(f);
+    return mino_nil();
+}
+
 /* (require name) — load a module by name using the host-supplied resolver.
  * Returns the cached value on subsequent calls with the same name. */
 static mino_val_t *prim_require(mino_val_t *args, mino_env_t *env)
@@ -6608,4 +6643,5 @@ void mino_install_io(mino_env_t *env)
     mino_env_set(env, "println",  mino_prim("println",  prim_println));
     mino_env_set(env, "prn",      mino_prim("prn",      prim_prn));
     mino_env_set(env, "slurp",    mino_prim("slurp",    prim_slurp));
+    mino_env_set(env, "spit",     mino_prim("spit",     prim_spit));
 }
