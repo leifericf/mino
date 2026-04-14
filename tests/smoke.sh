@@ -503,6 +503,14 @@ run "quot positive"     '(quot 10 3)'                          '3'
 run "quot negative"     '(quot -10 3)'                         '-3'
 run "mod float"         '(mod 5.5 2.0)'                        '1.5'
 
+# v0.14 — bitwise
+run "bit-and"           '(bit-and 12 10)'                      '8'
+run "bit-or"            '(bit-or 12 10)'                       '14'
+run "bit-xor"           '(bit-xor 12 10)'                      '6'
+run "bit-not"           '(bit-not 0)'                          '-1'
+run "bit-shift-left"    '(bit-shift-left 1 4)'                 '16'
+run "bit-shift-right"   '(bit-shift-right 16 2)'               '4'
+
 # v0.14 — dissoc
 run "dissoc single"     '(dissoc {:a 1 :b 2 :c 3} :b)'        '{:a 1, :c 3}'
 run "dissoc multi"      '(dissoc {:a 1 :b 2 :c 3} :a :c)'     '{:b 2}'

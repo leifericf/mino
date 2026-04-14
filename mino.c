@@ -4235,6 +4235,106 @@ static mino_val_t *prim_quot(mino_val_t *args, mino_env_t *env)
     return mino_float(q);
 }
 
+static mino_val_t *prim_bit_and(mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("bit-and requires two arguments");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.car, &a) ||
+        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("bit-and expects integers");
+        return NULL;
+    }
+    return mino_int(a & b);
+}
+
+static mino_val_t *prim_bit_or(mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("bit-or requires two arguments");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.car, &a) ||
+        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("bit-or expects integers");
+        return NULL;
+    }
+    return mino_int(a | b);
+}
+
+static mino_val_t *prim_bit_xor(mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("bit-xor requires two arguments");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.car, &a) ||
+        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("bit-xor expects integers");
+        return NULL;
+    }
+    return mino_int(a ^ b);
+}
+
+static mino_val_t *prim_bit_not(mino_val_t *args, mino_env_t *env)
+{
+    long long a;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("bit-not requires one argument");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.car, &a)) {
+        set_error("bit-not expects an integer");
+        return NULL;
+    }
+    return mino_int(~a);
+}
+
+static mino_val_t *prim_bit_shift_left(mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("bit-shift-left requires two arguments");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.car, &a) ||
+        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("bit-shift-left expects integers");
+        return NULL;
+    }
+    return mino_int(a << b);
+}
+
+static mino_val_t *prim_bit_shift_right(mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("bit-shift-right requires two arguments");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.car, &a) ||
+        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error("bit-shift-right expects integers");
+        return NULL;
+    }
+    return mino_int(a >> b);
+}
+
 static mino_val_t *prim_eq(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -6705,6 +6805,14 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "mod",      mino_prim("mod",      prim_mod));
     mino_env_set(env, "rem",      mino_prim("rem",      prim_rem));
     mino_env_set(env, "quot",     mino_prim("quot",     prim_quot));
+    mino_env_set(env, "bit-and", mino_prim("bit-and", prim_bit_and));
+    mino_env_set(env, "bit-or",  mino_prim("bit-or",  prim_bit_or));
+    mino_env_set(env, "bit-xor", mino_prim("bit-xor", prim_bit_xor));
+    mino_env_set(env, "bit-not", mino_prim("bit-not", prim_bit_not));
+    mino_env_set(env, "bit-shift-left",
+                 mino_prim("bit-shift-left", prim_bit_shift_left));
+    mino_env_set(env, "bit-shift-right",
+                 mino_prim("bit-shift-right", prim_bit_shift_right));
     mino_env_set(env, "car",      mino_prim("car",      prim_car));
     mino_env_set(env, "cdr",      mino_prim("cdr",      prim_cdr));
     mino_env_set(env, "cons",     mino_prim("cons",     prim_cons));
