@@ -4399,6 +4399,133 @@ static mino_val_t *print_to_string(const mino_val_t *v)
     return result;
 }
 
+/*
+ * (format fmt & args) — simple string formatting.
+ * Directives: %s (str of arg), %d (integer), %f (float), %% (literal %).
+ */
+static mino_val_t *prim_format(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fmt_val;
+    const char *fmt;
+    size_t      fmt_len;
+    mino_val_t *arg_list;
+    char  *buf = NULL;
+    size_t len = 0;
+    size_t cap = 0;
+    size_t i;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        set_error("format requires at least a format string");
+        return NULL;
+    }
+    fmt_val = args->as.cons.car;
+    if (fmt_val == NULL || fmt_val->type != MINO_STRING) {
+        set_error("format: first argument must be a string");
+        return NULL;
+    }
+    fmt     = fmt_val->as.s.data;
+    fmt_len = fmt_val->as.s.len;
+    arg_list = args->as.cons.cdr;
+
+#define FMT_ENSURE(extra) do { \
+        size_t _need = len + (extra) + 1; \
+        if (_need > cap) { \
+            cap = cap == 0 ? 128 : cap; \
+            while (cap < _need) cap *= 2; \
+            buf = (char *)realloc(buf, cap); \
+            if (buf == NULL) { set_error("out of memory"); return NULL; } \
+        } \
+    } while (0)
+
+    for (i = 0; i < fmt_len; i++) {
+        if (fmt[i] == '%' && i + 1 < fmt_len) {
+            char spec = fmt[i + 1];
+            i++;
+            if (spec == '%') {
+                FMT_ENSURE(1);
+                buf[len++] = '%';
+            } else if (spec == 's') {
+                mino_val_t *a;
+                if (!mino_is_cons(arg_list)) {
+                    free(buf);
+                    set_error("format: not enough arguments for format string");
+                    return NULL;
+                }
+                a = arg_list->as.cons.car;
+                arg_list = arg_list->as.cons.cdr;
+                if (a != NULL && a->type == MINO_STRING) {
+                    FMT_ENSURE(a->as.s.len);
+                    memcpy(buf + len, a->as.s.data, a->as.s.len);
+                    len += a->as.s.len;
+                } else {
+                    mino_val_t *s = print_to_string(a);
+                    if (s == NULL) { free(buf); return NULL; }
+                    FMT_ENSURE(s->as.s.len);
+                    memcpy(buf + len, s->as.s.data, s->as.s.len);
+                    len += s->as.s.len;
+                }
+            } else if (spec == 'd') {
+                long long n;
+                char tmp[32];
+                int  tn;
+                if (!mino_is_cons(arg_list)) {
+                    free(buf);
+                    set_error("format: not enough arguments for format string");
+                    return NULL;
+                }
+                if (!as_long(arg_list->as.cons.car, &n)) {
+                    double d;
+                    if (as_double(arg_list->as.cons.car, &d)) {
+                        n = (long long)d;
+                    } else {
+                        free(buf);
+                        set_error("format: %d expects a number");
+                        return NULL;
+                    }
+                }
+                arg_list = arg_list->as.cons.cdr;
+                tn = snprintf(tmp, sizeof(tmp), "%lld", n);
+                FMT_ENSURE((size_t)tn);
+                memcpy(buf + len, tmp, (size_t)tn);
+                len += (size_t)tn;
+            } else if (spec == 'f') {
+                double d;
+                char tmp[64];
+                int  tn;
+                if (!mino_is_cons(arg_list)) {
+                    free(buf);
+                    set_error("format: not enough arguments for format string");
+                    return NULL;
+                }
+                if (!as_double(arg_list->as.cons.car, &d)) {
+                    free(buf);
+                    set_error("format: %f expects a number");
+                    return NULL;
+                }
+                arg_list = arg_list->as.cons.cdr;
+                tn = snprintf(tmp, sizeof(tmp), "%f", d);
+                FMT_ENSURE((size_t)tn);
+                memcpy(buf + len, tmp, (size_t)tn);
+                len += (size_t)tn;
+            } else {
+                /* Unknown directive: emit literal. */
+                FMT_ENSURE(2);
+                buf[len++] = '%';
+                buf[len++] = spec;
+            }
+        } else {
+            FMT_ENSURE(1);
+            buf[len++] = fmt[i];
+        }
+    }
+#undef FMT_ENSURE
+    {
+        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", len);
+        free(buf);
+        return result;
+    }
+}
+
 static mino_val_t *prim_read_string(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s;
@@ -7003,6 +7130,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "pr-str",   mino_prim("pr-str",   prim_pr_str));
     mino_env_set(env, "read-string",
                  mino_prim("read-string", prim_read_string));
+    mino_env_set(env, "format",   mino_prim("format",   prim_format));
     mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
     mino_env_set(env, "require",  mino_prim("require",  prim_require));
     mino_env_set(env, "doc",      mino_prim("doc",      prim_doc));

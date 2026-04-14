@@ -219,7 +219,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   utility      not identity some every?
  *   coercion     int float
  *   reflection   type name doc source apropos
- *   strings      str pr-str read-string subs split join char-at
+ *   strings      str pr-str read-string format subs split join char-at
  *                starts-with? ends-with? includes? upper-case lower-case
  *                trim
  *   exceptions   throw

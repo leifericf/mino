@@ -503,6 +503,14 @@ run "quot positive"     '(quot 10 3)'                          '3'
 run "quot negative"     '(quot -10 3)'                         '-3'
 run "mod float"         '(mod 5.5 2.0)'                        '1.5'
 
+# v0.14 — format
+run "format str"        '(format "hello %s" "world")'          '"hello world"'
+run "format int"        '(format "n=%d" 42)'                   '"n=42"'
+run "format float"      '(format "pi=%f" 3.14)'                '"pi=3.140000"'
+run "format multi"      '(format "%s has %d" "Bob" 3)'         '"Bob has 3"'
+run "format percent"    '(format "100%%")'                     '"100%"'
+run "format keyword"    '(format "key: %s" :hello)'            '"key: :hello"'
+
 # v0.14 — read-string
 run "read-string int"   '(read-string "42")'                   '42'
 run "read-string list"  '(read-string "(+ 1 2)")'              '(+ 1 2)'
