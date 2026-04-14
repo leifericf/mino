@@ -134,6 +134,16 @@ Separate repo for rich mino library code loadable via `require`.
 Candidates: lazy sequence combinators (once the C type exists),
 protocols, transducers. Create when enough content justifies it.
 
+### mino-fs package
+
+Separate repo for file system operations, following the babashka/fs
+pattern. Candidates: `file-exists?`, `delete-file`, `rename-file`,
+`mkdir`, `directory?`, `glob`, `file-size`, directory listing.
+
+`slurp` and `spit` should eventually migrate from `mino_install_io`
+into mino-fs. They currently live in the C core for bootstrapping
+convenience but are conceptually library-level I/O.
+
 ~~### C primitive migration (phase 2)~~ -- Done in v0.14.0.
 
 `map`, `filter`, `take`, `drop`, `range`, `repeat`, `concat` moved to
