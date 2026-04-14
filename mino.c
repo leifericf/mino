@@ -4629,6 +4629,20 @@ static mino_val_t *prim_read_string(mino_val_t *args, mino_env_t *env)
     clear_error();
     result = mino_read(s->as.s.data, NULL);
     if (result == NULL && mino_last_error() != NULL) {
+        /* Throw parse errors as catchable exceptions so user code can
+         * handle them via try/catch. */
+        mino_val_t *ex = mino_string(mino_last_error());
+        if (try_depth > 0) {
+            try_stack[try_depth - 1].exception = ex;
+            longjmp(try_stack[try_depth - 1].buf, 1);
+        }
+        /* No enclosing try — propagate as fatal error. */
+        {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
+                     (int)ex->as.s.len, ex->as.s.data);
+            set_error(msg);
+        }
         return NULL;
     }
     return result != NULL ? result : mino_nil();
