@@ -684,3 +684,98 @@
            ~result (do ~@body))
        (println (str "Elapsed time: " (- (time-ms) ~start) " ms"))
        ~result)))
+
+;; --- Tree walking ---
+
+(def flatten (fn (coll)
+  (lazy-seq
+    (let (s (seq coll))
+      (when s
+        (let (x (first s))
+          (if (or (cons? x) (vector? x) (seq? x))
+            (concat (flatten x) (flatten (rest s)))
+            (cons x (flatten (rest s))))))))))
+
+(def tree-seq (fn (branch? children root)
+  (let (walk (fn (node)
+               (lazy-seq
+                 (cons node
+                   (when (branch? node)
+                     (mapcat walk (children node)))))))
+    (walk root))))
+
+(def walk (fn (inner outer form)
+  (cond
+    (cons?   form) (outer (apply list (map inner form)))
+    (vector? form) (outer (mapv inner form))
+    (map?    form) (outer (into {} (map inner (seq form))))
+    (set?    form) (outer (into #{} (map inner form)))
+    true           (outer form))))
+
+(def postwalk  (fn (f form) (walk (fn (x) (postwalk f x)) f form)))
+(def prewalk   (fn (f form) (walk (fn (x) (prewalk f x)) identity (f form))))
+
+(def postwalk-replace (fn (smap form)
+  (postwalk (fn (x) (if (contains? smap x) (get smap x) x)) form)))
+
+(def prewalk-replace (fn (smap form)
+  (prewalk (fn (x) (if (contains? smap x) (get smap x) x)) form)))
+
+;; --- Regex ---
+
+(def re-seq
+  (let (find-index (fn (s sub i)
+                     (if (> (+ i (count sub)) (count s))
+                       nil
+                       (if (= (subs s i (+ i (count sub))) sub)
+                         i
+                         (find-index s sub (inc i))))))
+    (fn (pattern s)
+      (lazy-seq
+        (when-let (m (re-find pattern s))
+          (let (idx (find-index s m 0))
+            (when (not (nil? idx))
+              (let (rest-s (subs s (+ idx (max (count m) 1))))
+                (cons m (re-seq pattern rest-s))))))))))
+
+;; --- Complex macros ---
+
+(defmacro condp (pred expr & clauses)
+  (let (gexpr (gensym))
+    `(let (~gexpr ~expr)
+       ~(let (build (fn (cls)
+                      (if (< (count cls) 2)
+                        (if (= (count cls) 1)
+                          (first cls)
+                          nil)
+                        (let (test (first cls)
+                              then (first (rest cls))
+                              more (rest (rest cls)))
+                          `(if (~pred ~test ~gexpr)
+                             ~then
+                             ~(build more))))))
+          (build clauses)))))
+
+(defmacro case (expr & clauses)
+  (let (gexpr (gensym))
+    `(let (~gexpr ~expr)
+       ~(let (build (fn (cls)
+                      (if (< (count cls) 2)
+                        (if (= (count cls) 1)
+                          (first cls)
+                          nil)
+                        `(if (= ~gexpr ~(first cls))
+                           ~(first (rest cls))
+                           ~(build (rest (rest cls)))))))
+          (build clauses)))))
+
+(defmacro for (bindings & body)
+  (let (sym  (first bindings)
+        coll (first (rest bindings))
+        opts (rest (rest bindings))
+        when-clause (when (and (seq opts) (= (first opts) :when))
+                      (first (rest opts))))
+    (if when-clause
+      `(map (fn (~sym) ~@body)
+            (filter (fn (~sym) ~when-clause) ~coll))
+      `(map (fn (~sym) ~@body) ~coll))))
