@@ -41,9 +41,9 @@ implementations. The stdlib nearly doubles in size.
 ### Changed
 - **Lazy sequence operations**: `map`, `filter`, `take`, `drop`,
   `concat`, `range`, `repeat` moved from strict C to lazy mino in
-  stdlib.mino. Infinite sequences now work:
+  core.mino. Infinite sequences now work:
   `(take 5 (iterate inc 0))` produces `(0 1 2 3 4)`.
-- **`update`**, **`some`**, **`every?`** moved from C to stdlib.mino.
+- **`update`**, **`some`**, **`every?`** moved from C to core.mino.
   `update` now supports extra args.
 - **C primitive count**: 57 to 50 (net: +11 new, -18 moved to mino).
 - Cons printer forces lazy tails for correct output.
@@ -68,7 +68,7 @@ future mino-std package. Delivers atoms and spit.
   Strings write raw bytes; other values write their printed form.
 
 ### Changed
-- **stdlib.mino**: the standard library is now a standalone `.mino`
+- **core.mino**: the standard library is now a standalone `.mino`
   file compiled into the binary at build time (was an inline C string).
 - **Stdlib migration**: `not`, `not=`, `identity`, `list`, `empty?`,
   `>`, `<=`, `>=`, and all ten type predicates (`nil?`, `cons?`,

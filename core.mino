@@ -1,5 +1,5 @@
-;; mino standard library
-;; Compiled into the binary at build time via stdlib_mino.h.
+;; mino core library
+;; Compiled into the binary at build time via core_mino.h.
 
 ;; --- Macros ---
 

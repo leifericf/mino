@@ -5610,7 +5610,7 @@ static void seq_iter_next(seq_iter_t *it)
     }
 }
 
-/* (map, filter are now lazy in stdlib.mino) */
+/* (map, filter are now lazy in core.mino) */
 
 static mino_val_t *prim_reduce(mino_val_t *args, mino_env_t *env)
 {
@@ -5657,7 +5657,7 @@ static mino_val_t *prim_reduce(mino_val_t *args, mino_env_t *env)
     return acc;
 }
 
-/* (take, drop, range, repeat, concat are now lazy in stdlib.mino) */
+/* (take, drop, range, repeat, concat are now lazy in core.mino) */
 
 static mino_val_t *prim_into(mino_val_t *args, mino_env_t *env)
 {
@@ -6771,17 +6771,17 @@ void mino_set_resolver(mino_resolve_fn fn, void *ctx)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Woverlength-strings"
 #endif
-#include "stdlib_mino.h"
+#include "core_mino.h"
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 
-static void install_stdlib_macros(mino_env_t *env)
+static void install_core_mino(mino_env_t *env)
 {
-    const char *src        = stdlib_mino_src;
+    const char *src        = core_mino_src;
     const char *saved_file = reader_file;
     int         saved_line = reader_line;
-    reader_file = intern_filename("<stdlib>");
+    reader_file = intern_filename("<core>");
     reader_line = 1;
     while (*src != '\0') {
         const char *end  = NULL;
@@ -6789,13 +6789,13 @@ static void install_stdlib_macros(mino_env_t *env)
         if (form == NULL) {
             if (mino_last_error() != NULL) {
                 /* Hardcoded source — a parse error here is a build-time bug. */
-                fprintf(stderr, "stdlib parse error: %s\n", mino_last_error());
+                fprintf(stderr, "core.mino parse error: %s\n", mino_last_error());
                 abort();
             }
             break;
         }
         if (mino_eval(form, env) == NULL) {
-            fprintf(stderr, "stdlib eval error: %s\n", mino_last_error());
+            fprintf(stderr, "core.mino eval error: %s\n", mino_last_error());
             abort();
         }
         src = end;
@@ -7027,7 +7027,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "disj",     mino_prim("disj",     prim_disj));
     mino_env_set(env, "dissoc",   mino_prim("dissoc",   prim_dissoc));
     /* sequence operations (map, filter, take, drop, range, repeat,
-       concat are now lazy in stdlib.mino) */
+       concat are now lazy in core.mino) */
     mino_env_set(env, "reduce",   mino_prim("reduce",   prim_reduce));
     mino_env_set(env, "into",     mino_prim("into",     prim_into));
     mino_env_set(env, "apply",    mino_prim("apply",    prim_apply));
@@ -7049,7 +7049,7 @@ void mino_install_core(mino_env_t *env)
                  mino_prim("lower-case", prim_lower_case));
     mino_env_set(env, "trim",     mino_prim("trim",     prim_trim));
     mino_env_set(env, "char-at",  mino_prim("char-at",  prim_char_at));
-    /* (some and every? are now in stdlib.mino) */
+    /* (some and every? are now in core.mino) */
     /* sequences */
     mino_env_set(env, "seq",       mino_prim("seq",       prim_seq));
     mino_env_set(env, "realized?", mino_prim("realized?", prim_realized_p));
@@ -7058,7 +7058,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "deref",    mino_prim("deref",    prim_deref));
     mino_env_set(env, "reset!",   mino_prim("reset!",   prim_reset_bang));
     mino_env_set(env, "atom?",    mino_prim("atom?",    prim_atom_p));
-    install_stdlib_macros(env);
+    install_core_mino(env);
 }
 
 void mino_install_io(mino_env_t *env)

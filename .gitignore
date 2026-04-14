@@ -8,7 +8,7 @@
 build/
 bin/
 mino
-stdlib_mino.h
+core_mino.h
 bench/vector_bench
 bench/map_bench
 bench/seq_bench

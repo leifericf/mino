@@ -231,9 +231,8 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   exceptions   throw
  *   modules      require
  *   macros       macroexpand macroexpand-1 gensym
- *   stdlib (mino-defined): when cond and or -> ->> map filter take drop
- *                          range repeat concat update some every? comp
- *                          partial complement
+ *   core.mino: when cond and or -> ->> map filter take drop range repeat
+ *              concat update some every? comp partial complement
  * Special forms (quote, quasiquote, unquote, unquote-splicing, def,
  * defmacro, if, do, let, fn, loop, recur, try, lazy-seq) are recognized by
  * the evaluator and do not need to be installed.
