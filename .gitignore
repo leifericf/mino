@@ -42,5 +42,6 @@ Thumbs.db
 /*.md
 !README.md
 !CHANGELOG.md
+!BACKLOG.md
 /design-notes/
 
