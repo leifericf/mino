@@ -4626,6 +4626,7 @@ static mino_val_t *prim_read_string(mino_val_t *args, mino_env_t *env)
         set_error("read-string: argument must be a string");
         return NULL;
     }
+    clear_error();
     result = mino_read(s->as.s.data, NULL);
     if (result == NULL && mino_last_error()[0] != '\0') {
         return NULL;
