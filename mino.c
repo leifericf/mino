@@ -168,6 +168,10 @@ static void gc_collect(void);
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the
  * maximum address (shallowest frame on a downward-growing stack). */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdangling-pointer"
+#endif
 static void gc_note_host_frame(void *addr)
 {
     if (gc_stack_bottom == NULL
@@ -175,6 +179,9 @@ static void gc_note_host_frame(void *addr)
         gc_stack_bottom = addr;
     }
 }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 static void *gc_alloc_typed(unsigned char tag, size_t size)
 {
@@ -4468,7 +4475,8 @@ static mino_val_t *print_to_string(const mino_val_t *v)
         return NULL;
     }
     if (n > 0) {
-        fread(buf, 1, (size_t)n, f);
+        size_t rd = fread(buf, 1, (size_t)n, f);
+        (void)rd;
     }
     buf[n] = '\0';
     fclose(f);
@@ -6767,13 +6775,18 @@ void mino_set_resolver(mino_resolve_fn fn, void *ctx)
  * capturing names from the caller's environment. 0.x makes no automatic
  * hygiene promise; gensym is the convention.
  */
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Woverlength-strings"
+#if defined(__clang__)
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Woverlength-strings"
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Woverlength-strings"
 #endif
 #include "core_mino.h"
-#ifdef __clang__
-#pragma clang diagnostic pop
+#if defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#  pragma GCC diagnostic pop
 #endif
 
 static void install_core_mino(mino_env_t *env)

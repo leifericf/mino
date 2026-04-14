@@ -2,7 +2,7 @@
 
 CC      ?= cc
 CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2
-LDFLAGS ?=
+LDFLAGS ?= -lm
 
 SRCS    := mino.c main.c
 OBJS    := $(SRCS:.c=.o)
