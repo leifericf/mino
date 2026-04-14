@@ -6899,20 +6899,17 @@ static mino_val_t *prim_re_matches(mino_val_t *args, mino_env_t *env)
     return mino_nil();
 }
 
-/* (time-ms) — return monotonic time in milliseconds as a float.
- * Uses clock_gettime(CLOCK_MONOTONIC) on POSIX systems. */
+/* (time-ms) — return process time in milliseconds as a float.
+ * Uses ANSI C clock() for portability across all C99 platforms. */
 static mino_val_t *prim_time_ms(mino_val_t *args, mino_env_t *env)
 {
-    struct timespec ts;
     (void)args;
     (void)env;
     if (mino_is_cons(args)) {
         set_error("time-ms takes no arguments");
         return NULL;
     }
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return mino_float((double)ts.tv_sec * 1000.0
-                    + (double)ts.tv_nsec / 1000000.0);
+    return mino_float((double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
 }
 
 /* (require name) — load a module by name using the host-supplied resolver.
