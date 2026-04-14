@@ -4,6 +4,68 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — Host C API
+
+First draft of the embedding API. An external C program can now create a
+runtime, register host functions, evaluate source, call mino functions,
+and extract results — all in under 50 lines of glue code. The surface
+language gains type predicates, `str`, and basic I/O. All new symbols are
+`mino_*`-prefixed; the header remains marked UNSTABLE until v1.0.
+
+### Added
+
+- `mino_new()` convenience: allocates an env and installs core bindings
+  in one call.
+- `mino_eval_string(src, env)` reads and evaluates all forms in a C
+  string, returning the last result.
+- `mino_load_file(path, env)` reads a file from disk and evaluates all
+  forms within it.
+- `mino_register_fn(env, name, fn)` shorthand for binding a C function
+  as a primitive.
+- `mino_call(fn, args, env)` applies a callable value (fn, prim, macro)
+  to an argument list from C; returns the result or NULL on error.
+- `mino_pcall(fn, args, env, &out)` protected variant that returns 0 on
+  success and -1 on error, writing the result through an out-parameter.
+- `MINO_HANDLE` value type for opaque host objects. A handle carries a
+  `void *` and a tag string; it self-evaluates, prints as
+  `#<handle:tag>`, compares by pointer identity, and hashes by the host
+  pointer. `mino_handle(ptr, tag)`, `mino_handle_ptr(v)`,
+  `mino_handle_tag(v)`, and `mino_is_handle(v)` form the C interface.
+- Type-safe C extraction: `mino_to_int`, `mino_to_float`,
+  `mino_to_string`, `mino_to_bool`. Each returns 1 on success and writes
+  through an out-parameter; `mino_to_bool` uses truthiness semantics.
+- `mino_set_limit(kind, value)` with `MINO_LIMIT_STEPS` (per-eval step
+  cap) and `MINO_LIMIT_HEAP` (soft cap on GC-managed bytes). When
+  exceeded the current eval returns NULL with a descriptive error.
+  Pass 0 to disable a limit.
+- Type-predicate primitives in the surface language: `string?`,
+  `number?`, `keyword?`, `symbol?`, `vector?`, `map?`, `fn?`.
+- `type` primitive returns the type of its argument as a keyword
+  (`:int`, `:string`, `:list`, `:vector`, `:map`, `:fn`, `:keyword`,
+  `:symbol`, `:nil`, `:bool`, `:float`, `:macro`, `:handle`).
+- `str` primitive concatenates its arguments into a string. String
+  arguments contribute raw content (no quotes); other types use their
+  printer representation; nil contributes nothing.
+- `println` prints its arguments as `str` does, appends a newline, and
+  returns nil. `prn` prints each argument in its printer form separated
+  by spaces, appends a newline, and returns nil.
+- `examples/embed.c`: a 50-line standalone C program demonstrating the
+  full embed lifecycle — create runtime, register a host function,
+  evaluate source, extract a float result.
+- `make example` target builds and runs the embedding example.
+- 31 additional smoke-test cases covering type predicates, `type`,
+  `str`, `println`, and `prn` (148 cases total).
+
+### Notes
+
+The header remains `/* UNSTABLE until v1.0.0 */`. API additions are
+possible through the 0.x series; the v1.0 release freezes the ABI.
+Execution limits are global rather than per-env; this simplifies the
+implementation while a single-threaded model is the only supported
+configuration. The `mino_load_file` function is the first place the
+runtime performs host I/O on behalf of the caller; v0.9 will gate this
+behind the capability model.
+
 ## [0.7.0] — Tracing garbage collection
 
 Replaces the per-allocation `malloc`/`free` discipline with a stop-the-world
