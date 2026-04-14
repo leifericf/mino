@@ -2,7 +2,8 @@
 
 CC      ?= cc
 CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2
-LDFLAGS ?= -lm
+LDFLAGS ?=
+LIBS    ?= -lm
 
 SRCS    := mino.c main.c
 OBJS    := $(SRCS:.c=.o)
@@ -13,7 +14,7 @@ TARGET  := mino
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 # core.mino is compiled into a C header so it can be #included.
 core_mino.h: core.mino
