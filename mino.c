@@ -6837,6 +6837,68 @@ static mino_val_t *prim_exit(mino_val_t *args, mino_env_t *env)
     return mino_nil(); /* unreachable */
 }
 
+/* --- Regex primitives (using bundled tiny-regex-c) --- */
+#include "re.h"
+
+/* (re-find pattern text) — find first match of pattern in text.
+ * Returns the matched substring, or nil if no match. */
+static mino_val_t *prim_re_find(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pat_val, *text_val;
+    int match_len = 0;
+    int match_idx;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("re-find requires two arguments");
+        return NULL;
+    }
+    pat_val  = args->as.cons.car;
+    text_val = args->as.cons.cdr->as.cons.car;
+    if (pat_val == NULL || pat_val->type != MINO_STRING) {
+        set_error("re-find: first argument must be a pattern string");
+        return NULL;
+    }
+    if (text_val == NULL || text_val->type != MINO_STRING) {
+        set_error("re-find: second argument must be a string");
+        return NULL;
+    }
+    match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
+    if (match_idx == -1) {
+        return mino_nil();
+    }
+    return mino_string_n(text_val->as.s.data + match_idx, (size_t)match_len);
+}
+
+/* (re-matches pattern text) — true if the entire text matches pattern. */
+static mino_val_t *prim_re_matches(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pat_val, *text_val;
+    int match_len = 0;
+    int match_idx;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error("re-matches requires two arguments");
+        return NULL;
+    }
+    pat_val  = args->as.cons.car;
+    text_val = args->as.cons.cdr->as.cons.car;
+    if (pat_val == NULL || pat_val->type != MINO_STRING) {
+        set_error("re-matches: first argument must be a pattern string");
+        return NULL;
+    }
+    if (text_val == NULL || text_val->type != MINO_STRING) {
+        set_error("re-matches: second argument must be a string");
+        return NULL;
+    }
+    match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
+    if (match_idx == 0 && (size_t)match_len == text_val->as.s.len) {
+        return text_val;
+    }
+    return mino_nil();
+}
+
 /* (time-ms) — return monotonic time in milliseconds as a float.
  * Uses clock_gettime(CLOCK_MONOTONIC) on POSIX systems. */
 static mino_val_t *prim_time_ms(mino_val_t *args, mino_env_t *env)
@@ -7298,6 +7360,9 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "name",     mino_prim("name",     prim_name));
     mino_env_set(env, "rand",     mino_prim("rand",     prim_rand));
+    /* regex */
+    mino_env_set(env, "re-find",    mino_prim("re-find",    prim_re_find));
+    mino_env_set(env, "re-matches", mino_prim("re-matches", prim_re_matches));
     mino_env_set(env, "eval",     mino_prim("eval",     prim_eval));
     mino_env_set(env, "symbol",   mino_prim("symbol",   prim_symbol));
     mino_env_set(env, "keyword",  mino_prim("keyword",  prim_keyword));

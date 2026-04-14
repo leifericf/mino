@@ -19,6 +19,7 @@
 (require "tests/gc_test")
 (require "tests/math_test")
 (require "tests/hash_compare_test")
+(require "tests/regex_test")
 (require "tests/reader_fuzz_test")
 
 (run-tests)

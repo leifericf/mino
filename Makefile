@@ -5,7 +5,7 @@ CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2
 LDFLAGS ?=
 LIBS    ?= -lm
 
-SRCS    := mino.c main.c
+SRCS    := mino.c main.c re.c
 OBJS    := $(SRCS:.c=.o)
 TARGET  := mino
 
@@ -22,9 +22,9 @@ core_mino.h: core.mino
 	@sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$$/\\n"/' $< >> $@
 	@printf '    ;\n' >> $@
 
-mino.o: mino.c mino.h core_mino.h
+mino.o: mino.c mino.h core_mino.h re.h
 
-%.o: %.c mino.h
+%.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
