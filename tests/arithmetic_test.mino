@@ -1,0 +1,78 @@
+(require "test")
+
+;; Arithmetic operations, comparisons, bitwise, and numeric utilities.
+
+(deftest self-eval
+  (is (= 42 42))
+  (is (= "hi" "hi"))
+  (is (= nil nil))
+  (is (= true true))
+  (is (= false false)))
+
+(deftest addition
+  (is (= 3 (+ 1 2)))
+  (is (= 3.5 (+ 1 2.5))))
+
+(deftest subtraction
+  (is (= 5 (- 10 3 2)))
+  (is (= -7 (- 7))))
+
+(deftest multiplication
+  (is (= 24 (* 2 3 4))))
+
+(deftest division
+  (is (= 2.5 (/ 10 4))))
+
+(deftest comparisons
+  (testing "less than"
+    (is (< 1 2 3))
+    (is (not (< 3 2 1))))
+  (testing "equal"
+    (is (= 1 1.0)))
+  (testing "less or equal"
+    (is (<= 1 2 2 3)))
+  (testing "greater than"
+    (is (> 3 2 1))
+    (is (not (> 1 2))))
+  (testing "greater or equal"
+    (is (>= 3 3 1))))
+
+(deftest mod-rem-quot
+  (testing "mod"
+    (is (= 1 (mod 10 3)))
+    (is (= 2 (mod -10 3)))
+    (is (= 1.5 (mod 5.5 2.0))))
+  (testing "rem"
+    (is (= 1 (rem 10 3)))
+    (is (= -1 (rem -10 3))))
+  (testing "quot"
+    (is (= 3 (quot 10 3)))
+    (is (= -3 (quot -10 3)))))
+
+(deftest bitwise
+  (is (= 8 (bit-and 12 10)))
+  (is (= 14 (bit-or 12 10)))
+  (is (= 6 (bit-xor 12 10)))
+  (is (= -1 (bit-not 0)))
+  (is (= 16 (bit-shift-left 1 4)))
+  (is (= 4 (bit-shift-right 16 2))))
+
+(deftest trivial-compositions
+  (is (= 2 (second [1 2 3])))
+  (is (= 1 (ffirst '((1 2) (3 4)))))
+  (is (= 6 (inc 5)))
+  (is (= 4 (dec 5)))
+  (is (zero? 0))
+  (is (pos? 5))
+  (is (neg? -1))
+  (is (even? 4))
+  (is (odd? 3))
+  (is (= 5 (abs -5)))
+  (is (= 7 (max 3 7)))
+  (is (= 3 (min 3 7))))
+
+(deftest numeric-coercion
+  (is (= 3 (int 3.7)))
+  (is (= 5 (int 5)))
+  (is (= 5.0 (float 5)))
+  (is (= 3.14 (float 3.14))))

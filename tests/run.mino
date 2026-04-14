@@ -1,0 +1,21 @@
+;; Test runner: loads all test files and runs them.
+;; Usage: ./mino tests/run.mino
+
+(require "test")
+(require "tests/arithmetic_test")
+(require "tests/binding_test")
+(require "tests/control_test")
+(require "tests/function_test")
+(require "tests/collection_test")
+(require "tests/string_test")
+(require "tests/sequence_test")
+(require "tests/lazy_test")
+(require "tests/macro_test")
+(require "tests/error_test")
+(require "tests/atom_test")
+(require "tests/predicate_test")
+(require "tests/io_test")
+(require "tests/reflection_test")
+(require "tests/gc_test")
+
+(run-tests)

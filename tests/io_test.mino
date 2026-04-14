@@ -1,0 +1,17 @@
+(require "test")
+
+;; I/O operations: spit, slurp, println, prn.
+
+(deftest spit-and-slurp
+  (spit "/tmp/mino_test_spit.txt" "hello")
+  (is (= "hello" (slurp "/tmp/mino_test_spit.txt"))))
+
+(deftest spit-non-string
+  (spit "/tmp/mino_test_spit2.txt" 42)
+  (is (= "42" (slurp "/tmp/mino_test_spit2.txt"))))
+
+(deftest println-returns-nil
+  (is (= nil (println "io-test-println"))))
+
+(deftest prn-returns-nil
+  (is (= nil (prn 1 2 3))))

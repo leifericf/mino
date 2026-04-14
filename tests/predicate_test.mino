@@ -1,0 +1,69 @@
+(require "test")
+
+;; Type predicates, type reflection, and utility predicates.
+
+(deftest type-predicates
+  (testing "string?"
+    (is (string? "hi"))
+    (is (not (string? 42))))
+  (testing "number?"
+    (is (number? 42))
+    (is (number? 3.14))
+    (is (not (number? "x"))))
+  (testing "keyword?"
+    (is (keyword? :k))
+    (is (not (keyword? "k"))))
+  (testing "symbol?"
+    (is (symbol? 'x))
+    (is (not (symbol? :x))))
+  (testing "vector?"
+    (is (vector? [1 2]))
+    (is (not (vector? 1))))
+  (testing "map?"
+    (is (map? {:a 1}))
+    (is (not (map? [1]))))
+  (testing "fn?"
+    (is (fn? +))
+    (is (fn? (fn (x) x)))
+    (is (not (fn? 42))))
+  (testing "set?"
+    (is (set? #{1 2}))
+    (is (not (set? [1 2])))))
+
+(deftest type-reflection
+  (is (= :int (type 42)))
+  (is (= :string (type "hi")))
+  (is (= :nil (type nil)))
+  (is (= :list (type '(1 2))))
+  (is (= :fn (type +)))
+  (is (= :vector (type [1 2])))
+  (is (= :map (type {:a 1})))
+  (is (= :keyword (type :foo))))
+
+(deftest utility-predicates
+  (testing "not"
+    (is (= false (not true)))
+    (is (= true (not false)))
+    (is (= true (not nil))))
+  (testing "not="
+    (is (not= 1 2))
+    (is (not (not= 1 1))))
+  (testing "empty?"
+    (is (empty? []))
+    (is (not (empty? [1])))
+    (is (empty? nil))
+    (is (empty? "")))
+  (testing "some"
+    (is (some (fn (x) (> x 3)) [1 2 3 4 5]))
+    (is (= nil (some (fn (x) (> x 10)) [1 2 3]))))
+  (testing "every?"
+    (is (every? (fn (x) (> x 0)) [1 2 3]))
+    (is (not (every? (fn (x) (> x 2)) [1 2 3]))))
+  (testing "identity"
+    (is (= 42 (identity 42))))
+  (testing "boolean"
+    (is (= true (boolean 1)))
+    (is (= false (boolean nil))))
+  (testing "not-empty"
+    (is (= [1] (not-empty [1])))
+    (is (= nil (not-empty [])))))

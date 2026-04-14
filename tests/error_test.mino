@@ -1,0 +1,32 @@
+(require "test")
+
+;; Error handling: try/catch/throw.
+
+(deftest try-no-throw
+  (is (= 3 (try (+ 1 2) (catch e :fail)))))
+
+(deftest try-catch-string
+  (is (= "caught: oops" (try (throw "oops") (catch e (str "caught: " e))))))
+
+(deftest try-catch-number
+  (is (= 420 (try (throw 42) (catch e (* e 10))))))
+
+(deftest try-catch-nil
+  (is (= true (try (throw nil) (catch e (nil? e))))))
+
+(deftest try-catch-map
+  (is (= :v (try (throw {:k :v}) (catch e (get e :k))))))
+
+(deftest try-nested
+  (is (= 2 (try (try (throw 1) (catch e (throw (+ e 1)))) (catch e e)))))
+
+(deftest try-fn-throw
+  (def boom__et (fn () (throw "bang")))
+  (is (= "bang" (try (boom__et) (catch e e)))))
+
+(deftest throw-unhandled
+  (def et-x (try (throw "err") (catch e e)))
+  (is (= "err" et-x)))
+
+(deftest thrown-assertion
+  (is (thrown? (throw "boom"))))

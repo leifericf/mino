@@ -1,0 +1,69 @@
+(require "test")
+
+;; String operations and formatting.
+
+(deftest str-fn
+  (is (= "hello world" (str "hello" " " "world")))
+  (is (= "n=42" (str "n=" 42)))
+  (is (= ":hi 3.14" (str :hi " " 3.14)))
+  (is (= "" (str)))
+  (is (= "ab" (str "a" nil "b"))))
+
+(deftest subs-fn
+  (is (= "el" (subs "hello" 1 3)))
+  (is (= "llo" (subs "hello" 2))))
+
+(deftest split-fn
+  (is (= ["a" "b" "c"] (split "a,b,c" ",")))
+  (is (= ["a" "b" "c"] (split "abc" ""))))
+
+(deftest join-fn
+  (is (= "a-b-c" (join "-" ["a" "b" "c"])))
+  (is (= "abc" (join ["a" "b" "c"]))))
+
+(deftest string-predicates
+  (is (starts-with? "hello" "he"))
+  (is (not (starts-with? "hello" "lo")))
+  (is (ends-with? "hello" "lo"))
+  (is (not (ends-with? "hello" "he")))
+  (is (includes? "hello" "ell"))
+  (is (not (includes? "hello" "xyz"))))
+
+(deftest case-fns
+  (is (= "HELLO" (upper-case "hello")))
+  (is (= "hello" (lower-case "HELLO"))))
+
+(deftest trim-fn
+  (is (= "hi" (trim "  hi  ")))
+  (is (= "hi" (trim "hi"))))
+
+(deftest char-at-fn
+  (is (= "h" (char-at "hello" 0)))
+  (is (= "o" (char-at "hello" 4))))
+
+(deftest format-fn
+  (is (= "hello world" (format "hello %s" "world")))
+  (is (= "n=42" (format "n=%d" 42)))
+  (is (= "pi=3.140000" (format "pi=%f" 3.14)))
+  (is (= "Bob has 3" (format "%s has %d" "Bob" 3)))
+  (is (= "100%" (format "100%%")))
+  (is (= "key: :hello" (format "key: %s" :hello))))
+
+(deftest pr-str-fn
+  (is (= "42" (pr-str 42)))
+  (is (= "\"hi\"" (pr-str "hi")))
+  (is (= "1 :a \"b\"" (pr-str 1 :a "b")))
+  (is (= "nil" (pr-str nil)))
+  (is (= "(1 2)" (pr-str '(1 2)))))
+
+(deftest name-fn
+  (is (= "hello" (name :hello)))
+  (is (= "world" (name 'world)))
+  (is (= "str" (name "str")))
+  (is (= nil (name nil))))
+
+(deftest read-string-fn
+  (is (= 42 (read-string "42")))
+  (is (= '(+ 1 2) (read-string "(+ 1 2)")))
+  (is (= :foo (read-string ":foo")))
+  (is (= nil (read-string ""))))

@@ -1,0 +1,186 @@
+(require "test")
+
+;; Collections: lists, vectors, maps, sets, and their operations.
+
+;; --- Lists ---
+
+(deftest list-ops
+  (is (= '(1 2 3) (cons 1 '(2 3))))
+  (is (= '(1 2 a) (list 1 2 'a)))
+  (is (= 1 (car '(1 2 3))))
+  (is (= '(2 3) (cdr '(1 2 3))))
+  (is (= '(true false) (list true false))))
+
+;; --- Keywords ---
+
+(deftest keywords
+  (is (= :foo :foo))
+  (is (= :a :a))
+  (is (not= :a :b))
+  (is (= '(:a :b :c) (list :a :b :c))))
+
+;; --- Vectors ---
+
+(deftest vector-literals
+  (is (= [] []))
+  (is (= [1 2 3] [1 2 3]))
+  (is (= [[1 2] [3 4]] [[1 2] [3 4]])))
+
+(deftest vector-equality
+  (is (= [1 2 3] [1 2 3]))
+  (is (not= [1 2] [1 2 3])))
+
+(deftest vector-evals
+  (def vx__ct 7)
+  (is (= [7 8 49] [vx__ct (+ vx__ct 1) (* vx__ct vx__ct)])))
+
+(deftest vector-scale
+  (testing "2000 build + nth"
+    (let (big (loop (i 0 v [])
+               (if (< i 2000) (recur (+ i 1) (conj v i)) v)))
+      (is (= 2000 (count big)))
+      (is (= 4109 (+ (nth big 0) (nth big 31) (nth big 32) (nth big 1023)
+                      (nth big 1024) (nth big 1999))))))
+  (testing "assoc shares source"
+    (let (big (loop (i 0 v [])
+               (if (< i 2000) (recur (+ i 1) (conj v i)) v))
+          big2 (assoc big 500 :x))
+      (is (= 500 (nth big 500)))
+      (is (= :x (nth big2 500)))
+      (is (= (count big) (count big2))))))
+
+;; --- Maps ---
+
+(deftest map-literals
+  (is (= {} {}))
+  (is (= {:a 1 :b 2} {:a 1 :b 2}))
+  (is (= {:a 1 :b 2} {:b 2 :a 1}))
+  (is (not= {:a 1} {:a 2})))
+
+(deftest map-evals
+  (def mx__ct 7)
+  (is (= {:n 7 :sq 49} {:n mx__ct :sq (* mx__ct mx__ct)})))
+
+(deftest map-order
+  (is (= '(:z :a :m :b) (keys {:z 1 :a 2 :m 3 :b 4})))
+  (is (= '(:z :a :m) (keys (assoc {:z 1 :a 2 :m 3} :a 99))))
+  (is (= '(:z :a :b :c) (keys (assoc {:z 1 :a 2} :b 3 :c 4)))))
+
+(deftest map-200-entries
+  (let (m (loop (i 0 m {})
+           (if (< i 200) (recur (+ i 1) (assoc m i (* i 10))) m)))
+    (is (= 200 (count m)))
+    (is (= 0 (get m 0)))
+    (is (= 1000 (get m 100)))
+    (is (= 1990 (get m 199)))
+    (is (= :miss (get m 300 :miss)))))
+
+;; --- Sets ---
+
+(deftest set-literals
+  (is (= #{1 2 3} #{1 2 3}))
+  (is (= #{1 2 3} #{1 2 2 3}))
+  (is (= 3 (count #{1 2 3})))
+  (is (= #{1 2 3} #{3 2 1}))
+  (is (= :set (type #{1}))))
+
+(deftest set-ops
+  (is (= #{1 2 3} (conj #{1 2} 3)))
+  (is (= #{1 2 3} (conj #{1 2} 2 3)))
+  (is (= #{1 2 3} (hash-set 1 2 3)))
+  (is (set? #{1 2}))
+  (is (not (set? [1 2])))
+  (is (contains? #{1 2 3} 2))
+  (is (not (contains? #{1 2 3} 4)))
+  (is (= #{1 3} (disj #{1 2 3} 2)))
+  (is (= #{1 3} (disj #{1 2 3 4} 2 4)))
+  (is (= :a (get #{:a :b} :a)))
+  (is (= nil (get #{:a :b} :c)))
+  (is (empty? #{})))
+
+;; --- Collection primitives ---
+
+(deftest count-fn
+  (is (= 3 (count [1 2 3])))
+  (is (= 2 (count {:a 1 :b 2})))
+  (is (= 3 (count (list 1 2 3))))
+  (is (= 0 (count nil)))
+  (is (= 5 (count "hello"))))
+
+(deftest first-rest
+  (is (= 10 (first [10 20 30])))
+  (is (= '(20 30) (rest [10 20 30])))
+  (is (= nil (first nil)))
+  (is (= nil (rest nil))))
+
+(deftest nth-fn
+  (is (= 20 (nth [10 20 30] 1)))
+  (is (= :none (nth [10 20] 99 :none))))
+
+(deftest constructors
+  (is (= [1 2 3] (vector 1 2 3)))
+  (is (= {:a 1 :b 2} (hash-map :a 1 :b 2))))
+
+(deftest assoc-fn
+  (is (= {:a 1 :b 2} (assoc {:a 1} :b 2)))
+  (is (= {:a 99} (assoc {:a 1} :a 99)))
+  (is (= [10 99 30] (assoc [10 20 30] 1 99)))
+  (is (= [10 20 30] (assoc [10 20] 2 30))))
+
+(deftest dissoc-fn
+  (is (= {:a 1 :c 3} (dissoc {:a 1 :b 2 :c 3} :b)))
+  (is (= {:b 2} (dissoc {:a 1 :b 2 :c 3} :a :c)))
+  (is (= {:a 1} (dissoc {:a 1} :z)))
+  (is (= nil (dissoc nil :a))))
+
+(deftest get-fn
+  (is (= 1 (get {:a 1 :b 2} :a)))
+  (is (= :def (get {:a 1} :no :def)))
+  (is (= 20 (get [10 20 30] 1))))
+
+(deftest conj-fn
+  (is (= '(4 3 1 2) (conj '(1 2) 3 4)))
+  (is (= [1 2 3 4] (conj [1 2] 3 4)))
+  (is (= {:a 1 :b 2} (conj {:a 1} [:b 2]))))
+
+(deftest update-fn
+  (is (= {:a 50} (update {:a 5} :a (fn (n) (* n 10))))))
+
+(deftest keys-vals
+  (is (= '(:a :b) (keys {:a 1 :b 2})))
+  (is (= '(1 2) (vals {:a 1 :b 2}))))
+
+(deftest contains-fn
+  (is (contains? {:a 1} :a))
+  (is (contains? [10 20 30] 1)))
+
+(deftest collection-compose
+  (def ccm__ct (hash-map :x 1 :y 2))
+  (is (= 101 (get (update ccm__ct :x (fn (n) (+ n 100))) :x))))
+
+;; --- Collection utilities ---
+
+(deftest merge-fn
+  (is (= {:a 3 :b 2} (merge {:a 1} {:b 2} {:a 3}))))
+
+(deftest select-keys-fn
+  (is (= {:a 1 :c 3} (select-keys {:a 1 :b 2 :c 3} [:a :c]))))
+
+(deftest find-fn
+  (is (= [:a 1] (find {:a 1 :b 2} :a)))
+  (is (= nil (find {:a 1} :z))))
+
+(deftest zipmap-fn
+  (is (= {:a 1 :b 2} (zipmap [:a :b] [1 2]))))
+
+(deftest frequencies-fn
+  (is (= {1 3, 2 2, 3 1} (frequencies [1 2 1 3 2 1]))))
+
+(deftest group-by-fn
+  (is (= {false [1 3], true [2 4]} (group-by even? [1 2 3 4]))))
+
+(deftest into-fn
+  (is (= [0 1 2] (into [] (range 3))))
+  (is (= #{1 2 3} (into #{} [1 2 2 3])))
+  (is (= {:a 1 :b 2} (into {} [[:a 1] [:b 2]])))
+  (is (= '(3 2 1) (into (list) [1 2 3]))))
