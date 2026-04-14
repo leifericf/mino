@@ -4960,6 +4960,57 @@ static mino_val_t *prim_disj(mino_val_t *args, mino_env_t *env)
     return coll;
 }
 
+static mino_val_t *prim_dissoc(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *p;
+    size_t      n;
+    (void)env;
+    arg_count(args, &n);
+    if (n < 2) {
+        set_error("dissoc requires a map and at least one key");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil();
+    }
+    if (coll->type != MINO_MAP) {
+        set_error("dissoc: first argument must be a map");
+        return NULL;
+    }
+    p = args->as.cons.cdr;
+    while (mino_is_cons(p)) {
+        mino_val_t *key = p->as.cons.car;
+        uint32_t    h   = hash_val(key);
+        if (hamt_get(coll->as.map.root, key, h, 0u) != NULL) {
+            mino_val_t *new_map = alloc_val(MINO_MAP);
+            mino_val_t *order   = mino_vector(NULL, 0);
+            mino_hamt_node_t *root = NULL;
+            size_t i;
+            size_t new_len = 0;
+            for (i = 0; i < coll->as.map.len; i++) {
+                mino_val_t *k = vec_nth(coll->as.map.key_order, i);
+                if (!mino_eq(k, key)) {
+                    mino_val_t   *v  = map_get_val(coll, k);
+                    hamt_entry_t *e2 = hamt_entry_new(k, v);
+                    uint32_t      h2 = hash_val(k);
+                    int rep = 0;
+                    root = hamt_assoc(root, e2, h2, 0u, &rep);
+                    order = vec_conj1(order, k);
+                    new_len++;
+                }
+            }
+            new_map->as.map.root      = root;
+            new_map->as.map.key_order = order;
+            new_map->as.map.len       = new_len;
+            coll = new_map;
+        }
+        p = p->as.cons.cdr;
+    }
+    return coll;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Sequence primitives (strict — no lazy seqs)                               */
 /* ------------------------------------------------------------------------- */
@@ -6599,6 +6650,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "hash-set", mino_prim("hash-set", prim_hash_set));
     mino_env_set(env, "contains?",mino_prim("contains?",prim_contains_p));
     mino_env_set(env, "disj",     mino_prim("disj",     prim_disj));
+    mino_env_set(env, "dissoc",   mino_prim("dissoc",   prim_dissoc));
     /* sequence operations */
     mino_env_set(env, "map",      mino_prim("map",      prim_map));
     mino_env_set(env, "filter",   mino_prim("filter",   prim_filter));

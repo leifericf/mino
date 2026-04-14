@@ -207,8 +207,8 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   arithmetic   + - * /
  *   comparison   = < <= > >= not=
  *   list         car cdr cons list
- *   collection   count nth first rest vector hash-map assoc get conj update
- *                keys vals
+ *   collection   count nth first rest vector hash-map assoc dissoc get conj
+ *                update keys vals
  *   sets         hash-set set? contains? disj
  *   sequences    map filter reduce take drop range repeat concat into apply
  *                reverse sort

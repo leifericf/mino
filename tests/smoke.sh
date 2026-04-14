@@ -494,6 +494,12 @@ run "map over map"      '(map (fn (kv) (nth kv 1)) {:a 1 :b 2})' '(1 2)'
 # v0.11 — into with lists
 run "into list"         '(into (list) [1 2 3])'                '(3 2 1)'
 
+# v0.14 — dissoc
+run "dissoc single"     '(dissoc {:a 1 :b 2 :c 3} :b)'        '{:a 1, :c 3}'
+run "dissoc multi"      '(dissoc {:a 1 :b 2 :c 3} :a :c)'     '{:b 2}'
+run "dissoc missing"    '(dissoc {:a 1} :z)'                   '{:a 1}'
+run "dissoc nil"        '(dissoc nil :a)'                      'nil'
+
 # v0.13 — atoms
 run "atom create"       '(atom 42)'                                    '#atom[42]'
 run "deref"             '(deref (atom 42))'                            '42'
