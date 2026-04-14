@@ -4790,6 +4790,16 @@ static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+/* (eval form) — evaluate a form at runtime. */
+static mino_val_t *prim_eval(mino_val_t *args, mino_env_t *env)
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("eval requires one argument");
+        return NULL;
+    }
+    return eval(args->as.cons.car, env);
+}
+
 /* (symbol str) — create a symbol from a string. */
 static mino_val_t *prim_symbol(mino_val_t *args, mino_env_t *env)
 {
@@ -7254,6 +7264,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "name",     mino_prim("name",     prim_name));
+    mino_env_set(env, "eval",     mino_prim("eval",     prim_eval));
     mino_env_set(env, "symbol",   mino_prim("symbol",   prim_symbol));
     mino_env_set(env, "keyword",  mino_prim("keyword",  prim_keyword));
     mino_env_set(env, "hash",     mino_prim("hash",     prim_hash));
