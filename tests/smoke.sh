@@ -298,5 +298,59 @@ nil'
 run "prn ret"      '(prn 1 2 3)'           '1 2 3
 nil'
 
+# v0.9 — try/catch/throw
+run "try no throw"   '(try (+ 1 2) (catch e :fail))'    '3'
+run "try catch str"  '(try (throw "oops") (catch e (str "caught: " e)))' '"caught: oops"'
+run "try catch num"  '(try (throw 42) (catch e (* e 10)))' '420'
+run "try catch nil"  '(try (throw nil) (catch e (nil? e)))' 'true'
+run "try catch map"  '(try (throw {:k :v}) (catch e (get e :k)))' ':v'
+run "try nested"     '(try (try (throw 1) (catch e (throw (+ e 1)))) (catch e e))' '2'
+run "try fn throw"   '(def boom (fn () (throw "bang")))
+(try (boom) (catch e e))' '#<fn>
+"bang"'
+run "throw unhandled" '(def x (try (throw "err") (catch e e)))
+x' '"err"
+"err"'
+
+# v0.9 — source locations in errors
+run "srcloc line 1"   '(+ z 1)' ''
+run "srcloc line 3"   '(def a 1)
+(def b 2)
+(+ c 3)' '1
+2'
+
+# Capture eval error output for location tests
+run_err() {
+    desc=$1
+    input=$2
+    expected=$3
+    actual=$(printf '%s\n' "$input" | ./mino 2>&1 1>/dev/null)
+    if printf '%s\n' "$actual" | grep -qF "$expected"; then
+        pass=$((pass + 1))
+        printf '  ok   %s\n' "$desc"
+    else
+        fail=$((fail + 1))
+        printf '  FAIL %s\n' "$desc"
+        printf '    expected to contain:\n'
+        printf '%s\n' "$expected" | sed 's/^/      /'
+        printf '    got:\n'
+        printf '%s\n' "$actual" | sed 's/^/      /'
+    fi
+}
+
+run_err "srcloc in error"  '(+ z 1)' '<input>:1: unbound symbol: z'
+run_err "srcloc multiline" '(def a 1)
+(def b 2)
+(+ c 3)' '<input>:3: unbound symbol: c'
+run_err "trace in error"   '(def f (fn (x) (+ x z)))
+(f 5)' 'in fn (<input>:2)'
+
+# v0.9 — sandbox: default core has no I/O (tested by our REPL which
+# explicitly opts in; the exit criterion is that an env without
+# mino_install_io cannot access println/prn/slurp)
+# These are verified at the C level by embed.c; the smoke test below
+# just confirms throw propagates correctly without an enclosing try.
+run_err "throw no try" '(throw "boom")' 'unhandled exception: boom'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = "0" ]
