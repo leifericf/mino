@@ -356,3 +356,47 @@
   (let (go (fn (s) (when (seq s) (f (first s)) (go (rest s)))))
     (go coll)
     nil)))
+
+;; --- Control flow macros ---
+
+(defmacro if-not (test then & else)
+  (if (seq else)
+    `(if (not ~test) ~then ~(first else))
+    `(if (not ~test) ~then)))
+
+(defmacro when-not (test & body)
+  `(when (not ~test) ~@body))
+
+(defmacro if-let (bindings then & else)
+  (let (sym  (first bindings)
+        expr (first (rest bindings))
+        g    (gensym))
+    (if (seq else)
+      `(let (~g ~expr)
+         (if ~g (let (~sym ~g) ~then) ~(first else)))
+      `(let (~g ~expr)
+         (if ~g (let (~sym ~g) ~then))))))
+
+(defmacro when-let (bindings & body)
+  (let (sym  (first bindings)
+        expr (first (rest bindings))
+        g    (gensym))
+    `(let (~g ~expr)
+       (when ~g (let (~sym ~g) ~@body)))))
+
+(defmacro if-some (bindings then & else)
+  (let (sym  (first bindings)
+        expr (first (rest bindings))
+        g    (gensym))
+    (if (seq else)
+      `(let (~g ~expr)
+         (if (not (nil? ~g)) (let (~sym ~g) ~then) ~(first else)))
+      `(let (~g ~expr)
+         (if (not (nil? ~g)) (let (~sym ~g) ~then))))))
+
+(defmacro when-some (bindings & body)
+  (let (sym  (first bindings)
+        expr (first (rest bindings))
+        g    (gensym))
+    `(let (~g ~expr)
+       (when (not (nil? ~g)) (let (~sym ~g) ~@body)))))
