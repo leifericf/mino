@@ -46,6 +46,17 @@
   ;; atan2(0, 1) = 0
   (is (= 0.0 (math-atan2 0 1))))
 
+(deftest rand-fn
+  (testing "returns a number"
+    (is (number? (rand))))
+  (testing "in range [0, 1)"
+    (let (r (rand))
+      (is (>= r 0.0))
+      (is (< r 1.0))))
+  (testing "produces different values"
+    (let (values (map (fn (_) (rand)) (range 10)))
+      (is (> (count (distinct values)) 1)))))
+
 (deftest math-pi-constant
   (is (> math-pi 3.14159))
   (is (< math-pi 3.14160)))

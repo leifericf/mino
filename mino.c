@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------------- */
@@ -4790,6 +4791,22 @@ static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+/* (rand) — return a random float in [0.0, 1.0). */
+static int rand_seeded = 0;
+static mino_val_t *prim_rand(mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        set_error("rand takes no arguments");
+        return NULL;
+    }
+    if (!rand_seeded) {
+        srand((unsigned int)time(NULL));
+        rand_seeded = 1;
+    }
+    return mino_float((double)rand() / ((double)RAND_MAX + 1.0));
+}
+
 /* (eval form) — evaluate a form at runtime. */
 static mino_val_t *prim_eval(mino_val_t *args, mino_env_t *env)
 {
@@ -7264,6 +7281,7 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
     mino_env_set(env, "type",     mino_prim("type",     prim_type));
     mino_env_set(env, "name",     mino_prim("name",     prim_name));
+    mino_env_set(env, "rand",     mino_prim("rand",     prim_rand));
     mino_env_set(env, "eval",     mino_prim("eval",     prim_eval));
     mino_env_set(env, "symbol",   mino_prim("symbol",   prim_symbol));
     mino_env_set(env, "keyword",  mino_prim("keyword",  prim_keyword));
