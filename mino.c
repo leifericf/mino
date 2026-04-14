@@ -97,6 +97,71 @@ static module_entry_t *module_cache     = NULL;
 static size_t          module_cache_len = 0;
 static size_t          module_cache_cap = 0;
 
+/* Metadata table: docstrings and source forms for def/defmacro bindings. */
+typedef struct {
+    char       *name;       /* binding name (malloc-owned) */
+    char       *docstring;  /* docstring (malloc-owned, NULL if none) */
+    mino_val_t *source;     /* source form (the whole def/defmacro form) */
+} meta_entry_t;
+
+static meta_entry_t *meta_table     = NULL;
+static size_t        meta_table_len = 0;
+static size_t        meta_table_cap = 0;
+
+static meta_entry_t *meta_find(const char *name)
+{
+    size_t i;
+    for (i = 0; i < meta_table_len; i++) {
+        if (strcmp(meta_table[i].name, name) == 0) {
+            return &meta_table[i];
+        }
+    }
+    return NULL;
+}
+
+static void meta_set(const char *name, const char *doc, size_t doc_len,
+                     mino_val_t *source)
+{
+    meta_entry_t *e = meta_find(name);
+    if (e != NULL) {
+        free(e->docstring);
+        e->docstring = NULL;
+        if (doc != NULL) {
+            e->docstring = (char *)malloc(doc_len + 1);
+            if (e->docstring != NULL) {
+                memcpy(e->docstring, doc, doc_len);
+                e->docstring[doc_len] = '\0';
+            }
+        }
+        e->source = source;
+        return;
+    }
+    if (meta_table_len == meta_table_cap) {
+        size_t new_cap = meta_table_cap == 0 ? 32 : meta_table_cap * 2;
+        meta_entry_t *ne = (meta_entry_t *)realloc(
+            meta_table, new_cap * sizeof(*ne));
+        if (ne == NULL) { return; }
+        meta_table = ne;
+        meta_table_cap = new_cap;
+    }
+    {
+        size_t nlen = strlen(name);
+        meta_table[meta_table_len].name = (char *)malloc(nlen + 1);
+        if (meta_table[meta_table_len].name == NULL) { return; }
+        memcpy(meta_table[meta_table_len].name, name, nlen + 1);
+    }
+    meta_table[meta_table_len].docstring = NULL;
+    if (doc != NULL) {
+        meta_table[meta_table_len].docstring = (char *)malloc(doc_len + 1);
+        if (meta_table[meta_table_len].docstring != NULL) {
+            memcpy(meta_table[meta_table_len].docstring, doc, doc_len);
+            meta_table[meta_table_len].docstring[doc_len] = '\0';
+        }
+    }
+    meta_table[meta_table_len].source = source;
+    meta_table_len++;
+}
+
 static void gc_collect(void);
 
 /* Record a stack address from a host-called entry point so the collector's
@@ -1240,10 +1305,24 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
     fputc('"', out);
 }
 
+/*
+ * Cycle-safe print depth: when recursion exceeds this limit, the printer
+ * emits #<...> instead of descending further. This prevents stack overflow
+ * on deeply nested or self-referential structures (possible through mutable
+ * cons tails in internal data, though the user-facing API is immutable).
+ */
+#define MINO_PRINT_DEPTH_MAX 128
+
+static int print_depth = 0;
+
 void mino_print_to(FILE *out, const mino_val_t *v)
 {
     if (v == NULL || v->type == MINO_NIL) {
         fputs("nil", out);
+        return;
+    }
+    if (print_depth >= MINO_PRINT_DEPTH_MAX) {
+        fputs("#<...>", out);
         return;
     }
     switch (v->type) {
@@ -1295,6 +1374,7 @@ void mino_print_to(FILE *out, const mino_val_t *v)
     case MINO_CONS: {
         const mino_val_t *p = v;
         fputc('(', out);
+        print_depth++;
         while (p != NULL && p->type == MINO_CONS) {
             mino_print_to(out, p->as.cons.car);
             p = p->as.cons.cdr;
@@ -1306,24 +1386,28 @@ void mino_print_to(FILE *out, const mino_val_t *v)
                 break;
             }
         }
+        print_depth--;
         fputc(')', out);
         return;
     }
     case MINO_VECTOR: {
         size_t i;
         fputc('[', out);
+        print_depth++;
         for (i = 0; i < v->as.vec.len; i++) {
             if (i > 0) {
                 fputc(' ', out);
             }
             mino_print_to(out, vec_nth(v, i));
         }
+        print_depth--;
         fputc(']', out);
         return;
     }
     case MINO_MAP: {
         size_t i;
         fputc('{', out);
+        print_depth++;
         for (i = 0; i < v->as.map.len; i++) {
             mino_val_t *key = vec_nth(v->as.map.key_order, i);
             if (i > 0) {
@@ -1333,6 +1417,7 @@ void mino_print_to(FILE *out, const mino_val_t *v)
             fputc(' ', out);
             mino_print_to(out, map_get_val(v, key));
         }
+        print_depth--;
         fputc('}', out);
         return;
     }
@@ -2471,6 +2556,13 @@ static void gc_mark_roots(void)
             gc_mark_interior(module_cache[mi].value);
         }
     }
+    /* Pin metadata source forms. */
+    {
+        size_t mi;
+        for (mi = 0; mi < meta_table_len; mi++) {
+            gc_mark_interior(meta_table[mi].source);
+        }
+    }
 }
 
 static void gc_sweep(void)
@@ -2939,6 +3031,8 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             mino_val_t *body;
             mino_val_t *mac;
             mino_val_t *p;
+            const char *doc     = NULL;
+            size_t      doc_len = 0;
             char        buf[256];
             size_t      n;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -2946,11 +3040,24 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 return NULL;
             }
             name_form = args->as.cons.car;
-            params    = args->as.cons.cdr->as.cons.car;
-            body      = args->as.cons.cdr->as.cons.cdr;
             if (name_form == NULL || name_form->type != MINO_SYMBOL) {
                 set_error_at(form, "defmacro name must be a symbol");
                 return NULL;
+            }
+            /* Optional docstring: (defmacro name "doc" (params) body) */
+            {
+                mino_val_t *after_name = args->as.cons.cdr;
+                mino_val_t *maybe_doc  = after_name->as.cons.car;
+                if (maybe_doc != NULL && maybe_doc->type == MINO_STRING
+                    && mino_is_cons(after_name->as.cons.cdr)) {
+                    doc     = maybe_doc->as.s.data;
+                    doc_len = maybe_doc->as.s.len;
+                    params  = after_name->as.cons.cdr->as.cons.car;
+                    body    = after_name->as.cons.cdr->as.cons.cdr;
+                } else {
+                    params = after_name->as.cons.car;
+                    body   = after_name->as.cons.cdr;
+                }
             }
             if (!mino_is_cons(params) && !mino_is_nil(params)) {
                 set_error_at(form, "defmacro parameter list must be a list");
@@ -2975,12 +3082,15 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
             memcpy(buf, name_form->as.s.data, n);
             buf[n] = '\0';
             env_bind(env_root(env), buf, mac);
+            meta_set(buf, doc, doc_len, form);
             return mac;
         }
         if (sym_eq(head, "def")) {
             mino_val_t *name_form;
             mino_val_t *value_form;
             mino_val_t *value;
+            const char *doc     = NULL;
+            size_t      doc_len = 0;
             char buf[256];
             size_t n;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -2988,10 +3098,22 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 return NULL;
             }
             name_form  = args->as.cons.car;
-            value_form = args->as.cons.cdr->as.cons.car;
             if (name_form == NULL || name_form->type != MINO_SYMBOL) {
                 set_error_at(form, "def name must be a symbol");
                 return NULL;
+            }
+            /* Optional docstring: (def name "doc" value) */
+            if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+                mino_val_t *maybe_doc = args->as.cons.cdr->as.cons.car;
+                if (maybe_doc != NULL && maybe_doc->type == MINO_STRING) {
+                    doc       = maybe_doc->as.s.data;
+                    doc_len   = maybe_doc->as.s.len;
+                    value_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+                } else {
+                    value_form = args->as.cons.cdr->as.cons.car;
+                }
+            } else {
+                value_form = args->as.cons.cdr->as.cons.car;
             }
             n = name_form->as.s.len;
             if (n >= sizeof(buf)) {
@@ -3005,6 +3127,7 @@ static mino_val_t *eval(mino_val_t *form, mino_env_t *env)
                 return NULL;
             }
             env_bind(env_root(env), buf, value);
+            meta_set(buf, doc, doc_len, form);
             return value;
         }
         if (sym_eq(head, "if")) {
@@ -3485,6 +3608,114 @@ void mino_set_limit(int kind, size_t value)
     case MINO_LIMIT_HEAP:  limit_heap  = value; break;
     default: break;
     }
+}
+
+/* ------------------------------------------------------------------------- */
+/* In-process REPL handle                                                    */
+/* ------------------------------------------------------------------------- */
+
+struct mino_repl {
+    mino_env_t *env;
+    char       *buf;
+    size_t      len;
+    size_t      cap;
+};
+
+mino_repl_t *mino_repl_new(mino_env_t *env)
+{
+    mino_repl_t *r = (mino_repl_t *)malloc(sizeof(*r));
+    if (r == NULL) { return NULL; }
+    r->env = env;
+    r->buf = NULL;
+    r->len = 0;
+    r->cap = 0;
+    return r;
+}
+
+static int repl_is_whitespace(const char *s)
+{
+    while (*s) {
+        unsigned char c = (unsigned char)*s++;
+        if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != ',') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
+{
+    size_t         add;
+    const char    *cursor;
+    const char    *end;
+    mino_val_t    *form;
+    mino_val_t    *result;
+
+    if (out != NULL) { *out = NULL; }
+    if (repl == NULL) { return MINO_REPL_ERROR; }
+
+    /* Append the line to the buffer. */
+    add = (line != NULL) ? strlen(line) : 0;
+    if (repl->len + add + 1 > repl->cap) {
+        size_t new_cap = repl->cap == 0 ? 256 : repl->cap;
+        char  *nb;
+        while (new_cap < repl->len + add + 1) { new_cap *= 2; }
+        nb = (char *)realloc(repl->buf, new_cap);
+        if (nb == NULL) {
+            set_error("repl: out of memory");
+            return MINO_REPL_ERROR;
+        }
+        repl->buf = nb;
+        repl->cap = new_cap;
+    }
+    if (add > 0) {
+        memcpy(repl->buf + repl->len, line, add);
+    }
+    repl->len += add;
+    repl->buf[repl->len] = '\0';
+
+    /* If buffer is only whitespace, need more input. */
+    if (repl_is_whitespace(repl->buf)) {
+        return MINO_REPL_MORE;
+    }
+
+    /* Try to read a form. */
+    cursor = repl->buf;
+    end    = repl->buf;
+    form   = mino_read(cursor, &end);
+    if (form == NULL) {
+        const char *err = mino_last_error();
+        if (err != NULL && strstr(err, "unterminated") != NULL) {
+            return MINO_REPL_MORE;
+        }
+        /* Hard parse error — reset buffer. */
+        repl->len = 0;
+        repl->buf[0] = '\0';
+        return MINO_REPL_ERROR;
+    }
+
+    /* Shift remaining bytes to the front. */
+    {
+        size_t consumed  = (size_t)(end - repl->buf);
+        size_t remaining = repl->len - consumed;
+        memmove(repl->buf, end, remaining + 1);
+        repl->len = remaining;
+    }
+
+    /* Evaluate the form. */
+    result = mino_eval(form, repl->env);
+    if (result == NULL) {
+        return MINO_REPL_ERROR;
+    }
+    if (out != NULL) { *out = result; }
+    return MINO_REPL_OK;
+}
+
+void mino_repl_free(mino_repl_t *repl)
+{
+    if (repl == NULL) { return; }
+    free(repl->buf);
+    free(repl);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -4727,6 +4958,106 @@ static mino_val_t *prim_require(mino_val_t *args, mino_env_t *env)
     return result;
 }
 
+/* (doc name) — print the docstring for a def/defmacro binding.
+ * Returns the docstring as a string, or nil if no docstring. */
+static mino_val_t *prim_doc(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t   *name_val;
+    char          buf[256];
+    size_t        n;
+    meta_entry_t *e;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("doc requires one argument");
+        return NULL;
+    }
+    name_val = args->as.cons.car;
+    if (name_val == NULL || name_val->type != MINO_SYMBOL) {
+        set_error("doc: argument must be a symbol");
+        return NULL;
+    }
+    n = name_val->as.s.len;
+    if (n >= sizeof(buf)) {
+        set_error("doc: name too long");
+        return NULL;
+    }
+    memcpy(buf, name_val->as.s.data, n);
+    buf[n] = '\0';
+    e = meta_find(buf);
+    if (e != NULL && e->docstring != NULL) {
+        return mino_string(e->docstring);
+    }
+    return mino_nil();
+}
+
+/* (source name) — return the source form of a def/defmacro binding. */
+static mino_val_t *prim_source(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t   *name_val;
+    char          buf[256];
+    size_t        n;
+    meta_entry_t *e;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("source requires one argument");
+        return NULL;
+    }
+    name_val = args->as.cons.car;
+    if (name_val == NULL || name_val->type != MINO_SYMBOL) {
+        set_error("source: argument must be a symbol");
+        return NULL;
+    }
+    n = name_val->as.s.len;
+    if (n >= sizeof(buf)) {
+        set_error("source: name too long");
+        return NULL;
+    }
+    memcpy(buf, name_val->as.s.data, n);
+    buf[n] = '\0';
+    e = meta_find(buf);
+    if (e != NULL && e->source != NULL) {
+        return e->source;
+    }
+    return mino_nil();
+}
+
+/* (apropos substring) — return a list of bound names containing substring. */
+static mino_val_t *prim_apropos(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pat_val;
+    const char *pat;
+    mino_val_t *head = mino_nil();
+    mino_val_t *tail = NULL;
+    mino_env_t *e;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error("apropos requires one argument");
+        return NULL;
+    }
+    pat_val = args->as.cons.car;
+    if (pat_val == NULL || pat_val->type != MINO_STRING) {
+        set_error("apropos: argument must be a string");
+        return NULL;
+    }
+    pat = pat_val->as.s.data;
+    /* Walk every env frame from the given env up to root. */
+    for (e = env; e != NULL; e = e->parent) {
+        size_t i;
+        for (i = 0; i < e->len; i++) {
+            if (strstr(e->bindings[i].name, pat) != NULL) {
+                mino_val_t *sym  = mino_symbol(e->bindings[i].name);
+                mino_val_t *cell = mino_cons(sym, mino_nil());
+                if (tail == NULL) {
+                    head = cell;
+                } else {
+                    tail->as.cons.cdr = cell;
+                }
+                tail = cell;
+            }
+        }
+    }
+    return head;
+}
+
 void mino_set_resolver(mino_resolve_fn fn, void *ctx)
 {
     module_resolver     = fn;
@@ -4863,6 +5194,9 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "str",      mino_prim("str",      prim_str));
     mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
     mino_env_set(env, "require",  mino_prim("require",  prim_require));
+    mino_env_set(env, "doc",      mino_prim("doc",      prim_doc));
+    mino_env_set(env, "source",   mino_prim("source",   prim_source));
+    mino_env_set(env, "apropos",  mino_prim("apropos",  prim_apropos));
     install_stdlib_macros(env);
 }
 

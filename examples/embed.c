@@ -50,6 +50,34 @@ int main(void)
         }
     }
 
+    /* Demonstrate the in-process REPL handle: feed lines one at a time,
+     * collecting results as complete forms become available. */
+    {
+        mino_repl_t *repl = mino_repl_new(env);
+        mino_val_t  *out  = NULL;
+        int          rc;
+
+        /* Single-line form. */
+        rc = mino_repl_feed(repl, "(+ 1 2)\n", &out);
+        if (rc == MINO_REPL_OK && out != NULL) {
+            printf("repl: ");
+            mino_println(out);
+        }
+
+        /* Multi-line form: first line is incomplete. */
+        rc = mino_repl_feed(repl, "(* 3\n", &out);
+        if (rc == MINO_REPL_MORE) {
+            printf("repl: awaiting more input...\n");
+        }
+        rc = mino_repl_feed(repl, "   4)\n", &out);
+        if (rc == MINO_REPL_OK && out != NULL) {
+            printf("repl: ");
+            mino_println(out);
+        }
+
+        mino_repl_free(repl);
+    }
+
     mino_env_free(env);
     return 0;
 }

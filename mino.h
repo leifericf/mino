@@ -193,7 +193,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   collection  count nth first rest vector hash-map assoc get conj update
  *               keys vals
  *   predicates  cons? nil? string? number? keyword? symbol? vector? map? fn?
- *   reflection  type
+ *   reflection  type doc source apropos
  *   strings     str
  *   exceptions  throw
  *   modules     require
@@ -286,6 +286,50 @@ void mino_set_resolver(mino_resolve_fn fn, void *ctx);
  * mino_last_error() reports the cause.
  */
 void mino_set_limit(int kind, size_t value);
+
+/* ------------------------------------------------------------------------- */
+/* In-process REPL handle                                                    */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Return codes for mino_repl_feed.
+ */
+#define MINO_REPL_OK     0   /* form evaluated; result written to *out      */
+#define MINO_REPL_MORE   1   /* line accepted; more input needed            */
+#define MINO_REPL_ERROR  2   /* parse or eval error; see mino_last_error()  */
+
+typedef struct mino_repl mino_repl_t;
+
+/*
+ * Create a REPL handle that evaluates forms in `env`. The handle owns
+ * an internal line buffer; the host drives it by feeding one line at a
+ * time via mino_repl_feed. No thread is required: the host controls
+ * the call cadence entirely.
+ *
+ * `env` must outlive the REPL handle.
+ */
+mino_repl_t *mino_repl_new(mino_env_t *env);
+
+/*
+ * Feed one line of input to the REPL. Returns:
+ *   MINO_REPL_OK    — a complete form was read and evaluated. The result
+ *                      is written to *out (when out is non-NULL).
+ *   MINO_REPL_MORE  — the line was accumulated; more input is needed to
+ *                      complete the current form.
+ *   MINO_REPL_ERROR — a parse or eval error occurred. The error message
+ *                      is available via mino_last_error(). The buffer is
+ *                      reset so the next feed starts a fresh form.
+ *
+ * Multiple complete forms on one line: only the first is evaluated per
+ * call. Feed an empty line (or call again with "") to drain remaining
+ * buffered forms.
+ */
+int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out);
+
+/*
+ * Free the REPL handle and its internal buffer. Does not free `env`.
+ */
+void mino_repl_free(mino_repl_t *repl);
 
 #ifdef __cplusplus
 }
