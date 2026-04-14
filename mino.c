@@ -5997,6 +5997,31 @@ static int val_compare(const mino_val_t *a, const mino_val_t *b)
     return a->type < b->type ? -1 : a->type > b->type ? 1 : 0;
 }
 
+/* Sort comparator state: when sort_comp_fn is non-NULL, the merge sort
+ * calls the user-supplied comparison function instead of val_compare. */
+static mino_val_t *sort_comp_fn  = NULL;
+static mino_env_t *sort_comp_env = NULL;
+
+static int sort_compare(const mino_val_t *a, const mino_val_t *b)
+{
+    if (sort_comp_fn != NULL) {
+        mino_val_t *call_args = mino_cons((mino_val_t *)a,
+                                  mino_cons((mino_val_t *)b, mino_nil()));
+        mino_val_t *result = mino_call(sort_comp_fn, call_args, sort_comp_env);
+        if (result == NULL) return 0;
+        /* Numeric result: use sign directly (compare-style) */
+        if (result->type == MINO_INT) {
+            return result->as.i < 0 ? -1 : result->as.i > 0 ? 1 : 0;
+        }
+        if (result->type == MINO_FLOAT) {
+            return result->as.f < 0 ? -1 : result->as.f > 0 ? 1 : 0;
+        }
+        /* Boolean result: true means a < b, false means a >= b */
+        return mino_is_truthy(result) ? -1 : 1;
+    }
+    return val_compare(a, b);
+}
+
 /* Merge sort for mino_val_t* arrays. */
 static void merge_sort_vals(mino_val_t **arr, mino_val_t **tmp, size_t len)
 {
@@ -6008,7 +6033,7 @@ static void merge_sort_vals(mino_val_t **arr, mino_val_t **tmp, size_t len)
     memcpy(tmp, arr, mid * sizeof(*tmp));
     i = 0; j = mid; k = 0;
     while (i < mid && j < len) {
-        if (val_compare(tmp[i], arr[j]) <= 0) {
+        if (sort_compare(tmp[i], arr[j]) <= 0) {
             arr[k++] = tmp[i++];
         } else {
             arr[k++] = arr[j++];
@@ -6017,21 +6042,33 @@ static void merge_sort_vals(mino_val_t **arr, mino_val_t **tmp, size_t len)
     while (i < mid) { arr[k++] = tmp[i++]; }
 }
 
+/* (sort coll) or (sort comp coll) */
 static mino_val_t *prim_sort(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
+    mino_val_t *comp = NULL;
     mino_val_t **arr;
     mino_val_t **tmp;
     mino_val_t *head = mino_nil();
     mino_val_t *tail = NULL;
     size_t      n_items, i;
     seq_iter_t  it;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error("sort requires one argument");
+    if (!mino_is_cons(args)) {
+        set_error("sort requires one or two arguments");
         return NULL;
     }
-    coll = args->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr) &&
+        !mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        /* Two args: (sort comp coll) */
+        comp = args->as.cons.car;
+        coll = args->as.cons.cdr->as.cons.car;
+    } else if (!mino_is_cons(args->as.cons.cdr)) {
+        /* One arg: (sort coll) */
+        coll = args->as.cons.car;
+    } else {
+        set_error("sort requires one or two arguments");
+        return NULL;
+    }
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil();
     }
@@ -6045,7 +6082,11 @@ static mino_val_t *prim_sort(mino_val_t *args, mino_env_t *env)
     i = 0;
     seq_iter_init(&it, coll);
     while (!seq_iter_done(&it)) { arr[i++] = seq_iter_val(&it); seq_iter_next(&it); }
+    sort_comp_fn  = comp;
+    sort_comp_env = env;
     merge_sort_vals(arr, tmp, n_items);
+    sort_comp_fn  = NULL;
+    sort_comp_env = NULL;
     for (i = 0; i < n_items; i++) {
         mino_val_t *cell = mino_cons(arr[i], mino_nil());
         if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }

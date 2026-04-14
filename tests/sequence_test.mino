@@ -53,6 +53,15 @@
   (is (= '("a" "b" "c") (sort ["c" "a" "b"])))
   (is (= nil (sort []))))
 
+(deftest sort-with-comparator
+  (testing "boolean comparator"
+    (is (= '(1 1 3 4 5) (sort < [3 1 4 1 5])))
+    (is (= '(5 4 3 1 1) (sort > [3 1 4 1 5]))))
+  (testing "compare-style comparator"
+    (is (= '(5 4 3 1 1) (sort (fn (a b) (compare b a)) [3 1 4 1 5]))))
+  (testing "string sorting with comparator"
+    (is (= '("apple" "banana" "cherry") (sort compare ["banana" "apple" "cherry"])))))
+
 (deftest juxt-fn
   (is (= '(6 4) ((juxt inc dec) 5))))
 
