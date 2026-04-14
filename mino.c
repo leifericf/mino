@@ -6592,6 +6592,24 @@ static mino_val_t *prim_spit(mino_val_t *args, mino_env_t *env)
     return mino_nil();
 }
 
+/* (exit code) — terminate the process with the given exit code.
+ * Defaults to 0 if no argument is given. */
+static mino_val_t *prim_exit(mino_val_t *args, mino_env_t *env)
+{
+    int code = 0;
+    (void)env;
+    if (mino_is_cons(args)) {
+        mino_val_t *v = args->as.cons.car;
+        if (v != NULL && v->type == MINO_INT) {
+            code = (int)v->as.i;
+        } else if (v != NULL && v->type == MINO_FLOAT) {
+            code = (int)v->as.f;
+        }
+    }
+    exit(code);
+    return mino_nil(); /* unreachable */
+}
+
 /* (require name) — load a module by name using the host-supplied resolver.
  * Returns the cached value on subsequent calls with the same name. */
 static mino_val_t *prim_require(mino_val_t *args, mino_env_t *env)
@@ -7081,4 +7099,5 @@ void mino_install_io(mino_env_t *env)
     mino_env_set(env, "prn",      mino_prim("prn",      prim_prn));
     mino_env_set(env, "slurp",    mino_prim("slurp",    prim_slurp));
     mino_env_set(env, "spit",     mino_prim("spit",     prim_spit));
+    mino_env_set(env, "exit",     mino_prim("exit",     prim_exit));
 }

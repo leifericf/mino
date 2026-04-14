@@ -244,9 +244,9 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
 void        mino_install_core(mino_env_t *env);
 
 /*
- * Install I/O primitives: println, prn, slurp. These are kept separate
- * from mino_install_core so that sandboxed environments start with no
- * I/O capability; the host opts in by calling this function.
+ * Install I/O primitives: println, prn, slurp, spit, exit. These are kept
+ * separate from mino_install_core so that sandboxed environments start with
+ * no I/O capability; the host opts in by calling this function.
  */
 void        mino_install_io(mino_env_t *env);
 
