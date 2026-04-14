@@ -83,6 +83,63 @@
 (defmacro defn (name params & body)
   `(def ~name (fn ~params ~@body)))
 
+;; --- Lazy sequence operations ---
+
+(def map (fn (f coll)
+  (lazy-seq
+    (let (s (seq coll))
+      (when s
+        (cons (f (first s)) (map f (rest s))))))))
+
+(def filter (fn (pred coll)
+  (lazy-seq
+    (let (s (seq coll))
+      (when s
+        (if (pred (first s))
+          (cons (first s) (filter pred (rest s)))
+          (filter pred (rest s))))))))
+
+(def take (fn (n coll)
+  (lazy-seq
+    (when (> n 0)
+      (let (s (seq coll))
+        (when s
+          (cons (first s) (take (- n 1) (rest s)))))))))
+
+(def drop (fn (n coll)
+  (if (<= n 0)
+    coll
+    (let (s (seq coll))
+      (if s
+        (drop (- n 1) (rest s))
+        nil)))))
+
+(def concat (fn (& colls)
+  (lazy-seq
+    (when (seq colls)
+      (let (s (seq (first colls)))
+        (if s
+          (cons (first s) (apply concat (cons (rest s) (rest colls))))
+          (apply concat (rest colls))))))))
+
+(def range
+  (let (range-impl (fn (start end step)
+         (lazy-seq
+           (when (if (> step 0) (< start end) (> start end))
+             (cons start (range-impl (+ start step) end step))))))
+    (fn (& args)
+      (let (n (count args))
+        (cond
+          (= n 1) (range-impl 0 (first args) 1)
+          (= n 2) (range-impl (first args) (first (rest args)) 1)
+          (= n 3) (range-impl (first args) (first (rest args)) (first (rest (rest args))))
+          true     nil)))))
+
+(def repeat (fn (n x)
+  (lazy-seq
+    (when (> n 0)
+      (cons x (repeat (- n 1) x))))))
+
 ;; --- Collection utilities ---
 
 (def update (fn (m k f & args)

@@ -1461,6 +1461,10 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         while (p != NULL && p->type == MINO_CONS) {
             mino_print_to(out, p->as.cons.car);
             p = p->as.cons.cdr;
+            /* Force lazy tails so (cons x (lazy-seq ...)) prints as a list. */
+            if (p != NULL && p->type == MINO_LAZY) {
+                p = lazy_force((mino_val_t *)p);
+            }
             if (p != NULL && p->type == MINO_CONS) {
                 fputc(' ', out);
             } else if (p != NULL && p->type != MINO_NIL) {
@@ -1547,13 +1551,9 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         fputc(']', out);
         return;
     case MINO_LAZY: {
-        /* Force the lazy seq and print as a list. */
+        /* Force the lazy seq and print the realized value. */
         mino_val_t *forced = lazy_force((mino_val_t *)v);
-        if (forced == NULL || forced->type == MINO_NIL) {
-            fputs("()", out);
-        } else {
-            mino_print_to(out, forced);
-        }
+        mino_print_to(out, forced);
         return;
     }
     case MINO_RECUR:
@@ -5603,68 +5603,7 @@ static void seq_iter_next(seq_iter_t *it)
     }
 }
 
-static mino_val_t *prim_map(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *fn;
-    mino_val_t *coll;
-    mino_val_t *head = mino_nil();
-    mino_val_t *tail = NULL;
-    seq_iter_t  it;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("map requires a function and a collection");
-        return NULL;
-    }
-    fn   = args->as.cons.car;
-    coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
-    }
-    seq_iter_init(&it, coll);
-    while (!seq_iter_done(&it)) {
-        mino_val_t *elem    = seq_iter_val(&it);
-        mino_val_t *call_a  = mino_cons(elem, mino_nil());
-        mino_val_t *result  = apply_callable(fn, call_a, env);
-        mino_val_t *cell;
-        if (result == NULL) return NULL;
-        cell = mino_cons(result, mino_nil());
-        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
-        tail = cell;
-        seq_iter_next(&it);
-    }
-    return head;
-}
-
-static mino_val_t *prim_filter(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *pred;
-    mino_val_t *coll;
-    mino_val_t *head = mino_nil();
-    mino_val_t *tail = NULL;
-    seq_iter_t  it;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("filter requires a predicate and a collection");
-        return NULL;
-    }
-    pred = args->as.cons.car;
-    coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
-    }
-    seq_iter_init(&it, coll);
-    while (!seq_iter_done(&it)) {
-        mino_val_t *elem   = seq_iter_val(&it);
-        mino_val_t *call_a = mino_cons(elem, mino_nil());
-        mino_val_t *result = apply_callable(pred, call_a, env);
-        if (result == NULL) return NULL;
-        if (mino_is_truthy(result)) {
-            mino_val_t *cell = mino_cons(elem, mino_nil());
-            if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
-            tail = cell;
-        }
-        seq_iter_next(&it);
-    }
-    return head;
-}
+/* (map, filter are now lazy in stdlib.mino) */
 
 static mino_val_t *prim_reduce(mino_val_t *args, mino_env_t *env)
 {
@@ -5711,182 +5650,7 @@ static mino_val_t *prim_reduce(mino_val_t *args, mino_env_t *env)
     return acc;
 }
 
-static mino_val_t *prim_take(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *coll;
-    mino_val_t *head = mino_nil();
-    mino_val_t *tail = NULL;
-    long long   n_take;
-    long long   i = 0;
-    seq_iter_t  it;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("take requires a count and a collection");
-        return NULL;
-    }
-    if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
-        set_error("take: first argument must be an integer");
-        return NULL;
-    }
-    n_take = args->as.cons.car->as.i;
-    coll   = args->as.cons.cdr->as.cons.car;
-    if (n_take <= 0 || coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
-    }
-    seq_iter_init(&it, coll);
-    while (!seq_iter_done(&it) && i < n_take) {
-        mino_val_t *elem = seq_iter_val(&it);
-        mino_val_t *cell = mino_cons(elem, mino_nil());
-        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
-        tail = cell;
-        seq_iter_next(&it);
-        i++;
-    }
-    return head;
-}
-
-static mino_val_t *prim_drop(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *coll;
-    mino_val_t *head = mino_nil();
-    mino_val_t *tail = NULL;
-    long long   n_drop;
-    long long   i = 0;
-    seq_iter_t  it;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("drop requires a count and a collection");
-        return NULL;
-    }
-    if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
-        set_error("drop: first argument must be an integer");
-        return NULL;
-    }
-    n_drop = args->as.cons.car->as.i;
-    coll   = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
-    }
-    seq_iter_init(&it, coll);
-    while (!seq_iter_done(&it) && i < n_drop) {
-        seq_iter_next(&it);
-        i++;
-    }
-    while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(&it);
-        mino_val_t *cell = mino_cons(elem, mino_nil());
-        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
-        tail = cell;
-        seq_iter_next(&it);
-    }
-    return head;
-}
-
-static mino_val_t *prim_range(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *head = mino_nil();
-    mino_val_t *tail = NULL;
-    long long   start = 0, end_val, step = 1;
-    long long   i;
-    size_t      n;
-    (void)env;
-    arg_count(args, &n);
-    if (n == 0) {
-        set_error("range requires at least one argument");
-        return NULL;
-    }
-    if (n == 1) {
-        if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
-            set_error("range: arguments must be integers");
-            return NULL;
-        }
-        end_val = args->as.cons.car->as.i;
-    } else if (n == 2) {
-        if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT
-            || args->as.cons.cdr->as.cons.car == NULL
-            || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
-            set_error("range: arguments must be integers");
-            return NULL;
-        }
-        start   = args->as.cons.car->as.i;
-        end_val = args->as.cons.cdr->as.cons.car->as.i;
-    } else if (n == 3) {
-        if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT
-            || args->as.cons.cdr->as.cons.car == NULL
-            || args->as.cons.cdr->as.cons.car->type != MINO_INT
-            || args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
-            || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
-            set_error("range: arguments must be integers");
-            return NULL;
-        }
-        start   = args->as.cons.car->as.i;
-        end_val = args->as.cons.cdr->as.cons.car->as.i;
-        step    = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
-    } else {
-        set_error("range requires 1, 2, or 3 arguments");
-        return NULL;
-    }
-    if (step == 0) {
-        set_error("range: step cannot be zero");
-        return NULL;
-    }
-    for (i = start; step > 0 ? i < end_val : i > end_val; i += step) {
-        mino_val_t *cell = mino_cons(mino_int(i), mino_nil());
-        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
-        tail = cell;
-    }
-    return head;
-}
-
-static mino_val_t *prim_repeat(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *head = mino_nil();
-    mino_val_t *tail = NULL;
-    long long   count;
-    mino_val_t *val;
-    long long   i;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error("repeat requires a count and a value");
-        return NULL;
-    }
-    if (args->as.cons.car == NULL || args->as.cons.car->type != MINO_INT) {
-        set_error("repeat: first argument must be an integer");
-        return NULL;
-    }
-    count = args->as.cons.car->as.i;
-    val   = args->as.cons.cdr->as.cons.car;
-    for (i = 0; i < count; i++) {
-        mino_val_t *cell = mino_cons(val, mino_nil());
-        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
-        tail = cell;
-    }
-    return head;
-}
-
-static mino_val_t *prim_concat(mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *head = mino_nil();
-    mino_val_t *tail = NULL;
-    (void)env;
-    while (mino_is_cons(args)) {
-        mino_val_t *coll = args->as.cons.car;
-        seq_iter_t  it;
-        if (coll != NULL && coll->type != MINO_NIL) {
-            seq_iter_init(&it, coll);
-            while (!seq_iter_done(&it)) {
-                mino_val_t *elem = seq_iter_val(&it);
-                mino_val_t *cell = mino_cons(elem, mino_nil());
-                if (tail == NULL) { head = cell; }
-                else              { tail->as.cons.cdr = cell; }
-                tail = cell;
-                seq_iter_next(&it);
-            }
-        }
-        args = args->as.cons.cdr;
-    }
-    return head;
-}
+/* (take, drop, range, repeat, concat are now lazy in stdlib.mino) */
 
 static mino_val_t *prim_into(mino_val_t *args, mino_env_t *env)
 {
@@ -7248,15 +7012,9 @@ void mino_install_core(mino_env_t *env)
     mino_env_set(env, "contains?",mino_prim("contains?",prim_contains_p));
     mino_env_set(env, "disj",     mino_prim("disj",     prim_disj));
     mino_env_set(env, "dissoc",   mino_prim("dissoc",   prim_dissoc));
-    /* sequence operations */
-    mino_env_set(env, "map",      mino_prim("map",      prim_map));
-    mino_env_set(env, "filter",   mino_prim("filter",   prim_filter));
+    /* sequence operations (map, filter, take, drop, range, repeat,
+       concat are now lazy in stdlib.mino) */
     mino_env_set(env, "reduce",   mino_prim("reduce",   prim_reduce));
-    mino_env_set(env, "take",     mino_prim("take",     prim_take));
-    mino_env_set(env, "drop",     mino_prim("drop",     prim_drop));
-    mino_env_set(env, "range",    mino_prim("range",    prim_range));
-    mino_env_set(env, "repeat",   mino_prim("repeat",   prim_repeat));
-    mino_env_set(env, "concat",   mino_prim("concat",   prim_concat));
     mino_env_set(env, "into",     mino_prim("into",     prim_into));
     mino_env_set(env, "apply",    mino_prim("apply",    prim_apply));
     mino_env_set(env, "reverse",  mino_prim("reverse",  prim_reverse));
