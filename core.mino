@@ -400,3 +400,50 @@
         g    (gensym))
     `(let (~g ~expr)
        (when (not (nil? ~g)) (let (~sym ~g) ~@body)))))
+
+;; --- Sequence functions ---
+
+(def last (fn (coll)
+  (let (s (seq coll))
+    (if (next s)
+      (last (next s))
+      (first s)))))
+
+(def butlast (fn (coll)
+  (let (s (seq coll))
+    (when (next s)
+      (cons (first s) (butlast (next s)))))))
+
+(def nthrest (fn (coll n)
+  (if (<= n 0) coll (nthrest (rest coll) (- n 1)))))
+
+(def nthnext (fn (coll n)
+  (if (<= n 0) (seq coll) (nthnext (next coll) (- n 1)))))
+
+(def take-last (fn (n coll)
+  (let (lead (drop n coll)
+        step (fn (s lead)
+               (if (seq lead)
+                 (step (next s) (next lead))
+                 s)))
+    (step (seq coll) (seq lead)))))
+
+(def drop-last (fn (& args)
+  (let (n    (if (= (count args) 1) 1 (first args))
+        coll (if (= (count args) 1) (first args) (second args)))
+    (take (- (count coll) n) coll))))
+
+(def split-at (fn (n coll)
+  (vector (into [] (take n coll)) (into [] (drop n coll)))))
+
+(def split-with (fn (pred coll)
+  (vector (into [] (take-while pred coll))
+          (into [] (drop-while pred coll)))))
+
+(def mapv    (fn (f coll) (into [] (map f coll))))
+(def filterv (fn (pred coll) (into [] (filter pred coll))))
+
+(def sort-by (fn (keyfn & args)
+  (let (cmp  (if (= (count args) 2) (first args) compare)
+        coll (last args))
+    (sort (fn (a b) (cmp (keyfn a) (keyfn b))) coll))))
