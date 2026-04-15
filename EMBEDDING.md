@@ -305,6 +305,66 @@ Three primitives expose the actor model to mino code:
   environment (set automatically by `spawn`).
 
 
+## Concurrency primitives
+
+### Atoms and swap!
+
+Atoms are mutable reference cells. `reset!` sets the value directly;
+`swap!` applies a function to the current value and stores the result:
+
+```
+(def counter (atom 0))
+(swap! counter + 1)     ;=> 1
+(swap! counter + 10)    ;=> 11
+(deref counter)         ;=> 11
+```
+
+`swap!` accepts extra arguments that are passed after the current value:
+`(swap! a f x y)` is equivalent to `(reset! a (f (deref a) x y))`.
+
+### Dynamic binding
+
+The `binding` special form establishes dynamic bindings that are visible
+to all code called within the body, regardless of lexical scope:
+
+```
+(def *verbose* false)
+
+(defn log (msg)
+  (when *verbose* (println msg)))
+
+(binding (*verbose* true)
+  (log "this prints"))     ; *verbose* is true inside binding
+
+(log "this does not")      ; *verbose* is false again
+```
+
+Dynamic bindings are per-state and stack correctly with nesting. They
+shadow lexical bindings of the same name for the duration of the body.
+
+### Agents
+
+Agents are mutable reference cells updated via function application.
+Within a single runtime, updates are synchronous. The API provides a
+familiar abstraction that maps to asynchronous patterns in multi-runtime
+contexts:
+
+```
+(def a (agent 0))
+(send-to a + 10)          ;=> 10
+(send-to a + 5)           ;=> 15
+(deref a)                 ;=> 15
+```
+
+### What mino does not provide
+
+mino does not implement shared-memory concurrency primitives (STM, refs,
+dosync). Concurrency in mino happens between runtimes via message passing,
+not within a single runtime via coordinated mutation. This is a deliberate
+design choice: the isolation model is simpler, safer, and maps naturally
+to the embedding context where the host controls scheduling.
+
+
 ## REPL handle
 
 The in-process REPL lets the host drive evaluation one line at a time

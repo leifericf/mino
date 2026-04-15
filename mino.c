@@ -111,6 +111,18 @@ struct mino_ref {
     struct mino_ref *prev;
 };
 
+/* Dynamic binding frame: a stack of name-value pairs for (binding ...). */
+typedef struct dyn_binding {
+    const char          *name;
+    mino_val_t          *val;
+    struct dyn_binding  *next;
+} dyn_binding_t;
+
+typedef struct dyn_frame {
+    dyn_binding_t       *bindings;
+    struct dyn_frame    *prev;
+} dyn_frame_t;
+
 /* GC range: address span of one allocated payload for conservative scan. */
 typedef struct {
     uintptr_t  start;  /* inclusive payload byte address */
@@ -201,6 +213,9 @@ struct mino_state {
 
     /* Host-retained value refs */
     mino_ref_t     *ref_roots;
+
+    /* Dynamic bindings */
+    dyn_frame_t    *dyn_stack;
 };
 
 /* Default global state instance and current-state pointer. */
@@ -370,6 +385,21 @@ void mino_unref(mino_state_t *S, mino_ref_t *ref)
 #define sort_comp_fn        (S_->sort_comp_fn)
 #define sort_comp_env       (S_->sort_comp_env)
 #define gensym_counter      (S_->gensym_counter)
+#define dyn_stack           (S_->dyn_stack)
+
+/* Look up a name in the dynamic binding stack.  Returns the value if
+ * found, NULL otherwise. */
+static mino_val_t *dyn_lookup(const char *name)
+{
+    dyn_frame_t *f;
+    dyn_binding_t *b;
+    for (f = dyn_stack; f != NULL; f = f->prev) {
+        for (b = f->bindings; b != NULL; b = b->next) {
+            if (strcmp(b->name, name) == 0) return b->val;
+        }
+    }
+    return NULL;
+}
 
 static meta_entry_t *meta_find(const char *name)
 {
@@ -3090,6 +3120,16 @@ static void gc_mark_roots(void)
             gc_mark_interior(ref->val);
         }
     }
+    /* Pin dynamic binding values. */
+    {
+        dyn_frame_t *f;
+        dyn_binding_t *b;
+        for (f = dyn_stack; f != NULL; f = f->prev) {
+            for (b = f->bindings; b != NULL; b = b->next) {
+                gc_mark_interior(b->val);
+            }
+        }
+    }
 }
 
 static void gc_sweep(void)
@@ -3528,7 +3568,8 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
         }
         memcpy(buf, form->as.s.data, n);
         buf[n] = '\0';
-        v = mino_env_get(env, buf);
+        v = dyn_lookup(buf);
+        if (v == NULL) v = mino_env_get(env, buf);
         if (v == NULL) {
             char msg[300];
             snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
@@ -3968,6 +4009,72 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                 env_bind(local, var_buf, ex != NULL ? ex : mino_nil(S_));
                 return eval_implicit_do(catch_body, local);
             }
+        }
+
+        /*
+         * binding: (binding (name1 val1 name2 val2 ...) body...)
+         * Pushes a dynamic binding frame, evaluates body forms, then pops
+         * the frame (even on error, via setjmp/longjmp cleanup).
+         */
+        if (sym_eq(head, "binding")) {
+            mino_val_t *pairs, *body, *result;
+            dyn_frame_t frame;
+            dyn_binding_t *bhead = NULL;
+            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.car)) {
+                set_error_at(form, "binding requires a binding list and body");
+                return NULL;
+            }
+            pairs = args->as.cons.car;
+            body  = args->as.cons.cdr;
+            /* Parse binding pairs. */
+            while (pairs != NULL && pairs->type == MINO_CONS) {
+                mino_val_t *sym_v, *val_form, *val;
+                dyn_binding_t *b;
+                char nbuf[256];
+                size_t nlen;
+                sym_v = pairs->as.cons.car;
+                if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
+                    set_error_at(form, "binding: names must be symbols");
+                    /* Free any allocated bindings. */
+                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                    return NULL;
+                }
+                nlen = sym_v->as.s.len;
+                if (nlen >= sizeof(nbuf)) {
+                    set_error_at(form, "binding: name too long");
+                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                    return NULL;
+                }
+                memcpy(nbuf, sym_v->as.s.data, nlen);
+                nbuf[nlen] = '\0';
+                pairs = pairs->as.cons.cdr;
+                if (pairs == NULL || pairs->type != MINO_CONS) {
+                    set_error_at(form, "binding: odd number of forms in binding list");
+                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                    return NULL;
+                }
+                val_form = pairs->as.cons.car;
+                pairs    = pairs->as.cons.cdr;
+                val = eval(val_form, env);
+                if (val == NULL) {
+                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                    return NULL;
+                }
+                b = (dyn_binding_t *)malloc(sizeof(*b));
+                b->name = mino_symbol(S_, nbuf)->as.s.data; /* interned */
+                b->val  = val;
+                b->next = bhead;
+                bhead   = b;
+            }
+            /* Push frame. */
+            frame.bindings = bhead;
+            frame.prev     = dyn_stack;
+            dyn_stack      = &frame;
+            result = eval_implicit_do(body, env);
+            /* Pop frame. */
+            dyn_stack = frame.prev;
+            while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+            return result;
         }
 
         if (sym_eq(head, "lazy-seq")) {
@@ -7617,6 +7724,46 @@ static mino_val_t *prim_reset_bang(mino_val_t *args, mino_env_t *env)
     return val;
 }
 
+/* (swap! atom f & args) — applies (f current-val args...) and sets result. */
+static mino_val_t *prim_swap_bang(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *a, *fn, *cur, *call_args, *extra, *tail, *result;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error("swap! requires at least 2 arguments: atom and function");
+        return NULL;
+    }
+    a  = args->as.cons.car;
+    fn = args->as.cons.cdr->as.cons.car;
+    if (a == NULL || a->type != MINO_ATOM) {
+        set_error("swap!: first argument must be an atom");
+        return NULL;
+    }
+    cur = a->as.atom.val;
+    /* Build arg list: (cur extra1 extra2 ...) */
+    call_args = mino_nil(S_);
+    /* Append extra args in reverse then prepend cur. */
+    extra = args->as.cons.cdr->as.cons.cdr; /* rest after fn */
+    if (extra != NULL && extra->type == MINO_CONS) {
+        /* Collect extras into a list. */
+        tail = mino_nil(S_);
+        while (extra != NULL && extra->type == MINO_CONS) {
+            tail = mino_cons(S_, extra->as.cons.car, tail);
+            extra = extra->as.cons.cdr;
+        }
+        /* Reverse to get correct order. */
+        call_args = mino_nil(S_);
+        while (tail != NULL && tail->type == MINO_CONS) {
+            call_args = mino_cons(S_, tail->as.cons.car, call_args);
+            tail = tail->as.cons.cdr;
+        }
+    }
+    call_args = mino_cons(S_, cur, call_args);
+    result = mino_call(S_, fn, call_args, env);
+    if (result == NULL) return NULL;
+    a->as.atom.val = result;
+    return result;
+}
+
 static mino_val_t *prim_atom_p(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -8153,6 +8300,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S_, env, "atom",     mino_prim(S_, "atom",     prim_atom));
     mino_env_set(S_, env, "deref",    mino_prim(S_, "deref",    prim_deref));
     mino_env_set(S_, env, "reset!",   mino_prim(S_, "reset!",   prim_reset_bang));
+    mino_env_set(S_, env, "swap!",    mino_prim(S_, "swap!",    prim_swap_bang));
     mino_env_set(S_, env, "atom?",    mino_prim(S_, "atom?",    prim_atom_p));
     /* actors */
     mino_env_set(S_, env, "spawn",    mino_prim(S_, "spawn",    prim_spawn));

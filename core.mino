@@ -780,3 +780,19 @@
       `(map (fn (~sym) ~@body)
             (filter (fn (~sym) ~when-clause) ~coll))
       `(map (fn (~sym) ~@body) ~coll))))
+
+;; ---------------------------------------------------------------------------
+;; Agents: mutable reference cells updated via function application.
+;;
+;; An agent wraps an atom. (send-to agent f) applies f to the current
+;; value and stores the result.  Within a single runtime this is
+;; synchronous; the API exists so that code written against agents
+;; transfers cleanly to multi-runtime contexts later.
+;; ---------------------------------------------------------------------------
+
+(def agent atom)
+
+(defn send-to (ag f & args)
+  (apply swap! ag f args))
+
+(defn agent-error (ag) nil)
