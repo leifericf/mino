@@ -3428,7 +3428,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "swap!",    mino_prim(S, "swap!",    prim_swap_bang));
     mino_env_set(S, env, "atom?",    mino_prim(S, "atom?",    prim_atom_p));
     /* actors */
-    mino_env_set(S, env, "spawn",    mino_prim(S, "spawn",    prim_spawn));
+    mino_env_set(S, env, "spawn*",   mino_prim(S, "spawn*",   prim_spawn));
     mino_env_set(S, env, "send!",    mino_prim(S, "send!",    prim_send_bang));
     mino_env_set(S, env, "receive",  mino_prim(S, "receive",  prim_receive));
     install_core_mino(S, env);

@@ -799,3 +799,17 @@
   (apply swap! ag f args))
 
 (defn agent-error (ag) nil)
+
+;; ---------------------------------------------------------------------------
+;; Actors: isolated runtimes with mailbox communication.
+;;
+;; (spawn & body) creates a new actor, evaluates the body forms in its
+;; own state, and returns an opaque handle.  The body forms are
+;; serialized to source text at macro-expansion time so they can be
+;; evaluated in a separate runtime.  spawn* is the underlying C
+;; primitive that takes a source string.
+;; ---------------------------------------------------------------------------
+
+(defmacro spawn (& body)
+  (let (src (apply str (interpose " " (map (fn (f) (pr-str f)) body))))
+    `(spawn* ~src)))

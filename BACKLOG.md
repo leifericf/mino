@@ -210,12 +210,9 @@ Separate package providing familiar API names for users coming from
 imperative embedded scripting backgrounds. Backed by mino's
 persistent data structures. Separate repo, low priority.
 
-### Language-level actor syntax
-
-Replace `(spawn src)` (source-string-based actor creation) with a
-structured form that bootstraps from existing functions or handler
-definitions rather than raw source strings. The C-level host API is
-already clean; this is about the mino-side surface.
+~~### Language-level actor syntax~~ -- Done in v0.19.0. `spawn` is now
+a macro that takes body forms directly. `spawn*` retains the
+source-string primitive for programmatic use.
 
 ### nREPL state-per-session concurrency
 

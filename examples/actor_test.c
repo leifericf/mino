@@ -131,10 +131,10 @@ int main(void)
         mino_actor_free(a2);
     }
 
-    /* ---- Test 6: spawn from mino code ---- */
+    /* ---- Test 6: spawn from mino code (structured form) ---- */
     {
         mino_val_t *handle = mino_eval_string(S,
-            "(spawn \"(def greet (fn (name) (str \\\"hello \\\" name)))\")",
+            "(spawn (def greet (fn (name) (str \"hello \" name))))",
             env);
         ASSERT(handle != NULL, "spawn returned");
         ASSERT(handle->type == MINO_HANDLE, "spawn returns handle");
@@ -144,7 +144,7 @@ int main(void)
     /* ---- Test 7: send! from mino code ---- */
     {
         mino_val_t *result = mino_eval_string(S,
-            "(let (a (spawn \"nil\")) (send! a 42))", env);
+            "(let (a (spawn nil)) (send! a 42))", env);
         ASSERT(result != NULL, "send! returned");
     }
 

@@ -332,14 +332,19 @@ mino_actor_free(a);
 
 ### Actors from mino code
 
-Three primitives expose the actor model to mino code:
+Three forms expose the actor model to mino code:
 
-- `(spawn src)` creates a new actor, evaluates the source string `src`
-  in the actor's state, and returns an opaque actor handle.
+- `(spawn & body)` creates a new actor, evaluates the body forms in its
+  own state, and returns an opaque actor handle. The body is serialized
+  to source text at macro-expansion time. Example:
+  `(spawn (def handler (fn (msg) (* msg msg))))`
 - `(send! actor val)` sends a value to an actor's mailbox.
 - `(receive)` receives the next message from the current actor's mailbox.
   Requires that `*self*` is bound to an actor handle in the current
   environment (set automatically by `spawn`).
+
+The underlying C primitive `spawn*` accepts a source string directly
+for cases where the host constructs actor source programmatically.
 
 
 ## Concurrency primitives
