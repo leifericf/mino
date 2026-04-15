@@ -155,6 +155,37 @@ through mino's eval (C has no unwinding). C++ primitives must wrap in
 try/catch. A thin `mino.hpp` header with RAII wrappers for
 `mino_env_t*` and pinned values would help C++ adoption. ~100 lines.
 
+## Performance
+
+### Mailbox binary serialization
+
+The mailbox (`clone.c`) serializes every message through
+`tmpfile()` + `mino_print_to` + `fread` + `mino_read`. That is a
+full text roundtrip with multiple syscalls per message. Measured at
+100 us per integer send+recv. Replace with a direct-to-buffer binary
+format (write type tag + payload to a `malloc`'d buffer, deserialize
+without the reader). Should bring message cost to single-digit
+microseconds. ~200 lines.
+
+### Cache parsed core.mino
+
+`mino_install_core` re-parses and re-evaluates `core_mino_src`
+(~800 lines) for every new environment. Measured at 524 us per
+`mino_new` call. Every actor pays this cost. Read the source once
+into a cached form list, then eval-into-env from the cache on
+subsequent calls. Or pre-evaluate into a template env and clone it.
+~100 lines.
+
+### Lazy sequence per-element overhead
+
+`(into [] (range 1000))` costs 8 ms (8 us/element). Each step
+allocates a lazy thunk, forces it (full eval), and produces a cons
+cell. For tight data-processing loops this dominates runtime. Options:
+(a) add eager C-level variants for hot paths (`range` returning a
+vector, `map`/`filter` with eager fallbacks for non-lazy input),
+(b) accept the cost as inherent to lazy-by-default. Design decision,
+not a simple fix.
+
 ## Architecture
 
 ### mino-std package
