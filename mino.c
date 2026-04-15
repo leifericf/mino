@@ -219,6 +219,11 @@ struct mino_state {
 
     /* Interrupt flag (checked by the eval loop) */
     volatile int    interrupted;
+
+    /* GC save stack: pinned values during eval to protect borrowed pointers
+     * that the conservative stack scanner might miss (register-allocated). */
+    mino_val_t     *gc_save[32];
+    int             gc_save_len;
 };
 
 /* Default global state instance and current-state pointer. */
@@ -390,6 +395,16 @@ void mino_unref(mino_state_t *S, mino_ref_t *ref)
 #define gensym_counter      (S_->gensym_counter)
 #define dyn_stack           (S_->dyn_stack)
 #define interrupted         (S_->interrupted)
+#define gc_save             (S_->gc_save)
+#define gc_save_len         (S_->gc_save_len)
+
+/* Pin a value on the GC save stack to protect borrowed pointers across
+ * allocations.  The conservative stack scanner can miss locals that the
+ * compiler has moved to registers or eliminated. */
+#define gc_pin(v) \
+    do { if (gc_save_len < 32) gc_save[gc_save_len++] = (v); } while (0)
+#define gc_unpin(n) \
+    do { gc_save_len -= (n); } while (0)
 
 /* Look up a name in the dynamic binding stack.  Returns the value if
  * found, NULL otherwise. */
@@ -3148,6 +3163,15 @@ static void gc_mark_roots(void)
             }
         }
     }
+    /* Pin sort comparator if active. */
+    gc_mark_interior(sort_comp_fn);
+    /* Pin values on the GC save stack. */
+    {
+        int si;
+        for (si = 0; si < gc_save_len; si++) {
+            gc_mark_interior(gc_save[si]);
+        }
+    }
 }
 
 static void gc_sweep(void)
@@ -3467,7 +3491,9 @@ static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
         if (v == NULL) {
             return NULL;
         }
+        gc_pin(v);
         cell = mino_cons(S_, v, mino_nil(S_));
+        gc_unpin(1);
         if (tail == NULL) {
             head = cell;
         } else {
@@ -3744,7 +3770,9 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
             }
             memcpy(buf, name_form->as.s.data, n);
             buf[n] = '\0';
+            gc_pin(mac);
             env_bind(env_root(env), buf, mac);
+            gc_unpin(1);
             meta_set(buf, doc, doc_len, form);
             return mac;
         }
@@ -3789,7 +3817,9 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
             if (value == NULL) {
                 return NULL;
             }
+            gc_pin(value);
             env_bind(env_root(env), buf, value);
+            gc_unpin(1);
             meta_set(buf, doc, doc_len, form);
             return value;
         }
@@ -3858,7 +3888,9 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                 if (val == NULL) {
                     return NULL;
                 }
+                gc_pin(val);
                 env_bind(local, buf, val);
+                gc_unpin(1);
                 bindings = rest_pair->as.cons.cdr;
             }
             return eval_implicit_do_impl(body, local, tail);
@@ -3939,7 +3971,9 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                 if (val == NULL) {
                     return NULL;
                 }
+                gc_pin(val);
                 env_bind(local, buf, val);
+                gc_unpin(1);
                 cell = mino_cons(S_, name_form, mino_nil(S_));
                 if (params_tail == NULL) {
                     params = cell;
@@ -4116,16 +4150,21 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
             if (fn == NULL) {
                 return NULL;
             }
+            /* Pin fn: eval_args allocates, and the conservative stack
+             * scanner may miss fn if the compiler keeps it in a register. */
+            gc_pin(fn);
             if (fn->type == MINO_MACRO) {
                 /* Expand with unevaluated args; re-eval the resulting form
                  * in the caller's environment. */
                 mino_val_t *expanded = apply_callable(fn, args, env);
+                gc_unpin(1);
                 if (expanded == NULL) {
                     return NULL;
                 }
                 return eval_impl(expanded, env, tail);
             }
             if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
+                gc_unpin(1);
                 {
                     char msg[128];
                     snprintf(msg, sizeof(msg), "not a function (got %s)",
@@ -4135,6 +4174,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                 return NULL;
             }
             evaled = eval_args(args, env);
+            gc_unpin(1);
             if (evaled == NULL && mino_last_error(S_) != NULL) {
                 return NULL;
             }
