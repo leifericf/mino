@@ -1183,6 +1183,10 @@ static mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env
         if (s->type == MINO_CONS) return s->as.cons.car;
         return mino_nil(S);
     }
+    if (coll->type == MINO_STRING) {
+        if (coll->as.s.len == 0) return mino_nil(S);
+        return mino_string_n(S, coll->as.s.data, 1);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
@@ -1230,6 +1234,23 @@ static mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (s->type == MINO_NIL || s == NULL) return mino_nil(S);
         if (s->type == MINO_CONS) return s->as.cons.cdr;
         return mino_nil(S);
+    }
+    if (coll->type == MINO_STRING) {
+        if (coll->as.s.len <= 1) return mino_nil(S);
+        /* Build a cons list of single-character strings. */
+        mino_val_t *head = mino_nil(S);
+        mino_val_t *tail = NULL;
+        size_t i;
+        for (i = 1; i < coll->as.s.len; i++) {
+            mino_val_t *cell = mino_cons(S, mino_string_n(S, coll->as.s.data + i, 1), mino_nil(S));
+            if (tail == NULL) {
+                head = cell;
+            } else {
+                tail->as.cons.cdr = cell;
+            }
+            tail = cell;
+        }
+        return head;
     }
     {
         char msg[96];
