@@ -61,20 +61,6 @@ typedef struct gc_hdr {
     struct gc_hdr *next;      /* registry link (all allocated objects)         */
 } gc_hdr_t;
 
-static gc_hdr_t *gc_all          = NULL;
-static size_t    gc_bytes_alloc  = 0;
-static size_t    gc_bytes_live   = 0;           /* after last sweep            */
-static size_t    gc_threshold    = 1u << 20;    /* 1 MiB default               */
-static int       gc_stress       = -1;          /* -1 unset, 0 off, 1 on       */
-static int       gc_depth        = 0;           /* re-entrancy guard           */
-static void     *gc_stack_bottom = NULL;        /* set at first mino_eval      */
-
-/* Execution limits (global; set via mino_set_limit). */
-static size_t    limit_steps     = 0;           /* 0 = unlimited               */
-static size_t    limit_heap      = 0;           /* 0 = unlimited               */
-static size_t    eval_steps      = 0;           /* current step count          */
-static int       limit_exceeded  = 0;           /* sticky flag for this eval   */
-
 /* Exception handling: setjmp/longjmp stack for try/catch. */
 #define MAX_TRY_DEPTH 64
 
@@ -83,32 +69,237 @@ typedef struct {
     mino_val_t *exception;
 } try_frame_t;
 
-static try_frame_t try_stack[MAX_TRY_DEPTH];
-static int         try_depth = 0;
-
-/* Module resolver (set via mino_set_resolver). */
-static mino_resolve_fn module_resolver     = NULL;
-static void           *module_resolver_ctx = NULL;
-
+/* Module cache entry. */
 typedef struct {
     char       *name;
     mino_val_t *value;
 } module_entry_t;
 
-static module_entry_t *module_cache     = NULL;
-static size_t          module_cache_len = 0;
-static size_t          module_cache_cap = 0;
-
-/* Metadata table: docstrings and source forms for def/defmacro bindings. */
+/* Metadata table entry: docstrings and source forms for def/defmacro. */
 typedef struct {
     char       *name;       /* binding name (malloc-owned) */
     char       *docstring;  /* docstring (malloc-owned, NULL if none) */
     mino_val_t *source;     /* source form (the whole def/defmacro form) */
 } meta_entry_t;
 
-static meta_entry_t *meta_table     = NULL;
-static size_t        meta_table_len = 0;
-static size_t        meta_table_cap = 0;
+/* Intern table: flat array with linear scan for symbol/keyword dedup. */
+typedef struct {
+    mino_val_t **entries;
+    size_t       len;
+    size_t       cap;
+} intern_table_t;
+
+/* Call-stack frame for stack traces on error. */
+#define MAX_CALL_DEPTH 256
+
+typedef struct {
+    const char *name;
+    const char *file;
+    int         line;
+} call_frame_t;
+
+/* GC root-environment registry node (malloc-owned, not GC-managed). */
+typedef struct root_env {
+    mino_env_t      *env;
+    struct root_env *next;
+} root_env_t;
+
+/* GC range: address span of one allocated payload for conservative scan. */
+typedef struct {
+    uintptr_t  start;  /* inclusive payload byte address */
+    uintptr_t  end;    /* exclusive payload byte address */
+    gc_hdr_t  *h;
+} gc_range_t;
+
+/* ------------------------------------------------------------------------- */
+/* Runtime state                                                             */
+/* ------------------------------------------------------------------------- */
+/*
+ * mino_state_t holds all mutable runtime state that was previously stored in
+ * file-scoped static variables.  A default instance (g_state) provides the
+ * same single-instance behaviour as before.  The macros below let existing
+ * code use bare names (gc_all, try_depth, ...) which resolve to S_->field.
+ */
+
+struct mino_state {
+    /* Garbage collection */
+    gc_hdr_t       *gc_all;
+    size_t          gc_bytes_alloc;
+    size_t          gc_bytes_live;
+    size_t          gc_threshold;
+    int             gc_stress;
+    int             gc_depth;
+    void           *gc_stack_bottom;
+    root_env_t     *gc_root_envs;
+    gc_range_t     *gc_ranges;
+    size_t          gc_ranges_len;
+    size_t          gc_ranges_cap;
+
+    /* Singletons */
+    mino_val_t      nil_singleton;
+    mino_val_t      true_singleton;
+    mino_val_t      false_singleton;
+
+    /* Intern tables */
+    intern_table_t  sym_intern;
+    intern_table_t  kw_intern;
+
+    /* Execution limits */
+    size_t          limit_steps;
+    size_t          limit_heap;
+    size_t          eval_steps;
+    int             limit_exceeded;
+
+    /* Exception handling */
+    try_frame_t     try_stack[MAX_TRY_DEPTH];
+    int             try_depth;
+
+    /* Module system */
+    mino_resolve_fn module_resolver;
+    void           *module_resolver_ctx;
+    module_entry_t *module_cache;
+    size_t          module_cache_len;
+    size_t          module_cache_cap;
+
+    /* Metadata */
+    meta_entry_t   *meta_table;
+    size_t          meta_table_len;
+    size_t          meta_table_cap;
+
+    /* Printer */
+    int             print_depth;
+
+    /* Error reporting */
+    char            error_buf[2048];
+    call_frame_t    call_stack[MAX_CALL_DEPTH];
+    int             call_depth;
+    int             trace_added;
+
+    /* Reader */
+    const char     *reader_file;
+    int             reader_line;
+
+    /* Eval */
+    const mino_val_t *eval_current_form;
+
+    /* Random */
+    int             rand_seeded;
+
+    /* Sort comparator (used during merge sort) */
+    mino_val_t     *sort_comp_fn;
+    mino_env_t     *sort_comp_env;
+
+    /* Gensym counter */
+    long            gensym_counter;
+};
+
+/* Default global state instance and current-state pointer. */
+static mino_state_t g_state;
+static int          g_state_ready;
+static mino_state_t *S_ = &g_state;
+
+static void state_init(mino_state_t *st)
+{
+    memset(st, 0, sizeof(*st));
+    st->gc_threshold        = 1u << 20;
+    st->gc_stress           = -1;
+    st->nil_singleton.type  = MINO_NIL;
+    st->true_singleton.type = MINO_BOOL;
+    st->true_singleton.as.b = 1;
+    st->false_singleton.type = MINO_BOOL;
+    st->reader_line         = 1;
+}
+
+mino_state_t *mino_state_new(void)
+{
+    mino_state_t *st = (mino_state_t *)calloc(1, sizeof(*st));
+    if (st == NULL) {
+        abort();
+    }
+    state_init(st);
+    return st;
+}
+
+void mino_state_free(mino_state_t *st)
+{
+    root_env_t *r;
+    root_env_t *rnext;
+    gc_hdr_t   *h;
+    gc_hdr_t   *hnext;
+    size_t      i;
+    if (st == NULL) {
+        return;
+    }
+    for (r = st->gc_root_envs; r != NULL; r = rnext) {
+        rnext = r->next;
+        free(r);
+    }
+    for (i = 0; i < st->module_cache_len; i++) {
+        free(st->module_cache[i].name);
+    }
+    free(st->module_cache);
+    for (i = 0; i < st->meta_table_len; i++) {
+        free(st->meta_table[i].name);
+        free(st->meta_table[i].docstring);
+    }
+    free(st->meta_table);
+    free(st->sym_intern.entries);
+    free(st->kw_intern.entries);
+    free(st->gc_ranges);
+    for (h = st->gc_all; h != NULL; h = hnext) {
+        hnext = h->next;
+        free(h);
+    }
+    if (st != &g_state) {
+        free(st);
+    }
+}
+
+/* ---- State field accessor macros ---------------------------------------- */
+/* Existing code uses bare names which resolve to S_->field.                 */
+
+#define gc_all              (S_->gc_all)
+#define gc_bytes_alloc      (S_->gc_bytes_alloc)
+#define gc_bytes_live       (S_->gc_bytes_live)
+#define gc_threshold        (S_->gc_threshold)
+#define gc_stress           (S_->gc_stress)
+#define gc_depth            (S_->gc_depth)
+#define gc_stack_bottom     (S_->gc_stack_bottom)
+#define gc_root_envs        (S_->gc_root_envs)
+#define gc_ranges           (S_->gc_ranges)
+#define gc_ranges_len       (S_->gc_ranges_len)
+#define gc_ranges_cap       (S_->gc_ranges_cap)
+#define nil_singleton       (S_->nil_singleton)
+#define true_singleton      (S_->true_singleton)
+#define false_singleton     (S_->false_singleton)
+#define sym_intern          (S_->sym_intern)
+#define kw_intern           (S_->kw_intern)
+#define limit_steps         (S_->limit_steps)
+#define limit_heap          (S_->limit_heap)
+#define eval_steps          (S_->eval_steps)
+#define limit_exceeded      (S_->limit_exceeded)
+#define try_stack           (S_->try_stack)
+#define try_depth           (S_->try_depth)
+#define module_resolver     (S_->module_resolver)
+#define module_resolver_ctx (S_->module_resolver_ctx)
+#define module_cache        (S_->module_cache)
+#define module_cache_len    (S_->module_cache_len)
+#define module_cache_cap    (S_->module_cache_cap)
+#define meta_table          (S_->meta_table)
+#define meta_table_len      (S_->meta_table_len)
+#define meta_table_cap      (S_->meta_table_cap)
+#define print_depth         (S_->print_depth)
+#define error_buf           (S_->error_buf)
+#define call_stack          (S_->call_stack)
+#define call_depth          (S_->call_depth)
+#define trace_added         (S_->trace_added)
+#define reader_file         (S_->reader_file)
+#define reader_line         (S_->reader_line)
+#define eval_current_form   (S_->eval_current_form)
+#define rand_seeded         (S_->rand_seeded)
+#define sort_comp_fn        (S_->sort_comp_fn)
+#define sort_comp_env       (S_->sort_comp_env)
+#define gensym_counter      (S_->gensym_counter)
 
 static meta_entry_t *meta_find(const char *name)
 {
@@ -187,6 +378,10 @@ static void gc_note_host_frame(void *addr)
 static void *gc_alloc_typed(unsigned char tag, size_t size)
 {
     gc_hdr_t *h;
+    if (!g_state_ready) {
+        state_init(S_);
+        g_state_ready = 1;
+    }
     if (gc_stress == -1) {
         const char *e = getenv("MINO_GC_STRESS");
         gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
@@ -229,13 +424,23 @@ static char *dup_n(const char *s, size_t len)
 /* Singletons                                                                */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t nil_singleton  = { MINO_NIL,  { 0 } };
-static mino_val_t true_singleton  = { MINO_BOOL, { 1 } };
-static mino_val_t false_singleton = { MINO_BOOL, { 0 } };
+mino_val_t *mino_nil(void)
+{
+    if (!g_state_ready) { state_init(S_); g_state_ready = 1; }
+    return &nil_singleton;
+}
 
-mino_val_t *mino_nil(void)   { return &nil_singleton; }
-mino_val_t *mino_true(void)  { return &true_singleton; }
-mino_val_t *mino_false(void) { return &false_singleton; }
+mino_val_t *mino_true(void)
+{
+    if (!g_state_ready) { state_init(S_); g_state_ready = 1; }
+    return &true_singleton;
+}
+
+mino_val_t *mino_false(void)
+{
+    if (!g_state_ready) { state_init(S_); g_state_ready = 1; }
+    return &false_singleton;
+}
 
 /* ------------------------------------------------------------------------- */
 /* Constructors                                                              */
@@ -274,15 +479,6 @@ mino_val_t *mino_string(const char *s)
  * flat arrays with linear scan — adequate until the v0.5 HAMT arrives and
  * the collector reclaims names. Entries live for the life of the process.
  */
-
-typedef struct {
-    mino_val_t **entries;
-    size_t       len;
-    size_t       cap;
-} intern_table_t;
-
-static intern_table_t sym_intern = { NULL, 0, 0 };
-static intern_table_t kw_intern  = { NULL, 0, 0 };
 
 static mino_val_t *intern_lookup_or_create(intern_table_t *tbl,
                                            mino_type_t type,
@@ -1404,8 +1600,6 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
  */
 #define MINO_PRINT_DEPTH_MAX 128
 
-static int print_depth = 0;
-
 void mino_print_to(FILE *out, const mino_val_t *v)
 {
     if (v == NULL || v->type == MINO_NIL) {
@@ -1589,8 +1783,6 @@ void mino_println(const mino_val_t *v)
 /* Error reporting                                                           */
 /* ------------------------------------------------------------------------- */
 
-static char error_buf[2048] = { 0 };
-
 const char *mino_last_error(void)
 {
     return error_buf[0] ? error_buf : NULL;
@@ -1657,18 +1849,6 @@ static const char *type_tag_str(const mino_val_t *v)
 /* Call stack (for stack traces on error)                                     */
 /* ------------------------------------------------------------------------- */
 
-#define MAX_CALL_DEPTH 256
-
-typedef struct {
-    const char *name;
-    const char *file;
-    int         line;
-} call_frame_t;
-
-static call_frame_t call_stack[MAX_CALL_DEPTH];
-static int          call_depth  = 0;
-static int          trace_added = 0;  /* set after trace is appended */
-
 static void push_frame(const char *name, const char *file, int line)
 {
     if (call_depth < MAX_CALL_DEPTH) {
@@ -1711,14 +1891,6 @@ static void append_trace(void)
 /* ------------------------------------------------------------------------- */
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
-
-/*
- * Reader state: file name and line number for source-location tracking.
- * File names are interned so the const char* stored in cons cells remains
- * valid for the lifetime of the process.
- */
-static const char *reader_file = NULL;
-static int         reader_line = 1;
 
 #define MAX_INTERNED_FILES 64
 
@@ -2386,16 +2558,6 @@ struct mino_env {
     mino_env_t    *parent;
 };
 
-/* Registry of root environments returned by mino_env_new. Tracing starts
- * from every env on this list. The list node itself is ordinary malloc-
- * allocated and freed on mino_env_free; the env it references is GC-owned. */
-typedef struct root_env {
-    mino_env_t      *env;
-    struct root_env *next;
-} root_env_t;
-
-static root_env_t *gc_root_envs = NULL;
-
 static mino_env_t *env_alloc(mino_env_t *parent)
 {
     mino_env_t *env = (mino_env_t *)gc_alloc_typed(GC_T_ENV, sizeof(*env));
@@ -2528,16 +2690,6 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name)
  * becomes the next cycle's baseline; the threshold grows to 2× live so the
  * collector's amortized cost stays bounded under steady-state programs.
  */
-
-typedef struct {
-    uintptr_t  start;  /* inclusive payload byte address */
-    uintptr_t  end;    /* exclusive payload byte address */
-    gc_hdr_t  *h;
-} gc_range_t;
-
-static gc_range_t *gc_ranges     = NULL;
-static size_t      gc_ranges_len = 0;
-static size_t      gc_ranges_cap = 0;
 
 static int gc_range_cmp(const void *a, const void *b)
 {
@@ -3211,10 +3363,6 @@ static int bind_params(mino_env_t *env, mino_val_t *params, mino_val_t *args,
     }
     return 1;
 }
-
-/* Tracks the most recent cons-cell form being evaluated; used by
- * set_error_at to include source location in error messages. */
-static const mino_val_t *eval_current_form = NULL;
 
 static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
 {
@@ -4842,7 +4990,6 @@ static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
 }
 
 /* (rand) — return a random float in [0.0, 1.0). */
-static int rand_seeded = 0;
 static mino_val_t *prim_rand(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -6110,8 +6257,6 @@ static int val_compare(const mino_val_t *a, const mino_val_t *b)
 
 /* Sort comparator state: when sort_comp_fn is non-NULL, the merge sort
  * calls the user-supplied comparison function instead of val_compare. */
-static mino_val_t *sort_comp_fn  = NULL;
-static mino_env_t *sort_comp_env = NULL;
 
 static int sort_compare(const mino_val_t *a, const mino_val_t *b)
 {
@@ -6715,8 +6860,6 @@ static mino_val_t *prim_macroexpand(mino_val_t *args, mino_env_t *env)
     }
     return macroexpand_all(args->as.cons.car, env);
 }
-
-static long gensym_counter = 0;
 
 static mino_val_t *prim_gensym(mino_val_t *args, mino_env_t *env)
 {

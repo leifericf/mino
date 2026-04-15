@@ -39,8 +39,9 @@ typedef enum {
     MINO_TAIL_CALL /* proper tail call: carries {fn, args} for trampoline */
 } mino_type_t;
 
-typedef struct mino_val mino_val_t;
-typedef struct mino_env mino_env_t;
+typedef struct mino_val   mino_val_t;
+typedef struct mino_env   mino_env_t;
+typedef struct mino_state mino_state_t;
 typedef struct mino_vec_node  mino_vec_node_t;   /* opaque; see mino.c */
 typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque; see mino.c */
 
@@ -188,6 +189,27 @@ void mino_print_to(FILE *out, const mino_val_t *v);
 mino_val_t *mino_read(const char *src, const char **end);
 
 const char *mino_last_error(void);
+
+/* ------------------------------------------------------------------------- */
+/* Runtime state                                                             */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Create a new isolated runtime state. Each state owns its own GC, intern
+ * tables, module cache, and singletons. Multiple states may coexist in the
+ * same process; they share no mutable data.
+ *
+ * A default state is used automatically when the host does not create one
+ * explicitly, preserving backwards compatibility with the existing API.
+ */
+mino_state_t *mino_state_new(void);
+
+/*
+ * Free a runtime state and all resources owned by it. All GC-managed objects,
+ * intern tables, module caches, and metadata are released. Environments
+ * created within this state become invalid.
+ */
+void mino_state_free(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* Environment and evaluator                                                 */
