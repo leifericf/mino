@@ -52,3 +52,9 @@ examples/embed
 examples/actor_test
 examples/clone_test
 examples/ref_test
+examples/api_stress_test
+examples/actor_stress_test
+examples/actor_scale_test
+examples/cpp_embed_test
+examples/state_switch_test
+examples/integration_test
