@@ -56,6 +56,14 @@ work. ~10 lines.
 "msg" {:key val}))` with `(ex-data e)` in catch. Currently `throw`
 takes any value, but `ex-info` provides a standard structure. ~30 lines.
 
+**Multi-collection `map`** -- `(map f coll1 coll2 ...)` applying `f`
+to corresponding elements of multiple collections. Currently `map`
+only accepts one collection. ~30 lines in core.mino.
+
+**`format` precision specifiers** -- `(format "%.2f" 3.14)` currently
+returns the literal `"%.2f"`. The format parser handles `%d`, `%s`,
+`%f` but not width/precision modifiers like `%.2f` or `%04d`. ~40 lines.
+
 **Protocols** -- polymorphic dispatch on first argument's type.
 `defprotocol`, `extend-type`, `extend-protocol`. Enables extensible
 abstractions. ~400 lines.
