@@ -49,7 +49,7 @@ static int is_terminator(char c)
         || is_ws(c);
 }
 
-static void skip_ws(const char **p)
+static void skip_ws(mino_state_t *S, const char **p)
 {
     while (**p) {
         char c = **p;
@@ -68,9 +68,9 @@ static void skip_ws(const char **p)
     }
 }
 
-static mino_val_t *read_form(const char **p);
+static mino_val_t *read_form(mino_state_t *S, const char **p);
 
-static mino_val_t *read_string_form(const char **p)
+static mino_val_t *read_string_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '"'. */
     char *buf;
@@ -97,7 +97,7 @@ static mino_val_t *read_string_form(const char **p)
             case '0':  c = '\0'; break;
             case '\0':
                 free(buf);
-                set_error("unterminated string literal");
+                set_error(S, "unterminated string literal");
                 return NULL;
             default:
                 /* Unknown escape: keep the character literally. */
@@ -117,28 +117,28 @@ static mino_val_t *read_string_form(const char **p)
     }
     if (**p != '"') {
         free(buf);
-        set_error("unterminated string literal");
+        set_error(S, "unterminated string literal");
         return NULL;
     }
     (*p)++; /* skip closing quote */
     {
-        mino_val_t *v = mino_string_n(S_, buf, len);
+        mino_val_t *v = mino_string_n(S, buf, len);
         free(buf);
         return v;
     }
 }
 
-static mino_val_t *read_list_form(const char **p)
+static mino_val_t *read_list_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
     int         list_line = reader_line;
-    mino_val_t *head = mino_nil(S_);
+    mino_val_t *head = mino_nil(S);
     mino_val_t *tail = NULL;
     (*p)++; /* skip '(' */
     for (;;) {
-        skip_ws(p);
+        skip_ws(S, p);
         if (**p == '\0') {
-            set_error("unterminated list");
+            set_error(S, "unterminated list");
             return NULL;
         }
         if (**p == ')') {
@@ -147,17 +147,17 @@ static mino_val_t *read_list_form(const char **p)
         }
         {
             int         elem_line = reader_line;
-            mino_val_t *elem = read_form(p);
-            if (elem == NULL && mino_last_error(S_) != NULL) {
+            mino_val_t *elem = read_form(S, p);
+            if (elem == NULL && mino_last_error(S) != NULL) {
                 return NULL;
             }
             if (elem == NULL) {
                 /* EOF mid-list */
-                set_error("unterminated list");
+                set_error(S, "unterminated list");
                 return NULL;
             }
             {
-                mino_val_t *cell = mino_cons(S_, elem, mino_nil(S_));
+                mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
                 cell->as.cons.file = reader_file;
                 cell->as.cons.line = (tail == NULL) ? list_line : elem_line;
                 if (tail == NULL) {
@@ -171,7 +171,7 @@ static mino_val_t *read_list_form(const char **p)
     }
 }
 
-static mino_val_t *read_vector_form(const char **p)
+static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '['. `buf` accumulates the
      * partially-built element list and is tracked by the GC so intermediate
@@ -182,9 +182,9 @@ static mino_val_t *read_vector_form(const char **p)
     size_t       len = 0;
     (*p)++; /* skip '[' */
     for (;;) {
-        skip_ws(p);
+        skip_ws(S, p);
         if (**p == '\0') {
-            set_error("unterminated vector");
+            set_error(S, "unterminated vector");
             return NULL;
         }
         if (**p == ']') {
@@ -192,16 +192,16 @@ static mino_val_t *read_vector_form(const char **p)
             break;
         }
         {
-            mino_val_t *elem = read_form(p);
+            mino_val_t *elem = read_form(S, p);
             if (elem == NULL) {
-                if (mino_last_error(S_) == NULL) {
-                    set_error("unterminated vector");
+                if (mino_last_error(S) == NULL) {
+                    set_error(S, "unterminated vector");
                 }
                 return NULL;
             }
             if (len == cap) {
                 size_t       new_cap = cap == 0 ? 8 : cap * 2;
-                mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(
+                mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(S,
                     GC_T_VALARR, new_cap * sizeof(*nb));
                 if (buf != NULL && len > 0) {
                     memcpy(nb, buf, len * sizeof(*nb));
@@ -212,10 +212,10 @@ static mino_val_t *read_vector_form(const char **p)
             buf[len++] = elem;
         }
     }
-    return mino_vector(S_, buf, len);
+    return mino_vector(S, buf, len);
 }
 
-static mino_val_t *read_map_form(const char **p)
+static mino_val_t *read_map_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '{'. Elements alternate as
      * key, value, key, value. An odd count is a parse error. The key and
@@ -229,39 +229,39 @@ static mino_val_t *read_map_form(const char **p)
     for (;;) {
         mino_val_t *key;
         mino_val_t *val;
-        skip_ws(p);
+        skip_ws(S, p);
         if (**p == '\0') {
-            set_error("unterminated map");
+            set_error(S, "unterminated map");
             return NULL;
         }
         if (**p == '}') {
             (*p)++;
             break;
         }
-        key = read_form(p);
+        key = read_form(S, p);
         if (key == NULL) {
-            if (mino_last_error(S_) == NULL) {
-                set_error("unterminated map");
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "unterminated map");
             }
             return NULL;
         }
-        skip_ws(p);
+        skip_ws(S, p);
         if (**p == '}' || **p == '\0') {
-            set_error("map literal has odd number of forms");
+            set_error(S, "map literal has odd number of forms");
             return NULL;
         }
-        val = read_form(p);
+        val = read_form(S, p);
         if (val == NULL) {
-            if (mino_last_error(S_) == NULL) {
-                set_error("unterminated map");
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "unterminated map");
             }
             return NULL;
         }
         if (len == cap) {
             size_t       new_cap = cap == 0 ? 8 : cap * 2;
-            mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(
+            mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(S,
                 GC_T_VALARR, new_cap * sizeof(*nk));
-            mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(
+            mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(S,
                 GC_T_VALARR, new_cap * sizeof(*nv));
             if (kbuf != NULL && len > 0) {
                 memcpy(nk, kbuf, len * sizeof(*nk));
@@ -275,10 +275,10 @@ static mino_val_t *read_map_form(const char **p)
         vbuf[len] = val;
         len++;
     }
-    return mino_map(S_, kbuf, vbuf, len);
+    return mino_map(S, kbuf, vbuf, len);
 }
 
-static mino_val_t *read_set_form(const char **p)
+static mino_val_t *read_set_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '{' after '#'. */
     mino_val_t **buf = NULL;
@@ -287,25 +287,25 @@ static mino_val_t *read_set_form(const char **p)
     (*p)++; /* skip '{' */
     for (;;) {
         mino_val_t *elem;
-        skip_ws(p);
+        skip_ws(S, p);
         if (**p == '\0') {
-            set_error("unterminated set");
+            set_error(S, "unterminated set");
             return NULL;
         }
         if (**p == '}') {
             (*p)++;
             break;
         }
-        elem = read_form(p);
+        elem = read_form(S, p);
         if (elem == NULL) {
-            if (mino_last_error(S_) == NULL) {
-                set_error("unterminated set");
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "unterminated set");
             }
             return NULL;
         }
         if (len == cap) {
             size_t       new_cap = cap == 0 ? 8 : cap * 2;
-            mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(
+            mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(S,
                 GC_T_VALARR, new_cap * sizeof(*nb));
             if (buf != NULL && len > 0) {
                 memcpy(nb, buf, len * sizeof(*nb));
@@ -315,10 +315,10 @@ static mino_val_t *read_set_form(const char **p)
         }
         buf[len++] = elem;
     }
-    return mino_set(S_, buf, len);
+    return mino_set(S, buf, len);
 }
 
-static mino_val_t *read_atom(const char **p)
+static mino_val_t *read_atom(mino_state_t *S, const char **p)
 {
     const char *start = *p;
     size_t len = 0;
@@ -328,21 +328,21 @@ static mino_val_t *read_atom(const char **p)
     *p += len;
 
     if (len >= 2 && start[0] == ':') {
-        return mino_keyword_n(S_, start + 1, len - 1);
+        return mino_keyword_n(S, start + 1, len - 1);
     }
     if (len == 1 && start[0] == ':') {
-        set_error("keyword missing name");
+        set_error(S, "keyword missing name");
         return NULL;
     }
 
     if (len == 3 && memcmp(start, "nil", 3) == 0) {
-        return mino_nil(S_);
+        return mino_nil(S);
     }
     if (len == 4 && memcmp(start, "true", 4) == 0) {
-        return mino_true(S_);
+        return mino_true(S);
     }
     if (len == 5 && memcmp(start, "false", 5) == 0) {
-        return mino_false(S_);
+        return mino_false(S);
     }
 
     /* Try numeric. */
@@ -375,69 +375,69 @@ static mino_val_t *read_atom(const char **p)
                 if (has_dot_or_exp) {
                     double d = strtod(buf, &endp);
                     if (endp == buf + len) {
-                        return mino_float(S_, d);
+                        return mino_float(S, d);
                     }
                 } else {
                     long long n = strtoll(buf, &endp, 10);
                     if (endp == buf + len) {
-                        return mino_int(S_, n);
+                        return mino_int(S, n);
                     }
                 }
             }
         }
     }
 
-    return mino_symbol_n(S_, start, len);
+    return mino_symbol_n(S, start, len);
 }
 
-static mino_val_t *read_form(const char **p)
+static mino_val_t *read_form(mino_state_t *S, const char **p)
 {
-    skip_ws(p);
+    skip_ws(S, p);
     if (**p == '\0') {
         return NULL;
     }
     if (**p == '(') {
-        return read_list_form(p);
+        return read_list_form(S, p);
     }
     if (**p == ')') {
-        set_error("unexpected ')'");
+        set_error(S, "unexpected ')'");
         return NULL;
     }
     if (**p == '[') {
-        return read_vector_form(p);
+        return read_vector_form(S, p);
     }
     if (**p == ']') {
-        set_error("unexpected ']'");
+        set_error(S, "unexpected ']'");
         return NULL;
     }
     if (**p == '{') {
-        return read_map_form(p);
+        return read_map_form(S, p);
     }
     if (**p == '}') {
-        set_error("unexpected '}'");
+        set_error(S, "unexpected '}'");
         return NULL;
     }
     if (**p == '#' && *(*p + 1) == '{') {
         (*p)++; /* skip '#', read_set_form will skip '{' */
-        return read_set_form(p);
+        return read_set_form(S, p);
     }
     if (**p == '"') {
-        return read_string_form(p);
+        return read_string_form(S, p);
     }
     if (**p == '\'') {
         int q_line = reader_line;
         (*p)++;
         {
-            mino_val_t *quoted = read_form(p);
+            mino_val_t *quoted = read_form(S, p);
             mino_val_t *outer;
             if (quoted == NULL) {
-                if (mino_last_error(S_) == NULL) {
-                    set_error("expected form after quote");
+                if (mino_last_error(S) == NULL) {
+                    set_error(S, "expected form after quote");
                 }
                 return NULL;
             }
-            outer = mino_cons(S_, mino_symbol(S_, "quote"),
-                              mino_cons(S_, quoted, mino_nil(S_)));
+            outer = mino_cons(S, mino_symbol(S, "quote"),
+                              mino_cons(S, quoted, mino_nil(S)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
@@ -447,16 +447,16 @@ static mino_val_t *read_form(const char **p)
         int q_line = reader_line;
         (*p)++;
         {
-            mino_val_t *qq = read_form(p);
+            mino_val_t *qq = read_form(S, p);
             mino_val_t *outer;
             if (qq == NULL) {
-                if (mino_last_error(S_) == NULL) {
-                    set_error("expected form after `");
+                if (mino_last_error(S) == NULL) {
+                    set_error(S, "expected form after `");
                 }
                 return NULL;
             }
-            outer = mino_cons(S_, mino_symbol(S_, "quasiquote"),
-                              mino_cons(S_, qq, mino_nil(S_)));
+            outer = mino_cons(S, mino_symbol(S, "quasiquote"),
+                              mino_cons(S, qq, mino_nil(S)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
@@ -466,16 +466,16 @@ static mino_val_t *read_form(const char **p)
         int q_line = reader_line;
         (*p)++;
         {
-            mino_val_t *target = read_form(p);
+            mino_val_t *target = read_form(S, p);
             mino_val_t *outer;
             if (target == NULL) {
-                if (mino_last_error(S_) == NULL) {
-                    set_error("expected form after @");
+                if (mino_last_error(S) == NULL) {
+                    set_error(S, "expected form after @");
                 }
                 return NULL;
             }
-            outer = mino_cons(S_, mino_symbol(S_, "deref"),
-                              mino_cons(S_, target, mino_nil(S_)));
+            outer = mino_cons(S, mino_symbol(S, "deref"),
+                              mino_cons(S, target, mino_nil(S)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
@@ -490,39 +490,38 @@ static mino_val_t *read_form(const char **p)
             (*p)++;
         }
         {
-            mino_val_t *uq = read_form(p);
+            mino_val_t *uq = read_form(S, p);
             mino_val_t *outer;
             if (uq == NULL) {
-                if (mino_last_error(S_) == NULL) {
-                    set_error("expected form after ~");
+                if (mino_last_error(S) == NULL) {
+                    set_error(S, "expected form after ~");
                 }
                 return NULL;
             }
-            outer = mino_cons(S_, mino_symbol(S_, name),
-                              mino_cons(S_, uq, mino_nil(S_)));
+            outer = mino_cons(S, mino_symbol(S, name),
+                              mino_cons(S, uq, mino_nil(S)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
         }
     }
-    return read_atom(p);
+    return read_atom(S, p);
 }
 
 mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
 {
-    S_ = S;
     volatile char probe = 0;
     const char   *p = src;
     mino_val_t   *v;
     /* Record this frame as a host-level stack bottom so the collector's
      * conservative scan covers the reader's call chain in full. */
-    gc_note_host_frame((void *)&probe);
+    gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     if (reader_file == NULL) {
         reader_file = intern_filename("<input>");
     }
-    clear_error();
-    v = read_form(&p);
+    clear_error(S);
+    v = read_form(S, &p);
     if (end != NULL) {
         *end = p;
     }

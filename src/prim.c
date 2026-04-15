@@ -868,7 +868,7 @@ static mino_val_t *prim_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *first = args->as.cons.car;
         args = args->as.cons.cdr;
         while (mino_is_cons(args)) {
-            if (!mino_eq(first, args->as.cons.car)) {
+            if (!mino_eq_force(S, first, args->as.cons.car)) {
                 return mino_false(S);
             }
             args = args->as.cons.cdr;

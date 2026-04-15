@@ -37,7 +37,6 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
 
 void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
-    S_ = S;
     if (v == NULL || v->type == MINO_NIL) {
         fputs("nil", out);
         return;
@@ -97,17 +96,17 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputc('(', out);
         print_depth++;
         while (p != NULL && p->type == MINO_CONS) {
-            mino_print_to(S_, out, p->as.cons.car);
+            mino_print_to(S, out, p->as.cons.car);
             p = p->as.cons.cdr;
             /* Force lazy tails so (cons x (lazy-seq ...)) prints as a list. */
             if (p != NULL && p->type == MINO_LAZY) {
-                p = lazy_force((mino_val_t *)p);
+                p = lazy_force(S,(mino_val_t *)p);
             }
             if (p != NULL && p->type == MINO_CONS) {
                 fputc(' ', out);
             } else if (p != NULL && p->type != MINO_NIL) {
                 fputs(" . ", out);
-                mino_print_to(S_, out, p);
+                mino_print_to(S, out, p);
                 break;
             }
         }
@@ -123,7 +122,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
             if (i > 0) {
                 fputc(' ', out);
             }
-            mino_print_to(S_, out, vec_nth(v, i));
+            mino_print_to(S, out, vec_nth(v, i));
         }
         print_depth--;
         fputc(']', out);
@@ -138,9 +137,9 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
             if (i > 0) {
                 fputs(", ", out);
             }
-            mino_print_to(S_, out, key);
+            mino_print_to(S, out, key);
             fputc(' ', out);
-            mino_print_to(S_, out, map_get_val(v, key));
+            mino_print_to(S, out, map_get_val(v, key));
         }
         print_depth--;
         fputc('}', out);
@@ -154,7 +153,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
             if (i > 0) {
                 fputc(' ', out);
             }
-            mino_print_to(S_, out, vec_nth(v->as.set.key_order, i));
+            mino_print_to(S, out, vec_nth(v->as.set.key_order, i));
         }
         print_depth--;
         fputc('}', out);
@@ -184,14 +183,14 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     case MINO_ATOM:
         fputs("#atom[", out);
         print_depth++;
-        mino_print_to(S_, out, v->as.atom.val);
+        mino_print_to(S, out, v->as.atom.val);
         print_depth--;
         fputc(']', out);
         return;
     case MINO_LAZY: {
         /* Force the lazy seq and print the realized value. */
-        mino_val_t *forced = lazy_force((mino_val_t *)v);
-        mino_print_to(S_, out, forced);
+        mino_val_t *forced = lazy_force(S,(mino_val_t *)v);
+        mino_print_to(S, out, forced);
         return;
     }
     case MINO_RECUR:
@@ -206,14 +205,12 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 
 void mino_print(mino_state_t *S, const mino_val_t *v)
 {
-    S_ = S;
-    mino_print_to(S_, stdout, v);
+    mino_print_to(S, stdout, v);
 }
 
 void mino_println(mino_state_t *S, const mino_val_t *v)
 {
-    S_ = S;
-    mino_print_to(S_, stdout, v);
+    mino_print_to(S, stdout, v);
     fputc('\n', stdout);
 }
 

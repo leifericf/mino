@@ -331,3 +331,19 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     }
     return 0;
 }
+
+int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
+{
+    if (a != NULL && a->type == MINO_LAZY)
+        a = lazy_force(S, (mino_val_t *)a);
+    if (b != NULL && b->type == MINO_LAZY)
+        b = lazy_force(S, (mino_val_t *)b);
+    if (a == b) return 1;
+    if (a == NULL || b == NULL) return mino_is_nil(a) && mino_is_nil(b);
+    /* For cons cells, recursively force lazy tails. */
+    if (a->type == MINO_CONS && b->type == MINO_CONS) {
+        return mino_eq_force(S, a->as.cons.car, b->as.cons.car)
+            && mino_eq_force(S, a->as.cons.cdr, b->as.cons.cdr);
+    }
+    return mino_eq(a, b);
+}

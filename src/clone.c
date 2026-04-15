@@ -164,15 +164,11 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
 mino_val_t *mino_clone(mino_state_t *dst, mino_state_t *src, mino_val_t *val)
 {
     mino_val_t *result;
-    mino_state_t *saved = S_;
     (void)src;
     result = clone_val(dst, val);
-    S_ = saved;
     if (result == NULL && val != NULL) {
-        S_ = dst;
-        set_error("clone: value contains non-transferable types "
+        set_error(dst, "clone: value contains non-transferable types "
                   "(fn, macro, prim, handle, atom, or lazy-seq)");
-        S_ = saved;
     }
     return result;
 }
@@ -277,7 +273,7 @@ static void sbuf_write(sbuf_t *b, const char *s, size_t n)
 }
 
 /* Print a value into a growable buffer (no FILE*, no syscalls). */
-static void sbuf_print(sbuf_t *b, const mino_val_t *v);
+static void sbuf_print(mino_state_t *S, sbuf_t *b, const mino_val_t *v);
 
 static void sbuf_print_string_escaped(sbuf_t *b, const char *s, size_t len)
 {
@@ -298,7 +294,7 @@ static void sbuf_print_string_escaped(sbuf_t *b, const char *s, size_t len)
     sbuf_putc(b, '"');
 }
 
-static void sbuf_print(sbuf_t *b, const mino_val_t *v)
+static void sbuf_print(mino_state_t *S, sbuf_t *b, const mino_val_t *v)
 {
     if (v == NULL || v->type == MINO_NIL) { sbuf_puts(b, "nil"); return; }
     switch (v->type) {
@@ -338,13 +334,13 @@ static void sbuf_print(sbuf_t *b, const mino_val_t *v)
         const mino_val_t *p = v;
         sbuf_putc(b, '(');
         while (p != NULL && p->type == MINO_CONS) {
-            sbuf_print(b, p->as.cons.car);
+            sbuf_print(S, b, p->as.cons.car);
             p = p->as.cons.cdr;
-            if (p != NULL && p->type == MINO_LAZY) p = lazy_force((mino_val_t *)p);
+            if (p != NULL && p->type == MINO_LAZY) p = lazy_force(S, (mino_val_t *)p);
             if (p != NULL && p->type == MINO_CONS) sbuf_putc(b, ' ');
             else if (p != NULL && p->type != MINO_NIL) {
                 sbuf_puts(b, " . ");
-                sbuf_print(b, p);
+                sbuf_print(S, b, p);
                 break;
             }
         }
@@ -356,7 +352,7 @@ static void sbuf_print(sbuf_t *b, const mino_val_t *v)
         sbuf_putc(b, '[');
         for (i = 0; i < v->as.vec.len; i++) {
             if (i > 0) sbuf_putc(b, ' ');
-            sbuf_print(b, vec_nth(v, i));
+            sbuf_print(S, b, vec_nth(v, i));
         }
         sbuf_putc(b, ']');
         return;
@@ -367,9 +363,9 @@ static void sbuf_print(sbuf_t *b, const mino_val_t *v)
         for (i = 0; i < v->as.map.len; i++) {
             mino_val_t *key = vec_nth(v->as.map.key_order, i);
             if (i > 0) sbuf_puts(b, ", ");
-            sbuf_print(b, key);
+            sbuf_print(S, b, key);
             sbuf_putc(b, ' ');
-            sbuf_print(b, map_get_val(v, key));
+            sbuf_print(S, b, map_get_val(v, key));
         }
         sbuf_putc(b, '}');
         return;
@@ -379,7 +375,7 @@ static void sbuf_print(sbuf_t *b, const mino_val_t *v)
         sbuf_puts(b, "#{");
         for (i = 0; i < v->as.set.len; i++) {
             if (i > 0) sbuf_putc(b, ' ');
-            sbuf_print(b, vec_nth(v->as.set.key_order, i));
+            sbuf_print(S, b, vec_nth(v->as.set.key_order, i));
         }
         sbuf_putc(b, '}');
         return;
@@ -394,9 +390,8 @@ static void sbuf_print(sbuf_t *b, const mino_val_t *v)
 static char *val_serialize(mino_state_t *S, mino_val_t *val, size_t *out_len)
 {
     sbuf_t buf;
-    (void)S;
     sbuf_init(&buf);
-    sbuf_print(&buf, val);
+    sbuf_print(S, &buf, val);
     if (buf.data == NULL) return NULL;
     buf.data[buf.len] = '\0';
     *out_len = buf.len;
@@ -514,32 +509,32 @@ void mino_actor_free(mino_actor_t *a)
 }
 
 /* Primitive: (send! actor val) — send a value to an actor's mailbox. */
-mino_val_t *prim_send_bang(mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_send_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *handle, *val;
     mino_actor_t *a;
     (void)env;
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL || args->as.cons.cdr->type != MINO_CONS) {
-        set_error("send! requires 2 arguments: actor and value");
+        set_error(S, "send! requires 2 arguments: actor and value");
         return NULL;
     }
     handle = args->as.cons.car;
     val    = args->as.cons.cdr->as.cons.car;
     if (handle == NULL || handle->type != MINO_HANDLE ||
         strcmp(handle->as.handle.tag, "actor") != 0) {
-        set_error("send! first argument must be an actor handle");
+        set_error(S, "send! first argument must be an actor handle");
         return NULL;
     }
     a = (mino_actor_t *)handle->as.handle.ptr;
-    mino_actor_send(a, S_, val);
-    return mino_nil(S_);
+    mino_actor_send(a, S, val);
+    return mino_nil(S);
 }
 
 /* Primitive: (receive) — receive from the current state's actor mailbox.
  * The host must set up the "self" binding before ticking the actor.
  * Returns nil if the mailbox is empty. */
-mino_val_t *prim_receive(mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_receive(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *self;
     mino_actor_t *a;
@@ -548,17 +543,17 @@ mino_val_t *prim_receive(mino_val_t *args, mino_env_t *env)
     self = mino_env_get(env, "*self*");
     if (self == NULL || self->type != MINO_HANDLE ||
         strcmp(self->as.handle.tag, "actor") != 0) {
-        set_error("receive: no actor context (*self* not bound)");
+        set_error(S, "receive: no actor context (*self* not bound)");
         return NULL;
     }
     a = (mino_actor_t *)self->as.handle.ptr;
     msg = mino_actor_recv(a);
-    return msg != NULL ? msg : mino_nil(S_);
+    return msg != NULL ? msg : mino_nil(S);
 }
 
 /* Primitive: (spawn src) — create a new actor, eval src string in it,
  * return a handle. The src typically defines a handler function. */
-mino_val_t *prim_spawn(mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_spawn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *src_val;
     const char *src;
@@ -567,18 +562,18 @@ mino_val_t *prim_spawn(mino_val_t *args, mino_env_t *env)
     char buf[256];
     (void)env;
     if (args == NULL || args->type != MINO_CONS) {
-        set_error("spawn requires 1 argument: init source string");
+        set_error(S, "spawn requires 1 argument: init source string");
         return NULL;
     }
     src_val = args->as.cons.car;
     if (src_val == NULL || src_val->type != MINO_STRING) {
-        set_error("spawn argument must be a string");
+        set_error(S, "spawn argument must be a string");
         return NULL;
     }
     src = src_val->as.s.data;
     a = mino_actor_new();
     if (a == NULL) {
-        set_error("spawn: failed to create actor");
+        set_error(S, "spawn: failed to create actor");
         return NULL;
     }
     /* Install I/O in the actor so it can print etc. */
@@ -591,11 +586,11 @@ mino_val_t *prim_spawn(mino_val_t *args, mino_env_t *env)
         const char *err = mino_last_error(a->state);
         snprintf(buf, sizeof(buf),
                  "spawn: init eval failed: %s", err ? err : "unknown error");
-        set_error(buf);
+        set_error(S, buf);
         mino_actor_free(a);
         return NULL;
     }
     /* Return a handle in the caller's state. */
-    return mino_handle(S_, a, "actor");
+    return mino_handle(S, a, "actor");
 }
 

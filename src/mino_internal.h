@@ -375,8 +375,8 @@ uint32_t hash_val(const mino_val_t *v);
 uint32_t fnv_mix(uint32_t h, unsigned char b);
 uint32_t fnv_bytes(uint32_t h, const unsigned char *p, size_t n);
 
-/* val.c: equality */
-int mino_eq_internal(const mino_val_t *a, const mino_val_t *b);
+/* val.c: equality (forcing lazy seqs) */
+int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b);
 
 /* vec.c */
 mino_val_t *vec_nth(const mino_val_t *v, size_t i);
