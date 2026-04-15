@@ -15,28 +15,23 @@ to the mino C API. It is the reference for the mino-nrepl implementation.
 | Interrupt | `mino_interrupt(S)` |
 | Error | `mino_last_error(S)` |
 
-A single `mino_state_t` serves all sessions. Each session is an independent
-environment created with `mino_env_clone` from a base environment. Sessions
-share the state's GC, intern tables, and module cache, but have independent
-bindings. Evaluating or defining names in one session does not affect another.
+Each session owns its own `mino_state_t` and `mino_env_t`. Sessions share
+nothing: each has independent GC, intern tables, module cache, and bindings.
+Evaluating or defining names in one session does not affect another. This
+isolation model enables concurrent eval across sessions (one thread per
+session).
 
 
 ## Session lifecycle
 
 ### Creation
 
-The server creates a base environment at startup:
-
-```c
-mino_state_t *S = mino_state_new();
-mino_env_t *base = mino_new(S);         /* core + I/O included    */
-```
-
 When a client sends a `clone` request (or the first `eval` without an
-explicit session), the server creates a new session:
+explicit session), the server creates a new session with its own runtime:
 
 ```c
-mino_env_t *session = mino_env_clone(S, base);
+mino_state_t *S   = mino_state_new();
+mino_env_t   *env = mino_new(S);         /* core + I/O included    */
 ```
 
 Each session gets a unique string ID that the client uses in subsequent
@@ -44,14 +39,13 @@ requests.
 
 ### Destruction
 
-When a client sends a `close` request, the server frees the session
-environment:
+When a client sends a `close` request, the server frees the session's
+environment and state:
 
 ```c
-mino_env_free(S, session);
+mino_env_free(S, env);
+mino_state_free(S);
 ```
-
-The base environment and state remain alive until the server shuts down.
 
 
 ## Operations
@@ -91,16 +85,8 @@ and sends it as `out` messages before the final `value` or `err` response.
 
 Clone an existing session or the base environment.
 
-Request fields:
-- `session` (optional): source session to clone; defaults to base
-
-Implementation:
-
-```c
-mino_env_t *src = session_id ? lookup(session_id) : base;
-mino_env_t *clone = mino_env_clone(S, src);
-/* assign new session ID, return it */
-```
+Implementation: creates a new `mino_state_t` and `mino_env_t` with
+core + I/O bindings. The new session is independent of all other sessions.
 
 ### `close`
 
@@ -134,9 +120,8 @@ The interrupt flag is checked on each eval step. The running eval returns
 NULL with `mino_last_error` reporting "interrupted". The flag is cleared
 at the start of the next `mino_eval` or `mino_eval_string` call.
 
-Since all sessions share one state, an interrupt stops whatever is currently
-evaluating in that state. The server must ensure that only one eval runs at
-a time per state.
+Each session has its own state, so `mino_interrupt` targets the specific
+session being interrupted.
 
 ### `stdin`
 
@@ -148,13 +133,13 @@ buffer wired into the state.
 
 ## Threading model
 
-A `mino_state_t` is single-threaded: only one eval may run at a time. The
-server serializes eval requests per state. The one exception is
-`mino_interrupt`, which is safe to call from any thread.
+Each session owns its own `mino_state_t`, so sessions are fully isolated.
+The current server is single-threaded and serializes eval across sessions.
+However, the one-state-per-session architecture enables a future threading
+model where each session evaluates on its own thread without locks.
 
-For nREPL servers that need concurrent evaluation across sessions, the
-recommended approach is one `mino_state_t` per thread, with sessions
-partitioned across states. This preserves isolation without locks.
+`mino_interrupt` is safe to call from any thread and targets a specific
+session's state.
 
 
 ## Output capture
@@ -164,11 +149,12 @@ per-eval buffer instead of stdout. After eval completes, the buffer contents
 are sent as `out` messages, followed by a `value` (on success) or `err`
 (on failure) response.
 
-This is implemented by registering replacement primitives before eval:
+This is implemented by registering replacement primitives at session
+creation time:
 
 ```c
-mino_register_fn(S, session_env, "println", nrepl_println);
-mino_register_fn(S, session_env, "prn", nrepl_prn);
+mino_register_fn(S, env, "println", capture_println);
+mino_register_fn(S, env, "prn",     capture_prn);
 ```
 
 

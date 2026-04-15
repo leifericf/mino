@@ -214,9 +214,7 @@ persistent data structures. Separate repo, low priority.
 a macro that takes body forms directly. `spawn*` retains the
 source-string primitive for programmatic use.
 
-### nREPL state-per-session concurrency
-
-Support one `mino_state_t` per session in the nREPL server, enabling
-true concurrent eval across sessions. Currently all sessions share one
-state with serialized eval. Requires the explicit-state cleanup (done
-in v0.19.0) as a prerequisite.
+~~### nREPL state-per-session concurrency~~ -- Done in v0.19.0. Each
+session owns its own `mino_state_t`. Sessions share nothing. The
+server is still single-threaded but the architecture enables future
+concurrent eval.
