@@ -568,8 +568,7 @@ static mino_val_t *prim_format(mino_val_t *args, mino_env_t *env)
                 mino_val_t *a;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
-                    set_error("format: not enough arguments for format string");
-                    return NULL;
+                    return prim_throw_error("format: not enough arguments for format string");
                 }
                 a = arg_list->as.cons.car;
                 arg_list = arg_list->as.cons.cdr;
@@ -590,8 +589,7 @@ static mino_val_t *prim_format(mino_val_t *args, mino_env_t *env)
                 int  tn;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
-                    set_error("format: not enough arguments for format string");
-                    return NULL;
+                    return prim_throw_error("format: not enough arguments for format string");
                 }
                 if (!as_long(arg_list->as.cons.car, &n)) {
                     double d;
@@ -599,8 +597,7 @@ static mino_val_t *prim_format(mino_val_t *args, mino_env_t *env)
                         n = (long long)d;
                     } else {
                         free(buf);
-                        set_error("format: %d expects a number");
-                        return NULL;
+                        return prim_throw_error("format: %d expects a number");
                     }
                 }
                 arg_list = arg_list->as.cons.cdr;
@@ -614,13 +611,11 @@ static mino_val_t *prim_format(mino_val_t *args, mino_env_t *env)
                 int  tn;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
-                    set_error("format: not enough arguments for format string");
-                    return NULL;
+                    return prim_throw_error("format: not enough arguments for format string");
                 }
                 if (!as_double(arg_list->as.cons.car, &d)) {
                     free(buf);
-                    set_error("format: %f expects a number");
-                    return NULL;
+                    return prim_throw_error("format: %f expects a number");
                 }
                 arg_list = arg_list->as.cons.cdr;
                 tn = snprintf(tmp, sizeof(tmp), "%f", d);
