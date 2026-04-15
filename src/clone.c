@@ -230,27 +230,177 @@ void mino_mailbox_free(mino_mailbox_t *mb)
     free(mb);
 }
 
+/* --- Growable buffer for serialization (avoids tmpfile syscalls) --- */
+
+typedef struct {
+    char  *data;
+    size_t len;
+    size_t cap;
+} sbuf_t;
+
+static void sbuf_init(sbuf_t *b)
+{
+    b->data = NULL;
+    b->len  = 0;
+    b->cap  = 0;
+}
+
+static int sbuf_ensure(sbuf_t *b, size_t extra)
+{
+    if (b->len + extra + 1 > b->cap) {
+        size_t need = b->len + extra + 1;
+        size_t nc   = b->cap == 0 ? 128 : b->cap;
+        char  *nd;
+        while (nc < need) nc *= 2;
+        nd = (char *)realloc(b->data, nc);
+        if (nd == NULL) return -1;
+        b->data = nd;
+        b->cap  = nc;
+    }
+    return 0;
+}
+
+static void sbuf_putc(sbuf_t *b, char c)
+{
+    if (sbuf_ensure(b, 1) == 0) b->data[b->len++] = c;
+}
+
+static void sbuf_puts(sbuf_t *b, const char *s)
+{
+    size_t n = strlen(s);
+    if (sbuf_ensure(b, n) == 0) { memcpy(b->data + b->len, s, n); b->len += n; }
+}
+
+static void sbuf_write(sbuf_t *b, const char *s, size_t n)
+{
+    if (sbuf_ensure(b, n) == 0) { memcpy(b->data + b->len, s, n); b->len += n; }
+}
+
+/* Print a value into a growable buffer (no FILE*, no syscalls). */
+static void sbuf_print(sbuf_t *b, const mino_val_t *v);
+
+static void sbuf_print_string_escaped(sbuf_t *b, const char *s, size_t len)
+{
+    size_t i;
+    sbuf_putc(b, '"');
+    for (i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)s[i];
+        switch (c) {
+        case '"':  sbuf_puts(b, "\\\""); break;
+        case '\\': sbuf_puts(b, "\\\\"); break;
+        case '\n': sbuf_puts(b, "\\n");  break;
+        case '\t': sbuf_puts(b, "\\t");  break;
+        case '\r': sbuf_puts(b, "\\r");  break;
+        case '\0': sbuf_puts(b, "\\0");  break;
+        default:   sbuf_putc(b, (char)c); break;
+        }
+    }
+    sbuf_putc(b, '"');
+}
+
+static void sbuf_print(sbuf_t *b, const mino_val_t *v)
+{
+    if (v == NULL || v->type == MINO_NIL) { sbuf_puts(b, "nil"); return; }
+    switch (v->type) {
+    case MINO_NIL:  sbuf_puts(b, "nil"); return;
+    case MINO_BOOL: sbuf_puts(b, v->as.b ? "true" : "false"); return;
+    case MINO_INT: {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%lld", v->as.i);
+        sbuf_puts(b, tmp);
+        return;
+    }
+    case MINO_FLOAT: {
+        char tmp[64];
+        int n = snprintf(tmp, sizeof(tmp), "%g", v->as.f);
+        int needs_dot = 1, k;
+        for (k = 0; k < n; k++) {
+            if (tmp[k] == '.' || tmp[k] == 'e' || tmp[k] == 'E'
+                || tmp[k] == 'n' || tmp[k] == 'i') {
+                needs_dot = 0; break;
+            }
+        }
+        sbuf_puts(b, tmp);
+        if (needs_dot) sbuf_puts(b, ".0");
+        return;
+    }
+    case MINO_STRING:
+        sbuf_print_string_escaped(b, v->as.s.data, v->as.s.len);
+        return;
+    case MINO_SYMBOL:
+        sbuf_write(b, v->as.s.data, v->as.s.len);
+        return;
+    case MINO_KEYWORD:
+        sbuf_putc(b, ':');
+        sbuf_write(b, v->as.s.data, v->as.s.len);
+        return;
+    case MINO_CONS: {
+        const mino_val_t *p = v;
+        sbuf_putc(b, '(');
+        while (p != NULL && p->type == MINO_CONS) {
+            sbuf_print(b, p->as.cons.car);
+            p = p->as.cons.cdr;
+            if (p != NULL && p->type == MINO_LAZY) p = lazy_force((mino_val_t *)p);
+            if (p != NULL && p->type == MINO_CONS) sbuf_putc(b, ' ');
+            else if (p != NULL && p->type != MINO_NIL) {
+                sbuf_puts(b, " . ");
+                sbuf_print(b, p);
+                break;
+            }
+        }
+        sbuf_putc(b, ')');
+        return;
+    }
+    case MINO_VECTOR: {
+        size_t i;
+        sbuf_putc(b, '[');
+        for (i = 0; i < v->as.vec.len; i++) {
+            if (i > 0) sbuf_putc(b, ' ');
+            sbuf_print(b, vec_nth(v, i));
+        }
+        sbuf_putc(b, ']');
+        return;
+    }
+    case MINO_MAP: {
+        size_t i;
+        sbuf_putc(b, '{');
+        for (i = 0; i < v->as.map.len; i++) {
+            mino_val_t *key = vec_nth(v->as.map.key_order, i);
+            if (i > 0) sbuf_puts(b, ", ");
+            sbuf_print(b, key);
+            sbuf_putc(b, ' ');
+            sbuf_print(b, map_get_val(v, key));
+        }
+        sbuf_putc(b, '}');
+        return;
+    }
+    case MINO_SET: {
+        size_t i;
+        sbuf_puts(b, "#{");
+        for (i = 0; i < v->as.set.len; i++) {
+            if (i > 0) sbuf_putc(b, ' ');
+            sbuf_print(b, vec_nth(v->as.set.key_order, i));
+        }
+        sbuf_putc(b, '}');
+        return;
+    }
+    default:
+        sbuf_puts(b, "nil");
+        return;
+    }
+}
+
 /* Serialize a value to a malloc'd string.  Returns NULL on failure. */
 static char *val_serialize(mino_state_t *S, mino_val_t *val, size_t *out_len)
 {
-    FILE *f = tmpfile();
-    long  n;
-    char *buf;
-    if (f == NULL) return NULL;
-    mino_print_to(S, f, val);
-    n = ftell(f);
-    if (n < 0) n = 0;
-    rewind(f);
-    buf = (char *)malloc((size_t)n + 1);
-    if (buf == NULL) { fclose(f); return NULL; }
-    if (n > 0) {
-        size_t got = fread(buf, 1, (size_t)n, f);
-        (void)got;
-    }
-    buf[n] = '\0';
-    fclose(f);
-    *out_len = (size_t)n;
-    return buf;
+    sbuf_t buf;
+    (void)S;
+    sbuf_init(&buf);
+    sbuf_print(&buf, val);
+    if (buf.data == NULL) return NULL;
+    buf.data[buf.len] = '\0';
+    *out_len = buf.len;
+    return buf.data;
 }
 
 int mino_mailbox_send(mino_mailbox_t *mb, mino_state_t *S, mino_val_t *val)
