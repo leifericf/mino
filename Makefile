@@ -1,13 +1,16 @@
-# mino — pure ANSI C build.
+# mino -- pure ANSI C build.
 
 CC      ?= cc
 CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2 -Isrc
 LDFLAGS ?=
 LIBS    ?= -lm
 
-SRCS    := src/mino.c main.c src/re.c
-OBJS    := $(SRCS:.c=.o)
-TARGET  := mino
+LIB_SRCS := src/mino.c src/val.c src/vec.c src/map.c src/read.c src/print.c \
+            src/prim.c src/clone.c src/re.c
+LIB_OBJS := $(LIB_SRCS:.c=.o)
+SRCS     := $(LIB_SRCS) main.c
+OBJS     := $(SRCS:.c=.o)
+TARGET   := mino
 
 .PHONY: all clean test test-gc-stress bench bench-map bench-seq fuzz-stdin
 
@@ -22,7 +25,8 @@ src/core_mino.h: src/core.mino
 	@sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$$/\\n"/' $< >> $@
 	@printf '    ;\n' >> $@
 
-src/mino.o: src/mino.c src/mino.h src/core_mino.h src/re.h
+src/mino.o: src/mino.c src/mino.h src/mino_internal.h
+src/prim.o: src/prim.c src/mino_internal.h src/core_mino.h src/re.h
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -48,31 +52,31 @@ test-gc-stress: $(TARGET)
 bench: bench/vector_bench
 	./bench/vector_bench
 
-bench/vector_bench: bench/vector_bench.c src/mino.o src/mino.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ bench/vector_bench.c src/mino.o
+bench/vector_bench: bench/vector_bench.c $(LIB_OBJS) src/mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ bench/vector_bench.c $(LIB_OBJS) $(LIBS)
 
 bench-map: bench/map_bench
 	./bench/map_bench
 
-bench/map_bench: bench/map_bench.c src/mino.o src/mino.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ bench/map_bench.c src/mino.o
+bench/map_bench: bench/map_bench.c $(LIB_OBJS) src/mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ bench/map_bench.c $(LIB_OBJS) $(LIBS)
 
 bench-seq: bench/seq_bench
 	./bench/seq_bench
 
-bench/seq_bench: bench/seq_bench.c src/mino.o src/mino.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ bench/seq_bench.c src/mino.o
+bench/seq_bench: bench/seq_bench.c $(LIB_OBJS) src/mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ bench/seq_bench.c $(LIB_OBJS) $(LIBS)
 
 # Example embedding program.
 example: examples/embed
 	./examples/embed
 
-examples/embed: examples/embed.c src/mino.o src/re.o src/mino.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ examples/embed.c src/mino.o src/re.o
+examples/embed: examples/embed.c $(LIB_OBJS) src/mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ examples/embed.c $(LIB_OBJS) $(LIBS)
 
 # Fuzz targets: stdin mode for crash_test.sh; libFuzzer for CI.
 fuzz-stdin: fuzz/fuzz_reader
 	@echo "fuzz_reader built (stdin mode). Run: ./fuzz/crash_test.sh"
 
-fuzz/fuzz_reader: fuzz/fuzz_reader.c src/mino.c src/mino.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -DFUZZ_STDIN -o $@ fuzz/fuzz_reader.c src/mino.c
+fuzz/fuzz_reader: fuzz/fuzz_reader.c $(LIB_SRCS) src/mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -DFUZZ_STDIN -o $@ fuzz/fuzz_reader.c $(LIB_SRCS) $(LIBS)
