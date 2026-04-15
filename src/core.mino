@@ -128,8 +128,11 @@
            (when (if (> step 0) (< start end) (> start end))
              (cons start (range-impl (+ start step) end step))))))
     (fn (& args)
-      (let (n (count args))
+      (let (n (count args)
+            inf-range (fn (start)
+                        (lazy-seq (cons start (inf-range (+ start 1))))))
         (cond
+          (= n 0) (inf-range 0)
           (= n 1) (range-impl 0 (first args) 1)
           (= n 2) (range-impl (first args) (first (rest args)) 1)
           (= n 3) (range-impl (first args) (first (rest args)) (first (rest (rest args))))
