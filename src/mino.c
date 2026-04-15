@@ -1699,6 +1699,7 @@ mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
             int         saved_try   = try_depth;
             int         saved_call  = call_depth;
             int         saved_trace = trace_added;
+            dyn_frame_t *saved_dyn  = dyn_stack;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
                 set_error_at(form, "try requires a body and a (catch e ...) clause");
                 return NULL;
@@ -1747,6 +1748,21 @@ mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                 try_depth   = saved_try;
                 call_depth  = saved_call;
                 trace_added = saved_trace;
+                /* Unwind dynamic binding frames pushed between the
+                 * try entry and the throw.  Each frame's bindings
+                 * were malloc'd; free them to avoid leaks. */
+                while (dyn_stack != saved_dyn) {
+                    dyn_frame_t *f = dyn_stack;
+                    dyn_binding_t *b = f->bindings;
+                    dyn_stack = f->prev;
+                    while (b) {
+                        dyn_binding_t *next = b->next;
+                        free(b);
+                        b = next;
+                    }
+                    /* The frame itself is a stack-local variable in
+                     * the binding special form; do NOT free it. */
+                }
                 clear_error();
                 local = env_child(env);
                 env_bind(local, var_buf, ex != NULL ? ex : mino_nil(S_));
