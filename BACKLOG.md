@@ -209,3 +209,17 @@ efficient).
 Separate package providing familiar API names for users coming from
 imperative embedded scripting backgrounds. Backed by mino's
 persistent data structures. Separate repo, low priority.
+
+### Language-level actor syntax
+
+Replace `(spawn src)` (source-string-based actor creation) with a
+structured form that bootstraps from existing functions or handler
+definitions rather than raw source strings. The C-level host API is
+already clean; this is about the mino-side surface.
+
+### nREPL state-per-session concurrency
+
+Support one `mino_state_t` per session in the nREPL server, enabling
+true concurrent eval across sessions. Currently all sessions share one
+state with serialized eval. Requires the explicit-state cleanup (done
+in v0.19.0) as a prerequisite.
