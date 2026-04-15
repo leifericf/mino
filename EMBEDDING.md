@@ -184,6 +184,45 @@ When a limit is exceeded the current eval returns `NULL` and
 `mino_last_error` reports the cause. Pass 0 to disable a limit.
 
 
+## Sessions
+
+Multiple independent evaluation contexts can share a single state by
+cloning an environment:
+
+```c
+mino_env_t *base = mino_new(S);
+mino_install_io(S, base);
+
+mino_env_t *session1 = mino_env_clone(S, base);
+mino_env_t *session2 = mino_env_clone(S, base);
+```
+
+Each clone is a new root environment with copies of all bindings from the
+source. Values are shared (not deep-copied), so the clone is cheap. After
+cloning, the two environments are independent: defining or redefining a
+name in one does not affect the other.
+
+This is the building block for nREPL-style session management. See
+`NREPL.md` for the full protocol mapping.
+
+
+## Interruption
+
+A running eval can be stopped from another thread:
+
+```c
+mino_interrupt(S);
+```
+
+The eval loop checks the interrupt flag on every step. When set, the
+current eval returns NULL and `mino_last_error` reports "interrupted".
+The flag is cleared automatically at the start of the next `mino_eval`
+or `mino_eval_string` call.
+
+`mino_interrupt` is the only mino API function that is safe to call from
+a thread other than the one running eval.
+
+
 ## Modules
 
 The host registers a resolver to map module names to file paths:
@@ -421,6 +460,7 @@ is valid for the duration of the call.
 | `mino_env_new(S)` | Create an empty environment |
 | `mino_new(S)` | Create an environment with core bindings |
 | `mino_env_free(S, env)` | Unregister and free an environment |
+| `mino_env_clone(S, env)` | Clone an environment (independent copy of bindings) |
 | `mino_env_set(S, env, name, val)` | Bind a name |
 | `mino_env_get(env, name)` | Look up a name (NULL if unbound) |
 | `mino_install_core(S, env)` | Install pure core bindings |
@@ -508,6 +548,7 @@ is valid for the duration of the call.
 | Function | Description |
 |----------|-------------|
 | `mino_set_limit(S, kind, value)` | Set step or heap limit (0 to disable) |
+| `mino_interrupt(S)` | Request eval interruption (thread-safe) |
 
 ### Cloning
 

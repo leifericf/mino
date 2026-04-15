@@ -239,6 +239,14 @@ mino_env_t *mino_env_new(mino_state_t *S);
 void        mino_env_free(mino_state_t *S, mino_env_t *env);
 
 /*
+ * Clone an environment: allocate a new root environment and copy all
+ * bindings from the source. Values are shared (not deep-copied), so
+ * the clone is only meaningful within the same state. Useful for
+ * snapshotting a session before independent evaluation in each copy.
+ */
+mino_env_t *mino_env_clone(mino_state_t *S, mino_env_t *env);
+
+/*
  * Convenience: allocate a new env and install core bindings in one call.
  * Equivalent to mino_env_new() followed by mino_install_core().
  */
@@ -366,6 +374,13 @@ void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx);
  * mino_last_error() reports the cause.
  */
 void mino_set_limit(mino_state_t *S, int kind, size_t value);
+
+/*
+ * Request interruption of a running eval. Sets a flag that the eval loop
+ * checks on each step. Safe to call from a different thread than the one
+ * running eval. The flag is cleared at the start of the next eval call.
+ */
+void mino_interrupt(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */

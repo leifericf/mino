@@ -216,6 +216,9 @@ struct mino_state {
 
     /* Dynamic bindings */
     dyn_frame_t    *dyn_stack;
+
+    /* Interrupt flag (checked by the eval loop) */
+    volatile int    interrupted;
 };
 
 /* Default global state instance and current-state pointer. */
@@ -386,6 +389,7 @@ void mino_unref(mino_state_t *S, mino_ref_t *ref)
 #define sort_comp_env       (S_->sort_comp_env)
 #define gensym_counter      (S_->gensym_counter)
 #define dyn_stack           (S_->dyn_stack)
+#define interrupted         (S_->interrupted)
 
 /* Look up a name in the dynamic binding stack.  Returns the value if
  * found, NULL otherwise. */
@@ -2785,6 +2789,20 @@ static mino_env_t *env_root(mino_env_t *env)
     return env;
 }
 
+mino_env_t *mino_env_clone(mino_state_t *S, mino_env_t *env)
+{
+    S_ = S;
+    if (env == NULL) return NULL;
+
+    /* Allocate a new root env and copy all bindings from the source. */
+    mino_env_t *clone = mino_env_new(S);
+    size_t i;
+    for (i = 0; i < env->len; i++) {
+        env_bind(clone, env->bindings[i].name, env->bindings[i].val);
+    }
+    return clone;
+}
+
 void mino_env_set(mino_state_t *S, mino_env_t *env, const char *name, mino_val_t *val)
 {
     S_ = S;
@@ -3529,6 +3547,11 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
     if (limit_exceeded) {
         return NULL;
     }
+    if (interrupted) {
+        limit_exceeded = 1;
+        set_error("interrupted");
+        return NULL;
+    }
     if (limit_steps > 0 && ++eval_steps > limit_steps) {
         limit_exceeded = 1;
         set_error("step limit exceeded");
@@ -4220,6 +4243,7 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     (void)probe;
     eval_steps     = 0;
     limit_exceeded = 0;
+    interrupted    = 0;
     trace_added    = 0;
     call_depth     = 0;
     v = eval(form, env);
@@ -4253,6 +4277,7 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     (void)probe;
     eval_steps     = 0;
     limit_exceeded = 0;
+    interrupted    = 0;
     if (reader_file == NULL) {
         reader_file = intern_filename("<string>");
     }
@@ -4369,6 +4394,14 @@ void mino_set_limit(mino_state_t *S, int kind, size_t value)
     case MINO_LIMIT_HEAP:  limit_heap  = value; break;
     default: break;
     }
+}
+
+void mino_interrupt(mino_state_t *S)
+{
+    /* Write directly to avoid S_ (may be in use by another thread). */
+#undef interrupted
+    S->interrupted = 1;
+#define interrupted (S_->interrupted)
 }
 
 /* ------------------------------------------------------------------------- */
