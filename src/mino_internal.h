@@ -218,63 +218,56 @@ struct mino_state {
 };
 
 /* ------------------------------------------------------------------------- */
-/* Global state and current-state pointer                                    */
-/* ------------------------------------------------------------------------- */
-
-extern mino_state_t  g_state;
-extern int           g_state_ready;
-extern mino_state_t *S_;
-
-/* ------------------------------------------------------------------------- */
 /* State field accessor macros                                               */
+/* These macros require a local variable named `S` of type mino_state_t *.   */
 /* ------------------------------------------------------------------------- */
 
-#define gc_all              (S_->gc_all)
-#define gc_bytes_alloc      (S_->gc_bytes_alloc)
-#define gc_bytes_live       (S_->gc_bytes_live)
-#define gc_threshold        (S_->gc_threshold)
-#define gc_stress           (S_->gc_stress)
-#define gc_depth            (S_->gc_depth)
-#define gc_stack_bottom     (S_->gc_stack_bottom)
-#define gc_root_envs        (S_->gc_root_envs)
-#define gc_ranges           (S_->gc_ranges)
-#define gc_ranges_len       (S_->gc_ranges_len)
-#define gc_ranges_cap       (S_->gc_ranges_cap)
-#define nil_singleton       (S_->nil_singleton)
-#define true_singleton      (S_->true_singleton)
-#define false_singleton     (S_->false_singleton)
-#define sym_intern          (S_->sym_intern)
-#define kw_intern           (S_->kw_intern)
-#define limit_steps         (S_->limit_steps)
-#define limit_heap          (S_->limit_heap)
-#define eval_steps          (S_->eval_steps)
-#define limit_exceeded      (S_->limit_exceeded)
-#define try_stack           (S_->try_stack)
-#define try_depth           (S_->try_depth)
-#define module_resolver     (S_->module_resolver)
-#define module_resolver_ctx (S_->module_resolver_ctx)
-#define module_cache        (S_->module_cache)
-#define module_cache_len    (S_->module_cache_len)
-#define module_cache_cap    (S_->module_cache_cap)
-#define meta_table          (S_->meta_table)
-#define meta_table_len      (S_->meta_table_len)
-#define meta_table_cap      (S_->meta_table_cap)
-#define print_depth         (S_->print_depth)
-#define error_buf           (S_->error_buf)
-#define call_stack          (S_->call_stack)
-#define call_depth          (S_->call_depth)
-#define trace_added         (S_->trace_added)
-#define reader_file         (S_->reader_file)
-#define reader_line         (S_->reader_line)
-#define eval_current_form   (S_->eval_current_form)
-#define rand_seeded         (S_->rand_seeded)
-#define sort_comp_fn        (S_->sort_comp_fn)
-#define sort_comp_env       (S_->sort_comp_env)
-#define gensym_counter      (S_->gensym_counter)
-#define dyn_stack           (S_->dyn_stack)
-#define interrupted         (S_->interrupted)
-#define gc_save             (S_->gc_save)
-#define gc_save_len         (S_->gc_save_len)
+#define gc_all              (S->gc_all)
+#define gc_bytes_alloc      (S->gc_bytes_alloc)
+#define gc_bytes_live       (S->gc_bytes_live)
+#define gc_threshold        (S->gc_threshold)
+#define gc_stress           (S->gc_stress)
+#define gc_depth            (S->gc_depth)
+#define gc_stack_bottom     (S->gc_stack_bottom)
+#define gc_root_envs        (S->gc_root_envs)
+#define gc_ranges           (S->gc_ranges)
+#define gc_ranges_len       (S->gc_ranges_len)
+#define gc_ranges_cap       (S->gc_ranges_cap)
+#define nil_singleton       (S->nil_singleton)
+#define true_singleton      (S->true_singleton)
+#define false_singleton     (S->false_singleton)
+#define sym_intern          (S->sym_intern)
+#define kw_intern           (S->kw_intern)
+#define limit_steps         (S->limit_steps)
+#define limit_heap          (S->limit_heap)
+#define eval_steps          (S->eval_steps)
+#define limit_exceeded      (S->limit_exceeded)
+#define try_stack           (S->try_stack)
+#define try_depth           (S->try_depth)
+#define module_resolver     (S->module_resolver)
+#define module_resolver_ctx (S->module_resolver_ctx)
+#define module_cache        (S->module_cache)
+#define module_cache_len    (S->module_cache_len)
+#define module_cache_cap    (S->module_cache_cap)
+#define meta_table          (S->meta_table)
+#define meta_table_len      (S->meta_table_len)
+#define meta_table_cap      (S->meta_table_cap)
+#define print_depth         (S->print_depth)
+#define error_buf           (S->error_buf)
+#define call_stack          (S->call_stack)
+#define call_depth          (S->call_depth)
+#define trace_added         (S->trace_added)
+#define reader_file         (S->reader_file)
+#define reader_line         (S->reader_line)
+#define eval_current_form   (S->eval_current_form)
+#define rand_seeded         (S->rand_seeded)
+#define sort_comp_fn        (S->sort_comp_fn)
+#define sort_comp_env       (S->sort_comp_env)
+#define gensym_counter      (S->gensym_counter)
+#define dyn_stack           (S->dyn_stack)
+#define interrupted         (S->interrupted)
+#define gc_save             (S->gc_save)
+#define gc_save_len         (S->gc_save_len)
 
 /* GC pin/unpin macros. */
 #define gc_pin(v) \
@@ -322,51 +315,60 @@ struct mino_hamt_node {
 /* ------------------------------------------------------------------------- */
 
 /* mino.c: allocation and GC */
-void  *gc_alloc_typed(unsigned char tag, size_t size);
-mino_val_t *alloc_val(mino_type_t type);
-char  *dup_n(const char *s, size_t len);
-void   gc_collect(void);
-void   gc_note_host_frame(void *addr);
+void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);
+mino_val_t *alloc_val(mino_state_t *S, mino_type_t type);
+char  *dup_n(mino_state_t *S, const char *s, size_t len);
+void   gc_collect(mino_state_t *S);
+void   gc_note_host_frame(mino_state_t *S, void *addr);
 
 /* mino.c: error reporting */
-void        set_error(const char *msg);
-void        set_error_at(const mino_val_t *form, const char *msg);
-void        clear_error(void);
+void        set_error(mino_state_t *S, const char *msg);
+void        set_error_at(mino_state_t *S, const mino_val_t *form,
+                         const char *msg);
+void        clear_error(mino_state_t *S);
 const char *type_tag_str(const mino_val_t *v);
-void        push_frame(const char *name, const char *file, int line);
-void        pop_frame(void);
+void        push_frame(mino_state_t *S, const char *name, const char *file,
+                       int line);
+void        pop_frame(mino_state_t *S);
 
 /* mino.c: metadata */
-meta_entry_t *meta_find(const char *name);
-void meta_set(const char *name, const char *doc, size_t doc_len,
-              mino_val_t *source);
+meta_entry_t *meta_find(mino_state_t *S, const char *name);
+void meta_set(mino_state_t *S, const char *name, const char *doc,
+              size_t doc_len, mino_val_t *source);
 
 /* mino.c: environment */
 env_binding_t *env_find_here(mino_env_t *env, const char *name);
-void           env_bind(mino_env_t *env, const char *name, mino_val_t *val);
-mino_env_t    *env_child(mino_env_t *parent);
-mino_env_t    *env_root(mino_env_t *env);
+void           env_bind(mino_state_t *S, mino_env_t *env, const char *name,
+                        mino_val_t *val);
+mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent);
+mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);
 
 /* mino.c: dynamic lookup */
-mino_val_t *dyn_lookup(const char *name);
+mino_val_t *dyn_lookup(mino_state_t *S, const char *name);
 
 /* mino.c: evaluator */
-mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail);
-mino_val_t *eval(mino_val_t *form, mino_env_t *env);
-mino_val_t *eval_value(mino_val_t *form, mino_env_t *env);
-mino_val_t *eval_implicit_do(mino_val_t *body, mino_env_t *env);
-mino_val_t *lazy_force(mino_val_t *v);
-mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args, mino_env_t *env);
+mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env,
+                      int tail);
+mino_val_t *eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
+mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env);
+mino_val_t *eval_implicit_do(mino_state_t *S, mino_val_t *body,
+                             mino_env_t *env);
+mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v);
+mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
+                           mino_env_t *env);
 int         sym_eq(const mino_val_t *v, const char *s);
-mino_val_t *eval_args(mino_val_t *args, mino_env_t *env);
-mino_val_t *macroexpand1(mino_val_t *form, mino_env_t *env, int *expanded);
-mino_val_t *macroexpand_all(mino_val_t *form, mino_env_t *env);
+mino_val_t *eval_args(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
+                         int *expanded);
+mino_val_t *macroexpand_all(mino_state_t *S, mino_val_t *form,
+                            mino_env_t *env);
 
 /* val.c: constructors and interning */
-mino_val_t *intern_lookup_or_create(intern_table_t *tbl,
+mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
                                     mino_type_t type,
                                     const char *s, size_t len);
-mino_val_t *make_fn(mino_val_t *params, mino_val_t *body, mino_env_t *env);
+mino_val_t *make_fn(mino_state_t *S, mino_val_t *params, mino_val_t *body,
+                    mino_env_t *env);
 
 /* val.c: hashing */
 uint32_t hash_val(const mino_val_t *v);
@@ -378,14 +380,16 @@ int mino_eq_internal(const mino_val_t *a, const mino_val_t *b);
 
 /* vec.c */
 mino_val_t *vec_nth(const mino_val_t *v, size_t i);
-mino_val_t *vec_conj1(const mino_val_t *v, mino_val_t *item);
-mino_val_t *vec_assoc1(const mino_val_t *v, size_t i, mino_val_t *item);
-mino_val_t *vec_from_array(mino_val_t **items, size_t len);
+mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v, mino_val_t *item);
+mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
+                       mino_val_t *item);
+mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len);
 
 /* map.c */
 unsigned     popcount32(uint32_t x);
-hamt_entry_t *hamt_entry_new(mino_val_t *key, mino_val_t *val);
-mino_hamt_node_t *hamt_assoc(const mino_hamt_node_t *n,
+hamt_entry_t *hamt_entry_new(mino_state_t *S, mino_val_t *key,
+                             mino_val_t *val);
+mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
                               hamt_entry_t *entry, uint32_t hash,
                               unsigned shift, int *replaced);
 mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
@@ -393,17 +397,17 @@ mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
 mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key);
 
 /* print.c */
-void print_val(FILE *out, const mino_val_t *v, int readably);
+void print_val(mino_state_t *S, FILE *out, const mino_val_t *v, int readably);
 
 /* read.c */
 const char *intern_filename(const char *name);
 
 /* clone.c: actor primitives (registered by prim.c install) */
-mino_val_t *prim_spawn(mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_send_bang(mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_receive(mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_spawn(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_send_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_receive(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* GC marking (used by gc_collect) */
-void gc_mark_interior(const void *p);
+void gc_mark_interior(mino_state_t *S, const void *p);
 
 #endif /* MINO_INTERNAL_H */
