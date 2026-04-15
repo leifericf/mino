@@ -736,8 +736,7 @@ static mino_val_t *prim_char_at(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (idx < 0 || (size_t)idx >= s->as.s.len) {
-        set_error("char-at: index out of range");
-        return NULL;
+        return prim_throw_error("char-at: index out of range");
     }
     return mino_string_n(S_, s->as.s.data + idx, 1);
 }
@@ -1111,13 +1110,11 @@ static mino_val_t *prim_nth(mino_val_t *args, mino_env_t *env)
     idx = idx_val->as.i;
     if (idx < 0) {
         if (def_val != NULL) return def_val;
-        set_error("nth index out of range");
-        return NULL;
+        return prim_throw_error("nth index out of range");
     }
     if (coll == NULL || coll->type == MINO_NIL) {
         if (def_val != NULL) return def_val;
-        set_error("nth index out of range");
-        return NULL;
+        return prim_throw_error("nth index out of range");
     }
     if (coll->type == MINO_VECTOR) {
         if ((size_t)idx >= coll->as.vec.len) {
@@ -1311,8 +1308,7 @@ static mino_val_t *prim_assoc(mino_val_t *args, mino_env_t *env)
             }
             idx = k->as.i;
             if (idx < 0 || (size_t)idx > acc->as.vec.len) {
-                set_error("assoc on vector: index out of range");
-                return NULL;
+                return prim_throw_error("assoc on vector: index out of range");
             }
             acc = vec_assoc1(acc, (size_t)idx, v);
             p = p->as.cons.cdr->as.cons.cdr;
@@ -2158,8 +2154,7 @@ static mino_val_t *prim_subs(mino_val_t *args, mino_env_t *env)
         end_idx = (long long)s_val->as.s.len;
     }
     if (start < 0 || end_idx < start || (size_t)end_idx > s_val->as.s.len) {
-        set_error("subs: index out of range");
-        return NULL;
+        return prim_throw_error("subs: index out of range");
     }
     return mino_string_n(S_, s_val->as.s.data + start, (size_t)(end_idx - start));
 }
