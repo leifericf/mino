@@ -10,19 +10,16 @@
 
 mino_val_t *mino_nil(mino_state_t *S)
 {
-    S_ = S;
     return &nil_singleton;
 }
 
 mino_val_t *mino_true(mino_state_t *S)
 {
-    S_ = S;
     return &true_singleton;
 }
 
 mino_val_t *mino_false(mino_state_t *S)
 {
-    S_ = S;
     return &false_singleton;
 }
 
@@ -32,33 +29,29 @@ mino_val_t *mino_false(mino_state_t *S)
 
 mino_val_t *mino_int(mino_state_t *S, long long n)
 {
-    S_ = S;
-    mino_val_t *v = alloc_val(MINO_INT);
+    mino_val_t *v = alloc_val(S, MINO_INT);
     v->as.i = n;
     return v;
 }
 
 mino_val_t *mino_float(mino_state_t *S, double f)
 {
-    S_ = S;
-    mino_val_t *v = alloc_val(MINO_FLOAT);
+    mino_val_t *v = alloc_val(S, MINO_FLOAT);
     v->as.f = f;
     return v;
 }
 
 mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len)
 {
-    S_ = S;
-    mino_val_t *v = alloc_val(MINO_STRING);
-    v->as.s.data = dup_n(s, len);
+    mino_val_t *v = alloc_val(S, MINO_STRING);
+    v->as.s.data = dup_n(S, s, len);
     v->as.s.len  = len;
     return v;
 }
 
 mino_val_t *mino_string(mino_state_t *S, const char *s)
 {
-    S_ = S;
-    return mino_string_n(S_, s, strlen(s));
+    return mino_string_n(S, s, strlen(s));
 }
 
 /*
@@ -68,7 +61,7 @@ mino_val_t *mino_string(mino_state_t *S, const char *s)
  * the collector reclaims names. Entries live for the life of the process.
  */
 
-mino_val_t *intern_lookup_or_create(intern_table_t *tbl,
+mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
                                            mino_type_t type,
                                            const char *s, size_t len)
 {
@@ -90,8 +83,8 @@ mino_val_t *intern_lookup_or_create(intern_table_t *tbl,
         tbl->entries = ne;
         tbl->cap = new_cap;
     }
-    v = alloc_val(type);
-    v->as.s.data = dup_n(s, len);
+    v = alloc_val(S, type);
+    v->as.s.data = dup_n(S, s, len);
     v->as.s.len  = len;
     tbl->entries[tbl->len++] = v;
     return v;
@@ -99,32 +92,27 @@ mino_val_t *intern_lookup_or_create(intern_table_t *tbl,
 
 mino_val_t *mino_symbol_n(mino_state_t *S, const char *s, size_t len)
 {
-    S_ = S;
-    return intern_lookup_or_create(&sym_intern, MINO_SYMBOL, s, len);
+    return intern_lookup_or_create(S, &sym_intern, MINO_SYMBOL, s, len);
 }
 
 mino_val_t *mino_symbol(mino_state_t *S, const char *s)
 {
-    S_ = S;
-    return mino_symbol_n(S_, s, strlen(s));
+    return mino_symbol_n(S, s, strlen(s));
 }
 
 mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len)
 {
-    S_ = S;
-    return intern_lookup_or_create(&kw_intern, MINO_KEYWORD, s, len);
+    return intern_lookup_or_create(S, &kw_intern, MINO_KEYWORD, s, len);
 }
 
 mino_val_t *mino_keyword(mino_state_t *S, const char *s)
 {
-    S_ = S;
-    return mino_keyword_n(S_, s, strlen(s));
+    return mino_keyword_n(S, s, strlen(s));
 }
 
 mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
 {
-    S_ = S;
-    mino_val_t *v = alloc_val(MINO_CONS);
+    mino_val_t *v = alloc_val(S, MINO_CONS);
     v->as.cons.car = car;
     v->as.cons.cdr = cdr;
     return v;
@@ -162,7 +150,7 @@ int mino_is_cons(const mino_val_t *v)
 mino_val_t *mino_car(const mino_val_t *v)
 {
     if (!mino_is_cons(v)) {
-        return mino_nil(S_);
+        return NULL;
     }
     return v->as.cons.car;
 }
@@ -170,7 +158,7 @@ mino_val_t *mino_car(const mino_val_t *v)
 mino_val_t *mino_cdr(const mino_val_t *v)
 {
     if (!mino_is_cons(v)) {
-        return mino_nil(S_);
+        return NULL;
     }
     return v->as.cons.cdr;
 }
@@ -239,11 +227,12 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     if (a == NULL || b == NULL) {
         return 0;
     }
-    /* Force lazy seqs before comparison. */
-    if (a->type == MINO_LAZY) a = lazy_force((mino_val_t *)a);
-    if (b->type == MINO_LAZY) b = lazy_force((mino_val_t *)b);
-    if (a == NULL) a = mino_nil(S_);
-    if (b == NULL) b = mino_nil(S_);
+    /* Force lazy seqs before comparison (use cached value if realized). */
+    if (a->type == MINO_LAZY && a->as.lazy.realized) a = a->as.lazy.cached;
+    if (b->type == MINO_LAZY && b->as.lazy.realized) b = b->as.lazy.cached;
+    if (a == NULL || b == NULL) {
+        return mino_is_nil(a) && mino_is_nil(b);
+    }
     if (a == b) return 1;
     if (a->type != b->type) {
         /*
@@ -342,4 +331,3 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     }
     return 0;
 }
-
