@@ -247,8 +247,10 @@ void        mino_env_free(mino_state_t *S, mino_env_t *env);
 mino_env_t *mino_env_clone(mino_state_t *S, mino_env_t *env);
 
 /*
- * Convenience: allocate a new env and install core bindings in one call.
- * Equivalent to mino_env_new() followed by mino_install_core().
+ * Convenience: allocate a new env and install all bindings in one call.
+ * Equivalent to mino_env_new() followed by mino_install_core() and
+ * mino_install_io().  For a sandboxed environment without I/O, call
+ * mino_env_new() and mino_install_core() directly.
  */
 mino_env_t *mino_new(mino_state_t *S);
 
