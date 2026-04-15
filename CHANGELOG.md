@@ -54,6 +54,32 @@ cleaner project layout for embedding and development.
   pointers from env lookups could be collected during `eval_args`
   when the compiler kept them in registers instead of on the stack.
   The GC save stack pins these values explicitly.
+- **`(range)` with no arguments**: returned nil instead of an infinite
+  lazy sequence. Added zero-arity case.
+- **`mino_clone` on nested non-transferable values**: cloning a
+  collection containing a function, handle, atom, or lazy-seq would
+  silently produce NULL elements instead of failing. Now propagates
+  the error with proper cleanup.
+- **`mino_new` docstring**: documented as core-only but also installed
+  I/O. Updated the docstring to match the actual behavior.
+- **Catchable runtime errors**: division by zero, mod/rem/quot by
+  zero, nth/char-at/subs/assoc index out of range, and format type
+  mismatches now throw catchable exceptions via `try`/`catch` instead
+  of propagating as fatal errors.
+- **`str` and `println` for collections**: vectors, maps, sets, cons
+  cells, lazy sequences, and atoms rendered as `#<?>`. Now uses the
+  standard printer for readable output.
+- **Segfault on throw inside binding**: `throw` inside a `binding`
+  form inside `try`/`catch` crashed with a use-after-free. The
+  `longjmp` skipped past the binding frame cleanup, leaving
+  `dyn_stack` pointing at reclaimed stack memory. The try handler now
+  saves and restores `dyn_stack`.
+
+### Performance
+- **Mailbox serialization**: replaced `tmpfile()` + fprintf + fread
+  text roundtrip with a direct-to-buffer printer. 911x faster for
+  integer messages (100 us to 0.11 us). Actor send+recv for 50,000
+  actors dropped from 6 seconds to 156 ms.
 
 
 ## [0.17.0] — Proper tail calls and core library
