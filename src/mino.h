@@ -46,7 +46,8 @@ typedef struct mino_ref   mino_ref_t;
 typedef struct mino_vec_node  mino_vec_node_t;   /* opaque; see mino.c */
 typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque; see mino.c */
 
-typedef mino_val_t *(*mino_prim_fn)(mino_val_t *args, mino_env_t *env);
+typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env);
 typedef void (*mino_finalizer_fn)(void *ptr, const char *tag);
 
 struct mino_val {
@@ -204,18 +205,8 @@ const char *mino_last_error(mino_state_t *S);
  * Create a new isolated runtime state. Each state owns its own GC, intern
  * tables, module cache, and singletons. Multiple states may coexist in the
  * same process; they share no mutable data.
- *
- * A default state is used automatically when the host does not create one
- * explicitly, preserving backwards compatibility with the existing API.
  */
 mino_state_t *mino_state_new(void);
-
-/*
- * Return the state that is currently active in the runtime. Useful inside
- * host-defined primitive functions (mino_prim_fn), which do not receive
- * the state as a parameter but may need it to call constructors.
- */
-mino_state_t *mino_current_state(void);
 
 /*
  * Free a runtime state and all resources owned by it. All GC-managed objects,
