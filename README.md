@@ -6,7 +6,7 @@ mino is designed first as a runtime library for native hosts: drop it into a C o
 
 ## Status
 
-v0.12.0. The language has a reader, evaluator, REPL, closures, tail recursion, persistent vectors and hash maps (HAMT), sets, macros with quasiquote, mark-and-sweep GC, try/catch, source locations with stack traces, modules, and a host C API with sandboxing and resource limits. The public C API is unstable.
+v0.18.0. The language has a reader, evaluator, REPL, closures, proper tail calls, persistent vectors and hash maps (HAMT), sets, lazy sequences, macros with quasiquote, mark-and-sweep GC, try/catch, source locations with stack traces, modules, atoms, actors, regex, and a host C API with sandboxing, resource limits, and multi-instance runtime support. The public C API is unstable.
 
 ## Building
 

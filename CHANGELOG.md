@@ -4,6 +4,58 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.18.0] — Runtime state, GC hardening, and repo reorganization
+
+Multi-instance runtime support, GC correctness under stress, and a
+cleaner project layout for embedding and development.
+
+### Added
+- **Explicit runtime state**: all public API functions now take a
+  `mino_state_t *S` parameter. Multiple independent runtime instances
+  can coexist in the same process with no shared mutable data.
+- **`mino_state_new` / `mino_state_free`**: create and destroy runtime
+  instances. The default global state is still available for simple
+  single-instance use.
+- **GC save stack**: `gc_pin`/`gc_unpin` macros protect borrowed values
+  across allocation boundaries where the conservative stack scanner
+  might miss register-allocated locals.
+- **Value cloning**: `mino_clone` deep-copies a value tree from one
+  state to another for safe cross-state transfer.
+- **Mailbox**: thread-safe `mino_mailbox_t` value queue for
+  communication between runtime instances.
+- **Actor system**: `spawn`, `send!`, `receive` primitives for
+  host-controlled isolated concurrency.
+- **Session cloning**: `mino_env_clone` copies an environment and its
+  bindings into another state.
+- **Eval interruption**: `mino_interrupt` sets a flag checked by the
+  eval loop, allowing the host to cancel long-running evaluations.
+- **Host-retained refs**: `mino_ref`/`mino_deref`/`mino_unref` pin
+  values across GC cycles without keeping an entire environment alive.
+- **Dynamic binding**: `binding` special form for thread-local dynamic
+  variables scoped to a runtime instance.
+- **`swap!` primitive**: atomic read-modify-write on atoms.
+- **Regex support**: `re-find` and `re-matches` primitives backed by
+  a bundled regex engine (`re.c`/`re.h`).
+
+### Changed
+- **Repository layout**: library source files moved to `src/`.
+  Test framework moved to `tests/test.mino`. `main.c` stays in the
+  root as the REPL binary entry point.
+- **Multi-file split**: the monolithic `mino.c` is now split into
+  9 focused translation units (`mino.c`, `val.c`, `vec.c`, `map.c`,
+  `read.c`, `print.c`, `prim.c`, `clone.c`, `mino_internal.h`).
+  The public API header `mino.h` is unchanged.
+- **Embedding**: copy the `src/` directory into your project and
+  compile with `-Isrc`. The Makefile uses `LIB_SRCS` / `LIB_OBJS`
+  for the library object set.
+
+### Fixed
+- **GC stress bug**: under `MINO_GC_STRESS=1`, borrowed function
+  pointers from env lookups could be collected during `eval_args`
+  when the compiler kept them in registers instead of on the stack.
+  The GC save stack pins these values explicitly.
+
+
 ## [0.17.0] — Proper tail calls and core library
 
 Proper tail call optimization in the evaluator. All function calls in
