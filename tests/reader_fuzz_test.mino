@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Reader robustness: feed adversarial inputs through read-string and verify
 ;; the reader handles them gracefully (throws or returns a value, never crashes).

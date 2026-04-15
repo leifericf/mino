@@ -8,7 +8,7 @@
 build/
 bin/
 mino
-core_mino.h
+src/core_mino.h
 bench/vector_bench
 bench/map_bench
 bench/seq_bench
@@ -47,4 +47,7 @@ Thumbs.db
 !EMBEDDING.md
 !NREPL.md
 /design-notes/
-
+examples/embed
+examples/actor_test
+examples/clone_test
+examples/ref_test

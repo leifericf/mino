@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Tests for core.mino functions added beyond the original set.
 

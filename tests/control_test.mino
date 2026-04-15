@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Control flow: if, do, when, cond, and, or, threading.
 

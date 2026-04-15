@@ -1,7 +1,7 @@
 ;; Test runner: loads all test files and runs them.
 ;; Usage: ./mino tests/run.mino
 
-(require "test")
+(require "tests/test")
 (require "tests/arithmetic_test")
 (require "tests/binding_test")
 (require "tests/control_test")

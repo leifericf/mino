@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Type predicates, type reflection, and utility predicates.
 

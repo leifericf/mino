@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Math functions: wrappers around math.h
 

@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Arithmetic operations, comparisons, bitwise, and numeric utilities.
 

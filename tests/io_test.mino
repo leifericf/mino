@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; I/O operations: spit, slurp, println, prn.
 

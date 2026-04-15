@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Proper tail call optimization: all function calls in tail position
 ;; run in constant stack space.

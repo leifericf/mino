@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; GC stability: heavy allocation tests.
 ;; Also run under `make test-gc-stress` which collects on every allocation.

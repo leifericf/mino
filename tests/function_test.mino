@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Functions, closures, higher-order, loop/recur.
 

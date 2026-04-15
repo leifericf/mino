@@ -1,4 +1,4 @@
-(require "test")
+(require "tests/test")
 
 ;; Collections: lists, vectors, maps, sets, and their operations.
 
