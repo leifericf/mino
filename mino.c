@@ -7885,6 +7885,160 @@ mino_val_t *mino_mailbox_recv(mino_mailbox_t *mb, mino_state_t *S)
     return result;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Actor (state + env + mailbox bundle)                                      */
+/* ------------------------------------------------------------------------- */
+
+struct mino_actor {
+    mino_state_t   *state;
+    mino_env_t     *env;
+    mino_mailbox_t *mailbox;
+};
+
+mino_actor_t *mino_actor_new(void)
+{
+    mino_actor_t *a = (mino_actor_t *)calloc(1, sizeof(*a));
+    if (a == NULL) return NULL;
+    a->state = mino_state_new();
+    if (a->state == NULL) { free(a); return NULL; }
+    a->env = mino_new(a->state);
+    if (a->env == NULL) {
+        mino_state_free(a->state);
+        free(a);
+        return NULL;
+    }
+    a->mailbox = mino_mailbox_new();
+    if (a->mailbox == NULL) {
+        mino_env_free(a->state, a->env);
+        mino_state_free(a->state);
+        free(a);
+        return NULL;
+    }
+    return a;
+}
+
+mino_state_t *mino_actor_state(mino_actor_t *a)
+{
+    return a ? a->state : NULL;
+}
+
+mino_env_t *mino_actor_env(mino_actor_t *a)
+{
+    return a ? a->env : NULL;
+}
+
+mino_mailbox_t *mino_actor_mailbox(mino_actor_t *a)
+{
+    return a ? a->mailbox : NULL;
+}
+
+void mino_actor_send(mino_actor_t *a, mino_state_t *src, mino_val_t *val)
+{
+    if (a == NULL || val == NULL) return;
+    mino_mailbox_send(a->mailbox, src, val);
+}
+
+mino_val_t *mino_actor_recv(mino_actor_t *a)
+{
+    if (a == NULL) return NULL;
+    return mino_mailbox_recv(a->mailbox, a->state);
+}
+
+void mino_actor_free(mino_actor_t *a)
+{
+    if (a == NULL) return;
+    mino_mailbox_free(a->mailbox);
+    mino_env_free(a->state, a->env);
+    mino_state_free(a->state);
+    free(a);
+}
+
+/* Primitive: (send! actor val) — send a value to an actor's mailbox. */
+static mino_val_t *prim_send_bang(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *handle, *val;
+    mino_actor_t *a;
+    (void)env;
+    if (args == NULL || args->type != MINO_CONS ||
+        args->as.cons.cdr == NULL || args->as.cons.cdr->type != MINO_CONS) {
+        set_error("send! requires 2 arguments: actor and value");
+        return NULL;
+    }
+    handle = args->as.cons.car;
+    val    = args->as.cons.cdr->as.cons.car;
+    if (handle == NULL || handle->type != MINO_HANDLE ||
+        strcmp(handle->as.handle.tag, "actor") != 0) {
+        set_error("send! first argument must be an actor handle");
+        return NULL;
+    }
+    a = (mino_actor_t *)handle->as.handle.ptr;
+    mino_actor_send(a, S_, val);
+    return mino_nil(S_);
+}
+
+/* Primitive: (receive) — receive from the current state's actor mailbox.
+ * The host must set up the "self" binding before ticking the actor.
+ * Returns nil if the mailbox is empty. */
+static mino_val_t *prim_receive(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *self;
+    mino_actor_t *a;
+    mino_val_t *msg;
+    (void)args;
+    self = mino_env_get(env, "*self*");
+    if (self == NULL || self->type != MINO_HANDLE ||
+        strcmp(self->as.handle.tag, "actor") != 0) {
+        set_error("receive: no actor context (*self* not bound)");
+        return NULL;
+    }
+    a = (mino_actor_t *)self->as.handle.ptr;
+    msg = mino_actor_recv(a);
+    return msg != NULL ? msg : mino_nil(S_);
+}
+
+/* Primitive: (spawn src) — create a new actor, eval src string in it,
+ * return a handle. The src typically defines a handler function. */
+static mino_val_t *prim_spawn(mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *src_val;
+    const char *src;
+    mino_actor_t *a;
+    mino_val_t *self_handle;
+    char buf[256];
+    (void)env;
+    if (args == NULL || args->type != MINO_CONS) {
+        set_error("spawn requires 1 argument: init source string");
+        return NULL;
+    }
+    src_val = args->as.cons.car;
+    if (src_val == NULL || src_val->type != MINO_STRING) {
+        set_error("spawn argument must be a string");
+        return NULL;
+    }
+    src = src_val->as.s.data;
+    a = mino_actor_new();
+    if (a == NULL) {
+        set_error("spawn: failed to create actor");
+        return NULL;
+    }
+    /* Install I/O in the actor so it can print etc. */
+    mino_install_io(a->state, a->env);
+    /* Create a handle for this actor in the actor's own state and bind *self*. */
+    self_handle = mino_handle(a->state, a, "actor");
+    mino_env_set(a->state, a->env, "*self*", self_handle);
+    /* Evaluate the init source in the actor's state. */
+    if (mino_eval_string(a->state, src, a->env) == NULL) {
+        const char *err = mino_last_error(a->state);
+        snprintf(buf, sizeof(buf),
+                 "spawn: init eval failed: %s", err ? err : "unknown error");
+        set_error(buf);
+        mino_actor_free(a);
+        return NULL;
+    }
+    /* Return a handle in the caller's state. */
+    return mino_handle(S_, a, "actor");
+}
+
 void mino_install_core(mino_state_t *S, mino_env_t *env)
 {
     S_ = S;
@@ -8000,6 +8154,10 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S_, env, "deref",    mino_prim(S_, "deref",    prim_deref));
     mino_env_set(S_, env, "reset!",   mino_prim(S_, "reset!",   prim_reset_bang));
     mino_env_set(S_, env, "atom?",    mino_prim(S_, "atom?",    prim_atom_p));
+    /* actors */
+    mino_env_set(S_, env, "spawn",    mino_prim(S_, "spawn",    prim_spawn));
+    mino_env_set(S_, env, "send!",    mino_prim(S_, "send!",    prim_send_bang));
+    mino_env_set(S_, env, "receive",  mino_prim(S_, "receive",  prim_receive));
     install_core_mino(env);
 }
 

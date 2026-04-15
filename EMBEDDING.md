@@ -253,6 +253,58 @@ The mailbox is the one place in mino that uses a mutex. It is safe to call
 by the host, not by any state.
 
 
+## Actors
+
+An actor bundles a state, an environment (with core bindings installed),
+and a mailbox into a single entity. Actors provide the isolation model:
+each actor is a failure domain with its own GC, its own bindings, and
+no shared mutable state.
+
+```c
+mino_actor_t *a = mino_actor_new();
+```
+
+The host drives the actor by sending messages and calling eval. No
+background thread is started; the host controls scheduling entirely.
+
+```c
+/* Send a value from the host's state to the actor. */
+mino_actor_send(a, host_state, val);
+
+/* Receive the next message in the actor's state. */
+mino_val_t *msg = mino_actor_recv(a);
+
+/* Evaluate code in the actor's context. */
+mino_eval_string(mino_actor_state(a), src, mino_actor_env(a));
+```
+
+The actor's state, environment, and mailbox are accessible individually
+when the host needs fine-grained control:
+
+```c
+mino_state_t   *s  = mino_actor_state(a);
+mino_env_t     *e  = mino_actor_env(a);
+mino_mailbox_t *mb = mino_actor_mailbox(a);
+```
+
+Free the actor when done. This frees the mailbox, environment, and state:
+
+```c
+mino_actor_free(a);
+```
+
+### Actors from mino code
+
+Three primitives expose the actor model to mino code:
+
+- `(spawn src)` creates a new actor, evaluates the source string `src`
+  in the actor's state, and returns an opaque actor handle.
+- `(send! actor val)` sends a value to an actor's mailbox.
+- `(receive)` receives the next message from the current actor's mailbox.
+  Requires that `*self*` is bound to an actor handle in the current
+  environment (set automatically by `spawn`).
+
+
 ## REPL handle
 
 The in-process REPL lets the host drive evaluation one line at a time
@@ -411,6 +463,18 @@ is valid for the duration of the call.
 | `mino_mailbox_send(mb, S, val)` | Serialize and enqueue a value |
 | `mino_mailbox_recv(mb, S)` | Dequeue and deserialize (NULL if empty) |
 | `mino_mailbox_free(mb)` | Free the mailbox and queued messages |
+
+### Actors
+
+| Function | Description |
+|----------|-------------|
+| `mino_actor_new()` | Create an actor (state + env + mailbox) |
+| `mino_actor_state(a)` | Get the actor's runtime state |
+| `mino_actor_env(a)` | Get the actor's environment |
+| `mino_actor_mailbox(a)` | Get the actor's mailbox |
+| `mino_actor_send(a, S, val)` | Send a value to the actor's mailbox |
+| `mino_actor_recv(a)` | Receive next message (NULL if empty) |
+| `mino_actor_free(a)` | Free the actor and all its resources |
 
 ### REPL
 

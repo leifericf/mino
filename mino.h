@@ -482,6 +482,32 @@ mino_val_t     *mino_mailbox_recv(mino_mailbox_t *mb, mino_state_t *S);
  */
 void            mino_mailbox_free(mino_mailbox_t *mb);
 
+/* ------------------------------------------------------------------------- */
+/* Actor (state + env + mailbox bundle)                                      */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * An actor bundles a runtime state, an environment with core bindings, and
+ * a mailbox into a single entity. The host creates actors and drives them
+ * by sending messages and calling eval; no background thread is started.
+ *
+ *   mino_actor_t *a = mino_actor_new();
+ *   mino_actor_send(a, caller_state, msg);
+ *   mino_val_t *m = mino_actor_recv(a);
+ *   mino_eval(mino_actor_state(a), handler, mino_actor_env(a));
+ *   mino_actor_free(a);
+ */
+typedef struct mino_actor mino_actor_t;
+
+mino_actor_t   *mino_actor_new(void);
+mino_state_t   *mino_actor_state(mino_actor_t *a);
+mino_env_t     *mino_actor_env(mino_actor_t *a);
+mino_mailbox_t *mino_actor_mailbox(mino_actor_t *a);
+void            mino_actor_send(mino_actor_t *a, mino_state_t *src,
+                                mino_val_t *val);
+mino_val_t     *mino_actor_recv(mino_actor_t *a);
+void            mino_actor_free(mino_actor_t *a);
+
 #ifdef __cplusplus
 }
 #endif
