@@ -1,0 +1,290 @@
+;; mutation_test.mino -- thorough testing of all mutable state paths.
+;; Covers atoms, swap!, reset!, deref, dynamic binding, and side effects.
+
+(require "tests/test")
+
+;; === ATOMS: the only mutable state primitive ===
+
+(deftest atom-creation-and-deref
+  (testing "Atom creation and deref with various types"
+    (is (= 42 @(atom 42)))
+    (is (= "hello" @(atom "hello")))
+    (is (= [1 2 3] @(atom [1 2 3])))
+    (is (= {:a 1} @(atom {:a 1})))
+    (is (= nil @(atom nil)))
+    (is (= true @(atom true)))
+    (is (= false @(atom false)))
+    (is (= :kw @(atom :kw)))))
+
+(deftest atom-reset!
+  (testing "reset! replaces atom value"
+    (def a (atom 0))
+    (reset! a 42)
+    (is (= 42 @a))
+    (reset! a nil)
+    (is (= nil @a))
+    (reset! a [1 2 3])
+    (is (= [1 2 3] @a))
+    (reset! a {:key "val"})
+    (is (= {:key "val"} @a))))
+
+(deftest atom-swap!-basic
+  (testing "swap! applies function to current value"
+    (def a (atom 0))
+    (swap! a + 1)
+    (is (= 1 @a))
+    (swap! a + 10)
+    (is (= 11 @a))
+    (swap! a * 2)
+    (is (= 22 @a))))
+
+(deftest atom-swap!-returns-new-value
+  (testing "swap! returns the new value"
+    (def a (atom 0))
+    (is (= 1 (swap! a + 1)))
+    (is (= 3 (swap! a + 2)))
+    (is (= 6 (swap! a * 2)))))
+
+(deftest atom-swap!-with-closure
+  (testing "swap! with a closure that captures state"
+    (def a (atom []))
+    (def adder (fn (v item) (conj v item)))
+    (swap! a adder :first)
+    (swap! a adder :second)
+    (swap! a adder :third)
+    (is (= [:first :second :third] @a))))
+
+(deftest atom-swap!-multi-arg
+  (testing "swap! passes extra arguments to the function"
+    (def a (atom {}))
+    (swap! a assoc :x 1)
+    (swap! a assoc :y 2)
+    (swap! a assoc :z 3)
+    (is (= {:x 1 :y 2 :z 3} @a))))
+
+(deftest atom-swap!-reads-current
+  (testing "swap! function receives the current value"
+    (def a (atom 10))
+    (def seen (atom []))
+    (dotimes (_ 5)
+      (swap! a (fn (current)
+        (swap! seen conj current)
+        (+ current 1))))
+    ;; seen should have [10 11 12 13 14]
+    (is (= [10 11 12 13 14] @seen))
+    (is (= 15 @a))))
+
+(deftest atom-swap!-heavy-allocation
+  (testing "swap! survives heavy allocation between reads"
+    (def a (atom 0))
+    (dotimes (i 100)
+      ;; Each swap allocates a fresh collection then discards it
+      (let (_ (into [] (range 50)))
+        (swap! a + 1)))
+    (is (= 100 @a))))
+
+(deftest atom-identity
+  (testing "atom? predicate"
+    (is (atom? (atom 0)))
+    (is (= false (atom? 42)))
+    (is (= false (atom? [1 2 3])))
+    (is (= false (atom? nil)))))
+
+(deftest atom-nested-in-collections
+  (testing "Atoms can be stored in collections"
+    (def a (atom 0))
+    (def b (atom 0))
+    (def atoms [a b])
+    (swap! (nth atoms 0) + 10)
+    (swap! (nth atoms 1) + 20)
+    (is (= 10 @a))
+    (is (= 20 @b))
+    ;; Atom in a map
+    (def m {:counter (atom 0)})
+    (swap! (get m :counter) + 5)
+    (is (= 5 @(get m :counter)))))
+
+(deftest atom-swap!-with-exception
+  (testing "swap! with a function that throws"
+    (def a (atom 42))
+    (def result (try
+      (swap! a (fn (v) (throw "oops")))
+      (catch e e)))
+    (is (= "oops" result))
+    ;; Atom should be unchanged after failed swap
+    (is (= 42 @a))))
+
+;; === DYNAMIC BINDING ===
+
+(deftest binding-basic
+  (testing "binding creates dynamic bindings"
+    (def *x* 10)
+    (is (= 10 *x*))
+    (binding (*x* 42)
+      (is (= 42 *x*)))
+    (is (= 10 *x*))))
+
+(deftest binding-nested
+  (testing "Nested bindings shadow correctly"
+    (def *level* :outer)
+    (binding (*level* :middle)
+      (is (= :middle *level*))
+      (binding (*level* :inner)
+        (is (= :inner *level*)))
+      (is (= :middle *level*)))
+    (is (= :outer *level*))))
+
+(deftest binding-visible-in-callees
+  (testing "Dynamic bindings are visible in called functions"
+    (def *context* :default)
+    (defn get-context () *context*)
+    (is (= :default (get-context)))
+    (binding (*context* :overridden)
+      (is (= :overridden (get-context))))
+    (is (= :default (get-context)))))
+
+(deftest binding-multiple-vars
+  (testing "binding can bind multiple vars at once"
+    (def *a* 1)
+    (def *b* 2)
+    (binding (*a* 10 *b* 20)
+      (is (= 10 *a*))
+      (is (= 20 *b*)))
+    (is (= 1 *a*))
+    (is (= 2 *b*))))
+
+(deftest binding-restored-on-exception
+  (testing "binding restores values even after exception"
+    (def *val* :original)
+    (try
+      (binding (*val* :temporary)
+        (throw "boom"))
+      (catch e nil))
+    (is (= :original *val*))))
+
+(deftest binding-with-atom-mutation
+  (testing "binding + atom interaction"
+    (def *target* (atom nil))
+    (def log-atom (atom []))
+    (binding (*target* log-atom)
+      (swap! *target* conj :entry1)
+      (swap! *target* conj :entry2))
+    ;; log-atom should have the entries
+    (is (= [:entry1 :entry2] @log-atom))
+    ;; *target* should be back to the original atom
+    (is (= nil @*target*))))
+
+;; === SIDE EFFECTS IN SEQUENCE OPERATIONS ===
+
+(deftest map-side-effects-order
+  (testing "map preserves side effect ordering"
+    (def log (atom []))
+    (def result (into [] (map (fn (x)
+      (swap! log conj x)
+      (* x x)) [1 2 3 4 5])))
+    (is (= [1 4 9 16 25] result))
+    (is (= [1 2 3 4 5] @log))))
+
+(deftest filter-side-effects
+  (testing "filter side effects execute for all elements"
+    (def log (atom []))
+    (def result (into [] (filter (fn (x)
+      (swap! log conj x)
+      (> x 2)) [1 2 3 4 5])))
+    (is (= [3 4 5] result))
+    (is (= [1 2 3 4 5] @log))))
+
+(deftest reduce-side-effects
+  (testing "reduce accumulates side effects"
+    (def log (atom []))
+    (def result (reduce (fn (acc x)
+      (swap! log conj {:acc acc :x x})
+      (+ acc x)) 0 [1 2 3]))
+    (is (= 6 result))
+    (is (= [{:acc 0 :x 1} {:acc 1 :x 2} {:acc 3 :x 3}] @log))))
+
+(deftest dotimes-mutation
+  (testing "dotimes with mutation"
+    (def counter (atom 0))
+    (dotimes (i 100)
+      (swap! counter + (+ i 1)))
+    ;; 1 + 2 + ... + 100 = 5050
+    (is (= 5050 @counter))))
+
+(deftest doseq-mutation
+  (testing "doseq with mutation over collection"
+    (def result (atom []))
+    (doseq (x [10 20 30])
+      (swap! result conj (* x 2)))
+    (is (= [20 40 60] @result))))
+
+;; === CLOSURE CAPTURE OF MUTABLE STATE ===
+
+(deftest closure-captures-atom
+  (testing "Closures capture atom reference, not snapshot"
+    (def a (atom 0))
+    (def inc-a (fn () (swap! a + 1)))
+    (def get-a (fn () @a))
+    (inc-a)
+    (inc-a)
+    (inc-a)
+    (is (= 3 (get-a)))))
+
+(deftest multiple-closures-share-atom
+  (testing "Multiple closures over same atom see each other's mutations"
+    (def state (atom {:count 0 :history []}))
+    (def bump (fn ()
+      (swap! state (fn (s)
+        (let (n (+ (get s :count) 1))
+          {:count n :history (conj (get s :history) n)})))))
+    (bump) (bump) (bump)
+    (is (= {:count 3 :history [1 2 3]} @state))))
+
+;; === MEMOIZATION WITH MUTABLE CACHE ===
+
+(deftest memoize-caches-results
+  (testing "Memoized function caches via atom"
+    (def call-count (atom 0))
+    (defn expensive (x)
+      (swap! call-count + 1)
+      (* x x))
+    (def cache (atom {}))
+    (defn memo-expensive (x)
+      (let (cached (get @cache x))
+        (if cached
+          cached
+          (let (result (expensive x))
+            (swap! cache assoc x result)
+            result))))
+    (is (= 25 (memo-expensive 5)))
+    (is (= 25 (memo-expensive 5)))  ; cached
+    (is (= 25 (memo-expensive 5)))  ; cached
+    (is (= 100 (memo-expensive 10)))
+    ;; expensive should have been called only twice (5 and 10)
+    (is (= 2 @call-count))))
+
+;; === ATOM AS ACCUMULATOR IN TRY/CATCH ===
+
+(deftest atom-accumulator-with-exceptions
+  (testing "Atom state survives partial processing with exceptions"
+    (def processed (atom []))
+    (def errors (atom []))
+    (doseq (x [1 2 0 3 0 4])
+      (try
+        (let (result (/ 10 x))
+          (swap! processed conj result))
+        (catch e
+          (swap! errors conj x))))
+    (is (= 4 (count @processed)))
+    (is (= [0 0] @errors))))
+
+;; === RESET! RETURN VALUE ===
+
+(deftest reset!-returns-new-value
+  (testing "reset! returns the new value"
+    (def a (atom 0))
+    (is (= 42 (reset! a 42)))
+    (is (= "hello" (reset! a "hello")))
+    (is (= [1 2] (reset! a [1 2])))))
+
+(run-tests)
