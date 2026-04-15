@@ -26,6 +26,20 @@ static int args_have_float(mino_val_t *args)
     return 0;
 }
 
+/* Throw a catchable exception from a primitive.  If inside a try block,
+ * this longjmps to the catch handler.  Otherwise it sets a fatal error
+ * and the caller returns NULL to propagate to the host. */
+static mino_val_t *prim_throw_error(const char *msg)
+{
+    mino_val_t *ex = mino_string(S_, msg);
+    if (try_depth > 0) {
+        try_stack[try_depth - 1].exception = ex;
+        longjmp(try_stack[try_depth - 1].buf, 1);
+    }
+    set_error(msg);
+    return NULL;
+}
+
 static int as_double(const mino_val_t *v, double *out)
 {
     if (v == NULL) {
@@ -177,8 +191,7 @@ static mino_val_t *prim_div(mino_val_t *args, mino_env_t *env)
     args = args->as.cons.cdr;
     if (!mino_is_cons(args)) {
         if (acc == 0.0) {
-            set_error("division by zero");
-            return NULL;
+            return prim_throw_error("division by zero");
         }
         return mino_float(S_, 1.0 / acc);
     }
@@ -189,8 +202,7 @@ static mino_val_t *prim_div(mino_val_t *args, mino_env_t *env)
             return NULL;
         }
         if (x == 0.0) {
-            set_error("division by zero");
-            return NULL;
+            return prim_throw_error("division by zero");
         }
         acc /= x;
         args = args->as.cons.cdr;
@@ -213,8 +225,7 @@ static mino_val_t *prim_mod(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (b == 0.0) {
-        set_error("mod: division by zero");
-        return NULL;
+        return prim_throw_error("mod: division by zero");
     }
     r = fmod(a, b);
     /* Floored modulo: result has same sign as divisor. */
@@ -242,8 +253,7 @@ static mino_val_t *prim_rem(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (b == 0.0) {
-        set_error("rem: division by zero");
-        return NULL;
+        return prim_throw_error("rem: division by zero");
     }
     r = fmod(a, b);
     if (args->as.cons.car->type == MINO_INT &&
@@ -268,8 +278,7 @@ static mino_val_t *prim_quot(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (b == 0.0) {
-        set_error("quot: division by zero");
-        return NULL;
+        return prim_throw_error("quot: division by zero");
     }
     q = a / b;
     q = q >= 0 ? floor(q) : ceil(q);
