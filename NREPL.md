@@ -29,8 +29,7 @@ The server creates a base environment at startup:
 
 ```c
 mino_state_t *S = mino_state_new();
-mino_env_t *base = mino_new(S);
-mino_install_io(S, base);
+mino_env_t *base = mino_new(S);         /* core + I/O included    */
 ```
 
 When a client sends a `clone` request (or the first `eval` without an

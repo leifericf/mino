@@ -19,14 +19,13 @@ The state owns the garbage collector, intern tables, module cache, singletons,
 and all GC-managed objects allocated within it. Multiple states may coexist in
 the same process; they share no mutable data.
 
-Create an environment and install bindings:
+Create an environment with all bindings (core + I/O) in one call:
 
 ```c
-mino_env_t *env = mino_new(S);          /* core bindings included */
-mino_install_io(S, env);                /* opt in to I/O          */
+mino_env_t *env = mino_new(S);          /* core + I/O included    */
 ```
 
-Or step by step:
+Or step by step for finer control:
 
 ```c
 mino_env_t *env = mino_env_new(S);      /* empty environment      */
@@ -190,8 +189,7 @@ Multiple independent evaluation contexts can share a single state by
 cloning an environment:
 
 ```c
-mino_env_t *base = mino_new(S);
-mino_install_io(S, base);
+mino_env_t *base = mino_new(S);         /* core + I/O included    */
 
 mino_env_t *session1 = mino_env_clone(S, base);
 mino_env_t *session2 = mino_env_clone(S, base);
@@ -455,7 +453,7 @@ runtime state.
 | Function | Description |
 |----------|-------------|
 | `mino_env_new(S)` | Create an empty environment |
-| `mino_new(S)` | Create an environment with core bindings |
+| `mino_new(S)` | Create an environment with core + I/O bindings |
 | `mino_env_free(S, env)` | Unregister and free an environment |
 | `mino_env_clone(S, env)` | Clone an environment (independent copy of bindings) |
 | `mino_env_set(S, env, name, val)` | Bind a name |
