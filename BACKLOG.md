@@ -157,15 +157,8 @@ try/catch. A thin `mino.hpp` header with RAII wrappers for
 
 ## Performance
 
-### Mailbox binary serialization
-
-The mailbox (`clone.c`) serializes every message through
-`tmpfile()` + `mino_print_to` + `fread` + `mino_read`. That is a
-full text roundtrip with multiple syscalls per message. Measured at
-100 us per integer send+recv. Replace with a direct-to-buffer binary
-format (write type tag + payload to a `malloc`'d buffer, deserialize
-without the reader). Should bring message cost to single-digit
-microseconds. ~200 lines.
+~~### Mailbox binary serialization~~ -- Done. Replaced tmpfile
+roundtrip with direct buffer printer. 911x faster for integers.
 
 ### Cache parsed core.mino
 
