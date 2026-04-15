@@ -129,6 +129,27 @@ int main(void)
             env);
     });
 
+    /* --- Eager variants --- */
+    printf("\nEager collection builders:\n");
+    BENCH("eval: (rangev 100)", 1000, {
+        (void)mino_eval_string(S, "(rangev 100)", env);
+    });
+    BENCH("eval: (rangev 1000)", 100, {
+        (void)mino_eval_string(S, "(rangev 1000)", env);
+    });
+    BENCH("eval: (mapv inc (rangev 100))", 1000, {
+        (void)mino_eval_string(S, "(mapv inc (rangev 100))", env);
+    });
+    BENCH("eval: (mapv inc (rangev 1000))", 100, {
+        (void)mino_eval_string(S, "(mapv inc (rangev 1000))", env);
+    });
+    BENCH("eval: (filterv odd? (rangev 100))", 1000, {
+        (void)mino_eval_string(S, "(filterv odd? (rangev 100))", env);
+    });
+    BENCH("eval: (reduce + 0 (rangev 1000))", 100, {
+        (void)mino_eval_string(S, "(reduce + 0 (rangev 1000))", env);
+    });
+
     /* --- Function calls --- */
     printf("\nFunction calls:\n");
     mino_eval_string(S, "(defn add1 (x) (+ x 1))", env);
