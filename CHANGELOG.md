@@ -25,8 +25,9 @@ cleaner project layout for embedding and development.
   communication between runtime instances.
 - **Actor system**: `spawn`, `send!`, `receive` primitives for
   host-controlled isolated concurrency.
-- **Session cloning**: `mino_env_clone` copies an environment and its
-  bindings into another state.
+- **Session cloning**: `mino_env_clone` creates a new root environment
+  within the same state, copying all bindings (values are shared, not
+  deep-copied). Cross-state transfer requires `mino_clone`.
 - **Eval interruption**: `mino_interrupt` sets a flag checked by the
   eval loop, allowing the host to cancel long-running evaluations.
 - **Host-retained refs**: `mino_ref`/`mino_deref`/`mino_unref` pin
