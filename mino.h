@@ -42,10 +42,12 @@ typedef enum {
 typedef struct mino_val   mino_val_t;
 typedef struct mino_env   mino_env_t;
 typedef struct mino_state mino_state_t;
+typedef struct mino_ref   mino_ref_t;
 typedef struct mino_vec_node  mino_vec_node_t;   /* opaque; see mino.c */
 typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque; see mino.c */
 
 typedef mino_val_t *(*mino_prim_fn)(mino_val_t *args, mino_env_t *env);
+typedef void (*mino_finalizer_fn)(void *ptr, const char *tag);
 
 struct mino_val {
     mino_type_t type;
@@ -92,6 +94,7 @@ struct mino_val {
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
             void       *ptr;
             const char *tag;    /* static or interned; not GC-owned */
+            void       (*finalizer)(void *ptr, const char *tag);
         } handle;
         struct {          /* MINO_ATOM: mutable reference cell */
             mino_val_t *val;
@@ -134,6 +137,8 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals,
 mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len);
 mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn);
 mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag);
+mino_val_t *mino_handle_ex(mino_state_t *S, void *ptr, const char *tag,
+                           mino_finalizer_fn finalizer);
 mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val);
 
 /* Handle accessors — return NULL/0 if the value is not a handle. */
@@ -405,6 +410,28 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out);
  * Free the REPL handle and its internal buffer. Does not free `env`.
  */
 void mino_repl_free(mino_repl_t *repl);
+
+/* ------------------------------------------------------------------------- */
+/* Value retention (refs)                                                     */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Values returned by constructors and eval are borrowed: they survive until
+ * the next GC cycle but are not pinned. A ref roots a value so it survives
+ * collection indefinitely. The host must call mino_unref when the value is
+ * no longer needed.
+ *
+ *   mino_ref_t *r = mino_ref(S, val);   // root val
+ *   mino_val_t *v = mino_deref(r);      // get the value
+ *   mino_unref(S, r);                   // release the root
+ *
+ * Refs are owned by the state that created them and freed when the state
+ * is freed, but the host should unref explicitly to avoid holding objects
+ * longer than necessary.
+ */
+mino_ref_t *mino_ref(mino_state_t *S, mino_val_t *val);
+mino_val_t *mino_deref(const mino_ref_t *ref);
+void        mino_unref(mino_state_t *S, mino_ref_t *ref);
 
 #ifdef __cplusplus
 }

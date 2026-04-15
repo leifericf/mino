@@ -67,8 +67,8 @@ bench/seq_bench: bench/seq_bench.c mino.o mino.h
 example: examples/embed
 	./examples/embed
 
-examples/embed: examples/embed.c mino.o mino.h
-	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ examples/embed.c mino.o
+examples/embed: examples/embed.c mino.o re.o mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -I. -o $@ examples/embed.c mino.o re.o
 
 # Fuzz targets: stdin mode for crash_test.sh; libFuzzer for CI.
 fuzz-stdin: fuzz/fuzz_reader

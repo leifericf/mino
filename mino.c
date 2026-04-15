@@ -104,6 +104,13 @@ typedef struct root_env {
     struct root_env *next;
 } root_env_t;
 
+/* Host-retained value ref (malloc-owned, not GC-managed). */
+struct mino_ref {
+    mino_val_t      *val;
+    struct mino_ref *next;
+    struct mino_ref *prev;
+};
+
 /* GC range: address span of one allocated payload for conservative scan. */
 typedef struct {
     uintptr_t  start;  /* inclusive payload byte address */
@@ -191,6 +198,9 @@ struct mino_state {
 
     /* Gensym counter */
     long            gensym_counter;
+
+    /* Host-retained value refs */
+    mino_ref_t     *ref_roots;
 };
 
 /* Default global state instance and current-state pointer. */
@@ -234,6 +244,15 @@ void mino_state_free(mino_state_t *st)
         rnext = r->next;
         free(r);
     }
+    {
+        mino_ref_t *ref = st->ref_roots;
+        mino_ref_t *rnxt;
+        while (ref != NULL) {
+            rnxt = ref->next;
+            free(ref);
+            ref = rnxt;
+        }
+    }
     for (i = 0; i < st->module_cache_len; i++) {
         free(st->module_cache[i].name);
     }
@@ -248,6 +267,12 @@ void mino_state_free(mino_state_t *st)
     free(st->gc_ranges);
     for (h = st->gc_all; h != NULL; h = hnext) {
         hnext = h->next;
+        if (h->type_tag == GC_T_VAL) {
+            mino_val_t *v = (mino_val_t *)(h + 1);
+            if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+                v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
+            }
+        }
         free(h);
     }
     if (st != &g_state) {
@@ -258,6 +283,46 @@ void mino_state_free(mino_state_t *st)
 mino_state_t *mino_current_state(void)
 {
     return S_;
+}
+
+mino_ref_t *mino_ref(mino_state_t *S, mino_val_t *val)
+{
+    mino_ref_t *r = (mino_ref_t *)calloc(1, sizeof(*r));
+    if (r == NULL) {
+        abort();
+    }
+    r->val  = val;
+    r->prev = NULL;
+    r->next = S->ref_roots;
+    if (S->ref_roots != NULL) {
+        S->ref_roots->prev = r;
+    }
+    S->ref_roots = r;
+    return r;
+}
+
+mino_val_t *mino_deref(const mino_ref_t *ref)
+{
+    if (ref == NULL) {
+        return NULL;
+    }
+    return ref->val;
+}
+
+void mino_unref(mino_state_t *S, mino_ref_t *ref)
+{
+    if (ref == NULL) {
+        return;
+    }
+    if (ref->prev != NULL) {
+        ref->prev->next = ref->next;
+    } else {
+        S->ref_roots = ref->next;
+    }
+    if (ref->next != NULL) {
+        ref->next->prev = ref->prev;
+    }
+    free(ref);
 }
 
 /* ---- State field accessor macros ---------------------------------------- */
@@ -1428,8 +1493,20 @@ mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag)
 {
     S_ = S;
     mino_val_t *v = alloc_val(MINO_HANDLE);
-    v->as.handle.ptr = ptr;
-    v->as.handle.tag = tag;
+    v->as.handle.ptr       = ptr;
+    v->as.handle.tag       = tag;
+    v->as.handle.finalizer = NULL;
+    return v;
+}
+
+mino_val_t *mino_handle_ex(mino_state_t *S, void *ptr, const char *tag,
+                           mino_finalizer_fn finalizer)
+{
+    S_ = S;
+    mino_val_t *v = alloc_val(MINO_HANDLE);
+    v->as.handle.ptr       = ptr;
+    v->as.handle.tag       = tag;
+    v->as.handle.finalizer = finalizer;
     return v;
 }
 
@@ -3006,6 +3083,13 @@ static void gc_mark_roots(void)
             gc_mark_interior(meta_table[mi].source);
         }
     }
+    /* Pin host-retained refs. */
+    {
+        mino_ref_t *ref;
+        for (ref = S_->ref_roots; ref != NULL; ref = ref->next) {
+            gc_mark_interior(ref->val);
+        }
+    }
 }
 
 static void gc_sweep(void)
@@ -3019,6 +3103,14 @@ static void gc_sweep(void)
             live += h->size;
             pp = &h->next;
         } else {
+            /* Call finalizer for handles being collected. */
+            if (h->type_tag == GC_T_VAL) {
+                mino_val_t *v = (mino_val_t *)(h + 1);
+                if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+                    v->as.handle.finalizer(v->as.handle.ptr,
+                                           v->as.handle.tag);
+                }
+            }
             *pp = h->next;
             free(h);
         }
