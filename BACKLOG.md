@@ -32,6 +32,30 @@ count at call time. Common pattern for default arguments. ~150 lines.
 
 ### Nice-to-have
 
+**Bracket syntax for `fn` parameters** -- use `[x y]` instead of
+`(x y)` for function parameter lists. The current `(fn (x) body)`
+syntax is a departure from the reference language where `(fn [x] body)`
+uses vectors. Switching would make mino code more visually distinct
+between parameter lists and function calls. Requires changing the `fn`
+special form parser in the evaluator. ~50 lines.
+
+**Variadic `comp`** -- compose N functions. Currently `comp` only
+accepts two arguments: `(comp f g)`. The reference language supports
+`(comp f g h ...)`. Change from fixed 2-arity fn to a reduce-based
+variadic form. ~10 lines in core.mino.
+
+**`reduced`** -- early termination for `reduce`. `(reduce (fn [acc x]
+(if (> x 5) (reduced acc) (+ acc x))) 0 (range 100))`. Requires a
+`Reduced` wrapper type and check in the reduce loop. ~40 lines.
+
+**`set` constructor function** -- `(set coll)` to create a set from a
+collection. Currently only set literals `#{...}` and `(into #{} coll)`
+work. ~10 lines.
+
+**`ex-info` / `ex-data`** -- structured exceptions. `(throw (ex-info
+"msg" {:key val}))` with `(ex-data e)` in catch. Currently `throw`
+takes any value, but `ex-info` provides a standard structure. ~30 lines.
+
 **Protocols** -- polymorphic dispatch on first argument's type.
 `defprotocol`, `extend-type`, `extend-protocol`. Enables extensible
 abstractions. ~400 lines.
