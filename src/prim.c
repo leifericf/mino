@@ -2553,13 +2553,32 @@ static mino_val_t *prim_str(mino_val_t *args, mino_env_t *env)
                 tmp[n] = '\0';
                 break;
             }
-            default:
-                n = snprintf(tmp, sizeof(tmp), "#<%s>",
-                             a->type == MINO_PRIM ? "prim" :
-                             a->type == MINO_FN   ? "fn" :
-                             a->type == MINO_MACRO ? "macro" :
-                             a->type == MINO_HANDLE ? "handle" : "?");
+            default: {
+                /* Collections (vector, map, set, cons, lazy, atom) and
+                 * opaque types: print via the standard printer so str
+                 * produces readable output, not #<?>. */
+                mino_val_t *printed = print_to_string(a);
+                if (printed != NULL && printed->type == MINO_STRING) {
+                    size_t plen = printed->as.s.len;
+                    size_t need2 = len + plen + 1;
+                    if (need2 > cap) {
+                        cap = cap == 0 ? 128 : cap;
+                        while (cap < need2) cap *= 2;
+                        buf = (char *)realloc(buf, cap);
+                        if (buf == NULL) { set_error("out of memory"); return NULL; }
+                    }
+                    memcpy(buf + len, printed->as.s.data, plen);
+                    len += plen;
+                    n = 0; /* already appended */
+                } else {
+                    n = snprintf(tmp, sizeof(tmp), "#<%s>",
+                                 a->type == MINO_PRIM ? "prim" :
+                                 a->type == MINO_FN   ? "fn" :
+                                 a->type == MINO_MACRO ? "macro" :
+                                 a->type == MINO_HANDLE ? "handle" : "?");
+                }
                 break;
+            }
             }
             if (n > 0) {
                 size_t need = len + (size_t)n + 1;
