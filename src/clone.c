@@ -23,8 +23,16 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     case MINO_CONS: {
         mino_val_t *car = clone_val(dst, v->as.cons.car);
         mino_val_t *cdr;
-        mino_ref_t *rcar = mino_ref(dst, car);
+        mino_ref_t *rcar;
+        if (car == NULL && v->as.cons.car != NULL
+            && v->as.cons.car->type != MINO_NIL) return NULL;
+        rcar = mino_ref(dst, car);
         cdr = clone_val(dst, v->as.cons.cdr);
+        if (cdr == NULL && v->as.cons.cdr != NULL
+            && v->as.cons.cdr->type != MINO_NIL) {
+            mino_unref(dst, rcar);
+            return NULL;
+        }
         car = mino_deref(rcar);
         mino_unref(dst, rcar);
         return mino_cons(dst, car, cdr);
@@ -44,6 +52,12 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         }
         for (i = 0; i < len; i++) {
             items[i] = clone_val(dst, vec_nth(v, i));
+            if (items[i] == NULL) {
+                size_t j;
+                for (j = 0; j < i; j++) mino_unref(dst, refs[j]);
+                free(items); free(refs);
+                return NULL;
+            }
             refs[i]  = mino_ref(dst, items[i]);
         }
         for (i = 0; i < len; i++) {
@@ -75,8 +89,21 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
             mino_val_t *src_val = hamt_get(v->as.map.root, src_key,
                                            hash_val(src_key), 0);
             keys[i]  = clone_val(dst, src_key);
+            if (keys[i] == NULL) {
+                size_t j;
+                for (j = 0; j < i; j++) { mino_unref(dst, krefs[j]); mino_unref(dst, vrefs[j]); }
+                free(keys); free(vals); free(krefs); free(vrefs);
+                return NULL;
+            }
             krefs[i] = mino_ref(dst, keys[i]);
             vals[i]  = clone_val(dst, src_val);
+            if (vals[i] == NULL) {
+                size_t j;
+                mino_unref(dst, krefs[i]);
+                for (j = 0; j < i; j++) { mino_unref(dst, krefs[j]); mino_unref(dst, vrefs[j]); }
+                free(keys); free(vals); free(krefs); free(vrefs);
+                return NULL;
+            }
             vrefs[i] = mino_ref(dst, vals[i]);
         }
         for (i = 0; i < len; i++) {
@@ -103,6 +130,12 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         if (!items || !refs) { free(items); free(refs); return NULL; }
         for (i = 0; i < len; i++) {
             items[i] = clone_val(dst, vec_nth(v->as.set.key_order, i));
+            if (items[i] == NULL) {
+                size_t j;
+                for (j = 0; j < i; j++) mino_unref(dst, refs[j]);
+                free(items); free(refs);
+                return NULL;
+            }
             refs[i]  = mino_ref(dst, items[i]);
         }
         for (i = 0; i < len; i++) {
