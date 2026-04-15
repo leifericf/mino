@@ -1114,8 +1114,7 @@ static mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_VECTOR) {
         if ((size_t)idx >= coll->as.vec.len) {
             if (def_val != NULL) return def_val;
-            set_error(S, "nth index out of range");
-            return NULL;
+            return prim_throw_error(S, "nth index out of range");
         }
         return vec_nth(coll, (size_t)idx);
     }
@@ -1125,15 +1124,13 @@ static mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         for (i = 0; i < idx; i++) {
             if (!mino_is_cons(p)) {
                 if (def_val != NULL) return def_val;
-                set_error(S, "nth index out of range");
-                return NULL;
+                return prim_throw_error(S, "nth index out of range");
             }
             p = p->as.cons.cdr;
         }
         if (!mino_is_cons(p)) {
             if (def_val != NULL) return def_val;
-            set_error(S, "nth index out of range");
-            return NULL;
+            return prim_throw_error(S, "nth index out of range");
         }
         return p->as.cons.car;
     }
