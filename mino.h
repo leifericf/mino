@@ -433,6 +433,55 @@ mino_ref_t *mino_ref(mino_state_t *S, mino_val_t *val);
 mino_val_t *mino_deref(const mino_ref_t *ref);
 void        mino_unref(mino_state_t *S, mino_ref_t *ref);
 
+/* ------------------------------------------------------------------------- */
+/* Value cloning (cross-state transfer)                                      */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Deep-copy a value from one state into another. Transferable types:
+ * nil, bool, int, float, string, symbol, keyword, cons, vector, map, set.
+ *
+ * Returns NULL (and sets an error on dst) if the value contains a
+ * non-transferable type (fn, macro, prim, handle, atom, lazy-seq).
+ * Nested collections are cloned recursively; a non-transferable element
+ * anywhere in the tree causes the entire clone to fail.
+ */
+mino_val_t *mino_clone(mino_state_t *dst, mino_state_t *src, mino_val_t *val);
+
+/* ------------------------------------------------------------------------- */
+/* Mailbox (thread-safe value queue)                                         */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * A mailbox is a thread-safe FIFO queue for passing values between states.
+ * The mailbox is owned by the host, not by any state. Values are serialized
+ * on send and deserialized on receive, so no cross-state pointers exist.
+ *
+ * The mailbox is the one concurrency primitive in mino that uses a mutex.
+ * It is safe to call send and recv from different threads simultaneously.
+ */
+typedef struct mino_mailbox mino_mailbox_t;
+
+mino_mailbox_t *mino_mailbox_new(void);
+
+/*
+ * Serialize val and enqueue it. Returns 0 on success, -1 on failure.
+ * Only data values are serializable (same restrictions as mino_clone).
+ */
+int             mino_mailbox_send(mino_mailbox_t *mb, mino_state_t *S,
+                                  mino_val_t *val);
+
+/*
+ * Dequeue and deserialize the next message into S. Returns the value,
+ * or NULL if the mailbox is empty.
+ */
+mino_val_t     *mino_mailbox_recv(mino_mailbox_t *mb, mino_state_t *S);
+
+/*
+ * Free the mailbox and any queued messages. Does not affect any state.
+ */
+void            mino_mailbox_free(mino_mailbox_t *mb);
+
 #ifdef __cplusplus
 }
 #endif

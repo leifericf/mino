@@ -206,8 +206,51 @@ The host must not call into a state from multiple threads concurrently.
 Different states may be used from different threads simultaneously since
 they share no mutable data.
 
-Refs, environments, and values belong to their state. Do not pass them
-between states.
+Refs, environments, and values belong to their state. Do not pass raw
+pointers between states; use `mino_clone` or a mailbox instead.
+
+
+## Value cloning
+
+To copy a value from one state to another:
+
+```c
+mino_val_t *copy = mino_clone(dst, src, val);
+```
+
+Clone performs a deep copy. Transferable types: nil, bool, int, float,
+string, symbol, keyword, cons, vector, map, set. Non-transferable types
+(fn, macro, prim, handle, atom, lazy-seq) cause the clone to return NULL
+with an error on the destination state.
+
+Nested collections are cloned recursively. A single non-transferable
+element anywhere in the tree fails the entire clone.
+
+
+## Mailbox
+
+A mailbox is a thread-safe FIFO queue for passing values between states
+that may live on different threads:
+
+```c
+mino_mailbox_t *mb = mino_mailbox_new();
+
+/* Thread A: send a value */
+mino_mailbox_send(mb, state_a, val);
+
+/* Thread B: receive into a different state */
+mino_val_t *msg = mino_mailbox_recv(mb, state_b);
+
+mino_mailbox_free(mb);
+```
+
+The mailbox serializes values on send and deserializes on receive, so no
+cross-state pointers ever exist. The same transferability rules apply as
+for `mino_clone`. `mino_mailbox_recv` returns NULL when the queue is empty.
+
+The mailbox is the one place in mino that uses a mutex. It is safe to call
+`send` and `recv` from different threads concurrently. The mailbox is owned
+by the host, not by any state.
 
 
 ## REPL handle
@@ -353,6 +396,21 @@ is valid for the duration of the call.
 | Function | Description |
 |----------|-------------|
 | `mino_set_limit(S, kind, value)` | Set step or heap limit (0 to disable) |
+
+### Cloning
+
+| Function | Description |
+|----------|-------------|
+| `mino_clone(dst, src, val)` | Deep-copy a value between states |
+
+### Mailbox
+
+| Function | Description |
+|----------|-------------|
+| `mino_mailbox_new()` | Create a thread-safe message queue |
+| `mino_mailbox_send(mb, S, val)` | Serialize and enqueue a value |
+| `mino_mailbox_recv(mb, S)` | Dequeue and deserialize (NULL if empty) |
+| `mino_mailbox_free(mb)` | Free the mailbox and queued messages |
 
 ### REPL
 
