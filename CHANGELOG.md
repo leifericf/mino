@@ -16,11 +16,26 @@ adheres to [Semantic Versioning](https://semver.org/).
   explicitly and no longer need to call this function.
 - **Default global state removed**: there is no implicit runtime state.
   The host must always create a state with `mino_state_new()`.
+- **`spawn` is now a macro**: `(spawn & body)` takes unquoted forms
+  instead of a source string. The string-based primitive is available
+  as `spawn*` for programmatic use.
+
+### Added
+
+- **Eager collection builders**: `rangev`, `mapv`, `filterv` produce
+  vectors directly in C without lazy thunk allocation. `rangev` is
+  60-70x faster than lazy `range` for data generation. `reduce` over
+  a `rangev` vector is 26x faster than over a lazy `range`.
+- **Core.mino parse caching**: parsed forms are cached per state.
+  Subsequent `mino_install_core` calls on the same state skip
+  re-parsing.
 
 ### Changed
 
 - All internal runtime state access is now explicit through
-  `mino_state_t *S` parameters. No process-global mutable state remains.
+  `mino_state_t *S` parameters. No process-global mutable state
+  remains (except a benign filename intern cache for reader
+  diagnostics).
 - Fixed `mino_env_clone` changelog description: it clones within the
   same state (values are shared), not across states.
 
