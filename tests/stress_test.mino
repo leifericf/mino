@@ -1,0 +1,395 @@
+;; stress_test.mino -- exploratory stress tests
+;; Targets: GC correctness, eval edge cases, data structure integrity,
+;; lazy sequences, macros, error handling, tail calls.
+
+(require "tests/test")
+
+;; --- GC stress: allocate heavily between lookups ---
+
+(deftest gc-stress-nested-calls
+  (testing "Deep nested function calls that allocate between each step"
+    (defn make-adder (n) (fn (x) (+ n x)))
+    (def add5 (make-adder 5))
+    (def add10 (make-adder 10))
+    (def _ (into [] (range 100)))
+    (is (= 15 (add5 10)))
+    (is (= 20 (add10 10)))
+    (def fns (map make-adder (range 20)))
+    (def _ (into [] (range 200)))
+    (is (= 19 ((nth (into [] fns) 0) 19)))
+    (is (= 29 ((nth (into [] fns) 10) 19)))))
+
+(deftest gc-stress-map-operations
+  (testing "Heavy map allocation to exercise HAMT under GC pressure"
+    (def m (reduce (fn (acc i) (assoc acc (keyword (str "k" i)) i))
+                   {} (range 100)))
+    (is (= 100 (count m)))
+    (is (= 0 (get m :k0)))
+    (is (= 99 (get m :k99)))
+    (def m2 (reduce (fn (acc i) (dissoc acc (keyword (str "k" i))))
+                    m (range 0 50)))
+    (is (= 50 (count m2)))
+    (is (= nil (get m2 :k0)))
+    (is (= 50 (get m2 :k50)))))
+
+(deftest gc-stress-vector-growth
+  (testing "Build a large vector element by element"
+    (def v (reduce conj [] (range 500)))
+    (is (= 500 (count v)))
+    (is (= 0 (nth v 0)))
+    (is (= 499 (nth v 499)))
+    (def v2 (assoc v 250 :replaced))
+    (is (= :replaced (nth v2 250)))
+    (is (= 249 (nth v2 249)))
+    (is (= 251 (nth v2 251)))))
+
+;; --- Lazy sequence stress ---
+
+(deftest lazy-infinite-take
+  (testing "Take from an infinite lazy sequence"
+    (defn naturals (n) (lazy-seq (cons n (naturals (+ n 1)))))
+    (def first-100 (into [] (take 100 (naturals 0))))
+    (is (= 100 (count first-100)))
+    (is (= 0 (nth first-100 0)))
+    (is (= 99 (nth first-100 99)))))
+
+(deftest lazy-chained-operations
+  (testing "Chain multiple lazy operations"
+    (def result (into [] (take 10
+      (filter (fn (x) (= 0 (mod x 3)))
+        (map (fn (x) (* x x))
+          (range))))))
+    (is (= 0 (nth result 0)))
+    (is (= 9 (nth result 1)))
+    (is (= 36 (nth result 2)))))
+
+(deftest lazy-concat-multiple
+  (testing "Concat many lazy sequences"
+    (def seqs (map (fn (i) (range (* i 10) (+ (* i 10) 5))) (range 10)))
+    (def all (into [] (apply concat (into [] seqs))))
+    (is (= 50 (count all)))
+    (is (= 0 (first all)))))
+
+(deftest lazy-realized-check
+  (testing "realized? on lazy sequences"
+    (def s (lazy-seq (cons 1 (lazy-seq (cons 2 nil)))))
+    (is (= false (realized? s)))
+    (is (= 1 (first s)))
+    (is (= true (realized? s)))))
+
+;; --- Tail call stress ---
+
+(deftest tail-call-deep-recursion
+  (testing "Proper tail calls: count down from a large number"
+    (defn countdown (n acc)
+      (if (= n 0) acc
+          (recur (- n 1) (+ acc 1))))
+    (is (= 100000 (countdown 100000 0)))))
+
+(deftest tail-call-mutual
+  (testing "Mutual recursion via function calls"
+    (defn my-even? (n)
+      (if (= n 0) true
+          (my-odd? (- n 1))))
+    (defn my-odd? (n)
+      (if (= n 0) false
+          (my-even? (- n 1))))
+    (is (= true (my-even? 100)))
+    (is (= false (my-odd? 100)))))
+
+(deftest loop-recur-stress
+  (testing "Loop/recur with heavy allocation each iteration"
+    (def result
+      (loop (i 0 acc [])
+        (if (= i 200)
+          acc
+          (recur (+ i 1) (conj acc (hash-map :i i :sq (* i i)))))))
+    (is (= 200 (count result)))
+    (is (= {:i 0 :sq 0} (nth result 0)))
+    (is (= {:i 199 :sq 39601} (nth result 199)))))
+
+;; --- Macro stress ---
+
+(deftest macro-gensym-hygiene
+  (testing "Macros with gensym don't capture outer bindings"
+    (defmacro my-let1 (name val body)
+      (let (g (gensym))
+        `(let (~g ~val) ~body)))
+    (def x 42)
+    ;; my-let1 binds a gensym to 10, body evaluates x which is still 42
+    (is (= 42 (my-let1 x 10 x)))))
+
+(deftest macro-recursive-expansion
+  (testing "Macro that expands to another macro call"
+    (defmacro double-when (test body)
+      `(when ~test (when ~test ~body)))
+    (def counter (atom 0))
+    (double-when true (swap! counter + 1))
+    (is (= 1 @counter))))
+
+(deftest quasiquote-splicing
+  (testing "Unquote-splicing in various positions"
+    (def xs '(1 2 3))
+    (is (= '(0 1 2 3 4) `(0 ~@xs 4)))
+    (def ys '())
+    (is (= '(a b) `(a ~@ys b)))))
+
+;; --- Error handling ---
+
+(deftest try-catch-basic
+  (testing "Try/catch catches thrown exceptions"
+    (def result (try (throw "boom") (catch e (str "caught: " e))))
+    (is (= "caught: boom" result))))
+
+(deftest try-catch-nested
+  (testing "Nested try/catch"
+    (def result
+      (try
+        (try
+          (throw "inner")
+          (catch e (str "inner: " e)))
+        (catch e (str "outer: " e))))
+    (is (= "inner: inner" result))))
+
+(deftest try-catch-rethrow
+  (testing "Catch and rethrow"
+    (def result
+      (try
+        (try
+          (throw "original")
+          (catch e (throw (str "wrapped: " e))))
+        (catch e e)))
+    (is (= "wrapped: original" result))))
+
+(deftest try-in-loop
+  (testing "Try/catch inside a loop"
+    (def results
+      (loop (i 0 acc [])
+        (if (= i 10) acc
+          (recur (+ i 1)
+            (conj acc
+              (try
+                (if (= 0 (mod i 3)) (throw i) i)
+                (catch e (str "err:" e))))))))
+    (is (= "err:0" (nth results 0)))
+    (is (= 1 (nth results 1)))
+    (is (= 2 (nth results 2)))
+    (is (= "err:3" (nth results 3)))))
+
+;; --- Set operations ---
+
+(deftest set-large-operations
+  (testing "Large set with conj/disj/contains?"
+    (def s (reduce conj #{} (range 200)))
+    (is (= 200 (count s)))
+    (is (contains? s 0))
+    (is (contains? s 199))
+    (is (= false (contains? s 200)))
+    (def s2 (reduce disj s (range 100)))
+    (is (= 100 (count s2)))
+    (is (= false (contains? s2 0)))
+    (is (contains? s2 100))))
+
+;; --- Atoms and swap! ---
+
+(deftest atom-swap-heavy-alloc
+  (testing "swap! with a function that allocates heavily"
+    (def a (atom []))
+    (dotimes (i 100)
+      (swap! a conj (hash-map :idx i :data (into [] (range 5)))))
+    (is (= 100 (count @a)))
+    (is (= {:idx 0 :data [0 1 2 3 4]} (nth @a 0)))))
+
+(deftest atom-swap-with-closures
+  (testing "swap! where the function is a closure"
+    (def a (atom 0))
+    (def incrementers (map (fn (n) (fn (x) (+ x n))) (range 1 11)))
+    (reduce (fn (_ f) (swap! a f)) nil (into [] incrementers))
+    (is (= 55 @a))))
+
+;; --- String edge cases ---
+
+(deftest string-empty-operations
+  (testing "String operations on empty strings"
+    (is (= "" (subs "" 0 0)))
+    (is (= "" (join "," [])))
+    (is (= "" (trim "   ")))
+    (is (= "" (upper-case "")))
+    (is (= "" (lower-case "")))))
+
+(deftest string-basics
+  (testing "Basic string operations"
+    (is (includes? "hello world" "world"))
+    (is (starts-with? "foobar" "foo"))
+    (is (ends-with? "foobar" "bar"))))
+
+;; --- Regression: the original GC bug ---
+
+(deftest gc-regression-fn-after-eval-args
+  (testing "Function value survives GC during argument evaluation"
+    (defn make-checker () number?)
+    (def check (make-checker))
+    (def _ (into [] (range 100)))
+    (is (= true (check 42)))
+    (is (= false (check "hello")))))
+
+(deftest gc-regression-nested-fn-calls
+  (testing "Nested function calls where each level allocates"
+    (defn f (x) (+ x 1))
+    (defn g (x) (f (+ x (count (into [] (range 50))))))
+    (defn h (x) (g (+ x (count (into [] (range 50))))))
+    (is (= 101 (h 0)))))
+
+;; --- Dynamic binding ---
+
+(deftest dynamic-binding-basic
+  (testing "binding form creates dynamic bindings"
+    (def *x* 10)
+    (is (= 10 *x*))
+    (binding (*x* 42)
+      (is (= 42 *x*)))
+    (is (= 10 *x*))))
+
+(deftest dynamic-binding-nested
+  (testing "Nested binding forms shadow correctly"
+    (def *val* :outer)
+    (binding (*val* :middle)
+      (is (= :middle *val*))
+      (binding (*val* :inner)
+        (is (= :inner *val*)))
+      (is (= :middle *val*)))
+    (is (= :outer *val*))))
+
+;; --- Eval and read-string ---
+
+(deftest eval-read-string-roundtrip
+  (testing "Read, eval, and verify complex expressions"
+    (is (= 42 (eval (read-string "(+ 40 2)"))))
+    (is (= [1 2 3] (eval (read-string "[1 2 3]"))))
+    (is (= {:a 1} (eval (read-string "{:a 1}"))))))
+
+;; --- Regex ---
+
+(deftest regex-basic-patterns
+  (testing "re-find and re-matches"
+    (is (= "123" (re-find "[0-9]+" "abc123def")))
+    (is (= nil (re-find "[0-9]+" "no digits")))
+    (is (= "hello" (re-matches "[a-z]+" "hello")))
+    (is (= nil (re-matches "[a-z]+" "Hello")))))
+
+;; --- Higher-order function stress ---
+
+(deftest comp-and-partial
+  (testing "comp and partial with multiple functions"
+    (def inc-then-double (comp (partial * 2) (partial + 1)))
+    (is (= 6 (inc-then-double 2)))
+    (is (= 20 (inc-then-double 9)))))
+
+(deftest reduce-large
+  (testing "reduce over a large collection"
+    (is (= 499500 (reduce + 0 (range 1000))))))
+
+(deftest into-various-collections
+  (testing "into with different target collection types"
+    (is (= [1 2 3 4 5] (into [1 2] [3 4 5])))
+    (is (= {:a 1 :b 2} (into {:a 1} [[:b 2]])))
+    (is (= #{1 2 3} (into #{1} [2 3])))))
+
+;; --- Sort with custom comparator ---
+
+(deftest sort-custom-comparator
+  (testing "sort with a comparator function"
+    (def data [3 1 4 1 5 9 2 6])
+    (is (= [1 1 2 3 4 5 6 9] (into [] (sort data))))
+    (is (= [9 6 5 4 3 2 1 1] (into [] (sort (fn (a b) (compare b a)) data))))))
+
+;; --- apply edge cases ---
+
+(deftest apply-with-collections
+  (testing "apply with various argument patterns"
+    (is (= 6 (apply + [1 2 3])))
+    (is (= 6 (apply + 1 [2 3])))
+    (is (= 6 (apply + 1 2 [3])))
+    (is (= "abc" (apply str ["a" "b" "c"])))))
+
+;; --- Threading macros ---
+
+(deftest threading-macro-stress
+  (testing "-> and ->> with many steps"
+    (is (= 14 (-> 1 (+ 2) (* 3) (+ 5))))
+    (is (= 30 (->> (range 5) (map (fn (x) (* x x))) (reduce +))))))
+
+;; --- Deeply nested data structures ---
+
+(deftest deeply-nested-vectors
+  (testing "Vectors nested 10 levels deep"
+    (defn nest (depth val)
+      (if (= depth 0) val
+          (vector (nest (- depth 1) val))))
+    (def deep (nest 10 42))
+    (defn unwrap (v depth)
+      (if (= depth 0) v
+          (unwrap (nth v 0) (- depth 1))))
+    (is (= 42 (unwrap deep 10)))))
+
+(deftest map-with-complex-keys
+  (testing "Maps with vector and keyword keys"
+    (def m {[1 2] :pair-a [3 4] :pair-b :simple :val})
+    (is (= :pair-a (get m [1 2])))
+    (is (= :pair-b (get m [3 4])))
+    (is (= :val (get m :simple)))))
+
+;; --- Edge case: empty collections ---
+
+(deftest empty-collection-operations
+  (testing "Operations on empty collections"
+    (is (= nil (first [])))
+    (is (= nil (first '())))
+    (is (= 0 (count #{})))
+    (is (= 0 (count [])))
+    (is (= 0 (count {})))
+    (is (= 0 (count #{})))
+    (is (= [] (into [] [])))
+    (is (= {} (into {} [])))
+    (is (= #{} (into #{} [])))))
+
+;; --- pr-str roundtrip ---
+
+(deftest pr-str-roundtrip
+  (testing "pr-str produces readable representations"
+    (is (= "42" (pr-str 42)))
+    (is (= "\"hello\"" (pr-str "hello")))
+    (is (= ":foo" (pr-str :foo)))
+    (is (= "[1 2 3]" (pr-str [1 2 3])))
+    (is (= "nil" (pr-str nil)))
+    (is (= "true" (pr-str true)))
+    (is (= "false" (pr-str false)))))
+
+;; --- Keyword as function ---
+
+(deftest keyword-lookup-via-get
+  (testing "Keyword lookup via get"
+    (is (= 1 (get {:a 1 :b 2} :a)))
+    (is (= nil (get {:a 1 :b 2} :c)))
+    (is (= [1 2 3] (into [] (map (fn (m) (get m :val)) [{:val 1} {:val 2} {:val 3}]))))))
+
+;; --- Complement ---
+
+(deftest complement-test
+  (testing "complement inverts predicates"
+    (def not-nil? (complement nil?))
+    (is (not-nil? 42))
+    (is (= false (not-nil? nil)))))
+
+;; --- identity and not ---
+
+(deftest identity-and-not
+  (testing "identity returns its argument, not inverts truthiness"
+    (is (= 42 (identity 42)))
+    (is (= nil (identity nil)))
+    (is (= true (not false)))
+    (is (= true (not nil)))
+    (is (= false (not 42)))
+    (is (= false (not "hello")))))
+
+(run-tests)
