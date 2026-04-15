@@ -82,8 +82,6 @@ static void test_repl_complex_session(void)
     /* Step 6: verify binding was restored */
     rc = mino_repl_feed(repl, "*ctx*", &out);
     CHK(rc == MINO_REPL_OK, "feed failed");
-    const char *s;
-    size_t len;
     /* *ctx* should be :default keyword */
     CHK(out->type == MINO_KEYWORD, "not keyword");
 
