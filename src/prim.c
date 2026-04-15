@@ -1146,6 +1146,13 @@ static mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return p->as.cons.car;
     }
+    if (coll->type == MINO_STRING) {
+        if ((size_t)idx >= coll->as.s.len) {
+            if (def_val != NULL) return def_val;
+            return prim_throw_error(S, "nth index out of range");
+        }
+        return mino_string_n(S, coll->as.s.data + idx, 1);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "nth: expected a list, vector, or string, got %s",
