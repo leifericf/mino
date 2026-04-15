@@ -36,40 +36,43 @@ static const char *math_plugin =
 /* Call a named function in env with a single argument. */
 static mino_val_t *call1(mino_env_t *env, const char *name, mino_val_t *arg)
 {
+    mino_state_t *S  = mino_current_state();
     mino_val_t *fn   = mino_env_get(env, name);
-    mino_val_t *args = mino_cons(arg, mino_nil());
+    mino_val_t *args = mino_cons(S, arg, mino_nil(S));
     if (fn == NULL) {
         fprintf(stderr, "plugin: function '%s' not found\n", name);
         return NULL;
     }
-    return mino_call(fn, args, env);
+    return mino_call(S, fn, args, env);
 }
 
 static mino_val_t *call2(mino_env_t *env, const char *name,
                          mino_val_t *a, mino_val_t *b)
 {
+    mino_state_t *S  = mino_current_state();
     mino_val_t *fn   = mino_env_get(env, name);
-    mino_val_t *args = mino_cons(a, mino_cons(b, mino_nil()));
+    mino_val_t *args = mino_cons(S, a, mino_cons(S, b, mino_nil(S)));
     if (fn == NULL) {
         fprintf(stderr, "plugin: function '%s' not found\n", name);
         return NULL;
     }
-    return mino_call(fn, args, env);
+    return mino_call(S, fn, args, env);
 }
 
 int main(void)
 {
-    mino_env_t *env = mino_new();
+    mino_state_t *S = mino_state_new();
+    mino_env_t *env = mino_new(S);
     mino_val_t *result;
 
     /* Load the greeter plugin. */
-    if (mino_eval_string(greeter_plugin, env) == NULL) {
-        fprintf(stderr, "load error: %s\n", mino_last_error());
+    if (mino_eval_string(S, greeter_plugin, env) == NULL) {
+        fprintf(stderr, "load error: %s\n", mino_last_error(S));
         return 1;
     }
 
     /* Call plugin functions from C. */
-    result = call1(env, "greet", mino_string("World"));
+    result = call1(env, "greet", mino_string(S, "World"));
     if (result != NULL) {
         const char *s;
         size_t      n;
@@ -78,7 +81,7 @@ int main(void)
         }
     }
 
-    result = call1(env, "farewell", mino_string("World"));
+    result = call1(env, "farewell", mino_string(S, "World"));
     if (result != NULL) {
         const char *s;
         size_t      n;
@@ -88,12 +91,12 @@ int main(void)
     }
 
     /* Load the math plugin. */
-    if (mino_eval_string(math_plugin, env) == NULL) {
-        fprintf(stderr, "load error: %s\n", mino_last_error());
+    if (mino_eval_string(S, math_plugin, env) == NULL) {
+        fprintf(stderr, "load error: %s\n", mino_last_error(S));
         return 1;
     }
 
-    result = call1(env, "square", mino_int(7));
+    result = call1(env, "square", mino_int(S, 7));
     if (result != NULL) {
         long long v;
         if (mino_to_int(result, &v)) {
@@ -101,7 +104,7 @@ int main(void)
         }
     }
 
-    result = call2(env, "hypot", mino_int(3), mino_int(4));
+    result = call2(env, "hypot", mino_int(S, 3), mino_int(S, 4));
     if (result != NULL) {
         long long v;
         if (mino_to_int(result, &v)) {
@@ -112,14 +115,15 @@ int main(void)
     /* Demonstrate protected call — catches errors gracefully. */
     {
         mino_val_t *fn  = mino_env_get(env, "square");
-        mino_val_t *bad = mino_cons(mino_string("oops"), mino_nil());
+        mino_val_t *bad = mino_cons(S, mino_string(S, "oops"), mino_nil(S));
         mino_val_t *out = NULL;
-        int rc = mino_pcall(fn, bad, env, &out);
+        int rc = mino_pcall(S, fn, bad, env, &out);
         if (rc != 0) {
-            printf("pcall caught: %s\n", mino_last_error());
+            printf("pcall caught: %s\n", mino_last_error(S));
         }
     }
 
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     return 0;
 }

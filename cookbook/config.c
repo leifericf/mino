@@ -31,24 +31,25 @@ static const char *config_src =
 
 int main(void)
 {
-    mino_env_t *env = mino_env_new();
+    mino_state_t *S = mino_state_new();
+    mino_env_t *env = mino_env_new(S);
     mino_val_t *cfg;
     mino_val_t *val;
 
     /* Core bindings only — no I/O. The config file cannot read files,
      * print, or access the network. */
-    mino_install_core(env);
+    mino_install_core(S, env);
 
     /* Evaluate the config source. */
-    cfg = mino_eval_string(config_src, env);
+    cfg = mino_eval_string(S, config_src, env);
     if (cfg == NULL) {
-        fprintf(stderr, "config error: %s\n", mino_last_error());
+        fprintf(stderr, "config error: %s\n", mino_last_error(S));
         return 1;
     }
 
     /* Bind the config map so we can query it from mino expressions. */
-    mino_env_set(env, "cfg", cfg);
-    val = mino_eval_string("(get cfg :port)", env);
+    mino_env_set(S, env, "cfg", cfg);
+    val = mino_eval_string(S, "(get cfg :port)", env);
     if (val != NULL) {
         long long port;
         if (mino_to_int(val, &port)) {
@@ -56,7 +57,7 @@ int main(void)
         }
     }
 
-    val = mino_eval_string("(get cfg :host)", env);
+    val = mino_eval_string(S, "(get cfg :host)", env);
     if (val != NULL) {
         const char *host;
         size_t      len;
@@ -65,16 +66,16 @@ int main(void)
         }
     }
 
-    val = mino_eval_string("(get cfg :debug)", env);
+    val = mino_eval_string(S, "(get cfg :debug)", env);
     if (val != NULL) {
         printf("debug: %s\n", mino_to_bool(val) ? "on" : "off");
     }
 
     /* Iterate over routes. */
-    val = mino_eval_string("(get cfg :routes)", env);
+    val = mino_eval_string(S, "(get cfg :routes)", env);
     if (val != NULL) {
         long long count;
-        mino_val_t *c = mino_eval_string("(count (get cfg :routes))", env);
+        mino_val_t *c = mino_eval_string(S, "(count (get cfg :routes))", env);
         if (c != NULL && mino_to_int(c, &count)) {
             long long i;
             printf("routes (%lld):\n", count);
@@ -84,10 +85,10 @@ int main(void)
                 mino_val_t *path;
                 snprintf(expr, sizeof(expr),
                          "(nth (get cfg :routes) %lld)", i);
-                route = mino_eval_string(expr, env);
+                route = mino_eval_string(S, expr, env);
                 if (route == NULL) continue;
-                mino_env_set(env, "__r", route);
-                path = mino_eval_string("(get __r :path)", env);
+                mino_env_set(S, env, "__r", route);
+                path = mino_eval_string(S, "(get __r :path)", env);
                 if (path != NULL) {
                     const char *s;
                     size_t      n;
@@ -99,6 +100,7 @@ int main(void)
         }
     }
 
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     return 0;
 }

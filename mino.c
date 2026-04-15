@@ -255,6 +255,11 @@ void mino_state_free(mino_state_t *st)
     }
 }
 
+mino_state_t *mino_current_state(void)
+{
+    return S_;
+}
+
 /* ---- State field accessor macros ---------------------------------------- */
 /* Existing code uses bare names which resolve to S_->field.                 */
 
@@ -424,21 +429,21 @@ static char *dup_n(const char *s, size_t len)
 /* Singletons                                                                */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_nil(void)
+mino_val_t *mino_nil(mino_state_t *S)
 {
-    if (!g_state_ready) { state_init(S_); g_state_ready = 1; }
+    S_ = S;
     return &nil_singleton;
 }
 
-mino_val_t *mino_true(void)
+mino_val_t *mino_true(mino_state_t *S)
 {
-    if (!g_state_ready) { state_init(S_); g_state_ready = 1; }
+    S_ = S;
     return &true_singleton;
 }
 
-mino_val_t *mino_false(void)
+mino_val_t *mino_false(mino_state_t *S)
 {
-    if (!g_state_ready) { state_init(S_); g_state_ready = 1; }
+    S_ = S;
     return &false_singleton;
 }
 
@@ -446,31 +451,35 @@ mino_val_t *mino_false(void)
 /* Constructors                                                              */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_int(long long n)
+mino_val_t *mino_int(mino_state_t *S, long long n)
 {
+    S_ = S;
     mino_val_t *v = alloc_val(MINO_INT);
     v->as.i = n;
     return v;
 }
 
-mino_val_t *mino_float(double f)
+mino_val_t *mino_float(mino_state_t *S, double f)
 {
+    S_ = S;
     mino_val_t *v = alloc_val(MINO_FLOAT);
     v->as.f = f;
     return v;
 }
 
-mino_val_t *mino_string_n(const char *s, size_t len)
+mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len)
 {
+    S_ = S;
     mino_val_t *v = alloc_val(MINO_STRING);
     v->as.s.data = dup_n(s, len);
     v->as.s.len  = len;
     return v;
 }
 
-mino_val_t *mino_string(const char *s)
+mino_val_t *mino_string(mino_state_t *S, const char *s)
 {
-    return mino_string_n(s, strlen(s));
+    S_ = S;
+    return mino_string_n(S_, s, strlen(s));
 }
 
 /*
@@ -509,28 +518,33 @@ static mino_val_t *intern_lookup_or_create(intern_table_t *tbl,
     return v;
 }
 
-mino_val_t *mino_symbol_n(const char *s, size_t len)
+mino_val_t *mino_symbol_n(mino_state_t *S, const char *s, size_t len)
 {
+    S_ = S;
     return intern_lookup_or_create(&sym_intern, MINO_SYMBOL, s, len);
 }
 
-mino_val_t *mino_symbol(const char *s)
+mino_val_t *mino_symbol(mino_state_t *S, const char *s)
 {
-    return mino_symbol_n(s, strlen(s));
+    S_ = S;
+    return mino_symbol_n(S_, s, strlen(s));
 }
 
-mino_val_t *mino_keyword_n(const char *s, size_t len)
+mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len)
 {
+    S_ = S;
     return intern_lookup_or_create(&kw_intern, MINO_KEYWORD, s, len);
 }
 
-mino_val_t *mino_keyword(const char *s)
+mino_val_t *mino_keyword(mino_state_t *S, const char *s)
 {
-    return mino_keyword_n(s, strlen(s));
+    S_ = S;
+    return mino_keyword_n(S_, s, strlen(s));
 }
 
-mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr)
+mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
 {
+    S_ = S;
     mino_val_t *v = alloc_val(MINO_CONS);
     v->as.cons.car = car;
     v->as.cons.cdr = cdr;
@@ -828,8 +842,9 @@ static mino_val_t *vec_from_array(mino_val_t **items, size_t len)
     }
 }
 
-mino_val_t *mino_vector(mino_val_t **items, size_t len)
+mino_val_t *mino_vector(mino_state_t *S, mino_val_t **items, size_t len)
 {
+    S_ = S;
     return vec_from_array(items, len);
 }
 
@@ -1350,11 +1365,12 @@ static mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key)
  * first appeared in the source sequence. Caller retains ownership of the
  * source arrays.
  */
-mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len)
+mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size_t len)
 {
+    S_ = S;
     mino_val_t       *v        = alloc_val(MINO_MAP);
     mino_hamt_node_t *root     = NULL;
-    mino_val_t       *order    = mino_vector(NULL, 0);
+    mino_val_t       *order    = mino_vector(S_, NULL, 0);
     size_t            len_out  = 0;
     size_t            i;
     for (i = 0; i < len; i++) {
@@ -1373,15 +1389,16 @@ mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len)
     return v;
 }
 
-mino_val_t *mino_set(mino_val_t **items, size_t len)
+mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len)
 {
+    S_ = S;
     mino_val_t       *v        = alloc_val(MINO_SET);
     mino_hamt_node_t *root     = NULL;
-    mino_val_t       *order    = mino_vector(NULL, 0);
+    mino_val_t       *order    = mino_vector(S_, NULL, 0);
     size_t            len_out  = 0;
     size_t            i;
     /* Sentinel value: all set entries map to true. */
-    mino_val_t       *sentinel = mino_true();
+    mino_val_t       *sentinel = mino_true(S_);
     for (i = 0; i < len; i++) {
         hamt_entry_t *e        = hamt_entry_new(items[i], sentinel);
         uint32_t      h        = hash_val(items[i]);
@@ -1398,16 +1415,18 @@ mino_val_t *mino_set(mino_val_t **items, size_t len)
     return v;
 }
 
-mino_val_t *mino_prim(const char *name, mino_prim_fn fn)
+mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn)
 {
+    S_ = S;
     mino_val_t *v = alloc_val(MINO_PRIM);
     v->as.prim.name = name;
     v->as.prim.fn   = fn;
     return v;
 }
 
-mino_val_t *mino_handle(void *ptr, const char *tag)
+mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag)
 {
+    S_ = S;
     mino_val_t *v = alloc_val(MINO_HANDLE);
     v->as.handle.ptr = ptr;
     v->as.handle.tag = tag;
@@ -1435,8 +1454,9 @@ const char *mino_handle_tag(const mino_val_t *v)
     return v->as.handle.tag;
 }
 
-mino_val_t *mino_atom(mino_val_t *val)
+mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val)
 {
+    S_ = S;
     mino_val_t *v = alloc_val(MINO_ATOM);
     v->as.atom.val = val;
     return v;
@@ -1501,7 +1521,7 @@ int mino_is_cons(const mino_val_t *v)
 mino_val_t *mino_car(const mino_val_t *v)
 {
     if (!mino_is_cons(v)) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     return v->as.cons.car;
 }
@@ -1509,7 +1529,7 @@ mino_val_t *mino_car(const mino_val_t *v)
 mino_val_t *mino_cdr(const mino_val_t *v)
 {
     if (!mino_is_cons(v)) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     return v->as.cons.cdr;
 }
@@ -1600,8 +1620,9 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
  */
 #define MINO_PRINT_DEPTH_MAX 128
 
-void mino_print_to(FILE *out, const mino_val_t *v)
+void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
+    S_ = S;
     if (v == NULL || v->type == MINO_NIL) {
         fputs("nil", out);
         return;
@@ -1661,7 +1682,7 @@ void mino_print_to(FILE *out, const mino_val_t *v)
         fputc('(', out);
         print_depth++;
         while (p != NULL && p->type == MINO_CONS) {
-            mino_print_to(out, p->as.cons.car);
+            mino_print_to(S_, out, p->as.cons.car);
             p = p->as.cons.cdr;
             /* Force lazy tails so (cons x (lazy-seq ...)) prints as a list. */
             if (p != NULL && p->type == MINO_LAZY) {
@@ -1671,7 +1692,7 @@ void mino_print_to(FILE *out, const mino_val_t *v)
                 fputc(' ', out);
             } else if (p != NULL && p->type != MINO_NIL) {
                 fputs(" . ", out);
-                mino_print_to(out, p);
+                mino_print_to(S_, out, p);
                 break;
             }
         }
@@ -1687,7 +1708,7 @@ void mino_print_to(FILE *out, const mino_val_t *v)
             if (i > 0) {
                 fputc(' ', out);
             }
-            mino_print_to(out, vec_nth(v, i));
+            mino_print_to(S_, out, vec_nth(v, i));
         }
         print_depth--;
         fputc(']', out);
@@ -1702,9 +1723,9 @@ void mino_print_to(FILE *out, const mino_val_t *v)
             if (i > 0) {
                 fputs(", ", out);
             }
-            mino_print_to(out, key);
+            mino_print_to(S_, out, key);
             fputc(' ', out);
-            mino_print_to(out, map_get_val(v, key));
+            mino_print_to(S_, out, map_get_val(v, key));
         }
         print_depth--;
         fputc('}', out);
@@ -1718,7 +1739,7 @@ void mino_print_to(FILE *out, const mino_val_t *v)
             if (i > 0) {
                 fputc(' ', out);
             }
-            mino_print_to(out, vec_nth(v->as.set.key_order, i));
+            mino_print_to(S_, out, vec_nth(v->as.set.key_order, i));
         }
         print_depth--;
         fputc('}', out);
@@ -1748,14 +1769,14 @@ void mino_print_to(FILE *out, const mino_val_t *v)
     case MINO_ATOM:
         fputs("#atom[", out);
         print_depth++;
-        mino_print_to(out, v->as.atom.val);
+        mino_print_to(S_, out, v->as.atom.val);
         print_depth--;
         fputc(']', out);
         return;
     case MINO_LAZY: {
         /* Force the lazy seq and print the realized value. */
         mino_val_t *forced = lazy_force((mino_val_t *)v);
-        mino_print_to(out, forced);
+        mino_print_to(S_, out, forced);
         return;
     }
     case MINO_RECUR:
@@ -1768,14 +1789,16 @@ void mino_print_to(FILE *out, const mino_val_t *v)
     }
 }
 
-void mino_print(const mino_val_t *v)
+void mino_print(mino_state_t *S, const mino_val_t *v)
 {
-    mino_print_to(stdout, v);
+    S_ = S;
+    mino_print_to(S_, stdout, v);
 }
 
-void mino_println(const mino_val_t *v)
+void mino_println(mino_state_t *S, const mino_val_t *v)
 {
-    mino_print_to(stdout, v);
+    S_ = S;
+    mino_print_to(S_, stdout, v);
     fputc('\n', stdout);
 }
 
@@ -1783,8 +1806,9 @@ void mino_println(const mino_val_t *v)
 /* Error reporting                                                           */
 /* ------------------------------------------------------------------------- */
 
-const char *mino_last_error(void)
+const char *mino_last_error(mino_state_t *S)
 {
+    S_ = S;
     return error_buf[0] ? error_buf : NULL;
 }
 
@@ -2006,7 +2030,7 @@ static mino_val_t *read_string_form(const char **p)
     }
     (*p)++; /* skip closing quote */
     {
-        mino_val_t *v = mino_string_n(buf, len);
+        mino_val_t *v = mino_string_n(S_, buf, len);
         free(buf);
         return v;
     }
@@ -2016,7 +2040,7 @@ static mino_val_t *read_list_form(const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
     int         list_line = reader_line;
-    mino_val_t *head = mino_nil();
+    mino_val_t *head = mino_nil(S_);
     mino_val_t *tail = NULL;
     (*p)++; /* skip '(' */
     for (;;) {
@@ -2032,7 +2056,7 @@ static mino_val_t *read_list_form(const char **p)
         {
             int         elem_line = reader_line;
             mino_val_t *elem = read_form(p);
-            if (elem == NULL && mino_last_error() != NULL) {
+            if (elem == NULL && mino_last_error(S_) != NULL) {
                 return NULL;
             }
             if (elem == NULL) {
@@ -2041,7 +2065,7 @@ static mino_val_t *read_list_form(const char **p)
                 return NULL;
             }
             {
-                mino_val_t *cell = mino_cons(elem, mino_nil());
+                mino_val_t *cell = mino_cons(S_, elem, mino_nil(S_));
                 cell->as.cons.file = reader_file;
                 cell->as.cons.line = (tail == NULL) ? list_line : elem_line;
                 if (tail == NULL) {
@@ -2078,7 +2102,7 @@ static mino_val_t *read_vector_form(const char **p)
         {
             mino_val_t *elem = read_form(p);
             if (elem == NULL) {
-                if (mino_last_error() == NULL) {
+                if (mino_last_error(S_) == NULL) {
                     set_error("unterminated vector");
                 }
                 return NULL;
@@ -2096,7 +2120,7 @@ static mino_val_t *read_vector_form(const char **p)
             buf[len++] = elem;
         }
     }
-    return mino_vector(buf, len);
+    return mino_vector(S_, buf, len);
 }
 
 static mino_val_t *read_map_form(const char **p)
@@ -2124,7 +2148,7 @@ static mino_val_t *read_map_form(const char **p)
         }
         key = read_form(p);
         if (key == NULL) {
-            if (mino_last_error() == NULL) {
+            if (mino_last_error(S_) == NULL) {
                 set_error("unterminated map");
             }
             return NULL;
@@ -2136,7 +2160,7 @@ static mino_val_t *read_map_form(const char **p)
         }
         val = read_form(p);
         if (val == NULL) {
-            if (mino_last_error() == NULL) {
+            if (mino_last_error(S_) == NULL) {
                 set_error("unterminated map");
             }
             return NULL;
@@ -2159,7 +2183,7 @@ static mino_val_t *read_map_form(const char **p)
         vbuf[len] = val;
         len++;
     }
-    return mino_map(kbuf, vbuf, len);
+    return mino_map(S_, kbuf, vbuf, len);
 }
 
 static mino_val_t *read_set_form(const char **p)
@@ -2182,7 +2206,7 @@ static mino_val_t *read_set_form(const char **p)
         }
         elem = read_form(p);
         if (elem == NULL) {
-            if (mino_last_error() == NULL) {
+            if (mino_last_error(S_) == NULL) {
                 set_error("unterminated set");
             }
             return NULL;
@@ -2199,7 +2223,7 @@ static mino_val_t *read_set_form(const char **p)
         }
         buf[len++] = elem;
     }
-    return mino_set(buf, len);
+    return mino_set(S_, buf, len);
 }
 
 static mino_val_t *read_atom(const char **p)
@@ -2212,7 +2236,7 @@ static mino_val_t *read_atom(const char **p)
     *p += len;
 
     if (len >= 2 && start[0] == ':') {
-        return mino_keyword_n(start + 1, len - 1);
+        return mino_keyword_n(S_, start + 1, len - 1);
     }
     if (len == 1 && start[0] == ':') {
         set_error("keyword missing name");
@@ -2220,13 +2244,13 @@ static mino_val_t *read_atom(const char **p)
     }
 
     if (len == 3 && memcmp(start, "nil", 3) == 0) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     if (len == 4 && memcmp(start, "true", 4) == 0) {
-        return mino_true();
+        return mino_true(S_);
     }
     if (len == 5 && memcmp(start, "false", 5) == 0) {
-        return mino_false();
+        return mino_false(S_);
     }
 
     /* Try numeric. */
@@ -2259,19 +2283,19 @@ static mino_val_t *read_atom(const char **p)
                 if (has_dot_or_exp) {
                     double d = strtod(buf, &endp);
                     if (endp == buf + len) {
-                        return mino_float(d);
+                        return mino_float(S_, d);
                     }
                 } else {
                     long long n = strtoll(buf, &endp, 10);
                     if (endp == buf + len) {
-                        return mino_int(n);
+                        return mino_int(S_, n);
                     }
                 }
             }
         }
     }
 
-    return mino_symbol_n(start, len);
+    return mino_symbol_n(S_, start, len);
 }
 
 static mino_val_t *read_form(const char **p)
@@ -2315,13 +2339,13 @@ static mino_val_t *read_form(const char **p)
             mino_val_t *quoted = read_form(p);
             mino_val_t *outer;
             if (quoted == NULL) {
-                if (mino_last_error() == NULL) {
+                if (mino_last_error(S_) == NULL) {
                     set_error("expected form after quote");
                 }
                 return NULL;
             }
-            outer = mino_cons(mino_symbol("quote"),
-                              mino_cons(quoted, mino_nil()));
+            outer = mino_cons(S_, mino_symbol(S_, "quote"),
+                              mino_cons(S_, quoted, mino_nil(S_)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
@@ -2334,13 +2358,13 @@ static mino_val_t *read_form(const char **p)
             mino_val_t *qq = read_form(p);
             mino_val_t *outer;
             if (qq == NULL) {
-                if (mino_last_error() == NULL) {
+                if (mino_last_error(S_) == NULL) {
                     set_error("expected form after `");
                 }
                 return NULL;
             }
-            outer = mino_cons(mino_symbol("quasiquote"),
-                              mino_cons(qq, mino_nil()));
+            outer = mino_cons(S_, mino_symbol(S_, "quasiquote"),
+                              mino_cons(S_, qq, mino_nil(S_)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
@@ -2353,13 +2377,13 @@ static mino_val_t *read_form(const char **p)
             mino_val_t *target = read_form(p);
             mino_val_t *outer;
             if (target == NULL) {
-                if (mino_last_error() == NULL) {
+                if (mino_last_error(S_) == NULL) {
                     set_error("expected form after @");
                 }
                 return NULL;
             }
-            outer = mino_cons(mino_symbol("deref"),
-                              mino_cons(target, mino_nil()));
+            outer = mino_cons(S_, mino_symbol(S_, "deref"),
+                              mino_cons(S_, target, mino_nil(S_)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
@@ -2377,13 +2401,13 @@ static mino_val_t *read_form(const char **p)
             mino_val_t *uq = read_form(p);
             mino_val_t *outer;
             if (uq == NULL) {
-                if (mino_last_error() == NULL) {
+                if (mino_last_error(S_) == NULL) {
                     set_error("expected form after ~");
                 }
                 return NULL;
             }
-            outer = mino_cons(mino_symbol(name),
-                              mino_cons(uq, mino_nil()));
+            outer = mino_cons(S_, mino_symbol(S_, name),
+                              mino_cons(S_, uq, mino_nil(S_)));
             outer->as.cons.file = reader_file;
             outer->as.cons.line = q_line;
             return outer;
@@ -2392,8 +2416,9 @@ static mino_val_t *read_form(const char **p)
     return read_atom(p);
 }
 
-mino_val_t *mino_read(const char *src, const char **end)
+mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
 {
+    S_ = S;
     volatile char probe = 0;
     const char   *p = src;
     mino_val_t   *v;
@@ -2427,8 +2452,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     /* Force lazy seqs before comparison. */
     if (a->type == MINO_LAZY) a = lazy_force((mino_val_t *)a);
     if (b->type == MINO_LAZY) b = lazy_force((mino_val_t *)b);
-    if (a == NULL) a = mino_nil();
-    if (b == NULL) b = mino_nil();
+    if (a == NULL) a = mino_nil(S_);
+    if (b == NULL) b = mino_nil(S_);
     if (a == b) return 1;
     if (a->type != b->type) {
         /*
@@ -2565,9 +2590,10 @@ static mino_env_t *env_alloc(mino_env_t *parent)
     return env;
 }
 
-mino_env_t *mino_env_new(void)
+mino_env_t *mino_env_new(mino_state_t *S)
 {
     volatile char probe = 0;
+    S_ = S;
     mino_env_t   *env;
     root_env_t   *r;
     /* Record the host's stack frame: this is typically the earliest point
@@ -2591,8 +2617,9 @@ static mino_env_t *env_child(mino_env_t *parent)
     return env_alloc(parent);
 }
 
-void mino_env_free(mino_env_t *env)
+void mino_env_free(mino_state_t *S, mino_env_t *env)
 {
+    S_ = S;
     /* Unroot the env. Its memory, along with any closures and bindings
      * reachable only through it, is reclaimed at the next collection. */
     root_env_t **pp = &gc_root_envs;
@@ -2651,8 +2678,9 @@ static mino_env_t *env_root(mino_env_t *env)
     return env;
 }
 
-void mino_env_set(mino_env_t *env, const char *name, mino_val_t *val)
+void mino_env_set(mino_state_t *S, mino_env_t *env, const char *name, mino_val_t *val)
 {
+    S_ = S;
     env_bind(env, name, val);
 }
 
@@ -3118,7 +3146,7 @@ static mino_val_t *quasiquote_expand(mino_val_t *form, mino_env_t *env)
             if (e == NULL) { return NULL; }
             tmp[i] = e;
         }
-        return mino_vector(tmp, nn);
+        return mino_vector(S_, tmp, nn);
     }
     if (form != NULL && form->type == MINO_MAP) {
         size_t        nn = form->as.map.len;
@@ -3138,7 +3166,7 @@ static mino_val_t *quasiquote_expand(mino_val_t *form, mino_env_t *env)
             if (vv == NULL) { return NULL; }
             ks[i] = kk; vs[i] = vv;
         }
-        return mino_map(ks, vs, nn);
+        return mino_map(S_, ks, vs, nn);
     }
     if (!mino_is_cons(form)) {
         return form;
@@ -3159,7 +3187,7 @@ static mino_val_t *quasiquote_expand(mino_val_t *form, mino_env_t *env)
         }
     }
     {
-        mino_val_t *out  = mino_nil();
+        mino_val_t *out  = mino_nil(S_);
         mino_val_t *tail = NULL;
         mino_val_t *p    = form;
         while (mino_is_cons(p)) {
@@ -3177,7 +3205,7 @@ static mino_val_t *quasiquote_expand(mino_val_t *form, mino_env_t *env)
                 if (spliced == NULL) { return NULL; }
                 sp = spliced;
                 while (mino_is_cons(sp)) {
-                    mino_val_t *cell = mino_cons(sp->as.cons.car, mino_nil());
+                    mino_val_t *cell = mino_cons(S_, sp->as.cons.car, mino_nil(S_));
                     if (tail == NULL) { out = cell; } else { tail->as.cons.cdr = cell; }
                     tail = cell;
                     sp = sp->as.cons.cdr;
@@ -3186,7 +3214,7 @@ static mino_val_t *quasiquote_expand(mino_val_t *form, mino_env_t *env)
                 mino_val_t *expanded = quasiquote_expand(elem, env);
                 mino_val_t *cell;
                 if (expanded == NULL) { return NULL; }
-                cell = mino_cons(expanded, mino_nil());
+                cell = mino_cons(S_, expanded, mino_nil(S_));
                 if (tail == NULL) { out = cell; } else { tail->as.cons.cdr = cell; }
                 tail = cell;
             }
@@ -3223,7 +3251,7 @@ static mino_val_t *eval_implicit_do_impl(mino_val_t *body, mino_env_t *env,
                                          int tail)
 {
     if (!mino_is_cons(body)) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     for (;;) {
         mino_val_t *rest = body->as.cons.cdr;
@@ -3281,7 +3309,7 @@ static mino_val_t *lazy_force(mino_val_t *v)
 
 static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *head = mino_nil();
+    mino_val_t *head = mino_nil(S_);
     mino_val_t *tail = NULL;
     while (mino_is_cons(args)) {
         mino_val_t *v = eval_value(args->as.cons.car, env);
@@ -3289,7 +3317,7 @@ static mino_val_t *eval_args(mino_val_t *args, mino_env_t *env)
         if (v == NULL) {
             return NULL;
         }
-        cell = mino_cons(v, mino_nil());
+        cell = mino_cons(S_, v, mino_nil(S_));
         if (tail == NULL) {
             head = cell;
         } else {
@@ -3380,7 +3408,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
         return NULL;
     }
     if (form == NULL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     switch (form->type) {
     case MINO_NIL:
@@ -3434,7 +3462,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
             }
             tmp[i] = ev;
         }
-        return mino_vector(tmp, n);
+        return mino_vector(S_, tmp, n);
     }
     case MINO_MAP: {
         /* Map literals evaluate keys and values in read order; the
@@ -3459,7 +3487,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
             ks[i] = k;
             vs[i] = v;
         }
-        return mino_map(ks, vs, n);
+        return mino_map(S_, ks, vs, n);
     }
     case MINO_SET: {
         /* Set literals evaluate each element in order. */
@@ -3477,7 +3505,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
             }
             tmp[i] = ev;
         }
-        return mino_set(tmp, n);
+        return mino_set(S_, tmp, n);
     }
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;
@@ -3612,7 +3640,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
         if (sym_eq(head, "if")) {
             mino_val_t *cond_form;
             mino_val_t *then_form;
-            mino_val_t *else_form = mino_nil();
+            mino_val_t *else_form = mino_nil(S_);
             mino_val_t *cond;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
                 set_error_at(form, "if requires a condition and a then-branch");
@@ -3705,7 +3733,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
         if (sym_eq(head, "recur")) {
             mino_val_t *evaled = eval_args(args, env);
             mino_val_t *r;
-            if (evaled == NULL && mino_last_error() != NULL) {
+            if (evaled == NULL && mino_last_error(S_) != NULL) {
                 return NULL;
             }
             r = alloc_val(MINO_RECUR);
@@ -3715,7 +3743,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
         if (sym_eq(head, "loop")) {
             mino_val_t *bindings;
             mino_val_t *body;
-            mino_val_t *params      = mino_nil();
+            mino_val_t *params      = mino_nil(S_);
             mino_val_t *params_tail = NULL;
             mino_env_t *local;
             if (!mino_is_cons(args)) {
@@ -3756,7 +3784,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                     return NULL;
                 }
                 env_bind(local, buf, val);
-                cell = mino_cons(name_form, mino_nil());
+                cell = mino_cons(S_, name_form, mino_nil(S_));
                 if (params_tail == NULL) {
                     params = cell;
                 } else {
@@ -3845,7 +3873,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                 trace_added = saved_trace;
                 clear_error();
                 local = env_child(env);
-                env_bind(local, var_buf, ex != NULL ? ex : mino_nil());
+                env_bind(local, var_buf, ex != NULL ? ex : mino_nil(S_));
                 return eval_implicit_do(catch_body, local);
             }
         }
@@ -3885,7 +3913,7 @@ static mino_val_t *eval_impl(mino_val_t *form, mino_env_t *env, int tail)
                 return NULL;
             }
             evaled = eval_args(args, env);
-            if (evaled == NULL && mino_last_error() != NULL) {
+            if (evaled == NULL && mino_last_error(S_) != NULL) {
                 return NULL;
             }
             /* Proper tail calls: in tail position, return a trampoline
@@ -3984,8 +4012,9 @@ static mino_val_t *apply_callable(mino_val_t *fn, mino_val_t *args,
     return NULL;
 }
 
-mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
+mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
+    S_ = S;
     volatile char probe = 0;
     mino_val_t   *v;
     gc_note_host_frame((void *)&probe);
@@ -4014,10 +4043,11 @@ mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env)
     return v;
 }
 
-mino_val_t *mino_eval_string(const char *src, mino_env_t *env)
+mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
 {
+    S_ = S;
     volatile char   probe = 0;
-    mino_val_t     *last  = mino_nil();
+    mino_val_t     *last  = mino_nil(S_);
     const char     *saved_file = reader_file;
     int             saved_line = reader_line;
     gc_note_host_frame((void *)&probe);
@@ -4030,16 +4060,16 @@ mino_val_t *mino_eval_string(const char *src, mino_env_t *env)
     reader_line = 1;
     while (*src != '\0') {
         const char *end  = NULL;
-        mino_val_t *form = mino_read(src, &end);
+        mino_val_t *form = mino_read(S_, src, &end);
         if (form == NULL) {
-            if (mino_last_error() != NULL) {
+            if (mino_last_error(S_) != NULL) {
                 reader_file = saved_file;
                 reader_line = saved_line;
                 return NULL;
             }
             break; /* EOF */
         }
-        last = mino_eval(form, env);
+        last = mino_eval(S_, form, env);
         if (last == NULL) {
             reader_file = saved_file;
             reader_line = saved_line;
@@ -4052,8 +4082,9 @@ mino_val_t *mino_eval_string(const char *src, mino_env_t *env)
     return last;
 }
 
-mino_val_t *mino_load_file(const char *path, mino_env_t *env)
+mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
 {
+    S_ = S;
     FILE  *f;
     char  *buf;
     long   sz;
@@ -4090,45 +4121,50 @@ mino_val_t *mino_load_file(const char *path, mino_env_t *env)
     buf[rd] = '\0';
     saved_file  = reader_file;
     reader_file = intern_filename(path);
-    result = mino_eval_string(buf, env);
+    result = mino_eval_string(S_, buf, env);
     reader_file = saved_file;
     free(buf);
     return result;
 }
 
-mino_env_t *mino_new(void)
+mino_env_t *mino_new(mino_state_t *S)
 {
-    mino_env_t *env = mino_env_new();
-    mino_install_core(env);
-    mino_install_io(env);
+    S_ = S;
+    mino_env_t *env = mino_env_new(S_);
+    mino_install_core(S_, env);
+    mino_install_io(S_, env);
     return env;
 }
 
-void mino_register_fn(mino_env_t *env, const char *name, mino_prim_fn fn)
+void mino_register_fn(mino_state_t *S, mino_env_t *env, const char *name, mino_prim_fn fn)
 {
-    mino_env_set(env, name, mino_prim(name, fn));
+    S_ = S;
+    mino_env_set(S_, env, name, mino_prim(S_, name, fn));
 }
 
-mino_val_t *mino_call(mino_val_t *fn, mino_val_t *args, mino_env_t *env)
+mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env)
 {
+    S_ = S;
     volatile char probe = 0;
     gc_note_host_frame((void *)&probe);
     (void)probe;
     return apply_callable(fn, args, env);
 }
 
-int mino_pcall(mino_val_t *fn, mino_val_t *args, mino_env_t *env,
+int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
                mino_val_t **out)
 {
-    mino_val_t *result = mino_call(fn, args, env);
+    S_ = S;
+    mino_val_t *result = mino_call(S_, fn, args, env);
     if (out != NULL) {
         *out = result;
     }
     return result == NULL ? -1 : 0;
 }
 
-void mino_set_limit(int kind, size_t value)
+void mino_set_limit(mino_state_t *S, int kind, size_t value)
 {
+    S_ = S;
     switch (kind) {
     case MINO_LIMIT_STEPS: limit_steps = value; break;
     case MINO_LIMIT_HEAP:  limit_heap  = value; break;
@@ -4141,20 +4177,23 @@ void mino_set_limit(int kind, size_t value)
 /* ------------------------------------------------------------------------- */
 
 struct mino_repl {
-    mino_env_t *env;
-    char       *buf;
-    size_t      len;
-    size_t      cap;
+    mino_state_t *state;
+    mino_env_t   *env;
+    char         *buf;
+    size_t        len;
+    size_t        cap;
 };
 
-mino_repl_t *mino_repl_new(mino_env_t *env)
+mino_repl_t *mino_repl_new(mino_state_t *S, mino_env_t *env)
 {
+    S_ = S;
     mino_repl_t *r = (mino_repl_t *)malloc(sizeof(*r));
     if (r == NULL) { return NULL; }
-    r->env = env;
-    r->buf = NULL;
-    r->len = 0;
-    r->cap = 0;
+    r->state = S;
+    r->env   = env;
+    r->buf   = NULL;
+    r->len   = 0;
+    r->cap   = 0;
     return r;
 }
 
@@ -4179,6 +4218,7 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
 
     if (out != NULL) { *out = NULL; }
     if (repl == NULL) { return MINO_REPL_ERROR; }
+    S_ = repl->state;
 
     /* Append the line to the buffer. */
     add = (line != NULL) ? strlen(line) : 0;
@@ -4208,9 +4248,9 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
     /* Try to read a form. */
     cursor = repl->buf;
     end    = repl->buf;
-    form   = mino_read(cursor, &end);
+    form   = mino_read(S_, cursor, &end);
     if (form == NULL) {
-        const char *err = mino_last_error();
+        const char *err = mino_last_error(S_);
         if (err != NULL && strstr(err, "unterminated") != NULL) {
             return MINO_REPL_MORE;
         }
@@ -4229,7 +4269,7 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
     }
 
     /* Evaluate the form. */
-    result = mino_eval(form, repl->env);
+    result = mino_eval(S_, form, repl->env);
     if (result == NULL) {
         return MINO_REPL_ERROR;
     }
@@ -4304,7 +4344,7 @@ static mino_val_t *prim_add(mino_val_t *args, mino_env_t *env)
             acc += x;
             args = args->as.cons.cdr;
         }
-        return mino_float(acc);
+        return mino_float(S_, acc);
     } else {
         long long acc = 0;
         while (mino_is_cons(args)) {
@@ -4316,7 +4356,7 @@ static mino_val_t *prim_add(mino_val_t *args, mino_env_t *env)
             acc += x;
             args = args->as.cons.cdr;
         }
-        return mino_int(acc);
+        return mino_int(S_, acc);
     }
 }
 
@@ -4335,7 +4375,7 @@ static mino_val_t *prim_sub(mino_val_t *args, mino_env_t *env)
         }
         args = args->as.cons.cdr;
         if (!mino_is_cons(args)) {
-            return mino_float(-acc);
+            return mino_float(S_, -acc);
         }
         while (mino_is_cons(args)) {
             double x;
@@ -4346,7 +4386,7 @@ static mino_val_t *prim_sub(mino_val_t *args, mino_env_t *env)
             acc -= x;
             args = args->as.cons.cdr;
         }
-        return mino_float(acc);
+        return mino_float(S_, acc);
     } else {
         long long acc;
         if (!as_long(args->as.cons.car, &acc)) {
@@ -4355,7 +4395,7 @@ static mino_val_t *prim_sub(mino_val_t *args, mino_env_t *env)
         }
         args = args->as.cons.cdr;
         if (!mino_is_cons(args)) {
-            return mino_int(-acc);
+            return mino_int(S_, -acc);
         }
         while (mino_is_cons(args)) {
             long long x;
@@ -4366,7 +4406,7 @@ static mino_val_t *prim_sub(mino_val_t *args, mino_env_t *env)
             acc -= x;
             args = args->as.cons.cdr;
         }
-        return mino_int(acc);
+        return mino_int(S_, acc);
     }
 }
 
@@ -4384,7 +4424,7 @@ static mino_val_t *prim_mul(mino_val_t *args, mino_env_t *env)
             acc *= x;
             args = args->as.cons.cdr;
         }
-        return mino_float(acc);
+        return mino_float(S_, acc);
     } else {
         long long acc = 1;
         while (mino_is_cons(args)) {
@@ -4396,7 +4436,7 @@ static mino_val_t *prim_mul(mino_val_t *args, mino_env_t *env)
             acc *= x;
             args = args->as.cons.cdr;
         }
-        return mino_int(acc);
+        return mino_int(S_, acc);
     }
 }
 
@@ -4419,7 +4459,7 @@ static mino_val_t *prim_div(mino_val_t *args, mino_env_t *env)
             set_error("division by zero");
             return NULL;
         }
-        return mino_float(1.0 / acc);
+        return mino_float(S_, 1.0 / acc);
     }
     while (mino_is_cons(args)) {
         double x;
@@ -4434,7 +4474,7 @@ static mino_val_t *prim_div(mino_val_t *args, mino_env_t *env)
         acc /= x;
         args = args->as.cons.cdr;
     }
-    return mino_float(acc);
+    return mino_float(S_, acc);
 }
 
 static mino_val_t *prim_mod(mino_val_t *args, mino_env_t *env)
@@ -4461,9 +4501,9 @@ static mino_val_t *prim_mod(mino_val_t *args, mino_env_t *env)
     /* Return int if both args are ints. */
     if (args->as.cons.car->type == MINO_INT &&
         args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int((long long)r);
+        return mino_int(S_, (long long)r);
     }
-    return mino_float(r);
+    return mino_float(S_, r);
 }
 
 static mino_val_t *prim_rem(mino_val_t *args, mino_env_t *env)
@@ -4487,9 +4527,9 @@ static mino_val_t *prim_rem(mino_val_t *args, mino_env_t *env)
     r = fmod(a, b);
     if (args->as.cons.car->type == MINO_INT &&
         args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int((long long)r);
+        return mino_int(S_, (long long)r);
     }
-    return mino_float(r);
+    return mino_float(S_, r);
 }
 
 static mino_val_t *prim_quot(mino_val_t *args, mino_env_t *env)
@@ -4514,9 +4554,9 @@ static mino_val_t *prim_quot(mino_val_t *args, mino_env_t *env)
     q = q >= 0 ? floor(q) : ceil(q);
     if (args->as.cons.car->type == MINO_INT &&
         args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int((long long)q);
+        return mino_int(S_, (long long)q);
     }
-    return mino_float(q);
+    return mino_float(S_, q);
 }
 
 /* --- Math functions (thin wrappers around math.h) --- */
@@ -4535,7 +4575,7 @@ static mino_val_t *prim_quot(mino_val_t *args, mino_env_t *env)
             set_error(label " expects a number");                       \
             return NULL;                                                \
         }                                                               \
-        return mino_float(cfn(x));                                      \
+        return mino_float(S_, cfn(x));                                      \
     }
 
 MATH_UNARY(prim_math_floor, floor, "math-floor")
@@ -4564,7 +4604,7 @@ static mino_val_t *prim_math_pow(mino_val_t *args, mino_env_t *env)
         set_error("math-pow expects numbers");
         return NULL;
     }
-    return mino_float(pow(base, exponent));
+    return mino_float(S_, pow(base, exponent));
 }
 
 static mino_val_t *prim_math_atan2(mino_val_t *args, mino_env_t *env)
@@ -4581,7 +4621,7 @@ static mino_val_t *prim_math_atan2(mino_val_t *args, mino_env_t *env)
         set_error("math-atan2 expects numbers");
         return NULL;
     }
-    return mino_float(atan2(y, x));
+    return mino_float(S_, atan2(y, x));
 }
 
 static mino_val_t *prim_bit_and(mino_val_t *args, mino_env_t *env)
@@ -4598,7 +4638,7 @@ static mino_val_t *prim_bit_and(mino_val_t *args, mino_env_t *env)
         set_error("bit-and expects integers");
         return NULL;
     }
-    return mino_int(a & b);
+    return mino_int(S_, a & b);
 }
 
 static mino_val_t *prim_bit_or(mino_val_t *args, mino_env_t *env)
@@ -4615,7 +4655,7 @@ static mino_val_t *prim_bit_or(mino_val_t *args, mino_env_t *env)
         set_error("bit-or expects integers");
         return NULL;
     }
-    return mino_int(a | b);
+    return mino_int(S_, a | b);
 }
 
 static mino_val_t *prim_bit_xor(mino_val_t *args, mino_env_t *env)
@@ -4632,7 +4672,7 @@ static mino_val_t *prim_bit_xor(mino_val_t *args, mino_env_t *env)
         set_error("bit-xor expects integers");
         return NULL;
     }
-    return mino_int(a ^ b);
+    return mino_int(S_, a ^ b);
 }
 
 static mino_val_t *prim_bit_not(mino_val_t *args, mino_env_t *env)
@@ -4647,7 +4687,7 @@ static mino_val_t *prim_bit_not(mino_val_t *args, mino_env_t *env)
         set_error("bit-not expects an integer");
         return NULL;
     }
-    return mino_int(~a);
+    return mino_int(S_, ~a);
 }
 
 static mino_val_t *prim_bit_shift_left(mino_val_t *args, mino_env_t *env)
@@ -4664,7 +4704,7 @@ static mino_val_t *prim_bit_shift_left(mino_val_t *args, mino_env_t *env)
         set_error("bit-shift-left expects integers");
         return NULL;
     }
-    return mino_int(a << b);
+    return mino_int(S_, a << b);
 }
 
 static mino_val_t *prim_bit_shift_right(mino_val_t *args, mino_env_t *env)
@@ -4681,7 +4721,7 @@ static mino_val_t *prim_bit_shift_right(mino_val_t *args, mino_env_t *env)
         set_error("bit-shift-right expects integers");
         return NULL;
     }
-    return mino_int(a >> b);
+    return mino_int(S_, a >> b);
 }
 
 static mino_val_t *prim_int(mino_val_t *args, mino_env_t *env)
@@ -4694,7 +4734,7 @@ static mino_val_t *prim_int(mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_INT) return v;
-    if (v != NULL && v->type == MINO_FLOAT) return mino_int((long long)v->as.f);
+    if (v != NULL && v->type == MINO_FLOAT) return mino_int(S_, (long long)v->as.f);
     set_error("int: expected a number");
     return NULL;
 }
@@ -4709,7 +4749,7 @@ static mino_val_t *prim_float(mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_FLOAT) return v;
-    if (v != NULL && v->type == MINO_INT) return mino_float((double)v->as.i);
+    if (v != NULL && v->type == MINO_INT) return mino_float(S_, (double)v->as.i);
     set_error("float: expected a number");
     return NULL;
 }
@@ -4728,7 +4768,7 @@ static mino_val_t *print_to_string(const mino_val_t *v)
         set_error("pr-str: tmpfile failed");
         return NULL;
     }
-    mino_print_to(f, v);
+    mino_print_to(S_, f, v);
     n = ftell(f);
     if (n < 0) n = 0;
     rewind(f);
@@ -4744,7 +4784,7 @@ static mino_val_t *print_to_string(const mino_val_t *v)
     }
     buf[n] = '\0';
     fclose(f);
-    result = mino_string_n(buf, (size_t)n);
+    result = mino_string_n(S_, buf, (size_t)n);
     free(buf);
     return result;
 }
@@ -4870,7 +4910,7 @@ static mino_val_t *prim_format(mino_val_t *args, mino_env_t *env)
     }
 #undef FMT_ENSURE
     {
-        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", len);
+        mino_val_t *result = mino_string_n(S_, buf != NULL ? buf : "", len);
         free(buf);
         return result;
     }
@@ -4891,11 +4931,11 @@ static mino_val_t *prim_read_string(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     clear_error();
-    result = mino_read(s->as.s.data, NULL);
-    if (result == NULL && mino_last_error() != NULL) {
+    result = mino_read(S_, s->as.s.data, NULL);
+    if (result == NULL && mino_last_error(S_) != NULL) {
         /* Throw parse errors as catchable exceptions so user code can
          * handle them via try/catch. */
-        mino_val_t *ex = mino_string(mino_last_error());
+        mino_val_t *ex = mino_string(S_, mino_last_error(S_));
         if (try_depth > 0) {
             try_stack[try_depth - 1].exception = ex;
             longjmp(try_stack[try_depth - 1].buf, 1);
@@ -4909,7 +4949,7 @@ static mino_val_t *prim_read_string(mino_val_t *args, mino_env_t *env)
         }
         return NULL;
     }
-    return result != NULL ? result : mino_nil();
+    return result != NULL ? result : mino_nil(S_);
 }
 
 static mino_val_t *prim_pr_str(mino_val_t *args, mino_env_t *env)
@@ -4940,7 +4980,7 @@ static mino_val_t *prim_pr_str(mino_val_t *args, mino_env_t *env)
         args = args->as.cons.cdr;
     }
     {
-        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", len);
+        mino_val_t *result = mino_string_n(S_, buf != NULL ? buf : "", len);
         free(buf);
         return result;
     }
@@ -4969,7 +5009,7 @@ static mino_val_t *prim_char_at(mino_val_t *args, mino_env_t *env)
         set_error("char-at: index out of range");
         return NULL;
     }
-    return mino_string_n(s->as.s.data + idx, 1);
+    return mino_string_n(S_, s->as.s.data + idx, 1);
 }
 
 static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
@@ -4981,10 +5021,10 @@ static mino_val_t *prim_name(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL) return mino_nil();
+    if (v == NULL || v->type == MINO_NIL) return mino_nil(S_);
     if (v->type == MINO_STRING)  return v;
-    if (v->type == MINO_KEYWORD) return mino_string_n(v->as.s.data, v->as.s.len);
-    if (v->type == MINO_SYMBOL)  return mino_string_n(v->as.s.data, v->as.s.len);
+    if (v->type == MINO_KEYWORD) return mino_string_n(S_, v->as.s.data, v->as.s.len);
+    if (v->type == MINO_SYMBOL)  return mino_string_n(S_, v->as.s.data, v->as.s.len);
     set_error("name: expected a keyword, symbol, or string");
     return NULL;
 }
@@ -5001,7 +5041,7 @@ static mino_val_t *prim_rand(mino_val_t *args, mino_env_t *env)
         srand((unsigned int)time(NULL));
         rand_seeded = 1;
     }
-    return mino_float((double)rand() / ((double)RAND_MAX + 1.0));
+    return mino_float(S_, (double)rand() / ((double)RAND_MAX + 1.0));
 }
 
 /* (eval form) — evaluate a form at runtime. */
@@ -5028,7 +5068,7 @@ static mino_val_t *prim_symbol(mino_val_t *args, mino_env_t *env)
         set_error("symbol: argument must be a string");
         return NULL;
     }
-    return mino_symbol_n(v->as.s.data, v->as.s.len);
+    return mino_symbol_n(S_, v->as.s.data, v->as.s.len);
 }
 
 /* (keyword str) — create a keyword from a string. */
@@ -5045,7 +5085,7 @@ static mino_val_t *prim_keyword(mino_val_t *args, mino_env_t *env)
         set_error("keyword: argument must be a string");
         return NULL;
     }
-    return mino_keyword_n(v->as.s.data, v->as.s.len);
+    return mino_keyword_n(S_, v->as.s.data, v->as.s.len);
 }
 
 /* (hash val) — return the integer hash code of any value. */
@@ -5056,7 +5096,7 @@ static mino_val_t *prim_hash(mino_val_t *args, mino_env_t *env)
         set_error("hash requires one argument");
         return NULL;
     }
-    return mino_int((long long)hash_val(args->as.cons.car));
+    return mino_int(S_, (long long)hash_val(args->as.cons.car));
 }
 
 /* (compare a b) — general comparison returning -1, 0, or 1.
@@ -5074,21 +5114,21 @@ static mino_val_t *prim_compare(mino_val_t *args, mino_env_t *env)
     b = args->as.cons.cdr->as.cons.car;
     /* nil sorts before everything */
     if ((a == NULL || (a->type == MINO_NIL)) &&
-        (b == NULL || (b->type == MINO_NIL))) return mino_int(0);
-    if (a == NULL || a->type == MINO_NIL) return mino_int(-1);
-    if (b == NULL || b->type == MINO_NIL) return mino_int(1);
+        (b == NULL || (b->type == MINO_NIL))) return mino_int(S_, 0);
+    if (a == NULL || a->type == MINO_NIL) return mino_int(S_, -1);
+    if (b == NULL || b->type == MINO_NIL) return mino_int(S_, 1);
     /* numbers */
     {
         double da, db;
         if (as_double(a, &da) && as_double(b, &db)) {
-            return mino_int(da < db ? -1 : da > db ? 1 : 0);
+            return mino_int(S_, da < db ? -1 : da > db ? 1 : 0);
         }
     }
     /* strings, keywords, symbols — lexicographic */
     if ((a->type == MINO_STRING || a->type == MINO_KEYWORD ||
          a->type == MINO_SYMBOL) && a->type == b->type) {
         int cmp = strcmp(a->as.s.data, b->as.s.data);
-        return mino_int(cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
+        return mino_int(S_, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
     set_error("compare: cannot compare values of different types");
     return NULL;
@@ -5098,19 +5138,19 @@ static mino_val_t *prim_eq(mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
-        return mino_true();
+        return mino_true(S_);
     }
     {
         mino_val_t *first = args->as.cons.car;
         args = args->as.cons.cdr;
         while (mino_is_cons(args)) {
             if (!mino_eq(first, args->as.cons.car)) {
-                return mino_false();
+                return mino_false(S_);
             }
             args = args->as.cons.cdr;
         }
     }
-    return mino_true();
+    return mino_true(S_);
 }
 
 /*
@@ -5123,7 +5163,7 @@ static mino_val_t *compare_chain(mino_val_t *args, const char *name, int op)
 {
     double prev;
     if (!mino_is_cons(args)) {
-        return mino_true();
+        return mino_true(S_);
     }
     if (!as_double(args->as.cons.car, &prev)) {
         char msg[64];
@@ -5148,12 +5188,12 @@ static mino_val_t *compare_chain(mino_val_t *args, const char *name, int op)
         default: ok = prev >= x; break;
         }
         if (!ok) {
-            return mino_false();
+            return mino_false(S_);
         }
         prev = x;
         args = args->as.cons.cdr;
     }
-    return mino_true();
+    return mino_true(S_);
 }
 
 static mino_val_t *prim_lt(mino_val_t *args, mino_env_t *env)
@@ -5189,7 +5229,7 @@ static mino_val_t *prim_cons(mino_val_t *args, mino_env_t *env)
         set_error("cons requires two arguments");
         return NULL;
     }
-    return mino_cons(args->as.cons.car, args->as.cons.cdr->as.cons.car);
+    return mino_cons(S_, args->as.cons.car, args->as.cons.cdr->as.cons.car);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -5237,20 +5277,20 @@ static mino_val_t *prim_count(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_int(0);
+        return mino_int(S_, 0);
     }
     switch (coll->type) {
-    case MINO_CONS:   return mino_int((long long)list_length(coll));
-    case MINO_VECTOR: return mino_int((long long)coll->as.vec.len);
-    case MINO_MAP:    return mino_int((long long)coll->as.map.len);
-    case MINO_SET:    return mino_int((long long)coll->as.set.len);
-    case MINO_STRING: return mino_int((long long)coll->as.s.len);
+    case MINO_CONS:   return mino_int(S_, (long long)list_length(coll));
+    case MINO_VECTOR: return mino_int(S_, (long long)coll->as.vec.len);
+    case MINO_MAP:    return mino_int(S_, (long long)coll->as.map.len);
+    case MINO_SET:    return mino_int(S_, (long long)coll->as.set.len);
+    case MINO_STRING: return mino_int(S_, (long long)coll->as.s.len);
     case MINO_LAZY: {
         /* Force the entire lazy seq and count it. */
         mino_val_t *forced = lazy_force(coll);
         if (forced == NULL) return NULL;
-        if (forced->type == MINO_NIL) return mino_int(0);
-        return mino_int((long long)list_length(forced));
+        if (forced->type == MINO_NIL) return mino_int(S_, 0);
+        return mino_int(S_, (long long)list_length(forced));
     }
     default:
         {
@@ -5272,7 +5312,7 @@ static mino_val_t *prim_vector(mino_val_t *args, mino_env_t *env)
     (void)env;
     arg_count(args, &n);
     if (n == 0) {
-        return mino_vector(NULL, 0);
+        return mino_vector(S_, NULL, 0);
     }
     /* GC_T_VALARR keeps partially-gathered pointers visible to the collector;
      * without this, the optimizer may drop the `args` parameter and the cons
@@ -5283,7 +5323,7 @@ static mino_val_t *prim_vector(mino_val_t *args, mino_env_t *env)
         tmp[i] = p->as.cons.car;
         p = p->as.cons.cdr;
     }
-    return mino_vector(tmp, n);
+    return mino_vector(S_, tmp, n);
 }
 
 static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
@@ -5301,7 +5341,7 @@ static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (n == 0) {
-        return mino_map(NULL, NULL, 0);
+        return mino_map(S_, NULL, NULL, 0);
     }
     pairs = n / 2;
     ks = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, pairs * sizeof(*ks));
@@ -5313,7 +5353,7 @@ static mino_val_t *prim_hash_map(mino_val_t *args, mino_env_t *env)
         vs[i] = p->as.cons.car;
         p = p->as.cons.cdr;
     }
-    return mino_map(ks, vs, pairs);
+    return mino_map(S_, ks, vs, pairs);
 }
 
 static mino_val_t *prim_nth(mino_val_t *args, mino_env_t *env)
@@ -5394,23 +5434,23 @@ static mino_val_t *prim_first(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     if (coll->type == MINO_CONS) {
         return coll->as.cons.car;
     }
     if (coll->type == MINO_VECTOR) {
         if (coll->as.vec.len == 0) {
-            return mino_nil();
+            return mino_nil(S_);
         }
         return vec_nth(coll, 0);
     }
     if (coll->type == MINO_LAZY) {
         mino_val_t *s = lazy_force(coll);
         if (s == NULL) return NULL;
-        if (s->type == MINO_NIL || s == NULL) return mino_nil();
+        if (s->type == MINO_NIL || s == NULL) return mino_nil(S_);
         if (s->type == MINO_CONS) return s->as.cons.car;
-        return mino_nil();
+        return mino_nil(S_);
     }
     {
         char msg[96];
@@ -5431,7 +5471,7 @@ static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     if (coll->type == MINO_CONS) {
         return coll->as.cons.cdr;
@@ -5439,11 +5479,11 @@ static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_VECTOR) {
         /* Rest of a vector is a list of the trailing elements. v0.11 will
          * promote this to a seq abstraction. */
-        mino_val_t *head = mino_nil();
+        mino_val_t *head = mino_nil(S_);
         mino_val_t *tail = NULL;
         size_t i;
         for (i = 1; i < coll->as.vec.len; i++) {
-            mino_val_t *cell = mino_cons(vec_nth(coll, i), mino_nil());
+            mino_val_t *cell = mino_cons(S_, vec_nth(coll, i), mino_nil(S_));
             if (tail == NULL) {
                 head = cell;
             } else {
@@ -5456,9 +5496,9 @@ static mino_val_t *prim_rest(mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_LAZY) {
         mino_val_t *s = lazy_force(coll);
         if (s == NULL) return NULL;
-        if (s->type == MINO_NIL || s == NULL) return mino_nil();
+        if (s->type == MINO_NIL || s == NULL) return mino_nil(S_);
         if (s->type == MINO_CONS) return s->as.cons.cdr;
-        return mino_nil();
+        return mino_nil(S_);
     }
     {
         char msg[96];
@@ -5480,7 +5520,7 @@ static mino_val_t *map_assoc_pairs(mino_val_t *coll, mino_val_t *p,
     size_t            i;
     if (coll == NULL || coll->type == MINO_NIL) {
         root    = NULL;
-        order   = mino_vector(NULL, 0);
+        order   = mino_vector(S_, NULL, 0);
         len_out = 0;
     } else {
         root    = coll->as.map.root;
@@ -5565,7 +5605,7 @@ static mino_val_t *prim_get(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *key;
-    mino_val_t *def_val = mino_nil();
+    mino_val_t *def_val = mino_nil(S_);
     size_t      n;
     (void)env;
     arg_count(args, &n);
@@ -5620,9 +5660,9 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_CONS) {
         /* List/nil: prepend each item so (conj '(1 2) 3 4) => (4 3 1 2). */
         mino_val_t *out = (coll == NULL || coll->type == MINO_NIL)
-            ? mino_nil() : coll;
+            ? mino_nil(S_) : coll;
         while (mino_is_cons(p)) {
-            out = mino_cons(p->as.cons.car, out);
+            out = mino_cons(S_, p->as.cons.car, out);
             p = p->as.cons.cdr;
         }
         return out;
@@ -5651,8 +5691,8 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
                 set_error("conj on map requires 2-element vectors");
                 return NULL;
             }
-            pair_args = mino_cons(vec_nth(item, 0),
-                                   mino_cons(vec_nth(item, 1), mino_nil()));
+            pair_args = mino_cons(S_, vec_nth(item, 0),
+                                   mino_cons(S_, vec_nth(item, 1), mino_nil(S_)));
             acc = map_assoc_pairs(acc, pair_args, 1);
             p = p->as.cons.cdr;
         }
@@ -5679,7 +5719,7 @@ static mino_val_t *prim_conj(mino_val_t *args, mino_env_t *env)
 static mino_val_t *prim_keys(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
-    mino_val_t *head = mino_nil();
+    mino_val_t *head = mino_nil(S_);
     mino_val_t *tail = NULL;
     size_t i;
     (void)env;
@@ -5689,15 +5729,15 @@ static mino_val_t *prim_keys(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     if (coll->type != MINO_MAP) {
         set_error("keys: argument must be a map");
         return NULL;
     }
     for (i = 0; i < coll->as.map.len; i++) {
-        mino_val_t *cell = mino_cons(vec_nth(coll->as.map.key_order, i),
-                                      mino_nil());
+        mino_val_t *cell = mino_cons(S_, vec_nth(coll->as.map.key_order, i),
+                                      mino_nil(S_));
         if (tail == NULL) {
             head = cell;
         } else {
@@ -5711,7 +5751,7 @@ static mino_val_t *prim_keys(mino_val_t *args, mino_env_t *env)
 static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
-    mino_val_t *head = mino_nil();
+    mino_val_t *head = mino_nil(S_);
     mino_val_t *tail = NULL;
     size_t i;
     (void)env;
@@ -5721,7 +5761,7 @@ static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     if (coll->type != MINO_MAP) {
         set_error("vals: argument must be a map");
@@ -5729,7 +5769,7 @@ static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
     }
     for (i = 0; i < coll->as.map.len; i++) {
         mino_val_t *key  = vec_nth(coll->as.map.key_order, i);
-        mino_val_t *cell = mino_cons(map_get_val(coll, key), mino_nil());
+        mino_val_t *cell = mino_cons(S_, map_get_val(coll, key), mino_nil(S_));
         if (tail == NULL) {
             head = cell;
         } else {
@@ -5744,7 +5784,7 @@ static mino_val_t *prim_vals(mino_val_t *args, mino_env_t *env)
 static mino_val_t *set_conj1(const mino_val_t *s, mino_val_t *elem)
 {
     mino_val_t       *v        = alloc_val(MINO_SET);
-    mino_val_t       *sentinel = mino_true();
+    mino_val_t       *sentinel = mino_true(S_);
     hamt_entry_t     *e        = hamt_entry_new(elem, sentinel);
     uint32_t          h        = hash_val(elem);
     int               replaced = 0;
@@ -5774,7 +5814,7 @@ static mino_val_t *prim_hash_set(mino_val_t *args, mino_env_t *env)
         tmp[i] = p->as.cons.car;
         p = p->as.cons.cdr;
     }
-    return mino_set(tmp, n);
+    return mino_set(S_, tmp, n);
 }
 
 static mino_val_t *prim_contains_p(mino_val_t *args, mino_env_t *env)
@@ -5790,24 +5830,24 @@ static mino_val_t *prim_contains_p(mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.car;
     key  = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_false();
+        return mino_false(S_);
     }
     if (coll->type == MINO_MAP) {
-        return map_get_val(coll, key) != NULL ? mino_true() : mino_false();
+        return map_get_val(coll, key) != NULL ? mino_true(S_) : mino_false(S_);
     }
     if (coll->type == MINO_SET) {
         uint32_t h = hash_val(key);
         return hamt_get(coll->as.set.root, key, h, 0u) != NULL
-            ? mino_true() : mino_false();
+            ? mino_true(S_) : mino_false(S_);
     }
     if (coll->type == MINO_VECTOR) {
         /* For vectors, key is an index. */
         if (key != NULL && key->type == MINO_INT) {
             long long idx = key->as.i;
             return (idx >= 0 && (size_t)idx < coll->as.vec.len)
-                ? mino_true() : mino_false();
+                ? mino_true(S_) : mino_false(S_);
         }
-        return mino_false();
+        return mino_false(S_);
     }
     {
         char msg[96];
@@ -5832,7 +5872,7 @@ static mino_val_t *prim_disj(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     if (coll->type != MINO_SET) {
         set_error("disj: first argument must be a set");
@@ -5847,14 +5887,14 @@ static mino_val_t *prim_disj(mino_val_t *args, mino_env_t *env)
         if (hamt_get(coll->as.set.root, key, h, 0u) != NULL) {
             /* Element exists; rebuild without it. */
             mino_val_t *new_set = alloc_val(MINO_SET);
-            mino_val_t *order   = mino_vector(NULL, 0);
+            mino_val_t *order   = mino_vector(S_, NULL, 0);
             mino_hamt_node_t *root = NULL;
             size_t i;
             size_t new_len = 0;
             for (i = 0; i < coll->as.set.len; i++) {
                 mino_val_t *elem = vec_nth(coll->as.set.key_order, i);
                 if (!mino_eq(elem, key)) {
-                    hamt_entry_t *e2 = hamt_entry_new(elem, mino_true());
+                    hamt_entry_t *e2 = hamt_entry_new(elem, mino_true(S_));
                     uint32_t h2 = hash_val(elem);
                     int rep = 0;
                     root = hamt_assoc(root, e2, h2, 0u, &rep);
@@ -5885,7 +5925,7 @@ static mino_val_t *prim_dissoc(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     if (coll->type != MINO_MAP) {
         set_error("dissoc: first argument must be a map");
@@ -5897,7 +5937,7 @@ static mino_val_t *prim_dissoc(mino_val_t *args, mino_env_t *env)
         uint32_t    h   = hash_val(key);
         if (hamt_get(coll->as.map.root, key, h, 0u) != NULL) {
             mino_val_t *new_map = alloc_val(MINO_MAP);
-            mino_val_t *order   = mino_vector(NULL, 0);
+            mino_val_t *order   = mino_vector(S_, NULL, 0);
             mino_hamt_node_t *root = NULL;
             size_t i;
             size_t new_len = 0;
@@ -5978,11 +6018,11 @@ static mino_val_t *seq_iter_val(const seq_iter_t *it)
         mino_val_t *kv[2];
         kv[0] = key;
         kv[1] = val;
-        return mino_vector(kv, 2);
+        return mino_vector(S_, kv, 2);
     }
     case MINO_SET:    return vec_nth(c->as.set.key_order, it->idx);
-    case MINO_STRING: return mino_string_n(c->as.s.data + it->idx, 1);
-    default:          return mino_nil();
+    case MINO_STRING: return mino_string_n(S_, c->as.s.data + it->idx, 1);
+    default:          return mino_nil(S_);
     }
 }
 
@@ -6018,11 +6058,11 @@ static mino_val_t *prim_reduce(mino_val_t *args, mino_env_t *env)
         coll = args->as.cons.cdr->as.cons.car;
         if (coll == NULL || coll->type == MINO_NIL) {
             /* (reduce f nil) → (f) */
-            return apply_callable(fn, mino_nil(), env);
+            return apply_callable(fn, mino_nil(S_), env);
         }
         seq_iter_init(&it, coll);
         if (seq_iter_done(&it)) {
-            return apply_callable(fn, mino_nil(), env);
+            return apply_callable(fn, mino_nil(S_), env);
         }
         acc = seq_iter_val(&it);
         seq_iter_next(&it);
@@ -6041,7 +6081,7 @@ static mino_val_t *prim_reduce(mino_val_t *args, mino_env_t *env)
     }
     while (!seq_iter_done(&it)) {
         mino_val_t *elem   = seq_iter_val(&it);
-        mino_val_t *call_a = mino_cons(acc, mino_cons(elem, mino_nil()));
+        mino_val_t *call_a = mino_cons(S_, acc, mino_cons(S_, elem, mino_nil(S_)));
         acc = apply_callable(fn, call_a, env);
         if (acc == NULL) return NULL;
         seq_iter_next(&it);
@@ -6070,10 +6110,10 @@ static mino_val_t *prim_into(mino_val_t *args, mino_env_t *env)
      * the conj semantics (vector appends, list prepends, map/set merges). */
     if (to == NULL || to->type == MINO_NIL) {
         /* Into nil: build a list. */
-        mino_val_t *out = mino_nil();
+        mino_val_t *out = mino_nil(S_);
         seq_iter_init(&it, from);
         while (!seq_iter_done(&it)) {
-            out = mino_cons(seq_iter_val(&it), out);
+            out = mino_cons(S_, seq_iter_val(&it), out);
             seq_iter_next(&it);
         }
         return out;
@@ -6098,8 +6138,8 @@ static mino_val_t *prim_into(mino_val_t *args, mino_env_t *env)
                 set_error("into map: each element must be a 2-element vector");
                 return NULL;
             }
-            pair_args = mino_cons(vec_nth(item, 0),
-                                   mino_cons(vec_nth(item, 1), mino_nil()));
+            pair_args = mino_cons(S_, vec_nth(item, 0),
+                                   mino_cons(S_, vec_nth(item, 1), mino_nil(S_)));
             acc = map_assoc_pairs(acc, pair_args, 1);
             seq_iter_next(&it);
         }
@@ -6118,7 +6158,7 @@ static mino_val_t *prim_into(mino_val_t *args, mino_env_t *env)
         mino_val_t *out = to;
         seq_iter_init(&it, from);
         while (!seq_iter_done(&it)) {
-            out = mino_cons(seq_iter_val(&it), out);
+            out = mino_cons(S_, seq_iter_val(&it), out);
             seq_iter_next(&it);
         }
         return out;
@@ -6151,12 +6191,12 @@ static mino_val_t *prim_apply(mino_val_t *args, mino_env_t *env)
         last = args->as.cons.cdr->as.cons.car;
     } else {
         /* (apply f a b ... coll) — prepend individual args, then spread coll. */
-        mino_val_t *head = mino_nil();
+        mino_val_t *head = mino_nil(S_);
         mino_val_t *tail2 = NULL;
         p = args->as.cons.cdr;
         /* Collect all but the last arg as individual args. */
         while (mino_is_cons(p) && mino_is_cons(p->as.cons.cdr)) {
-            mino_val_t *cell = mino_cons(p->as.cons.car, mino_nil());
+            mino_val_t *cell = mino_cons(S_, p->as.cons.car, mino_nil(S_));
             if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
             tail2 = cell;
             p = p->as.cons.cdr;
@@ -6167,7 +6207,7 @@ static mino_val_t *prim_apply(mino_val_t *args, mino_env_t *env)
             seq_iter_t it;
             seq_iter_init(&it, last);
             while (!seq_iter_done(&it)) {
-                mino_val_t *cell = mino_cons(seq_iter_val(&it), mino_nil());
+                mino_val_t *cell = mino_cons(S_, seq_iter_val(&it), mino_nil(S_));
                 if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
                 tail2 = cell;
                 seq_iter_next(&it);
@@ -6177,19 +6217,19 @@ static mino_val_t *prim_apply(mino_val_t *args, mino_env_t *env)
     }
     /* (apply f coll) — convert coll to a cons arg list. */
     if (last == NULL || last->type == MINO_NIL) {
-        return apply_callable(fn, mino_nil(), env);
+        return apply_callable(fn, mino_nil(S_), env);
     }
     if (last->type == MINO_CONS) {
         return apply_callable(fn, last, env);
     }
     /* Convert non-list collection to cons list. */
     {
-        mino_val_t *head = mino_nil();
+        mino_val_t *head = mino_nil(S_);
         mino_val_t *tail2 = NULL;
         seq_iter_t it;
         seq_iter_init(&it, last);
         while (!seq_iter_done(&it)) {
-            mino_val_t *cell = mino_cons(seq_iter_val(&it), mino_nil());
+            mino_val_t *cell = mino_cons(S_, seq_iter_val(&it), mino_nil(S_));
             if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
             tail2 = cell;
             seq_iter_next(&it);
@@ -6202,7 +6242,7 @@ static mino_val_t *prim_apply(mino_val_t *args, mino_env_t *env)
 static mino_val_t *prim_reverse(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
-    mino_val_t *out = mino_nil();
+    mino_val_t *out = mino_nil(S_);
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -6211,11 +6251,11 @@ static mino_val_t *prim_reverse(mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     seq_iter_init(&it, coll);
     while (!seq_iter_done(&it)) {
-        out = mino_cons(seq_iter_val(&it), out);
+        out = mino_cons(S_, seq_iter_val(&it), out);
         seq_iter_next(&it);
     }
     return out;
@@ -6261,9 +6301,9 @@ static int val_compare(const mino_val_t *a, const mino_val_t *b)
 static int sort_compare(const mino_val_t *a, const mino_val_t *b)
 {
     if (sort_comp_fn != NULL) {
-        mino_val_t *call_args = mino_cons((mino_val_t *)a,
-                                  mino_cons((mino_val_t *)b, mino_nil()));
-        mino_val_t *result = mino_call(sort_comp_fn, call_args, sort_comp_env);
+        mino_val_t *call_args = mino_cons(S_, (mino_val_t *)a,
+                                  mino_cons(S_, (mino_val_t *)b, mino_nil(S_)));
+        mino_val_t *result = mino_call(S_, sort_comp_fn, call_args, sort_comp_env);
         if (result == NULL) return 0;
         /* Numeric result: use sign directly (compare-style) */
         if (result->type == MINO_INT) {
@@ -6305,7 +6345,7 @@ static mino_val_t *prim_sort(mino_val_t *args, mino_env_t *env)
     mino_val_t *comp = NULL;
     mino_val_t **arr;
     mino_val_t **tmp;
-    mino_val_t *head = mino_nil();
+    mino_val_t *head = mino_nil(S_);
     mino_val_t *tail = NULL;
     size_t      n_items, i;
     seq_iter_t  it;
@@ -6326,13 +6366,13 @@ static mino_val_t *prim_sort(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil();
+        return mino_nil(S_);
     }
     /* Collect elements into an array. */
     n_items = 0;
     seq_iter_init(&it, coll);
     while (!seq_iter_done(&it)) { n_items++; seq_iter_next(&it); }
-    if (n_items == 0) return mino_nil();
+    if (n_items == 0) return mino_nil(S_);
     arr = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n_items * sizeof(*arr));
     tmp = (mino_val_t **)gc_alloc_typed(GC_T_VALARR, n_items * sizeof(*tmp));
     i = 0;
@@ -6344,7 +6384,7 @@ static mino_val_t *prim_sort(mino_val_t *args, mino_env_t *env)
     sort_comp_fn  = NULL;
     sort_comp_env = NULL;
     for (i = 0; i < n_items; i++) {
-        mino_val_t *cell = mino_cons(arr[i], mino_nil());
+        mino_val_t *cell = mino_cons(S_, arr[i], mino_nil(S_));
         if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
         tail = cell;
     }
@@ -6391,7 +6431,7 @@ static mino_val_t *prim_subs(mino_val_t *args, mino_env_t *env)
         set_error("subs: index out of range");
         return NULL;
     }
-    return mino_string_n(s_val->as.s.data + start, (size_t)(end_idx - start));
+    return mino_string_n(S_, s_val->as.s.data + start, (size_t)(end_idx - start));
 }
 
 static mino_val_t *prim_split(mino_val_t *args, mino_env_t *env)
@@ -6428,9 +6468,9 @@ static mino_val_t *prim_split(mino_val_t *args, mino_env_t *env)
         buf = (mino_val_t **)gc_alloc_typed(GC_T_VALARR,
               (slen > 0 ? slen : 1) * sizeof(*buf));
         for (i = 0; i < slen; i++) {
-            buf[i] = mino_string_n(s + i, 1);
+            buf[i] = mino_string_n(S_, s + i, 1);
         }
-        return mino_vector(buf, slen);
+        return mino_vector(S_, buf, slen);
     }
     while (p <= s + slen) {
         const char *found = NULL;
@@ -6450,14 +6490,14 @@ static mino_val_t *prim_split(mino_val_t *args, mino_env_t *env)
             cap = new_cap;
         }
         if (found != NULL) {
-            buf[len++] = mino_string_n(p, (size_t)(found - p));
+            buf[len++] = mino_string_n(S_, p, (size_t)(found - p));
             p = found + sep_len;
         } else {
-            buf[len++] = mino_string_n(p, (size_t)(s + slen - p));
+            buf[len++] = mino_string_n(S_, p, (size_t)(s + slen - p));
             break;
         }
     }
-    return mino_vector(buf, len);
+    return mino_vector(S_, buf, len);
 }
 
 static mino_val_t *prim_join(mino_val_t *args, mino_env_t *env)
@@ -6491,7 +6531,7 @@ static mino_val_t *prim_join(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_string("");
+        return mino_string(S_, "");
     }
     seq_iter_init(&it, coll);
     while (!seq_iter_done(&it)) {
@@ -6508,7 +6548,7 @@ static mino_val_t *prim_join(mino_val_t *args, mino_env_t *env)
             part_len = elem->as.s.len;
         } else {
             /* Convert to string. */
-            mino_val_t *str_a = mino_cons(elem, mino_nil());
+            mino_val_t *str_a = mino_cons(S_, elem, mino_nil(S_));
             mino_val_t *str   = prim_str(str_a, env);
             if (str == NULL) return NULL;
             part     = str->as.s.data;
@@ -6531,7 +6571,7 @@ static mino_val_t *prim_join(mino_val_t *args, mino_env_t *env)
         seq_iter_next(&it);
     }
     {
-        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", buf_len);
+        mino_val_t *result = mino_string_n(S_, buf != NULL ? buf : "", buf_len);
         free(buf);
         return result;
     }
@@ -6552,9 +6592,9 @@ static mino_val_t *prim_starts_with_p(mino_val_t *args, mino_env_t *env)
         set_error("starts-with? requires two string arguments");
         return NULL;
     }
-    if (prefix->as.s.len > s->as.s.len) return mino_false();
+    if (prefix->as.s.len > s->as.s.len) return mino_false(S_);
     return memcmp(s->as.s.data, prefix->as.s.data, prefix->as.s.len) == 0
-        ? mino_true() : mino_false();
+        ? mino_true(S_) : mino_false(S_);
 }
 
 static mino_val_t *prim_ends_with_p(mino_val_t *args, mino_env_t *env)
@@ -6572,10 +6612,10 @@ static mino_val_t *prim_ends_with_p(mino_val_t *args, mino_env_t *env)
         set_error("ends-with? requires two string arguments");
         return NULL;
     }
-    if (suffix->as.s.len > s->as.s.len) return mino_false();
+    if (suffix->as.s.len > s->as.s.len) return mino_false(S_);
     return memcmp(s->as.s.data + s->as.s.len - suffix->as.s.len,
                   suffix->as.s.data, suffix->as.s.len) == 0
-        ? mino_true() : mino_false();
+        ? mino_true(S_) : mino_false(S_);
 }
 
 static mino_val_t *prim_includes_p(mino_val_t *args, mino_env_t *env)
@@ -6594,14 +6634,14 @@ static mino_val_t *prim_includes_p(mino_val_t *args, mino_env_t *env)
         set_error("includes? requires two string arguments");
         return NULL;
     }
-    if (sub->as.s.len == 0) return mino_true();
-    if (sub->as.s.len > s->as.s.len) return mino_false();
+    if (sub->as.s.len == 0) return mino_true(S_);
+    if (sub->as.s.len > s->as.s.len) return mino_false(S_);
     for (p = s->as.s.data; p + sub->as.s.len <= s->as.s.data + s->as.s.len; p++) {
         if (memcmp(p, sub->as.s.data, sub->as.s.len) == 0) {
-            return mino_true();
+            return mino_true(S_);
         }
     }
-    return mino_false();
+    return mino_false(S_);
 }
 
 static mino_val_t *prim_upper_case(mino_val_t *args, mino_env_t *env)
@@ -6627,7 +6667,7 @@ static mino_val_t *prim_upper_case(mino_val_t *args, mino_env_t *env)
         buf[i] = (char)toupper((unsigned char)s->as.s.data[i]);
     }
     {
-        mino_val_t *result = mino_string_n(buf, s->as.s.len);
+        mino_val_t *result = mino_string_n(S_, buf, s->as.s.len);
         free(buf);
         return result;
     }
@@ -6656,7 +6696,7 @@ static mino_val_t *prim_lower_case(mino_val_t *args, mino_env_t *env)
         buf[i] = (char)tolower((unsigned char)s->as.s.data[i]);
     }
     {
-        mino_val_t *result = mino_string_n(buf, s->as.s.len);
+        mino_val_t *result = mino_string_n(S_, buf, s->as.s.len);
         free(buf);
         return result;
     }
@@ -6680,7 +6720,7 @@ static mino_val_t *prim_trim(mino_val_t *args, mino_env_t *env)
     end_ptr = s->as.s.data + s->as.s.len;
     while (start < end_ptr && isspace((unsigned char)*start)) start++;
     while (end_ptr > start && isspace((unsigned char)*(end_ptr - 1))) end_ptr--;
-    return mino_string_n(start, (size_t)(end_ptr - start));
+    return mino_string_n(S_, start, (size_t)(end_ptr - start));
 }
 
 /* ------------------------------------------------------------------------- */
@@ -6696,29 +6736,29 @@ static mino_val_t *prim_type(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL)  return mino_keyword("nil");
+    if (v == NULL || v->type == MINO_NIL)  return mino_keyword(S_, "nil");
     switch (v->type) {
-    case MINO_NIL:     return mino_keyword("nil");
-    case MINO_BOOL:    return mino_keyword("bool");
-    case MINO_INT:     return mino_keyword("int");
-    case MINO_FLOAT:   return mino_keyword("float");
-    case MINO_STRING:  return mino_keyword("string");
-    case MINO_SYMBOL:  return mino_keyword("symbol");
-    case MINO_KEYWORD: return mino_keyword("keyword");
-    case MINO_CONS:    return mino_keyword("list");
-    case MINO_VECTOR:  return mino_keyword("vector");
-    case MINO_MAP:     return mino_keyword("map");
-    case MINO_SET:     return mino_keyword("set");
-    case MINO_PRIM:    return mino_keyword("fn");
-    case MINO_FN:      return mino_keyword("fn");
-    case MINO_MACRO:   return mino_keyword("macro");
-    case MINO_HANDLE:  return mino_keyword("handle");
-    case MINO_ATOM:    return mino_keyword("atom");
-    case MINO_LAZY:    return mino_keyword("lazy-seq");
-    case MINO_RECUR:     return mino_keyword("recur");
-    case MINO_TAIL_CALL: return mino_keyword("tail-call");
+    case MINO_NIL:     return mino_keyword(S_, "nil");
+    case MINO_BOOL:    return mino_keyword(S_, "bool");
+    case MINO_INT:     return mino_keyword(S_, "int");
+    case MINO_FLOAT:   return mino_keyword(S_, "float");
+    case MINO_STRING:  return mino_keyword(S_, "string");
+    case MINO_SYMBOL:  return mino_keyword(S_, "symbol");
+    case MINO_KEYWORD: return mino_keyword(S_, "keyword");
+    case MINO_CONS:    return mino_keyword(S_, "list");
+    case MINO_VECTOR:  return mino_keyword(S_, "vector");
+    case MINO_MAP:     return mino_keyword(S_, "map");
+    case MINO_SET:     return mino_keyword(S_, "set");
+    case MINO_PRIM:    return mino_keyword(S_, "fn");
+    case MINO_FN:      return mino_keyword(S_, "fn");
+    case MINO_MACRO:   return mino_keyword(S_, "macro");
+    case MINO_HANDLE:  return mino_keyword(S_, "handle");
+    case MINO_ATOM:    return mino_keyword(S_, "atom");
+    case MINO_LAZY:    return mino_keyword(S_, "lazy-seq");
+    case MINO_RECUR:     return mino_keyword(S_, "recur");
+    case MINO_TAIL_CALL: return mino_keyword(S_, "tail-call");
     }
-    return mino_keyword("unknown");
+    return mino_keyword(S_, "unknown");
 }
 
 /*
@@ -6811,7 +6851,7 @@ static mino_val_t *prim_str(mino_val_t *args, mino_env_t *env)
         args = args->as.cons.cdr;
     }
     {
-        mino_val_t *result = mino_string_n(buf != NULL ? buf : "", len);
+        mino_val_t *result = mino_string_n(S_, buf != NULL ? buf : "", len);
         free(buf);
         return result;
     }
@@ -6824,7 +6864,7 @@ static mino_val_t *prim_println(mino_val_t *args, mino_env_t *env)
     fwrite(result->as.s.data, 1, result->as.s.len, stdout);
     fputc('\n', stdout);
     fflush(stdout);
-    return mino_nil();
+    return mino_nil(S_);
 }
 
 static mino_val_t *prim_prn(mino_val_t *args, mino_env_t *env)
@@ -6833,13 +6873,13 @@ static mino_val_t *prim_prn(mino_val_t *args, mino_env_t *env)
     (void)env;
     while (mino_is_cons(args)) {
         if (!first) fputc(' ', stdout);
-        mino_print(args->as.cons.car);
+        mino_print(S_, args->as.cons.car);
         first = 0;
         args = args->as.cons.cdr;
     }
     fputc('\n', stdout);
     fflush(stdout);
-    return mino_nil();
+    return mino_nil(S_);
 }
 
 static mino_val_t *prim_macroexpand_1(mino_val_t *args, mino_env_t *env)
@@ -6895,7 +6935,7 @@ static mino_val_t *prim_gensym(mino_val_t *args, mino_env_t *env)
             set_error("gensym formatting failed");
             return NULL;
         }
-        return mino_symbol_n(buf, prefix_len + (size_t)used);
+        return mino_symbol_n(S_, buf, prefix_len + (size_t)used);
     }
 }
 
@@ -6973,7 +7013,7 @@ static mino_val_t *prim_slurp(mino_val_t *args, mino_env_t *env)
     rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[rd] = '\0';
-    result = mino_string_n(buf, rd);
+    result = mino_string_n(S_, buf, rd);
     free(buf);
     return result;
 }
@@ -7007,10 +7047,10 @@ static mino_val_t *prim_spit(mino_val_t *args, mino_env_t *env)
     if (content != NULL && content->type == MINO_STRING) {
         fwrite(content->as.s.data, 1, content->as.s.len, f);
     } else {
-        mino_print_to(f, content);
+        mino_print_to(S_, f, content);
     }
     fclose(f);
-    return mino_nil();
+    return mino_nil(S_);
 }
 
 /* (exit code) — terminate the process with the given exit code.
@@ -7028,7 +7068,7 @@ static mino_val_t *prim_exit(mino_val_t *args, mino_env_t *env)
         }
     }
     exit(code);
-    return mino_nil(); /* unreachable */
+    return mino_nil(S_); /* unreachable */
 }
 
 /* --- Regex primitives (using bundled tiny-regex-c) --- */
@@ -7059,9 +7099,9 @@ static mino_val_t *prim_re_find(mino_val_t *args, mino_env_t *env)
     }
     match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
     if (match_idx == -1) {
-        return mino_nil();
+        return mino_nil(S_);
     }
-    return mino_string_n(text_val->as.s.data + match_idx, (size_t)match_len);
+    return mino_string_n(S_, text_val->as.s.data + match_idx, (size_t)match_len);
 }
 
 /* (re-matches pattern text) — true if the entire text matches pattern. */
@@ -7090,7 +7130,7 @@ static mino_val_t *prim_re_matches(mino_val_t *args, mino_env_t *env)
     if (match_idx == 0 && (size_t)match_len == text_val->as.s.len) {
         return text_val;
     }
-    return mino_nil();
+    return mino_nil(S_);
 }
 
 /* (time-ms) — return process time in milliseconds as a float.
@@ -7103,7 +7143,7 @@ static mino_val_t *prim_time_ms(mino_val_t *args, mino_env_t *env)
         set_error("time-ms takes no arguments");
         return NULL;
     }
-    return mino_float((double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
+    return mino_float(S_, (double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
 }
 
 /* (require name) — load a module by name using the host-supplied resolver.
@@ -7144,7 +7184,7 @@ static mino_val_t *prim_require(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     /* Load. */
-    result = mino_load_file(path, env);
+    result = mino_load_file(S_, path, env);
     if (result == NULL) {
         return NULL;
     }
@@ -7202,9 +7242,9 @@ static mino_val_t *prim_doc(mino_val_t *args, mino_env_t *env)
     buf[n] = '\0';
     e = meta_find(buf);
     if (e != NULL && e->docstring != NULL) {
-        return mino_string(e->docstring);
+        return mino_string(S_, e->docstring);
     }
-    return mino_nil();
+    return mino_nil(S_);
 }
 
 /* (source name) — return the source form of a def/defmacro binding. */
@@ -7235,7 +7275,7 @@ static mino_val_t *prim_source(mino_val_t *args, mino_env_t *env)
     if (e != NULL && e->source != NULL) {
         return e->source;
     }
-    return mino_nil();
+    return mino_nil(S_);
 }
 
 /* (apropos substring) — return a list of bound names containing substring. */
@@ -7243,7 +7283,7 @@ static mino_val_t *prim_apropos(mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pat_val;
     const char *pat;
-    mino_val_t *head = mino_nil();
+    mino_val_t *head = mino_nil(S_);
     mino_val_t *tail = NULL;
     mino_env_t *e;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -7261,8 +7301,8 @@ static mino_val_t *prim_apropos(mino_val_t *args, mino_env_t *env)
         size_t i;
         for (i = 0; i < e->len; i++) {
             if (strstr(e->bindings[i].name, pat) != NULL) {
-                mino_val_t *sym  = mino_symbol(e->bindings[i].name);
-                mino_val_t *cell = mino_cons(sym, mino_nil());
+                mino_val_t *sym  = mino_symbol(S_, e->bindings[i].name);
+                mino_val_t *cell = mino_cons(S_, sym, mino_nil(S_));
                 if (tail == NULL) {
                     head = cell;
                 } else {
@@ -7275,8 +7315,9 @@ static mino_val_t *prim_apropos(mino_val_t *args, mino_env_t *env)
     return head;
 }
 
-void mino_set_resolver(mino_resolve_fn fn, void *ctx)
+void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx)
 {
+    S_ = S;
     module_resolver     = fn;
     module_resolver_ctx = ctx;
 }
@@ -7313,17 +7354,17 @@ static void install_core_mino(mino_env_t *env)
     reader_line = 1;
     while (*src != '\0') {
         const char *end  = NULL;
-        mino_val_t *form = mino_read(src, &end);
+        mino_val_t *form = mino_read(S_, src, &end);
         if (form == NULL) {
-            if (mino_last_error() != NULL) {
+            if (mino_last_error(S_) != NULL) {
                 /* Hardcoded source — a parse error here is a build-time bug. */
-                fprintf(stderr, "core.mino parse error: %s\n", mino_last_error());
+                fprintf(stderr, "core.mino parse error: %s\n", mino_last_error(S_));
                 abort();
             }
             break;
         }
-        if (mino_eval(form, env) == NULL) {
-            fprintf(stderr, "core.mino eval error: %s\n", mino_last_error());
+        if (mino_eval(S_, form, env) == NULL) {
+            fprintf(stderr, "core.mino eval error: %s\n", mino_last_error(S_));
             abort();
         }
         src = end;
@@ -7347,21 +7388,21 @@ static mino_val_t *prim_seq(mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_nil();
+    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S_);
     if (coll->type == MINO_LAZY) {
         mino_val_t *forced = lazy_force(coll);
         if (forced == NULL) return NULL;
-        if (forced->type == MINO_NIL) return mino_nil();
+        if (forced->type == MINO_NIL) return mino_nil(S_);
         return forced;
     }
     if (coll->type == MINO_CONS) return coll;
     if (coll->type == MINO_VECTOR) {
-        mino_val_t *head = mino_nil();
+        mino_val_t *head = mino_nil(S_);
         mino_val_t *tail = NULL;
         size_t i;
-        if (coll->as.vec.len == 0) return mino_nil();
+        if (coll->as.vec.len == 0) return mino_nil(S_);
         for (i = 0; i < coll->as.vec.len; i++) {
-            mino_val_t *cell = mino_cons(vec_nth(coll, i), mino_nil());
+            mino_val_t *cell = mino_cons(S_, vec_nth(coll, i), mino_nil(S_));
             if (tail == NULL) head = cell;
             else tail->as.cons.cdr = cell;
             tail = cell;
@@ -7369,17 +7410,17 @@ static mino_val_t *prim_seq(mino_val_t *args, mino_env_t *env)
         return head;
     }
     if (coll->type == MINO_MAP) {
-        mino_val_t *head = mino_nil();
+        mino_val_t *head = mino_nil(S_);
         mino_val_t *tail = NULL;
         size_t i;
-        if (coll->as.map.len == 0) return mino_nil();
+        if (coll->as.map.len == 0) return mino_nil(S_);
         for (i = 0; i < coll->as.map.len; i++) {
             mino_val_t *key = vec_nth(coll->as.map.key_order, i);
             mino_val_t *val = map_get_val(coll, key);
             mino_val_t *kv[2];
             mino_val_t *cell;
             kv[0] = key; kv[1] = val;
-            cell = mino_cons(mino_vector(kv, 2), mino_nil());
+            cell = mino_cons(S_, mino_vector(S_, kv, 2), mino_nil(S_));
             if (tail == NULL) head = cell;
             else tail->as.cons.cdr = cell;
             tail = cell;
@@ -7387,13 +7428,13 @@ static mino_val_t *prim_seq(mino_val_t *args, mino_env_t *env)
         return head;
     }
     if (coll->type == MINO_SET) {
-        mino_val_t *head = mino_nil();
+        mino_val_t *head = mino_nil(S_);
         mino_val_t *tail = NULL;
         size_t i;
-        if (coll->as.set.len == 0) return mino_nil();
+        if (coll->as.set.len == 0) return mino_nil(S_);
         for (i = 0; i < coll->as.set.len; i++) {
             mino_val_t *elem = vec_nth(coll->as.set.key_order, i);
-            mino_val_t *cell = mino_cons(elem, mino_nil());
+            mino_val_t *cell = mino_cons(S_, elem, mino_nil(S_));
             if (tail == NULL) head = cell;
             else tail->as.cons.cdr = cell;
             tail = cell;
@@ -7401,13 +7442,13 @@ static mino_val_t *prim_seq(mino_val_t *args, mino_env_t *env)
         return head;
     }
     if (coll->type == MINO_STRING) {
-        mino_val_t *head = mino_nil();
+        mino_val_t *head = mino_nil(S_);
         mino_val_t *tail = NULL;
         size_t i;
-        if (coll->as.s.len == 0) return mino_nil();
+        if (coll->as.s.len == 0) return mino_nil(S_);
         for (i = 0; i < coll->as.s.len; i++) {
-            mino_val_t *ch = mino_string_n(coll->as.s.data + i, 1);
-            mino_val_t *cell = mino_cons(ch, mino_nil());
+            mino_val_t *ch = mino_string_n(S_, coll->as.s.data + i, 1);
+            mino_val_t *cell = mino_cons(S_, ch, mino_nil(S_));
             if (tail == NULL) head = cell;
             else tail->as.cons.cdr = cell;
             tail = cell;
@@ -7433,10 +7474,10 @@ static mino_val_t *prim_realized_p(mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_LAZY) {
-        return v->as.lazy.realized ? mino_true() : mino_false();
+        return v->as.lazy.realized ? mino_true(S_) : mino_false(S_);
     }
     /* Non-lazy values are always realized. */
-    return mino_true();
+    return mino_true(S_);
 }
 
 static mino_val_t *prim_atom(mino_val_t *args, mino_env_t *env)
@@ -7446,7 +7487,7 @@ static mino_val_t *prim_atom(mino_val_t *args, mino_env_t *env)
         set_error("atom requires one argument");
         return NULL;
     }
-    return mino_atom(args->as.cons.car);
+    return mino_atom(S_, args->as.cons.car);
 }
 
 static mino_val_t *prim_deref(mino_val_t *args, mino_env_t *env)
@@ -7491,132 +7532,134 @@ static mino_val_t *prim_atom_p(mino_val_t *args, mino_env_t *env)
         set_error("atom? requires one argument");
         return NULL;
     }
-    return mino_is_atom(args->as.cons.car) ? mino_true() : mino_false();
+    return mino_is_atom(args->as.cons.car) ? mino_true(S_) : mino_false(S_);
 }
 
-void mino_install_core(mino_env_t *env)
+void mino_install_core(mino_state_t *S, mino_env_t *env)
 {
+    S_ = S;
     volatile char probe = 0;
     gc_note_host_frame((void *)&probe);
     (void)probe;
-    mino_env_set(env, "+",        mino_prim("+",        prim_add));
-    mino_env_set(env, "-",        mino_prim("-",        prim_sub));
-    mino_env_set(env, "*",        mino_prim("*",        prim_mul));
-    mino_env_set(env, "/",        mino_prim("/",        prim_div));
-    mino_env_set(env, "=",        mino_prim("=",        prim_eq));
-    mino_env_set(env, "<",        mino_prim("<",        prim_lt));
-    mino_env_set(env, "mod",      mino_prim("mod",      prim_mod));
-    mino_env_set(env, "rem",      mino_prim("rem",      prim_rem));
-    mino_env_set(env, "quot",     mino_prim("quot",     prim_quot));
+    mino_env_set(S_, env, "+",        mino_prim(S_, "+",        prim_add));
+    mino_env_set(S_, env, "-",        mino_prim(S_, "-",        prim_sub));
+    mino_env_set(S_, env, "*",        mino_prim(S_, "*",        prim_mul));
+    mino_env_set(S_, env, "/",        mino_prim(S_, "/",        prim_div));
+    mino_env_set(S_, env, "=",        mino_prim(S_, "=",        prim_eq));
+    mino_env_set(S_, env, "<",        mino_prim(S_, "<",        prim_lt));
+    mino_env_set(S_, env, "mod",      mino_prim(S_, "mod",      prim_mod));
+    mino_env_set(S_, env, "rem",      mino_prim(S_, "rem",      prim_rem));
+    mino_env_set(S_, env, "quot",     mino_prim(S_, "quot",     prim_quot));
     /* math */
-    mino_env_set(env, "math-floor", mino_prim("math-floor", prim_math_floor));
-    mino_env_set(env, "math-ceil",  mino_prim("math-ceil",  prim_math_ceil));
-    mino_env_set(env, "math-round", mino_prim("math-round", prim_math_round));
-    mino_env_set(env, "math-sqrt",  mino_prim("math-sqrt",  prim_math_sqrt));
-    mino_env_set(env, "math-pow",   mino_prim("math-pow",   prim_math_pow));
-    mino_env_set(env, "math-log",   mino_prim("math-log",   prim_math_log));
-    mino_env_set(env, "math-exp",   mino_prim("math-exp",   prim_math_exp));
-    mino_env_set(env, "math-sin",   mino_prim("math-sin",   prim_math_sin));
-    mino_env_set(env, "math-cos",   mino_prim("math-cos",   prim_math_cos));
-    mino_env_set(env, "math-tan",   mino_prim("math-tan",   prim_math_tan));
-    mino_env_set(env, "math-atan2", mino_prim("math-atan2", prim_math_atan2));
-    mino_env_set(env, "math-pi",    mino_float(3.14159265358979323846));
-    mino_env_set(env, "bit-and", mino_prim("bit-and", prim_bit_and));
-    mino_env_set(env, "bit-or",  mino_prim("bit-or",  prim_bit_or));
-    mino_env_set(env, "bit-xor", mino_prim("bit-xor", prim_bit_xor));
-    mino_env_set(env, "bit-not", mino_prim("bit-not", prim_bit_not));
-    mino_env_set(env, "bit-shift-left",
-                 mino_prim("bit-shift-left", prim_bit_shift_left));
-    mino_env_set(env, "bit-shift-right",
-                 mino_prim("bit-shift-right", prim_bit_shift_right));
-    mino_env_set(env, "car",      mino_prim("car",      prim_car));
-    mino_env_set(env, "cdr",      mino_prim("cdr",      prim_cdr));
-    mino_env_set(env, "cons",     mino_prim("cons",     prim_cons));
-    mino_env_set(env, "count",    mino_prim("count",    prim_count));
-    mino_env_set(env, "nth",      mino_prim("nth",      prim_nth));
-    mino_env_set(env, "first",    mino_prim("first",    prim_first));
-    mino_env_set(env, "rest",     mino_prim("rest",     prim_rest));
-    mino_env_set(env, "vector",   mino_prim("vector",   prim_vector));
-    mino_env_set(env, "hash-map", mino_prim("hash-map", prim_hash_map));
-    mino_env_set(env, "assoc",    mino_prim("assoc",    prim_assoc));
-    mino_env_set(env, "get",      mino_prim("get",      prim_get));
-    mino_env_set(env, "conj",     mino_prim("conj",     prim_conj));
-    mino_env_set(env, "keys",     mino_prim("keys",     prim_keys));
-    mino_env_set(env, "vals",     mino_prim("vals",     prim_vals));
-    mino_env_set(env, "macroexpand-1",
-                 mino_prim("macroexpand-1", prim_macroexpand_1));
-    mino_env_set(env, "macroexpand",
-                 mino_prim("macroexpand", prim_macroexpand));
-    mino_env_set(env, "gensym",   mino_prim("gensym",   prim_gensym));
-    mino_env_set(env, "type",     mino_prim("type",     prim_type));
-    mino_env_set(env, "name",     mino_prim("name",     prim_name));
-    mino_env_set(env, "rand",     mino_prim("rand",     prim_rand));
+    mino_env_set(S_, env, "math-floor", mino_prim(S_, "math-floor", prim_math_floor));
+    mino_env_set(S_, env, "math-ceil",  mino_prim(S_, "math-ceil",  prim_math_ceil));
+    mino_env_set(S_, env, "math-round", mino_prim(S_, "math-round", prim_math_round));
+    mino_env_set(S_, env, "math-sqrt",  mino_prim(S_, "math-sqrt",  prim_math_sqrt));
+    mino_env_set(S_, env, "math-pow",   mino_prim(S_, "math-pow",   prim_math_pow));
+    mino_env_set(S_, env, "math-log",   mino_prim(S_, "math-log",   prim_math_log));
+    mino_env_set(S_, env, "math-exp",   mino_prim(S_, "math-exp",   prim_math_exp));
+    mino_env_set(S_, env, "math-sin",   mino_prim(S_, "math-sin",   prim_math_sin));
+    mino_env_set(S_, env, "math-cos",   mino_prim(S_, "math-cos",   prim_math_cos));
+    mino_env_set(S_, env, "math-tan",   mino_prim(S_, "math-tan",   prim_math_tan));
+    mino_env_set(S_, env, "math-atan2", mino_prim(S_, "math-atan2", prim_math_atan2));
+    mino_env_set(S_, env, "math-pi",    mino_float(S_, 3.14159265358979323846));
+    mino_env_set(S_, env, "bit-and", mino_prim(S_, "bit-and", prim_bit_and));
+    mino_env_set(S_, env, "bit-or",  mino_prim(S_, "bit-or",  prim_bit_or));
+    mino_env_set(S_, env, "bit-xor", mino_prim(S_, "bit-xor", prim_bit_xor));
+    mino_env_set(S_, env, "bit-not", mino_prim(S_, "bit-not", prim_bit_not));
+    mino_env_set(S_, env, "bit-shift-left",
+                 mino_prim(S_, "bit-shift-left", prim_bit_shift_left));
+    mino_env_set(S_, env, "bit-shift-right",
+                 mino_prim(S_, "bit-shift-right", prim_bit_shift_right));
+    mino_env_set(S_, env, "car",      mino_prim(S_, "car",      prim_car));
+    mino_env_set(S_, env, "cdr",      mino_prim(S_, "cdr",      prim_cdr));
+    mino_env_set(S_, env, "cons",     mino_prim(S_, "cons",     prim_cons));
+    mino_env_set(S_, env, "count",    mino_prim(S_, "count",    prim_count));
+    mino_env_set(S_, env, "nth",      mino_prim(S_, "nth",      prim_nth));
+    mino_env_set(S_, env, "first",    mino_prim(S_, "first",    prim_first));
+    mino_env_set(S_, env, "rest",     mino_prim(S_, "rest",     prim_rest));
+    mino_env_set(S_, env, "vector",   mino_prim(S_, "vector",   prim_vector));
+    mino_env_set(S_, env, "hash-map", mino_prim(S_, "hash-map", prim_hash_map));
+    mino_env_set(S_, env, "assoc",    mino_prim(S_, "assoc",    prim_assoc));
+    mino_env_set(S_, env, "get",      mino_prim(S_, "get",      prim_get));
+    mino_env_set(S_, env, "conj",     mino_prim(S_, "conj",     prim_conj));
+    mino_env_set(S_, env, "keys",     mino_prim(S_, "keys",     prim_keys));
+    mino_env_set(S_, env, "vals",     mino_prim(S_, "vals",     prim_vals));
+    mino_env_set(S_, env, "macroexpand-1",
+                 mino_prim(S_, "macroexpand-1", prim_macroexpand_1));
+    mino_env_set(S_, env, "macroexpand",
+                 mino_prim(S_, "macroexpand", prim_macroexpand));
+    mino_env_set(S_, env, "gensym",   mino_prim(S_, "gensym",   prim_gensym));
+    mino_env_set(S_, env, "type",     mino_prim(S_, "type",     prim_type));
+    mino_env_set(S_, env, "name",     mino_prim(S_, "name",     prim_name));
+    mino_env_set(S_, env, "rand",     mino_prim(S_, "rand",     prim_rand));
     /* regex */
-    mino_env_set(env, "re-find",    mino_prim("re-find",    prim_re_find));
-    mino_env_set(env, "re-matches", mino_prim("re-matches", prim_re_matches));
-    mino_env_set(env, "eval",     mino_prim("eval",     prim_eval));
-    mino_env_set(env, "symbol",   mino_prim("symbol",   prim_symbol));
-    mino_env_set(env, "keyword",  mino_prim("keyword",  prim_keyword));
-    mino_env_set(env, "hash",     mino_prim("hash",     prim_hash));
-    mino_env_set(env, "compare",  mino_prim("compare",  prim_compare));
-    mino_env_set(env, "int",      mino_prim("int",      prim_int));
-    mino_env_set(env, "float",    mino_prim("float",    prim_float));
-    mino_env_set(env, "str",      mino_prim("str",      prim_str));
-    mino_env_set(env, "pr-str",   mino_prim("pr-str",   prim_pr_str));
-    mino_env_set(env, "read-string",
-                 mino_prim("read-string", prim_read_string));
-    mino_env_set(env, "format",   mino_prim("format",   prim_format));
-    mino_env_set(env, "throw",    mino_prim("throw",    prim_throw));
-    mino_env_set(env, "require",  mino_prim("require",  prim_require));
-    mino_env_set(env, "doc",      mino_prim("doc",      prim_doc));
-    mino_env_set(env, "source",   mino_prim("source",   prim_source));
-    mino_env_set(env, "apropos",  mino_prim("apropos",  prim_apropos));
+    mino_env_set(S_, env, "re-find",    mino_prim(S_, "re-find",    prim_re_find));
+    mino_env_set(S_, env, "re-matches", mino_prim(S_, "re-matches", prim_re_matches));
+    mino_env_set(S_, env, "eval",     mino_prim(S_, "eval",     prim_eval));
+    mino_env_set(S_, env, "symbol",   mino_prim(S_, "symbol",   prim_symbol));
+    mino_env_set(S_, env, "keyword",  mino_prim(S_, "keyword",  prim_keyword));
+    mino_env_set(S_, env, "hash",     mino_prim(S_, "hash",     prim_hash));
+    mino_env_set(S_, env, "compare",  mino_prim(S_, "compare",  prim_compare));
+    mino_env_set(S_, env, "int",      mino_prim(S_, "int",      prim_int));
+    mino_env_set(S_, env, "float",    mino_prim(S_, "float",    prim_float));
+    mino_env_set(S_, env, "str",      mino_prim(S_, "str",      prim_str));
+    mino_env_set(S_, env, "pr-str",   mino_prim(S_, "pr-str",   prim_pr_str));
+    mino_env_set(S_, env, "read-string",
+                 mino_prim(S_, "read-string", prim_read_string));
+    mino_env_set(S_, env, "format",   mino_prim(S_, "format",   prim_format));
+    mino_env_set(S_, env, "throw",    mino_prim(S_, "throw",    prim_throw));
+    mino_env_set(S_, env, "require",  mino_prim(S_, "require",  prim_require));
+    mino_env_set(S_, env, "doc",      mino_prim(S_, "doc",      prim_doc));
+    mino_env_set(S_, env, "source",   mino_prim(S_, "source",   prim_source));
+    mino_env_set(S_, env, "apropos",  mino_prim(S_, "apropos",  prim_apropos));
     /* set operations */
-    mino_env_set(env, "hash-set", mino_prim("hash-set", prim_hash_set));
-    mino_env_set(env, "contains?",mino_prim("contains?",prim_contains_p));
-    mino_env_set(env, "disj",     mino_prim("disj",     prim_disj));
-    mino_env_set(env, "dissoc",   mino_prim("dissoc",   prim_dissoc));
+    mino_env_set(S_, env, "hash-set", mino_prim(S_, "hash-set", prim_hash_set));
+    mino_env_set(S_, env, "contains?",mino_prim(S_, "contains?",prim_contains_p));
+    mino_env_set(S_, env, "disj",     mino_prim(S_, "disj",     prim_disj));
+    mino_env_set(S_, env, "dissoc",   mino_prim(S_, "dissoc",   prim_dissoc));
     /* sequence operations (map, filter, take, drop, range, repeat,
        concat are now lazy in core.mino) */
-    mino_env_set(env, "reduce",   mino_prim("reduce",   prim_reduce));
-    mino_env_set(env, "into",     mino_prim("into",     prim_into));
-    mino_env_set(env, "apply",    mino_prim("apply",    prim_apply));
-    mino_env_set(env, "reverse",  mino_prim("reverse",  prim_reverse));
-    mino_env_set(env, "sort",     mino_prim("sort",     prim_sort));
+    mino_env_set(S_, env, "reduce",   mino_prim(S_, "reduce",   prim_reduce));
+    mino_env_set(S_, env, "into",     mino_prim(S_, "into",     prim_into));
+    mino_env_set(S_, env, "apply",    mino_prim(S_, "apply",    prim_apply));
+    mino_env_set(S_, env, "reverse",  mino_prim(S_, "reverse",  prim_reverse));
+    mino_env_set(S_, env, "sort",     mino_prim(S_, "sort",     prim_sort));
     /* string operations */
-    mino_env_set(env, "subs",     mino_prim("subs",     prim_subs));
-    mino_env_set(env, "split",    mino_prim("split",    prim_split));
-    mino_env_set(env, "join",     mino_prim("join",     prim_join));
-    mino_env_set(env, "starts-with?",
-                 mino_prim("starts-with?", prim_starts_with_p));
-    mino_env_set(env, "ends-with?",
-                 mino_prim("ends-with?", prim_ends_with_p));
-    mino_env_set(env, "includes?",
-                 mino_prim("includes?", prim_includes_p));
-    mino_env_set(env, "upper-case",
-                 mino_prim("upper-case", prim_upper_case));
-    mino_env_set(env, "lower-case",
-                 mino_prim("lower-case", prim_lower_case));
-    mino_env_set(env, "trim",     mino_prim("trim",     prim_trim));
-    mino_env_set(env, "char-at",  mino_prim("char-at",  prim_char_at));
+    mino_env_set(S_, env, "subs",     mino_prim(S_, "subs",     prim_subs));
+    mino_env_set(S_, env, "split",    mino_prim(S_, "split",    prim_split));
+    mino_env_set(S_, env, "join",     mino_prim(S_, "join",     prim_join));
+    mino_env_set(S_, env, "starts-with?",
+                 mino_prim(S_, "starts-with?", prim_starts_with_p));
+    mino_env_set(S_, env, "ends-with?",
+                 mino_prim(S_, "ends-with?", prim_ends_with_p));
+    mino_env_set(S_, env, "includes?",
+                 mino_prim(S_, "includes?", prim_includes_p));
+    mino_env_set(S_, env, "upper-case",
+                 mino_prim(S_, "upper-case", prim_upper_case));
+    mino_env_set(S_, env, "lower-case",
+                 mino_prim(S_, "lower-case", prim_lower_case));
+    mino_env_set(S_, env, "trim",     mino_prim(S_, "trim",     prim_trim));
+    mino_env_set(S_, env, "char-at",  mino_prim(S_, "char-at",  prim_char_at));
     /* (some and every? are now in core.mino) */
     /* sequences */
-    mino_env_set(env, "seq",       mino_prim("seq",       prim_seq));
-    mino_env_set(env, "realized?", mino_prim("realized?", prim_realized_p));
+    mino_env_set(S_, env, "seq",       mino_prim(S_, "seq",       prim_seq));
+    mino_env_set(S_, env, "realized?", mino_prim(S_, "realized?", prim_realized_p));
     /* atoms */
-    mino_env_set(env, "atom",     mino_prim("atom",     prim_atom));
-    mino_env_set(env, "deref",    mino_prim("deref",    prim_deref));
-    mino_env_set(env, "reset!",   mino_prim("reset!",   prim_reset_bang));
-    mino_env_set(env, "atom?",    mino_prim("atom?",    prim_atom_p));
+    mino_env_set(S_, env, "atom",     mino_prim(S_, "atom",     prim_atom));
+    mino_env_set(S_, env, "deref",    mino_prim(S_, "deref",    prim_deref));
+    mino_env_set(S_, env, "reset!",   mino_prim(S_, "reset!",   prim_reset_bang));
+    mino_env_set(S_, env, "atom?",    mino_prim(S_, "atom?",    prim_atom_p));
     install_core_mino(env);
 }
 
-void mino_install_io(mino_env_t *env)
+void mino_install_io(mino_state_t *S, mino_env_t *env)
 {
-    mino_env_set(env, "println",  mino_prim("println",  prim_println));
-    mino_env_set(env, "prn",      mino_prim("prn",      prim_prn));
-    mino_env_set(env, "slurp",    mino_prim("slurp",    prim_slurp));
-    mino_env_set(env, "spit",     mino_prim("spit",     prim_spit));
-    mino_env_set(env, "exit",     mino_prim("exit",     prim_exit));
-    mino_env_set(env, "time-ms",  mino_prim("time-ms",  prim_time_ms));
+    S_ = S;
+    mino_env_set(S_, env, "println",  mino_prim(S_, "println",  prim_println));
+    mino_env_set(S_, env, "prn",      mino_prim(S_, "prn",      prim_prn));
+    mino_env_set(S_, env, "slurp",    mino_prim(S_, "slurp",    prim_slurp));
+    mino_env_set(S_, env, "spit",     mino_prim(S_, "spit",     prim_spit));
+    mino_env_set(S_, env, "exit",     mino_prim(S_, "exit",     prim_exit));
+    mino_env_set(S_, env, "time-ms",  mino_prim(S_, "time-ms",  prim_time_ms));
 }

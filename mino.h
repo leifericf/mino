@@ -116,24 +116,25 @@ struct mino_val {
 /* Constructors                                                              */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_nil(void);
-mino_val_t *mino_true(void);
-mino_val_t *mino_false(void);
-mino_val_t *mino_int(long long n);
-mino_val_t *mino_float(double f);
-mino_val_t *mino_string(const char *s);
-mino_val_t *mino_string_n(const char *s, size_t len);
-mino_val_t *mino_symbol(const char *s);
-mino_val_t *mino_symbol_n(const char *s, size_t len);
-mino_val_t *mino_keyword(const char *s);
-mino_val_t *mino_keyword_n(const char *s, size_t len);
-mino_val_t *mino_cons(mino_val_t *car, mino_val_t *cdr);
-mino_val_t *mino_vector(mino_val_t **items, size_t len);
-mino_val_t *mino_map(mino_val_t **keys, mino_val_t **vals, size_t len);
-mino_val_t *mino_set(mino_val_t **items, size_t len);
-mino_val_t *mino_prim(const char *name, mino_prim_fn fn);
-mino_val_t *mino_handle(void *ptr, const char *tag);
-mino_val_t *mino_atom(mino_val_t *val);
+mino_val_t *mino_nil(mino_state_t *S);
+mino_val_t *mino_true(mino_state_t *S);
+mino_val_t *mino_false(mino_state_t *S);
+mino_val_t *mino_int(mino_state_t *S, long long n);
+mino_val_t *mino_float(mino_state_t *S, double f);
+mino_val_t *mino_string(mino_state_t *S, const char *s);
+mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len);
+mino_val_t *mino_symbol(mino_state_t *S, const char *s);
+mino_val_t *mino_symbol_n(mino_state_t *S, const char *s, size_t len);
+mino_val_t *mino_keyword(mino_state_t *S, const char *s);
+mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len);
+mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr);
+mino_val_t *mino_vector(mino_state_t *S, mino_val_t **items, size_t len);
+mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals,
+                     size_t len);
+mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len);
+mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn);
+mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag);
+mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val);
 
 /* Handle accessors — return NULL/0 if the value is not a handle. */
 int         mino_is_handle(const mino_val_t *v);
@@ -171,9 +172,9 @@ int mino_to_bool(const mino_val_t *v);
 
 #include <stdio.h>
 
-void mino_print(const mino_val_t *v);            /* to stdout, no newline */
-void mino_println(const mino_val_t *v);          /* to stdout, with newline */
-void mino_print_to(FILE *out, const mino_val_t *v);
+void mino_print(mino_state_t *S, const mino_val_t *v);
+void mino_println(mino_state_t *S, const mino_val_t *v);
+void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 
 /* ------------------------------------------------------------------------- */
 /* Reader                                                                    */
@@ -186,9 +187,9 @@ void mino_print_to(FILE *out, const mino_val_t *v);
  * past the trailing whitespace. On parse error returns NULL and writes a
  * human-readable message via `mino_last_error()`.
  */
-mino_val_t *mino_read(const char *src, const char **end);
+mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end);
 
-const char *mino_last_error(void);
+const char *mino_last_error(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
@@ -203,6 +204,13 @@ const char *mino_last_error(void);
  * explicitly, preserving backwards compatibility with the existing API.
  */
 mino_state_t *mino_state_new(void);
+
+/*
+ * Return the state that is currently active in the runtime. Useful inside
+ * host-defined primitive functions (mino_prim_fn), which do not receive
+ * the state as a parameter but may need it to call constructors.
+ */
+mino_state_t *mino_current_state(void);
 
 /*
  * Free a runtime state and all resources owned by it. All GC-managed objects,
@@ -222,17 +230,18 @@ void mino_state_free(mino_state_t *S);
  * sweep reclaim the frame and any closures that were reachable only from
  * within it. The host does not free any mino-owned pointers directly.
  */
-mino_env_t *mino_env_new(void);
-void        mino_env_free(mino_env_t *env);
+mino_env_t *mino_env_new(mino_state_t *S);
+void        mino_env_free(mino_state_t *S, mino_env_t *env);
 
 /*
  * Convenience: allocate a new env and install core bindings in one call.
  * Equivalent to mino_env_new() followed by mino_install_core().
  */
-mino_env_t *mino_new(void);
+mino_env_t *mino_new(mino_state_t *S);
 
 /* Define or replace a binding in `env`. */
-void        mino_env_set(mino_env_t *env, const char *name, mino_val_t *val);
+void        mino_env_set(mino_state_t *S, mino_env_t *env, const char *name,
+                         mino_val_t *val);
 /* Look up `name`. Returns NULL if unbound. */
 mino_val_t *mino_env_get(mino_env_t *env, const char *name);
 
@@ -268,52 +277,56 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  * mino_install_io to opt in to println, prn, and slurp.
  * Safe to call on a fresh env.
  */
-void        mino_install_core(mino_env_t *env);
+void        mino_install_core(mino_state_t *S, mino_env_t *env);
 
 /*
  * Install I/O primitives: println, prn, slurp, spit, exit. These are kept
  * separate from mino_install_core so that sandboxed environments start with
  * no I/O capability; the host opts in by calling this function.
  */
-void        mino_install_io(mino_env_t *env);
+void        mino_install_io(mino_state_t *S, mino_env_t *env);
 
 /*
  * Evaluate one form. Returns NULL on error and writes a message via
  * mino_last_error(). Returns mino_nil() for an explicit nil result.
  */
-mino_val_t *mino_eval(mino_val_t *form, mino_env_t *env);
+mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
 
 /*
  * Read and evaluate all forms in `src`. Returns the value of the last
  * form, or NULL on error. An empty string returns mino_nil().
  */
-mino_val_t *mino_eval_string(const char *src, mino_env_t *env);
+mino_val_t *mino_eval_string(mino_state_t *S, const char *src,
+                             mino_env_t *env);
 
 /*
  * Read a file at `path` and evaluate all forms. Returns the value of the
  * last form, or NULL on error (file I/O failures and parse/eval errors).
  */
-mino_val_t *mino_load_file(const char *path, mino_env_t *env);
+mino_val_t *mino_load_file(mino_state_t *S, const char *path,
+                           mino_env_t *env);
 
 /*
  * Shorthand: bind a C function as a primitive in `env`.
- * Equivalent to mino_env_set(env, name, mino_prim(name, fn)).
+ * Equivalent to mino_env_set(S, env, name, mino_prim(S, name, fn)).
  */
-void mino_register_fn(mino_env_t *env, const char *name, mino_prim_fn fn);
+void mino_register_fn(mino_state_t *S, mino_env_t *env, const char *name,
+                      mino_prim_fn fn);
 
 /*
  * Call a callable value (fn, macro, prim) with an argument list.
  * Returns the result, or NULL on error (via mino_last_error).
  */
-mino_val_t *mino_call(mino_val_t *fn, mino_val_t *args, mino_env_t *env);
+mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
+                      mino_env_t *env);
 
 /*
  * Protected call: same as mino_call but returns 0 on success (writing the
  * result to *out) or -1 on error. The error message is available via
  * mino_last_error(). *out is set to NULL on error.
  */
-int mino_pcall(mino_val_t *fn, mino_val_t *args, mino_env_t *env,
-               mino_val_t **out);
+int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
+               mino_env_t *env, mino_val_t **out);
 
 /* ------------------------------------------------------------------------- */
 /* Modules                                                                   */
@@ -332,7 +345,7 @@ typedef const char *(*mino_resolve_fn)(const char *name, void *ctx);
  * once; subsequent requires of the same name return the cached value.
  * Pass NULL to remove the resolver.
  */
-void mino_set_resolver(mino_resolve_fn fn, void *ctx);
+void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx);
 
 /* ------------------------------------------------------------------------- */
 /* Execution limits                                                          */
@@ -347,7 +360,7 @@ void mino_set_resolver(mino_resolve_fn fn, void *ctx);
  * When a limit is exceeded, the current eval returns NULL and
  * mino_last_error() reports the cause.
  */
-void mino_set_limit(int kind, size_t value);
+void mino_set_limit(mino_state_t *S, int kind, size_t value);
 
 /* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */
@@ -370,7 +383,7 @@ typedef struct mino_repl mino_repl_t;
  *
  * `env` must outlive the REPL handle.
  */
-mino_repl_t *mino_repl_new(mino_env_t *env);
+mino_repl_t *mino_repl_new(mino_state_t *S, mino_env_t *env);
 
 /*
  * Feed one line of input to the REPL. Returns:

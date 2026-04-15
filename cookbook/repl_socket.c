@@ -66,9 +66,10 @@ int main(void)
     printf("client connected\n");
 
     /* Create the mino runtime with full capabilities. */
-    env = mino_new();
-    mino_install_io(env);
-    repl = mino_repl_new(env);
+    mino_state_t *S = mino_state_new();
+    env = mino_new(S);
+    mino_install_io(S, env);
+    repl = mino_repl_new(S, env);
 
     send_str(cli, "mino REPL\n");
     send_prompt(cli, 0);
@@ -98,7 +99,7 @@ int main(void)
                         {
                             FILE *tmp = tmpfile();
                             if (tmp != NULL) {
-                                mino_print_to(tmp, out);
+                                mino_print_to(S, tmp, out);
                                 len = (int)ftell(tmp);
                                 if (len > 0 && len < (int)sizeof(repr)) {
                                     rewind(tmp);
@@ -118,7 +119,7 @@ int main(void)
                     break;
                 case MINO_REPL_ERROR:
                     send_str(cli, "error: ");
-                    send_str(cli, mino_last_error());
+                    send_str(cli, mino_last_error(S));
                     send_str(cli, "\n");
                     send_prompt(cli, 0);
                     break;
@@ -130,7 +131,8 @@ int main(void)
 
     printf("client disconnected\n");
     mino_repl_free(repl);
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     close(cli);
     close(srv);
     return 0;

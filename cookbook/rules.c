@@ -27,20 +27,23 @@ static customer_t current_customer;
 
 static mino_val_t *host_age(mino_val_t *args, mino_env_t *env)
 {
+    mino_state_t *S = mino_current_state();
     (void)args; (void)env;
-    return mino_int(current_customer.age);
+    return mino_int(S, current_customer.age);
 }
 
 static mino_val_t *host_purchases(mino_val_t *args, mino_env_t *env)
 {
+    mino_state_t *S = mino_current_state();
     (void)args; (void)env;
-    return mino_int(current_customer.purchases);
+    return mino_int(S, current_customer.purchases);
 }
 
 static mino_val_t *host_balance(mino_val_t *args, mino_env_t *env)
 {
+    mino_state_t *S = mino_current_state();
     (void)args; (void)env;
-    return mino_float(current_customer.balance);
+    return mino_float(S, current_customer.balance);
 }
 
 /* --- Rules are mino expressions returning a discount tier keyword ------- */
@@ -56,17 +59,18 @@ static const char *rules_src =
 
 int main(void)
 {
-    mino_env_t *env = mino_new();
+    mino_state_t *S = mino_state_new();
+    mino_env_t *env = mino_new(S);
     mino_val_t *result;
 
     /* Register host accessors. */
-    mino_register_fn(env, "age",       host_age);
-    mino_register_fn(env, "purchases", host_purchases);
-    mino_register_fn(env, "balance",   host_balance);
+    mino_register_fn(S, env, "age",       host_age);
+    mino_register_fn(S, env, "purchases", host_purchases);
+    mino_register_fn(S, env, "balance",   host_balance);
 
     /* Load the rules. */
-    if (mino_eval_string(rules_src, env) == NULL) {
-        fprintf(stderr, "rules error: %s\n", mino_last_error());
+    if (mino_eval_string(S, rules_src, env) == NULL) {
+        fprintf(stderr, "rules error: %s\n", mino_last_error(S));
         return 1;
     }
 
@@ -80,16 +84,17 @@ int main(void)
         size_t i;
         for (i = 0; i < sizeof(customers)/sizeof(customers[0]); i++) {
             current_customer = customers[i];
-            result = mino_eval_string("(discount-tier)", env);
+            result = mino_eval_string(S, "(discount-tier)", env);
             if (result == NULL) {
-                fprintf(stderr, "eval error: %s\n", mino_last_error());
+                fprintf(stderr, "eval error: %s\n", mino_last_error(S));
                 continue;
             }
             printf("%-8s -> ", customers[i].user);
-            mino_println(result);
+            mino_println(S, result);
         }
     }
 
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     return 0;
 }

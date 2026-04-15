@@ -56,26 +56,28 @@ static int has_only_whitespace(const char *s)
 
 int main(int argc, char **argv)
 {
-    mino_env_t *env = mino_env_new();
+    mino_state_t *S   = mino_state_new();
+    mino_env_t   *env = mino_env_new(S);
     char *buf  = NULL;
     size_t cap = 0;
     size_t len = 0;
     int    awaiting_continuation = 0;
     int    exit_code = 0;
 
-    mino_install_core(env);
-    mino_install_io(env);
-    mino_set_resolver(cwd_resolve, NULL);
+    mino_install_core(S, env);
+    mino_install_io(S, env);
+    mino_set_resolver(S, cwd_resolve, NULL);
 
     /* File mode: evaluate a script and exit. */
     if (argc > 1) {
-        mino_val_t *result = mino_load_file(argv[1], env);
+        mino_val_t *result = mino_load_file(S, argv[1], env);
         if (result == NULL) {
-            const char *err = mino_last_error();
+            const char *err = mino_last_error(S);
             fprintf(stderr, "mino: %s\n", err ? err : "unknown error");
             exit_code = 1;
         }
-        mino_env_free(env);
+        mino_env_free(S, env);
+        mino_state_free(S);
         return exit_code;
     }
 
@@ -120,9 +122,9 @@ int main(int argc, char **argv)
                 break;
             }
 
-            form = mino_read(cursor, &end);
+            form = mino_read(S, cursor, &end);
             if (form == NULL) {
-                const char *err = mino_last_error();
+                const char *err = mino_last_error(S);
                 if (is_unterminated_error(err)) {
                     awaiting_continuation = 1;
                     break;
@@ -134,12 +136,12 @@ int main(int argc, char **argv)
                 break;
             }
 
-            result = mino_eval(form, env);
+            result = mino_eval(S, form, env);
             if (result == NULL) {
-                const char *err = mino_last_error();
+                const char *err = mino_last_error(S);
                 fprintf(stderr, "eval error: %s\n", err ? err : "unknown");
             } else {
-                mino_println(result);
+                mino_println(S, result);
             }
 
             /* Shift unread bytes to the front of the buffer. */
@@ -160,6 +162,7 @@ int main(int argc, char **argv)
 
 cleanup:
     free(buf);
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     return exit_code;
 }

@@ -15,7 +15,8 @@
 
 int main(void)
 {
-    mino_env_t *env = mino_new();
+    mino_state_t *S   = mino_state_new();
+    mino_env_t   *env = mino_new(S);
     mino_val_t *result;
 
     /* Build a vector of employee records from C data. */
@@ -29,32 +30,32 @@ int main(void)
 
         for (i = 0; i < n; i++) {
             mino_val_t *keys[3], *vals[3];
-            keys[0] = mino_keyword("name");
-            vals[0] = mino_string(names[i]);
-            keys[1] = mino_keyword("age");
-            vals[1] = mino_int(ages[i]);
-            keys[2] = mino_keyword("salary");
-            vals[2] = mino_int(salaries[i]);
-            records[i] = mino_map(keys, vals, 3);
+            keys[0] = mino_keyword(S, "name");
+            vals[0] = mino_string(S, names[i]);
+            keys[1] = mino_keyword(S, "age");
+            vals[1] = mino_int(S, ages[i]);
+            keys[2] = mino_keyword(S, "salary");
+            vals[2] = mino_int(S, salaries[i]);
+            records[i] = mino_map(S, keys, vals, 3);
         }
-        mino_env_set(env, "employees", mino_vector(records, n));
+        mino_env_set(S, env, "employees", mino_vector(S, records, n));
         free(records);
     }
 
     /* Pipeline 1: names of employees over 35. */
     printf("Over 35:\n");
-    result = mino_eval_string(
+    result = mino_eval_string(S,
         "(->> employees\n"
         "     (filter (fn (e) (> (get e :age) 35)))\n"
         "     (map (fn (e) (get e :name))))",
         env);
     if (result != NULL) {
         printf("  ");
-        mino_println(result);
+        mino_println(S, result);
     }
 
     /* Pipeline 2: total salary budget. */
-    result = mino_eval_string(
+    result = mino_eval_string(S,
         "(reduce + 0 (map (fn (e) (get e :salary)) employees))",
         env);
     if (result != NULL) {
@@ -66,7 +67,7 @@ int main(void)
 
     /* Pipeline 3: sorted by salary descending. */
     printf("By salary (desc):\n");
-    result = mino_eval_string(
+    result = mino_eval_string(S,
         "(->> employees\n"
         "     (sort)\n"
         "     (reverse)\n"
@@ -86,7 +87,7 @@ int main(void)
     }
 
     /* Pipeline 4: group into age brackets using into + map. */
-    result = mino_eval_string(
+    result = mino_eval_string(S,
         "(let (senior   (filter (fn (e) (>= (get e :age) 40)) employees)\n"
         "      junior   (filter (fn (e) (<  (get e :age) 40)) employees))\n"
         "  {:senior (map (fn (e) (get e :name)) senior)\n"
@@ -94,9 +95,10 @@ int main(void)
         env);
     if (result != NULL) {
         printf("Age groups: ");
-        mino_println(result);
+        mino_println(S, result);
     }
 
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     return 0;
 }

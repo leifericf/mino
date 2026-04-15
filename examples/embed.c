@@ -16,23 +16,25 @@
 /* A host function exposed to mino as (add-tax amount). */
 static mino_val_t *host_add_tax(mino_val_t *args, mino_env_t *env)
 {
+    mino_state_t *S = mino_current_state();
     long long amount;
     (void)env;
     if (!mino_is_cons(args) || !mino_to_int(args->as.cons.car, &amount)) {
-        return mino_nil();
+        return mino_nil(S);
     }
-    return mino_float((double)amount * 1.08);
+    return mino_float(S, (double)amount * 1.08);
 }
 
 int main(void)
 {
-    mino_env_t *env = mino_new();          /* env + core in one call */
+    mino_state_t *S   = mino_state_new();
+    mino_env_t   *env = mino_new(S);       /* env + core in one call */
 
     /* Register a host-defined function. */
-    mino_register_fn(env, "add-tax", host_add_tax);
+    mino_register_fn(S, env, "add-tax", host_add_tax);
 
     /* Evaluate mino source that calls the host function. */
-    mino_val_t *result = mino_eval_string(
+    mino_val_t *result = mino_eval_string(S,
         "(def prices [100 200 300])\n"
         "(loop (i 0 total 0.0)\n"
         "  (if (< i (count prices))\n"
@@ -42,7 +44,7 @@ int main(void)
 
     /* Extract and use the result from C. */
     if (result == NULL) {
-        fprintf(stderr, "error: %s\n", mino_last_error());
+        fprintf(stderr, "error: %s\n", mino_last_error(S));
     } else {
         double total;
         if (mino_to_float(result, &total)) {
@@ -53,7 +55,7 @@ int main(void)
     /* Demonstrate the in-process REPL handle: feed lines one at a time,
      * collecting results as complete forms become available. */
     {
-        mino_repl_t *repl = mino_repl_new(env);
+        mino_repl_t *repl = mino_repl_new(S, env);
         mino_val_t  *out  = NULL;
         int          rc;
 
@@ -61,7 +63,7 @@ int main(void)
         rc = mino_repl_feed(repl, "(+ 1 2)\n", &out);
         if (rc == MINO_REPL_OK && out != NULL) {
             printf("repl: ");
-            mino_println(out);
+            mino_println(S, out);
         }
 
         /* Multi-line form: first line is incomplete. */
@@ -72,12 +74,13 @@ int main(void)
         rc = mino_repl_feed(repl, "   4)\n", &out);
         if (rc == MINO_REPL_OK && out != NULL) {
             printf("repl: ");
-            mino_println(out);
+            mino_println(S, out);
         }
 
         mino_repl_free(repl);
     }
 
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     return 0;
 }
