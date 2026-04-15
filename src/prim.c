@@ -1111,6 +1111,14 @@ static mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (def_val != NULL) return def_val;
         return prim_throw_error(S, "nth index out of range");
     }
+    if (coll->type == MINO_LAZY) {
+        coll = lazy_force(S, coll);
+        if (coll == NULL) return NULL;
+        if (coll->type == MINO_NIL) {
+            if (def_val != NULL) return def_val;
+            return prim_throw_error(S, "nth index out of range");
+        }
+    }
     if (coll->type == MINO_VECTOR) {
         if ((size_t)idx >= coll->as.vec.len) {
             if (def_val != NULL) return def_val;
@@ -1127,6 +1135,10 @@ static mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 return prim_throw_error(S, "nth index out of range");
             }
             p = p->as.cons.cdr;
+            if (p != NULL && p->type == MINO_LAZY) {
+                p = lazy_force(S, p);
+                if (p == NULL) return NULL;
+            }
         }
         if (!mino_is_cons(p)) {
             if (def_val != NULL) return def_val;
