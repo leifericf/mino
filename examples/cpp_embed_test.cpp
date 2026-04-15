@@ -147,10 +147,9 @@ static void test_cpp_vector_to_mino(void)
 /* Host callback using C++ closure via static dispatch */
 static std::function<long long(long long)> g_transform;
 
-static mino_val_t *prim_cpp_transform(mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_cpp_transform(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
-    mino_state_t *S = mino_current_state();
     if (!args || args->type != MINO_CONS) return mino_nil(S);
     long long n;
     if (!mino_to_int(args->as.cons.car, &n)) return mino_nil(S);

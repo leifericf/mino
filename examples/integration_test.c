@@ -191,9 +191,8 @@ static void test_actor_eval_with_exceptions(void)
 }
 
 /* Test: pcall inside eval_string (nested C->mino->C->mino) */
-static mino_val_t *prim_safe_divide(mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_safe_divide(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     (void)env;
     if (!args || args->type != MINO_CONS ||
         !args->as.cons.cdr || args->as.cons.cdr->type != MINO_CONS)

@@ -75,18 +75,18 @@ static void test_cross_state_value_safety(void)
     OK();
 }
 
-/* Test: mino_current_state inside a primitive callback */
-static mino_val_t *prim_check_state(mino_val_t *args, mino_env_t *env)
+/* Test: explicit state parameter inside a primitive callback */
+static mino_val_t *prim_check_state(mino_state_t *S, mino_val_t *args,
+                                     mino_env_t *env)
 {
-    mino_state_t *cur = mino_current_state();
     (void)args; (void)env;
-    /* The current state should match the state we're evaluating in */
-    return mino_int(cur, 42);
+    /* S is the state we're evaluating in, passed explicitly */
+    return mino_int(S, 42);
 }
 
 static void test_current_state_in_primitive(void)
 {
-    TEST("mino_current_state correct inside primitive callback");
+    TEST("explicit state correct inside primitive callback");
     mino_state_t *s1 = mino_state_new();
     mino_state_t *s2 = mino_state_new();
     mino_env_t *e1 = mino_new(s1);

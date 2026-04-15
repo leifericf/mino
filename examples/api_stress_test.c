@@ -608,9 +608,8 @@ static void test_actor_lifecycle(void)
 
 /* --- Custom primitive --- */
 
-static mino_val_t *prim_double(mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_double(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     (void)env;
     if (args == NULL || args->type != MINO_CONS) return mino_nil(S);
     mino_val_t *v = args->as.cons.car;

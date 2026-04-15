@@ -27,9 +27,8 @@ static entity_t player = { 0.0, 0.0, 100, 100, "player" };
 
 /* --- Host functions ----------------------------------------------------- */
 
-static mino_val_t *host_pos(mino_val_t *args, mino_env_t *env)
+static mino_val_t *host_pos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     mino_val_t *items[2];
     (void)args; (void)env;
     items[0] = mino_float(S, player.x);
@@ -37,9 +36,8 @@ static mino_val_t *host_pos(mino_val_t *args, mino_env_t *env)
     return mino_vector(S, items, 2);
 }
 
-static mino_val_t *host_move(mino_val_t *args, mino_env_t *env)
+static mino_val_t *host_move(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     double dx, dy;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -57,19 +55,17 @@ static mino_val_t *host_move(mino_val_t *args, mino_env_t *env)
     }
     player.x += dx;
     player.y += dy;
-    return host_pos(args, env);
+    return host_pos(S, args, env);
 }
 
-static mino_val_t *host_hp(mino_val_t *args, mino_env_t *env)
+static mino_val_t *host_hp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     (void)args; (void)env;
     return mino_int(S, player.hp);
 }
 
-static mino_val_t *host_heal(mino_val_t *args, mino_env_t *env)
+static mino_val_t *host_heal(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     long long amount;
     (void)env;
     if (mino_is_cons(args) && mino_to_int(args->as.cons.car, &amount)) {
@@ -79,9 +75,8 @@ static mino_val_t *host_heal(mino_val_t *args, mino_env_t *env)
     return mino_int(S, player.hp);
 }
 
-static mino_val_t *host_damage(mino_val_t *args, mino_env_t *env)
+static mino_val_t *host_damage(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     long long amount;
     (void)env;
     if (mino_is_cons(args) && mino_to_int(args->as.cons.car, &amount)) {
@@ -91,13 +86,12 @@ static mino_val_t *host_damage(mino_val_t *args, mino_env_t *env)
     return mino_int(S, player.hp);
 }
 
-static mino_val_t *host_status(mino_val_t *args, mino_env_t *env)
+static mino_val_t *host_status(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     mino_val_t *keys[3], *vals[3];
     (void)args; (void)env;
     keys[0] = mino_keyword(S, "pos");
-    vals[0] = host_pos(args, env);
+    vals[0] = host_pos(S, args, env);
     keys[1] = mino_keyword(S, "hp");
     vals[1] = mino_int(S, player.hp);
     keys[2] = mino_keyword(S, "name");

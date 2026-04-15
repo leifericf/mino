@@ -14,9 +14,8 @@
 #include <stdio.h>
 
 /* A host function exposed to mino as (add-tax amount). */
-static mino_val_t *host_add_tax(mino_val_t *args, mino_env_t *env)
+static mino_val_t *host_add_tax(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_state_t *S = mino_current_state();
     long long amount;
     (void)env;
     if (!mino_is_cons(args) || !mino_to_int(args->as.cons.car, &amount)) {

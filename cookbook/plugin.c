@@ -34,9 +34,9 @@ static const char *math_plugin =
     "                (reduce + 0 (list a2 b2)))))\n";
 
 /* Call a named function in env with a single argument. */
-static mino_val_t *call1(mino_env_t *env, const char *name, mino_val_t *arg)
+static mino_val_t *call1(mino_state_t *S, mino_env_t *env, const char *name,
+                         mino_val_t *arg)
 {
-    mino_state_t *S  = mino_current_state();
     mino_val_t *fn   = mino_env_get(env, name);
     mino_val_t *args = mino_cons(S, arg, mino_nil(S));
     if (fn == NULL) {
@@ -46,10 +46,9 @@ static mino_val_t *call1(mino_env_t *env, const char *name, mino_val_t *arg)
     return mino_call(S, fn, args, env);
 }
 
-static mino_val_t *call2(mino_env_t *env, const char *name,
+static mino_val_t *call2(mino_state_t *S, mino_env_t *env, const char *name,
                          mino_val_t *a, mino_val_t *b)
 {
-    mino_state_t *S  = mino_current_state();
     mino_val_t *fn   = mino_env_get(env, name);
     mino_val_t *args = mino_cons(S, a, mino_cons(S, b, mino_nil(S)));
     if (fn == NULL) {
@@ -72,7 +71,7 @@ int main(void)
     }
 
     /* Call plugin functions from C. */
-    result = call1(env, "greet", mino_string(S, "World"));
+    result = call1(S, env, "greet", mino_string(S, "World"));
     if (result != NULL) {
         const char *s;
         size_t      n;
@@ -81,7 +80,7 @@ int main(void)
         }
     }
 
-    result = call1(env, "farewell", mino_string(S, "World"));
+    result = call1(S, env, "farewell", mino_string(S, "World"));
     if (result != NULL) {
         const char *s;
         size_t      n;
@@ -96,7 +95,7 @@ int main(void)
         return 1;
     }
 
-    result = call1(env, "square", mino_int(S, 7));
+    result = call1(S, env, "square", mino_int(S, 7));
     if (result != NULL) {
         long long v;
         if (mino_to_int(result, &v)) {
@@ -104,7 +103,7 @@ int main(void)
         }
     }
 
-    result = call2(env, "hypot", mino_int(S, 3), mino_int(S, 4));
+    result = call2(S, env, "hypot", mino_int(S, 3), mino_int(S, 4));
     if (result != NULL) {
         long long v;
         if (mino_to_int(result, &v)) {
