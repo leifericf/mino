@@ -160,24 +160,14 @@ try/catch. A thin `mino.hpp` header with RAII wrappers for
 ~~### Mailbox binary serialization~~ -- Done. Replaced tmpfile
 roundtrip with direct buffer printer. 911x faster for integers.
 
-### Cache parsed core.mino
+~~### Cache parsed core.mino~~ -- Done in v0.19.0. Parsed forms are
+cached per state; subsequent `mino_install_core` calls on the same
+state skip re-parsing.
 
-`mino_install_core` re-parses and re-evaluates `core_mino_src`
-(~800 lines) for every new environment. Measured at 524 us per
-`mino_new` call. Every actor pays this cost. Read the source once
-into a cached form list, then eval-into-env from the cache on
-subsequent calls. Or pre-evaluate into a template env and clone it.
-~100 lines.
-
-### Lazy sequence per-element overhead
-
-`(into [] (range 1000))` costs 8 ms (8 us/element). Each step
-allocates a lazy thunk, forces it (full eval), and produces a cons
-cell. For tight data-processing loops this dominates runtime. Options:
-(a) add eager C-level variants for hot paths (`range` returning a
-vector, `map`/`filter` with eager fallbacks for non-lazy input),
-(b) accept the cost as inherent to lazy-by-default. Design decision,
-not a simple fix.
+~~### Lazy sequence per-element overhead~~ -- Mitigated in v0.19.0.
+Added `rangev`, `mapv`, `filterv` as eager C-level alternatives that
+return vectors directly without lazy thunk allocation. Lazy sequences
+remain the default for `range`, `map`, `filter`.
 
 ## Architecture
 

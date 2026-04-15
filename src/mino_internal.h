@@ -215,6 +215,11 @@ struct mino_state {
     /* GC save stack */
     mino_val_t     *gc_save[32];
     int             gc_save_len;
+
+    /* Cached parsed core.mino forms (avoids re-parsing on second
+     * mino_install_core call within the same state). */
+    mino_val_t    **core_forms;
+    size_t          core_forms_len;
 };
 
 /* ------------------------------------------------------------------------- */

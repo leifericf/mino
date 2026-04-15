@@ -1812,6 +1812,135 @@ static mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *en
 
 /* (take, drop, range, repeat, concat are now lazy in core.mino) */
 
+/* Eager range returning a vector. Avoids lazy thunk overhead for tight loops.
+ * (rangev end) or (rangev start end) or (rangev start end step). */
+static mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long start = 0, end = 0, step = 1, i;
+    size_t n, len;
+    mino_val_t **items;
+    mino_val_t *result;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n == 1) {
+        if (!mino_to_int(args->as.cons.car, &end)) {
+            set_error(S, "rangev argument must be an integer"); return NULL;
+        }
+    } else if (n == 2) {
+        if (!mino_to_int(args->as.cons.car, &start) ||
+            !mino_to_int(args->as.cons.cdr->as.cons.car, &end)) {
+            set_error(S, "rangev arguments must be integers"); return NULL;
+        }
+    } else if (n == 3) {
+        if (!mino_to_int(args->as.cons.car, &start) ||
+            !mino_to_int(args->as.cons.cdr->as.cons.car, &end) ||
+            !mino_to_int(args->as.cons.cdr->as.cons.cdr->as.cons.car, &step)) {
+            set_error(S, "rangev arguments must be integers"); return NULL;
+        }
+        if (step == 0) {
+            set_error(S, "rangev step must not be zero"); return NULL;
+        }
+    } else {
+        set_error(S, "rangev requires 1, 2, or 3 arguments"); return NULL;
+    }
+    /* Compute length. */
+    if (step > 0) {
+        len = (end > start) ? (size_t)((end - start + step - 1) / step) : 0;
+    } else {
+        len = (start > end) ? (size_t)((start - end + (-step) - 1) / (-step)) : 0;
+    }
+    items = malloc(len * sizeof(mino_val_t *));
+    if (!items && len > 0) { set_error(S, "rangev: out of memory"); return NULL; }
+    for (i = start, n = 0; n < len; i += step, n++) {
+        items[n] = mino_int(S, i);
+    }
+    result = mino_vector(S, items, len);
+    free(items);
+    return result;
+}
+
+/* Eager map returning a vector. (mapv f coll) */
+static mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fn, *coll;
+    seq_iter_t  it;
+    size_t      cap = 64, len = 0;
+    mino_val_t **items;
+    mino_val_t *result;
+    size_t n;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        set_error(S, "mapv requires 2 arguments: function and collection");
+        return NULL;
+    }
+    fn   = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || mino_is_nil(coll)) {
+        return mino_vector(S, NULL, 0);
+    }
+    items = malloc(cap * sizeof(mino_val_t *));
+    if (!items) { set_error(S, "mapv: out of memory"); return NULL; }
+    seq_iter_init(S, &it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val_t *val = apply_callable(S, fn, call_args, env);
+        if (val == NULL) { free(items); return NULL; }
+        if (len >= cap) {
+            cap *= 2;
+            items = realloc(items, cap * sizeof(mino_val_t *));
+            if (!items) { set_error(S, "mapv: out of memory"); return NULL; }
+        }
+        items[len++] = val;
+        seq_iter_next(S, &it);
+    }
+    result = mino_vector(S, items, len);
+    free(items);
+    return result;
+}
+
+/* Eager filter returning a vector. (filterv pred coll) */
+static mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pred, *coll;
+    seq_iter_t  it;
+    size_t      cap = 64, len = 0;
+    mino_val_t **items;
+    mino_val_t *result;
+    size_t n;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        set_error(S, "filterv requires 2 arguments: predicate and collection");
+        return NULL;
+    }
+    pred = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || mino_is_nil(coll)) {
+        return mino_vector(S, NULL, 0);
+    }
+    items = malloc(cap * sizeof(mino_val_t *));
+    if (!items) { set_error(S, "filterv: out of memory"); return NULL; }
+    seq_iter_init(S, &it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val_t *test = apply_callable(S, pred, call_args, env);
+        if (test == NULL) { free(items); return NULL; }
+        if (mino_is_truthy(test)) {
+            if (len >= cap) {
+                cap *= 2;
+                items = realloc(items, cap * sizeof(mino_val_t *));
+                if (!items) { set_error(S, "filterv: out of memory"); return NULL; }
+            }
+            items[len++] = elem;
+        }
+        seq_iter_next(S, &it);
+    }
+    result = mino_vector(S, items, len);
+    free(items);
+    return result;
+}
+
 static mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *to;
@@ -3084,30 +3213,66 @@ void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx)
 
 static void install_core_mino(mino_state_t *S, mino_env_t *env)
 {
-    const char *src        = core_mino_src;
-    const char *saved_file = reader_file;
-    int         saved_line = reader_line;
-    reader_file = intern_filename("<core>");
-    reader_line = 1;
-    while (*src != '\0') {
-        const char *end  = NULL;
-        mino_val_t *form = mino_read(S, src, &end);
-        if (form == NULL) {
-            if (mino_last_error(S) != NULL) {
-                /* Hardcoded source — a parse error here is a build-time bug. */
-                fprintf(stderr, "core.mino parse error: %s\n", mino_last_error(S));
+    size_t i;
+
+    /* On first call for this state, parse and eval each form, caching
+     * the parsed ASTs for subsequent mino_install_core calls.  We set
+     * S->core_forms immediately and update core_forms_len as we go so
+     * that the GC root walker can pin the forms during collection. */
+    if (S->core_forms == NULL) {
+        const char  *src        = core_mino_src;
+        const char  *saved_file = reader_file;
+        int          saved_line = reader_line;
+        size_t       cap        = 256;
+
+        S->core_forms     = malloc(cap * sizeof(mino_val_t *));
+        S->core_forms_len = 0;
+        if (!S->core_forms) {
+            fprintf(stderr, "core.mino: out of memory\n"); abort();
+        }
+
+        reader_file = intern_filename("<core>");
+        reader_line = 1;
+        while (*src != '\0') {
+            const char *end  = NULL;
+            mino_val_t *form = mino_read(S, src, &end);
+            if (form == NULL) {
+                if (mino_last_error(S) != NULL) {
+                    fprintf(stderr, "core.mino parse error: %s\n",
+                            mino_last_error(S));
+                    abort();
+                }
+                break;
+            }
+            if (S->core_forms_len >= cap) {
+                cap *= 2;
+                S->core_forms = realloc(S->core_forms,
+                                        cap * sizeof(mino_val_t *));
+                if (!S->core_forms) {
+                    fprintf(stderr, "core.mino: out of memory\n");
+                    abort();
+                }
+            }
+            S->core_forms[S->core_forms_len++] = form;
+            if (mino_eval(S, form, env) == NULL) {
+                fprintf(stderr, "core.mino eval error: %s\n",
+                        mino_last_error(S));
                 abort();
             }
-            break;
+            src = end;
         }
-        if (mino_eval(S, form, env) == NULL) {
+        reader_file = saved_file;
+        reader_line = saved_line;
+        return;
+    }
+
+    /* Subsequent calls: evaluate cached forms into the target env. */
+    for (i = 0; i < S->core_forms_len; i++) {
+        if (mino_eval(S, S->core_forms[i], env) == NULL) {
             fprintf(stderr, "core.mino eval error: %s\n", mino_last_error(S));
             abort();
         }
-        src = end;
     }
-    reader_file = saved_file;
-    reader_line = saved_line;
 }
 
 /* --- Atom primitives --------------------------------------------------- */
@@ -3398,6 +3563,10 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
        concat are now lazy in core.mino) */
     mino_env_set(S, env, "reduce",   mino_prim(S, "reduce",   prim_reduce));
     mino_env_set(S, env, "into",     mino_prim(S, "into",     prim_into));
+    /* eager collection builders -- bypass lazy thunk overhead */
+    mino_env_set(S, env, "rangev",   mino_prim(S, "rangev",   prim_rangev));
+    mino_env_set(S, env, "mapv",     mino_prim(S, "mapv",     prim_mapv));
+    mino_env_set(S, env, "filterv",  mino_prim(S, "filterv",  prim_filterv));
     mino_env_set(S, env, "apply",    mino_prim(S, "apply",    prim_apply));
     mino_env_set(S, env, "reverse",  mino_prim(S, "reverse",  prim_reverse));
     mino_env_set(S, env, "sort",     mino_prim(S, "sort",     prim_sort));

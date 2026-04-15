@@ -61,6 +61,7 @@ void mino_state_free(mino_state_t *S)
     free(sym_intern.entries);
     free(kw_intern.entries);
     free(gc_ranges);
+    free(S->core_forms);
     for (h = gc_all; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
@@ -833,6 +834,13 @@ static void gc_mark_roots(mino_state_t *S)
         int si;
         for (si = 0; si < gc_save_len; si++) {
             gc_mark_interior(S, gc_save[si]);
+        }
+    }
+    /* Pin cached core.mino parsed forms. */
+    if (S->core_forms != NULL) {
+        size_t ci;
+        for (ci = 0; ci < S->core_forms_len; ci++) {
+            gc_mark_interior(S, S->core_forms[ci]);
         }
     }
 }
