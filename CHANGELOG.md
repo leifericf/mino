@@ -4,6 +4,26 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.19.0] — Explicit runtime state
+
+### Breaking changes
+
+- **Primitive callback signature**: `mino_prim_fn` now receives
+  `mino_state_t *S` as its first parameter. All host-defined primitives
+  must be updated from `(mino_val_t *args, mino_env_t *env)` to
+  `(mino_state_t *S, mino_val_t *args, mino_env_t *env)`.
+- **`mino_current_state()` removed**: primitives receive the state
+  explicitly and no longer need to call this function.
+- **Default global state removed**: there is no implicit runtime state.
+  The host must always create a state with `mino_state_new()`.
+
+### Changed
+
+- All internal runtime state access is now explicit through
+  `mino_state_t *S` parameters. No process-global mutable state remains.
+- Fixed `mino_env_clone` changelog description: it clones within the
+  same state (values are shared), not across states.
+
 ## [0.18.0] — Runtime state, GC hardening, and repo reorganization
 
 Multi-instance runtime support, GC correctness under stress, and a
