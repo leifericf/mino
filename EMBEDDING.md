@@ -428,19 +428,17 @@ mino_repl_free(repl);
 
 ## Inside a primitive
 
-Host-defined primitives receive `(mino_val_t *args, mino_env_t *env)`.
-To call constructors or other API functions that require a state, use
-`mino_current_state()`:
+Host-defined primitives receive the active state as their first
+parameter:
 
 ```c
-mino_val_t *my_prim(mino_val_t *args, mino_env_t *env) {
-    mino_state_t *S = mino_current_state();
+mino_val_t *my_prim(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
     return mino_int(S, 42);
 }
 ```
 
-The current state is set by the runtime before calling the primitive and
-is valid for the duration of the call.
+Use `S` to call constructors, eval, or any API function that needs a
+runtime state.
 
 
 ## Quick reference
@@ -451,7 +449,6 @@ is valid for the duration of the call.
 |----------|-------------|
 | `mino_state_new()` | Create a new isolated runtime state |
 | `mino_state_free(S)` | Free the state and all its resources |
-| `mino_current_state()` | Get the active state (inside primitives) |
 
 ### Environments
 
