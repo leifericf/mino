@@ -635,17 +635,17 @@
 
 ;; --- Collection utilities ---
 
-(def get-in (fn
-  ([m ks]     (reduce get m ks))
-  ([m ks nf]
-   (let [sentinel (gensym)]
-     (loop [m m ks (seq ks)]
-       (if ks
-         (let [v (get m (first ks) sentinel)]
-           (if (= v sentinel)
-             nf
-             (recur v (next ks))))
-         m))))))
+(def get-in
+  (let [step (fn step [m ks nf sentinel]
+               (if ks
+                 (let [v (get m (first ks) sentinel)]
+                   (if (= v sentinel)
+                     nf
+                     (step v (next ks) nf sentinel)))
+                 m))]
+    (fn
+      ([m ks]     (reduce get m ks))
+      ([m ks nf]  (step m (seq ks) nf (gensym))))))
 
 (def assoc-in (fn [m ks v]
   (let [k (first ks)]
