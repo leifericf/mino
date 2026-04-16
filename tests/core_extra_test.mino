@@ -131,10 +131,10 @@
   (is (= [1 2] (into [] (drop-last 2 [1 2 3 4])))))
 
 (deftest split-at-fn
-  (is (= [[1 2] [3 4 5]] (split-at 2 [1 2 3 4 5]))))
+  (is (= ['(1 2) '(3 4 5)] (split-at 2 [1 2 3 4 5]))))
 
 (deftest split-with-fn
-  (is (= [[1 3] [4 2 5]] (split-with odd? [1 3 4 2 5]))))
+  (is (= ['(1 3) '(4 2 5)] (split-with odd? [1 3 4 2 5]))))
 
 (deftest mapv-fn
   (is (= [2 4 6] (mapv (fn [x] (* x 2)) [1 2 3])))
