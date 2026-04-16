@@ -672,7 +672,10 @@
           init (seq m))))
 
 (def replace (fn [smap coll]
-  (map (fn [x] (if (contains? smap x) (get smap x) x)) coll)))
+  (let [f (fn [x] (if-let [e (find smap x)] (val e) x))]
+    (if (vector? coll)
+      (mapv f coll)
+      (map f coll)))))
 
 (def str-replace (fn [s match replacement]
   (join replacement (split s match))))
