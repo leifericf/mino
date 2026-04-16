@@ -81,10 +81,12 @@
 ;; --- Definitions ---
 
 (defmacro defn [name & fdecl]
-  (let [has-doc (string? (first fdecl))
-        doc     (if has-doc (first fdecl) nil)
-        fdecl   (if has-doc (rest fdecl) fdecl)
-        form    (cons 'fn fdecl)]
+  (let [has-doc  (string? (first fdecl))
+        doc      (if has-doc (first fdecl) nil)
+        fdecl    (if has-doc (rest fdecl) fdecl)
+        has-attr (map? (first fdecl))
+        fdecl    (if has-attr (rest fdecl) fdecl)
+        form     (cons 'fn fdecl)]
     (if doc
       `(def ~name ~doc ~form)
       `(def ~name ~form))))
