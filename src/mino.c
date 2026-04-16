@@ -1625,20 +1625,30 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 set_error_at(S, form, "defmacro name must be a symbol");
                 return NULL;
             }
-            /* Optional docstring: (defmacro name "doc" (params) body) */
+            /* Optional docstring and attr-map:
+             *   (defmacro name "doc" {:added "1.0"} [params] body)
+             *   (defmacro name "doc" [params] body)
+             *   (defmacro name {:added "1.0"} [params] body)
+             *   (defmacro name [params] body)
+             */
             {
-                mino_val_t *after_name = args->as.cons.cdr;
-                mino_val_t *maybe_doc  = after_name->as.cons.car;
-                if (maybe_doc != NULL && maybe_doc->type == MINO_STRING
-                    && mino_is_cons(after_name->as.cons.cdr)) {
-                    doc     = maybe_doc->as.s.data;
-                    doc_len = maybe_doc->as.s.len;
-                    params  = after_name->as.cons.cdr->as.cons.car;
-                    body    = after_name->as.cons.cdr->as.cons.cdr;
-                } else {
-                    params = after_name->as.cons.car;
-                    body   = after_name->as.cons.cdr;
+                mino_val_t *rest = args->as.cons.cdr;
+                mino_val_t *cur  = rest->as.cons.car;
+                /* Optional docstring. */
+                if (cur != NULL && cur->type == MINO_STRING
+                    && mino_is_cons(rest->as.cons.cdr)) {
+                    doc     = cur->as.s.data;
+                    doc_len = cur->as.s.len;
+                    rest    = rest->as.cons.cdr;
+                    cur     = rest->as.cons.car;
                 }
+                /* Optional attr-map (skip it). */
+                if (cur != NULL && cur->type == MINO_MAP
+                    && mino_is_cons(rest->as.cons.cdr)) {
+                    rest = rest->as.cons.cdr;
+                }
+                params = rest->as.cons.car;
+                body   = rest->as.cons.cdr;
             }
             if (!mino_is_cons(params) && !mino_is_nil(params)
                 && params->type != MINO_VECTOR) {
