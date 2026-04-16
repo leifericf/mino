@@ -2261,51 +2261,94 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             mino_val_t *pairs, *body, *result;
             dyn_frame_t frame;
             dyn_binding_t *bhead = NULL;
-            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.car)) {
+            if (!mino_is_cons(args)) {
                 set_error_at(S, form, "binding requires a binding list and body");
                 return NULL;
             }
             pairs = args->as.cons.car;
             body  = args->as.cons.cdr;
-            /* Parse binding pairs. */
-            while (pairs != NULL && pairs->type == MINO_CONS) {
-                mino_val_t *sym_v, *val_form, *val;
-                dyn_binding_t *b;
-                char nbuf[256];
-                size_t nlen;
-                sym_v = pairs->as.cons.car;
-                if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
-                    set_error_at(S, form, "binding: names must be symbols");
-                    /* Free any allocated bindings. */
-                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+            if (pairs != NULL && pairs->type == MINO_VECTOR) {
+                /* Vector binding form: [sym val sym val ...] */
+                size_t vlen = pairs->as.vec.len;
+                size_t vi;
+                if (vlen % 2 != 0) {
+                    set_error_at(S, form, "binding: odd number of forms in binding vector");
                     return NULL;
                 }
-                nlen = sym_v->as.s.len;
-                if (nlen >= sizeof(nbuf)) {
-                    set_error_at(S, form, "binding: name too long");
-                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
-                    return NULL;
+                for (vi = 0; vi < vlen; vi += 2) {
+                    mino_val_t *sym_v = vec_nth(pairs, vi);
+                    mino_val_t *val_form = vec_nth(pairs, vi + 1);
+                    mino_val_t *val;
+                    dyn_binding_t *b;
+                    char nbuf[256];
+                    size_t nlen;
+                    if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
+                        set_error_at(S, form, "binding: names must be symbols");
+                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        return NULL;
+                    }
+                    nlen = sym_v->as.s.len;
+                    if (nlen >= sizeof(nbuf)) {
+                        set_error_at(S, form, "binding: name too long");
+                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        return NULL;
+                    }
+                    memcpy(nbuf, sym_v->as.s.data, nlen);
+                    nbuf[nlen] = '\0';
+                    val = eval(S, val_form, env);
+                    if (val == NULL) {
+                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        return NULL;
+                    }
+                    b = (dyn_binding_t *)malloc(sizeof(*b));
+                    b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
+                    b->val  = val;
+                    b->next = bhead;
+                    bhead   = b;
                 }
-                memcpy(nbuf, sym_v->as.s.data, nlen);
-                nbuf[nlen] = '\0';
-                pairs = pairs->as.cons.cdr;
-                if (pairs == NULL || pairs->type != MINO_CONS) {
-                    set_error_at(S, form, "binding: odd number of forms in binding list");
-                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
-                    return NULL;
+            } else if (mino_is_cons(pairs)) {
+                /* Legacy list binding form: (sym val sym val ...) */
+                while (pairs != NULL && pairs->type == MINO_CONS) {
+                    mino_val_t *sym_v, *val_form, *val;
+                    dyn_binding_t *b;
+                    char nbuf[256];
+                    size_t nlen;
+                    sym_v = pairs->as.cons.car;
+                    if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
+                        set_error_at(S, form, "binding: names must be symbols");
+                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        return NULL;
+                    }
+                    nlen = sym_v->as.s.len;
+                    if (nlen >= sizeof(nbuf)) {
+                        set_error_at(S, form, "binding: name too long");
+                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        return NULL;
+                    }
+                    memcpy(nbuf, sym_v->as.s.data, nlen);
+                    nbuf[nlen] = '\0';
+                    pairs = pairs->as.cons.cdr;
+                    if (pairs == NULL || pairs->type != MINO_CONS) {
+                        set_error_at(S, form, "binding: odd number of forms in binding list");
+                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        return NULL;
+                    }
+                    val_form = pairs->as.cons.car;
+                    pairs    = pairs->as.cons.cdr;
+                    val = eval(S, val_form, env);
+                    if (val == NULL) {
+                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        return NULL;
+                    }
+                    b = (dyn_binding_t *)malloc(sizeof(*b));
+                    b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
+                    b->val  = val;
+                    b->next = bhead;
+                    bhead   = b;
                 }
-                val_form = pairs->as.cons.car;
-                pairs    = pairs->as.cons.cdr;
-                val = eval(S, val_form, env);
-                if (val == NULL) {
-                    while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
-                    return NULL;
-                }
-                b = (dyn_binding_t *)malloc(sizeof(*b));
-                b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
-                b->val  = val;
-                b->next = bhead;
-                bhead   = b;
+            } else {
+                set_error_at(S, form, "binding requires a binding list and body");
+                return NULL;
             }
             /* Push frame. */
             frame.bindings = bhead;
