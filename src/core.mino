@@ -797,12 +797,11 @@
 (def memoize (fn [f]
   (let [cache (atom {})]
     (fn [& args]
-      (let [key args
-            hit (get (deref cache) key)]
-        (if (not (nil? hit))
-          hit
+      (let [e (find (deref cache) args)]
+        (if e
+          (val e)
           (let [v (apply f args)]
-            (swap! cache assoc key v)
+            (swap! cache assoc args v)
             v)))))))
 
 (def trampoline (fn [f & args]
