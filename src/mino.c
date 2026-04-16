@@ -20,7 +20,7 @@ mino_state_t *mino_state_new(void)
 {
     mino_state_t *st = (mino_state_t *)calloc(1, sizeof(*st));
     if (st == NULL) {
-        abort();
+        abort(); /* unrecoverable: no state to report error through */
     }
     state_init(st);
     return st;
@@ -79,7 +79,7 @@ mino_ref_t *mino_ref(mino_state_t *S, mino_val_t *val)
 {
     mino_ref_t *r = (mino_ref_t *)calloc(1, sizeof(*r));
     if (r == NULL) {
-        abort();
+        return NULL;
     }
     r->val  = val;
     r->prev = NULL;

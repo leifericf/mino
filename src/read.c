@@ -79,7 +79,8 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     (*p)++; /* skip opening quote */
     buf = (char *)malloc(cap);
     if (buf == NULL) {
-        abort();
+        set_error(S, "out of memory reading string");
+        return NULL;
     }
     while (**p && **p != '"') {
         char c = **p;
@@ -107,9 +108,14 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
         }
         if (len + 1 >= cap) {
             cap *= 2;
-            buf = (char *)realloc(buf, cap);
-            if (buf == NULL) {
-                abort();
+            {
+                char *nb = (char *)realloc(buf, cap);
+                if (nb == NULL) {
+                    free(buf);
+                    set_error(S, "out of memory reading string");
+                    return NULL;
+                }
+                buf = nb;
             }
         }
         buf[len++] = c;
