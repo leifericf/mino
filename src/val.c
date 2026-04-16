@@ -219,6 +219,79 @@ int mino_to_bool(const mino_val_t *v)
 /* Equality                                                                  */
 /* ------------------------------------------------------------------------- */
 
+/* Forward declarations. */
+int mino_eq(const mino_val_t *a, const mino_val_t *b);
+int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b);
+static int seq_equal_force(mino_state_t *S, const mino_val_t *a,
+                           const mino_val_t *b);
+
+/*
+ * Check whether a type is sequential (list, vector, nil, or lazy-seq).
+ */
+static int is_sequential(mino_type_t t)
+{
+    return (t == MINO_CONS || t == MINO_VECTOR || t == MINO_NIL
+            || t == MINO_LAZY);
+}
+
+/*
+ * Resolve a value: if it is a realized lazy seq, return the cached form.
+ * Does NOT force unrealized lazy seqs (that requires the state).
+ */
+static const mino_val_t *resolve_lazy(const mino_val_t *v)
+{
+    while (v != NULL && v->type == MINO_LAZY && v->as.lazy.realized) {
+        v = v->as.lazy.cached;
+    }
+    return v;
+}
+
+/*
+ * Compare two sequential values element-by-element (non-forcing version).
+ * Handles cons lists, vectors, nil, and realized lazy seqs.
+ * Returns 1 if they contain the same elements in the same order.
+ */
+static int seq_equal(const mino_val_t *a, const mino_val_t *b)
+{
+    const mino_val_t *ca = resolve_lazy(a);
+    const mino_val_t *cb = resolve_lazy(b);
+    size_t ia = 0, ib = 0;
+
+    for (;;) {
+        const mino_val_t *ea;
+        const mino_val_t *eb;
+        int a_end;
+        int b_end;
+
+        ca = resolve_lazy(ca);
+        cb = resolve_lazy(cb);
+
+        a_end = (ca == NULL || ca->type == MINO_NIL
+                 || (ca->type == MINO_VECTOR && ia >= ca->as.vec.len)
+                 || ca->type == MINO_LAZY /* unrealized */);
+        b_end = (cb == NULL || cb->type == MINO_NIL
+                 || (cb->type == MINO_VECTOR && ib >= cb->as.vec.len)
+                 || cb->type == MINO_LAZY /* unrealized */);
+
+        if (a_end && b_end) return 1;
+        if (a_end || b_end) return 0;
+
+        if (ca->type == MINO_CONS) ea = ca->as.cons.car;
+        else ea = vec_nth(ca, ia);
+
+        if (cb->type == MINO_CONS) eb = cb->as.cons.car;
+        else eb = vec_nth(cb, ib);
+
+        if (!mino_eq(ea, eb)) return 0;
+
+        if (ca->type == MINO_CONS) ca = ca->as.cons.cdr;
+        else ia++;
+
+        if (cb->type == MINO_CONS) cb = cb->as.cons.cdr;
+        else ib++;
+    }
+}
+
 int mino_eq(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == b) {
@@ -243,6 +316,19 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         }
         if (a->type == MINO_FLOAT && b->type == MINO_INT) {
             return a->as.f == (double)b->as.i;
+        }
+        /*
+         * Cross-type sequential equality: cons, vector, and nil compare
+         * element-wise.  Matches Clojure where (= '(1 2) [1 2]) is true.
+         */
+        {
+            int a_seq = (a->type == MINO_CONS || a->type == MINO_VECTOR
+                         || a->type == MINO_NIL || a->type == MINO_LAZY);
+            int b_seq = (b->type == MINO_CONS || b->type == MINO_VECTOR
+                         || b->type == MINO_NIL || b->type == MINO_LAZY);
+            if (a_seq && b_seq) {
+                return seq_equal(a, b);
+            }
         }
         return 0;
     }
@@ -334,6 +420,52 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     return 0;
 }
 
+/*
+ * Compare two sequential values element-by-element, forcing lazy seqs.
+ */
+static int seq_equal_force(mino_state_t *S, const mino_val_t *a,
+                           const mino_val_t *b)
+{
+    const mino_val_t *ca = a;
+    const mino_val_t *cb = b;
+    size_t ia = 0, ib = 0;
+
+    for (;;) {
+        const mino_val_t *ea;
+        const mino_val_t *eb;
+        int a_end;
+        int b_end;
+
+        /* Force lazy seqs */
+        if (ca != NULL && ca->type == MINO_LAZY)
+            ca = lazy_force(S, (mino_val_t *)ca);
+        if (cb != NULL && cb->type == MINO_LAZY)
+            cb = lazy_force(S, (mino_val_t *)cb);
+
+        a_end = (ca == NULL || ca->type == MINO_NIL
+                 || (ca->type == MINO_VECTOR && ia >= ca->as.vec.len));
+        b_end = (cb == NULL || cb->type == MINO_NIL
+                 || (cb->type == MINO_VECTOR && ib >= cb->as.vec.len));
+
+        if (a_end && b_end) return 1;
+        if (a_end || b_end) return 0;
+
+        if (ca->type == MINO_CONS) ea = ca->as.cons.car;
+        else ea = vec_nth(ca, ia);
+
+        if (cb->type == MINO_CONS) eb = cb->as.cons.car;
+        else eb = vec_nth(cb, ib);
+
+        if (!mino_eq_force(S, ea, eb)) return 0;
+
+        if (ca->type == MINO_CONS) ca = ca->as.cons.cdr;
+        else ia++;
+
+        if (cb->type == MINO_CONS) cb = cb->as.cons.cdr;
+        else ib++;
+    }
+}
+
 int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
 {
     if (a != NULL && a->type == MINO_LAZY)
@@ -347,5 +479,20 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
         return mino_eq_force(S, a->as.cons.car, b->as.cons.car)
             && mino_eq_force(S, a->as.cons.cdr, b->as.cons.cdr);
     }
+    /* Cross-type sequential: cons vs vector, nil vs vector, etc. */
+    if (a->type != b->type && is_sequential(a->type) && is_sequential(b->type)) {
+        /* Force any remaining lazy seqs in elements during comparison. */
+        return seq_equal_force(S, a, b);
+    }
+    /* Vectors: compare elements with forcing. */
+    if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
+        size_t i;
+        if (a->as.vec.len != b->as.vec.len) return 0;
+        for (i = 0; i < a->as.vec.len; i++) {
+            if (!mino_eq_force(S, vec_nth(a, i), vec_nth(b, i))) return 0;
+        }
+        return 1;
+    }
+    /* Maps and sets: delegate to mino_eq (no lazy forcing needed inside). */
     return mino_eq(a, b);
 }
