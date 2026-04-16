@@ -335,7 +335,14 @@
 (def mapcat (fn
   ([f] (comp (map f) cat))
   ([f coll]
-   (apply concat (map f coll)))))
+   (let [cat-lazy (fn cat-lazy [s]
+                    (lazy-seq
+                      (when (seq s)
+                        (let [inner (seq (f (first s)))]
+                          (if inner
+                            (concat inner (cat-lazy (rest s)))
+                            (cat-lazy (rest s)))))))]
+     (cat-lazy coll)))))
 
 ;; --- Lazy combinators ---
 
