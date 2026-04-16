@@ -3,141 +3,140 @@
 
 ;; --- Macros ---
 
-(defmacro when (c & body)
+(defmacro when [c & body]
   `(if ~c (do ~@body)))
 
-(defmacro cond (& clauses)
+(defmacro cond [& clauses]
   (if (< (count clauses) 2)
     nil
     `(if ~(first clauses)
          ~(first (rest clauses))
          (cond ~@(rest (rest clauses))))))
 
-(defmacro and (& xs)
+(defmacro and [& xs]
   (if (= 0 (count xs))
     true
     (if (= 1 (count xs))
       (first xs)
-      (let (g (gensym))
-        `(let (~g ~(first xs))
+      (let [g (gensym)]
+        `(let [~g ~(first xs)]
            (if ~g (and ~@(rest xs)) ~g))))))
 
-(defmacro or (& xs)
+(defmacro or [& xs]
   (if (= 0 (count xs))
     nil
     (if (= 1 (count xs))
       (first xs)
-      (let (g (gensym))
-        `(let (~g ~(first xs))
+      (let [g (gensym)]
+        `(let [~g ~(first xs)]
            (if ~g ~g (or ~@(rest xs))))))))
 
-(defmacro -> (x & forms)
+(defmacro -> [x & forms]
   (if (= 0 (count forms))
     x
-    (let (step (first forms))
+    (let [step (first forms)]
       (if (cons? step)
         `(-> (~(first step) ~x ~@(rest step)) ~@(rest forms))
         `(-> (~step ~x) ~@(rest forms))))))
 
-(defmacro ->> (x & forms)
+(defmacro ->> [x & forms]
   (if (= 0 (count forms))
     x
-    (let (step (first forms))
+    (let [step (first forms)]
       (if (cons? step)
         `(->> (~(first step) ~@(rest step) ~x) ~@(rest forms))
         `(->> (~step ~x) ~@(rest forms))))))
 
 ;; --- Logic and utilities ---
 
-(def not      (fn (x) (if x false true)))
-(def not=     (fn (a b) (not (= a b))))
-(def identity (fn (x) x))
-(def list     (fn (& args) args))
-(def empty?   (fn (coll) (= (count coll) 0)))
+(def not      (fn [x] (if x false true)))
+(def not=     (fn [a b] (not (= a b))))
+(def identity (fn [x] x))
+(def list     (fn [& args] args))
+(def empty?   (fn [coll] (= (count coll) 0)))
 
 ;; --- Comparison (chained, built on <) ---
 
-(def >  (fn (a b & more) (if (< b a)  (if (nil? more) true (apply >  b more)) false)))
-(def <= (fn (a b & more) (if (< b a)  false (if (nil? more) true (apply <= b more)))))
-(def >= (fn (a b & more) (if (< a b)  false (if (nil? more) true (apply >= b more)))))
+(def >  (fn [a b & more] (if (< b a)  (if (nil? more) true (apply >  b more)) false)))
+(def <= (fn [a b & more] (if (< b a)  false (if (nil? more) true (apply <= b more)))))
+(def >= (fn [a b & more] (if (< a b)  false (if (nil? more) true (apply >= b more)))))
 
 ;; --- Type predicates (built on type) ---
 
-(def nil?     (fn (x) (= (type x) :nil)))
-(def cons?    (fn (x) (= (type x) :list)))
-(def string?  (fn (x) (= (type x) :string)))
-(def number?  (fn (x) (let (t (type x)) (or (= t :int) (= t :float)))))
-(def keyword? (fn (x) (= (type x) :keyword)))
-(def symbol?  (fn (x) (= (type x) :symbol)))
-(def vector?  (fn (x) (= (type x) :vector)))
-(def map?     (fn (x) (= (type x) :map)))
-(def fn?      (fn (x) (= (type x) :fn)))
-(def set?     (fn (x) (= (type x) :set)))
+(def nil?     (fn [x] (= (type x) :nil)))
+(def cons?    (fn [x] (= (type x) :list)))
+(def string?  (fn [x] (= (type x) :string)))
+(def number?  (fn [x] (let [t (type x)] (or (= t :int) (= t :float)))))
+(def keyword? (fn [x] (= (type x) :keyword)))
+(def symbol?  (fn [x] (= (type x) :symbol)))
+(def vector?  (fn [x] (= (type x) :vector)))
+(def map?     (fn [x] (= (type x) :map)))
+(def fn?      (fn [x] (= (type x) :fn)))
+(def set?     (fn [x] (= (type x) :set)))
 
 ;; --- Atoms ---
 
-(def swap! (fn (a f & args) (reset! a (apply f (deref a) args))))
+(def swap! (fn [a f & args] (reset! a (apply f (deref a) args))))
 
 ;; --- Definitions ---
 
-(defmacro defn (name & fdecl)
-  (let (;; Peel off optional docstring.
-        has-doc (string? (first fdecl))
+(defmacro defn [name & fdecl]
+  (let [has-doc (string? (first fdecl))
         doc     (if has-doc (first fdecl) nil)
         fdecl   (if has-doc (rest fdecl) fdecl)
-        form    (cons 'fn fdecl))
+        form    (cons 'fn fdecl)]
     (if doc
       `(def ~name ~doc ~form)
       `(def ~name ~form))))
 
 ;; --- Lazy sequence operations ---
 
-(def map (fn (f coll)
+(def map (fn [f coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when s
         (cons (f (first s)) (map f (rest s))))))))
 
-(def filter (fn (pred coll)
+(def filter (fn [pred coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when s
         (if (pred (first s))
           (cons (first s) (filter pred (rest s)))
           (filter pred (rest s))))))))
 
-(def take (fn (n coll)
+(def take (fn [n coll]
   (lazy-seq
     (when (> n 0)
-      (let (s (seq coll))
+      (let [s (seq coll)]
         (when s
           (cons (first s) (take (- n 1) (rest s)))))))))
 
-(def drop (fn (n coll)
+(def drop (fn [n coll]
   (if (<= n 0)
     coll
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (if s
         (drop (- n 1) (rest s))
         nil)))))
 
-(def concat (fn (& colls)
+(def concat (fn [& colls]
   (lazy-seq
     (when (seq colls)
-      (let (s (seq (first colls)))
+      (let [s (seq (first colls))]
         (if s
           (cons (first s) (apply concat (cons (rest s) (rest colls))))
           (apply concat (rest colls))))))))
 
 (def range
-  (let (range-impl (fn (start end step)
+  (let [range-impl (fn [start end step]
          (lazy-seq
            (when (if (> step 0) (< start end) (> start end))
-             (cons start (range-impl (+ start step) end step))))))
-    (fn (& args)
-      (let (n (count args)
-            inf-range (fn (start)
-                        (lazy-seq (cons start (inf-range (+ start 1))))))
+             (cons start (range-impl (+ start step) end step)))))]
+    (fn [& args]
+      (let [n (count args)
+            inf-range (fn [start]
+                        (lazy-seq (cons start (inf-range (+ start 1)))))]
         (cond
           (= n 0) (inf-range 0)
           (= n 1) (range-impl 0 (first args) 1)
@@ -145,24 +144,24 @@
           (= n 3) (range-impl (first args) (first (rest args)) (first (rest (rest args))))
           true     nil)))))
 
-(def repeat (fn (n x)
+(def repeat (fn [n x]
   (lazy-seq
     (when (> n 0)
       (cons x (repeat (- n 1) x))))))
 
 ;; --- Collection utilities ---
 
-(def update (fn (m k f & args)
+(def update (fn [m k f & args]
   (assoc m k (apply f (get m k) args))))
 
 ;; --- Utility functions ---
 
-(def some (fn (pred coll)
+(def some (fn [pred coll]
   (when (not (empty? coll))
     (or (pred (first coll))
         (some pred (rest coll))))))
 
-(def every? (fn (pred coll)
+(def every? (fn [pred coll]
   (if (empty? coll)
     true
     (if (pred (first coll))
@@ -171,451 +170,451 @@
 
 ;; --- Higher-order functions ---
 
-(def comp (fn (f g) (fn (& args) (f (apply g args)))))
-(def partial (fn (f & bound) (fn (& args) (apply f (concat bound args)))))
-(def complement (fn (f) (fn (& args) (not (apply f args)))))
+(def comp (fn [f g] (fn [& args] (f (apply g args)))))
+(def partial (fn [f & bound] (fn [& args] (apply f (concat bound args)))))
+(def complement (fn [f] (fn [& args] (not (apply f args)))))
 
 ;; --- Trivial compositions ---
 
-(def second     (fn (coll) (first (rest coll))))
-(def ffirst     (fn (coll) (first (first coll))))
-(def inc        (fn (x) (+ x 1)))
-(def dec        (fn (x) (- x 1)))
-(def zero?      (fn (x) (= x 0)))
-(def pos?       (fn (x) (> x 0)))
-(def neg?       (fn (x) (< x 0)))
-(def even?      (fn (x) (= (mod x 2) 0)))
-(def odd?       (fn (x) (not (even? x))))
-(def abs        (fn (x) (if (< x 0) (- x) x)))
-(def max        (fn (a b) (if (> a b) a b)))
-(def min        (fn (a b) (if (< a b) a b)))
-(def not-empty  (fn (coll) (if (seq coll) coll nil)))
-(def constantly (fn (x) (fn (& _) x)))
-(def boolean    (fn (x) (if x true false)))
-(def seq?       (fn (x) (or (cons? x) (= (type x) :lazy-seq))))
+(def second     (fn [coll] (first (rest coll))))
+(def ffirst     (fn [coll] (first (first coll))))
+(def inc        (fn [x] (+ x 1)))
+(def dec        (fn [x] (- x 1)))
+(def zero?      (fn [x] (= x 0)))
+(def pos?       (fn [x] (> x 0)))
+(def neg?       (fn [x] (< x 0)))
+(def even?      (fn [x] (= (mod x 2) 0)))
+(def odd?       (fn [x] (not (even? x))))
+(def abs        (fn [x] (if (< x 0) (- x) x)))
+(def max        (fn [a b] (if (> a b) a b)))
+(def min        (fn [a b] (if (< a b) a b)))
+(def not-empty  (fn [coll] (if (seq coll) coll nil)))
+(def constantly (fn [x] (fn [& _] x)))
+(def boolean    (fn [x] (if x true false)))
+(def seq?       (fn [x] (or (cons? x) (= (type x) :lazy-seq))))
 
 ;; --- Collection utilities ---
 
-(def merge (fn (& maps)
-  (reduce (fn (acc m)
-    (reduce (fn (a kv) (assoc a (first kv) (second kv)))
+(def merge (fn [& maps]
+  (reduce (fn [acc m]
+    (reduce (fn [a kv] (assoc a (first kv) (second kv)))
             acc (seq m)))
           {} maps)))
 
-(def select-keys (fn (m ks)
-  (reduce (fn (acc k)
+(def select-keys (fn [m ks]
+  (reduce (fn [acc k]
     (if (contains? m k)
       (assoc acc k (get m k))
       acc))
     {} ks)))
 
-(def find (fn (m k)
+(def find (fn [m k]
   (when (contains? m k) (vector k (get m k)))))
 
 (def zipmap
-  (let (zm-impl (fn (acc ks vs)
+  (let [zm-impl (fn [acc ks vs]
          (if (and (seq ks) (seq vs))
            (zm-impl (assoc acc (first ks) (first vs))
                     (rest ks) (rest vs))
-           acc)))
-    (fn (ks vs) (zm-impl {} ks vs))))
+           acc))]
+    (fn [ks vs] (zm-impl {} ks vs))))
 
-(def frequencies (fn (coll)
-  (reduce (fn (acc x)
-    (update acc x (fn (n) (+ (if n n 0) 1))))
+(def frequencies (fn [coll]
+  (reduce (fn [acc x]
+    (update acc x (fn [n] (+ (if n n 0) 1))))
     {} coll)))
 
-(def group-by (fn (f coll)
-  (reduce (fn (acc x)
-    (let (k (f x))
-      (update acc k (fn (v) (conj (if v v []) x)))))
+(def group-by (fn [f coll]
+  (reduce (fn [acc x]
+    (let [k (f x)]
+      (update acc k (fn [v] (conj (if v v []) x)))))
     {} coll)))
 
 ;; --- More higher-order ---
 
-(def juxt (fn (& fs)
-  (fn (& args) (map (fn (f) (apply f args)) fs))))
+(def juxt (fn [& fs]
+  (fn [& args] (map (fn [f] (apply f args)) fs))))
 
-(def mapcat (fn (f coll)
+(def mapcat (fn [f coll]
   (apply concat (map f coll))))
 
 ;; --- Lazy combinators ---
 
-(def take-while (fn (pred coll)
+(def take-while (fn [pred coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when (and s (pred (first s)))
         (cons (first s) (take-while pred (rest s))))))))
 
-(def drop-while (fn (pred coll)
-  (let (s (seq coll))
+(def drop-while (fn [pred coll]
+  (let [s (seq coll)]
     (if (and s (pred (first s)))
       (drop-while pred (rest s))
       s))))
 
-(def iterate (fn (f x)
+(def iterate (fn [f x]
   (lazy-seq (cons x (iterate f (f x))))))
 
 (def cycle
-  (let (cycle-impl (fn (orig coll)
+  (let [cycle-impl (fn [orig coll]
          (lazy-seq
-           (let (s (seq coll))
+           (let [s (seq coll)]
              (if s
                (cons (first s) (cycle-impl orig (rest s)))
-               (cycle-impl orig orig))))))
-    (fn (coll) (cycle-impl coll coll))))
+               (cycle-impl orig orig)))))]
+    (fn [coll] (cycle-impl coll coll))))
 
-(def repeatedly (fn (f)
+(def repeatedly (fn [f]
   (lazy-seq (cons (f) (repeatedly f)))))
 
 (def interleave
-  (let (interleave-impl (fn (c1 c2)
+  (let [interleave-impl (fn [c1 c2]
          (lazy-seq
-           (let (s1 (seq c1) s2 (seq c2))
+           (let [s1 (seq c1) s2 (seq c2)]
              (when (and s1 s2)
                (cons (first s1) (cons (first s2)
-                 (interleave-impl (rest s1) (rest s2)))))))))
-    (fn (c1 c2) (interleave-impl c1 c2))))
+                 (interleave-impl (rest s1) (rest s2))))))))]
+    (fn [c1 c2] (interleave-impl c1 c2))))
 
-(def interpose (fn (sep coll)
+(def interpose (fn [sep coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when s
         (cons (first s)
-          (mapcat (fn (x) (list sep x)) (rest s))))))))
+          (mapcat (fn [x] (list sep x)) (rest s))))))))
 
 (def distinct
-  (let (dist-impl (fn (seen coll)
+  (let [dist-impl (fn [seen coll]
          (lazy-seq
-           (let (s (seq coll))
+           (let [s (seq coll)]
              (when s
-               (let (x (first s))
+               (let [x (first s)]
                  (if (contains? seen x)
                    (dist-impl seen (rest s))
-                   (cons x (dist-impl (conj seen x) (rest s))))))))))
-    (fn (coll) (dist-impl #{} coll))))
+                   (cons x (dist-impl (conj seen x) (rest s)))))))))]
+    (fn [coll] (dist-impl #{} coll))))
 
 (def partition
-  (let (part-impl (fn (n coll)
+  (let [part-impl (fn [n coll]
          (lazy-seq
-           (let (chunk (into [] (take n coll)))
+           (let [chunk (into [] (take n coll))]
              (when (= (count chunk) n)
-               (cons chunk (part-impl n (drop n coll))))))))
-    (fn (n coll) (part-impl n coll))))
+               (cons chunk (part-impl n (drop n coll)))))))]
+    (fn [n coll] (part-impl n coll))))
 
-(def partition-by (fn (f coll)
+(def partition-by (fn [f coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when s
-        (let (v (f (first s))
+        (let [v (f (first s))
               run (cons (first s)
-                    (take-while (fn (x) (= (f x) v)) (rest s)))
-              remaining (drop (count run) s))
+                    (take-while (fn [x] (= (f x) v)) (rest s)))
+              remaining (drop (count run) s)]
           (cons run (partition-by f remaining))))))))
 
 ;; --- Forcing ---
 
-(def doall (fn (coll)
-  (let (walk (fn (s) (when (seq s) (walk (rest s)))))
+(def doall (fn [coll]
+  (let [walk (fn [s] (when (seq s) (walk (rest s))))]
     (walk coll)
     coll)))
 
-(def dorun (fn (coll)
-  (let (walk (fn (s) (when (seq s) (walk (rest s)))))
+(def dorun (fn [coll]
+  (let [walk (fn [s] (when (seq s) (walk (rest s))))]
     (walk coll)
     nil)))
 
 ;; --- Type predicates and trivial compositions ---
 
-(def true?     (fn (x) (= x true)))
-(def false?    (fn (x) (= x false)))
-(def boolean?  (fn (x) (or (= x true) (= x false))))
-(def int?      (fn (x) (= (type x) :int)))
-(def float?    (fn (x) (= (type x) :float)))
-(def some?     (fn (x) (not (nil? x))))
+(def true?     (fn [x] (= x true)))
+(def false?    (fn [x] (= x false)))
+(def boolean?  (fn [x] (or (= x true) (= x false))))
+(def int?      (fn [x] (= (type x) :int)))
+(def float?    (fn [x] (= (type x) :float)))
+(def some?     (fn [x] (not (nil? x))))
 (def list?     cons?)
-(def atom?     (fn (x) (= (type x) :atom)))
-(def not-any?  (fn (pred coll) (not (some pred coll))))
-(def not-every? (fn (pred coll) (not (every? pred coll))))
+(def atom?     (fn [x] (= (type x) :atom)))
+(def not-any?  (fn [pred coll] (not (some pred coll))))
+(def not-every? (fn [pred coll] (not (every? pred coll))))
 
 ;; --- Sequence navigation ---
 
-(def next      (fn (coll) (seq (rest coll))))
-(def nfirst    (fn (coll) (next (first coll))))
-(def fnext     (fn (coll) (first (next coll))))
-(def nnext     (fn (coll) (next (next coll))))
+(def next      (fn [coll] (seq (rest coll))))
+(def nfirst    (fn [coll] (next (first coll))))
+(def fnext     (fn [coll] (first (next coll))))
+(def nnext     (fn [coll] (next (next coll))))
 
 ;; --- Map entry accessors ---
 
-(def key       (fn (entry) (first entry)))
-(def val       (fn (entry) (second entry)))
+(def key       (fn [entry] (first entry)))
+(def val       (fn [entry] (second entry)))
 
 ;; --- Collection conversions ---
 
-(def remove    (fn (pred coll) (filter (complement pred) coll)))
-(def vec       (fn (coll) (into [] coll)))
+(def remove    (fn [pred coll] (filter (complement pred) coll)))
+(def vec       (fn [coll] (into [] coll)))
 
 ;; --- Random utilities ---
 
-(def rand-int  (fn (n) (int (* (rand) n))))
-(def rand-nth  (fn (coll) (nth coll (rand-int (count coll)))))
+(def rand-int  (fn [n] (int (* (rand) n))))
+(def rand-nth  (fn [coll] (nth coll (rand-int (count coll)))))
 
 ;; --- Side-effecting traversal ---
 
-(def run!      (fn (f coll)
-  (let (go (fn (s) (when (seq s) (f (first s)) (go (rest s)))))
+(def run!      (fn [f coll]
+  (let [go (fn [s] (when (seq s) (f (first s)) (go (rest s))))]
     (go coll)
     nil)))
 
 ;; --- Control flow macros ---
 
-(defmacro if-not (test then & else)
+(defmacro if-not [test then & else]
   (if (seq else)
     `(if (not ~test) ~then ~(first else))
     `(if (not ~test) ~then)))
 
-(defmacro when-not (test & body)
+(defmacro when-not [test & body]
   `(when (not ~test) ~@body))
 
-(defmacro if-let (bindings then & else)
-  (let (sym  (first bindings)
+(defmacro if-let [bindings then & else]
+  (let [sym  (first bindings)
         expr (first (rest bindings))
-        g    (gensym))
+        g    (gensym)]
     (if (seq else)
-      `(let (~g ~expr)
-         (if ~g (let (~sym ~g) ~then) ~(first else)))
-      `(let (~g ~expr)
-         (if ~g (let (~sym ~g) ~then))))))
+      `(let [~g ~expr]
+         (if ~g (let [~sym ~g] ~then) ~(first else)))
+      `(let [~g ~expr]
+         (if ~g (let [~sym ~g] ~then))))))
 
-(defmacro when-let (bindings & body)
-  (let (sym  (first bindings)
+(defmacro when-let [bindings & body]
+  (let [sym  (first bindings)
         expr (first (rest bindings))
-        g    (gensym))
-    `(let (~g ~expr)
-       (when ~g (let (~sym ~g) ~@body)))))
+        g    (gensym)]
+    `(let [~g ~expr]
+       (when ~g (let [~sym ~g] ~@body)))))
 
-(defmacro if-some (bindings then & else)
-  (let (sym  (first bindings)
+(defmacro if-some [bindings then & else]
+  (let [sym  (first bindings)
         expr (first (rest bindings))
-        g    (gensym))
+        g    (gensym)]
     (if (seq else)
-      `(let (~g ~expr)
-         (if (not (nil? ~g)) (let (~sym ~g) ~then) ~(first else)))
-      `(let (~g ~expr)
-         (if (not (nil? ~g)) (let (~sym ~g) ~then))))))
+      `(let [~g ~expr]
+         (if (not (nil? ~g)) (let [~sym ~g] ~then) ~(first else)))
+      `(let [~g ~expr]
+         (if (not (nil? ~g)) (let [~sym ~g] ~then))))))
 
-(defmacro when-some (bindings & body)
-  (let (sym  (first bindings)
+(defmacro when-some [bindings & body]
+  (let [sym  (first bindings)
         expr (first (rest bindings))
-        g    (gensym))
-    `(let (~g ~expr)
-       (when (not (nil? ~g)) (let (~sym ~g) ~@body)))))
+        g    (gensym)]
+    `(let [~g ~expr]
+       (when (not (nil? ~g)) (let [~sym ~g] ~@body)))))
 
 ;; --- Sequence functions ---
 
-(def last (fn (coll)
-  (let (s (seq coll))
+(def last (fn [coll]
+  (let [s (seq coll)]
     (if (next s)
       (last (next s))
       (first s)))))
 
-(def butlast (fn (coll)
-  (let (s (seq coll))
+(def butlast (fn [coll]
+  (let [s (seq coll)]
     (when (next s)
       (cons (first s) (butlast (next s)))))))
 
-(def nthrest (fn (coll n)
+(def nthrest (fn [coll n]
   (if (<= n 0) coll (nthrest (rest coll) (- n 1)))))
 
-(def nthnext (fn (coll n)
+(def nthnext (fn [coll n]
   (if (<= n 0) (seq coll) (nthnext (next coll) (- n 1)))))
 
-(def take-last (fn (n coll)
-  (let (lead (drop n coll)
-        step (fn (s lead)
+(def take-last (fn [n coll]
+  (let [lead (drop n coll)
+        step (fn [s lead]
                (if (seq lead)
                  (step (next s) (next lead))
-                 s)))
+                 s))]
     (step (seq coll) (seq lead)))))
 
-(def drop-last (fn (& args)
-  (let (n    (if (= (count args) 1) 1 (first args))
-        coll (if (= (count args) 1) (first args) (second args)))
+(def drop-last (fn [& args]
+  (let [n    (if (= (count args) 1) 1 (first args))
+        coll (if (= (count args) 1) (first args) (second args))]
     (take (- (count coll) n) coll))))
 
-(def split-at (fn (n coll)
+(def split-at (fn [n coll]
   (vector (into [] (take n coll)) (into [] (drop n coll)))))
 
-(def split-with (fn (pred coll)
+(def split-with (fn [pred coll]
   (vector (into [] (take-while pred coll))
           (into [] (drop-while pred coll)))))
 
-(def mapv    (fn (f coll) (into [] (map f coll))))
-(def filterv (fn (pred coll) (into [] (filter pred coll))))
+(def mapv    (fn [f coll] (into [] (map f coll))))
+(def filterv (fn [pred coll] (into [] (filter pred coll))))
 
-(def sort-by (fn (keyfn & args)
-  (let (cmp  (if (= (count args) 2) (first args) compare)
-        coll (last args))
-    (sort (fn (a b) (cmp (keyfn a) (keyfn b))) coll))))
+(def sort-by (fn [keyfn & args]
+  (let [cmp  (if (= (count args) 2) (first args) compare)
+        coll (last args)]
+    (sort (fn [a b] (cmp (keyfn a) (keyfn b))) coll))))
 
 ;; --- Collection utilities ---
 
-(def get-in (fn (m ks)
+(def get-in (fn [m ks]
   (reduce get m ks)))
 
-(def assoc-in (fn (m ks v)
-  (let (k (first ks))
+(def assoc-in (fn [m ks v]
+  (let [k (first ks)]
     (if (next ks)
       (assoc m k (assoc-in (get m k) (rest ks) v))
       (assoc m k v)))))
 
-(def update-in (fn (m ks f & args)
-  (let (k (first ks))
+(def update-in (fn [m ks f & args]
+  (let [k (first ks)]
     (if (next ks)
       (assoc m k (apply update-in (get m k) (rest ks) f args))
       (assoc m k (apply f (get m k) args))))))
 
-(def merge-with (fn (f & maps)
-  (reduce (fn (acc m)
-    (reduce (fn (a kv)
-      (let (k (first kv)
-            v (second kv))
+(def merge-with (fn [f & maps]
+  (reduce (fn [acc m]
+    (reduce (fn [a kv]
+      (let [k (first kv)
+            v (second kv)]
         (if (contains? a k)
           (assoc a k (f (get a k) v))
           (assoc a k v))))
       acc (seq m)))
     {} maps)))
 
-(def reduce-kv (fn (f init m)
-  (reduce (fn (acc kv) (f acc (first kv) (second kv)))
+(def reduce-kv (fn [f init m]
+  (reduce (fn [acc kv] (f acc (first kv) (second kv)))
           init (seq m))))
 
-(def replace (fn (smap coll)
-  (map (fn (x) (if (contains? smap x) (get smap x) x)) coll)))
+(def replace (fn [smap coll]
+  (map (fn [x] (if (contains? smap x) (get smap x) x)) coll)))
 
-(def str-replace (fn (s match replacement)
+(def str-replace (fn [s match replacement]
   (join replacement (split s match))))
 
 ;; --- Bitwise compositions ---
 
-(def bit-and-not (fn (x y) (bit-and x (bit-not y))))
-(def bit-test    (fn (x n) (not (= 0 (bit-and x (bit-shift-left 1 n))))))
-(def bit-set     (fn (x n) (bit-or x (bit-shift-left 1 n))))
-(def bit-clear   (fn (x n) (bit-and x (bit-not (bit-shift-left 1 n)))))
-(def bit-flip    (fn (x n) (bit-xor x (bit-shift-left 1 n))))
+(def bit-and-not (fn [x y] (bit-and x (bit-not y))))
+(def bit-test    (fn [x n] (not (= 0 (bit-and x (bit-shift-left 1 n))))))
+(def bit-set     (fn [x n] (bit-or x (bit-shift-left 1 n))))
+(def bit-clear   (fn [x n] (bit-and x (bit-not (bit-shift-left 1 n)))))
+(def bit-flip    (fn [x n] (bit-xor x (bit-shift-left 1 n))))
 
 ;; --- Misc utilities ---
 
-(def blank? (fn (s)
+(def blank? (fn [s]
   (or (nil? s) (= (trim s) ""))))
 
-(def comparator (fn (pred)
-  (fn (a b) (cond (pred a b) -1 (pred b a) 1 true 0))))
+(def comparator (fn [pred]
+  (fn [a b] (cond (pred a b) -1 (pred b a) 1 true 0))))
 
 ;; --- Lazy combinators ---
 
-(def keep (fn (f coll)
+(def keep (fn [f coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when s
-        (let (v (f (first s)))
+        (let [v (f (first s))]
           (if (nil? v)
             (keep f (rest s))
             (cons v (keep f (rest s))))))))))
 
-(def keep-indexed (fn (f coll)
-  (let (step (fn (i s)
+(def keep-indexed (fn [f coll]
+  (let [step (fn [i s]
                (lazy-seq
                  (when (seq s)
-                   (let (v (f i (first s)))
+                   (let [v (f i (first s))]
                      (if (nil? v)
                        (step (inc i) (rest s))
-                       (cons v (step (inc i) (rest s)))))))))
+                       (cons v (step (inc i) (rest s))))))))]
     (step 0 coll))))
 
-(def map-indexed (fn (f coll)
-  (let (step (fn (i s)
+(def map-indexed (fn [f coll]
+  (let [step (fn [i s]
                (lazy-seq
                  (when (seq s)
                    (cons (f i (first s))
-                         (step (inc i) (rest s)))))))
+                         (step (inc i) (rest s))))))]
     (step 0 coll))))
 
-(def partition-all (fn (n coll)
+(def partition-all (fn [n coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when s
         (cons (into [] (take n s))
               (partition-all n (drop n s))))))))
 
-(def reductions (fn (f & args)
-  (let (init (if (= (count args) 2) (first args) (first (first args)))
+(def reductions (fn [f & args]
+  (let [init (if (= (count args) 2) (first args) (first (first args)))
         coll (if (= (count args) 2) (second args) (rest (first args)))
-        step (fn (acc s)
+        step (fn [acc s]
                (lazy-seq
                  (when (seq s)
-                   (let (v (f acc (first s)))
-                     (cons v (step v (rest s))))))))
+                   (let [v (f acc (first s))]
+                     (cons v (step v (rest s)))))))]
     (cons init (step init coll)))))
 
-(def dedupe (fn (coll)
-  (let (step (fn (prev s)
+(def dedupe (fn [coll]
+  (let [step (fn [prev s]
                (lazy-seq
                  (when (seq s)
-                   (let (x (first s))
+                   (let [x (first s)]
                      (if (= x prev)
                        (step prev (rest s))
-                       (cons x (step x (rest s)))))))))
+                       (cons x (step x (rest s))))))))]
     (lazy-seq
       (when (seq coll)
         (cons (first coll) (step (first coll) (rest coll))))))))
 
 ;; --- Higher-order combinators ---
 
-(def every-pred (fn (& preds)
-  (fn (& args)
-    (every? (fn (p) (every? p args)) preds))))
+(def every-pred (fn [& preds]
+  (fn [& args]
+    (every? (fn [p] (every? p args)) preds))))
 
-(def some-fn (fn (& preds)
-  (fn (& args)
-    (some (fn (p) (some p args)) preds))))
+(def some-fn (fn [& preds]
+  (fn [& args]
+    (some (fn [p] (some p args)) preds))))
 
-(def fnil (fn (f default)
-  (fn (& args)
+(def fnil (fn [f default]
+  (fn [& args]
     (apply f (cons (if (nil? (first args)) default (first args))
                    (rest args))))))
 
-(def memoize (fn (f)
-  (let (cache (atom {}))
-    (fn (& args)
-      (let (key args
-            hit (get (deref cache) key))
+(def memoize (fn [f]
+  (let [cache (atom {})]
+    (fn [& args]
+      (let [key args
+            hit (get (deref cache) key)]
         (if (not (nil? hit))
           hit
-          (let (v (apply f args))
+          (let [v (apply f args)]
             (swap! cache assoc key v)
             v)))))))
 
-(def trampoline (fn (f & args)
-  (let (result (apply f args)
-        bounce (fn (r) (if (fn? r) (bounce (r)) r)))
+(def trampoline (fn [f & args]
+  (let [result (apply f args)
+        bounce (fn [r] (if (fn? r) (bounce (r)) r))]
     (bounce result))))
 
 ;; --- Threading macros ---
 
-(defmacro as-> (expr sym & forms)
+(defmacro as-> [expr sym & forms]
   (if (= 0 (count forms))
     expr
-    `(let (~sym ~expr)
+    `(let [~sym ~expr]
        (as-> ~(first forms) ~sym ~@(rest forms)))))
 
-(defmacro cond-> (expr & clauses)
+(defmacro cond-> [expr & clauses]
   (if (< (count clauses) 2)
     expr
-    (let (g    (gensym)
+    (let [g    (gensym)
           test (first clauses)
-          step (first (rest clauses)))
-      `(let (~g ~expr)
+          step (first (rest clauses))]
+      `(let [~g ~expr]
          (cond-> (if ~test
                    ~(if (cons? step)
                       `(~(first step) ~g ~@(rest step))
@@ -623,13 +622,13 @@
                    ~g)
                  ~@(rest (rest clauses)))))))
 
-(defmacro cond->> (expr & clauses)
+(defmacro cond->> [expr & clauses]
   (if (< (count clauses) 2)
     expr
-    (let (g    (gensym)
+    (let [g    (gensym)
           test (first clauses)
-          step (first (rest clauses)))
-      `(let (~g ~expr)
+          step (first (rest clauses))]
+      `(let [~g ~expr]
          (cond->> (if ~test
                     ~(if (cons? step)
                        `(~(first step) ~@(rest step) ~g)
@@ -639,83 +638,83 @@
 
 ;; --- Iteration macros ---
 
-(defmacro doto (x & forms)
-  (let (g       (gensym)
-        stmts   (apply list (map (fn (f) (if (cons? f)
+(defmacro doto [x & forms]
+  (let [g       (gensym)
+        stmts   (apply list (map (fn [f] (if (cons? f)
                                             `(~(first f) ~g ~@(rest f))
                                             `(~f ~g)))
-                                  forms)))
-    `(let (~g ~x)
+                                  forms))]
+    `(let [~g ~x]
        ~@stmts
        ~g)))
 
-(defmacro dotimes (bindings & body)
-  (let (sym (first bindings)
+(defmacro dotimes [bindings & body]
+  (let [sym (first bindings)
         n   (first (rest bindings))
         gn  (gensym)
-        go  (gensym))
-    `(let (~gn ~n
-           ~go (fn (~sym)
+        go  (gensym)]
+    `(let [~gn ~n
+           ~go (fn [~sym]
                  (when (< ~sym ~gn)
                    ~@body
-                   (~go (inc ~sym)))))
+                   (~go (inc ~sym))))]
        (~go 0))))
 
-(defmacro doseq (bindings & body)
-  (let (sym  (first bindings)
+(defmacro doseq [bindings & body]
+  (let [sym  (first bindings)
         coll (first (rest bindings))
         gs   (gensym)
-        go   (gensym))
-    `(let (~go (fn (~gs)
+        go   (gensym)]
+    `(let [~go (fn [~gs]
                  (when ~gs
-                   (let (~sym (first ~gs))
+                   (let [~sym (first ~gs)]
                      ~@body
-                     (~go (next ~gs))))))
+                     (~go (next ~gs)))))]
        (~go (seq ~coll)))))
 
 ;; --- Shuffle (Fisher-Yates) ---
 
-(def shuffle (fn (coll)
-  (let (v   (vec coll)
+(def shuffle (fn [coll]
+  (let [v   (vec coll)
         n   (count v)
-        step (fn (v i)
+        step (fn [v i]
                (if (= i 0)
                  v
-                 (let (j (rand-int (inc i)))
+                 (let [j (rand-int (inc i))]
                    (step (assoc (assoc v i (nth v j)) j (nth v i))
-                         (dec i))))))
+                         (dec i)))))]
     (into [] (step v (dec n))))))
 
 ;; --- Timing ---
 
-(defmacro time (& body)
-  (let (start  (gensym)
-        result (gensym))
-    `(let (~start  (time-ms)
-           ~result (do ~@body))
+(defmacro time [& body]
+  (let [start  (gensym)
+        result (gensym)]
+    `(let [~start  (time-ms)
+           ~result (do ~@body)]
        (println (str "Elapsed time: " (- (time-ms) ~start) " ms"))
        ~result)))
 
 ;; --- Tree walking ---
 
-(def flatten (fn (coll)
+(def flatten (fn [coll]
   (lazy-seq
-    (let (s (seq coll))
+    (let [s (seq coll)]
       (when s
-        (let (x (first s))
+        (let [x (first s)]
           (if (or (cons? x) (vector? x) (seq? x))
             (concat (flatten x) (flatten (rest s)))
             (cons x (flatten (rest s))))))))))
 
-(def tree-seq (fn (branch? children root)
-  (let (walk (fn (node)
+(def tree-seq (fn [branch? children root]
+  (let [walk (fn [node]
                (lazy-seq
                  (cons node
                    (when (branch? node)
-                     (mapcat walk (children node)))))))
+                     (mapcat walk (children node))))))]
     (walk root))))
 
-(def walk (fn (inner outer form)
+(def walk (fn [inner outer form]
   (cond
     (cons?   form) (outer (apply list (map inner form)))
     (vector? form) (outer (mapv inner form))
@@ -723,73 +722,73 @@
     (set?    form) (outer (into #{} (map inner form)))
     true           (outer form))))
 
-(def postwalk  (fn (f form) (walk (fn (x) (postwalk f x)) f form)))
-(def prewalk   (fn (f form) (walk (fn (x) (prewalk f x)) identity (f form))))
+(def postwalk  (fn [f form] (walk (fn [x] (postwalk f x)) f form)))
+(def prewalk   (fn [f form] (walk (fn [x] (prewalk f x)) identity (f form))))
 
-(def postwalk-replace (fn (smap form)
-  (postwalk (fn (x) (if (contains? smap x) (get smap x) x)) form)))
+(def postwalk-replace (fn [smap form]
+  (postwalk (fn [x] (if (contains? smap x) (get smap x) x)) form)))
 
-(def prewalk-replace (fn (smap form)
-  (prewalk (fn (x) (if (contains? smap x) (get smap x) x)) form)))
+(def prewalk-replace (fn [smap form]
+  (prewalk (fn [x] (if (contains? smap x) (get smap x) x)) form)))
 
 ;; --- Regex ---
 
 (def re-seq
-  (let (find-index (fn (s sub i)
+  (let [find-index (fn [s sub i]
                      (if (> (+ i (count sub)) (count s))
                        nil
                        (if (= (subs s i (+ i (count sub))) sub)
                          i
-                         (find-index s sub (inc i))))))
-    (fn (pattern s)
+                         (find-index s sub (inc i)))))]
+    (fn [pattern s]
       (lazy-seq
-        (when-let (m (re-find pattern s))
-          (let (idx (find-index s m 0))
+        (when-let [m (re-find pattern s)]
+          (let [idx (find-index s m 0)]
             (when (not (nil? idx))
-              (let (rest-s (subs s (+ idx (max (count m) 1))))
+              (let [rest-s (subs s (+ idx (max (count m) 1)))]
                 (cons m (re-seq pattern rest-s))))))))))
 
 ;; --- Complex macros ---
 
-(defmacro condp (pred expr & clauses)
-  (let (gexpr (gensym))
-    `(let (~gexpr ~expr)
-       ~(let (build (fn (cls)
+(defmacro condp [pred expr & clauses]
+  (let [gexpr (gensym)]
+    `(let [~gexpr ~expr]
+       ~(let [build (fn [cls]
                       (if (< (count cls) 2)
                         (if (= (count cls) 1)
                           (first cls)
                           nil)
-                        (let (test (first cls)
+                        (let [test (first cls)
                               then (first (rest cls))
-                              more (rest (rest cls)))
+                              more (rest (rest cls))]
                           `(if (~pred ~test ~gexpr)
                              ~then
-                             ~(build more))))))
+                             ~(build more)))))]
           (build clauses)))))
 
-(defmacro case (expr & clauses)
-  (let (gexpr (gensym))
-    `(let (~gexpr ~expr)
-       ~(let (build (fn (cls)
+(defmacro case [expr & clauses]
+  (let [gexpr (gensym)]
+    `(let [~gexpr ~expr]
+       ~(let [build (fn [cls]
                       (if (< (count cls) 2)
                         (if (= (count cls) 1)
                           (first cls)
                           nil)
                         `(if (= ~gexpr ~(first cls))
                            ~(first (rest cls))
-                           ~(build (rest (rest cls)))))))
+                           ~(build (rest (rest cls))))))]
           (build clauses)))))
 
-(defmacro for (bindings & body)
-  (let (sym  (first bindings)
+(defmacro for [bindings & body]
+  (let [sym  (first bindings)
         coll (first (rest bindings))
         opts (rest (rest bindings))
         when-clause (when (and (seq opts) (= (first opts) :when))
-                      (first (rest opts))))
+                      (first (rest opts)))]
     (if when-clause
-      `(map (fn (~sym) ~@body)
-            (filter (fn (~sym) ~when-clause) ~coll))
-      `(map (fn (~sym) ~@body) ~coll))))
+      `(map (fn [~sym] ~@body)
+            (filter (fn [~sym] ~when-clause) ~coll))
+      `(map (fn [~sym] ~@body) ~coll))))
 
 ;; ---------------------------------------------------------------------------
 ;; Agents: mutable reference cells updated via function application.
@@ -802,10 +801,10 @@
 
 (def agent atom)
 
-(defn send-to (ag f & args)
+(defn send-to [ag f & args]
   (apply swap! ag f args))
 
-(defn agent-error (ag) nil)
+(defn agent-error [ag] nil)
 
 ;; ---------------------------------------------------------------------------
 ;; Actors: isolated runtimes with mailbox communication.
@@ -817,6 +816,6 @@
 ;; primitive that takes a source string.
 ;; ---------------------------------------------------------------------------
 
-(defmacro spawn (& body)
-  (let (src (apply str (interpose " " (map (fn (f) (pr-str f)) body))))
+(defmacro spawn [& body]
+  (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]
     `(spawn* ~src)))
