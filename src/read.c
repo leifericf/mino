@@ -390,6 +390,101 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
     return mino_symbol_n(S, start, len);
 }
 
+/* ---- #() anonymous function reader macro helpers ---- */
+
+/*
+ * Walk a parsed form tree, recording which % arg slots are used.
+ * used[0] = true means bare % or %1, used[1] = %2, ..., used[8] = %9.
+ * *has_rest = true means %& was found.  *max_arg = highest numbered slot.
+ */
+static void scan_percent_args(mino_val_t *form, int used[9],
+                              int *max_arg, int *has_rest)
+{
+    if (form == NULL) return;
+    if (form->type == MINO_SYMBOL) {
+        const char *s = form->as.s.data;
+        size_t      n = form->as.s.len;
+        if (n == 1 && s[0] == '%') {
+            used[0] = 1;
+            if (*max_arg < 1) *max_arg = 1;
+        } else if (n == 2 && s[0] == '%' && s[1] >= '1' && s[1] <= '9') {
+            int idx = s[1] - '1';
+            used[idx] = 1;
+            if (*max_arg < idx + 1) *max_arg = idx + 1;
+        } else if (n == 2 && s[0] == '%' && s[1] == '&') {
+            *has_rest = 1;
+        }
+        return;
+    }
+    if (mino_is_cons(form)) {
+        scan_percent_args(form->as.cons.car, used, max_arg, has_rest);
+        scan_percent_args(form->as.cons.cdr, used, max_arg, has_rest);
+        return;
+    }
+    if (form->type == MINO_VECTOR) {
+        size_t i;
+        for (i = 0; i < form->as.vec.len; i++)
+            scan_percent_args(vec_nth(form, i), used, max_arg, has_rest);
+        return;
+    }
+    if (form->type == MINO_MAP) {
+        size_t i;
+        for (i = 0; i < form->as.map.len; i++) {
+            scan_percent_args(vec_nth(form->as.map.key_order, i),
+                              used, max_arg, has_rest);
+            scan_percent_args(map_get_val(form,
+                              vec_nth(form->as.map.key_order, i)),
+                              used, max_arg, has_rest);
+        }
+        return;
+    }
+    if (form->type == MINO_SET) {
+        size_t i;
+        for (i = 0; i < form->as.set.len; i++)
+            scan_percent_args(vec_nth(form->as.set.key_order, i),
+                              used, max_arg, has_rest);
+        return;
+    }
+}
+
+/*
+ * Replace bare % with %1 in a parsed form tree so the evaluator
+ * sees a single canonical name.
+ */
+static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
+{
+    if (form == NULL) return form;
+    if (form->type == MINO_SYMBOL && form->as.s.len == 1
+        && form->as.s.data[0] == '%') {
+        return mino_symbol(S, "%1");
+    }
+    if (mino_is_cons(form)) {
+        mino_val_t *car = normalize_percent(S, form->as.cons.car);
+        mino_val_t *cdr = normalize_percent(S, form->as.cons.cdr);
+        if (car == form->as.cons.car && cdr == form->as.cons.cdr)
+            return form;
+        {
+            mino_val_t *c = mino_cons(S, car, cdr);
+            c->as.cons.file = form->as.cons.file;
+            c->as.cons.line = form->as.cons.line;
+            return c;
+        }
+    }
+    if (form->type == MINO_VECTOR) {
+        size_t      i;
+        int         changed = 0;
+        mino_val_t *items[64]; /* plenty for fn bodies */
+        size_t      len = form->as.vec.len;
+        if (len > 64) return form;
+        for (i = 0; i < len; i++) {
+            items[i] = normalize_percent(S, vec_nth(form, i));
+            if (items[i] != vec_nth(form, i)) changed = 1;
+        }
+        return changed ? mino_vector(S, items, len) : form;
+    }
+    return form;
+}
+
 static mino_val_t *read_form(mino_state_t *S, const char **p)
 {
     skip_ws(S, p);
@@ -430,6 +525,47 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
                 return NULL;
             return read_form(S, p);
         }
+    }
+    if (**p == '#' && *(*p + 1) == '(') {
+        /* Anonymous function shorthand: #(inc %) => (fn [%1] (inc %1)) */
+        int fn_line = reader_line;
+        int used[9] = {0};
+        int max_arg = 0, has_rest = 0;
+        mino_val_t *body;
+        mino_val_t *params_vec;
+        mino_val_t *fn_form;
+        (*p)++; /* skip '#', read_list_form will handle '(' */
+        body = read_list_form(S, p);
+        if (body == NULL) return NULL;
+        /* Scan for % arg slots. */
+        scan_percent_args(body, used, &max_arg, &has_rest);
+        /* Normalize bare % to %1. */
+        body = normalize_percent(S, body);
+        /* Build params vector: [%1 %2 ... & %&] */
+        {
+            mino_val_t *items[12]; /* max 9 + & + %& */
+            size_t      nparams = 0;
+            int         i;
+            char        name[4];
+            for (i = 0; i < max_arg; i++) {
+                name[0] = '%';
+                name[1] = (char)('1' + i);
+                name[2] = '\0';
+                items[nparams++] = mino_symbol(S, name);
+            }
+            if (has_rest) {
+                items[nparams++] = mino_symbol(S, "&");
+                items[nparams++] = mino_symbol(S, "%&");
+            }
+            params_vec = mino_vector(S, items, nparams);
+        }
+        /* Build (fn [params] (body...)) — body is already a list form. */
+        fn_form = mino_cons(S, mino_symbol(S, "fn"),
+                      mino_cons(S, params_vec,
+                          mino_cons(S, body, mino_nil(S))));
+        fn_form->as.cons.file = reader_file;
+        fn_form->as.cons.line = fn_line;
+        return fn_form;
     }
     if (**p == '"') {
         return read_string_form(S, p);
