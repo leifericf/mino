@@ -28,6 +28,16 @@
   (testing "partial match returns nil"
     (is (= nil (re-matches "\\d+" "123abc")))))
 
+(deftest re-find-inverted-class
+  (testing "inverted literal class"
+    (is (= "d" (re-find "[^abc]" "abcdef"))))
+  (testing "inverted class no match"
+    (is (= nil (re-find "[^abc]" "aaa"))))
+  (testing "inverted digit class"
+    (is (= "x" (re-find "[^0-9]" "123x456"))))
+  (testing "inverted range class"
+    (is (= "W" (re-find "[^a-z ]" "hello World")))))
+
 (deftest re-matches-patterns
   (testing "word pattern"
     (is (= "hello" (re-matches "[a-z]+" "hello"))))
