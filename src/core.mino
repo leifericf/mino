@@ -91,11 +91,30 @@
 
 ;; --- Lazy sequence operations ---
 
-(def map (fn [f coll]
+(def map1_ (fn map1_ [f coll]
   (lazy-seq
     (let [s (seq coll)]
       (when s
-        (cons (f (first s)) (map f (rest s))))))))
+        (cons (f (first s)) (map1_ f (rest s))))))))
+
+(def all-some?_ (fn all-some?_ [coll]
+  (if (empty? coll)
+    true
+    (if (first coll)
+      (all-some?_ (rest coll))
+      false))))
+
+(def map-n_ (fn map-n_ [f seqs]
+  (lazy-seq
+    (let [ss (map1_ seq seqs)]
+      (when (all-some?_ ss)
+        (cons (apply f (map1_ first ss))
+              (map-n_ f (map1_ rest ss))))))))
+
+(def map (fn [f & colls]
+  (if (= (count colls) 1)
+    (map1_ f (first colls))
+    (map-n_ f colls))))
 
 (def filter (fn [pred coll]
   (lazy-seq
