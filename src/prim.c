@@ -559,8 +559,42 @@ static mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *en
 
     for (i = 0; i < fmt_len; i++) {
         if (fmt[i] == '%' && i + 1 < fmt_len) {
-            char spec = fmt[i + 1];
+            /* Collect the full format directive: %[flags][width][.prec]spec
+             * Flags: '-', '+', ' ', '0', '#'
+             * Width/precision: digits and '.'
+             * Spec: d, f, e, g, s, x, o, % */
+            char   directive[32];
+            size_t di = 0;
+            char   spec;
+            directive[di++] = '%';
             i++;
+            /* Flags. */
+            while (i < fmt_len && di < sizeof(directive) - 4 &&
+                   (fmt[i] == '-' || fmt[i] == '+' || fmt[i] == ' ' ||
+                    fmt[i] == '0' || fmt[i] == '#')) {
+                directive[di++] = fmt[i++];
+            }
+            /* Width. */
+            while (i < fmt_len && di < sizeof(directive) - 4 &&
+                   fmt[i] >= '0' && fmt[i] <= '9') {
+                directive[di++] = fmt[i++];
+            }
+            /* Precision. */
+            if (i < fmt_len && fmt[i] == '.') {
+                directive[di++] = fmt[i++];
+                while (i < fmt_len && di < sizeof(directive) - 4 &&
+                       fmt[i] >= '0' && fmt[i] <= '9') {
+                    directive[di++] = fmt[i++];
+                }
+            }
+            if (i >= fmt_len) {
+                /* Incomplete directive at end of string: emit literal. */
+                FMT_ENSURE(di);
+                memcpy(buf + len, directive, di);
+                len += di;
+                break;
+            }
+            spec = fmt[i];
             if (spec == '%') {
                 FMT_ENSURE(1);
                 buf[len++] = '%';
@@ -583,9 +617,9 @@ static mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *en
                     memcpy(buf + len, s->as.s.data, s->as.s.len);
                     len += s->as.s.len;
                 }
-            } else if (spec == 'd') {
+            } else if (spec == 'd' || spec == 'x' || spec == 'o') {
                 long long n;
-                char tmp[32];
+                char tmp[64];
                 int  tn;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
@@ -597,17 +631,22 @@ static mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *en
                         n = (long long)d;
                     } else {
                         free(buf);
-                        return prim_throw_error(S, "format: %d expects a number");
+                        return prim_throw_error(S, "format: integer directive expects a number");
                     }
                 }
                 arg_list = arg_list->as.cons.cdr;
-                tn = snprintf(tmp, sizeof(tmp), "%lld", n);
+                /* Build snprintf format: replace spec with lld/llx/llo. */
+                directive[di++] = 'l';
+                directive[di++] = 'l';
+                directive[di++] = spec;
+                directive[di]   = '\0';
+                tn = snprintf(tmp, sizeof(tmp), directive, n);
                 FMT_ENSURE((size_t)tn);
                 memcpy(buf + len, tmp, (size_t)tn);
                 len += (size_t)tn;
-            } else if (spec == 'f') {
+            } else if (spec == 'f' || spec == 'e' || spec == 'g') {
                 double d;
-                char tmp[64];
+                char tmp[128];
                 int  tn;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
@@ -615,17 +654,20 @@ static mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *en
                 }
                 if (!as_double(arg_list->as.cons.car, &d)) {
                     free(buf);
-                    return prim_throw_error(S, "format: %f expects a number");
+                    return prim_throw_error(S, "format: float directive expects a number");
                 }
                 arg_list = arg_list->as.cons.cdr;
-                tn = snprintf(tmp, sizeof(tmp), "%f", d);
+                directive[di++] = spec;
+                directive[di]   = '\0';
+                tn = snprintf(tmp, sizeof(tmp), directive, d);
                 FMT_ENSURE((size_t)tn);
                 memcpy(buf + len, tmp, (size_t)tn);
                 len += (size_t)tn;
             } else {
                 /* Unknown directive: emit literal. */
-                FMT_ENSURE(2);
-                buf[len++] = '%';
+                FMT_ENSURE(di + 1);
+                memcpy(buf + len, directive, di);
+                len += di;
                 buf[len++] = spec;
             }
         } else {
