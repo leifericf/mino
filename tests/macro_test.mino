@@ -11,17 +11,17 @@
   (is (= 2 (+ 1 1))))
 
 (deftest defmacro-basic
-  (defmacro twice__mt (x) `(do ~x ~x))
+  (defmacro twice__mt [x] `(do ~x ~x))
   (def mt-n (atom 0))
   (twice__mt (swap! mt-n inc))
   (is (= 2 @mt-n)))
 
 (deftest quasiquote-splice
-  (defmacro my-list__mt (& xs) `(list ~@xs))
+  (defmacro my-list__mt [& xs] `(list ~@xs))
   (is (= '(1 2 3) (my-list__mt 1 2 3))))
 
 (deftest macroexpand-1-fn
-  (defmacro unless__mt (c t f) (list 'if c f t))
+  (defmacro unless__mt [c t f] (list 'if c f t))
   (is (= '(if x 2 1) (macroexpand-1 '(unless__mt x 1 2)))))
 
 (deftest gensym-fresh

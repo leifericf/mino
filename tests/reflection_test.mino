@@ -3,7 +3,7 @@
 ;; doc, source, apropos.
 
 (deftest doc-with-docstring
-  (def inc-doc__rt "increment by one" (fn (x) (+ x 1)))
+  (def inc-doc__rt "increment by one" (fn [x] (+ x 1)))
   (is (= "increment by one" (doc 'inc-doc__rt))))
 
 (deftest doc-no-docstring
@@ -11,7 +11,7 @@
   (is (= nil (doc 'y__rt))))
 
 (deftest source-returns-form
-  (def sq-src__rt "square" (fn (x) (* x x)))
+  (def sq-src__rt "square" (fn [x] (* x x)))
   (is (= 'def (car (source 'sq-src__rt)))))
 
 (deftest defmacro-docstring
@@ -19,7 +19,7 @@
   (is (= "identity macro" (doc 'my-id__rt))))
 
 (deftest apropos-finds
-  (let (results (apropos "cons"))
+  (let [results (apropos "cons")]
     (is results)
     (is (cons? results))))
 

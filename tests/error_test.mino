@@ -21,7 +21,7 @@
   (is (= 2 (try (try (throw 1) (catch e (throw (+ e 1)))) (catch e e)))))
 
 (deftest try-fn-throw
-  (def boom__et (fn () (throw "bang")))
+  (def boom__et (fn [] (throw "bang")))
   (is (= "bang" (try (boom__et) (catch e e)))))
 
 (deftest throw-unhandled

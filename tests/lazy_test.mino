@@ -16,7 +16,7 @@
   (is (= '("a" "b") (seq "ab"))))
 
 (deftest realized-fn
-  (let (s (lazy-seq (cons 1 nil)))
+  (let [s (lazy-seq (cons 1 nil))]
     (is (not (realized? s)))
     (first s)
     (is (realized? s))))
@@ -25,7 +25,7 @@
   (is (= 2 (count (lazy-seq (cons 1 (cons 2 nil)))))))
 
 (deftest lazy-seq-chain
-  (defn nats__lt (n) (lazy-seq (cons n (nats__lt (+ n 1)))))
+  (defn nats__lt [n] (lazy-seq (cons n (nats__lt (+ n 1)))))
   (is (= 2 (first (rest (rest (nats__lt 0)))))))
 
 (deftest lazy-seq-take
@@ -37,16 +37,16 @@
 ;; --- Lazy combinators ---
 
 (deftest take-while-fn
-  (is (= '(1 2) (take-while (fn (x) (< x 3)) [1 2 3 4]))))
+  (is (= '(1 2) (take-while (fn [x] (< x 3)) [1 2 3 4]))))
 
 (deftest drop-while-fn
-  (is (= '(3 4) (drop-while (fn (x) (< x 3)) [1 2 3 4]))))
+  (is (= '(3 4) (drop-while (fn [x] (< x 3)) [1 2 3 4]))))
 
 (deftest iterate-fn
   (is (= '(0 1 2 3 4) (take 5 (iterate inc 0)))))
 
 (deftest repeatedly-fn
-  (is (= '(42 42 42) (take 3 (repeatedly (fn () 42))))))
+  (is (= '(42 42 42) (take 3 (repeatedly (fn [] 42))))))
 
 (deftest interleave-fn
   (is (= '(1 :a 2 :b 3 :c) (interleave [1 2 3] [:a :b :c]))))

@@ -60,18 +60,18 @@
 ;; --- Random ---
 
 (deftest rand-int-fn
-  (let (n (rand-int 10))
+  (let [n (rand-int 10)]
     (is (and (>= n 0) (< n 10)))))
 
 (deftest rand-nth-fn
-  (let (x (rand-nth [:a :b :c]))
+  (let [x (rand-nth [:a :b :c])]
     (is (contains? #{:a :b :c} x))))
 
 ;; --- Side-effecting traversal ---
 
 (deftest run-fn
-  (let (a (atom []))
-    (run! (fn (x) (swap! a conj x)) [1 2 3])
+  (let [a (atom [])]
+    (run! (fn [x] (swap! a conj x)) [1 2 3])
     (is (= [1 2 3] (deref a)))))
 
 ;; --- Control flow macros ---
@@ -137,7 +137,7 @@
   (is (= [[1 3] [4 2 5]] (split-with odd? [1 3 4 2 5]))))
 
 (deftest mapv-fn
-  (is (= [2 4 6] (mapv (fn (x) (* x 2)) [1 2 3])))
+  (is (= [2 4 6] (mapv (fn [x] (* x 2)) [1 2 3])))
   (is (vector? (mapv inc [1]))))
 
 (deftest filterv-fn
@@ -167,7 +167,7 @@
 
 (deftest reduce-kv-fn
   (is (= {:a 2 :b 4}
-         (reduce-kv (fn (acc k v) (assoc acc k (* v 2)))
+         (reduce-kv (fn [acc k v] (assoc acc k (* v 2)))
                     {} {:a 1 :b 2}))))
 
 (deftest replace-fn
@@ -204,12 +204,12 @@
 ;; --- Lazy combinators ---
 
 (deftest keep-fn
-  (is (= [20 40] (into [] (keep (fn (x) (when (even? x) (* x 10)))
+  (is (= [20 40] (into [] (keep (fn [x] (when (even? x) (* x 10)))
                                 [1 2 3 4 5])))))
 
 (deftest keep-indexed-fn
   (is (= [:a :c :e] (into [] (keep-indexed
-                                (fn (i x) (when (even? i) x))
+                                (fn [i x] (when (even? i) x))
                                 [:a :b :c :d :e])))))
 
 (deftest map-indexed-fn
@@ -242,16 +242,16 @@
   (is (= 7 ((fnil + 0) 3 4))))
 
 (deftest memoize-fn
-  (let (call-count (atom 0)
-        f (memoize (fn (x) (swap! call-count inc) (* x x))))
+  (let [call-count (atom 0)
+        f (memoize (fn [x] (swap! call-count inc) (* x x)))]
     (is (= 9 (f 3)))
     (is (= 9 (f 3)))
     ;; called once: second call uses cached result
     (is (= 1 (deref call-count)))))
 
 (deftest trampoline-fn
-  (defn my-bounce (n)
-    (if (= n 0) :done (fn () (my-bounce (- n 1)))))
+  (defn my-bounce [n]
+    (if (= n 0) :done (fn [] (my-bounce (- n 1)))))
   (is (= :done (trampoline my-bounce 1000))))
 
 ;; --- Threading macros ---
@@ -269,26 +269,26 @@
 ;; --- Iteration ---
 
 (deftest doto-macro
-  (let (a (atom []))
+  (let [a (atom [])]
     (doto a
       (swap! conj 1)
       (swap! conj 2))
     (is (= [1 2] (deref a)))))
 
 (deftest dotimes-macro
-  (let (a (atom []))
+  (let [a (atom [])]
     (dotimes (i 5) (swap! a conj i))
     (is (= [0 1 2 3 4] (deref a)))))
 
 (deftest doseq-macro
-  (let (a (atom []))
+  (let [a (atom [])]
     (doseq (x [10 20 30]) (swap! a conj (* x 2)))
     (is (= [20 40 60] (deref a)))))
 
 ;; --- Shuffle ---
 
 (deftest shuffle-fn
-  (let (v (shuffle [1 2 3 4 5]))
+  (let [v (shuffle [1 2 3 4 5])]
     (is (= 5 (count v)))
     (is (= #{1 2 3 4 5} (into #{} v)))))
 
@@ -304,7 +304,7 @@
 
 (deftest walk-fns
   (is (= '(2 (3 4))
-         (postwalk (fn (x) (if (number? x) (inc x) x)) '(1 (2 3)))))
+         (postwalk (fn [x] (if (number? x) (inc x) x)) '(1 (2 3)))))
   (is (= [1 [2 :c]]
          (postwalk-replace {:a 1 :b 2} [:a [:b :c]])))
   (is (= [1 [2 :c]]

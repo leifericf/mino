@@ -48,7 +48,7 @@
 (deftest atom-swap!-with-closure
   (testing "swap! with a closure that captures state"
     (def a (atom []))
-    (def adder (fn (v item) (conj v item)))
+    (def adder (fn [v item] (conj v item)))
     (swap! a adder :first)
     (swap! a adder :second)
     (swap! a adder :third)
@@ -67,7 +67,7 @@
     (def a (atom 10))
     (def seen (atom []))
     (dotimes (_ 5)
-      (swap! a (fn (current)
+      (swap! a (fn [current]
         (swap! seen conj current)
         (+ current 1))))
     ;; seen should have [10 11 12 13 14]
@@ -79,7 +79,7 @@
     (def a (atom 0))
     (dotimes (i 100)
       ;; Each swap allocates a fresh collection then discards it
-      (let (_ (into [] (range 50)))
+      (let [_ (into [] (range 50))]
         (swap! a + 1)))
     (is (= 100 @a))))
 
@@ -108,7 +108,7 @@
   (testing "swap! with a function that throws"
     (def a (atom 42))
     (def result (try
-      (swap! a (fn (v) (throw "oops")))
+      (swap! a (fn [v] (throw "oops")))
       (catch e e)))
     (is (= "oops" result))
     ;; Atom should be unchanged after failed swap
@@ -137,7 +137,7 @@
 (deftest binding-visible-in-callees
   (testing "Dynamic bindings are visible in called functions"
     (def *context* :default)
-    (defn get-context () *context*)
+    (defn get-context [] *context*)
     (is (= :default (get-context)))
     (binding (*context* :overridden)
       (is (= :overridden (get-context))))
@@ -179,7 +179,7 @@
 (deftest map-side-effects-order
   (testing "map preserves side effect ordering"
     (def log (atom []))
-    (def result (into [] (map (fn (x)
+    (def result (into [] (map (fn [x]
       (swap! log conj x)
       (* x x)) [1 2 3 4 5])))
     (is (= [1 4 9 16 25] result))
@@ -188,7 +188,7 @@
 (deftest filter-side-effects
   (testing "filter side effects execute for all elements"
     (def log (atom []))
-    (def result (into [] (filter (fn (x)
+    (def result (into [] (filter (fn [x]
       (swap! log conj x)
       (> x 2)) [1 2 3 4 5])))
     (is (= [3 4 5] result))
@@ -197,7 +197,7 @@
 (deftest reduce-side-effects
   (testing "reduce accumulates side effects"
     (def log (atom []))
-    (def result (reduce (fn (acc x)
+    (def result (reduce (fn [acc x]
       (swap! log conj {:acc acc :x x})
       (+ acc x)) 0 [1 2 3]))
     (is (= 6 result))
@@ -223,8 +223,8 @@
 (deftest closure-captures-atom
   (testing "Closures capture atom reference, not snapshot"
     (def a (atom 0))
-    (def inc-a (fn () (swap! a + 1)))
-    (def get-a (fn () @a))
+    (def inc-a (fn [] (swap! a + 1)))
+    (def get-a (fn [] @a))
     (inc-a)
     (inc-a)
     (inc-a)
@@ -233,9 +233,9 @@
 (deftest multiple-closures-share-atom
   (testing "Multiple closures over same atom see each other's mutations"
     (def state (atom {:count 0 :history []}))
-    (def bump (fn ()
-      (swap! state (fn (s)
-        (let (n (+ (get s :count) 1))
+    (def bump (fn []
+      (swap! state (fn [s]
+        (let [n (+ (get s :count) 1)]
           {:count n :history (conj (get s :history) n)})))))
     (bump) (bump) (bump)
     (is (= {:count 3 :history [1 2 3]} @state))))
@@ -245,15 +245,15 @@
 (deftest memoize-caches-results
   (testing "Memoized function caches via atom"
     (def call-count (atom 0))
-    (defn expensive (x)
+    (defn expensive [x]
       (swap! call-count + 1)
       (* x x))
     (def cache (atom {}))
-    (defn memo-expensive (x)
-      (let (cached (get @cache x))
+    (defn memo-expensive [x]
+      (let [cached (get @cache x)]
         (if cached
           cached
-          (let (result (expensive x))
+          (let [result (expensive x)]
             (swap! cache assoc x result)
             result))))
     (is (= 25 (memo-expensive 5)))
@@ -271,7 +271,7 @@
     (def errors (atom []))
     (doseq (x [1 2 0 3 0 4])
       (try
-        (let (result (/ 10 x))
+        (let [result (/ 10 x)]
           (swap! processed conj result))
         (catch e
           (swap! errors conj x))))

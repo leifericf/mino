@@ -5,25 +5,25 @@
 
 (deftest self-tail-recursion
   (testing "countdown without recur"
-    (defn countdown (n)
+    (defn countdown [n]
       (if (= n 0) :done (countdown (- n 1))))
     (is (= :done (countdown 100000))))
   (testing "accumulator pattern"
-    (defn sum-to (n acc)
+    (defn sum-to [n acc]
       (if (= n 0) acc (sum-to (- n 1) (+ acc n))))
     (is (= 5000050000 (sum-to 100000 0)))))
 
 (deftest mutual-recursion
   (testing "is-even?/is-odd? with large n"
-    (defn is-even? (n) (if (= n 0) true  (is-odd?  (- n 1))))
-    (defn is-odd?  (n) (if (= n 0) false (is-even? (- n 1))))
+    (defn is-even? [n] (if (= n 0) true  (is-odd?  (- n 1))))
+    (defn is-odd?  [n] (if (= n 0) false (is-even? (- n 1))))
     (is (= true  (is-even? 100000)))
     (is (= false (is-odd?  100000)))
     (is (= false (is-even? 99999)))
     (is (= true  (is-odd?  99999)))))
 
 (deftest tail-through-if
-  (defn find-zero (n)
+  (defn find-zero [n]
     (if (= n 0)
       :found
       (if (even? n)
@@ -32,28 +32,28 @@
   (is (= :found (find-zero 100000))))
 
 (deftest tail-through-let
-  (defn step (n)
-    (let (next (- n 1))
+  (defn step [n]
+    (let [next (- n 1)]
       (if (= next 0)
         :done
         (step next))))
   (is (= :done (step 100000))))
 
 (deftest tail-through-do
-  (defn run-do (n)
+  (defn run-do [n]
     (do
       nil  ; non-tail expression
       (if (= n 0) :done (run-do (- n 1)))))
   (is (= :done (run-do 100000))))
 
 (deftest tail-through-when
-  (defn when-loop (n)
+  (defn when-loop [n]
     (when (> n 0)
       (when-loop (- n 1))))
   (is (= nil (when-loop 100000))))
 
 (deftest tail-through-cond
-  (defn cond-loop (n)
+  (defn cond-loop [n]
     (cond
       (= n 0) :zero
       (even? n) (cond-loop (- n 2))
@@ -63,14 +63,14 @@
 (deftest loop-recur-still-works
   (testing "loop/recur backward compat"
     (is (= 5050
-           (loop (n 100 acc 0)
+           (loop [n 100 acc 0]
              (if (= n 0)
                acc
                (recur (- n 1) (+ acc n))))))))
 
 (deftest non-tail-calls-work
   (testing "normal recursion within stack limit"
-    (defn fib (n)
+    (defn fib [n]
       (if (< n 2)
         n
         (+ (fib (- n 1)) (fib (- n 2)))))
@@ -78,16 +78,16 @@
 
 (deftest tail-through-and-or
   (testing "tail call through and"
-    (defn and-loop (n)
+    (defn and-loop [n]
       (if (= n 0) true (and true (and-loop (- n 1)))))
     (is (= true (and-loop 100000))))
   (testing "tail call through or"
-    (defn or-loop (n)
+    (defn or-loop [n]
       (if (= n 0) :done (or false (or-loop (- n 1)))))
     (is (= :done (or-loop 100000)))))
 
 (deftest tail-through-threading
   (testing "tail call through ->"
-    (defn thread-loop (n)
+    (defn thread-loop [n]
       (if (= n 0) :done (-> n dec thread-loop)))
     (is (= :done (thread-loop 100000)))))

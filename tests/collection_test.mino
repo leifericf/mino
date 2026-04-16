@@ -36,15 +36,15 @@
 
 (deftest vector-scale
   (testing "2000 build + nth"
-    (let (big (loop (i 0 v [])
-               (if (< i 2000) (recur (+ i 1) (conj v i)) v)))
+    (let [big (loop [i 0 v []]
+               (if (< i 2000) (recur (+ i 1) (conj v i)) v))]
       (is (= 2000 (count big)))
       (is (= 4109 (+ (nth big 0) (nth big 31) (nth big 32) (nth big 1023)
                       (nth big 1024) (nth big 1999))))))
   (testing "assoc shares source"
-    (let (big (loop (i 0 v [])
+    (let [big (loop [i 0 v []]
                (if (< i 2000) (recur (+ i 1) (conj v i)) v))
-          big2 (assoc big 500 :x))
+          big2 (assoc big 500 :x)]
       (is (= 500 (nth big 500)))
       (is (= :x (nth big2 500)))
       (is (= (count big) (count big2))))))
@@ -67,8 +67,8 @@
   (is (= '(:z :a :b :c) (keys (assoc {:z 1 :a 2} :b 3 :c 4)))))
 
 (deftest map-200-entries
-  (let (m (loop (i 0 m {})
-           (if (< i 200) (recur (+ i 1) (assoc m i (* i 10))) m)))
+  (let [m (loop [i 0 m {}]
+           (if (< i 200) (recur (+ i 1) (assoc m i (* i 10))) m))]
     (is (= 200 (count m)))
     (is (= 0 (get m 0)))
     (is (= 1000 (get m 100)))
@@ -144,7 +144,7 @@
   (is (= {:a 1 :b 2} (conj {:a 1} [:b 2]))))
 
 (deftest update-fn
-  (is (= {:a 50} (update {:a 5} :a (fn (n) (* n 10))))))
+  (is (= {:a 50} (update {:a 5} :a (fn [n] (* n 10))))))
 
 (deftest keys-vals
   (is (= '(:a :b) (keys {:a 1 :b 2})))
@@ -156,7 +156,7 @@
 
 (deftest collection-compose
   (def ccm__ct (hash-map :x 1 :y 2))
-  (is (= 101 (get (update ccm__ct :x (fn (n) (+ n 100))) :x))))
+  (is (= 101 (get (update ccm__ct :x (fn [n] (+ n 100))) :x))))
 
 ;; --- Collection utilities ---
 

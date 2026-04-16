@@ -6,7 +6,7 @@
 
 ;; Helper: assert that read-string doesn't crash. It may return a value or
 ;; throw — both are fine. A crash (segfault) is the failure mode.
-(defmacro reader-survives (desc input)
+(defmacro reader-survives [desc input]
   `(deftest ~desc
      (try
        (do (read-string ~input)

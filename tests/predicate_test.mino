@@ -24,7 +24,7 @@
     (is (not (map? [1]))))
   (testing "fn?"
     (is (fn? +))
-    (is (fn? (fn (x) x)))
+    (is (fn? (fn [x] x)))
     (is (not (fn? 42))))
   (testing "set?"
     (is (set? #{1 2}))
@@ -54,11 +54,11 @@
     (is (empty? nil))
     (is (empty? "")))
   (testing "some"
-    (is (some (fn (x) (> x 3)) [1 2 3 4 5]))
-    (is (= nil (some (fn (x) (> x 10)) [1 2 3]))))
+    (is (some (fn [x] (> x 3)) [1 2 3 4 5]))
+    (is (= nil (some (fn [x] (> x 10)) [1 2 3]))))
   (testing "every?"
-    (is (every? (fn (x) (> x 0)) [1 2 3]))
-    (is (not (every? (fn (x) (> x 2)) [1 2 3]))))
+    (is (every? (fn [x] (> x 0)) [1 2 3]))
+    (is (not (every? (fn [x] (> x 2)) [1 2 3]))))
   (testing "identity"
     (is (= 42 (identity 42))))
   (testing "boolean"

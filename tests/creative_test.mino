@@ -1,10 +1,10 @@
 ;; --- Closure-intensive patterns ---
 
 ;; Closure that returns a closure that captures the first closure's var
-(defn make-counter ()
-  (let (state (atom 0))
-    {:inc (fn () (swap! state + 1))
-     :get (fn () @state)}))
+(defn make-counter []
+  (let [state (atom 0)]
+    {:inc (fn [] (swap! state + 1))
+     :get (fn [] @state)}))
 
 (def c (make-counter))
 ((get c :inc))
@@ -13,31 +13,31 @@
 (println "counter:" ((get c :get)))  ; should be 3
 
 ;; Higher-order closure factory
-(defn make-pipeline (& fns)
-  (reduce (fn (acc f) (fn (x) (f (acc x))))
+(defn make-pipeline [& fns]
+  (reduce (fn [acc f] (fn [x] (f (acc x))))
           identity
           fns))
 
 (def pipeline (make-pipeline
-  (fn (x) (+ x 1))
-  (fn (x) (* x 2))
-  (fn (x) (- x 3))))
+  (fn [x] (+ x 1))
+  (fn [x] (* x 2))
+  (fn [x] (- x 3))))
 
 (println "pipeline:" (pipeline 10))  ; ((10+1)*2)-3 = 19
 
 ;; Memoize via closure + atom
-(defn memoize (f)
-  (let (cache (atom {}))
-    (fn (& args)
-      (let (key (pr-str args)
-            cached (get @cache key))
+(defn memoize [f]
+  (let [cache (atom {})]
+    (fn [& args]
+      (let [key (pr-str args)
+            cached (get @cache key)]
         (if cached
           cached
-          (let (result (apply f args))
+          (let [result (apply f args)]
             (swap! cache assoc key result)
             result))))))
 
-(defn slow-fib (n)
+(defn slow-fib [n]
   (if (< n 2) n
       (+ (slow-fib (- n 1)) (slow-fib (- n 2)))))
 
@@ -49,54 +49,54 @@
 ;; --- Lazy sequence gymnastics ---
 
 ;; Fibonacci as lazy sequence
-(defn fibs ()
-  (let (fib-from (fn (a b) (lazy-seq (cons a (fib-from b (+ a b))))))
+(defn fibs []
+  (let [fib-from (fn [a b] (lazy-seq (cons a (fib-from b (+ a b)))))]
     (fib-from 0 1)))
 
 (println "fibs:" (pr-str (into [] (take 15 (fibs)))))
 
 ;; Interleave two infinite sequences
-(defn interleave2 (s1 s2)
+(defn interleave2 [s1 s2]
   (lazy-seq
     (when (seq s1)
       (cons (first s1)
         (interleave2 s2 (rest s1))))))
 
-(def evens (filter (fn (x) (= 0 (mod x 2))) (range)))
-(def odds  (filter (fn (x) (= 1 (mod x 2))) (range)))
+(def evens (filter (fn [x] (= 0 (mod x 2))) (range)))
+(def odds  (filter (fn [x] (= 1 (mod x 2))) (range)))
 (println "interleave:" (pr-str (into [] (take 10 (interleave2 evens odds)))))
 
 ;; Iterate: f(x), f(f(x)), f(f(f(x))), ...
-(defn iterate (f x)
+(defn iterate [f x]
   (lazy-seq (cons x (iterate f (f x)))))
 
-(def powers-of-2 (iterate (fn (x) (* x 2)) 1))
+(def powers-of-2 (iterate (fn [x] (* x 2)) 1))
 (println "powers:" (pr-str (into [] (take 10 powers-of-2))))
 
 ;; --- Macro gymnastics ---
 
 ;; Macro that generates a defn
-(defmacro def-doubler (name)
-  `(defn ~name (x) (* x 2)))
+(defmacro def-doubler [name]
+  `(defn ~name [x] (* x 2)))
 
 (def-doubler my-double)
 (println "doubler:" (my-double 21))
 
 ;; Macro that takes a body and wraps it in timing
 ;; (can't actually time, but can wrap in let)
-(defmacro with-result (name body & rest)
-  `(let (~name ~body) ~@rest))
+(defmacro with-result [name body & rest]
+  `(let [~name ~body] ~@rest))
 
 (println "with-result:" (with-result answer (+ 20 22) answer))
 
 ;; --- Recursive data processing ---
 
 ;; Tree as nested vectors: [value [children...]]
-(defn make-tree (val children) [val children])
-(defn tree-val (t) (nth t 0))
-(defn tree-children (t) (nth t 1))
+(defn make-tree [val children] [val children])
+(defn tree-val [t] (nth t 0))
+(defn tree-children [t] (nth t 1))
 
-(defn tree-sum (t)
+(defn tree-sum [t]
   (+ (tree-val t)
      (reduce + 0 (map tree-sum (tree-children t)))))
 
@@ -108,17 +108,17 @@
 (println "tree-sum:" (tree-sum my-tree))  ; 1+2+3+4+5+6 = 21
 
 ;; Tree map: apply f to every node value
-(defn tree-map (f t)
+(defn tree-map [f t]
   (make-tree (f (tree-val t))
-    (into [] (map (fn (child) (tree-map f child)) (tree-children t)))))
+    (into [] (map (fn [child] (tree-map f child)) (tree-children t)))))
 
-(def doubled-tree (tree-map (fn (x) (* x 2)) my-tree))
+(def doubled-tree (tree-map (fn [x] (* x 2)) my-tree))
 (println "doubled tree-sum:" (tree-sum doubled-tree))  ; 42
 
 ;; --- Error boundaries ---
 
 ;; defn that never fails: wraps body in try/catch
-(defmacro safe-defn (name params fallback & body)
+(defmacro safe-defn [name params fallback & body]
   `(defn ~name ~params
      (try (do ~@body) (catch __e ~fallback))))
 
@@ -128,11 +128,11 @@
 
 ;; --- Transducer-like composition ---
 
-(defn mapping (f) (fn (step) (fn (acc x) (step acc (f x)))))
-(defn filtering (pred) (fn (step) (fn (acc x) (if (pred x) (step acc x) acc))))
+(defn mapping [f] (fn [step] (fn [acc x] (step acc (f x)))))
+(defn filtering [pred] (fn [step] (fn [acc x] (if (pred x) (step acc x) acc))))
 
-(def xform (comp (filtering (fn (x) (> x 3)))
-                 (mapping (fn (x) (* x 10)))))
+(def xform (comp (filtering (fn [x] (> x 3)))
+                 (mapping (fn [x] (* x 10)))))
 
 (def result (reduce (xform conj) [] [1 2 3 4 5 6]))
 (println "transducer:" (pr-str result))  ; [40 50 60]
@@ -140,22 +140,22 @@
 ;; --- Stress test: many bindings in one let ---
 
 (def big-let-result
-  (let (a 1 b 2 c 3 d 4 e 5 f 6 g 7 h 8 i 9 j 10
-        k 11 l 12 m 13 n 14 o 15 p 16 q 17 r 18 s 19 t 20)
+  (let [a 1 b 2 c 3 d 4 e 5 f 6 g 7 h 8 i 9 j 10
+        k 11 l 12 m 13 n 14 o 15 p 16 q 17 r 18 s 19 t 20]
     (+ a b c d e f g h i j k l m n o p q r s t)))
 
 (println "big let:" big-let-result)  ; 210
 
 ;; --- Walk a data structure ---
 
-(defn postwalk (f form)
+(defn postwalk [f form]
   (cond
-    (cons? form) (f (map (fn (x) (postwalk f x)) form))
-    (vector? form) (f (into [] (map (fn (x) (postwalk f x)) form)))
-    (map? form) (f (reduce (fn (acc kv) (assoc acc (first kv) (postwalk f (first (rest kv)))))
-                           {} (map (fn (k) (list k (get form k))) (keys form))))
+    (cons? form) (f (map (fn [x] (postwalk f x)) form))
+    (vector? form) (f (into [] (map (fn [x] (postwalk f x)) form)))
+    (map? form) (f (reduce (fn [acc kv] (assoc acc (first kv) (postwalk f (first (rest kv)))))
+                           {} (map (fn [k] (list k (get form k))) (keys form))))
     true (f form)))
 
 (def data {:a [1 2 3] :b {:c 4 :d [5 6]}})
-(def incremented (postwalk (fn (x) (if (number? x) (+ x 100) x)) data))
+(def incremented (postwalk (fn [x] (if (number? x) (+ x 100) x)) data))
 (println "postwalk:" (pr-str incremented))

@@ -14,18 +14,18 @@
 
 (deftest let-binding
   (testing "single"
-    (is (= 5 (let (x 5) x))))
+    (is (= 5 (let [x 5] x))))
   (testing "multi"
-    (is (= 3 (let (x 1 y 2) (+ x y)))))
+    (is (= 3 (let [x 1 y 2] (+ x y)))))
   (testing "sequential"
-    (is (= 11 (let (x 1 y (+ x 10)) y))))
+    (is (= 11 (let [x 1 y (+ x 10)] y))))
   (testing "shadow"
     (def a__bt 1)
-    (is (= 99 (let (a__bt 99) a__bt)))
+    (is (= 99 (let [a__bt 99] a__bt)))
     (is (= 1 a__bt))))
 
 (deftest var-redef-closure
-  (def vrc-f (fn () vrc-x))
+  (def vrc-f (fn [] vrc-x))
   (def vrc-x 10)
   (is (= 10 (vrc-f)))
   (def vrc-x 20)
