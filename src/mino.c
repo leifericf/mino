@@ -2160,6 +2160,35 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 }
                 return eval_impl(S, expanded, env, tail);
             }
+            if (fn->type == MINO_KEYWORD) {
+                /* Callable keywords: (:k m) => (get m :k),
+                 *                    (:k m default) => (get m :k default). */
+                mino_val_t *kw = fn;
+                int         nargs = 0;
+                mino_val_t *tmp;
+                gc_unpin(1);
+                evaled = eval_args(S, args, env);
+                if (evaled == NULL && mino_last_error(S) != NULL)
+                    return NULL;
+                for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    nargs++;
+                if (nargs < 1 || nargs > 2) {
+                    set_error_at(S, form,
+                        "keyword as function takes 1 or 2 arguments");
+                    return NULL;
+                }
+                {
+                    mino_val_t *coll    = evaled->as.cons.car;
+                    mino_val_t *def_val = nargs == 2
+                        ? evaled->as.cons.cdr->as.cons.car
+                        : mino_nil(S);
+                    if (coll != NULL && coll->type == MINO_MAP) {
+                        mino_val_t *v = map_get_val(coll, kw);
+                        return v == NULL ? def_val : v;
+                    }
+                    return def_val;
+                }
+            }
             if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
                 gc_unpin(1);
                 {
