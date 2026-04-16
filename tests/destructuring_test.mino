@@ -1,0 +1,163 @@
+(require "tests/test")
+
+;; Destructuring, named fn, multi-arity, vector bindings.
+
+;; --- Vector binding forms ---
+
+(deftest let-vector-bindings
+  (testing "single binding"
+    (is (= 5 (let [x 5] x))))
+  (testing "multiple bindings"
+    (is (= 3 (let [x 1 y 2] (+ x y)))))
+  (testing "sequential reference"
+    (is (= 11 (let [x 1 y (+ x 10)] y)))))
+
+(deftest fn-vector-params
+  (is (= 49 ((fn [x] (* x x)) 7)))
+  (is (= 42 ((fn [] 42))))
+  (is (= 7 ((fn [x y] (+ x y)) 3 4))))
+
+(deftest loop-vector-bindings
+  (is (= 120 (loop [n 5 acc 1]
+               (if (<= n 1) acc (recur (- n 1) (* acc n)))))))
+
+(deftest defn-vector-params
+  (defn sq__dt [x] (* x x))
+  (is (= 25 (sq__dt 5))))
+
+;; --- Named anonymous functions ---
+
+(deftest named-fn-recursion
+  (def fib__dt (fn fib [n]
+    (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2))))))
+  (is (= 55 (fib__dt 10))))
+
+(deftest named-fn-no-leak
+  (def outer__dt (fn [] (fn inner [x] (+ x 1))))
+  (is (= 6 ((outer__dt) 5))))
+
+(deftest named-fn-with-list-params
+  (def fact__dt (fn fact (n) (if (<= n 1) 1 (* n (fact (- n 1))))))
+  (is (= 120 (fact__dt 5))))
+
+;; --- Multi-arity functions ---
+
+(deftest multi-arity-basic
+  (def greet__dt (fn
+    ([name] (str "hello " name))
+    ([greeting name] (str greeting " " name))))
+  (is (= "hello world" (greet__dt "world")))
+  (is (= "hey alice" (greet__dt "hey" "alice"))))
+
+(deftest multi-arity-with-zero
+  (def counter__dt (fn
+    ([] 0)
+    ([x] x)
+    ([x y] (+ x y))))
+  (is (= 0 (counter__dt)))
+  (is (= 5 (counter__dt 5)))
+  (is (= 7 (counter__dt 3 4))))
+
+(deftest multi-arity-variadic
+  (def my-add__dt (fn
+    ([] 0)
+    ([x] x)
+    ([x y] (+ x y))
+    ([x y & rest] (apply + x y rest))))
+  (is (= 0 (my-add__dt)))
+  (is (= 5 (my-add__dt 5)))
+  (is (= 7 (my-add__dt 3 4)))
+  (is (= 10 (my-add__dt 1 2 3 4))))
+
+(deftest multi-arity-named
+  (def fib2__dt (fn fib2
+    ([n] (fib2 n 0 1))
+    ([n a b] (if (<= n 0) a (fib2 (- n 1) b (+ a b))))))
+  (is (= 55 (fib2__dt 10))))
+
+(deftest defn-multi-arity
+  (defn greeter__dt
+    ([name] (greeter__dt "hello" name))
+    ([greeting name] (str greeting " " name)))
+  (is (= "hello world" (greeter__dt "world")))
+  (is (= "hey bob" (greeter__dt "hey" "bob"))))
+
+;; --- Vector destructuring ---
+
+(deftest vec-destructure-let
+  (let [[a b c] [1 2 3]]
+    (is (= 1 a))
+    (is (= 2 b))
+    (is (= 3 c))))
+
+(deftest vec-destructure-rest
+  (let [[x & rest] [1 2 3 4]]
+    (is (= 1 x))
+    (is (= '(2 3 4) rest))))
+
+(deftest vec-destructure-as
+  (let [[a b :as all] [1 2 3]]
+    (is (= 1 a))
+    (is (= 2 b))
+    (is (= [1 2 3] all))))
+
+(deftest vec-destructure-rest-and-as
+  (let [[a & more :as all] [1 2 3]]
+    (is (= 1 a))
+    (is (= '(2 3) more))
+    (is (= [1 2 3] all))))
+
+(deftest vec-destructure-nested
+  (let [[a [b c]] [1 [2 3]]]
+    (is (= 1 a))
+    (is (= 2 b))
+    (is (= 3 c))))
+
+(deftest vec-destructure-from-list
+  (let [[a b c] '(10 20 30)]
+    (is (= 10 a))
+    (is (= 20 b))
+    (is (= 30 c))))
+
+(deftest vec-destructure-fn-params
+  (defn head-tail__dt [[h & t]] {:head h :tail t})
+  (is (= {:head 1 :tail '(2 3)} (head-tail__dt [1 2 3]))))
+
+;; --- Map destructuring ---
+
+(deftest map-destructure-keys
+  (let [{:keys [name age]} {:name "Alice" :age 30}]
+    (is (= "Alice" name))
+    (is (= 30 age))))
+
+(deftest map-destructure-explicit
+  (let [{n :name a :age} {:name "Bob" :age 25}]
+    (is (= "Bob" n))
+    (is (= 25 a))))
+
+(deftest map-destructure-defaults
+  (let [{:keys [x y] :or {:x 10 :y 20}} {:x 5}]
+    (is (= 5 x))
+    (is (= 20 y))))
+
+(deftest map-destructure-as
+  (let [{:keys [a] :as m} {:a 1 :b 2}]
+    (is (= 1 a))
+    (is (= {:a 1 :b 2} m))))
+
+(deftest map-destructure-nested
+  (let [[{:keys [x]} {:keys [y]}] [{:x 1} {:y 2}]]
+    (is (= 1 x))
+    (is (= 2 y))))
+
+(deftest map-destructure-fn-params
+  (defn extract__dt [{:keys [name age]}] (str name " is " age))
+  (is (= "Alice is 30" (extract__dt {:name "Alice" :age 30}))))
+
+;; --- Mixed ---
+
+(deftest mixed-vec-map-destructure
+  (let [[a {:keys [b c]}] [1 {:b 2 :c 3}]]
+    (is (= 1 a))
+    (is (= 2 b))
+    (is (= 3 c))))
