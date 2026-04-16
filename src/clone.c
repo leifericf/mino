@@ -260,24 +260,30 @@ typedef struct {
     char  *data;
     size_t len;
     size_t cap;
+    int    failed; /* set on allocation failure; all writes become no-ops */
 } sbuf_t;
 
 static void sbuf_init(sbuf_t *b)
 {
-    b->data = NULL;
-    b->len  = 0;
-    b->cap  = 0;
+    b->data   = NULL;
+    b->len    = 0;
+    b->cap    = 0;
+    b->failed = 0;
 }
 
 static int sbuf_ensure(sbuf_t *b, size_t extra)
 {
+    if (b->failed) return -1;
     if (b->len + extra + 1 > b->cap) {
         size_t need = b->len + extra + 1;
         size_t nc   = b->cap == 0 ? 128 : b->cap;
         char  *nd;
         while (nc < need) nc *= 2;
         nd = (char *)realloc(b->data, nc);
-        if (nd == NULL) return -1;
+        if (nd == NULL) {
+            b->failed = 1;
+            return -1;
+        }
         b->data = nd;
         b->cap  = nc;
     }
@@ -420,7 +426,10 @@ static char *val_serialize(mino_state_t *S, mino_val_t *val, size_t *out_len)
     sbuf_t buf;
     sbuf_init(&buf);
     sbuf_print(S, &buf, val);
-    if (buf.data == NULL) return NULL;
+    if (buf.data == NULL || buf.failed) {
+        free(buf.data);
+        return NULL;
+    }
     buf.data[buf.len] = '\0';
     *out_len = buf.len;
     return buf.data;
