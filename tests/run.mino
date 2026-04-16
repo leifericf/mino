@@ -24,5 +24,6 @@
 (require "tests/tco_test")
 (require "tests/core_extra_test")
 (require "tests/destructuring_test")
+(require "tests/reader_macros_test")
 
 (run-tests)
