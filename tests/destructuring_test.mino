@@ -136,7 +136,7 @@
     (is (= 25 a))))
 
 (deftest map-destructure-defaults
-  (let [{:keys [x y] :or {:x 10 :y 20}} {:x 5}]
+  (let [{:keys [x y] :or {x 10 y 20}} {:x 5}]
     (is (= 5 x))
     (is (= 20 y))))
 

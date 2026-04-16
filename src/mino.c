@@ -1351,7 +1351,8 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                 found = map_get_val(val, lookup_key);
             }
             if (found == NULL && or_map != NULL && or_map->type == MINO_MAP) {
-                found = map_get_val(or_map, lookup_key);
+                /* :or map uses symbol keys: {a default-val} */
+                found = map_get_val(or_map, ksym);
             }
             if (found == NULL) found = mino_nil(S);
             if (!bind_sym(S, env, ksym, found)) return 0;
