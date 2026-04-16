@@ -936,15 +936,9 @@
 (def sequential? (fn [x]
   (or (cons? x) (vector? x) (seq? x))))
 
-(def flatten (fn [coll]
-  (lazy-seq
-    (when (sequential? coll)
-      (let [s (seq coll)]
-        (when s
-          (let [x (first s)]
-            (if (sequential? x)
-              (concat (flatten x) (flatten (rest s)))
-              (cons x (flatten (rest s)))))))))))
+(def flatten (fn [x]
+  (filter (complement sequential?)
+          (rest (tree-seq sequential? seq x)))))
 
 (def tree-seq (fn [branch? children root]
   (let [walk (fn [node]
