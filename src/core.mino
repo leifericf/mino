@@ -80,8 +80,15 @@
 
 ;; --- Definitions ---
 
-(defmacro defn (name params & body)
-  `(def ~name (fn ~params ~@body)))
+(defmacro defn (name & fdecl)
+  (let (;; Peel off optional docstring.
+        has-doc (string? (first fdecl))
+        doc     (if has-doc (first fdecl) nil)
+        fdecl   (if has-doc (rest fdecl) fdecl)
+        form    (cons 'fn fdecl))
+    (if doc
+      `(def ~name ~doc ~form)
+      `(def ~name ~form))))
 
 ;; --- Lazy sequence operations ---
 
