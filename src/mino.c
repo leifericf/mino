@@ -307,6 +307,7 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_LAZY:    return "lazy-seq";
     case MINO_RECUR:     return "recur";
     case MINO_TAIL_CALL: return "tail-call";
+    case MINO_REDUCED:   return "reduced";
     }
     return "unknown";
 }
@@ -641,6 +642,9 @@ static void gc_mark_val(mino_state_t *S, mino_val_t *v)
     case MINO_TAIL_CALL:
         gc_mark_interior(S, v->as.tail_call.fn);
         gc_mark_interior(S, v->as.tail_call.args);
+        break;
+    case MINO_REDUCED:
+        gc_mark_interior(S, v->as.reduced.val);
         break;
     default:
         /* NIL, BOOL, INT, FLOAT, PRIM, HANDLE: no owned children. prim.name
@@ -1472,6 +1476,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_LAZY:
     case MINO_RECUR:
     case MINO_TAIL_CALL:
+    case MINO_REDUCED:
         return form;
     case MINO_SYMBOL: {
         char buf[256];

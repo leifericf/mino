@@ -200,6 +200,11 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     case MINO_TAIL_CALL:
         fputs("#<tail-call>", out);
         return;
+    case MINO_REDUCED:
+        fputs("#<reduced ", out);
+        mino_print_to(S, out, v->as.reduced.val);
+        fputc('>', out);
+        return;
     }
 }
 

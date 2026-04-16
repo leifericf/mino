@@ -156,6 +156,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     case MINO_LAZY:
     case MINO_RECUR:
     case MINO_TAIL_CALL:
+    case MINO_REDUCED:
         return NULL;
     }
     return NULL; /* unreachable */

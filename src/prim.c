@@ -1802,6 +1802,32 @@ static void seq_iter_next(mino_state_t *S, seq_iter_t *it)
 
 /* (map, filter are now lazy in core.mino) */
 
+/* (reduced val) — wrap val to signal early termination in reduce. */
+static mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "reduced requires exactly 1 argument");
+        return NULL;
+    }
+    v = alloc_val(S, MINO_REDUCED);
+    v->as.reduced.val = args->as.cons.car;
+    return v;
+}
+
+/* (reduced? x) — true if x is a reduced wrapper. */
+static mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "reduced? requires exactly 1 argument");
+        return NULL;
+    }
+    return (args->as.cons.car != NULL && args->as.cons.car->type == MINO_REDUCED)
+        ? mino_true(S) : mino_false(S);
+}
+
 static mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn;
@@ -1842,6 +1868,7 @@ static mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *en
         mino_val_t *call_a = mino_cons(S, acc, mino_cons(S, elem, mino_nil(S)));
         acc = apply_callable(S, fn, call_a, env);
         if (acc == NULL) return NULL;
+        if (acc->type == MINO_REDUCED) return acc->as.reduced.val;
         seq_iter_next(S, &it);
     }
     return acc;
@@ -2643,6 +2670,7 @@ static mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_LAZY:    return mino_keyword(S, "lazy-seq");
     case MINO_RECUR:     return mino_keyword(S, "recur");
     case MINO_TAIL_CALL: return mino_keyword(S, "tail-call");
+    case MINO_REDUCED:   return mino_keyword(S, "reduced");
     }
     return mino_keyword(S, "unknown");
 }
@@ -3599,6 +3627,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     /* sequence operations (map, filter, take, drop, range, repeat,
        concat are now lazy in core.mino) */
     mino_env_set(S, env, "reduce",   mino_prim(S, "reduce",   prim_reduce));
+    mino_env_set(S, env, "reduced",  mino_prim(S, "reduced",  prim_reduced));
+    mino_env_set(S, env, "reduced?", mino_prim(S, "reduced?", prim_reduced_p));
     mino_env_set(S, env, "into",     mino_prim(S, "into",     prim_into));
     /* eager collection builders -- bypass lazy thunk overhead */
     mino_env_set(S, env, "rangev",   mino_prim(S, "rangev",   prim_rangev));

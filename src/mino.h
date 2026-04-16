@@ -36,7 +36,8 @@ typedef enum {
     MINO_ATOM,    /* mutable reference cell: wraps a single value */
     MINO_LAZY,    /* lazy sequence: thunk body + env, cached on first force */
     MINO_RECUR,   /* internal tail-call trampoline sentinel */
-    MINO_TAIL_CALL /* proper tail call: carries {fn, args} for trampoline */
+    MINO_TAIL_CALL, /* proper tail call: carries {fn, args} for trampoline */
+    MINO_REDUCED  /* early termination wrapper for reduce */
 } mino_type_t;
 
 typedef struct mino_val   mino_val_t;
@@ -113,6 +114,9 @@ struct mino_val {
             mino_val_t *fn;
             mino_val_t *args;
         } tail_call;
+        struct {          /* MINO_REDUCED: early termination wrapper */
+            mino_val_t *val;
+        } reduced;
     } as;
 };
 

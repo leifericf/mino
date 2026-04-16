@@ -328,6 +328,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a == b;
     case MINO_TAIL_CALL:
         return a == b;
+    case MINO_REDUCED:
+        return a == b;
     }
     return 0;
 }
