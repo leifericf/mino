@@ -189,7 +189,13 @@
 
 ;; --- Higher-order functions ---
 
-(def comp (fn [f g] (fn [& args] (f (apply g args)))))
+(def comp (fn [& fns]
+  (if (empty? fns)
+    identity
+    (if (empty? (rest fns))
+      (first fns)
+      (let [comp2 (fn comp2 [f g] (fn [& args] (f (apply g args))))]
+        (reduce comp2 fns))))))
 (def partial (fn [f & bound] (fn [& args] (apply f (concat bound args)))))
 (def complement (fn [f] (fn [& args] (not (apply f args)))))
 
