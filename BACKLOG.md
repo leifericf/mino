@@ -8,12 +8,6 @@ language and embedding API items.
 
 ### Nice-to-have
 
-**Value metadata** -- arbitrary key-value metadata on any value.
-`with-meta`, `meta`, `vary-meta`. Reader syntax `^{:key val} form`.
-Currently only docstrings on `def`/`defmacro` via the internal
-`meta_table`. Requires adding a metadata pointer to `mino_val_t`.
-~300 lines.
-
 **Transducers** -- `transduce`, `eduction`, `into` with xform.
 Composable algorithmic transformations. Requires protocol-level
 abstractions or a simpler approach. ~400 lines.
