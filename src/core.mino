@@ -660,15 +660,18 @@
       (assoc m k (apply f (get m k) args))))))
 
 (def merge-with (fn [f & maps]
-  (reduce (fn [acc m]
-    (reduce (fn [a kv]
-      (let [k (first kv)
-            v (second kv)]
-        (if (contains? a k)
-          (assoc a k (f (get a k) v))
-          (assoc a k v))))
-      acc (seq m)))
-    {} maps)))
+  (when (some identity maps)
+    (reduce (fn [acc m]
+      (if m
+        (reduce (fn [a kv]
+          (let [k (first kv)
+                v (second kv)]
+            (if (contains? a k)
+              (assoc a k (f (get a k) v))
+              (assoc a k v))))
+          (or acc {}) (seq m))
+        acc))
+      nil maps))))
 
 (def reduce-kv (fn [f init m]
   (reduce (fn [acc kv] (f acc (first kv) (second kv)))
