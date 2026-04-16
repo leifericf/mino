@@ -18,10 +18,6 @@ Currently only docstrings on `def`/`defmacro` via the internal
 Composable algorithmic transformations. Requires protocol-level
 abstractions or a simpler approach. ~400 lines.
 
-**Multi-binding `doseq`/`for`** -- nested iteration with multiple
-bindings. Currently single-binding only. Requires destructuring or
-recursive macro expansion over binding pairs. ~100 lines.
-
 ## C/C++ Interop
 
 mino is a GC'd language embedded inside unmanaged C/C++ programs. This
