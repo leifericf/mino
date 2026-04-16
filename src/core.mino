@@ -860,6 +860,105 @@
 ;; primitive that takes a source string.
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Protocols: polymorphic dispatch on the type of the first argument.
+;;
+;; (defprotocol Name
+;;   (method1 [this])
+;;   (method2 [this x]))
+;;
+;; (extend-type :string
+;;   Name
+;;   (method1 [this] ...)
+;;   (method2 [this x] ...))
+;;
+;; (extend-protocol Name
+;;   :string
+;;   (method1 [this] ...)
+;;   :vector
+;;   (method1 [this] ...))
+;;
+;; (satisfies? Name x) returns true if x's type has implementations for Name.
+;; ---------------------------------------------------------------------------
+
+(defn protocol-dispatch_ [dispatch-atom mname & args]
+  (let [target (first args)
+        t (type target)
+        dispatch-map @dispatch-atom
+        impl (get dispatch-map t)]
+    (if impl
+      (apply impl args)
+      (let [default (get dispatch-map :default)]
+        (if default
+          (apply default args)
+          (throw (ex-info (str "No implementation of " mname " for type " (name t))
+                          {:method mname :type t})))))))
+
+(defmacro defprotocol [proto-name & methods]
+  (let [pname (name proto-name)
+        method-info (into [] (map (fn [m]
+                           (let [mname (first m)
+                                 params (second m)]
+                             {:mname mname
+                              :params params
+                              :dsym (symbol (str pname "--" (name mname)))}))
+                         methods))
+        atom-defs (into [] (map (fn [mi] (list 'def (:dsym mi) '(atom {})))
+                       method-info))
+        fn-defs (into [] (map (fn [mi]
+                       (let [dispatch-call (apply list
+                                             'protocol-dispatch_
+                                             (:dsym mi)
+                                             (str (:mname mi))
+                                             (:params mi))]
+                         (list 'defn (:mname mi) (:params mi)
+                               dispatch-call)))
+                     method-info))
+        proto-map (into {} (map (fn [mi]
+                                  [(keyword (str (:mname mi))) (:dsym mi)])
+                                method-info))
+        proto-def (list 'def proto-name
+                        {:name pname :methods proto-map})
+        all-forms (concat atom-defs fn-defs (list proto-def))]
+    (apply list 'do all-forms)))
+
+(defmacro extend-type [type-kw proto & methods]
+  (let [pname (name proto)
+        swaps (into [] (map (fn [m]
+             (let [mname (first m)
+                   params (second m)
+                   body (drop 2 m)
+                   dsym (symbol (str pname "--" (name mname)))]
+               (list 'swap! dsym 'assoc type-kw
+                     (apply list 'fn params body))))
+           methods))]
+    (apply list 'do swaps)))
+
+(defn partition-protocol-specs_ [specs]
+  (loop [remaining specs groups [] current nil]
+    (if (empty? remaining)
+      (if current (conj groups current) groups)
+      (let [item (first remaining)]
+        (if (keyword? item)
+          (recur (rest remaining)
+                 (if current (conj groups current) groups)
+                 [item])
+          (recur (rest remaining) groups (conj current item)))))))
+
+(defmacro extend-protocol [proto & specs]
+  (let [groups (partition-protocol-specs_ specs)
+        forms (into [] (map (fn [group]
+                (apply list 'extend-type (first group) proto (rest group)))
+              groups))]
+    (apply list 'do forms)))
+
+(defn satisfies? [proto x]
+  (let [t (type x)
+        methods (vals (:methods proto))]
+    (every? (fn [dispatch-atom]
+              (contains? @dispatch-atom t))
+            methods)))
+
 (defmacro with-open [bindings & body]
   (if (empty? bindings)
     `(do ~@body)

@@ -27,5 +27,6 @@
 (require "tests/reader_macros_test")
 (require "tests/phase3_test")
 (require "tests/finally_test")
+(require "tests/protocol_test")
 
 (run-tests)
