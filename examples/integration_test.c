@@ -213,12 +213,12 @@ static void test_pcall_inside_eval(void)
 
     mino_register_fn(S, env, "safe-divide", prim_safe_divide);
 
-    /* Normal case */
+    /* Normal case: 10 / 2 = 5 (integer division) */
     mino_val_t *r = mino_eval_string(S, "(safe-divide 10 2)", env);
     CHK(r != NULL, "eval failed");
-    double v;
-    CHK(mino_to_float(r, &v), "not float");
-    CHK(v == 5.0, "expected 5.0");
+    long long v;
+    CHK(mino_to_int(r, &v), "not int");
+    CHK(v == 5, "expected 5");
 
     /* Error case -- pcall should catch the div by zero */
     r = mino_eval_string(S, "(safe-divide 10 0)", env);
