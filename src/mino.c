@@ -2740,14 +2740,22 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
         set_error(S, msg);
         return NULL;
     }
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        set_error(S, "cannot seek to end of file");
+        return NULL;
+    }
     sz = ftell(f);
     if (sz < 0) {
         fclose(f);
         set_error(S, "cannot determine file size");
         return NULL;
     }
-    fseek(f, 0, SEEK_SET);
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        set_error(S, "cannot seek to start of file");
+        return NULL;
+    }
     buf = (char *)malloc((size_t)sz + 1);
     if (buf == NULL) {
         fclose(f);
@@ -2756,6 +2764,11 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
     }
     rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
+    if (rd != (size_t)sz) {
+        free(buf);
+        set_error(S, "short read loading file");
+        return NULL;
+    }
     buf[rd] = '\0';
     saved_file  = reader_file;
     reader_file = intern_filename(path);
