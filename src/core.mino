@@ -686,16 +686,30 @@
        (~go 0))))
 
 (defmacro doseq [bindings & body]
-  (let [sym  (first bindings)
-        coll (first (rest bindings))
-        gs   (gensym)
-        go   (gensym)]
-    `(let [~go (fn [~gs]
-                 (when ~gs
-                   (let [~sym (first ~gs)]
-                     ~@body
-                     (~go (next ~gs)))))]
-       (~go (seq ~coll)))))
+  (if (<= (count bindings) 2)
+    ;; Single binding: (doseq [x coll] body...)
+    (let [sym  (first bindings)
+          coll (first (rest bindings))
+          gs   (gensym)
+          go   (gensym)]
+      `(let [~go (fn [~gs]
+                   (when ~gs
+                     (let [~sym (first ~gs)]
+                       ~@body
+                       (~go (next ~gs)))))]
+         (~go (seq ~coll))))
+    ;; Multiple bindings: nest inner doseq
+    (let [sym  (first bindings)
+          coll (first (rest bindings))
+          rest-bindings (into [] (drop 2 bindings))
+          gs   (gensym)
+          go   (gensym)]
+      `(let [~go (fn [~gs]
+                   (when ~gs
+                     (let [~sym (first ~gs)]
+                       (doseq ~rest-bindings ~@body)
+                       (~go (next ~gs)))))]
+         (~go (seq ~coll))))))
 
 ;; --- Shuffle (Fisher-Yates) ---
 
@@ -807,13 +821,39 @@
 (defmacro for [bindings & body]
   (let [sym  (first bindings)
         coll (first (rest bindings))
-        opts (rest (rest bindings))
-        when-clause (when (and (seq opts) (= (first opts) :when))
-                      (first (rest opts)))]
-    (if when-clause
-      `(map (fn [~sym] ~@body)
-            (filter (fn [~sym] ~when-clause) ~coll))
-      `(map (fn [~sym] ~@body) ~coll))))
+        rest-bindings (drop 2 bindings)]
+    (if (empty? rest-bindings)
+      ;; Last binding pair: produce elements
+      `(map (fn [~sym] ~@body) ~coll)
+      (let [modifier (first rest-bindings)]
+        (cond
+          ;; :when filter
+          (= modifier :when)
+          (let [pred (first (rest rest-bindings))
+                remaining (into [] (drop 2 rest-bindings))]
+            (if (empty? remaining)
+              `(map (fn [~sym] ~@body)
+                    (filter (fn [~sym] ~pred) ~coll))
+              `(for ~(into [sym (list 'filter (list 'fn [sym] pred) coll)]
+                           remaining)
+                 ~@body)))
+          ;; :let local bindings
+          (= modifier :let)
+          (let [let-bindings (first (rest rest-bindings))
+                remaining (into [] (drop 2 rest-bindings))]
+            (if (empty? remaining)
+              `(map (fn [~sym]
+                      (let ~let-bindings ~@body))
+                    ~coll)
+              `(mapcat (fn [~sym]
+                         (let ~let-bindings
+                           (for ~remaining ~@body)))
+                       ~coll)))
+          ;; Another binding pair: nested iteration
+          :else
+          `(mapcat (fn [~sym]
+                     (for ~(into [] rest-bindings) ~@body))
+                   ~coll))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Agents: mutable reference cells updated via function application.

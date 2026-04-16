@@ -28,5 +28,6 @@
 (require "tests/phase3_test")
 (require "tests/finally_test")
 (require "tests/protocol_test")
+(require "tests/iteration_test")
 
 (run-tests)
