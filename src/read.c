@@ -372,6 +372,10 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
                 char c = buf[i];
                 if (c == '.' || c == 'e' || c == 'E') {
                     has_dot_or_exp = 1;
+                    if ((c == 'e' || c == 'E') && i + 1 < len &&
+                        (buf[i + 1] == '+' || buf[i + 1] == '-')) {
+                        i++;
+                    }
                 } else if (!isdigit((unsigned char)c)) {
                     looks_numeric = 0;
                     break;
