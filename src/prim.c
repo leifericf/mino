@@ -1916,6 +1916,32 @@ static mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *en
     return acc;
 }
 
+/* (set coll) — create a set from a collection. */
+static mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *result;
+    seq_iter_t  it;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "set requires exactly 1 argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_set(S, NULL, 0);
+    }
+    result = mino_set(S, NULL, 0);
+    gc_pin(result);
+    seq_iter_init(S, &it, coll);
+    while (!seq_iter_done(&it)) {
+        result = set_conj1(S, result, seq_iter_val(S, &it));
+        seq_iter_next(S, &it);
+    }
+    gc_unpin(1);
+    return result;
+}
+
 /* (take, drop, range, repeat, concat are now lazy in core.mino) */
 
 /* Eager range returning a vector. Avoids lazy thunk overhead for tight loops.
@@ -3663,6 +3689,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "apropos",  mino_prim(S, "apropos",  prim_apropos));
     /* set operations */
     mino_env_set(S, env, "hash-set", mino_prim(S, "hash-set", prim_hash_set));
+    mino_env_set(S, env, "set",      mino_prim(S, "set",      prim_set));
     mino_env_set(S, env, "contains?",mino_prim(S, "contains?",prim_contains_p));
     mino_env_set(S, env, "disj",     mino_prim(S, "disj",     prim_disj));
     mino_env_set(S, env, "dissoc",   mino_prim(S, "dissoc",   prim_dissoc));
