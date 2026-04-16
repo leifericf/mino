@@ -26,5 +26,6 @@
 (require "tests/destructuring_test")
 (require "tests/reader_macros_test")
 (require "tests/phase3_test")
+(require "tests/finally_test")
 
 (run-tests)

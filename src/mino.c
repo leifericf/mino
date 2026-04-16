@@ -2008,74 +2008,120 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         }
 
         /*
-         * try / catch: (try body (catch e handler...))
-         * Script-level exceptions thrown by `throw` are caught; fatal
-         * runtime errors (NULL returns without longjmp) propagate to host.
+         * try / catch / finally:
+         *   (try body... (catch e handler...))
+         *   (try body... (finally cleanup...))
+         *   (try body... (catch e handler...) (finally cleanup...))
+         *
+         * At least one of catch or finally must be present.  The finally
+         * clause runs unconditionally: after body succeeds, after catch
+         * handles an exception, or before re-throwing an unhandled
+         * exception.  finally does not affect the return value.
          */
         if (sym_eq(head, "try")) {
-            mino_val_t *body_form;
-            mino_val_t *catch_clause;
-            mino_val_t *catch_var;
-            mino_val_t *catch_body;
+            mino_val_t *body_head = NULL;
+            mino_val_t *body_tail = NULL;
+            mino_val_t *catch_body = NULL;
+            mino_val_t *finally_body = NULL;
             char        var_buf[256];
-            size_t      var_len;
+            int         has_catch   = 0;
+            int         has_finally = 0;
             int         saved_try   = try_depth;
             int         saved_call  = call_depth;
             int         saved_trace = trace_added;
             dyn_frame_t *saved_dyn  = dyn_stack;
-            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-                set_error_at(S, form, "try requires a body and a (catch e ...) clause");
+            volatile int         got_exception = 0;
+            volatile mino_val_t *vol_result    = NULL;
+            volatile mino_val_t *vol_ex        = NULL;
+
+            /* Partition args into body forms, catch clause, finally clause. */
+            {
+                mino_val_t *rest = args;
+                while (mino_is_cons(rest)) {
+                    mino_val_t *clause = rest->as.cons.car;
+                    if (mino_is_cons(clause)
+                        && sym_eq(clause->as.cons.car, "catch")) {
+                        /* (catch e handler...) */
+                        mino_val_t *cv;
+                        size_t      vl;
+                        if (!mino_is_cons(clause->as.cons.cdr)) {
+                            set_error_at(S, form,
+                                "catch requires a binding symbol");
+                            return NULL;
+                        }
+                        cv = clause->as.cons.cdr->as.cons.car;
+                        if (cv == NULL || cv->type != MINO_SYMBOL) {
+                            set_error_at(S, form,
+                                "catch binding must be a symbol");
+                            return NULL;
+                        }
+                        vl = cv->as.s.len;
+                        if (vl >= sizeof(var_buf)) {
+                            set_error_at(S, form,
+                                "catch variable name too long");
+                            return NULL;
+                        }
+                        memcpy(var_buf, cv->as.s.data, vl);
+                        var_buf[vl] = '\0';
+                        catch_body = clause->as.cons.cdr->as.cons.cdr;
+                        has_catch = 1;
+                        rest = rest->as.cons.cdr;
+                        continue;
+                    }
+                    if (mino_is_cons(clause)
+                        && sym_eq(clause->as.cons.car, "finally")) {
+                        finally_body = clause->as.cons.cdr;
+                        has_finally = 1;
+                        rest = rest->as.cons.cdr;
+                        continue;
+                    }
+                    /* Body form — append to list. */
+                    {
+                        mino_val_t *cell = mino_cons(S, clause, mino_nil(S));
+                        if (body_tail == NULL) {
+                            body_head = cell;
+                        } else {
+                            body_tail->as.cons.cdr = cell;
+                        }
+                        body_tail = cell;
+                    }
+                    rest = rest->as.cons.cdr;
+                }
+            }
+
+            if (!has_catch && !has_finally) {
+                set_error_at(S, form,
+                    "try requires a catch or finally clause");
                 return NULL;
             }
-            body_form    = args->as.cons.car;
-            catch_clause = args->as.cons.cdr->as.cons.car;
-            /* Parse (catch e handler-body ...) */
-            if (!mino_is_cons(catch_clause)
-                || !sym_eq(catch_clause->as.cons.car, "catch")
-                || !mino_is_cons(catch_clause->as.cons.cdr)) {
-                set_error_at(S, form, "try: second form must be (catch e ...)");
-                return NULL;
-            }
-            catch_var = catch_clause->as.cons.cdr->as.cons.car;
-            if (catch_var == NULL || catch_var->type != MINO_SYMBOL) {
-                set_error_at(S, form, "catch binding must be a symbol");
-                return NULL;
-            }
-            var_len = catch_var->as.s.len;
-            if (var_len >= sizeof(var_buf)) {
-                set_error_at(S, form, "catch variable name too long");
-                return NULL;
-            }
-            memcpy(var_buf, catch_var->as.s.data, var_len);
-            var_buf[var_len] = '\0';
-            catch_body = catch_clause->as.cons.cdr->as.cons.cdr;
+
             if (try_depth >= MAX_TRY_DEPTH) {
                 set_error_at(S, form, "try nesting too deep");
                 return NULL;
             }
+
+            /* Phase 1: evaluate body forms. */
             try_stack[try_depth].exception = NULL;
             if (setjmp(try_stack[try_depth].buf) == 0) {
-                mino_val_t *result;
+                mino_val_t *r;
                 try_depth++;
-                result = eval(S, body_form, env);
+                r = eval_implicit_do(S, body_head, env);
                 try_depth = saved_try;
-                if (result == NULL) {
-                    /* Fatal runtime error — propagate to host. */
+                if (r == NULL) {
+                    /* Fatal runtime error. */
+                    if (has_finally)
+                        eval_implicit_do(S, finally_body, env);
                     return NULL;
                 }
-                return result;
+                vol_result = r;
             } else {
-                /* longjmp'd from throw. */
-                mino_val_t *ex = try_stack[saved_try].exception;
-                mino_env_t *local;
+                /* longjmp'd from throw in body. */
+                vol_ex      = try_stack[saved_try].exception;
                 try_depth   = saved_try;
                 call_depth  = saved_call;
                 trace_added = saved_trace;
-                /* Unwind dynamic binding frames pushed between the
-                 * try entry and the throw.  Each frame's bindings
-                 * were malloc'd; free them to avoid leaks. */
                 while (dyn_stack != saved_dyn) {
-                    dyn_frame_t *f = dyn_stack;
+                    dyn_frame_t   *f = dyn_stack;
                     dyn_binding_t *b = f->bindings;
                     dyn_stack = f->prev;
                     while (b) {
@@ -2083,14 +2129,95 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                         free(b);
                         b = next;
                     }
-                    /* The frame itself is a stack-local variable in
-                     * the binding special form; do NOT free it. */
                 }
                 clear_error(S);
-                local = env_child(S, env);
-                env_bind(S, local, var_buf, ex != NULL ? ex : mino_nil(S));
-                return eval_implicit_do(S, catch_body, local);
+                got_exception = 1;
             }
+
+            /* Phase 2: run catch handler if we caught an exception. */
+            if (got_exception && has_catch) {
+                mino_val_t *ex_val =
+                    vol_ex ? (mino_val_t *)vol_ex : mino_nil(S);
+                mino_env_t *local  = env_child(S, env);
+                env_bind(S, local, var_buf, ex_val);
+
+                if (has_finally && try_depth < MAX_TRY_DEPTH) {
+                    /* Inner try frame catches re-throws from handler
+                     * so that finally still runs. */
+                    int         ic = call_depth;
+                    int         it = trace_added;
+                    int         is = try_depth; /* save before setjmp */
+                    dyn_frame_t *id = dyn_stack;
+                    try_stack[is].exception = NULL;
+                    if (setjmp(try_stack[is].buf) == 0) {
+                        mino_val_t *r;
+                        try_depth++;
+                        r = eval_implicit_do(S, catch_body, local);
+                        try_depth = is;
+                        if (r == NULL) {
+                            eval_implicit_do(S, finally_body, env);
+                            return NULL;
+                        }
+                        vol_result    = r;
+                        got_exception = 0;
+                    } else {
+                        /* Catch handler re-threw. */
+                        vol_ex      = try_stack[is].exception;
+                        try_depth   = is;
+                        call_depth  = ic;
+                        trace_added = it;
+                        while (dyn_stack != id) {
+                            dyn_frame_t   *f = dyn_stack;
+                            dyn_binding_t *b = f->bindings;
+                            dyn_stack = f->prev;
+                            while (b) {
+                                dyn_binding_t *next = b->next;
+                                free(b);
+                                b = next;
+                            }
+                        }
+                        clear_error(S);
+                        /* got_exception stays 1, vol_ex updated. */
+                    }
+                } else {
+                    /* No finally or nesting limit — run catch directly. */
+                    mino_val_t *r =
+                        eval_implicit_do(S, catch_body, local);
+                    if (r == NULL) {
+                        if (has_finally)
+                            eval_implicit_do(S, finally_body, env);
+                        return NULL;
+                    }
+                    vol_result    = r;
+                    got_exception = 0;
+                }
+            }
+
+            /* Phase 3: run finally unconditionally. */
+            if (has_finally) {
+                eval_implicit_do(S, finally_body, env);
+            }
+
+            /* Phase 4: re-throw if exception was not handled. */
+            if (got_exception) {
+                mino_val_t *e = (mino_val_t *)vol_ex;
+                if (try_depth > 0) {
+                    try_stack[try_depth - 1].exception = e;
+                    longjmp(try_stack[try_depth - 1].buf, 1);
+                }
+                if (e != NULL && e->type == MINO_STRING) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                             "unhandled exception: %.*s",
+                             (int)e->as.s.len, e->as.s.data);
+                    set_error(S, msg);
+                } else {
+                    set_error(S, "unhandled exception");
+                }
+                return NULL;
+            }
+
+            return (mino_val_t *)vol_result;
         }
 
         /*

@@ -1,0 +1,73 @@
+;; Tests for try/finally and with-open.
+
+;; --- finally ---
+
+(deftest finally-basic
+  (testing "finally runs on normal return"
+    (let [a (atom 0)]
+      (try (+ 1 2) (finally (reset! a 42)))
+      (is (= 42 @a))))
+  (testing "finally does not affect return value"
+    (is (= 42 (try 42 (finally (+ 1 2))))))
+  (testing "finally runs on exception"
+    (let [a (atom 0)]
+      (try
+        (try (throw "boom") (finally (reset! a 99)))
+        (catch e nil))
+      (is (= 99 @a))))
+  (testing "finally with catch"
+    (let [a (atom 0)]
+      (is (= "caught"
+             (try (throw "x")
+                  (catch e "caught")
+                  (finally (reset! a 1)))))
+      (is (= 1 @a)))))
+
+(deftest finally-rethrow
+  (testing "finally runs when catch re-throws"
+    (let [a (atom 0)]
+      (try
+        (try (throw "boom")
+             (catch e (throw "rethrown"))
+             (finally (reset! a 42)))
+        (catch e
+          (is (= "rethrown" e))))
+      (is (= 42 @a))))
+  (testing "finally-only re-throws to outer catch"
+    (let [a (atom 0)]
+      (is (= "got-it"
+             (try
+               (try (throw "x") (finally (reset! a 1)))
+               (catch e "got-it"))))
+      (is (= 1 @a)))))
+
+(deftest finally-multiple-body
+  (testing "multiple body forms before catch/finally"
+    (let [a (atom 0)]
+      (try
+        (reset! a 1)
+        (reset! a 2)
+        (finally (reset! a (+ @a 10))))
+      (is (= 12 @a)))))
+
+;; --- with-open ---
+
+(defn close [x] (swap! *log* conj (str "closed:" x)))
+
+(deftest with-open-basic
+  (testing "single binding"
+    (def *log* (atom []))
+    (let [result (with-open [r "res"] (str "used:" r))]
+      (is (= "used:res" result))
+      (is (= ["closed:res"] @*log*))))
+  (testing "closes on exception"
+    (def *log* (atom []))
+    (try
+      (with-open [r "res"] (throw "boom"))
+      (catch e nil))
+    (is (= ["closed:res"] @*log*)))
+  (testing "multiple bindings close in reverse"
+    (def *log* (atom []))
+    (with-open [a "first" b "second"]
+      (str a "+" b))
+    (is (= ["closed:second" "closed:first"] @*log*))))
