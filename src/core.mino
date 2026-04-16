@@ -248,6 +248,15 @@
 (def inc        (fn [x] (+ x 1)))
 (def dec        (fn [x] (- x 1)))
 (def zero?      (fn [x] (= x 0)))
+(def ==         (fn
+                  ([x] true)
+                  ([x y] (= (+ 0.0 x) (+ 0.0 y)))
+                  ([x y & more]
+                    (if (== x y)
+                      (if (next more)
+                        (recur y (first more) (next more))
+                        (== y (first more)))
+                      false))))
 (def pos?       (fn [x] (> x 0)))
 (def neg?       (fn [x] (< x 0)))
 (def even?      (fn [x] (= (mod x 2) 0)))
@@ -262,6 +271,14 @@
                   ([a b] (if (< a b) a b))
                   ([a b & more] (reduce min (min a b) more))))
 (def not-empty  (fn [coll] (if (seq coll) coll nil)))
+(def empty      (fn [coll]
+                  (cond
+                    (nil? coll) nil
+                    (vector? coll) []
+                    (map? coll) {}
+                    (set? coll) #{}
+                    (seq? coll) '()
+                    :else nil)))
 (def constantly (fn [x] (fn [& _] x)))
 (def boolean    (fn [x] (if x true false)))
 (def seq?       (fn [x] (or (cons? x) (= (type x) :lazy-seq))))
@@ -469,7 +486,9 @@
 (def false?    (fn [x] (= x false)))
 (def boolean?  (fn [x] (or (= x true) (= x false))))
 (def int?      (fn [x] (= (type x) :int)))
+(def integer?  int?)
 (def float?    (fn [x] (= (type x) :float)))
+(def coll?     (fn [x] (or (seq? x) (vector? x) (map? x) (set? x))))
 (def some?     (fn [x] (not (nil? x))))
 (def list?     cons?)
 (def atom?     (fn [x] (= (type x) :atom)))
@@ -927,6 +946,8 @@
   (prewalk (fn [x] (if (contains? smap x) (get smap x) x)) form)))
 
 ;; --- Regex ---
+
+(def re-pattern identity)
 
 (def re-seq
   (let [find-index (fn [s sub i]
