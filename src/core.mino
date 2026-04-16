@@ -253,8 +253,14 @@
 (def even?      (fn [x] (= (mod x 2) 0)))
 (def odd?       (fn [x] (not (even? x))))
 (def abs        (fn [x] (if (< x 0) (- x) x)))
-(def max        (fn [a b] (if (> a b) a b)))
-(def min        (fn [a b] (if (< a b) a b)))
+(def max        (fn
+                  ([a] a)
+                  ([a b] (if (> a b) a b))
+                  ([a b & more] (reduce max (max a b) more))))
+(def min        (fn
+                  ([a] a)
+                  ([a b] (if (< a b) a b))
+                  ([a b & more] (reduce min (min a b) more))))
 (def not-empty  (fn [coll] (if (seq coll) coll nil)))
 (def constantly (fn [x] (fn [& _] x)))
 (def boolean    (fn [x] (if x true false)))
