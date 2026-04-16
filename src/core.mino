@@ -111,33 +111,73 @@
         (cons (apply f (map1_ first ss))
               (map-n_ f (map1_ rest ss))))))))
 
-(def map (fn [f & colls]
-  (if (= (count colls) 1)
-    (map1_ f (first colls))
-    (map-n_ f colls))))
+(def map (fn
+  ([f]
+   (fn [rf]
+     (fn ([] (rf))
+         ([result] (rf result))
+         ([result input] (rf result (f input))))))
+  ([f & colls]
+   (if (= (count colls) 1)
+     (map1_ f (first colls))
+     (map-n_ f colls)))))
 
-(def filter (fn [pred coll]
-  (lazy-seq
-    (let [s (seq coll)]
-      (when s
-        (if (pred (first s))
-          (cons (first s) (filter pred (rest s)))
-          (filter pred (rest s))))))))
+(def filter (fn
+  ([pred]
+   (fn [rf]
+     (fn ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (if (pred input)
+            (rf result input)
+            result)))))
+  ([pred coll]
+   (lazy-seq
+     (let [s (seq coll)]
+       (when s
+         (if (pred (first s))
+           (cons (first s) (filter pred (rest s)))
+           (filter pred (rest s)))))))))
 
-(def take (fn [n coll]
-  (lazy-seq
-    (when (> n 0)
-      (let [s (seq coll)]
-        (when s
-          (cons (first s) (take (- n 1) (rest s)))))))))
+(def take (fn
+  ([n]
+   (fn [rf]
+     (let [remaining (atom n)]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (let [r @remaining]
+              (swap! remaining dec)
+              (if (> r 0)
+                (let [ret (rf result input)]
+                  (if (= (dec r) 0)
+                    (reduced ret)
+                    ret))
+                result)))))))
+  ([n coll]
+   (lazy-seq
+     (when (> n 0)
+       (let [s (seq coll)]
+         (when s
+           (cons (first s) (take (- n 1) (rest s))))))))))
 
-(def drop (fn [n coll]
-  (if (<= n 0)
-    coll
-    (let [s (seq coll)]
-      (if s
-        (drop (- n 1) (rest s))
-        nil)))))
+(def drop (fn
+  ([n]
+   (fn [rf]
+     (let [remaining (atom n)]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (if (> @remaining 0)
+              (do (swap! remaining dec) result)
+              (rf result input)))))))
+  ([n coll]
+   (if (<= n 0)
+     coll
+     (let [s (seq coll)]
+       (if s
+         (drop (- n 1) (rest s))
+         nil))))))
 
 (def concat (fn [& colls]
   (lazy-seq
@@ -260,22 +300,44 @@
 (def juxt (fn [& fs]
   (fn [& args] (map (fn [f] (apply f args)) fs))))
 
-(def mapcat (fn [f coll]
-  (apply concat (map f coll))))
+(def mapcat (fn
+  ([f] (comp (map f) cat))
+  ([f coll]
+   (apply concat (map f coll)))))
 
 ;; --- Lazy combinators ---
 
-(def take-while (fn [pred coll]
-  (lazy-seq
-    (let [s (seq coll)]
-      (when (and s (pred (first s)))
-        (cons (first s) (take-while pred (rest s))))))))
+(def take-while (fn
+  ([pred]
+   (fn [rf]
+     (fn ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (if (pred input)
+            (rf result input)
+            (reduced result))))))
+  ([pred coll]
+   (lazy-seq
+     (let [s (seq coll)]
+       (when (and s (pred (first s)))
+         (cons (first s) (take-while pred (rest s)))))))))
 
-(def drop-while (fn [pred coll]
-  (let [s (seq coll)]
-    (if (and s (pred (first s)))
-      (drop-while pred (rest s))
-      s))))
+(def drop-while (fn
+  ([pred]
+   (fn [rf]
+     (let [dropping (atom true)]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (if (and @dropping (pred input))
+              result
+              (do (reset! dropping false)
+                  (rf result input))))))))
+  ([pred coll]
+   (let [s (seq coll)]
+     (if (and s (pred (first s)))
+       (drop-while pred (rest s))
+       s)))))
 
 (def iterate (fn [f x]
   (lazy-seq (cons x (iterate f (f x))))))
@@ -301,23 +363,46 @@
                  (interleave-impl (rest s1) (rest s2))))))))]
     (fn [c1 c2] (interleave-impl c1 c2))))
 
-(def interpose (fn [sep coll]
-  (lazy-seq
-    (let [s (seq coll)]
-      (when s
-        (cons (first s)
-          (mapcat (fn [x] (list sep x)) (rest s))))))))
+(def interpose (fn
+  ([sep]
+   (fn [rf]
+     (let [started (atom false)]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (if @started
+              (let [r (rf result sep)]
+                (if (reduced? r) r (rf r input)))
+              (do (reset! started true)
+                  (rf result input))))))))
+  ([sep coll]
+   (lazy-seq
+     (let [s (seq coll)]
+       (when s
+         (cons (first s)
+           (mapcat (fn [x] (list sep x)) (rest s)))))))))
 
-(def distinct
-  (let [dist-impl (fn [seen coll]
-         (lazy-seq
-           (let [s (seq coll)]
-             (when s
-               (let [x (first s)]
-                 (if (contains? seen x)
-                   (dist-impl seen (rest s))
-                   (cons x (dist-impl (conj seen x) (rest s)))))))))]
-    (fn [coll] (dist-impl #{} coll))))
+(def distinct (fn
+  ([]
+   (fn [rf]
+     (let [seen (atom #{})]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (if (contains? @seen input)
+              result
+              (do (swap! seen conj input)
+                  (rf result input))))))))
+  ([coll]
+   (let [dist-impl (fn dist-impl [seen coll]
+                      (lazy-seq
+                        (let [s (seq coll)]
+                          (when s
+                            (let [x (first s)]
+                              (if (contains? seen x)
+                                (dist-impl seen (rest s))
+                                (cons x (dist-impl (conj seen x) (rest s)))))))))]
+     (dist-impl #{} coll)))))
 
 (def partition
   (let [part-impl (fn [n coll]
@@ -327,15 +412,36 @@
                (cons chunk (part-impl n (drop n coll)))))))]
     (fn [n coll] (part-impl n coll))))
 
-(def partition-by (fn [f coll]
-  (lazy-seq
-    (let [s (seq coll)]
-      (when s
-        (let [v (f (first s))
-              run (cons (first s)
-                    (take-while (fn [x] (= (f x) v)) (rest s)))
-              remaining (drop (count run) s)]
-          (cons run (partition-by f remaining))))))))
+(def partition-by (fn
+  ([f]
+   (fn [rf]
+     (let [buf (atom [])
+           pval (atom ::none)]
+       (fn ([] (rf))
+           ([result]
+            (let [b @buf]
+              (if (empty? b)
+                (rf result)
+                (let [r (rf result b)]
+                  (rf (if (reduced? r) @r r))))))
+           ([result input]
+            (let [v (f input)
+                  p @pval]
+              (reset! pval v)
+              (if (or (= p ::none) (= v p))
+                (do (swap! buf conj input) result)
+                (let [b @buf]
+                  (reset! buf [input])
+                  (rf result b)))))))))
+  ([f coll]
+   (lazy-seq
+     (let [s (seq coll)]
+       (when s
+         (let [v (f (first s))
+               run (cons (first s)
+                     (take-while (fn [x] (= (f x) v)) (rest s)))
+               remaining (drop (count run) s)]
+           (cons run (partition-by f remaining)))))))))
 
 ;; --- Forcing ---
 
@@ -376,7 +482,9 @@
 
 ;; --- Collection conversions ---
 
-(def remove    (fn [pred coll] (filter (complement pred) coll)))
+(def remove (fn
+  ([pred] (filter (complement pred)))
+  ([pred coll] (filter (complement pred) coll))))
 (def vec       (fn [coll] (into [] coll)))
 
 ;; --- Random utilities ---
@@ -538,14 +646,24 @@
 
 ;; --- Lazy combinators ---
 
-(def keep (fn [f coll]
-  (lazy-seq
-    (let [s (seq coll)]
-      (when s
-        (let [v (f (first s))]
-          (if (nil? v)
-            (keep f (rest s))
-            (cons v (keep f (rest s))))))))))
+(def keep (fn
+  ([f]
+   (fn [rf]
+     (fn ([] (rf))
+         ([result] (rf result))
+         ([result input]
+          (let [v (f input)]
+            (if (nil? v)
+              result
+              (rf result v)))))))
+  ([f coll]
+   (lazy-seq
+     (let [s (seq coll)]
+       (when s
+         (let [v (f (first s))]
+           (if (nil? v)
+             (keep f (rest s))
+             (cons v (keep f (rest s)))))))))))
 
 (def keep-indexed (fn [f coll]
   (let [step (fn [i s]
@@ -565,12 +683,29 @@
                          (step (inc i) (rest s))))))]
     (step 0 coll))))
 
-(def partition-all (fn [n coll]
-  (lazy-seq
-    (let [s (seq coll)]
-      (when s
-        (cons (into [] (take n s))
-              (partition-all n (drop n s))))))))
+(def partition-all (fn
+  ([n]
+   (fn [rf]
+     (let [buf (atom [])]
+       (fn ([] (rf))
+           ([result]
+            (let [b @buf]
+              (if (empty? b)
+                (rf result)
+                (let [r (rf result b)]
+                  (rf (if (reduced? r) @r r))))))
+           ([result input]
+            (let [b (swap! buf conj input)]
+              (if (= (count b) n)
+                (do (reset! buf [])
+                    (rf result b))
+                result)))))))
+  ([n coll]
+   (lazy-seq
+     (let [s (seq coll)]
+       (when s
+         (cons (into [] (take n s))
+               (partition-all n (drop n s)))))))))
 
 (def reductions (fn [f & args]
   (let [init (if (= (count args) 2) (first args) (first (first args)))
@@ -582,17 +717,28 @@
                      (cons v (step v (rest s)))))))]
     (cons init (step init coll)))))
 
-(def dedupe (fn [coll]
-  (let [step (fn [prev s]
-               (lazy-seq
-                 (when (seq s)
-                   (let [x (first s)]
-                     (if (= x prev)
-                       (step prev (rest s))
-                       (cons x (step x (rest s))))))))]
-    (lazy-seq
-      (when (seq coll)
-        (cons (first coll) (step (first coll) (rest coll))))))))
+(def dedupe (fn
+  ([]
+   (fn [rf]
+     (let [prev (atom ::none)]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (if (= @prev input)
+              result
+              (do (reset! prev input)
+                  (rf result input))))))))
+  ([coll]
+   (let [step (fn step [prev s]
+                (lazy-seq
+                  (when (seq s)
+                    (let [x (first s)]
+                      (if (= x prev)
+                        (step prev (rest s))
+                        (cons x (step x (rest s))))))))]
+     (lazy-seq
+       (when (seq coll)
+         (cons (first coll) (step (first coll) (rest coll)))))))))
 
 ;; --- Higher-order combinators ---
 
@@ -1009,6 +1155,51 @@
          (try
            (with-open ~(into [] rest-bindings) ~@body)
            (finally (close ~name)))))))
+
+;; ---------------------------------------------------------------------------
+;; Transducers: composable algorithmic transformations.
+;;
+;; A transducer is a function (rf -> rf) where rf is a reducing function
+;; with three arities: ([] init), ([result] completion), ([result input] step).
+;;
+;; Use (transduce xf f coll) or (into to xf from) to apply.
+;; ---------------------------------------------------------------------------
+
+(def cat
+  (fn [rf]
+    (fn ([] (rf))
+        ([result] (rf result))
+        ([result input]
+         (reduce (fn [r v]
+                   (let [ret (rf r v)]
+                     (if (reduced? ret) (reduced ret) ret)))
+                 result input)))))
+
+(defn completing
+  ([f] (completing f identity))
+  ([f cf]
+   (fn ([] (f))
+       ([result] (cf result))
+       ([result input] (f result input)))))
+
+(defn transduce
+  ([xf f coll]
+   (transduce xf f (f) coll))
+  ([xf f init coll]
+   (let [xrf (xf (completing f))
+         result (reduce xrf init coll)]
+     (xrf result))))
+
+(def into_ into)
+(def into (fn
+  ([to from] (into_ to from))
+  ([to xf from] (transduce xf conj to from))))
+
+(defn sequence [xf coll]
+  (lazy-seq (seq (into [] xf coll))))
+
+(defn eduction [xf coll]
+  (sequence xf coll))
 
 (defmacro spawn [& body]
   (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]

@@ -3643,11 +3643,14 @@ static mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env
         return NULL;
     }
     a = args->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
-        set_error(S, "deref: expected an atom");
-        return NULL;
+    if (a != NULL && a->type == MINO_ATOM) {
+        return a->as.atom.val;
     }
-    return a->as.atom.val;
+    if (a != NULL && a->type == MINO_REDUCED) {
+        return a->as.reduced.val;
+    }
+    set_error(S, "deref: expected an atom or reduced");
+    return NULL;
 }
 
 static mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
