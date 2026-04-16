@@ -18,9 +18,6 @@ Currently only docstrings on `def`/`defmacro` via the internal
 `meta_table`. Requires adding a metadata pointer to `mino_val_t`.
 ~300 lines.
 
-**`identical?`** -- pointer identity comparison. C primitive checking
-`a == b` without value comparison. ~10 lines.
-
 **Transducers** -- `transduce`, `eduction`, `into` with xform.
 Composable algorithmic transformations. Requires protocol-level
 abstractions or a simpler approach. ~400 lines.
