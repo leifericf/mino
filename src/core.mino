@@ -605,10 +605,9 @@
                  s))]
     (step (seq coll) (seq lead)))))
 
-(def drop-last (fn [& args]
-  (let [n    (if (= (count args) 1) 1 (first args))
-        coll (if (= (count args) 1) (first args) (second args))]
-    (take (- (count coll) n) coll))))
+(def drop-last (fn
+  ([coll]   (drop-last 1 coll))
+  ([n coll] (map (fn [x _] x) coll (drop n coll)))))
 
 (def split-at (fn [n coll]
   (vector (take n coll) (drop n coll))))
