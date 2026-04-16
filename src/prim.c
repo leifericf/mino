@@ -1029,6 +1029,40 @@ static mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
 }
 
 /*
+ * (alter-meta! ref f & args) — mutate metadata in place.
+ * Applies f to the current metadata of ref (plus any extra args)
+ * and sets the result as the new metadata.
+ */
+static mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
+                                   mino_env_t *env)
+{
+    mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "alter-meta! requires at least 2 arguments");
+        return NULL;
+    }
+    obj   = args->as.cons.car;
+    f     = args->as.cons.cdr->as.cons.car;
+    extra = args->as.cons.cdr->as.cons.cdr;
+    if (obj == NULL || !supports_meta(obj->type)) {
+        set_error(S, "alter-meta!: type does not support metadata");
+        return NULL;
+    }
+    old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
+    call_args = mino_cons(S, old_meta, extra);
+    new_meta = mino_call(S, f, call_args, env);
+    if (new_meta == NULL) {
+        return NULL;
+    }
+    if (new_meta->type != MINO_NIL && new_meta->type != MINO_MAP) {
+        set_error(S, "alter-meta!: f must return a map or nil");
+        return NULL;
+    }
+    obj->meta = (new_meta->type == MINO_NIL) ? NULL : new_meta;
+    return obj->meta != NULL ? obj->meta : mino_nil(S);
+}
+
+/*
  * Chained numeric comparison. `op` selects the relation:
  *   0: <    1: <=    2: >    3: >=
  * Returns true if each successive pair satisfies the relation (and
@@ -3736,6 +3770,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "meta",      mino_prim(S, "meta",      prim_meta));
     mino_env_set(S, env, "with-meta", mino_prim(S, "with-meta", prim_with_meta));
     mino_env_set(S, env, "vary-meta", mino_prim(S, "vary-meta", prim_vary_meta));
+    mino_env_set(S, env, "alter-meta!", mino_prim(S, "alter-meta!", prim_alter_meta));
     mino_env_set(S, env, "<",        mino_prim(S, "<",        prim_lt));
     mino_env_set(S, env, "mod",      mino_prim(S, "mod",      prim_mod));
     mino_env_set(S, env, "rem",      mino_prim(S, "rem",      prim_rem));
