@@ -1151,14 +1151,97 @@ static mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_cdr(args->as.cons.car);
 }
 
+/* Convert a value to a seq suitable for use as the cdr of a cons cell.
+ * Returns nil for empty/nil, cons for lists, and builds a cons list for
+ * vectors, maps, sets, and strings.  Used by prim_cons so that
+ * (cons 1 #{2 3}) returns (1 2 3), not (1 . #{2 3}). */
+static mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v);
+
+/* Forward-declared; body after prim_seq which has the full logic.
+ * For now we use a simple wrapper that calls prim_seq's guts inline. */
+
+static mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
+{
+    mino_val_t *head;
+    mino_val_t *tail;
+    size_t i;
+
+    if (v == NULL || v->type == MINO_NIL) return mino_nil(S);
+    if (v->type == MINO_CONS) return v;
+    /* Lazy seqs are valid as the cdr of a cons cell; do not force them
+     * here to avoid infinite recursion with self-referential sequences
+     * like (repeat x). */
+    if (v->type == MINO_LAZY) return v;
+    if (v->type == MINO_VECTOR) {
+        if (v->as.vec.len == 0) return mino_nil(S);
+        head = mino_nil(S);
+        tail = NULL;
+        for (i = 0; i < v->as.vec.len; i++) {
+            mino_val_t *cell = mino_cons(S, vec_nth(v, i), mino_nil(S));
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (v->type == MINO_MAP) {
+        if (v->as.map.len == 0) return mino_nil(S);
+        head = mino_nil(S);
+        tail = NULL;
+        for (i = 0; i < v->as.map.len; i++) {
+            mino_val_t *key = vec_nth(v->as.map.key_order, i);
+            mino_val_t *val = map_get_val(v, key);
+            mino_val_t *kv[2];
+            mino_val_t *cell;
+            kv[0] = key; kv[1] = val;
+            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (v->type == MINO_SET) {
+        if (v->as.set.len == 0) return mino_nil(S);
+        head = mino_nil(S);
+        tail = NULL;
+        for (i = 0; i < v->as.set.len; i++) {
+            mino_val_t *elem = vec_nth(v->as.set.key_order, i);
+            mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (v->type == MINO_STRING) {
+        if (v->as.s.len == 0) return mino_nil(S);
+        head = mino_nil(S);
+        tail = NULL;
+        for (i = 0; i < v->as.s.len; i++) {
+            mino_val_t *ch = mino_string_n(S, v->as.s.data + i, 1);
+            mino_val_t *cell = mino_cons(S, ch, mino_nil(S));
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    /* Unsupported types: just return as-is (cons cell will be a dotted pair) */
+    return v;
+}
+
 static mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    mino_val_t *cdr;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         set_error(S, "cons requires two arguments");
         return NULL;
     }
-    return mino_cons(S, args->as.cons.car, args->as.cons.cdr->as.cons.car);
+    cdr = val_to_seq(S, args->as.cons.cdr->as.cons.car);
+    if (cdr == NULL) return NULL;
+    return mino_cons(S, args->as.cons.car, cdr);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1660,9 +1743,13 @@ static mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *p;
     (void)env;
     arg_count(S, args, &n);
+    if (n == 0) {
+        /* (conj) => [] — identity element, matches Clojure. */
+        return mino_vector(S, NULL, 0);
+    }
     if (n < 2) {
-        set_error(S, "conj requires a collection and at least one item");
-        return NULL;
+        /* (conj coll) => coll — single arg returns the collection. */
+        return args->as.cons.car;
     }
     coll = args->as.cons.car;
     p    = args->as.cons.cdr;
