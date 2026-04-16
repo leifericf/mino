@@ -323,7 +323,7 @@
 ;; --- More higher-order ---
 
 (def juxt (fn [& fs]
-  (fn [& args] (map (fn [f] (apply f args)) fs))))
+  (fn [& args] (vec (map (fn [f] (apply f args)) fs)))))
 
 (def mapcat (fn
   ([f] (comp (map f) cat))
@@ -430,12 +430,15 @@
      (dist-impl #{} coll)))))
 
 (def partition
-  (let [part-impl (fn [n coll]
+  (let [part-impl (fn [n step coll]
          (lazy-seq
-           (let [chunk (into [] (take n coll))]
-             (when (= (count chunk) n)
-               (cons chunk (part-impl n (drop n coll)))))))]
-    (fn [n coll] (part-impl n coll))))
+           (when-let [s (seq coll)]
+             (let [p (doall (take n s))]
+               (when (= n (count p))
+                 (cons p (part-impl n step (drop step s))))))))]
+    (fn
+      ([n coll] (part-impl n n coll))
+      ([n step coll] (part-impl n step coll)))))
 
 (def partition-by (fn
   ([f]
@@ -721,20 +724,20 @@
             (let [b @buf]
               (if (empty? b)
                 (rf result)
-                (let [r (rf result b)]
+                (let [r (rf result (seq b))]
                   (rf (if (reduced? r) @r r))))))
            ([result input]
             (let [b (swap! buf conj input)]
               (if (= (count b) n)
                 (do (reset! buf [])
-                    (rf result b))
+                    (rf result (seq b)))
                 result)))))))
   ([n coll]
    (lazy-seq
      (let [s (seq coll)]
        (when s
-         (cons (into [] (take n s))
-               (partition-all n (drop n s)))))))))
+         (let [p (doall (take n s))]
+           (cons p (partition-all n (drop n s))))))))))
 
 (def reductions (fn [f & args]
   (let [init (if (= (count args) 2) (first args) (first (first args)))

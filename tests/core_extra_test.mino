@@ -217,7 +217,7 @@
          (into [] (map-indexed vector [:a :b :c])))))
 
 (deftest partition-all-fn
-  (is (= [[1 2 3] [4 5 6] [7 8]]
+  (is (= ['(1 2 3) '(4 5 6) '(7 8)]
          (into [] (partition-all 3 [1 2 3 4 5 6 7 8])))))
 
 (deftest reductions-fn

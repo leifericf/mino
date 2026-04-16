@@ -63,7 +63,7 @@
     (is (= '("apple" "banana" "cherry") (sort compare ["banana" "apple" "cherry"])))))
 
 (deftest juxt-fn
-  (is (= '(6 4) ((juxt inc dec) 5))))
+  (is (= [6 4] ((juxt inc dec) 5))))
 
 (deftest mapcat-fn
   (is (= '(1 10 2 20 3 30) (mapcat (fn [x] [x (* x 10)]) [1 2 3]))))
