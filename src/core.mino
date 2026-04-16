@@ -628,8 +628,15 @@
 
 (def get-in (fn
   ([m ks]     (reduce get m ks))
-  ([m ks nf]  (let [v (reduce get m ks)]
-                (if (nil? v) nf v)))))
+  ([m ks nf]
+   (let [sentinel (gensym)]
+     (loop [m m ks (seq ks)]
+       (if ks
+         (let [v (get m (first ks) sentinel)]
+           (if (= v sentinel)
+             nf
+             (recur v (next ks))))
+         m))))))
 
 (def assoc-in (fn [m ks v]
   (let [k (first ks)]
