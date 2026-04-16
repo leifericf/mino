@@ -205,10 +205,13 @@
           (= n 3) (range-impl (first args) (first (rest args)) (first (rest (rest args))))
           true     nil)))))
 
-(def repeat (fn [n x]
-  (lazy-seq
-    (when (> n 0)
-      (cons x (repeat (- n 1) x))))))
+(def repeat (fn
+  ([x]
+   (lazy-seq (cons x (repeat x))))
+  ([n x]
+   (lazy-seq
+     (when (> n 0)
+       (cons x (repeat (- n 1) x)))))))
 
 ;; --- Collection utilities ---
 
@@ -371,20 +374,24 @@
            (let [s (seq coll)]
              (if s
                (cons (first s) (cycle-impl orig (rest s)))
-               (cycle-impl orig orig)))))]
+               (when (seq orig)
+                 (cycle-impl orig orig))))))]
     (fn [coll] (cycle-impl coll coll))))
 
 (def repeatedly (fn [f]
   (lazy-seq (cons (f) (repeatedly f)))))
 
 (def interleave
-  (let [interleave-impl (fn [c1 c2]
+  (let [interleave2 (fn [c1 c2]
          (lazy-seq
            (let [s1 (seq c1) s2 (seq c2)]
              (when (and s1 s2)
                (cons (first s1) (cons (first s2)
-                 (interleave-impl (rest s1) (rest s2))))))))]
-    (fn [c1 c2] (interleave-impl c1 c2))))
+                 (interleave2 (rest s1) (rest s2))))))))]
+    (fn
+      ([] ())
+      ([c1] (lazy-seq (seq c1)))
+      ([c1 c2] (interleave2 c1 c2)))))
 
 (def interpose (fn
   ([sep]
@@ -604,11 +611,10 @@
     (take (- (count coll) n) coll))))
 
 (def split-at (fn [n coll]
-  (vector (into [] (take n coll)) (into [] (drop n coll)))))
+  (vector (take n coll) (drop n coll))))
 
 (def split-with (fn [pred coll]
-  (vector (into [] (take-while pred coll))
-          (into [] (drop-while pred coll)))))
+  (vector (take-while pred coll) (drop-while pred coll))))
 
 (def mapv    (fn [f coll] (into [] (map f coll))))
 (def filterv (fn [pred coll] (into [] (filter pred coll))))
@@ -713,29 +719,32 @@
                          (step (inc i) (rest s))))))]
     (step 0 coll))))
 
-(def partition-all (fn
-  ([n]
-   (fn [rf]
-     (let [buf (atom [])]
-       (fn ([] (rf))
-           ([result]
-            (let [b @buf]
-              (if (empty? b)
-                (rf result)
-                (let [r (rf result (seq b))]
-                  (rf (if (reduced? r) @r r))))))
-           ([result input]
-            (let [b (swap! buf conj input)]
-              (if (= (count b) n)
-                (do (reset! buf [])
-                    (rf result (seq b)))
-                result)))))))
-  ([n coll]
-   (lazy-seq
-     (let [s (seq coll)]
-       (when s
-         (let [p (doall (take n s))]
-           (cons p (partition-all n (drop n s))))))))))
+(def partition-all
+  (let [pa-impl (fn [n step coll]
+         (lazy-seq
+           (let [s (seq coll)]
+             (when s
+               (let [p (doall (take n s))]
+                 (cons p (pa-impl n step (drop step s))))))))]
+    (fn
+      ([n]
+       (fn [rf]
+         (let [buf (atom [])]
+           (fn ([] (rf))
+               ([result]
+                (let [b @buf]
+                  (if (empty? b)
+                    (rf result)
+                    (let [r (rf result (seq b))]
+                      (rf (if (reduced? r) @r r))))))
+               ([result input]
+                (let [b (swap! buf conj input)]
+                  (if (= (count b) n)
+                    (do (reset! buf [])
+                        (rf result (seq b)))
+                    result)))))))
+      ([n coll] (pa-impl n n coll))
+      ([n step coll] (pa-impl n step coll)))))
 
 (def reductions (fn [f & args]
   (let [init (if (= (count args) 2) (first args) (first (first args)))
@@ -912,14 +921,18 @@
 
 ;; --- Tree walking ---
 
+(def sequential? (fn [x]
+  (or (cons? x) (vector? x) (seq? x))))
+
 (def flatten (fn [coll]
   (lazy-seq
-    (let [s (seq coll)]
-      (when s
-        (let [x (first s)]
-          (if (or (cons? x) (vector? x) (seq? x))
-            (concat (flatten x) (flatten (rest s)))
-            (cons x (flatten (rest s))))))))))
+    (when (sequential? coll)
+      (let [s (seq coll)]
+        (when s
+          (let [x (first s)]
+            (if (sequential? x)
+              (concat (flatten x) (flatten (rest s)))
+              (cons x (flatten (rest s)))))))))))
 
 (def tree-seq (fn [branch? children root]
   (let [walk (fn [node]
@@ -1015,17 +1028,63 @@
               `(for ~(into [sym (list 'filter (list 'fn [sym] pred) coll)]
                            remaining)
                  ~@body)))
+          ;; :while stop iteration
+          (= modifier :while)
+          (let [pred (first (rest rest-bindings))
+                remaining (into [] (drop 2 rest-bindings))]
+            (if (empty? remaining)
+              `(map (fn [~sym] ~@body)
+                    (take-while (fn [~sym] ~pred) ~coll))
+              `(for ~(into [sym (list 'take-while (list 'fn [sym] pred) coll)]
+                           remaining)
+                 ~@body)))
           ;; :let local bindings
           (= modifier :let)
           (let [let-bindings (first (rest rest-bindings))
-                remaining (into [] (drop 2 rest-bindings))]
-            (if (empty? remaining)
+                after-let (into [] (drop 2 rest-bindings))
+                ;; Collect :when/:while modifiers that follow the :let
+                next-mod (first after-let)]
+            (cond
+              (empty? after-let)
               `(map (fn [~sym]
                       (let ~let-bindings ~@body))
                     ~coll)
+              ;; :when after :let on same binding
+              (= next-mod :when)
+              (let [pred (first (rest after-let))
+                    remaining (into [] (drop 2 after-let))]
+                (if (empty? remaining)
+                  `(map (fn [~sym]
+                          (let ~let-bindings ~@body))
+                        (filter (fn [~sym]
+                                  (let ~let-bindings ~pred))
+                                ~coll))
+                  `(mapcat (fn [~sym]
+                             (let ~let-bindings
+                               (when ~pred
+                                 (for ~remaining ~@body))))
+                           ~coll)))
+              ;; :while after :let on same binding
+              (= next-mod :while)
+              (let [pred (first (rest after-let))
+                    remaining (into [] (drop 2 after-let))]
+                (if (empty? remaining)
+                  `(map (fn [~sym]
+                          (let ~let-bindings ~@body))
+                        (take-while (fn [~sym]
+                                      (let ~let-bindings ~pred))
+                                    ~coll))
+                  `(mapcat (fn [~sym]
+                             (let ~let-bindings
+                               (for ~remaining ~@body)))
+                           (take-while (fn [~sym]
+                                         (let ~let-bindings ~pred))
+                                       ~coll))))
+              ;; Other bindings after :let
+              :else
               `(mapcat (fn [~sym]
                          (let ~let-bindings
-                           (for ~remaining ~@body)))
+                           (for ~after-let ~@body)))
                        ~coll)))
           ;; Another binding pair: nested iteration
           :else
@@ -1230,8 +1289,12 @@
 (defn sequence [xf coll]
   (lazy-seq (seq (into [] xf coll))))
 
-(defn eduction [xf coll]
-  (sequence xf coll))
+(defn eduction [& args]
+  (let [coll (last args)
+        xfs  (butlast args)]
+    (if (= 1 (count xfs))
+      (sequence (first xfs) coll)
+      (sequence (apply comp xfs) coll))))
 
 (defmacro spawn [& body]
   (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]
