@@ -1518,7 +1518,13 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             }
             tmp[i] = ev;
         }
-        return mino_vector(S, tmp, n);
+        {
+            mino_val_t *result = mino_vector(S, tmp, n);
+            if (form->meta != NULL) {
+                result->meta = form->meta;
+            }
+            return result;
+        }
     }
     case MINO_MAP: {
         /* Map literals evaluate keys and values in read order; the
@@ -1543,7 +1549,13 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             ks[i] = k;
             vs[i] = v;
         }
-        return mino_map(S, ks, vs, n);
+        {
+            mino_val_t *result = mino_map(S, ks, vs, n);
+            if (form->meta != NULL) {
+                result->meta = form->meta;
+            }
+            return result;
+        }
     }
     case MINO_SET: {
         /* Set literals evaluate each element in order. */
@@ -1561,7 +1573,13 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             }
             tmp[i] = ev;
         }
-        return mino_set(S, tmp, n);
+        {
+            mino_val_t *result = mino_set(S, tmp, n);
+            if (form->meta != NULL) {
+                result->meta = form->meta;
+            }
+            return result;
+        }
     }
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;
