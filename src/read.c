@@ -421,6 +421,16 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         (*p)++; /* skip '#', read_set_form will skip '{' */
         return read_set_form(S, p);
     }
+    if (**p == '#' && *(*p + 1) == '_') {
+        /* Discard reader macro: #_ discards the next form. */
+        (*p) += 2;
+        {
+            mino_val_t *discarded = read_form(S, p);
+            if (discarded == NULL && mino_last_error(S) != NULL)
+                return NULL;
+            return read_form(S, p);
+        }
+    }
     if (**p == '"') {
         return read_string_form(S, p);
     }
