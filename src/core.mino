@@ -736,13 +736,21 @@
                        (cons v (step (inc i) (rest s))))))))]
     (step 0 coll))))
 
-(def map-indexed (fn [f coll]
-  (let [step (fn [i s]
-               (lazy-seq
-                 (when (seq s)
-                   (cons (f i (first s))
-                         (step (inc i) (rest s))))))]
-    (step 0 coll))))
+(def map-indexed (fn
+  ([f]
+   (fn [rf]
+     (let [i (atom -1)]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (rf result (f (swap! i inc) input)))))))
+  ([f coll]
+   (let [step (fn step [i s]
+                (lazy-seq
+                  (when (seq s)
+                    (cons (f i (first s))
+                          (step (inc i) (rest s))))))]
+     (step 0 coll)))))
 
 (def partition-all
   (let [pa-impl (fn [n step coll]
