@@ -106,8 +106,10 @@ static mino_vec_node_t *trie_assoc(mino_state_t *S,
     return clone;
 }
 
-/* Construct a vector value from an already-built trie and tail. */
-static mino_val_t *vec_assemble(mino_state_t *S, mino_vec_node_t *root,
+/* Construct a vector value from an already-built trie and tail.
+ * If `src` is non-NULL, its metadata is carried over to the new vector. */
+static mino_val_t *vec_assemble(mino_state_t *S, const mino_val_t *src,
+                                 mino_vec_node_t *root,
                                  mino_vec_node_t *tail,
                                  unsigned tail_len, unsigned shift, size_t len)
 {
@@ -117,6 +119,9 @@ static mino_val_t *vec_assemble(mino_state_t *S, mino_vec_node_t *root,
     v->as.vec.tail_len = tail_len;
     v->as.vec.shift    = shift;
     v->as.vec.len      = len;
+    if (src != NULL) {
+        v->meta = src->meta;
+    }
     return v;
 }
 
@@ -155,7 +160,7 @@ mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v, mino_val_t *item)
             new_tail->slots[v->as.vec.tail_len] = item;
             new_tail->count = v->as.vec.tail_len + 1u;
         }
-        return vec_assemble(S, v->as.vec.root, new_tail,
+        return vec_assemble(S, v, v->as.vec.root, new_tail,
                             v->as.vec.tail_len + 1u,
                             v->as.vec.shift, v->as.vec.len + 1u);
     }
@@ -179,7 +184,7 @@ mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v, mino_val_t *item)
         new_root = push_tail(S, v->as.vec.root, v->as.vec.shift, trie_count,
                              v->as.vec.tail);
     }
-    return vec_assemble(S, new_root, new_tail, 1u, new_shift,
+    return vec_assemble(S, v, new_root, new_tail, 1u, new_shift,
                         v->as.vec.len + 1u);
 }
 
@@ -199,12 +204,12 @@ mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
         /* In the tail: copy and overwrite one slot. */
         new_tail = vnode_clone(S, v->as.vec.tail);
         new_tail->slots[i - trie_count] = item;
-        return vec_assemble(S, v->as.vec.root, new_tail, v->as.vec.tail_len,
+        return vec_assemble(S, v, v->as.vec.root, new_tail, v->as.vec.tail_len,
                             v->as.vec.shift, v->as.vec.len);
     }
     /* In the trie: path-copy the spine. */
     new_root = trie_assoc(S, v->as.vec.root, v->as.vec.shift, i, item);
-    return vec_assemble(S, new_root, v->as.vec.tail, v->as.vec.tail_len,
+    return vec_assemble(S, v, new_root, v->as.vec.tail, v->as.vec.tail_len,
                         v->as.vec.shift, v->as.vec.len);
 }
 
@@ -233,7 +238,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
     unsigned          shift;
     size_t            i;
     if (len == 0) {
-        return vec_assemble(S, NULL, NULL, 0u, 0u, 0);
+        return vec_assemble(S, NULL, NULL, NULL, 0u, 0u, 0);
     }
     tail_len = (unsigned)(len % MINO_VEC_WIDTH);
     if (tail_len == 0) {
@@ -249,7 +254,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
     memcpy(tail->slots, items + trie_count, tail_len * sizeof(*items));
     if (trie_count == 0) {
         gc_depth--;
-        return vec_assemble(S, NULL, tail, tail_len, 0u, len);
+        return vec_assemble(S, NULL, NULL, tail, tail_len, 0u, len);
     }
     num_leaves = trie_count / MINO_VEC_WIDTH;
     layer = (mino_vec_node_t **)malloc(num_leaves * sizeof(*layer));
@@ -291,7 +296,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
         mino_vec_node_t *root = layer[0];
         free(layer);
         gc_depth--;
-        return vec_assemble(S, root, tail, tail_len, shift, len);
+        return vec_assemble(S, NULL, root, tail, tail_len, shift, len);
     }
 }
 

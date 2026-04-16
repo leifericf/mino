@@ -1638,6 +1638,9 @@ static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
         out->as.map.root      = root;
         out->as.map.key_order = order;
         out->as.map.len       = len_out;
+        if (coll != NULL && coll->type == MINO_MAP) {
+            out->meta = coll->meta;
+        }
         return out;
     }
 }
@@ -1886,6 +1889,7 @@ static mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *e
     int               replaced = 0;
     mino_hamt_node_t *root     = hamt_assoc(S, s->as.set.root, e, h, 0u, &replaced);
     v->as.set.root      = root;
+    v->meta              = s->meta;
     if (replaced) {
         v->as.set.key_order = s->as.set.key_order;
         v->as.set.len       = s->as.set.len;
@@ -2001,6 +2005,7 @@ static mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             new_set->as.set.root      = root;
             new_set->as.set.key_order = order;
             new_set->as.set.len       = new_len;
+            new_set->meta             = coll->meta;
             coll = new_set;
         }
         p = p->as.cons.cdr;
@@ -2052,6 +2057,7 @@ static mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *en
             new_map->as.map.root      = root;
             new_map->as.map.key_order = order;
             new_map->as.map.len       = new_len;
+            new_map->meta             = coll->meta;
             coll = new_map;
         }
         p = p->as.cons.cdr;
