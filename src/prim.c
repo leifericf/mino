@@ -3160,11 +3160,25 @@ static mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
+static void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
+{
+    if (v != NULL && v->type == MINO_STRING) {
+        fwrite(v->as.s.data, 1, v->as.s.len, out);
+    } else {
+        mino_print_to(S, out, v);
+    }
+}
+
 static mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *result = prim_str(S, args, env);
-    if (result == NULL) return NULL;
-    fwrite(result->as.s.data, 1, result->as.s.len, stdout);
+    int first = 1;
+    (void)env;
+    while (mino_is_cons(args)) {
+        if (!first) fputc(' ', stdout);
+        print_str_to(S, stdout, args->as.cons.car);
+        first = 0;
+        args = args->as.cons.cdr;
+    }
     fputc('\n', stdout);
     fflush(stdout);
     return mino_nil(S);
