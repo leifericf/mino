@@ -6,38 +6,7 @@ language and embedding API items.
 
 ## Language
 
-### Critical
-
-**Destructuring** -- pattern matching in binding forms.
-
-Vector destructuring: `(let [[a b & rest] xs] ...)`. Map
-destructuring: `(let [{:keys [a b]} m] ...)` and
-`(let [{a :a, b :b} m] ...)`. Applies to `let`, `fn`, `loop`, and
-`defmacro` parameter lists. Currently only symbol bindings work.
-Refactor `bind_params` to recursively destructure. ~300 lines.
-
-**Named anonymous functions** -- optional name in `fn` form.
-
-`(fn name (x) (name (- x 1)))` for self-referencing anonymous
-functions. The name is only bound in the function's own body. Common
-in recursive anonymous fns and matches the form supported by most
-Lisps. Small change to the `fn` special form parser. ~30 lines.
-
-### Important
-
-**Multi-arity functions** -- multiple parameter lists per function.
-
-`(fn ([x] ...) ([x y] ...) ([x y & rest] ...))`. Dispatch by argument
-count at call time. Common pattern for default arguments. ~150 lines.
-
 ### Nice-to-have
-
-**Bracket syntax for `fn` parameters** -- use `[x y]` instead of
-`(x y)` for function parameter lists. The current `(fn (x) body)`
-syntax is a departure from the reference language where `(fn [x] body)`
-uses vectors. Switching would make mino code more visually distinct
-between parameter lists and function calls. Requires changing the `fn`
-special form parser in the evaluator. ~50 lines.
 
 **Variadic `comp`** -- compose N functions. Currently `comp` only
 accepts two arguments: `(comp f g)`. The reference language supports
