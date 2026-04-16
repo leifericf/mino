@@ -392,7 +392,13 @@
     (fn
       ([] ())
       ([c1] (lazy-seq (seq c1)))
-      ([c1 c2] (interleave2 c1 c2)))))
+      ([c1 c2] (interleave2 c1 c2))
+      ([c1 c2 & colls]
+       (lazy-seq
+         (let [ss (map seq (cons c1 (cons c2 colls)))]
+           (when (every? identity ss)
+             (concat (map first ss)
+                     (apply interleave (map rest ss))))))))))
 
 (def interpose (fn
   ([sep]
