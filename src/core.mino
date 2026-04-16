@@ -378,8 +378,9 @@
                  (cycle-impl orig orig))))))]
     (fn [coll] (cycle-impl coll coll))))
 
-(def repeatedly (fn [f]
-  (lazy-seq (cons (f) (repeatedly f)))))
+(def repeatedly (fn
+  ([f]   (lazy-seq (cons (f) (repeatedly f))))
+  ([n f] (take n (repeatedly f)))))
 
 (def interleave
   (let [interleave2 (fn [c1 c2]
