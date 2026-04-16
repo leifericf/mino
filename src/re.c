@@ -31,6 +31,8 @@
 
 #include "re.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <ctype.h>
 
 /* Definitions: */
@@ -72,7 +74,11 @@ static int ismetachar(char c);
 /* Public functions: */
 int re_match(const char* pattern, const char* text, int* matchlength)
 {
-  return re_matchp(re_compile(pattern), text, matchlength);
+  int result;
+  re_t compiled = re_compile(pattern);
+  result = re_matchp(compiled, text, matchlength);
+  re_free(compiled);
+  return result;
 }
 
 int re_matchp(re_t pattern, const char* text, int* matchlength)
@@ -106,18 +112,31 @@ int re_matchp(re_t pattern, const char* text, int* matchlength)
   return -1;
 }
 
+void re_free(re_t pattern)
+{
+  free(pattern);
+}
+
 re_t re_compile(const char* pattern)
 {
-  /* The sizes of the two static arrays below substantiates the static RAM usage of this module.
-     MAX_REGEXP_OBJECTS is the max number of symbols in the expression.
-     MAX_CHAR_CLASS_LEN determines the size of buffer for chars in all char-classes in the expression. */
-  static regex_t re_compiled[MAX_REGEXP_OBJECTS];
-  static unsigned char ccl_buf[MAX_CHAR_CLASS_LEN];
+  /* Allocate compile buffers on the heap so that multiple patterns can
+   * coexist and compilation is reentrant/thread-safe.  The regex_t
+   * array and the char-class buffer are laid out in a single allocation:
+   *   [MAX_REGEXP_OBJECTS * regex_t] [MAX_CHAR_CLASS_LEN bytes]       */
+  size_t obj_bytes = MAX_REGEXP_OBJECTS * sizeof(regex_t);
+  size_t total     = obj_bytes + MAX_CHAR_CLASS_LEN;
+  regex_t       *re_compiled;
+  unsigned char *ccl_buf;
   int ccl_bufidx = 1;
 
   char c;     /* current char in pattern   */
   int i = 0;  /* index into pattern        */
   int j = 0;  /* index into re_compiled    */
+
+  re_compiled = (regex_t *)malloc(total);
+  if (re_compiled == NULL) return 0;
+  memset(re_compiled, 0, total);
+  ccl_buf = (unsigned char *)re_compiled + obj_bytes;
 
   while (pattern[i] != '\0' && (j+1 < MAX_REGEXP_OBJECTS))
   {
@@ -183,7 +202,7 @@ re_t re_compile(const char* pattern)
           i += 1; /* Increment i to avoid including '^' in the char-buffer */
           if (pattern[i+1] == 0) /* incomplete pattern, missing non-zero char after '^' */
           {
-            return 0;
+            free(re_compiled); return 0;
           }
         }
         else
@@ -199,27 +218,24 @@ re_t re_compile(const char* pattern)
           {
             if (ccl_bufidx >= MAX_CHAR_CLASS_LEN - 1)
             {
-              //fputs("exceeded internal buffer!\n", stderr);
-              return 0;
+              free(re_compiled); return 0;
             }
             if (pattern[i+1] == 0) /* incomplete pattern, missing non-zero char after '\\' */
             {
-              return 0;
+              free(re_compiled); return 0;
             }
             ccl_buf[ccl_bufidx++] = pattern[i++];
           }
           else if (ccl_bufidx >= MAX_CHAR_CLASS_LEN)
           {
-              //fputs("exceeded internal buffer!\n", stderr);
-              return 0;
+              free(re_compiled); return 0;
           }
           ccl_buf[ccl_bufidx++] = pattern[i];
         }
         if (ccl_bufidx >= MAX_CHAR_CLASS_LEN)
         {
             /* Catches cases such as [00000000000000000000000000000000000000][ */
-            //fputs("exceeded internal buffer!\n", stderr);
-            return 0;
+            free(re_compiled); return 0;
         }
         /* Null-terminate string end */
         ccl_buf[ccl_bufidx++] = 0;
@@ -236,7 +252,7 @@ re_t re_compile(const char* pattern)
     /* no buffer-out-of-bounds access on invalid patterns - see https://github.com/kokke/tiny-regex-c/commit/1a279e04014b70b0695fba559a7c05d55e6ee90b */
     if (pattern[i] == 0)
     {
-      return 0;
+      free(re_compiled); return 0;
     }
 
     i += 1;

@@ -46,9 +46,13 @@ extern "C"{
 typedef struct regex_t* re_t;
 
 
-/* Compile regex string pattern to a regex_t-array. */
+/* Compile regex string pattern to a regex_t-array.
+ * Returns a heap-allocated pattern; caller must free with re_free.
+ * Returns NULL on invalid pattern or allocation failure. */
 re_t re_compile(const char* pattern);
 
+/* Free a compiled pattern returned by re_compile. */
+void re_free(re_t pattern);
 
 /* Find matches of the compiled pattern inside text. */
 int re_matchp(re_t pattern, const char* text, int* matchlength);
