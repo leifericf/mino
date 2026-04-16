@@ -21,10 +21,6 @@ Currently only docstrings on `def`/`defmacro` via the internal
 **`identical?`** -- pointer identity comparison. C primitive checking
 `a == b` without value comparison. ~10 lines.
 
-**`with-open`** -- resource management. `(with-open (f (open path)) body)`.
-Needs `try/finally` in the evaluator. ~50 lines for `finally` + ~20
-for the macro.
-
 **Transducers** -- `transduce`, `eduction`, `into` with xform.
 Composable algorithmic transformations. Requires protocol-level
 abstractions or a simpler approach. ~400 lines.
