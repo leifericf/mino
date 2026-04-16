@@ -4,6 +4,111 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.20.0] — Dialect alignment
+
+Brings mino's surface language into close alignment with standard
+conventions. Multi-arity functions, destructuring, protocols,
+transducers, value metadata, and reader macros land as a cohesive set.
+A large test suite derived from the official test repository validates
+conformance across 552 tests (up from 300) and 2039 assertions (up
+from 664).
+
+### Added
+
+- **Multi-arity functions**: `fn` and `defn` accept multiple arities
+  via `([x] body) ([x y] body)` dispatch. Arity mismatch produces a
+  clear error naming the function and the available arities.
+- **Vector bindings**: `let`, `fn`, `loop`, `binding`, `for`, `doseq`,
+  and all destructuring forms accept `[x y]` binding vectors alongside
+  the existing `(x y)` list form.
+- **Destructuring**: positional destructuring in vectors, map
+  destructuring with `:keys`, `:strs`, `:or`, and `:as`, and nested
+  destructuring at any depth. Works in `let`, `fn`, `loop`, `for`,
+  and `doseq`.
+- **Named fn**: `(fn name [x] body)` binds `name` inside the body for
+  self-reference without `def`.
+- **Protocols**: `defprotocol`, `extend-type`, `extend-protocol`, and
+  `satisfies?`. Dispatch on the type of the first argument. `:default`
+  extension provides fallback implementations. Implemented in mino
+  using atoms for dispatch tables.
+- **Transducers**: `transduce`, `into` with xform, `sequence`,
+  `eduction`, `completing`, and `cat`. Composable transducer arities
+  added to `map`, `filter`, `remove`, `take`, `drop`, `take-while`,
+  `drop-while`, `keep`, `keep-indexed`, `map-indexed`, `dedupe`,
+  `partition-by`, `partition-all`, `distinct`, and `interpose`.
+- **Value metadata**: `meta`, `with-meta`, `vary-meta`, `alter-meta!`.
+  Reader `^` syntax attaches metadata directly: `^{:k v}`, `^:key`,
+  `^Type`. Metadata preserved through collection operations (`merge`,
+  `merge-with`, `select-keys`, `replace`, `conj`, `assoc`, `dissoc`,
+  `into`, `vec`, `set`, `subvec`, `pop`).
+- **Reader macros**: `#(+ %1 %2)` anonymous function shorthand, `#_`
+  discard next form.
+- **Callable keywords**: `(:k m)` and `(:k m default)` for map lookup.
+- **Exception data**: `ex-info`, `ex-data`, `ex-message` for
+  structured exceptions.
+- **`try`/`finally`**: finally clause executes on both success and
+  exception. `try` without `catch` or `finally` is now accepted.
+- **`with-open`**: macro that binds a resource and ensures cleanup via
+  `finally`.
+- **`identical?`**: pointer identity comparison.
+- **`reduced`**: wraps a value for early termination in `reduce` and
+  `transduce`.
+- **`declare`**: forward declaration of vars.
+- **`set` constructor**: `(set coll)` builds a set from any
+  collection.
+- **`integer?`**, **`coll?`**, **`==`**, **`empty`**, **`re-pattern`**:
+  new predicates and constructors.
+- **Multi-binding `for` and `doseq`**: multiple binding pairs with
+  `:when`, `:while`, and `:let` modifiers.
+- **Multi-collection `map`**: `(map f c1 c2 ...)` maps over multiple
+  collections in parallel.
+- **Format precision**: `%5d`, `%.2f`, and width specifiers in
+  `format`.
+- **Test suite**: 552 tests, 2039 assertions (up from 300/664).
+  Includes a suite derived from the official test repository covering
+  predicates, sequences, higher-order functions, math, control flow,
+  transducers, and metadata.
+
+### Changed
+
+- **`defn` and `defmacro`**: skip optional attr-map argument after the
+  name for source compatibility.
+- **`fn*`, `let*`, `loop*`**: recognized as aliases for `fn`, `let`,
+  `loop`.
+- **`(def name)`**: allowed without a value, binds to nil.
+- **`/` (division)**: returns an integer when the result is exact
+  (`(/ 6 3)` returns `2`, not `2.0`).
+- **`cons`**: coerces its second argument to a seq.
+- **`=` on sequences**: cross-type sequential equality. `(= '(1 2 3)
+  [1 2 3])` is true.
+- **`first` and `rest`**: extended to work on maps, sets, and strings.
+- **`nth`**: extended to work on strings and lazy sequences.
+- **`max` and `min`**: now variadic.
+- **`comp`**: now variadic, accepts any number of functions.
+- **`interleave`**: now variadic.
+- **`not=`**: supports 1-arity and variadic calls.
+- **`get-in`**: 3-arity distinguishes nil values from missing keys;
+  accepts a not-found parameter.
+- **Single-quote in symbols**: `can't` and `it's` now parse correctly.
+- **`nth` out-of-range**: throws a catchable exception via `try`/`catch`
+  instead of a fatal error.
+
+### Fixed
+
+- `memoize` correctly caches nil return values.
+- `merge` and `merge-with` return nil when all arguments are nil.
+- `replace` preserves vector type and uses `find` for nil-safe lookup.
+- `flatten` reimplemented using `tree-seq` for correct behavior on
+  non-sequential nested values.
+- `drop-last` is lazy instead of forcing `count`.
+- `mapcat` is lazy to support infinite sequences.
+- `juxt` returns a vector.
+- `partition` returns lists when called with a step argument.
+- `repeatedly` supports the `(repeatedly n f)` arity.
+- `satisfies?` accounts for `:default` protocol extensions.
+- `transduce` unwraps nested reduced values.
+- `:or` destructuring uses symbol keys correctly.
+
 ## [0.19.0] — Explicit runtime state
 
 ### Breaking changes
