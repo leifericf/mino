@@ -1452,6 +1452,837 @@ static int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
     return 1;
 }
 
+/* --- Evaluator helpers: one per value kind or special-form cluster. --- */
+
+static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+{
+    char buf[256];
+    size_t n = form->as.s.len;
+    mino_val_t *v;
+    if (n >= sizeof(buf)) {
+        set_error_at(S, eval_current_form, "symbol name too long");
+        return NULL;
+    }
+    memcpy(buf, form->as.s.data, n);
+    buf[n] = '\0';
+    v = dyn_lookup(S, buf);
+    if (v == NULL) v = mino_env_get(env, buf);
+    if (v == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
+        set_error_at(S, eval_current_form, msg);
+        return NULL;
+    }
+    return v;
+}
+
+static mino_val_t *eval_vector_literal(mino_state_t *S, mino_val_t *form,
+                                       mino_env_t *env)
+{
+    size_t i;
+    size_t n = form->as.vec.len;
+    mino_val_t **tmp;
+    if (n == 0) {
+        return form;
+    }
+    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    for (i = 0; i < n; i++) {
+        mino_val_t *ev = eval_value(S, vec_nth(form, i), env);
+        if (ev == NULL) {
+            return NULL;
+        }
+        tmp[i] = ev;
+    }
+    {
+        mino_val_t *result = mino_vector(S, tmp, n);
+        if (form->meta != NULL) {
+            result->meta = form->meta;
+        }
+        return result;
+    }
+}
+
+static mino_val_t *eval_map_literal(mino_state_t *S, mino_val_t *form,
+                                    mino_env_t *env)
+{
+    size_t i;
+    size_t n = form->as.map.len;
+    mino_val_t **ks;
+    mino_val_t **vs;
+    if (n == 0) {
+        return form;
+    }
+    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
+    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
+    for (i = 0; i < n; i++) {
+        mino_val_t *form_key = vec_nth(form->as.map.key_order, i);
+        mino_val_t *form_val = map_get_val(form, form_key);
+        mino_val_t *k = eval_value(S, form_key, env);
+        mino_val_t *v;
+        if (k == NULL) { return NULL; }
+        v = eval_value(S, form_val, env);
+        if (v == NULL) { return NULL; }
+        ks[i] = k;
+        vs[i] = v;
+    }
+    {
+        mino_val_t *result = mino_map(S, ks, vs, n);
+        if (form->meta != NULL) {
+            result->meta = form->meta;
+        }
+        return result;
+    }
+}
+
+static mino_val_t *eval_set_literal(mino_state_t *S, mino_val_t *form,
+                                    mino_env_t *env)
+{
+    size_t i;
+    size_t n = form->as.set.len;
+    mino_val_t **tmp;
+    if (n == 0) {
+        return form;
+    }
+    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    for (i = 0; i < n; i++) {
+        mino_val_t *ev = eval_value(S, vec_nth(form->as.set.key_order, i), env);
+        if (ev == NULL) {
+            return NULL;
+        }
+        tmp[i] = ev;
+    }
+    {
+        mino_val_t *result = mino_set(S, tmp, n);
+        if (form->meta != NULL) {
+            result->meta = form->meta;
+        }
+        return result;
+    }
+}
+
+static mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
+                                 mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *name_form;
+    mino_val_t *params;
+    mino_val_t *body;
+    mino_val_t *mac;
+    mino_val_t *p;
+    const char *doc     = NULL;
+    size_t      doc_len = 0;
+    char        buf[256];
+    size_t      n;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error_at(S, form, "defmacro requires a name, parameters, and body");
+        return NULL;
+    }
+    name_form = args->as.cons.car;
+    if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+        set_error_at(S, form, "defmacro name must be a symbol");
+        return NULL;
+    }
+    /* Optional docstring and attr-map:
+     *   (defmacro name "doc" {:added "1.0"} [params] body)
+     *   (defmacro name "doc" [params] body)
+     *   (defmacro name {:added "1.0"} [params] body)
+     *   (defmacro name [params] body)
+     */
+    {
+        mino_val_t *rest = args->as.cons.cdr;
+        mino_val_t *cur  = rest->as.cons.car;
+        /* Optional docstring. */
+        if (cur != NULL && cur->type == MINO_STRING
+            && mino_is_cons(rest->as.cons.cdr)) {
+            doc     = cur->as.s.data;
+            doc_len = cur->as.s.len;
+            rest    = rest->as.cons.cdr;
+            cur     = rest->as.cons.car;
+        }
+        /* Optional attr-map (skip it). */
+        if (cur != NULL && cur->type == MINO_MAP
+            && mino_is_cons(rest->as.cons.cdr)) {
+            rest = rest->as.cons.cdr;
+        }
+        params = rest->as.cons.car;
+        body   = rest->as.cons.cdr;
+    }
+    if (!mino_is_cons(params) && !mino_is_nil(params)
+        && params->type != MINO_VECTOR) {
+        set_error_at(S, form, "defmacro parameter list must be a list or vector");
+        return NULL;
+    }
+    if (mino_is_cons(params) || mino_is_nil(params)) {
+        for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
+            mino_val_t *pn = p->as.cons.car;
+            if (pn == NULL || pn->type != MINO_SYMBOL) {
+                set_error_at(S, form, "defmacro parameter must be a symbol");
+                return NULL;
+            }
+        }
+    }
+    mac = alloc_val(S, MINO_MACRO);
+    mac->as.fn.params = params;
+    mac->as.fn.body   = body;
+    mac->as.fn.env    = env;
+    n = name_form->as.s.len;
+    if (n >= sizeof(buf)) {
+        set_error_at(S, form, "defmacro name too long");
+        return NULL;
+    }
+    memcpy(buf, name_form->as.s.data, n);
+    buf[n] = '\0';
+    gc_pin(mac);
+    env_bind(S, env_root(S, env), buf, mac);
+    gc_unpin(1);
+    meta_set(S, buf, doc, doc_len, form);
+    return mac;
+}
+
+static mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
+                                mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *rest = args;
+    while (mino_is_cons(rest)) {
+        mino_val_t *sym = rest->as.cons.car;
+        char buf[256];
+        size_t n;
+        if (sym == NULL || sym->type != MINO_SYMBOL) {
+            set_error_at(S, form, "declare: arguments must be symbols");
+            return NULL;
+        }
+        n = sym->as.s.len;
+        if (n >= sizeof(buf)) {
+            set_error_at(S, form, "declare: name too long");
+            return NULL;
+        }
+        memcpy(buf, sym->as.s.data, n);
+        buf[n] = '\0';
+        env_bind(S, env_root(S, env), buf, mino_nil(S));
+        rest = rest->as.cons.cdr;
+    }
+    return mino_nil(S);
+}
+
+static mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
+                            mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *name_form;
+    mino_val_t *value_form;
+    mino_val_t *value;
+    const char *doc     = NULL;
+    size_t      doc_len = 0;
+    char buf[256];
+    size_t n;
+    if (!mino_is_cons(args)) {
+        set_error_at(S, form, "def requires a name");
+        return NULL;
+    }
+    name_form  = args->as.cons.car;
+    if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+        set_error_at(S, form, "def name must be a symbol");
+        return NULL;
+    }
+    n = name_form->as.s.len;
+    if (n >= sizeof(buf)) {
+        set_error_at(S, form, "def name too long");
+        return NULL;
+    }
+    memcpy(buf, name_form->as.s.data, n);
+    buf[n] = '\0';
+    /* (def name) -- declaration only, bind to nil. */
+    if (!mino_is_cons(args->as.cons.cdr)) {
+        env_bind(S, env_root(S, env), buf, mino_nil(S));
+        meta_set(S, buf, NULL, 0, form);
+        return mino_nil(S);
+    }
+    /* Optional docstring: (def name "doc" value) */
+    if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        mino_val_t *maybe_doc = args->as.cons.cdr->as.cons.car;
+        if (maybe_doc != NULL && maybe_doc->type == MINO_STRING) {
+            doc       = maybe_doc->as.s.data;
+            doc_len   = maybe_doc->as.s.len;
+            value_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        } else {
+            value_form = args->as.cons.cdr->as.cons.car;
+        }
+    } else {
+        value_form = args->as.cons.cdr->as.cons.car;
+    }
+    value = eval_value(S, value_form, env);
+    if (value == NULL) {
+        return NULL;
+    }
+    gc_pin(value);
+    env_bind(S, env_root(S, env), buf, value);
+    gc_unpin(1);
+    meta_set(S, buf, doc, doc_len, form);
+    return value;
+}
+
+static mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
+                            mino_val_t *args, mino_env_t *env, int tail)
+{
+    mino_val_t *bindings;
+    mino_val_t *body;
+    mino_env_t *local;
+    if (!mino_is_cons(args)) {
+        set_error_at(S, form, "let requires a binding form and body");
+        return NULL;
+    }
+    bindings = args->as.cons.car;
+    body     = args->as.cons.cdr;
+    local = env_child(S, env);
+    if (bindings != NULL && bindings->type == MINO_VECTOR) {
+        /* Vector binding form: [pattern val pattern val ...] */
+        size_t vlen = bindings->as.vec.len;
+        size_t vi;
+        if (vlen % 2 != 0) {
+            set_error_at(S, form, "let vector bindings must have even number of forms");
+            return NULL;
+        }
+        for (vi = 0; vi < vlen; vi += 2) {
+            mino_val_t *pat = vec_nth(bindings, vi);
+            mino_val_t *val = eval_value(S, vec_nth(bindings, vi + 1), local);
+            if (val == NULL) return NULL;
+            gc_pin(val);
+            if (!bind_form(S, local, pat, val, "let")) {
+                gc_unpin(1);
+                return NULL;
+            }
+            gc_unpin(1);
+        }
+    } else if (mino_is_cons(bindings) || mino_is_nil(bindings)) {
+        /* Legacy list binding form: (name val name val ...) */
+        while (mino_is_cons(bindings)) {
+            mino_val_t *name_form = bindings->as.cons.car;
+            mino_val_t *rest_pair = bindings->as.cons.cdr;
+            mino_val_t *val;
+            if (!mino_is_cons(rest_pair)) {
+                set_error_at(S, form, "let binding missing value");
+                return NULL;
+            }
+            val = eval_value(S, rest_pair->as.cons.car, local);
+            if (val == NULL) return NULL;
+            gc_pin(val);
+            if (!bind_form(S, local, name_form, val, "let")) {
+                gc_unpin(1);
+                return NULL;
+            }
+            gc_unpin(1);
+            bindings = rest_pair->as.cons.cdr;
+        }
+    } else {
+        set_error_at(S, form, "let bindings must be a list or vector");
+        return NULL;
+    }
+    return eval_implicit_do_impl(S, body, local, tail);
+}
+
+static mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
+                           mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fn_name = NULL;
+    mino_val_t *params;
+    mino_val_t *body;
+    mino_val_t *p;
+    mino_val_t *fn_val;
+    int         multi_arity = 0;
+    if (!mino_is_cons(args)) {
+        set_error_at(S, form, "fn requires a parameter list");
+        return NULL;
+    }
+    /* Optional name: (fn name (...) body) or (fn name ([x] ...) ([x y] ...)) */
+    if (args->as.cons.car != NULL
+        && args->as.cons.car->type == MINO_SYMBOL
+        && mino_is_cons(args->as.cons.cdr)) {
+        mino_val_t *after = args->as.cons.cdr->as.cons.car;
+        if (after != NULL
+            && (mino_is_cons(after) || mino_is_nil(after)
+                || after->type == MINO_VECTOR)) {
+            fn_name = args->as.cons.car;
+            args    = args->as.cons.cdr;
+        }
+    }
+    params = args->as.cons.car;
+    body   = args->as.cons.cdr;
+    /* Detect multi-arity: (fn ([x] ...) ([x y] ...))
+     * The first arg is a list whose car is a vector or list. */
+    if (mino_is_cons(params) && params->as.cons.car != NULL
+        && (params->as.cons.car->type == MINO_VECTOR
+            || (mino_is_cons(params->as.cons.car)
+                || mino_is_nil(params->as.cons.car)))) {
+        /* Could be multi-arity OR single-arity with list params.
+         * Multi-arity: each clause is (params-vec . body-forms).
+         * Disambiguate: if car of first arg is a vector, it's
+         * multi-arity. If car is a cons/nil, check if it looks
+         * like a params list (all symbols) or an arity clause. */
+        if (params->as.cons.car->type == MINO_VECTOR) {
+            multi_arity = 1;
+        }
+    }
+    if (multi_arity) {
+        /* Multi-arity: args is (([p1] body1...) ([p2] body2...) ...).
+         * Store as: params = NULL (sentinel), body = list of
+         * (params-vec . body-forms) clauses. */
+        mino_val_t *clauses = mino_nil(S);
+        mino_val_t *clause_tail = NULL;
+        mino_val_t *rest = args;
+        while (mino_is_cons(rest)) {
+            mino_val_t *clause = rest->as.cons.car;
+            mino_val_t *cparams;
+            mino_val_t *cbody;
+            mino_val_t *cell;
+            if (!mino_is_cons(clause)) {
+                set_error_at(S, form, "multi-arity clause must be a list");
+                return NULL;
+            }
+            cparams = clause->as.cons.car;
+            cbody   = clause->as.cons.cdr;
+            if (cparams == NULL
+                || (cparams->type != MINO_VECTOR
+                    && !mino_is_cons(cparams)
+                    && !mino_is_nil(cparams))) {
+                set_error_at(S, form, "multi-arity clause must start with a parameter list");
+                return NULL;
+            }
+            cell = mino_cons(S, mino_cons(S, cparams, cbody), mino_nil(S));
+            if (clause_tail == NULL) {
+                clauses = cell;
+            } else {
+                clause_tail->as.cons.cdr = cell;
+            }
+            clause_tail = cell;
+            rest = rest->as.cons.cdr;
+        }
+        params = NULL;
+        body   = clauses;
+    } else {
+        if (!mino_is_cons(params) && !mino_is_nil(params)
+            && params->type != MINO_VECTOR) {
+            set_error_at(S, form, "fn parameter list must be a list or vector");
+            return NULL;
+        }
+        /* Validate params when given as a cons list. */
+        if (mino_is_cons(params) || mino_is_nil(params)) {
+            for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
+                mino_val_t *name = p->as.cons.car;
+                if (name == NULL || name->type != MINO_SYMBOL) {
+                    set_error_at(S, form, "fn parameter must be a symbol");
+                    return NULL;
+                }
+            }
+        }
+    }
+    if (fn_name != NULL) {
+        char nbuf[256];
+        size_t nlen = fn_name->as.s.len;
+        mino_env_t *fn_env;
+        if (nlen >= sizeof(nbuf)) {
+            set_error_at(S, form, "fn name too long");
+            return NULL;
+        }
+        memcpy(nbuf, fn_name->as.s.data, nlen);
+        nbuf[nlen] = '\0';
+        fn_env = env_child(S, env);
+        fn_val = make_fn(S, params, body, fn_env);
+        env_bind(S, fn_env, nbuf, fn_val);
+    } else {
+        fn_val = make_fn(S, params, body, env);
+    }
+    return fn_val;
+}
+
+static mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
+                             mino_val_t *args, mino_env_t *env, int tail)
+{
+    mino_val_t *bindings;
+    mino_val_t *body;
+    mino_val_t *params      = mino_nil(S);
+    mino_val_t *params_tail = NULL;
+    mino_env_t *local;
+    if (!mino_is_cons(args)) {
+        set_error_at(S, form, "loop requires a binding form and body");
+        return NULL;
+    }
+    bindings = args->as.cons.car;
+    body     = args->as.cons.cdr;
+    local = env_child(S, env);
+    if (bindings != NULL && bindings->type == MINO_VECTOR) {
+        /* Vector binding form: [name val name val ...] */
+        size_t vlen = bindings->as.vec.len;
+        size_t vi;
+        mino_val_t **ptmp;
+        if (vlen % 2 != 0) {
+            set_error_at(S, form, "loop vector bindings must have even number of forms");
+            return NULL;
+        }
+        /* Build a params vector of just the name symbols for recur. */
+        ptmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+                    (vlen / 2) * sizeof(*ptmp));
+        for (vi = 0; vi < vlen; vi += 2) {
+            mino_val_t *pat = vec_nth(bindings, vi);
+            mino_val_t *val = eval_value(S, vec_nth(bindings, vi + 1), local);
+            if (val == NULL) return NULL;
+            gc_pin(val);
+            if (!bind_form(S, local, pat, val, "loop")) {
+                gc_unpin(1);
+                return NULL;
+            }
+            gc_unpin(1);
+            ptmp[vi / 2] = pat;
+        }
+        params = mino_vector(S, ptmp, vlen / 2);
+    } else if (mino_is_cons(bindings) || mino_is_nil(bindings)) {
+        /* Legacy list binding form. */
+        while (mino_is_cons(bindings)) {
+            mino_val_t *name_form = bindings->as.cons.car;
+            mino_val_t *rest_pair = bindings->as.cons.cdr;
+            mino_val_t *val;
+            mino_val_t *cell;
+            if (!mino_is_cons(rest_pair)) {
+                set_error_at(S, form, "loop binding missing value");
+                return NULL;
+            }
+            val = eval_value(S, rest_pair->as.cons.car, local);
+            if (val == NULL) return NULL;
+            gc_pin(val);
+            if (!bind_form(S, local, name_form, val, "loop")) {
+                gc_unpin(1);
+                return NULL;
+            }
+            gc_unpin(1);
+            cell = mino_cons(S, name_form, mino_nil(S));
+            if (params_tail == NULL) {
+                params = cell;
+            } else {
+                params_tail->as.cons.cdr = cell;
+            }
+            params_tail = cell;
+            bindings = rest_pair->as.cons.cdr;
+        }
+    } else {
+        set_error_at(S, form, "loop bindings must be a list or vector");
+        return NULL;
+    }
+    for (;;) {
+        mino_val_t *result = eval_implicit_do_impl(S, body, local, tail);
+        if (result == NULL) {
+            return NULL;
+        }
+        if (result->type != MINO_RECUR) {
+            return result;
+        }
+        if (!bind_params(S, local, params, result->as.recur.args,
+                         "recur")) {
+            return NULL;
+        }
+    }
+}
+
+static mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
+                            mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *body_head = NULL;
+    mino_val_t *body_tail = NULL;
+    mino_val_t *catch_body = NULL;
+    mino_val_t *finally_body = NULL;
+    char        var_buf[256];
+    int         has_catch   = 0;
+    int         has_finally = 0;
+    int         saved_try   = try_depth;
+    int         saved_call  = call_depth;
+    int         saved_trace = trace_added;
+    dyn_frame_t *saved_dyn  = dyn_stack;
+    volatile int         got_exception = 0;
+    volatile mino_val_t *vol_result    = NULL;
+    volatile mino_val_t *vol_ex        = NULL;
+
+    /* Partition args into body forms, catch clause, finally clause. */
+    {
+        mino_val_t *rest = args;
+        while (mino_is_cons(rest)) {
+            mino_val_t *clause = rest->as.cons.car;
+            if (mino_is_cons(clause)
+                && sym_eq(clause->as.cons.car, "catch")) {
+                /* (catch e handler...) */
+                mino_val_t *cv;
+                size_t      vl;
+                if (!mino_is_cons(clause->as.cons.cdr)) {
+                    set_error_at(S, form,
+                        "catch requires a binding symbol");
+                    return NULL;
+                }
+                cv = clause->as.cons.cdr->as.cons.car;
+                if (cv == NULL || cv->type != MINO_SYMBOL) {
+                    set_error_at(S, form,
+                        "catch binding must be a symbol");
+                    return NULL;
+                }
+                vl = cv->as.s.len;
+                if (vl >= sizeof(var_buf)) {
+                    set_error_at(S, form,
+                        "catch variable name too long");
+                    return NULL;
+                }
+                memcpy(var_buf, cv->as.s.data, vl);
+                var_buf[vl] = '\0';
+                catch_body = clause->as.cons.cdr->as.cons.cdr;
+                has_catch = 1;
+                rest = rest->as.cons.cdr;
+                continue;
+            }
+            if (mino_is_cons(clause)
+                && sym_eq(clause->as.cons.car, "finally")) {
+                finally_body = clause->as.cons.cdr;
+                has_finally = 1;
+                rest = rest->as.cons.cdr;
+                continue;
+            }
+            /* Body form -- append to list. */
+            {
+                mino_val_t *cell = mino_cons(S, clause, mino_nil(S));
+                if (body_tail == NULL) {
+                    body_head = cell;
+                } else {
+                    body_tail->as.cons.cdr = cell;
+                }
+                body_tail = cell;
+            }
+            rest = rest->as.cons.cdr;
+        }
+    }
+
+    if (try_depth >= MAX_TRY_DEPTH) {
+        set_error_at(S, form, "try nesting too deep");
+        return NULL;
+    }
+
+    /* Phase 1: evaluate body forms. */
+    try_stack[try_depth].exception = NULL;
+    if (setjmp(try_stack[try_depth].buf) == 0) {
+        mino_val_t *r;
+        try_depth++;
+        r = eval_implicit_do(S, body_head, env);
+        try_depth = saved_try;
+        if (r == NULL) {
+            /* Fatal runtime error. */
+            if (has_finally)
+                eval_implicit_do(S, finally_body, env);
+            return NULL;
+        }
+        vol_result = r;
+    } else {
+        /* longjmp'd from throw in body. */
+        vol_ex      = try_stack[saved_try].exception;
+        try_depth   = saved_try;
+        call_depth  = saved_call;
+        trace_added = saved_trace;
+        while (dyn_stack != saved_dyn) {
+            dyn_frame_t *f = dyn_stack;
+            dyn_stack = f->prev;
+            dyn_binding_list_free(f->bindings);
+        }
+        clear_error(S);
+        got_exception = 1;
+    }
+
+    /* Phase 2: run catch handler if we caught an exception. */
+    if (got_exception && has_catch) {
+        mino_val_t *ex_val =
+            vol_ex ? (mino_val_t *)vol_ex : mino_nil(S);
+        mino_env_t *local  = env_child(S, env);
+        env_bind(S, local, var_buf, ex_val);
+
+        if (has_finally && try_depth < MAX_TRY_DEPTH) {
+            /* Inner try frame catches re-throws from handler
+             * so that finally still runs. */
+            int         ic = call_depth;
+            int         it = trace_added;
+            int         is = try_depth; /* save before setjmp */
+            dyn_frame_t *id = dyn_stack;
+            try_stack[is].exception = NULL;
+            if (setjmp(try_stack[is].buf) == 0) {
+                mino_val_t *r;
+                try_depth++;
+                r = eval_implicit_do(S, catch_body, local);
+                try_depth = is;
+                if (r == NULL) {
+                    eval_implicit_do(S, finally_body, env);
+                    return NULL;
+                }
+                vol_result    = r;
+                got_exception = 0;
+            } else {
+                /* Catch handler re-threw. */
+                vol_ex      = try_stack[is].exception;
+                try_depth   = is;
+                call_depth  = ic;
+                trace_added = it;
+                while (dyn_stack != id) {
+                    dyn_frame_t *f = dyn_stack;
+                    dyn_stack = f->prev;
+                    dyn_binding_list_free(f->bindings);
+                }
+                clear_error(S);
+                /* got_exception stays 1, vol_ex updated. */
+            }
+        } else {
+            /* No finally or nesting limit -- run catch directly. */
+            mino_val_t *r =
+                eval_implicit_do(S, catch_body, local);
+            if (r == NULL) {
+                if (has_finally)
+                    eval_implicit_do(S, finally_body, env);
+                return NULL;
+            }
+            vol_result    = r;
+            got_exception = 0;
+        }
+    }
+
+    /* Phase 3: run finally unconditionally. */
+    if (has_finally) {
+        eval_implicit_do(S, finally_body, env);
+    }
+
+    /* Phase 4: re-throw if exception was not handled. */
+    if (got_exception) {
+        mino_val_t *e = (mino_val_t *)vol_ex;
+        if (try_depth > 0) {
+            try_stack[try_depth - 1].exception = e;
+            longjmp(try_stack[try_depth - 1].buf, 1);
+        }
+        if (e != NULL && e->type == MINO_STRING) {
+            char msg[512];
+            snprintf(msg, sizeof(msg),
+                     "unhandled exception: %.*s",
+                     (int)e->as.s.len, e->as.s.data);
+            set_error(S, msg);
+        } else {
+            set_error(S, "unhandled exception");
+        }
+        return NULL;
+    }
+
+    return (mino_val_t *)vol_result;
+}
+
+static mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
+                                mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pairs, *body, *result;
+    dyn_frame_t frame;
+    dyn_binding_t *bhead = NULL;
+    if (!mino_is_cons(args)) {
+        set_error_at(S, form, "binding requires a binding list and body");
+        return NULL;
+    }
+    pairs = args->as.cons.car;
+    body  = args->as.cons.cdr;
+    if (pairs != NULL && pairs->type == MINO_VECTOR) {
+        /* Vector binding form: [sym val sym val ...] */
+        size_t vlen = pairs->as.vec.len;
+        size_t vi;
+        if (vlen % 2 != 0) {
+            set_error_at(S, form, "binding: odd number of forms in binding vector");
+            return NULL;
+        }
+        for (vi = 0; vi < vlen; vi += 2) {
+            mino_val_t *sym_v = vec_nth(pairs, vi);
+            mino_val_t *val_form = vec_nth(pairs, vi + 1);
+            mino_val_t *val;
+            dyn_binding_t *b;
+            char nbuf[256];
+            size_t nlen;
+            if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
+                set_error_at(S, form, "binding: names must be symbols");
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            nlen = sym_v->as.s.len;
+            if (nlen >= sizeof(nbuf)) {
+                set_error_at(S, form, "binding: name too long");
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            memcpy(nbuf, sym_v->as.s.data, nlen);
+            nbuf[nlen] = '\0';
+            val = eval(S, val_form, env);
+            if (val == NULL) {
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            b = (dyn_binding_t *)malloc(sizeof(*b));
+            if (b == NULL) {
+                set_error_at(S, form, "binding: out of memory");
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
+            b->val  = val;
+            b->next = bhead;
+            bhead   = b;
+        }
+    } else if (mino_is_cons(pairs)) {
+        /* Legacy list binding form: (sym val sym val ...) */
+        while (pairs != NULL && pairs->type == MINO_CONS) {
+            mino_val_t *sym_v, *val_form, *val;
+            dyn_binding_t *b;
+            char nbuf[256];
+            size_t nlen;
+            sym_v = pairs->as.cons.car;
+            if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
+                set_error_at(S, form, "binding: names must be symbols");
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            nlen = sym_v->as.s.len;
+            if (nlen >= sizeof(nbuf)) {
+                set_error_at(S, form, "binding: name too long");
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            memcpy(nbuf, sym_v->as.s.data, nlen);
+            nbuf[nlen] = '\0';
+            pairs = pairs->as.cons.cdr;
+            if (pairs == NULL || pairs->type != MINO_CONS) {
+                set_error_at(S, form, "binding: odd number of forms in binding list");
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            val_form = pairs->as.cons.car;
+            pairs    = pairs->as.cons.cdr;
+            val = eval(S, val_form, env);
+            if (val == NULL) {
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            b = (dyn_binding_t *)malloc(sizeof(*b));
+            if (b == NULL) {
+                set_error_at(S, form, "binding: out of memory");
+                dyn_binding_list_free(bhead);
+                return NULL;
+            }
+            b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
+            b->val  = val;
+            b->next = bhead;
+            bhead   = b;
+        }
+    } else {
+        set_error_at(S, form, "binding requires a binding list and body");
+        return NULL;
+    }
+    /* Push frame. */
+    frame.bindings = bhead;
+    frame.prev     = dyn_stack;
+    dyn_stack      = &frame;
+    result = eval_implicit_do(S, body, env);
+    /* Pop frame. */
+    dyn_stack = frame.prev;
+    dyn_binding_list_free(bhead);
+    return result;
+}
+
 mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int tail)
 {
     if (limit_exceeded) {
@@ -1492,106 +2323,14 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_TAIL_CALL:
     case MINO_REDUCED:
         return form;
-    case MINO_SYMBOL: {
-        char buf[256];
-        size_t n = form->as.s.len;
-        mino_val_t *v;
-        if (n >= sizeof(buf)) {
-            set_error_at(S, eval_current_form, "symbol name too long");
-            return NULL;
-        }
-        memcpy(buf, form->as.s.data, n);
-        buf[n] = '\0';
-        v = dyn_lookup(S, buf);
-        if (v == NULL) v = mino_env_get(env, buf);
-        if (v == NULL) {
-            char msg[300];
-            snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
-            set_error_at(S, eval_current_form, msg);
-            return NULL;
-        }
-        return v;
-    }
-    case MINO_VECTOR: {
-        /* Vector literals evaluate each element in order, producing a new
-         * vector whose shape matches the source. */
-        size_t i;
-        size_t n = form->as.vec.len;
-        mino_val_t **tmp;
-        if (n == 0) {
-            return form;
-        }
-        tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
-        for (i = 0; i < n; i++) {
-            mino_val_t *ev = eval_value(S, vec_nth(form, i), env);
-            if (ev == NULL) {
-                return NULL;
-            }
-            tmp[i] = ev;
-        }
-        {
-            mino_val_t *result = mino_vector(S, tmp, n);
-            if (form->meta != NULL) {
-                result->meta = form->meta;
-            }
-            return result;
-        }
-    }
-    case MINO_MAP: {
-        /* Map literals evaluate keys and values in read order; the
-         * constructor handles duplicate-key resolution. */
-        size_t i;
-        size_t n = form->as.map.len;
-        mino_val_t **ks;
-        mino_val_t **vs;
-        if (n == 0) {
-            return form;
-        }
-        ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
-        vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
-        for (i = 0; i < n; i++) {
-            mino_val_t *form_key = vec_nth(form->as.map.key_order, i);
-            mino_val_t *form_val = map_get_val(form, form_key);
-            mino_val_t *k = eval_value(S, form_key, env);
-            mino_val_t *v;
-            if (k == NULL) { return NULL; }
-            v = eval_value(S, form_val, env);
-            if (v == NULL) { return NULL; }
-            ks[i] = k;
-            vs[i] = v;
-        }
-        {
-            mino_val_t *result = mino_map(S, ks, vs, n);
-            if (form->meta != NULL) {
-                result->meta = form->meta;
-            }
-            return result;
-        }
-    }
-    case MINO_SET: {
-        /* Set literals evaluate each element in order. */
-        size_t i;
-        size_t n = form->as.set.len;
-        mino_val_t **tmp;
-        if (n == 0) {
-            return form;
-        }
-        tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
-        for (i = 0; i < n; i++) {
-            mino_val_t *ev = eval_value(S, vec_nth(form->as.set.key_order, i), env);
-            if (ev == NULL) {
-                return NULL;
-            }
-            tmp[i] = ev;
-        }
-        {
-            mino_val_t *result = mino_set(S, tmp, n);
-            if (form->meta != NULL) {
-                result->meta = form->meta;
-            }
-            return result;
-        }
-    }
+    case MINO_SYMBOL:
+        return eval_symbol(S, form, env);
+    case MINO_VECTOR:
+        return eval_vector_literal(S, form, env);
+    case MINO_MAP:
+        return eval_map_literal(S, form, env);
+    case MINO_SET:
+        return eval_set_literal(S, form, env);
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;
         mino_val_t *args = form->as.cons.cdr;
@@ -1618,155 +2357,13 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             return NULL;
         }
         if (sym_eq(head, "defmacro")) {
-            mino_val_t *name_form;
-            mino_val_t *params;
-            mino_val_t *body;
-            mino_val_t *mac;
-            mino_val_t *p;
-            const char *doc     = NULL;
-            size_t      doc_len = 0;
-            char        buf[256];
-            size_t      n;
-            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-                set_error_at(S, form, "defmacro requires a name, parameters, and body");
-                return NULL;
-            }
-            name_form = args->as.cons.car;
-            if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-                set_error_at(S, form, "defmacro name must be a symbol");
-                return NULL;
-            }
-            /* Optional docstring and attr-map:
-             *   (defmacro name "doc" {:added "1.0"} [params] body)
-             *   (defmacro name "doc" [params] body)
-             *   (defmacro name {:added "1.0"} [params] body)
-             *   (defmacro name [params] body)
-             */
-            {
-                mino_val_t *rest = args->as.cons.cdr;
-                mino_val_t *cur  = rest->as.cons.car;
-                /* Optional docstring. */
-                if (cur != NULL && cur->type == MINO_STRING
-                    && mino_is_cons(rest->as.cons.cdr)) {
-                    doc     = cur->as.s.data;
-                    doc_len = cur->as.s.len;
-                    rest    = rest->as.cons.cdr;
-                    cur     = rest->as.cons.car;
-                }
-                /* Optional attr-map (skip it). */
-                if (cur != NULL && cur->type == MINO_MAP
-                    && mino_is_cons(rest->as.cons.cdr)) {
-                    rest = rest->as.cons.cdr;
-                }
-                params = rest->as.cons.car;
-                body   = rest->as.cons.cdr;
-            }
-            if (!mino_is_cons(params) && !mino_is_nil(params)
-                && params->type != MINO_VECTOR) {
-                set_error_at(S, form, "defmacro parameter list must be a list or vector");
-                return NULL;
-            }
-            if (mino_is_cons(params) || mino_is_nil(params)) {
-                for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
-                    mino_val_t *pn = p->as.cons.car;
-                    if (pn == NULL || pn->type != MINO_SYMBOL) {
-                        set_error_at(S, form, "defmacro parameter must be a symbol");
-                        return NULL;
-                    }
-                }
-            }
-            mac = alloc_val(S, MINO_MACRO);
-            mac->as.fn.params = params;
-            mac->as.fn.body   = body;
-            mac->as.fn.env    = env;
-            n = name_form->as.s.len;
-            if (n >= sizeof(buf)) {
-                set_error_at(S, form, "defmacro name too long");
-                return NULL;
-            }
-            memcpy(buf, name_form->as.s.data, n);
-            buf[n] = '\0';
-            gc_pin(mac);
-            env_bind(S, env_root(S, env), buf, mac);
-            gc_unpin(1);
-            meta_set(S, buf, doc, doc_len, form);
-            return mac;
+            return eval_defmacro(S, form, args, env);
         }
         if (sym_eq(head, "declare")) {
-            /* (declare x y z) — forward declare symbols, binding to nil. */
-            mino_val_t *rest = args;
-            while (mino_is_cons(rest)) {
-                mino_val_t *sym = rest->as.cons.car;
-                char buf[256];
-                size_t n;
-                if (sym == NULL || sym->type != MINO_SYMBOL) {
-                    set_error_at(S, form, "declare: arguments must be symbols");
-                    return NULL;
-                }
-                n = sym->as.s.len;
-                if (n >= sizeof(buf)) {
-                    set_error_at(S, form, "declare: name too long");
-                    return NULL;
-                }
-                memcpy(buf, sym->as.s.data, n);
-                buf[n] = '\0';
-                env_bind(S, env_root(S, env), buf, mino_nil(S));
-                rest = rest->as.cons.cdr;
-            }
-            return mino_nil(S);
+            return eval_declare(S, form, args, env);
         }
         if (sym_eq(head, "def")) {
-            mino_val_t *name_form;
-            mino_val_t *value_form;
-            mino_val_t *value;
-            const char *doc     = NULL;
-            size_t      doc_len = 0;
-            char buf[256];
-            size_t n;
-            if (!mino_is_cons(args)) {
-                set_error_at(S, form, "def requires a name");
-                return NULL;
-            }
-            name_form  = args->as.cons.car;
-            if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-                set_error_at(S, form, "def name must be a symbol");
-                return NULL;
-            }
-            n = name_form->as.s.len;
-            if (n >= sizeof(buf)) {
-                set_error_at(S, form, "def name too long");
-                return NULL;
-            }
-            memcpy(buf, name_form->as.s.data, n);
-            buf[n] = '\0';
-            /* (def name) — declaration only, bind to nil. */
-            if (!mino_is_cons(args->as.cons.cdr)) {
-                env_bind(S, env_root(S, env), buf, mino_nil(S));
-                meta_set(S, buf, NULL, 0, form);
-                return mino_nil(S);
-            }
-            /* Optional docstring: (def name "doc" value) */
-            if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-                mino_val_t *maybe_doc = args->as.cons.cdr->as.cons.car;
-                if (maybe_doc != NULL && maybe_doc->type == MINO_STRING) {
-                    doc       = maybe_doc->as.s.data;
-                    doc_len   = maybe_doc->as.s.len;
-                    value_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-                } else {
-                    value_form = args->as.cons.cdr->as.cons.car;
-                }
-            } else {
-                value_form = args->as.cons.cdr->as.cons.car;
-            }
-            value = eval_value(S, value_form, env);
-            if (value == NULL) {
-                return NULL;
-            }
-            gc_pin(value);
-            env_bind(S, env_root(S, env), buf, value);
-            gc_unpin(1);
-            meta_set(S, buf, doc, doc_len, form);
-            return value;
+            return eval_def(S, form, args, env);
         }
         if (sym_eq(head, "if")) {
             mino_val_t *cond_form;
@@ -1794,171 +2391,10 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             return eval_implicit_do_impl(S, args, env, tail);
         }
         if (sym_eq(head, "let") || sym_eq(head, "let*")) {
-            mino_val_t *bindings;
-            mino_val_t *body;
-            mino_env_t *local;
-            if (!mino_is_cons(args)) {
-                set_error_at(S, form, "let requires a binding form and body");
-                return NULL;
-            }
-            bindings = args->as.cons.car;
-            body     = args->as.cons.cdr;
-            local = env_child(S, env);
-            if (bindings != NULL && bindings->type == MINO_VECTOR) {
-                /* Vector binding form: [pattern val pattern val ...] */
-                size_t vlen = bindings->as.vec.len;
-                size_t vi;
-                if (vlen % 2 != 0) {
-                    set_error_at(S, form, "let vector bindings must have even number of forms");
-                    return NULL;
-                }
-                for (vi = 0; vi < vlen; vi += 2) {
-                    mino_val_t *pat = vec_nth(bindings, vi);
-                    mino_val_t *val = eval_value(S, vec_nth(bindings, vi + 1), local);
-                    if (val == NULL) return NULL;
-                    gc_pin(val);
-                    if (!bind_form(S, local, pat, val, "let")) {
-                        gc_unpin(1);
-                        return NULL;
-                    }
-                    gc_unpin(1);
-                }
-            } else if (mino_is_cons(bindings) || mino_is_nil(bindings)) {
-                /* Legacy list binding form: (name val name val ...) */
-                while (mino_is_cons(bindings)) {
-                    mino_val_t *name_form = bindings->as.cons.car;
-                    mino_val_t *rest_pair = bindings->as.cons.cdr;
-                    mino_val_t *val;
-                    if (!mino_is_cons(rest_pair)) {
-                        set_error_at(S, form, "let binding missing value");
-                        return NULL;
-                    }
-                    val = eval_value(S, rest_pair->as.cons.car, local);
-                    if (val == NULL) return NULL;
-                    gc_pin(val);
-                    if (!bind_form(S, local, name_form, val, "let")) {
-                        gc_unpin(1);
-                        return NULL;
-                    }
-                    gc_unpin(1);
-                    bindings = rest_pair->as.cons.cdr;
-                }
-            } else {
-                set_error_at(S, form, "let bindings must be a list or vector");
-                return NULL;
-            }
-            return eval_implicit_do_impl(S, body, local, tail);
+            return eval_let(S, form, args, env, tail);
         }
         if (sym_eq(head, "fn") || sym_eq(head, "fn*")) {
-            mino_val_t *fn_name = NULL;
-            mino_val_t *params;
-            mino_val_t *body;
-            mino_val_t *p;
-            mino_val_t *fn_val;
-            int         multi_arity = 0;
-            if (!mino_is_cons(args)) {
-                set_error_at(S, form, "fn requires a parameter list");
-                return NULL;
-            }
-            /* Optional name: (fn name (...) body) or (fn name ([x] ...) ([x y] ...)) */
-            if (args->as.cons.car != NULL
-                && args->as.cons.car->type == MINO_SYMBOL
-                && mino_is_cons(args->as.cons.cdr)) {
-                mino_val_t *after = args->as.cons.cdr->as.cons.car;
-                if (after != NULL
-                    && (mino_is_cons(after) || mino_is_nil(after)
-                        || after->type == MINO_VECTOR)) {
-                    fn_name = args->as.cons.car;
-                    args    = args->as.cons.cdr;
-                }
-            }
-            params = args->as.cons.car;
-            body   = args->as.cons.cdr;
-            /* Detect multi-arity: (fn ([x] ...) ([x y] ...))
-             * The first arg is a list whose car is a vector or list. */
-            if (mino_is_cons(params) && params->as.cons.car != NULL
-                && (params->as.cons.car->type == MINO_VECTOR
-                    || (mino_is_cons(params->as.cons.car)
-                        || mino_is_nil(params->as.cons.car)))) {
-                /* Could be multi-arity OR single-arity with list params.
-                 * Multi-arity: each clause is (params-vec . body-forms).
-                 * Disambiguate: if car of first arg is a vector, it's
-                 * multi-arity. If car is a cons/nil, check if it looks
-                 * like a params list (all symbols) or an arity clause. */
-                if (params->as.cons.car->type == MINO_VECTOR) {
-                    multi_arity = 1;
-                }
-            }
-            if (multi_arity) {
-                /* Multi-arity: args is (([p1] body1...) ([p2] body2...) ...).
-                 * Store as: params = NULL (sentinel), body = list of
-                 * (params-vec . body-forms) clauses. */
-                mino_val_t *clauses = mino_nil(S);
-                mino_val_t *clause_tail = NULL;
-                mino_val_t *rest = args;
-                while (mino_is_cons(rest)) {
-                    mino_val_t *clause = rest->as.cons.car;
-                    mino_val_t *cparams;
-                    mino_val_t *cbody;
-                    mino_val_t *cell;
-                    if (!mino_is_cons(clause)) {
-                        set_error_at(S, form, "multi-arity clause must be a list");
-                        return NULL;
-                    }
-                    cparams = clause->as.cons.car;
-                    cbody   = clause->as.cons.cdr;
-                    if (cparams == NULL
-                        || (cparams->type != MINO_VECTOR
-                            && !mino_is_cons(cparams)
-                            && !mino_is_nil(cparams))) {
-                        set_error_at(S, form, "multi-arity clause must start with a parameter list");
-                        return NULL;
-                    }
-                    cell = mino_cons(S, mino_cons(S, cparams, cbody), mino_nil(S));
-                    if (clause_tail == NULL) {
-                        clauses = cell;
-                    } else {
-                        clause_tail->as.cons.cdr = cell;
-                    }
-                    clause_tail = cell;
-                    rest = rest->as.cons.cdr;
-                }
-                params = NULL;
-                body   = clauses;
-            } else {
-                if (!mino_is_cons(params) && !mino_is_nil(params)
-                    && params->type != MINO_VECTOR) {
-                    set_error_at(S, form, "fn parameter list must be a list or vector");
-                    return NULL;
-                }
-                /* Validate params when given as a cons list. */
-                if (mino_is_cons(params) || mino_is_nil(params)) {
-                    for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
-                        mino_val_t *name = p->as.cons.car;
-                        if (name == NULL || name->type != MINO_SYMBOL) {
-                            set_error_at(S, form, "fn parameter must be a symbol");
-                            return NULL;
-                        }
-                    }
-                }
-            }
-            if (fn_name != NULL) {
-                char nbuf[256];
-                size_t nlen = fn_name->as.s.len;
-                mino_env_t *fn_env;
-                if (nlen >= sizeof(nbuf)) {
-                    set_error_at(S, form, "fn name too long");
-                    return NULL;
-                }
-                memcpy(nbuf, fn_name->as.s.data, nlen);
-                nbuf[nlen] = '\0';
-                fn_env = env_child(S, env);
-                fn_val = make_fn(S, params, body, fn_env);
-                env_bind(S, fn_env, nbuf, fn_val);
-            } else {
-                fn_val = make_fn(S, params, body, env);
-            }
-            return fn_val;
+            return eval_fn(S, form, args, env);
         }
         if (sym_eq(head, "recur")) {
             mino_val_t *evaled = eval_args(S, args, env);
@@ -1971,404 +2407,13 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             return r;
         }
         if (sym_eq(head, "loop") || sym_eq(head, "loop*")) {
-            mino_val_t *bindings;
-            mino_val_t *body;
-            mino_val_t *params      = mino_nil(S);
-            mino_val_t *params_tail = NULL;
-            mino_env_t *local;
-            if (!mino_is_cons(args)) {
-                set_error_at(S, form, "loop requires a binding form and body");
-                return NULL;
-            }
-            bindings = args->as.cons.car;
-            body     = args->as.cons.cdr;
-            local = env_child(S, env);
-            if (bindings != NULL && bindings->type == MINO_VECTOR) {
-                /* Vector binding form: [name val name val ...] */
-                size_t vlen = bindings->as.vec.len;
-                size_t vi;
-                mino_val_t **ptmp;
-                if (vlen % 2 != 0) {
-                    set_error_at(S, form, "loop vector bindings must have even number of forms");
-                    return NULL;
-                }
-                /* Build a params vector of just the name symbols for recur. */
-                ptmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
-                            (vlen / 2) * sizeof(*ptmp));
-                for (vi = 0; vi < vlen; vi += 2) {
-                    mino_val_t *pat = vec_nth(bindings, vi);
-                    mino_val_t *val = eval_value(S, vec_nth(bindings, vi + 1), local);
-                    if (val == NULL) return NULL;
-                    gc_pin(val);
-                    if (!bind_form(S, local, pat, val, "loop")) {
-                        gc_unpin(1);
-                        return NULL;
-                    }
-                    gc_unpin(1);
-                    ptmp[vi / 2] = pat;
-                }
-                params = mino_vector(S, ptmp, vlen / 2);
-            } else if (mino_is_cons(bindings) || mino_is_nil(bindings)) {
-                /* Legacy list binding form. */
-                while (mino_is_cons(bindings)) {
-                    mino_val_t *name_form = bindings->as.cons.car;
-                    mino_val_t *rest_pair = bindings->as.cons.cdr;
-                    mino_val_t *val;
-                    mino_val_t *cell;
-                    if (!mino_is_cons(rest_pair)) {
-                        set_error_at(S, form, "loop binding missing value");
-                        return NULL;
-                    }
-                    val = eval_value(S, rest_pair->as.cons.car, local);
-                    if (val == NULL) return NULL;
-                    gc_pin(val);
-                    if (!bind_form(S, local, name_form, val, "loop")) {
-                        gc_unpin(1);
-                        return NULL;
-                    }
-                    gc_unpin(1);
-                    cell = mino_cons(S, name_form, mino_nil(S));
-                    if (params_tail == NULL) {
-                        params = cell;
-                    } else {
-                        params_tail->as.cons.cdr = cell;
-                    }
-                    params_tail = cell;
-                    bindings = rest_pair->as.cons.cdr;
-                }
-            } else {
-                set_error_at(S, form, "loop bindings must be a list or vector");
-                return NULL;
-            }
-            for (;;) {
-                mino_val_t *result = eval_implicit_do_impl(S, body, local, tail);
-                if (result == NULL) {
-                    return NULL;
-                }
-                if (result->type != MINO_RECUR) {
-                    return result;
-                }
-                if (!bind_params(S, local, params, result->as.recur.args,
-                                 "recur")) {
-                    return NULL;
-                }
-            }
+            return eval_loop(S, form, args, env, tail);
         }
-
-        /*
-         * try / catch / finally:
-         *   (try body... (catch e handler...))
-         *   (try body... (finally cleanup...))
-         *   (try body... (catch e handler...) (finally cleanup...))
-         *
-         * At least one of catch or finally must be present.  The finally
-         * clause runs unconditionally: after body succeeds, after catch
-         * handles an exception, or before re-throwing an unhandled
-         * exception.  finally does not affect the return value.
-         */
         if (sym_eq(head, "try")) {
-            mino_val_t *body_head = NULL;
-            mino_val_t *body_tail = NULL;
-            mino_val_t *catch_body = NULL;
-            mino_val_t *finally_body = NULL;
-            char        var_buf[256];
-            int         has_catch   = 0;
-            int         has_finally = 0;
-            int         saved_try   = try_depth;
-            int         saved_call  = call_depth;
-            int         saved_trace = trace_added;
-            dyn_frame_t *saved_dyn  = dyn_stack;
-            volatile int         got_exception = 0;
-            volatile mino_val_t *vol_result    = NULL;
-            volatile mino_val_t *vol_ex        = NULL;
-
-            /* Partition args into body forms, catch clause, finally clause. */
-            {
-                mino_val_t *rest = args;
-                while (mino_is_cons(rest)) {
-                    mino_val_t *clause = rest->as.cons.car;
-                    if (mino_is_cons(clause)
-                        && sym_eq(clause->as.cons.car, "catch")) {
-                        /* (catch e handler...) */
-                        mino_val_t *cv;
-                        size_t      vl;
-                        if (!mino_is_cons(clause->as.cons.cdr)) {
-                            set_error_at(S, form,
-                                "catch requires a binding symbol");
-                            return NULL;
-                        }
-                        cv = clause->as.cons.cdr->as.cons.car;
-                        if (cv == NULL || cv->type != MINO_SYMBOL) {
-                            set_error_at(S, form,
-                                "catch binding must be a symbol");
-                            return NULL;
-                        }
-                        vl = cv->as.s.len;
-                        if (vl >= sizeof(var_buf)) {
-                            set_error_at(S, form,
-                                "catch variable name too long");
-                            return NULL;
-                        }
-                        memcpy(var_buf, cv->as.s.data, vl);
-                        var_buf[vl] = '\0';
-                        catch_body = clause->as.cons.cdr->as.cons.cdr;
-                        has_catch = 1;
-                        rest = rest->as.cons.cdr;
-                        continue;
-                    }
-                    if (mino_is_cons(clause)
-                        && sym_eq(clause->as.cons.car, "finally")) {
-                        finally_body = clause->as.cons.cdr;
-                        has_finally = 1;
-                        rest = rest->as.cons.cdr;
-                        continue;
-                    }
-                    /* Body form — append to list. */
-                    {
-                        mino_val_t *cell = mino_cons(S, clause, mino_nil(S));
-                        if (body_tail == NULL) {
-                            body_head = cell;
-                        } else {
-                            body_tail->as.cons.cdr = cell;
-                        }
-                        body_tail = cell;
-                    }
-                    rest = rest->as.cons.cdr;
-                }
-            }
-
-            if (try_depth >= MAX_TRY_DEPTH) {
-                set_error_at(S, form, "try nesting too deep");
-                return NULL;
-            }
-
-            /* Phase 1: evaluate body forms. */
-            try_stack[try_depth].exception = NULL;
-            if (setjmp(try_stack[try_depth].buf) == 0) {
-                mino_val_t *r;
-                try_depth++;
-                r = eval_implicit_do(S, body_head, env);
-                try_depth = saved_try;
-                if (r == NULL) {
-                    /* Fatal runtime error. */
-                    if (has_finally)
-                        eval_implicit_do(S, finally_body, env);
-                    return NULL;
-                }
-                vol_result = r;
-            } else {
-                /* longjmp'd from throw in body. */
-                vol_ex      = try_stack[saved_try].exception;
-                try_depth   = saved_try;
-                call_depth  = saved_call;
-                trace_added = saved_trace;
-                while (dyn_stack != saved_dyn) {
-                    dyn_frame_t *f = dyn_stack;
-                    dyn_stack = f->prev;
-                    dyn_binding_list_free(f->bindings);
-                }
-                clear_error(S);
-                got_exception = 1;
-            }
-
-            /* Phase 2: run catch handler if we caught an exception. */
-            if (got_exception && has_catch) {
-                mino_val_t *ex_val =
-                    vol_ex ? (mino_val_t *)vol_ex : mino_nil(S);
-                mino_env_t *local  = env_child(S, env);
-                env_bind(S, local, var_buf, ex_val);
-
-                if (has_finally && try_depth < MAX_TRY_DEPTH) {
-                    /* Inner try frame catches re-throws from handler
-                     * so that finally still runs. */
-                    int         ic = call_depth;
-                    int         it = trace_added;
-                    int         is = try_depth; /* save before setjmp */
-                    dyn_frame_t *id = dyn_stack;
-                    try_stack[is].exception = NULL;
-                    if (setjmp(try_stack[is].buf) == 0) {
-                        mino_val_t *r;
-                        try_depth++;
-                        r = eval_implicit_do(S, catch_body, local);
-                        try_depth = is;
-                        if (r == NULL) {
-                            eval_implicit_do(S, finally_body, env);
-                            return NULL;
-                        }
-                        vol_result    = r;
-                        got_exception = 0;
-                    } else {
-                        /* Catch handler re-threw. */
-                        vol_ex      = try_stack[is].exception;
-                        try_depth   = is;
-                        call_depth  = ic;
-                        trace_added = it;
-                        while (dyn_stack != id) {
-                            dyn_frame_t *f = dyn_stack;
-                            dyn_stack = f->prev;
-                            dyn_binding_list_free(f->bindings);
-                        }
-                        clear_error(S);
-                        /* got_exception stays 1, vol_ex updated. */
-                    }
-                } else {
-                    /* No finally or nesting limit — run catch directly. */
-                    mino_val_t *r =
-                        eval_implicit_do(S, catch_body, local);
-                    if (r == NULL) {
-                        if (has_finally)
-                            eval_implicit_do(S, finally_body, env);
-                        return NULL;
-                    }
-                    vol_result    = r;
-                    got_exception = 0;
-                }
-            }
-
-            /* Phase 3: run finally unconditionally. */
-            if (has_finally) {
-                eval_implicit_do(S, finally_body, env);
-            }
-
-            /* Phase 4: re-throw if exception was not handled. */
-            if (got_exception) {
-                mino_val_t *e = (mino_val_t *)vol_ex;
-                if (try_depth > 0) {
-                    try_stack[try_depth - 1].exception = e;
-                    longjmp(try_stack[try_depth - 1].buf, 1);
-                }
-                if (e != NULL && e->type == MINO_STRING) {
-                    char msg[512];
-                    snprintf(msg, sizeof(msg),
-                             "unhandled exception: %.*s",
-                             (int)e->as.s.len, e->as.s.data);
-                    set_error(S, msg);
-                } else {
-                    set_error(S, "unhandled exception");
-                }
-                return NULL;
-            }
-
-            return (mino_val_t *)vol_result;
+            return eval_try(S, form, args, env);
         }
-
-        /*
-         * binding: (binding (name1 val1 name2 val2 ...) body...)
-         * Pushes a dynamic binding frame, evaluates body forms, then pops
-         * the frame (even on error, via setjmp/longjmp cleanup).
-         */
         if (sym_eq(head, "binding")) {
-            mino_val_t *pairs, *body, *result;
-            dyn_frame_t frame;
-            dyn_binding_t *bhead = NULL;
-            if (!mino_is_cons(args)) {
-                set_error_at(S, form, "binding requires a binding list and body");
-                return NULL;
-            }
-            pairs = args->as.cons.car;
-            body  = args->as.cons.cdr;
-            if (pairs != NULL && pairs->type == MINO_VECTOR) {
-                /* Vector binding form: [sym val sym val ...] */
-                size_t vlen = pairs->as.vec.len;
-                size_t vi;
-                if (vlen % 2 != 0) {
-                    set_error_at(S, form, "binding: odd number of forms in binding vector");
-                    return NULL;
-                }
-                for (vi = 0; vi < vlen; vi += 2) {
-                    mino_val_t *sym_v = vec_nth(pairs, vi);
-                    mino_val_t *val_form = vec_nth(pairs, vi + 1);
-                    mino_val_t *val;
-                    dyn_binding_t *b;
-                    char nbuf[256];
-                    size_t nlen;
-                    if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
-                        set_error_at(S, form, "binding: names must be symbols");
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    nlen = sym_v->as.s.len;
-                    if (nlen >= sizeof(nbuf)) {
-                        set_error_at(S, form, "binding: name too long");
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    memcpy(nbuf, sym_v->as.s.data, nlen);
-                    nbuf[nlen] = '\0';
-                    val = eval(S, val_form, env);
-                    if (val == NULL) {
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    b = (dyn_binding_t *)malloc(sizeof(*b));
-                    if (b == NULL) {
-                        set_error_at(S, form, "binding: out of memory");
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
-                    b->val  = val;
-                    b->next = bhead;
-                    bhead   = b;
-                }
-            } else if (mino_is_cons(pairs)) {
-                /* Legacy list binding form: (sym val sym val ...) */
-                while (pairs != NULL && pairs->type == MINO_CONS) {
-                    mino_val_t *sym_v, *val_form, *val;
-                    dyn_binding_t *b;
-                    char nbuf[256];
-                    size_t nlen;
-                    sym_v = pairs->as.cons.car;
-                    if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
-                        set_error_at(S, form, "binding: names must be symbols");
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    nlen = sym_v->as.s.len;
-                    if (nlen >= sizeof(nbuf)) {
-                        set_error_at(S, form, "binding: name too long");
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    memcpy(nbuf, sym_v->as.s.data, nlen);
-                    nbuf[nlen] = '\0';
-                    pairs = pairs->as.cons.cdr;
-                    if (pairs == NULL || pairs->type != MINO_CONS) {
-                        set_error_at(S, form, "binding: odd number of forms in binding list");
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    val_form = pairs->as.cons.car;
-                    pairs    = pairs->as.cons.cdr;
-                    val = eval(S, val_form, env);
-                    if (val == NULL) {
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    b = (dyn_binding_t *)malloc(sizeof(*b));
-                    if (b == NULL) {
-                        set_error_at(S, form, "binding: out of memory");
-                        dyn_binding_list_free(bhead);
-                        return NULL;
-                    }
-                    b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
-                    b->val  = val;
-                    b->next = bhead;
-                    bhead   = b;
-                }
-            } else {
-                set_error_at(S, form, "binding requires a binding list and body");
-                return NULL;
-            }
-            /* Push frame. */
-            frame.bindings = bhead;
-            frame.prev     = dyn_stack;
-            dyn_stack      = &frame;
-            result = eval_implicit_do(S, body, env);
-            /* Pop frame. */
-            dyn_stack = frame.prev;
-            dyn_binding_list_free(bhead);
-            return result;
+            return eval_binding(S, form, args, env);
         }
 
         if (sym_eq(head, "lazy-seq")) {
