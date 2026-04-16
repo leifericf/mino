@@ -115,6 +115,16 @@ void mino_unref(mino_state_t *S, mino_ref_t *ref)
     free(ref);
 }
 
+/* Free a chain of dynamic bindings (node storage only). */
+static void dyn_binding_list_free(dyn_binding_t *head)
+{
+    while (head != NULL) {
+        dyn_binding_t *next = head->next;
+        free(head);
+        head = next;
+    }
+}
+
 /* Look up a name in the dynamic binding stack.  Returns the value if
  * found, NULL otherwise. */
 mino_val_t *dyn_lookup(mino_state_t *S, const char *name)
@@ -2153,14 +2163,9 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 call_depth  = saved_call;
                 trace_added = saved_trace;
                 while (dyn_stack != saved_dyn) {
-                    dyn_frame_t   *f = dyn_stack;
-                    dyn_binding_t *b = f->bindings;
+                    dyn_frame_t *f = dyn_stack;
                     dyn_stack = f->prev;
-                    while (b) {
-                        dyn_binding_t *next = b->next;
-                        free(b);
-                        b = next;
-                    }
+                    dyn_binding_list_free(f->bindings);
                 }
                 clear_error(S);
                 got_exception = 1;
@@ -2199,14 +2204,9 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                         call_depth  = ic;
                         trace_added = it;
                         while (dyn_stack != id) {
-                            dyn_frame_t   *f = dyn_stack;
-                            dyn_binding_t *b = f->bindings;
+                            dyn_frame_t *f = dyn_stack;
                             dyn_stack = f->prev;
-                            while (b) {
-                                dyn_binding_t *next = b->next;
-                                free(b);
-                                b = next;
-                            }
+                            dyn_binding_list_free(f->bindings);
                         }
                         clear_error(S);
                         /* got_exception stays 1, vol_ex updated. */
@@ -2284,23 +2284,28 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     size_t nlen;
                     if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
                         set_error_at(S, form, "binding: names must be symbols");
-                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        dyn_binding_list_free(bhead);
                         return NULL;
                     }
                     nlen = sym_v->as.s.len;
                     if (nlen >= sizeof(nbuf)) {
                         set_error_at(S, form, "binding: name too long");
-                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        dyn_binding_list_free(bhead);
                         return NULL;
                     }
                     memcpy(nbuf, sym_v->as.s.data, nlen);
                     nbuf[nlen] = '\0';
                     val = eval(S, val_form, env);
                     if (val == NULL) {
-                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        dyn_binding_list_free(bhead);
                         return NULL;
                     }
                     b = (dyn_binding_t *)malloc(sizeof(*b));
+                    if (b == NULL) {
+                        set_error_at(S, form, "binding: out of memory");
+                        dyn_binding_list_free(bhead);
+                        return NULL;
+                    }
                     b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
                     b->val  = val;
                     b->next = bhead;
@@ -2316,13 +2321,13 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     sym_v = pairs->as.cons.car;
                     if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
                         set_error_at(S, form, "binding: names must be symbols");
-                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        dyn_binding_list_free(bhead);
                         return NULL;
                     }
                     nlen = sym_v->as.s.len;
                     if (nlen >= sizeof(nbuf)) {
                         set_error_at(S, form, "binding: name too long");
-                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        dyn_binding_list_free(bhead);
                         return NULL;
                     }
                     memcpy(nbuf, sym_v->as.s.data, nlen);
@@ -2330,17 +2335,22 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     pairs = pairs->as.cons.cdr;
                     if (pairs == NULL || pairs->type != MINO_CONS) {
                         set_error_at(S, form, "binding: odd number of forms in binding list");
-                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        dyn_binding_list_free(bhead);
                         return NULL;
                     }
                     val_form = pairs->as.cons.car;
                     pairs    = pairs->as.cons.cdr;
                     val = eval(S, val_form, env);
                     if (val == NULL) {
-                        while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+                        dyn_binding_list_free(bhead);
                         return NULL;
                     }
                     b = (dyn_binding_t *)malloc(sizeof(*b));
+                    if (b == NULL) {
+                        set_error_at(S, form, "binding: out of memory");
+                        dyn_binding_list_free(bhead);
+                        return NULL;
+                    }
                     b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
                     b->val  = val;
                     b->next = bhead;
@@ -2357,7 +2367,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             result = eval_implicit_do(S, body, env);
             /* Pop frame. */
             dyn_stack = frame.prev;
-            while (bhead) { dyn_binding_t *n = bhead->next; free(bhead); bhead = n; }
+            dyn_binding_list_free(bhead);
             return result;
         }
 
