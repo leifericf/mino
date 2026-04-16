@@ -294,7 +294,7 @@
     (reduce (fn [acc m]
       (if m
         (reduce (fn [a kv] (assoc a (first kv) (second kv)))
-                (or acc {}) (seq m))
+                (if acc acc (with-meta {} (meta m))) (seq m))
         acc))
       nil maps))))
 
@@ -303,7 +303,7 @@
     (if (contains? m k)
       (assoc acc k (get m k))
       acc))
-    {} ks)))
+    (with-meta {} (meta m)) ks)))
 
 (def find (fn [m k]
   (when (contains? m k) (vector k (get m k)))))
@@ -672,7 +672,7 @@
             (if (contains? a k)
               (assoc a k (f (get a k) v))
               (assoc a k v))))
-          (or acc {}) (seq m))
+          (if acc acc (with-meta {} (meta m))) (seq m))
         acc))
       nil maps))))
 
@@ -683,7 +683,7 @@
 (def replace (fn [smap coll]
   (let [f (fn [x] (if-let [e (find smap x)] (val e) x))]
     (if (vector? coll)
-      (mapv f coll)
+      (with-meta (mapv f coll) (meta coll))
       (map f coll)))))
 
 (def str-replace (fn [s match replacement]

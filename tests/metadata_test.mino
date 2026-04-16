@@ -82,12 +82,12 @@
 
 ;; --- Metadata preserved through operations ---
 
-(deftest metadata-not-preserved-by-operations
-  (testing "conj does not preserve metadata"
+(deftest metadata-preserved-by-operations
+  (testing "conj preserves metadata"
     (let [v (with-meta [1 2] {:tag "x"})
           v2 (conj v 3)]
-      (is (nil? (meta v2)))))
-  (testing "assoc on map does not preserve metadata"
+      (is (= {:tag "x"} (meta v2)))))
+  (testing "assoc on map preserves metadata"
     (let [m (with-meta {:a 1} {:doc "y"})
           m2 (assoc m :b 2)]
-      (is (nil? (meta m2))))))
+      (is (= {:doc "y"} (meta m2))))))
