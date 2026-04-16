@@ -1772,7 +1772,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         if (sym_eq(head, "do")) {
             return eval_implicit_do_impl(S, args, env, tail);
         }
-        if (sym_eq(head, "let")) {
+        if (sym_eq(head, "let") || sym_eq(head, "let*")) {
             mino_val_t *bindings;
             mino_val_t *body;
             mino_env_t *local;
@@ -1828,7 +1828,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             }
             return eval_implicit_do_impl(S, body, local, tail);
         }
-        if (sym_eq(head, "fn")) {
+        if (sym_eq(head, "fn") || sym_eq(head, "fn*")) {
             mino_val_t *fn_name = NULL;
             mino_val_t *params;
             mino_val_t *body;
@@ -1949,7 +1949,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             r->as.recur.args = evaled;
             return r;
         }
-        if (sym_eq(head, "loop")) {
+        if (sym_eq(head, "loop") || sym_eq(head, "loop*")) {
             mino_val_t *bindings;
             mino_val_t *body;
             mino_val_t *params      = mino_nil(S);
