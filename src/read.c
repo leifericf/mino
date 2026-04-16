@@ -44,7 +44,7 @@ static int is_ws(char c)
 static int is_terminator(char c)
 {
     return c == '\0' || c == '(' || c == ')' || c == '[' || c == ']'
-        || c == '{' || c == '}' || c == '\'' || c == '"' || c == ';'
+        || c == '{' || c == '}' || c == '"' || c == ';'
         || c == '`'  || c == '~' || c == '@' || c == '^'
         || is_ws(c);
 }
