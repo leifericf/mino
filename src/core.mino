@@ -253,9 +253,7 @@
                   ([x y] (= (+ 0.0 x) (+ 0.0 y)))
                   ([x y & more]
                     (if (== x y)
-                      (if (next more)
-                        (recur y (first more) (next more))
-                        (== y (first more)))
+                      (apply == y more)
                       false))))
 (def pos?       (fn [x] (> x 0)))
 (def neg?       (fn [x] (< x 0)))

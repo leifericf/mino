@@ -31,5 +31,6 @@
 (require "tests/iteration_test")
 (require "tests/metadata_test")
 (require "tests/transducer_test")
+(require "tests/dialect_test")
 
 (run-tests)
