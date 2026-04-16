@@ -21,10 +21,6 @@ variadic form. ~10 lines in core.mino.
 collection. Currently only set literals `#{...}` and `(into #{} coll)`
 work. ~10 lines.
 
-**`ex-info` / `ex-data`** -- structured exceptions. `(throw (ex-info
-"msg" {:key val}))` with `(ex-data e)` in catch. Currently `throw`
-takes any value, but `ex-info` provides a standard structure. ~30 lines.
-
 **Multi-collection `map`** -- `(map f coll1 coll2 ...)` applying `f`
 to corresponding elements of multiple collections. Currently `map`
 only accepts one collection. ~30 lines in core.mino.
