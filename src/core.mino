@@ -600,8 +600,10 @@
 
 ;; --- Collection utilities ---
 
-(def get-in (fn [m ks]
-  (reduce get m ks)))
+(def get-in (fn
+  ([m ks]     (reduce get m ks))
+  ([m ks nf]  (let [v (reduce get m ks)]
+                (if (nil? v) nf v)))))
 
 (def assoc-in (fn [m ks v]
   (let [k (first ks)]
