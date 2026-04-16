@@ -8,10 +8,6 @@ language and embedding API items.
 
 ### Nice-to-have
 
-**Protocols** -- polymorphic dispatch on first argument's type.
-`defprotocol`, `extend-type`, `extend-protocol`. Enables extensible
-abstractions. ~400 lines.
-
 **Value metadata** -- arbitrary key-value metadata on any value.
 `with-meta`, `meta`, `vary-meta`. Reader syntax `^{:key val} form`.
 Currently only docstrings on `def`/`defmacro` via the internal
