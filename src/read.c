@@ -473,14 +473,27 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
     if (form->type == MINO_VECTOR) {
         size_t      i;
         int         changed = 0;
-        mino_val_t *items[64]; /* plenty for fn bodies */
+        mino_val_t *stack_items[64];
+        mino_val_t **items;
         size_t      len = form->as.vec.len;
-        if (len > 64) return form;
+        if (len <= 64) {
+            items = stack_items;
+        } else {
+            items = (mino_val_t **)malloc(len * sizeof(*items));
+            if (items == NULL) {
+                set_error(S, "out of memory in anonymous fn expansion");
+                return NULL;
+            }
+        }
         for (i = 0; i < len; i++) {
             items[i] = normalize_percent(S, vec_nth(form, i));
             if (items[i] != vec_nth(form, i)) changed = 1;
         }
-        return changed ? mino_vector(S, items, len) : form;
+        {
+            mino_val_t *result = changed ? mino_vector(S, items, len) : form;
+            if (items != stack_items) free(items);
+            return result;
+        }
     }
     return form;
 }
