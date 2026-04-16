@@ -4,14 +4,6 @@ What remains for mino to be complete at its intended scale. Tooling
 (tree-sitter-mino, mino-lsp, mino-nrepl) is done. These are core
 language and embedding API items.
 
-## Language
-
-### Nice-to-have
-
-**Transducers** -- `transduce`, `eduction`, `into` with xform.
-Composable algorithmic transformations. Requires protocol-level
-abstractions or a simpler approach. ~400 lines.
-
 ## C/C++ Interop
 
 mino is a GC'd language embedded inside unmanaged C/C++ programs. This
