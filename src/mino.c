@@ -1650,6 +1650,29 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             meta_set(S, buf, doc, doc_len, form);
             return mac;
         }
+        if (sym_eq(head, "declare")) {
+            /* (declare x y z) — forward declare symbols, binding to nil. */
+            mino_val_t *rest = args;
+            while (mino_is_cons(rest)) {
+                mino_val_t *sym = rest->as.cons.car;
+                char buf[256];
+                size_t n;
+                if (sym == NULL || sym->type != MINO_SYMBOL) {
+                    set_error_at(S, form, "declare: arguments must be symbols");
+                    return NULL;
+                }
+                n = sym->as.s.len;
+                if (n >= sizeof(buf)) {
+                    set_error_at(S, form, "declare: name too long");
+                    return NULL;
+                }
+                memcpy(buf, sym->as.s.data, n);
+                buf[n] = '\0';
+                env_bind(S, env_root(S, env), buf, mino_nil(S));
+                rest = rest->as.cons.cdr;
+            }
+            return mino_nil(S);
+        }
         if (sym_eq(head, "def")) {
             mino_val_t *name_form;
             mino_val_t *value_form;
