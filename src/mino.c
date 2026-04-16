@@ -1702,14 +1702,27 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             size_t      doc_len = 0;
             char buf[256];
             size_t n;
-            if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-                set_error_at(S, form, "def requires a name and a value");
+            if (!mino_is_cons(args)) {
+                set_error_at(S, form, "def requires a name");
                 return NULL;
             }
             name_form  = args->as.cons.car;
             if (name_form == NULL || name_form->type != MINO_SYMBOL) {
                 set_error_at(S, form, "def name must be a symbol");
                 return NULL;
+            }
+            n = name_form->as.s.len;
+            if (n >= sizeof(buf)) {
+                set_error_at(S, form, "def name too long");
+                return NULL;
+            }
+            memcpy(buf, name_form->as.s.data, n);
+            buf[n] = '\0';
+            /* (def name) — declaration only, bind to nil. */
+            if (!mino_is_cons(args->as.cons.cdr)) {
+                env_bind(S, env_root(S, env), buf, mino_nil(S));
+                meta_set(S, buf, NULL, 0, form);
+                return mino_nil(S);
             }
             /* Optional docstring: (def name "doc" value) */
             if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1724,13 +1737,6 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             } else {
                 value_form = args->as.cons.cdr->as.cons.car;
             }
-            n = name_form->as.s.len;
-            if (n >= sizeof(buf)) {
-                set_error_at(S, form, "def name too long");
-                return NULL;
-            }
-            memcpy(buf, name_form->as.s.data, n);
-            buf[n] = '\0';
             value = eval_value(S, value_form, env);
             if (value == NULL) {
                 return NULL;
