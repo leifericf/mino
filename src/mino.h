@@ -53,6 +53,7 @@ typedef void (*mino_finalizer_fn)(void *ptr, const char *tag);
 
 struct mino_val {
     mino_type_t type;
+    mino_val_t *meta;     /* metadata map (NULL when absent) */
     union {
         int b;            /* MINO_BOOL: 0 or 1 */
         long long i;      /* MINO_INT */
@@ -268,6 +269,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
  *   sequences    seq realized? reduce into apply reverse sort
  *   predicates   cons? nil? string? number? keyword? symbol? vector? map?
  *                set? fn? empty?
+ *   metadata     meta with-meta vary-meta
  *   utility      not identity
  *   coercion     int float
  *   reflection   type name doc source apropos

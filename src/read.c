@@ -45,7 +45,7 @@ static int is_terminator(char c)
 {
     return c == '\0' || c == '(' || c == ')' || c == '[' || c == ']'
         || c == '{' || c == '}' || c == '\'' || c == '"' || c == ';'
-        || c == '`'  || c == '~' || c == '@'
+        || c == '`'  || c == '~' || c == '@' || c == '^'
         || is_ws(c);
 }
 
@@ -626,6 +626,47 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             outer->as.cons.line = q_line;
             return outer;
         }
+    }
+    if (**p == '^') {
+        /* Metadata reader syntax:
+         *   ^{:k v} form  => (with-meta form {:k v})
+         *   ^:k form      => (with-meta form {:k true})
+         */
+        int m_line = reader_line;
+        mino_val_t *meta_val, *target, *outer;
+        (*p)++;
+        meta_val = read_form(S, p);
+        if (meta_val == NULL) {
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "expected metadata after ^");
+            }
+            return NULL;
+        }
+        /* ^:key shorthand: expand to {:key true}. */
+        if (meta_val->type == MINO_KEYWORD) {
+            mino_val_t *kv[1], *vv[1];
+            kv[0] = meta_val;
+            vv[0] = mino_true(S);
+            meta_val = mino_map(S, kv, vv, 1);
+        }
+        if (meta_val->type != MINO_MAP) {
+            set_error(S, "metadata must be a map or keyword");
+            return NULL;
+        }
+        target = read_form(S, p);
+        if (target == NULL) {
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "expected form after metadata");
+            }
+            return NULL;
+        }
+        /* Desugar to (with-meta target meta-map). */
+        outer = mino_cons(S, mino_symbol(S, "with-meta"),
+                    mino_cons(S, target,
+                        mino_cons(S, meta_val, mino_nil(S))));
+        outer->as.cons.file = reader_file;
+        outer->as.cons.line = m_line;
+        return outer;
     }
     if (**p == '~') {
         int         q_line = reader_line;

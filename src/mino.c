@@ -231,6 +231,7 @@ mino_val_t *alloc_val(mino_state_t *S, mino_type_t type)
 {
     mino_val_t *v = (mino_val_t *)gc_alloc_typed(S, GC_T_VAL, sizeof(*v));
     v->type = type;
+    v->meta = NULL;
     return v;
 }
 
@@ -597,6 +598,8 @@ static void gc_mark_val(mino_state_t *S, mino_val_t *v)
     if (v == NULL) {
         return;
     }
+    /* Metadata can be attached to any value type. */
+    gc_mark_interior(S, v->meta);
     switch (v->type) {
     case MINO_STRING:
     case MINO_SYMBOL:

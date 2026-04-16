@@ -933,6 +933,101 @@ static mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args,
     return (a == b) ? mino_true(S) : mino_false(S);
 }
 
+/* --- Metadata primitives ------------------------------------------------- */
+
+/*
+ * Return 1 if the type supports value metadata, 0 otherwise.
+ * Supported: symbols, cons, vectors, maps, sets, fns/macros.
+ */
+static int supports_meta(mino_type_t t)
+{
+    return t == MINO_SYMBOL || t == MINO_CONS || t == MINO_VECTOR
+        || t == MINO_MAP    || t == MINO_SET  || t == MINO_FN
+        || t == MINO_MACRO;
+}
+
+/* (meta obj) — return the metadata map, or nil if none. */
+static mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
+                             mino_env_t *env)
+{
+    mino_val_t *obj;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        set_error(S, "meta requires 1 argument");
+        return NULL;
+    }
+    obj = args->as.cons.car;
+    if (obj == NULL || obj->meta == NULL) {
+        return mino_nil(S);
+    }
+    return obj->meta;
+}
+
+/*
+ * (with-meta obj m) — return a shallow copy of obj with metadata m.
+ * m must be a map or nil.
+ */
+static mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    mino_val_t *obj, *m, *copy;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "with-meta requires 2 arguments");
+        return NULL;
+    }
+    obj = args->as.cons.car;
+    m   = args->as.cons.cdr->as.cons.car;
+    if (obj == NULL || !supports_meta(obj->type)) {
+        set_error(S, "with-meta: type does not support metadata");
+        return NULL;
+    }
+    if (m != NULL && m->type != MINO_NIL && m->type != MINO_MAP) {
+        set_error(S, "with-meta: metadata must be a map or nil");
+        return NULL;
+    }
+    /* Shallow-copy the value and attach the new metadata. */
+    copy = alloc_val(S, obj->type);
+    copy->as = obj->as;
+    copy->meta = (m != NULL && m->type == MINO_NIL) ? NULL : m;
+    return copy;
+}
+
+/*
+ * (vary-meta obj f & args) — return (with-meta obj (apply f (meta obj) args)).
+ */
+static mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta, *copy;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "vary-meta requires at least 2 arguments");
+        return NULL;
+    }
+    obj = args->as.cons.car;
+    f   = args->as.cons.cdr->as.cons.car;
+    extra = args->as.cons.cdr->as.cons.cdr; /* remaining args (cons list or nil) */
+    if (obj == NULL || !supports_meta(obj->type)) {
+        set_error(S, "vary-meta: type does not support metadata");
+        return NULL;
+    }
+    old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
+    /* Build (old-meta extra...) argument list for f. */
+    call_args = mino_cons(S, old_meta, extra);
+    new_meta = mino_call(S, f, call_args, env);
+    if (new_meta == NULL) {
+        return NULL;
+    }
+    if (new_meta->type != MINO_NIL && new_meta->type != MINO_MAP) {
+        set_error(S, "vary-meta: f must return a map or nil");
+        return NULL;
+    }
+    copy = alloc_val(S, obj->type);
+    copy->as = obj->as;
+    copy->meta = (new_meta->type == MINO_NIL) ? NULL : new_meta;
+    return copy;
+}
+
 /*
  * Chained numeric comparison. `op` selects the relation:
  *   0: <    1: <=    2: >    3: >=
@@ -3635,6 +3730,9 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "/",        mino_prim(S, "/",        prim_div));
     mino_env_set(S, env, "=",        mino_prim(S, "=",        prim_eq));
     mino_env_set(S, env, "identical?", mino_prim(S, "identical?", prim_identical));
+    mino_env_set(S, env, "meta",      mino_prim(S, "meta",      prim_meta));
+    mino_env_set(S, env, "with-meta", mino_prim(S, "with-meta", prim_with_meta));
+    mino_env_set(S, env, "vary-meta", mino_prim(S, "vary-meta", prim_vary_meta));
     mino_env_set(S, env, "<",        mino_prim(S, "<",        prim_lt));
     mino_env_set(S, env, "mod",      mino_prim(S, "mod",      prim_mod));
     mino_env_set(S, env, "rem",      mino_prim(S, "rem",      prim_rem));

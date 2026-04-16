@@ -8,6 +8,20 @@
 /* Value cloning (cross-state transfer)                                      */
 /* ------------------------------------------------------------------------- */
 
+static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v);
+
+/* Clone metadata if present, attaching it to the cloned value. */
+static int clone_meta(mino_state_t *dst, const mino_val_t *src,
+                      mino_val_t *out)
+{
+    mino_val_t *m;
+    if (src->meta == NULL) return 0;
+    m = clone_val(dst, src->meta);
+    if (m == NULL) return -1;
+    out->meta = m;
+    return 0;
+}
+
 static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
 {
     if (v == NULL) return mino_nil(dst);
@@ -18,7 +32,13 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     case MINO_INT:    return mino_int(dst, v->as.i);
     case MINO_FLOAT:  return mino_float(dst, v->as.f);
     case MINO_STRING: return mino_string_n(dst, v->as.s.data, v->as.s.len);
-    case MINO_SYMBOL: return mino_symbol_n(dst, v->as.s.data, v->as.s.len);
+    case MINO_SYMBOL: {
+        mino_val_t *r = mino_symbol_n(dst, v->as.s.data, v->as.s.len);
+        if (r != NULL && v->meta != NULL) {
+            if (clone_meta(dst, v, r) != 0) return NULL;
+        }
+        return r;
+    }
     case MINO_KEYWORD:return mino_keyword_n(dst, v->as.s.data, v->as.s.len);
     case MINO_CONS: {
         mino_val_t *car = clone_val(dst, v->as.cons.car);
@@ -35,7 +55,11 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         }
         car = mino_deref(rcar);
         mino_unref(dst, rcar);
-        return mino_cons(dst, car, cdr);
+        {
+            mino_val_t *r = mino_cons(dst, car, cdr);
+            if (clone_meta(dst, v, r) != 0) return NULL;
+            return r;
+        }
     }
     case MINO_VECTOR: {
         size_t len = v->as.vec.len;
@@ -67,6 +91,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         for (i = 0; i < len; i++) mino_unref(dst, refs[i]);
         free(items);
         free(refs);
+        if (clone_meta(dst, v, result) != 0) return NULL;
         return result;
     }
     case MINO_MAP: {
@@ -116,6 +141,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
             mino_unref(dst, vrefs[i]);
         }
         free(keys); free(vals); free(krefs); free(vrefs);
+        if (clone_meta(dst, v, result) != 0) return NULL;
         return result;
     }
     case MINO_SET: {
@@ -145,6 +171,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         for (i = 0; i < len; i++) mino_unref(dst, refs[i]);
         free(items);
         free(refs);
+        if (clone_meta(dst, v, result) != 0) return NULL;
         return result;
     }
     /* Non-transferable types. */
