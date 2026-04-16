@@ -177,13 +177,22 @@ static mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 static mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    /* Division always yields a float result for now. */
+    /* Division returns an integer when all operands are integers and the
+     * result is exact, a float otherwise. */
     double acc;
+    int all_int = 1;
     (void)env;
     if (!mino_is_cons(args)) {
         set_error(S, "/ requires at least one argument");
         return NULL;
     }
+    if (args->as.cons.car == NULL
+        || (args->as.cons.car->type != MINO_INT
+            && args->as.cons.car->type != MINO_FLOAT)) {
+        set_error(S, "/ expects numbers");
+        return NULL;
+    }
+    if (args->as.cons.car->type == MINO_FLOAT) all_int = 0;
     if (!as_double(args->as.cons.car, &acc)) {
         set_error(S, "/ expects numbers");
         return NULL;
@@ -197,6 +206,13 @@ static mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     while (mino_is_cons(args)) {
         double x;
+        if (args->as.cons.car == NULL
+            || (args->as.cons.car->type != MINO_INT
+                && args->as.cons.car->type != MINO_FLOAT)) {
+            set_error(S, "/ expects numbers");
+            return NULL;
+        }
+        if (args->as.cons.car->type == MINO_FLOAT) all_int = 0;
         if (!as_double(args->as.cons.car, &x)) {
             set_error(S, "/ expects numbers");
             return NULL;
@@ -206,6 +222,10 @@ static mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         acc /= x;
         args = args->as.cons.cdr;
+    }
+    /* Return integer when all operands were ints and result is exact. */
+    if (all_int && acc == (double)(long long)acc) {
+        return mino_int(S, (long long)acc);
     }
     return mino_float(S, acc);
 }
