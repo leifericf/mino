@@ -287,10 +287,13 @@
 ;; --- Collection utilities ---
 
 (def merge (fn [& maps]
-  (reduce (fn [acc m]
-    (reduce (fn [a kv] (assoc a (first kv) (second kv)))
-            acc (seq m)))
-          {} maps)))
+  (when (some identity maps)
+    (reduce (fn [acc m]
+      (if m
+        (reduce (fn [a kv] (assoc a (first kv) (second kv)))
+                (or acc {}) (seq m))
+        acc))
+      nil maps))))
 
 (def select-keys (fn [m ks]
   (reduce (fn [acc k]
