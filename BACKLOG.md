@@ -8,27 +8,6 @@ language and embedding API items.
 
 ### Nice-to-have
 
-**Variadic `comp`** -- compose N functions. Currently `comp` only
-accepts two arguments: `(comp f g)`. The reference language supports
-`(comp f g h ...)`. Change from fixed 2-arity fn to a reduce-based
-variadic form. ~10 lines in core.mino.
-
-**`reduced`** -- early termination for `reduce`. `(reduce (fn [acc x]
-(if (> x 5) (reduced acc) (+ acc x))) 0 (range 100))`. Requires a
-`Reduced` wrapper type and check in the reduce loop. ~40 lines.
-
-**`set` constructor function** -- `(set coll)` to create a set from a
-collection. Currently only set literals `#{...}` and `(into #{} coll)`
-work. ~10 lines.
-
-**Multi-collection `map`** -- `(map f coll1 coll2 ...)` applying `f`
-to corresponding elements of multiple collections. Currently `map`
-only accepts one collection. ~30 lines in core.mino.
-
-**`format` precision specifiers** -- `(format "%.2f" 3.14)` currently
-returns the literal `"%.2f"`. The format parser handles `%d`, `%s`,
-`%f` but not width/precision modifiers like `%.2f` or `%04d`. ~40 lines.
-
 **Protocols** -- polymorphic dispatch on first argument's type.
 `defprotocol`, `extend-type`, `extend-protocol`. Enables extensible
 abstractions. ~400 lines.
@@ -41,10 +20,6 @@ Currently only docstrings on `def`/`defmacro` via the internal
 
 **`identical?`** -- pointer identity comparison. C primitive checking
 `a == b` without value comparison. ~10 lines.
-
-**`declare`** -- forward declaration. `(def x)` without a value, or
-`(declare x y z)`. Needed for mutually recursive definitions without
-`defn`. ~20 lines.
 
 **`with-open`** -- resource management. `(with-open (f (open path)) body)`.
 Needs `try/finally` in the evaluator. ~50 lines for `finally` + ~20
