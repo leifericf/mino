@@ -919,6 +919,20 @@ static mino_val_t *prim_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_true(S);
 }
 
+static mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    mino_val_t *a, *b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "identical? requires 2 arguments");
+        return NULL;
+    }
+    a = args->as.cons.car;
+    b = args->as.cons.cdr->as.cons.car;
+    return (a == b) ? mino_true(S) : mino_false(S);
+}
+
 /*
  * Chained numeric comparison. `op` selects the relation:
  *   0: <    1: <=    2: >    3: >=
@@ -3620,6 +3634,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "*",        mino_prim(S, "*",        prim_mul));
     mino_env_set(S, env, "/",        mino_prim(S, "/",        prim_div));
     mino_env_set(S, env, "=",        mino_prim(S, "=",        prim_eq));
+    mino_env_set(S, env, "identical?", mino_prim(S, "identical?", prim_identical));
     mino_env_set(S, env, "<",        mino_prim(S, "<",        prim_lt));
     mino_env_set(S, env, "mod",      mino_prim(S, "mod",      prim_mod));
     mino_env_set(S, env, "rem",      mino_prim(S, "rem",      prim_rem));

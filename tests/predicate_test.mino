@@ -66,4 +66,10 @@
     (is (= false (boolean nil))))
   (testing "not-empty"
     (is (= [1] (not-empty [1])))
-    (is (= nil (not-empty [])))))
+    (is (= nil (not-empty []))))
+  (testing "identical?"
+    (let [v [1 2]]
+      (is (identical? v v))
+      (is (not (identical? [1 2] [1 2]))))
+    (is (identical? :a :a))
+    (is (identical? nil nil))))
