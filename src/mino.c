@@ -1779,18 +1779,16 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             mino_val_t *body;
             mino_val_t *p;
             mino_val_t *fn_val;
+            int         multi_arity = 0;
             if (!mino_is_cons(args)) {
                 set_error_at(S, form, "fn requires a parameter list");
                 return NULL;
             }
-            /* Optional name: (fn name (...) body) */
+            /* Optional name: (fn name (...) body) or (fn name ([x] ...) ([x y] ...)) */
             if (args->as.cons.car != NULL
                 && args->as.cons.car->type == MINO_SYMBOL
                 && mino_is_cons(args->as.cons.cdr)) {
                 mino_val_t *after = args->as.cons.cdr->as.cons.car;
-                /* Disambiguate: a symbol followed by a list/vector/nil
-                 * is a named fn; a symbol followed by a symbol is a
-                 * one-param anonymous fn like (fn x ...). */
                 if (after != NULL
                     && (mino_is_cons(after) || mino_is_nil(after)
                         || after->type == MINO_VECTOR)) {
@@ -1800,24 +1798,75 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             }
             params = args->as.cons.car;
             body   = args->as.cons.cdr;
-            if (!mino_is_cons(params) && !mino_is_nil(params)
-                && params->type != MINO_VECTOR) {
-                set_error_at(S, form, "fn parameter list must be a list or vector");
-                return NULL;
+            /* Detect multi-arity: (fn ([x] ...) ([x y] ...))
+             * The first arg is a list whose car is a vector or list. */
+            if (mino_is_cons(params) && params->as.cons.car != NULL
+                && (params->as.cons.car->type == MINO_VECTOR
+                    || (mino_is_cons(params->as.cons.car)
+                        || mino_is_nil(params->as.cons.car)))) {
+                /* Could be multi-arity OR single-arity with list params.
+                 * Multi-arity: each clause is (params-vec . body-forms).
+                 * Disambiguate: if car of first arg is a vector, it's
+                 * multi-arity. If car is a cons/nil, check if it looks
+                 * like a params list (all symbols) or an arity clause. */
+                if (params->as.cons.car->type == MINO_VECTOR) {
+                    multi_arity = 1;
+                }
             }
-            /* Validate params when given as a cons list. */
-            if (mino_is_cons(params) || mino_is_nil(params)) {
-                for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
-                    mino_val_t *name = p->as.cons.car;
-                    if (name == NULL || name->type != MINO_SYMBOL) {
-                        set_error_at(S, form, "fn parameter must be a symbol");
+            if (multi_arity) {
+                /* Multi-arity: args is (([p1] body1...) ([p2] body2...) ...).
+                 * Store as: params = NULL (sentinel), body = list of
+                 * (params-vec . body-forms) clauses. */
+                mino_val_t *clauses = mino_nil(S);
+                mino_val_t *clause_tail = NULL;
+                mino_val_t *rest = args;
+                while (mino_is_cons(rest)) {
+                    mino_val_t *clause = rest->as.cons.car;
+                    mino_val_t *cparams;
+                    mino_val_t *cbody;
+                    mino_val_t *cell;
+                    if (!mino_is_cons(clause)) {
+                        set_error_at(S, form, "multi-arity clause must be a list");
                         return NULL;
+                    }
+                    cparams = clause->as.cons.car;
+                    cbody   = clause->as.cons.cdr;
+                    if (cparams == NULL
+                        || (cparams->type != MINO_VECTOR
+                            && !mino_is_cons(cparams)
+                            && !mino_is_nil(cparams))) {
+                        set_error_at(S, form, "multi-arity clause must start with a parameter list");
+                        return NULL;
+                    }
+                    cell = mino_cons(S, mino_cons(S, cparams, cbody), mino_nil(S));
+                    if (clause_tail == NULL) {
+                        clauses = cell;
+                    } else {
+                        clause_tail->as.cons.cdr = cell;
+                    }
+                    clause_tail = cell;
+                    rest = rest->as.cons.cdr;
+                }
+                params = NULL;
+                body   = clauses;
+            } else {
+                if (!mino_is_cons(params) && !mino_is_nil(params)
+                    && params->type != MINO_VECTOR) {
+                    set_error_at(S, form, "fn parameter list must be a list or vector");
+                    return NULL;
+                }
+                /* Validate params when given as a cons list. */
+                if (mino_is_cons(params) || mino_is_nil(params)) {
+                    for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
+                        mino_val_t *name = p->as.cons.car;
+                        if (name == NULL || name->type != MINO_SYMBOL) {
+                            set_error_at(S, form, "fn parameter must be a symbol");
+                            return NULL;
+                        }
                     }
                 }
             }
             if (fn_name != NULL) {
-                /* Create a child env for self-reference so the name
-                 * binding does not leak into the enclosing scope. */
                 char nbuf[256];
                 size_t nlen = fn_name->as.s.len;
                 mino_env_t *fn_env;
@@ -2147,6 +2196,74 @@ mino_val_t *eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     return eval_impl(S, form, env, 0);
 }
 
+/* Count elements in a cons list. */
+static int list_len(const mino_val_t *lst)
+{
+    int n = 0;
+    while (mino_is_cons(lst)) {
+        n++;
+        lst = lst->as.cons.cdr;
+    }
+    return n;
+}
+
+/* Count required params (excluding & rest) in a param form. Returns the
+ * fixed arity count and sets *has_rest if & is present. */
+static int param_arity(const mino_val_t *params, int *has_rest)
+{
+    int n = 0;
+    *has_rest = 0;
+    if (params == NULL) return 0;
+    if (params->type == MINO_VECTOR) {
+        size_t i;
+        for (i = 0; i < params->as.vec.len; i++) {
+            mino_val_t *p = vec_nth(params, i);
+            if (sym_eq(p, "&")) {
+                *has_rest = 1;
+                return n;
+            }
+            if (kw_eq(p, "as")) {
+                i++; /* skip the :as symbol */
+                continue;
+            }
+            n++;
+        }
+        return n;
+    }
+    /* Cons list params. */
+    while (mino_is_cons(params)) {
+        mino_val_t *p = params->as.cons.car;
+        if (sym_eq(p, "&")) {
+            *has_rest = 1;
+            return n;
+        }
+        n++;
+        params = params->as.cons.cdr;
+    }
+    return n;
+}
+
+/* For a multi-arity fn (params == NULL, body = list of (params . body)
+ * clauses), find the clause matching the given arg count. */
+static mino_val_t *find_arity_clause(mino_state_t *S, mino_val_t *clauses,
+                                     int argc)
+{
+    (void)S;
+    mino_val_t *rest = clauses;
+    mino_val_t *variadic_match = NULL;
+    while (mino_is_cons(rest)) {
+        mino_val_t *clause  = rest->as.cons.car;
+        mino_val_t *cparams = clause->as.cons.car;
+        int has_rest;
+        int fixed = param_arity(cparams, &has_rest);
+        if (!has_rest && argc == fixed) return clause;
+        if (has_rest && argc >= fixed)  variadic_match = clause;
+        rest = rest->as.cons.cdr;
+    }
+    if (variadic_match) return variadic_match;
+    return NULL;
+}
+
 /*
  * Invoke `fn` with an already-evaluated argument list. Used both by the
  * evaluator's function-call path and by primitives (e.g. update) that
@@ -2178,6 +2295,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
     }
     if (fn->type == MINO_FN || fn->type == MINO_MACRO) {
         const char *tag       = fn->type == MINO_MACRO ? "macro" : "fn";
+        mino_val_t *cur_params = fn->as.fn.params;
+        mino_val_t *cur_body   = fn->as.fn.body;
         mino_env_t *local     = env_child(S, fn->as.fn.env);
         mino_val_t *call_args = args;
         const char *file      = NULL;
@@ -2189,24 +2308,65 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             line = eval_current_form->as.cons.line;
         }
         push_frame(S, tag, file, line);
+        /* Multi-arity dispatch: params == NULL means body is a clause list. */
+        if (cur_params == NULL) {
+            int argc = list_len(call_args);
+            mino_val_t *clause = find_arity_clause(S, cur_body, argc);
+            if (clause == NULL) {
+                char msg[96];
+                snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
+                set_error(S, msg);
+                return NULL;
+            }
+            cur_params = clause->as.cons.car;
+            cur_body   = clause->as.cons.cdr;
+        }
         for (;;) {
-            if (!bind_params(S, local, fn->as.fn.params, call_args, tag)) {
+            if (!bind_params(S, local, cur_params, call_args, tag)) {
                 return NULL; /* leave frame for trace */
             }
-            result = eval_implicit_do_impl(S, fn->as.fn.body, local, 1);
+            result = eval_implicit_do_impl(S, cur_body, local, 1);
             if (result == NULL) {
                 return NULL; /* leave frame for trace */
             }
             if (result->type == MINO_RECUR) {
-                /* Self-recursion: rebind params and loop. */
+                /* Self-recursion: rebind params and loop.
+                 * For multi-arity, re-dispatch on new arg count. */
                 call_args = result->as.recur.args;
+                if (fn->as.fn.params == NULL) {
+                    int argc = list_len(call_args);
+                    mino_val_t *clause = find_arity_clause(S, fn->as.fn.body, argc);
+                    if (clause == NULL) {
+                        char msg[96];
+                        snprintf(msg, sizeof(msg), "no matching arity for %d args in recur", argc);
+                        set_error(S, msg);
+                        return NULL;
+                    }
+                    cur_params = clause->as.cons.car;
+                    cur_body   = clause->as.cons.cdr;
+                    local      = env_child(S, fn->as.fn.env);
+                }
                 continue;
             }
             if (result->type == MINO_TAIL_CALL) {
                 /* Proper tail call: switch to the target function. */
                 fn        = result->as.tail_call.fn;
                 call_args = result->as.tail_call.args;
+                cur_params = fn->as.fn.params;
+                cur_body   = fn->as.fn.body;
                 local     = env_child(S, fn->as.fn.env);
+                if (cur_params == NULL) {
+                    int argc = list_len(call_args);
+                    mino_val_t *clause = find_arity_clause(S, cur_body, argc);
+                    if (clause == NULL) {
+                        char msg[96];
+                        snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
+                        set_error(S, msg);
+                        return NULL;
+                    }
+                    cur_params = clause->as.cons.car;
+                    cur_body   = clause->as.cons.cdr;
+                }
                 continue;
             }
             pop_frame(S);
