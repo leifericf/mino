@@ -799,6 +799,25 @@
 ;; transfers cleanly to multi-runtime contexts later.
 ;; ---------------------------------------------------------------------------
 
+;; ---------------------------------------------------------------------------
+;; Exception info
+;; ---------------------------------------------------------------------------
+
+(defn ex-info
+  "Create an exception map with a message and data map."
+  [msg data]
+  {:message msg :data data})
+
+(defn ex-data
+  "Extract the data map from an exception created with ex-info."
+  [ex]
+  (when (map? ex) (:data ex)))
+
+(defn ex-message
+  "Extract the message from an exception created with ex-info."
+  [ex]
+  (when (map? ex) (:message ex)))
+
 (def agent atom)
 
 (defn send-to [ag f & args]
