@@ -2127,12 +2127,6 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 }
             }
 
-            if (!has_catch && !has_finally) {
-                set_error_at(S, form,
-                    "try requires a catch or finally clause");
-                return NULL;
-            }
-
             if (try_depth >= MAX_TRY_DEPTH) {
                 set_error_at(S, form, "try nesting too deep");
                 return NULL;
