@@ -1299,13 +1299,16 @@
        ([result] (cf result))
        ([result input] (f result input)))))
 
+(def unreduced (fn [x]
+  (if (reduced? x) (unreduced @x) x)))
+
 (defn transduce
   ([xf f coll]
    (transduce xf f (f) coll))
   ([xf f init coll]
    (let [xrf (xf (completing f))
          result (reduce xrf init coll)]
-     (xrf result))))
+     (xrf (unreduced result)))))
 
 (def into_ into)
 (def into (fn
