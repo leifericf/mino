@@ -1259,7 +1259,9 @@
   (let [t (type x)
         methods (vals (:methods proto))]
     (every? (fn [dispatch-atom]
-              (contains? @dispatch-atom t))
+              (let [dm @dispatch-atom]
+                (or (contains? dm t)
+                    (contains? dm :default))))
             methods)))
 
 (defmacro with-open [bindings & body]
