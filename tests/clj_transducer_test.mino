@@ -1,0 +1,142 @@
+(require "tests/test")
+
+;; Tests from clojure/test_clojure/transducers.clj
+;; Expected values are taken as-is from the Clojure test suite.
+
+;; --- transduce ---
+
+(deftest clj-transduce
+  (testing "without init value"
+    (is (== 5050 (transduce (map inc) + (range 100))))
+    (is (== 5050 (transduce (map inc) + (into [] (range 100))))))
+  (testing "with init value"
+    (is (== 5051 (transduce (map inc) + 1 (range 100))))
+    (is (== 5051 (transduce (map inc) + 1 (into [] (range 100)))))))
+
+;; --- cat ---
+
+(deftest clj-cat
+  (is (= (transduce cat conj []) []))
+  (is (= (transduce cat conj [[1 2]]) [1 2]))
+  (is (= (transduce cat conj [[1 2] [3 4]]) [1 2 3 4]))
+  (is (= (transduce cat conj [[] [3 4]]) [3 4]))
+  (is (= (transduce cat conj [[1 2] []]) [1 2]))
+  (is (= (transduce cat conj [[] []]) []))
+  (is (= (transduce cat conj [[1 2] [3 4] [5 6]]) [1 2 3 4 5 6])))
+
+;; --- dedupe ---
+
+(deftest clj-dedupe
+  (is (= (transduce (dedupe) conj []) []))
+  (is (= (transduce (dedupe) conj [1]) [1]))
+  (is (= (transduce (dedupe) conj [1 2 3]) [1 2 3]))
+  (is (= (transduce (dedupe) conj [1 2 3 1 2 2 1 1]) [1 2 3 1 2 1]))
+  (is (= (transduce (dedupe) conj [1 1 1 2]) [1 2]))
+  (is (= (transduce (dedupe) conj [1 1 1 1]) [1]))
+  (is (= (transduce (dedupe) conj [nil nil nil]) [nil]))
+  (is (= (transduce (dedupe) conj [0.5 0.5]) [0.5])))
+
+;; --- take (transducer) ---
+
+(deftest clj-take-xf
+  (is (= (transduce (take 1) conj [1 2 3 4 5]) '(1)))
+  (is (= (transduce (take 3) conj [1 2 3 4 5]) '(1 2 3)))
+  (is (= (transduce (take 5) conj [1 2 3 4 5]) '(1 2 3 4 5)))
+  (is (= (transduce (take 9) conj [1 2 3 4 5]) '(1 2 3 4 5)))
+  (is (= (transduce (take 0) conj [1 2 3 4 5]) ()))
+  (is (= (transduce (take -1) conj [1 2 3 4 5]) ()))
+  (is (= (transduce (take -2) conj [1 2 3 4 5]) ())))
+
+;; --- drop (transducer) ---
+
+(deftest clj-drop-xf
+  (is (= (transduce (drop 1) conj [1 2 3 4 5]) '(2 3 4 5)))
+  (is (= (transduce (drop 3) conj [1 2 3 4 5]) '(4 5)))
+  (is (= (transduce (drop 5) conj [1 2 3 4 5]) ()))
+  (is (= (transduce (drop 9) conj [1 2 3 4 5]) ()))
+  (is (= (transduce (drop 0) conj [1 2 3 4 5]) '(1 2 3 4 5)))
+  (is (= (transduce (drop -1) conj [1 2 3 4 5]) '(1 2 3 4 5)))
+  (is (= (transduce (drop -2) conj [1 2 3 4 5]) '(1 2 3 4 5))))
+
+;; --- take-while (transducer) ---
+
+(deftest clj-take-while-xf
+  (is (= (transduce (take-while pos?) conj []) ()))
+  (is (= (transduce (take-while pos?) conj [1 2 3 4]) '(1 2 3 4)))
+  (is (= (transduce (take-while pos?) conj [1 2 3 -1]) '(1 2 3)))
+  (is (= (transduce (take-while pos?) conj [1 -1 2 3]) '(1)))
+  (is (= (transduce (take-while pos?) conj [-1 1 2 3]) ()))
+  (is (= (transduce (take-while pos?) conj [-1 -2 -3]) ())))
+
+;; --- drop-while (transducer) ---
+
+(deftest clj-drop-while-xf
+  (is (= (transduce (drop-while pos?) conj []) ()))
+  (is (= (transduce (drop-while pos?) conj [1 2 3 4]) ()))
+  (is (= (transduce (drop-while pos?) conj [1 2 3 -1]) '(-1)))
+  (is (= (transduce (drop-while pos?) conj [1 -1 2 3]) '(-1 2 3)))
+  (is (= (transduce (drop-while pos?) conj [-1 1 2 3]) '(-1 1 2 3)))
+  (is (= (transduce (drop-while pos?) conj [-1 -2 -3]) '(-1 -2 -3))))
+
+;; --- map-indexed (transducer) ---
+
+(deftest clj-map-indexed-xf
+  (is (= [] (sequence (map-indexed vector) [])))
+  (is (= [[0 1] [1 2] [2 3] [3 4]]
+         (sequence (map-indexed vector) (range 1 5)))))
+
+;; --- partition-all (transducer) ---
+
+(deftest clj-partition-all-xf
+  (is (= (transduce (partition-all 2) conj [1 2 3]) '((1 2) (3))))
+  (is (= (transduce (partition-all 2) conj [1 2 3 4]) '((1 2) (3 4))))
+  (is (= (transduce (partition-all 2) conj []) ()))
+  (is (= (transduce (partition-all 1) conj []) ()))
+  (is (= (transduce (partition-all 1) conj [1 2 3]) '((1) (2) (3))))
+  (is (= (transduce (partition-all 5) conj [1 2 3]) '((1 2 3)))))
+
+;; --- distinct (transducer) ---
+
+(deftest clj-distinct-xf
+  (is (= [] (sequence (distinct) [])))
+  (is (= (range 10) (sequence (distinct) (range 10))))
+  (is (= [0] (sequence (distinct) (repeat 10 0))))
+  (is (= [0 1 2] (sequence (distinct) [0 0 1 1 2 2 1 1 0 0]))))
+
+;; --- interpose (transducer) ---
+
+(deftest clj-interpose-xf
+  (is (= [] (sequence (interpose :s) (range 0))))
+  (is (= [0] (sequence (interpose :s) (range 1))))
+  (is (= [0 :s 1] (sequence (interpose :s) (range 2))))
+  (is (= [0 :s 1 :s 2] (sequence (interpose :s) (range 3)))))
+
+;; --- re-reduced / early termination ---
+
+(deftest clj-re-reduced
+  (is (= [:a] (transduce (take 1) conj [:a])))
+  (is (= [:a] (transduce (comp (take 1) (take 1)) conj [:a])))
+  (is (= [:a] (transduce (comp (take 1) (take 1) (take 1)) conj [:a])))
+  (is (= [:a] (transduce (comp (take 1) (take 1) (take 1) (take 1)) conj [:a])))
+  (is (= [[:a]] (transduce (comp (partition-by keyword?) (take 1)) conj [] [:a])))
+  (is (= [[:a]] (sequence (comp (partition-by keyword?) (take 1)) [:a]))))
+
+;; --- eduction ---
+
+(deftest clj-eduction
+  (testing "one xform"
+    (is (= [1 2 3 4 5]
+           (eduction (map inc) (range 5)))))
+  (testing "multiple xforms"
+    (is (= ["2" "4"]
+           (eduction (map inc) (filter even?) (map str) (range 5)))))
+  (testing "expanding transducer with nils"
+    (is (= '(1 2 3 nil 4 5 6 nil)
+           (eduction cat [[1 2 3 nil] [4 5 6 nil]])))))
+
+;; --- sequence (multi-collection) ---
+;; TODO: multi-collection sequence not yet implemented
+;; (deftest clj-sequence-multi
+;;   (is (= [11 12 13 14] (sequence (map +) [1 2 3 4] (repeat 10))))
+;;   (is (= [11 12 13 14] (sequence (map +) (repeat 10) [1 2 3 4])))
+;;   (is (= [31 32 33 34] (sequence (map +) (repeat 10) (repeat 20) [1 2 3 4]))))
