@@ -50,7 +50,10 @@
 ;; --- Logic and utilities ---
 
 (def not      (fn [x] (if x false true)))
-(def not=     (fn [a b] (not (= a b))))
+(def not=     (fn
+                ([x] false)
+                ([x y] (not (= x y)))
+                ([x y & more] (not (apply = x y more)))))
 (def identity (fn [x] x))
 (def list     (fn [& args] args))
 (def empty?   (fn [coll] (= (count coll) 0)))
