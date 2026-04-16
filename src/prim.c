@@ -1379,6 +1379,21 @@ static mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env
         if (coll->as.s.len == 0) return mino_nil(S);
         return mino_string_n(S, coll->as.s.data, 1);
     }
+    if (coll->type == MINO_MAP) {
+        if (coll->as.map.len == 0) return mino_nil(S);
+        {
+            mino_val_t *key = vec_nth(coll->as.map.key_order, 0);
+            mino_val_t *val = map_get_val(coll, key);
+            mino_val_t *kv[2];
+            kv[0] = key;
+            kv[1] = val;
+            return mino_vector(S, kv, 2);
+        }
+    }
+    if (coll->type == MINO_SET) {
+        if (coll->as.set.len == 0) return mino_nil(S);
+        return vec_nth(coll->as.set.key_order, 0);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
@@ -1440,6 +1455,37 @@ static mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             } else {
                 tail->as.cons.cdr = cell;
             }
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_MAP) {
+        mino_val_t *head = mino_nil(S);
+        mino_val_t *tail = NULL;
+        size_t i;
+        for (i = 1; i < coll->as.map.len; i++) {
+            mino_val_t *key = vec_nth(coll->as.map.key_order, i);
+            mino_val_t *val = map_get_val(coll, key);
+            mino_val_t *kv[2];
+            mino_val_t *cell;
+            kv[0] = key;
+            kv[1] = val;
+            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_SET) {
+        mino_val_t *head = mino_nil(S);
+        mino_val_t *tail = NULL;
+        size_t i;
+        for (i = 1; i < coll->as.set.len; i++) {
+            mino_val_t *cell = mino_cons(S, vec_nth(coll->as.set.key_order, i),
+                                         mino_nil(S));
+            if (tail == NULL) head = cell;
+            else tail->as.cons.cdr = cell;
             tail = cell;
         }
         return head;
