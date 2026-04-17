@@ -2814,12 +2814,13 @@ static mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* (join sep coll) */
         sep_val = args->as.cons.car;
         coll    = args->as.cons.cdr->as.cons.car;
-        if (sep_val == NULL || sep_val->type != MINO_STRING) {
-            set_error(S, "join: separator must be a string");
+        if (sep_val != NULL && sep_val->type == MINO_STRING) {
+            sep     = sep_val->as.s.data;
+            sep_len = sep_val->as.s.len;
+        } else if (sep_val != NULL && sep_val->type != MINO_NIL) {
+            set_error(S, "join: separator must be a string or nil");
             return NULL;
         }
-        sep     = sep_val->as.s.data;
-        sep_len = sep_val->as.s.len;
     } else {
         set_error(S, "join requires 1 or 2 arguments");
         return NULL;
