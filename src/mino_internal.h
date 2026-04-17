@@ -145,6 +145,9 @@ struct mino_state {
     gc_range_t     *gc_ranges;
     size_t          gc_ranges_len;
     size_t          gc_ranges_cap;
+    size_t          gc_ranges_valid;
+    gc_range_t      gc_ranges_pending[8];
+    size_t          gc_ranges_pending_len;
 
     /* Singletons */
     mino_val_t      nil_singleton;
@@ -238,6 +241,9 @@ struct mino_state {
 #define gc_ranges           (S->gc_ranges)
 #define gc_ranges_len       (S->gc_ranges_len)
 #define gc_ranges_cap       (S->gc_ranges_cap)
+#define gc_ranges_valid     (S->gc_ranges_valid)
+#define gc_ranges_pending   (S->gc_ranges_pending)
+#define gc_ranges_pending_len (S->gc_ranges_pending_len)
 #define nil_singleton       (S->nil_singleton)
 #define true_singleton      (S->true_singleton)
 #define false_singleton     (S->false_singleton)

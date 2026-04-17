@@ -213,6 +213,8 @@ void gc_note_host_frame(mino_state_t *S, void *addr)
 #pragma GCC diagnostic pop
 #endif
 
+static void gc_range_insert(mino_state_t *S, gc_hdr_t *h);
+
 void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
 {
     gc_hdr_t *h;
@@ -234,6 +236,11 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     h->next          = gc_all;
     gc_all           = h;
     gc_bytes_alloc  += size;
+    if (gc_stress > 0) {
+        gc_range_insert(S, h);
+    } else {
+        gc_ranges_valid = 0;
+    }
     return (void *)(h + 1);
 }
 
@@ -569,6 +576,94 @@ static void gc_build_range_index(mino_state_t *S)
         gc_ranges_len++;
     }
     qsort(gc_ranges, gc_ranges_len, sizeof(*gc_ranges), gc_range_cmp);
+    gc_ranges_valid = 1;
+    gc_ranges_pending_len = 0;
+}
+
+/*
+ * Buffer a newly allocated header for the next collection's range index.
+ * Instead of doing an O(n) memmove into the sorted main array on every
+ * allocation, we append to a small pending buffer.  gc_find_header_for_ptr
+ * checks the pending buffer with a linear scan, which is fast for the
+ * 1-2 entries that accumulate between stress-mode collections.
+ * If the pending buffer fills (normal mode with many allocations between
+ * collections), the range index is invalidated and rebuilt from scratch
+ * at the next collection.
+ */
+static void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
+{
+    gc_range_t entry;
+
+    if (!gc_ranges_valid) {
+        return;
+    }
+
+    if (gc_ranges_pending_len >= sizeof(gc_ranges_pending) / sizeof(gc_ranges_pending[0])) {
+        gc_ranges_valid = 0;
+        return;
+    }
+
+    entry.start = (uintptr_t)(h + 1);
+    entry.end   = (uintptr_t)(h + 1) + h->size;
+    entry.h     = h;
+    gc_ranges_pending[gc_ranges_pending_len] = entry;
+    gc_ranges_pending_len++;
+}
+
+/*
+ * Remove entries for unmarked (dead) objects from the range index,
+ * then merge in any pending entries from recent allocations.
+ * Called after marking but before sweep, while mark bits still indicate
+ * liveness.  Preserves sort order.  O(n) in the size of the index.
+ */
+static void gc_range_compact(mino_state_t *S)
+{
+    size_t dst = 0;
+    size_t src;
+    size_t i;
+    size_t need;
+    if (!gc_ranges_valid) {
+        return;
+    }
+    for (src = 0; src < gc_ranges_len; src++) {
+        if (gc_ranges[src].h->mark) {
+            gc_ranges[dst] = gc_ranges[src];
+            dst++;
+        }
+    }
+    gc_ranges_len = dst;
+
+    /* Merge pending entries (new allocations since last collection). */
+    need = gc_ranges_len + gc_ranges_pending_len;
+    if (need > gc_ranges_cap) {
+        size_t      new_cap = need * 2 + 16;
+        gc_range_t *nr      = (gc_range_t *)realloc(
+            gc_ranges, new_cap * sizeof(*nr));
+        if (nr == NULL) {
+            abort();
+        }
+        gc_ranges     = nr;
+        gc_ranges_cap = new_cap;
+    }
+    for (i = 0; i < gc_ranges_pending_len; i++) {
+        size_t lo = 0;
+        size_t hi = gc_ranges_len;
+        while (lo < hi) {
+            size_t mid = lo + (hi - lo) / 2;
+            if (gc_ranges_pending[i].start < gc_ranges[mid].start) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        if (lo < gc_ranges_len) {
+            memmove(&gc_ranges[lo + 1], &gc_ranges[lo],
+                    (gc_ranges_len - lo) * sizeof(*gc_ranges));
+        }
+        gc_ranges[lo] = gc_ranges_pending[i];
+        gc_ranges_len++;
+    }
+    gc_ranges_pending_len = 0;
 }
 
 static gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
@@ -576,6 +671,7 @@ static gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
     uintptr_t u  = (uintptr_t)p;
     size_t    lo = 0;
     size_t    hi = gc_ranges_len;
+    size_t    i;
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
         if (u < gc_ranges[mid].start) {
@@ -584,6 +680,11 @@ static gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
             lo = mid + 1;
         } else {
             return gc_ranges[mid].h;
+        }
+    }
+    for (i = 0; i < gc_ranges_pending_len; i++) {
+        if (u >= gc_ranges_pending[i].start && u < gc_ranges_pending[i].end) {
+            return gc_ranges_pending[i].h;
         }
     }
     return NULL;
@@ -910,9 +1011,12 @@ void gc_collect(mino_state_t *S)
         abort();
     }
     (void)jb;
-    gc_build_range_index(S);
+    if (!gc_ranges_valid) {
+        gc_build_range_index(S);
+    }
     gc_mark_roots(S);
     gc_scan_stack(S);
+    gc_range_compact(S);
     gc_sweep(S);
     gc_depth--;
 }
