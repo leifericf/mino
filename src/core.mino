@@ -1058,8 +1058,8 @@
   (cond
     (cons?   form) (outer (apply list (map inner form)))
     (vector? form) (outer (mapv inner form))
-    (map?    form) (outer (into {} (map inner (seq form))))
-    (set?    form) (outer (into #{} (map inner form)))
+    (map?    form) (outer (into (empty form) (map inner (seq form))))
+    (set?    form) (outer (into (empty form) (map inner form)))
     true           (outer form))))
 
 (def postwalk  (fn [f form] (walk (fn [x] (postwalk f x)) f form)))
