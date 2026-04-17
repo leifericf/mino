@@ -10,16 +10,19 @@
 
 #include "mino_internal.h"
 
-/* Shared helpers (defined in prim.c). */
-int          args_have_float(mino_val_t *args);
-mino_val_t  *prim_throw_error(mino_state_t *S, const char *msg);
-int          as_double(const mino_val_t *v, double *out);
-int          as_long(const mino_val_t *v, long long *out);
-size_t       list_length(mino_state_t *S, mino_val_t *list);
-int          arg_count(mino_state_t *S, mino_val_t *args, size_t *out);
-mino_val_t  *print_to_string(mino_state_t *S, const mino_val_t *v);
+/* Shared helpers (defined in prim.c).
+ * These operate on borrowed args and return GC-owned values unless noted. */
+int          args_have_float(mino_val_t *args);             /* pure predicate */
+mino_val_t  *prim_throw_error(mino_state_t *S, const char *msg); /* longjmp, never returns normally */
+int          as_double(const mino_val_t *v, double *out);   /* pure extraction */
+int          as_long(const mino_val_t *v, long long *out);  /* pure extraction */
+size_t       list_length(mino_state_t *S, mino_val_t *list); /* pure traversal */
+int          arg_count(mino_state_t *S, mino_val_t *args, size_t *out); /* pure */
+mino_val_t  *print_to_string(mino_state_t *S, const mino_val_t *v); /* GC-owned */
 
-/* Sequence iterator (defined in prim.c). */
+/* Sequence iterator: borrows the collection being iterated.
+ * seq_iter_val returns a borrowed pointer into the collection's storage;
+ * do not retain it across allocations without gc_pin. */
 typedef struct {
     const mino_val_t *coll;
     size_t            idx;       /* for vectors, maps, sets */
@@ -29,20 +32,22 @@ typedef struct {
 void         seq_iter_init(mino_state_t *S, seq_iter_t *it,
                            const mino_val_t *coll);
 int          seq_iter_done(const seq_iter_t *it);
-mino_val_t  *seq_iter_val(mino_state_t *S, const seq_iter_t *it);
+mino_val_t  *seq_iter_val(mino_state_t *S, const seq_iter_t *it); /* borrowed */
 void         seq_iter_next(mino_state_t *S, seq_iter_t *it);
 
-/* val_to_seq (defined in prim_collections.c). */
+/* val_to_seq: coerce a value to a cons-list sequence (GC-owned). */
 mino_val_t  *val_to_seq(mino_state_t *S, mino_val_t *v);
 
-/* set_conj1 (defined in prim_collections.c). */
+/* set_conj1: return a new set with elem added (GC-owned). */
 mino_val_t  *set_conj1(mino_state_t *S, const mino_val_t *s,
                        mino_val_t *elem);
 
-/* print_str_to (defined in prim_io.c). */
+/* print_str_to: write v to out; strings as raw bytes, others via printer. */
 void         print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 
-/* Primitives declared per domain (each prim_*.c defines these). */
+/* Primitives declared per domain (each prim_*.c defines these).
+ * All follow the standard primitive signature: args are borrowed,
+ * return value is GC-owned (NULL on error via set_error). */
 
 /* prim_numeric.c */
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);
