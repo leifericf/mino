@@ -18,7 +18,7 @@ SRC_DIR="src"
 # Allowlist: files that are known to exceed the threshold during the
 # decomposition work.  Remove entries as files are split.
 TU_LIMIT=1200
-TU_ALLOWLIST="src/prim.c src/eval_special.c"
+TU_ALLOWLIST="src/eval_special.c"
 
 printf "=== Translation unit sizes (limit: %d LOC) ===\n" "$TU_LIMIT"
 

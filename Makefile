@@ -8,7 +8,9 @@ LIBS    ?= -lm
 LIB_SRCS := src/mino.c src/eval_special.c src/runtime_state.c \
             src/runtime_error.c src/runtime_env.c src/runtime_gc.c \
             src/val.c src/vec.c src/map.c src/read.c src/print.c \
-            src/prim.c src/prim_numeric.c src/clone.c src/re.c
+            src/prim.c src/prim_numeric.c src/prim_collections.c \
+            src/prim_sequences.c src/prim_string.c src/prim_io.c \
+            src/clone.c src/re.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 SRCS     := $(LIB_SRCS) main.c
 OBJS     := $(SRCS:.c=.o)
@@ -32,6 +34,10 @@ src/core_mino.h: src/core.mino
 src/mino.o: src/mino.c src/mino.h src/mino_internal.h
 src/prim.o: src/prim.c src/prim_internal.h src/mino_internal.h src/core_mino.h src/re.h
 src/prim_numeric.o: src/prim_numeric.c src/prim_internal.h src/mino_internal.h
+src/prim_collections.o: src/prim_collections.c src/prim_internal.h src/mino_internal.h
+src/prim_sequences.o: src/prim_sequences.c src/prim_internal.h src/mino_internal.h
+src/prim_string.o: src/prim_string.c src/prim_internal.h src/mino_internal.h
+src/prim_io.o: src/prim_io.c src/prim_internal.h src/mino_internal.h
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
