@@ -1,0 +1,5 @@
+;; GC stress shard 11/11: sequence, lazy.
+(require "tests/test")
+(require "tests/sequence_test")
+(require "tests/lazy_test")
+(run-tests)

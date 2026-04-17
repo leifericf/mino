@@ -1,4 +1,4 @@
-;; GC stress shard 10/10: clj transducer, clj metadata, error path, regex reentrant, failure stress.
+;; GC stress shard 10/11: clj transducer, clj metadata, error path, regex reentrant, failure stress.
 (require "tests/test")
 (require "tests/clj_transducer_test")
 (require "tests/clj_metadata_test")

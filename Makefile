@@ -52,15 +52,15 @@ test: $(TARGET)
 test-gc-stress: $(TARGET)
 	MINO_GC_STRESS=1 ./mino tests/run.mino
 
-# Sharded GC stress: same coverage, split into ~30s shards to avoid
+# Sharded GC stress: same coverage, split into shards to avoid
 # watchdog timeouts.  Expected total: ~5 minutes on a modern machine.
 # Run all shards sequentially:
 #   make test-gc-stress-sharded
 # Or run a single shard:
 #   MINO_GC_STRESS=1 ./mino tests/run_gc_shard3.mino
 test-gc-stress-sharded: $(TARGET)
-	@for i in 1 2 3 4 5 6 7 8 9 10; do \
-	  printf "shard %s/10... " "$$i"; \
+	@for i in 1 2 3 4 5 6 7 8 9 10 11; do \
+	  printf "shard %s/11... " "$$i"; \
 	  MINO_GC_STRESS=1 ./mino tests/run_gc_shard$$i.mino || exit 1; \
 	done
 	@echo "all shards passed"
