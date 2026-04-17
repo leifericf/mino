@@ -1,0 +1,62 @@
+(require "tests/test")
+
+;; peek and pop: stack abstraction for vectors and lists.
+
+;; --- peek ---
+
+(deftest peek-vector
+  (is (= 3 (peek [1 2 3])))
+  (is (= 1 (peek [1])))
+  (is (nil? (peek []))))
+
+(deftest peek-list
+  (is (= 1 (peek '(1 2 3))))
+  (is (= :a (peek '(:a)))))
+
+(deftest peek-nil
+  (is (nil? (peek nil))))
+
+;; --- pop ---
+
+(deftest pop-vector-basic
+  (is (= [1 2] (pop [1 2 3])))
+  (is (= [] (pop [1]))))
+
+(deftest pop-vector-sizes
+  (testing "size 32 boundary"
+    (let [v (vec (range 32))]
+      (is (= 31 (count (pop v))))
+      (is (= 30 (peek (pop v))))))
+  (testing "size 33 boundary"
+    (let [v (vec (range 33))]
+      (is (= 32 (count (pop v))))
+      (is (= 31 (peek (pop v))))))
+  (testing "size 1024 boundary"
+    (let [v (vec (range 1024))]
+      (is (= 1023 (count (pop v))))
+      (is (= 1022 (peek (pop v))))))
+  (testing "size 1025 boundary"
+    (let [v (vec (range 1025))]
+      (is (= 1024 (count (pop v))))
+      (is (= 1023 (peek (pop v)))))))
+
+(deftest pop-list
+  (is (= '(2 3) (pop '(1 2 3))))
+  (is (nil? (pop '(1)))))
+
+(deftest pop-preserves-structure
+  (testing "round-trip through repeated pop"
+    (let [v (vec (range 100))]
+      (loop [v v n 100]
+        (if (= n 0)
+          (is (= 0 (count v)))
+          (do
+            (is (= n (count v)))
+            (is (= (- n 1) (peek v)))
+            (recur (pop v) (- n 1))))))))
+
+(deftest pop-empty-errors
+  (is (thrown? "pop" (pop [])))
+  (is (thrown? "pop" (pop nil))))
+
+(run-tests)

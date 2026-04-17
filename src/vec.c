@@ -305,6 +305,89 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
     }
 }
 
+/*
+ * pop_tail: remove the rightmost leaf from the subtree at `node` (level
+ * `shift`). Returns the new subtree root, or NULL if the subtree became
+ * empty. The removed leaf is returned through *out_leaf.
+ */
+static mino_vec_node_t *pop_tail(mino_state_t *S,
+                                 const mino_vec_node_t *node, unsigned shift,
+                                 size_t trie_count,
+                                 mino_vec_node_t **out_leaf)
+{
+    unsigned digit = (unsigned)(((trie_count - 1) >> shift) & MINO_VEC_MASK);
+    if (shift == MINO_VEC_B) {
+        *out_leaf = (mino_vec_node_t *)node->slots[digit];
+        if (digit == 0) return NULL;
+        {
+            mino_vec_node_t *clone = vnode_clone(S, node);
+            clone->slots[digit] = NULL;
+            clone->count = digit;
+            return clone;
+        }
+    }
+    {
+        mino_vec_node_t *child = (mino_vec_node_t *)node->slots[digit];
+        mino_vec_node_t *new_child = pop_tail(S, child, shift - MINO_VEC_B,
+                                              trie_count, out_leaf);
+        if (new_child == NULL && digit == 0) return NULL;
+        {
+            mino_vec_node_t *clone = vnode_clone(S, node);
+            clone->slots[digit] = new_child;
+            if (new_child == NULL) clone->count = digit;
+            return clone;
+        }
+    }
+}
+
+/* Remove the last element. Returns an empty vector when len == 1.
+ * Caller must ensure len > 0. */
+mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v)
+{
+    size_t new_len = v->as.vec.len - 1;
+    if (new_len == 0) {
+        return vec_assemble(S, v, NULL, NULL, 0u, 0u, 0);
+    }
+    if (v->as.vec.tail_len > 1) {
+        mino_vec_node_t *new_tail = vnode_clone(S, v->as.vec.tail);
+        new_tail->slots[v->as.vec.tail_len - 1] = NULL;
+        new_tail->count = v->as.vec.tail_len - 1u;
+        return vec_assemble(S, v, v->as.vec.root, new_tail,
+                            v->as.vec.tail_len - 1u,
+                            v->as.vec.shift, new_len);
+    }
+    /* tail_len == 1: pull the rightmost trie leaf as the new tail. */
+    if (v->as.vec.root == NULL) {
+        /* Should not happen (len >= 2 and tail_len == 1 implies trie
+         * has at least one leaf), but guard defensively. */
+        return vec_assemble(S, v, NULL, NULL, 0u, 0u, 0);
+    }
+    {
+        size_t           trie_count = v->as.vec.len - v->as.vec.tail_len;
+        mino_vec_node_t *new_leaf   = NULL;
+        mino_vec_node_t *new_root;
+        unsigned         new_shift  = v->as.vec.shift;
+        if (v->as.vec.shift == 0) {
+            /* Root is the only leaf; it becomes the new tail. */
+            new_leaf  = v->as.vec.root;
+            new_root  = NULL;
+            new_shift = 0;
+        } else {
+            new_root = pop_tail(S, v->as.vec.root, v->as.vec.shift,
+                                trie_count, &new_leaf);
+            /* Shrink height if root has only one child. */
+            if (new_root != NULL && new_root->count == 1
+                && new_shift > 0) {
+                new_root  = (mino_vec_node_t *)new_root->slots[0];
+                new_shift -= MINO_VEC_B;
+            }
+        }
+        return vec_assemble(S, v, new_root, new_leaf,
+                            new_leaf != NULL ? new_leaf->count : 0u,
+                            new_shift, new_len);
+    }
+}
+
 mino_val_t *mino_vector(mino_state_t *S, mino_val_t **items, size_t len)
 {
     return vec_from_array(S, items, len);

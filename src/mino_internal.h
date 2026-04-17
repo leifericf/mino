@@ -380,12 +380,13 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b);
 
 /* vec.c: persistent vector operations.
  * vec_nth returns a borrowed pointer into existing trie storage.
- * vec_conj1/vec_assoc1/vec_from_array return new GC-owned vectors. */
+ * vec_conj1/vec_assoc1/vec_pop/vec_from_array return new GC-owned vectors. */
 mino_val_t *vec_nth(const mino_val_t *v, size_t i);              /* borrowed */
 mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v,
                       mino_val_t *item);                          /* GC-owned */
 mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
                        mino_val_t *item);                         /* GC-owned */
+mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v);       /* GC-owned */
 mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items,
                            size_t len);                           /* GC-owned */
 

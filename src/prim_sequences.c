@@ -602,3 +602,55 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return head;
 }
+
+mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "peek requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    if (coll->type == MINO_VECTOR) {
+        if (coll->as.vec.len == 0) return mino_nil(S);
+        return vec_nth(coll, coll->as.vec.len - 1);
+    }
+    if (coll->type == MINO_CONS) return coll->as.cons.car;
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "peek: expected a vector or list, got %s",
+                 type_tag_str(coll));
+        set_error(S, msg);
+    }
+    return NULL;
+}
+
+mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "pop requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return prim_throw_error(S, "pop: cannot pop an empty collection");
+    }
+    if (coll->type == MINO_VECTOR) {
+        if (coll->as.vec.len == 0) {
+            return prim_throw_error(S, "pop: cannot pop an empty vector");
+        }
+        return vec_pop(S, coll);
+    }
+    if (coll->type == MINO_CONS) return coll->as.cons.cdr;
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "pop: expected a vector or list, got %s",
+                 type_tag_str(coll));
+        set_error(S, msg);
+    }
+    return NULL;
+}
