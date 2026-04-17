@@ -779,6 +779,10 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
     }
+    if (coll->type == MINO_SORTED_MAP) {
+        rb_to_list(S, coll->as.sorted.root, &head, &tail);
+        return head;
+    }
     if (coll->type != MINO_MAP) {
         set_error(S, "keys: argument must be a map");
         return NULL;
@@ -810,6 +814,20 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
+    }
+    if (coll->type == MINO_SORTED_MAP) {
+        mino_val_t *keys = mino_nil(S);
+        mino_val_t *kt   = NULL;
+        rb_to_list(S, coll->as.sorted.root, &keys, &kt);
+        while (mino_is_cons(keys)) {
+            mino_val_t *v = rb_get(S, coll->as.sorted.root, keys->as.cons.car,
+                                   coll->as.sorted.comparator);
+            mino_val_t *cell = mino_cons(S, v, mino_nil(S));
+            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            tail = cell;
+            keys = keys->as.cons.cdr;
+        }
+        return head;
     }
     if (coll->type != MINO_MAP) {
         set_error(S, "vals: argument must be a map");
@@ -926,6 +944,14 @@ mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
+    }
+    if (coll->type == MINO_SORTED_SET) {
+        p = args->as.cons.cdr;
+        while (mino_is_cons(p)) {
+            coll = sorted_set_disj1(S, coll, p->as.cons.car);
+            p = p->as.cons.cdr;
+        }
+        return coll;
     }
     if (coll->type != MINO_SET) {
         set_error(S, "disj: first argument must be a set");

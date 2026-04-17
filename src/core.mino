@@ -73,9 +73,9 @@
 (def keyword? (fn [x] (= (type x) :keyword)))
 (def symbol?  (fn [x] (= (type x) :symbol)))
 (def vector?  (fn [x] (= (type x) :vector)))
-(def map?     (fn [x] (= (type x) :map)))
+(def map?     (fn [x] (let [t (type x)] (or (= t :map) (= t :sorted-map)))))
 (def fn?      (fn [x] (= (type x) :fn)))
-(def set?     (fn [x] (= (type x) :set)))
+(def set?     (fn [x] (let [t (type x)] (or (= t :set) (= t :sorted-set)))))
 
 ;; --- Atoms ---
 

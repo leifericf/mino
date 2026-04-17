@@ -392,6 +392,21 @@ mino_val_t *sorted_set_conj1(mino_state_t *S, const mino_val_t *s,
     return nv;
 }
 
+mino_val_t *sorted_set_disj1(mino_state_t *S, const mino_val_t *s,
+                              const mino_val_t *elem)
+{
+    mino_rb_node_t *nr = rb_dissoc(S, s->as.sorted.root, elem,
+                                    s->as.sorted.comparator);
+    if (nr == s->as.sorted.root) return (mino_val_t *)s;
+    {
+        mino_val_t *nv = alloc_val(S, MINO_SORTED_SET);
+        nv->as.sorted.comparator = s->as.sorted.comparator;
+        nv->as.sorted.root = nr;
+        nv->as.sorted.len = s->as.sorted.len - 1;
+        return nv;
+    }
+}
+
 mino_val_t *sorted_seq(mino_state_t *S, const mino_val_t *coll)
 {
     mino_val_t *head = mino_nil(S), *tail = NULL;

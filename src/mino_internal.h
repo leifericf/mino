@@ -442,6 +442,8 @@ mino_val_t *sorted_map_dissoc1(mino_state_t *S, const mino_val_t *m,
                                 const mino_val_t *key);
 mino_val_t *sorted_set_conj1(mino_state_t *S, const mino_val_t *s,
                               mino_val_t *elem);
+mino_val_t *sorted_set_disj1(mino_state_t *S, const mino_val_t *s,
+                              const mino_val_t *elem);
 mino_val_t *sorted_seq(mino_state_t *S, const mino_val_t *coll);
 mino_val_t *sorted_rest(mino_state_t *S, const mino_val_t *coll);
 

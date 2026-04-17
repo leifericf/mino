@@ -114,6 +114,11 @@ void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
     if (coll != NULL && coll->type == MINO_LAZY) {
         coll = lazy_force(S, (mino_val_t *)coll);
     }
+    /* Sorted collections: flatten to cons list for uniform iteration. */
+    if (coll != NULL &&
+        (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET)) {
+        coll = sorted_seq(S, coll);
+    }
     it->coll  = coll;
     it->idx   = 0;
     it->cons_p = (coll != NULL && coll->type == MINO_CONS) ? coll : NULL;
