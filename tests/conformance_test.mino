@@ -118,4 +118,17 @@
 (deftest halt-when-first-element
   (is (= 2 (transduce (halt-when even?) conj [2 3 4 5]))))
 
+;; --- bounded-count ---
+
+(deftest bounded-count-vector
+  (is (= 5 (bounded-count 10 [1 2 3 4 5]))))
+
+(deftest bounded-count-lazy
+  (is (= 10 (bounded-count 10 (range))))
+  (is (= 3 (bounded-count 10 (take 3 (range))))))
+
+(deftest bounded-count-empty
+  (is (= 0 (bounded-count 10 [])))
+  (is (= 0 (bounded-count 10 nil))))
+
 ;; (run-tests) -- called by tests/run.mino

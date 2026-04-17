@@ -558,6 +558,19 @@
 (def key       (fn [entry] (first entry)))
 (def val       (fn [entry] (second entry)))
 
+(def counted?   (fn [x]
+  (let [t (type x)]
+    (or (= t :vector) (= t :map) (= t :set) (= t :string)
+        (= t :sorted-map) (= t :sorted-set)))))
+
+(def bounded-count (fn [n coll]
+  (if (counted? coll)
+    (count coll)
+    (loop [i 0 s (seq coll)]
+      (if (and s (< i n))
+        (recur (inc i) (next s))
+        i)))))
+
 ;; --- Collection conversions ---
 
 (def remove (fn
