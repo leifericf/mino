@@ -2823,6 +2823,7 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
     volatile char probe = 0;
     mino_val_t   *v;
+    int           saved_try = try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     eval_steps     = 0;
@@ -2830,7 +2831,25 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     interrupted    = 0;
     trace_added    = 0;
     call_depth     = 0;
+
+    /* Top-level try frame so that OOM and unhandled throw during eval
+     * surface as a NULL return instead of aborting the process. */
+    if (try_depth < MAX_TRY_DEPTH) {
+        try_stack[try_depth].exception = NULL;
+        if (setjmp(try_stack[try_depth].buf) != 0) {
+            /* Landed here from longjmp (OOM or uncaught throw). */
+            try_depth = saved_try;
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "unhandled exception");
+            }
+            call_depth = 0;
+            return NULL;
+        }
+        try_depth++;
+    }
+
     v = eval(S, form, env);
+    try_depth = saved_try;
     if (v == NULL) {
         append_trace(S);
         call_depth = 0;
@@ -2856,6 +2875,7 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     mino_val_t     *last  = mino_nil(S);
     const char     *saved_file = reader_file;
     int             saved_line = reader_line;
+    int             saved_try  = try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     eval_steps     = 0;
@@ -2865,11 +2885,30 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
         reader_file = intern_filename("<string>");
     }
     reader_line = 1;
+
+    /* Top-level try frame so that OOM during read or eval surfaces as a
+     * NULL return instead of aborting the process. */
+    if (try_depth < MAX_TRY_DEPTH) {
+        try_stack[try_depth].exception = NULL;
+        if (setjmp(try_stack[try_depth].buf) != 0) {
+            try_depth   = saved_try;
+            reader_file = saved_file;
+            reader_line = saved_line;
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "unhandled exception");
+            }
+            call_depth = 0;
+            return NULL;
+        }
+        try_depth++;
+    }
+
     while (*src != '\0') {
         const char *end  = NULL;
         mino_val_t *form = mino_read(S, src, &end);
         if (form == NULL) {
             if (mino_last_error(S) != NULL) {
+                try_depth   = saved_try;
                 reader_file = saved_file;
                 reader_line = saved_line;
                 return NULL;
@@ -2878,12 +2917,14 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
         }
         last = mino_eval(S, form, env);
         if (last == NULL) {
+            try_depth   = saved_try;
             reader_file = saved_file;
             reader_line = saved_line;
             return NULL;
         }
         src = end;
     }
+    try_depth   = saved_try;
     reader_file = saved_file;
     reader_line = saved_line;
     return last;
