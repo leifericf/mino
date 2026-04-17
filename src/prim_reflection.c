@@ -123,6 +123,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_RECUR:     return mino_keyword(S, "recur");
     case MINO_TAIL_CALL: return mino_keyword(S, "tail-call");
     case MINO_REDUCED:   return mino_keyword(S, "reduced");
+    case MINO_VAR:       return mino_keyword(S, "var");
     }
     return mino_keyword(S, "unknown");
 }

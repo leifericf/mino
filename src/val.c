@@ -111,6 +111,17 @@ mino_val_t *mino_keyword(mino_state_t *S, const char *s)
     return mino_keyword_n(S, s, strlen(s));
 }
 
+mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
+                        mino_val_t *root)
+{
+    mino_val_t *v = alloc_val(S, MINO_VAR);
+    v->as.var.ns      = ns;
+    v->as.var.sym     = name;
+    v->as.var.root    = root;
+    v->as.var.dynamic = 0;
+    return v;
+}
+
 mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
 {
     mino_val_t *v = alloc_val(S, MINO_CONS);
@@ -495,6 +506,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a == b;
     case MINO_REDUCED:
         return a == b;
+    case MINO_VAR:
+        return a == b; /* identity equality */
     }
     return 0;
 }
