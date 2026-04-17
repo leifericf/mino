@@ -5,7 +5,10 @@ CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2 -Isrc
 LDFLAGS ?=
 LIBS    ?= -lm
 
-LIB_SRCS := src/mino.c src/eval_special.c src/runtime_state.c \
+LIB_SRCS := src/mino.c src/eval_special.c \
+            src/eval_special_defs.c src/eval_special_bindings.c \
+            src/eval_special_control.c src/eval_special_fn.c \
+            src/runtime_state.c \
             src/runtime_error.c src/runtime_env.c src/runtime_gc.c \
             src/val.c src/vec.c src/map.c src/read.c src/print.c \
             src/prim.c src/prim_numeric.c src/prim_collections.c \
@@ -32,6 +35,11 @@ src/core_mino.h: src/core.mino
 	@printf '    ;\n' >> $@
 
 src/mino.o: src/mino.c src/mino.h src/mino_internal.h
+src/eval_special.o: src/eval_special.c src/eval_special_internal.h src/mino_internal.h
+src/eval_special_defs.o: src/eval_special_defs.c src/eval_special_internal.h src/mino_internal.h
+src/eval_special_bindings.o: src/eval_special_bindings.c src/eval_special_internal.h src/mino_internal.h
+src/eval_special_control.o: src/eval_special_control.c src/eval_special_internal.h src/mino_internal.h
+src/eval_special_fn.o: src/eval_special_fn.c src/eval_special_internal.h src/mino_internal.h
 src/prim.o: src/prim.c src/prim_internal.h src/mino_internal.h src/core_mino.h src/re.h
 src/prim_numeric.o: src/prim_numeric.c src/prim_internal.h src/mino_internal.h
 src/prim_collections.o: src/prim_collections.c src/prim_internal.h src/mino_internal.h
