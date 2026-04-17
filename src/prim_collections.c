@@ -375,6 +375,59 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
+/* Lazy rest thunks: each takes a cons(collection, int-index) as context. */
+static mino_val_t *make_c_lazy(mino_state_t *S, mino_val_t *ctx,
+                               mino_val_t *(*thunk)(mino_state_t *, mino_val_t *))
+{
+    mino_val_t *lz = alloc_val(S, MINO_LAZY);
+    lz->as.lazy.body    = ctx;
+    lz->as.lazy.c_thunk = thunk;
+    return lz;
+}
+
+static mino_val_t *vec_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+{
+    mino_val_t *vec = ctx->as.cons.car;
+    size_t idx      = (size_t)ctx->as.cons.cdr->as.i;
+    if (idx >= vec->as.vec.len) return mino_nil(S);
+    return mino_cons(S, vec_nth(vec, idx),
+        make_c_lazy(S, mino_cons(S, vec, mino_int(S, (long long)(idx + 1))),
+                    vec_rest_thunk));
+}
+
+static mino_val_t *str_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+{
+    mino_val_t *str = ctx->as.cons.car;
+    size_t idx      = (size_t)ctx->as.cons.cdr->as.i;
+    if (idx >= str->as.s.len) return mino_nil(S);
+    return mino_cons(S, mino_string_n(S, str->as.s.data + idx, 1),
+        make_c_lazy(S, mino_cons(S, str, mino_int(S, (long long)(idx + 1))),
+                    str_rest_thunk));
+}
+
+static mino_val_t *map_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+{
+    mino_val_t *m  = ctx->as.cons.car;
+    size_t idx     = (size_t)ctx->as.cons.cdr->as.i;
+    mino_val_t *kv[2];
+    if (idx >= m->as.map.len) return mino_nil(S);
+    kv[0] = vec_nth(m->as.map.key_order, idx);
+    kv[1] = map_get_val(m, kv[0]);
+    return mino_cons(S, mino_vector(S, kv, 2),
+        make_c_lazy(S, mino_cons(S, m, mino_int(S, (long long)(idx + 1))),
+                    map_rest_thunk));
+}
+
+static mino_val_t *set_rest_thunk(mino_state_t *S, mino_val_t *ctx)
+{
+    mino_val_t *s = ctx->as.cons.car;
+    size_t idx    = (size_t)ctx->as.cons.cdr->as.i;
+    if (idx >= s->as.set.len) return mino_nil(S);
+    return mino_cons(S, vec_nth(s->as.set.key_order, idx),
+        make_c_lazy(S, mino_cons(S, s, mino_int(S, (long long)(idx + 1))),
+                    set_rest_thunk));
+}
+
 mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
@@ -391,21 +444,10 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return coll->as.cons.cdr;
     }
     if (coll->type == MINO_VECTOR) {
-        /* Rest of a vector is a list of the trailing elements. v0.11 will
-         * promote this to a seq abstraction. */
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        for (i = 1; i < coll->as.vec.len; i++) {
-            mino_val_t *cell = mino_cons(S, vec_nth(coll, i), mino_nil(S));
-            if (tail == NULL) {
-                head = cell;
-            } else {
-                tail->as.cons.cdr = cell;
-            }
-            tail = cell;
-        }
-        return head;
+        if (coll->as.vec.len <= 1) return mino_nil(S);
+        return mino_cons(S, vec_nth(coll, 1),
+            make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
+                        vec_rest_thunk));
     }
     if (coll->type == MINO_LAZY) {
         mino_val_t *s = lazy_force(S, coll);
@@ -416,51 +458,24 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (coll->type == MINO_STRING) {
         if (coll->as.s.len <= 1) return mino_nil(S);
-        /* Build a cons list of single-character strings. */
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        for (i = 1; i < coll->as.s.len; i++) {
-            mino_val_t *cell = mino_cons(S, mino_string_n(S, coll->as.s.data + i, 1), mino_nil(S));
-            if (tail == NULL) {
-                head = cell;
-            } else {
-                tail->as.cons.cdr = cell;
-            }
-            tail = cell;
-        }
-        return head;
+        return mino_cons(S, mino_string_n(S, coll->as.s.data + 1, 1),
+            make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
+                        str_rest_thunk));
     }
     if (coll->type == MINO_MAP) {
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        for (i = 1; i < coll->as.map.len; i++) {
-            mino_val_t *key = vec_nth(coll->as.map.key_order, i);
-            mino_val_t *val = map_get_val(coll, key);
-            mino_val_t *kv[2];
-            mino_val_t *cell;
-            kv[0] = key;
-            kv[1] = val;
-            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
-            if (tail == NULL) head = cell;
-            else tail->as.cons.cdr = cell;
-            tail = cell;
-        }
-        return head;
+        mino_val_t *kv[2];
+        if (coll->as.map.len <= 1) return mino_nil(S);
+        kv[0] = vec_nth(coll->as.map.key_order, 1);
+        kv[1] = map_get_val(coll, kv[0]);
+        return mino_cons(S, mino_vector(S, kv, 2),
+            make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
+                        map_rest_thunk));
     }
     if (coll->type == MINO_SET) {
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        for (i = 1; i < coll->as.set.len; i++) {
-            mino_val_t *cell = mino_cons(S, vec_nth(coll->as.set.key_order, i),
-                                         mino_nil(S));
-            if (tail == NULL) head = cell;
-            else tail->as.cons.cdr = cell;
-            tail = cell;
-        }
-        return head;
+        if (coll->as.set.len <= 1) return mino_nil(S);
+        return mino_cons(S, vec_nth(coll->as.set.key_order, 1),
+            make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
+                        set_rest_thunk));
     }
     {
         char msg[96];

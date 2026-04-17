@@ -106,6 +106,8 @@ struct mino_val {
             mino_val_t *body;     /* unevaluated form list (NULL after force) */
             mino_env_t *env;      /* captured environment (NULL after force) */
             mino_val_t *cached;   /* realized cons/nil (valid after force) */
+            mino_val_t *(*c_thunk)(struct mino_state *, mino_val_t *);
+                                  /* optional C thunk; body is context if set */
             int         realized; /* 0 = pending, 1 = forced */
         } lazy;
         struct {          /* MINO_RECUR: carries rebind args for trampoline */

@@ -224,15 +224,19 @@ mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
         return v->as.lazy.cached;
     }
     {
-        mino_val_t *result = eval_implicit_do(S, v->as.lazy.body, v->as.lazy.env);
+        mino_val_t *result = v->as.lazy.c_thunk != NULL
+            ? v->as.lazy.c_thunk(S, v->as.lazy.body)
+            : eval_implicit_do(S, v->as.lazy.body, v->as.lazy.env);
         if (result == NULL) return NULL;
         /* Iteratively unwrap nested lazy seqs. */
         while (result != NULL && result->type == MINO_LAZY) {
             if (result->as.lazy.realized) {
                 result = result->as.lazy.cached;
             } else {
-                mino_val_t *inner = eval_implicit_do(S, 
-                    result->as.lazy.body, result->as.lazy.env);
+                mino_val_t *inner = result->as.lazy.c_thunk != NULL
+                    ? result->as.lazy.c_thunk(S, result->as.lazy.body)
+                    : eval_implicit_do(S,
+                        result->as.lazy.body, result->as.lazy.env);
                 result->as.lazy.cached  = inner;
                 result->as.lazy.realized = 1;
                 result->as.lazy.body    = NULL;
