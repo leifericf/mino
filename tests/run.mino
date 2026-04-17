@@ -50,5 +50,7 @@
 (require "tests/reader_cond_test")
 (require "tests/ns_test")
 (require "tests/require_extended_test")
+(require "tests/var_test")
+(require "tests/ns_resolution_test")
 
 (run-tests)
