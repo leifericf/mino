@@ -34,6 +34,7 @@ Thumbs.db
 .vscode/
 .idea/
 .claude/
+.mcp.json
 *.swp
 *.swo
 *~
@@ -58,3 +59,7 @@ examples/actor_scale_test
 examples/cpp_embed_test
 examples/state_switch_test
 examples/integration_test
+examples/fault_inject_test
+examples/regex_thread_test
+data/
+.clj-kondo/
