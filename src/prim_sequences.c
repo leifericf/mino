@@ -700,3 +700,27 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     default:          return mino_nil(S);
     }
 }
+
+mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *out;
+    size_t i;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "rseq requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    if (coll->type != MINO_VECTOR) {
+        set_error(S, "rseq: argument must be a vector");
+        return NULL;
+    }
+    if (coll->as.vec.len == 0) return mino_nil(S);
+    out = mino_nil(S);
+    for (i = 0; i < coll->as.vec.len; i++) {
+        out = mino_cons(S, vec_nth(coll, i), out);
+    }
+    return out;
+}

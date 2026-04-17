@@ -307,6 +307,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "pop",      mino_prim(S, "pop",      prim_pop));
     mino_env_set(S, env, "find",     mino_prim(S, "find",     prim_find));
     mino_env_set(S, env, "empty",    mino_prim(S, "empty",    prim_empty));
+    mino_env_set(S, env, "rseq",     mino_prim(S, "rseq",     prim_rseq));
     /* string operations */
     mino_env_set(S, env, "subs",     mino_prim(S, "subs",     prim_subs));
     mino_env_set(S, env, "split",    mino_prim(S, "split",    prim_split));
