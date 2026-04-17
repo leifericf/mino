@@ -260,7 +260,12 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 return NULL;
             }
             if (elem == NULL) {
-                /* EOF mid-list */
+                /* No form produced (e.g. unmatched #?). Re-check for
+                 * closing delimiter before declaring unterminated. */
+                if (**p == ')') {
+                    (*p)++;
+                    return head;
+                }
                 set_error(S, "unterminated list");
                 return NULL;
             }
@@ -348,6 +353,10 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
         {
             mino_val_t *elem = read_form(S, p);
             if (elem == NULL) {
+                if (mino_last_error(S) == NULL && **p == ']') {
+                    (*p)++;
+                    break; /* unmatched #? at end of vector */
+                }
                 if (mino_last_error(S) == NULL) {
                     set_error(S, "unterminated vector");
                 }
@@ -876,7 +885,14 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             gc_unpin(1);
             return found;
         }
-        /* No branch matched: read next form transparently */
+        /* No branch matched: skip whitespace and check if we're at a
+         * closing delimiter. If so, return NULL without error to signal
+         * "no form produced" to the enclosing list/vector reader.
+         * Otherwise, read the next form transparently. */
+        skip_ws(S, p);
+        if (**p == '\0' || **p == ')' || **p == ']' || **p == '}') {
+            return NULL;
+        }
         return read_form(S, p);
     }
     if (**p == '"') {
