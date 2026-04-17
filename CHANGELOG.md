@@ -8,13 +8,16 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - **Module extraction**: evaluator, runtime, and primitive code further
-  split into focused translation units. `mino.c` split into `mino.c`
-  (eval front door) + `eval_special.c` (special forms) + `runtime_state.c`
-  + `runtime_gc.c` + `runtime_env.c` + `runtime_error.c`. `prim.c` split
-  into `prim.c` (shared helpers, install) + `prim_numeric.c` +
-  `prim_collections.c` + `prim_sequences.c` + `prim_string.c` +
-  `prim_io.c`. Reader helpers `read_anon_fn_form` and
-  `read_metadata_form` extracted from `read_form`.
+  split into focused translation units. `eval_special.c` split into
+  `eval_special.c` (dispatch) + `eval_special_defs.c` +
+  `eval_special_bindings.c` + `eval_special_control.c` +
+  `eval_special_fn.c`. `prim.c` split into `prim.c` (shared helpers,
+  install) + `prim_reflection.c` + `prim_meta.c` + `prim_regex.c` +
+  `prim_stateful.c` + `prim_module.c`. New `eval_special_internal.h`
+  provides cross-domain declarations for the evaluator layer.
+- **Architecture gates**: `make qa-arch` now passes with zero allowlists.
+  TU size limit tightened from 1200 to 1100 LOC. All function span
+  allowlists removed.
 - **State access**: all state field alias macros removed. Internal code
   uses explicit `S->field` access throughout.
 - **Ownership annotations**: function declarations in `mino_internal.h`
