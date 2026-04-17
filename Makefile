@@ -37,6 +37,7 @@ clean:
 	      fuzz/fuzz_reader fuzz/fuzz_reader.o \
 	      examples/embed examples/embed.o \
 	      examples/fault_inject_test examples/fault_inject_test.o \
+	      examples/regex_thread_test examples/regex_thread_test.o \
 	      cookbook/config cookbook/rules cookbook/repl_socket \
 	      cookbook/plugin cookbook/pipeline cookbook/console
 
@@ -82,6 +83,13 @@ test-fault-inject: examples/fault_inject_test
 
 examples/fault_inject_test: examples/fault_inject_test.c $(LIB_OBJS) src/mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ examples/fault_inject_test.c $(LIB_OBJS) $(LIBS)
+
+# Regex thread-safety smoke test (requires pthreads).
+test-regex-thread: examples/regex_thread_test
+	./examples/regex_thread_test
+
+examples/regex_thread_test: examples/regex_thread_test.c src/re.c src/re.h
+	$(CC) $(CFLAGS) -Isrc $(LDFLAGS) -pthread -o $@ examples/regex_thread_test.c src/re.c
 
 fuzz-stdin: fuzz/fuzz_reader
 	@echo "fuzz_reader built (stdin mode). Run: ./fuzz/crash_test.sh"
