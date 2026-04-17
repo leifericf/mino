@@ -13,17 +13,64 @@
 
 /* --- Evaluator helpers: one per value kind. --- */
 
+/* Look up an alias in the ns_aliases table; returns the full module name
+ * or NULL if not found. */
+static const char *alias_resolve(mino_state_t *S, const char *alias)
+{
+    size_t i;
+    for (i = 0; i < S->ns_alias_len; i++) {
+        if (strcmp(S->ns_aliases[i].alias, alias) == 0)
+            return S->ns_aliases[i].full_name;
+    }
+    return NULL;
+}
+
 static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
     char buf[256];
     size_t n = form->as.s.len;
     mino_val_t *v;
+    const char *slash;
     if (n >= sizeof(buf)) {
         set_error_at(S, S->eval_current_form, "symbol name too long");
         return NULL;
     }
     memcpy(buf, form->as.s.data, n);
     buf[n] = '\0';
+
+    /* Check for namespace-qualified symbol (e.g. t/is, clojure.core/+).
+     * Single-char "/" is the division function, not a qualified symbol. */
+    slash = (n > 1) ? strchr(buf, '/') : NULL;
+    if (slash != NULL) {
+        char ns_buf[256];
+        const char *sym_name = slash + 1;
+        size_t ns_len = (size_t)(slash - buf);
+        const char *resolved_ns;
+        mino_val_t *var;
+
+        memcpy(ns_buf, buf, ns_len);
+        ns_buf[ns_len] = '\0';
+
+        /* Resolve alias to full module name. */
+        resolved_ns = alias_resolve(S, ns_buf);
+        if (resolved_ns == NULL) resolved_ns = ns_buf;
+
+        /* Look up in var registry by resolved namespace + name. */
+        var = var_find(S, resolved_ns, sym_name);
+        if (var != NULL) return var->as.var.root;
+
+        /* Also try looking up the bare name in root env as fallback. */
+        v = mino_env_get(env, sym_name);
+        if (v != NULL) return v;
+
+        {
+            char msg[300];
+            snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
+            set_error_at(S, S->eval_current_form, msg);
+            return NULL;
+        }
+    }
+
     v = dyn_lookup(S, buf);
     if (v == NULL) v = mino_env_get(env, buf);
     if (v == NULL) {
