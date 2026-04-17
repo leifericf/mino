@@ -202,6 +202,9 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         if (sym_eq(head, "declare")) {
             return eval_declare(S, form, args, env);
         }
+        if (sym_eq(head, "ns")) {
+            return eval_ns(S, form, args, env);
+        }
         if (sym_eq(head, "var")) {
             mino_val_t *sym_arg;
             if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {

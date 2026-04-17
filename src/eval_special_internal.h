@@ -10,6 +10,9 @@
 
 #include "mino_internal.h"
 
+/* prim_module.c: needed by eval_ns for require delegation. */
+mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+
 /* eval_special_bindings.c: destructuring and binding helpers. */
 int kw_eq(const mino_val_t *v, const char *s);
 int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
@@ -22,6 +25,9 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
                          mino_val_t *args, mino_env_t *env);
 mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
                      mino_val_t *args, mino_env_t *env);
+
+mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
+                    mino_val_t *args, mino_env_t *env);
 
 /* eval_special_bindings.c */
 mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,

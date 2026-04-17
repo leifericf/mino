@@ -48,5 +48,6 @@
 (require "tests/conformance_test")
 (require "tests/var_quote_test")
 (require "tests/reader_cond_test")
+(require "tests/ns_test")
 
 (run-tests)
