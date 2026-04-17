@@ -70,6 +70,7 @@ int main(void)
     }
     if (pthread_create(&t2, NULL, thread_alpha, NULL) != 0) {
         fprintf(stderr, "failed to create thread 2\n");
+        pthread_join(t1, NULL);
         return 1;
     }
 
