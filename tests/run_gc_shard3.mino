@@ -1,0 +1,7 @@
+;; GC stress shard 3/10: macro, error, atom, predicate.
+(require "tests/test")
+(require "tests/macro_test")
+(require "tests/error_test")
+(require "tests/atom_test")
+(require "tests/predicate_test")
+(run-tests)

@@ -1,0 +1,7 @@
+;; GC stress shard 1/10: arithmetic, binding, control, function.
+(require "tests/test")
+(require "tests/arithmetic_test")
+(require "tests/binding_test")
+(require "tests/control_test")
+(require "tests/function_test")
+(run-tests)

@@ -1,0 +1,6 @@
+;; GC stress shard 9/10: clj control, clj math, clj higher-order.
+(require "tests/test")
+(require "tests/clj_control_test")
+(require "tests/clj_math_test")
+(require "tests/clj_higher_order_test")
+(run-tests)

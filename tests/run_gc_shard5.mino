@@ -1,0 +1,7 @@
+;; GC stress shard 5/10: hash/compare, regex, reader fuzz, tco.
+(require "tests/test")
+(require "tests/hash_compare_test")
+(require "tests/regex_test")
+(require "tests/reader_fuzz_test")
+(require "tests/tco_test")
+(run-tests)

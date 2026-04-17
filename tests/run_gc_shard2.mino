@@ -1,0 +1,7 @@
+;; GC stress shard 2/10: collection, string, sequence, lazy.
+(require "tests/test")
+(require "tests/collection_test")
+(require "tests/string_test")
+(require "tests/sequence_test")
+(require "tests/lazy_test")
+(run-tests)
