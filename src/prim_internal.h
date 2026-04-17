@@ -81,7 +81,7 @@ mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lt(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_meta.c / prim.c: metadata */
+/* prim_meta.c */
 mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -146,7 +146,7 @@ mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim.c: reflection, stateful, regex, require, install */
+/* prim_reflection.c */
 mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -158,16 +158,22 @@ mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *en
 mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+
+/* prim_regex.c */
 mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+
+/* prim_stateful.c */
 mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+
+/* prim_module.c */
+mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 #endif /* PRIM_INTERNAL_H */

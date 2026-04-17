@@ -1,0 +1,67 @@
+/*
+ * prim_regex.c -- regex primitives: re-find, re-matches.
+ *
+ * Extracted from prim.c. No behavior change.
+ */
+
+#include "prim_internal.h"
+#include "re.h"
+
+/* (re-find pattern text) -- find first match of pattern in text.
+ * Returns the matched substring, or nil if no match. */
+mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pat_val, *text_val;
+    int match_len = 0;
+    int match_idx;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error(S, "re-find requires two arguments");
+        return NULL;
+    }
+    pat_val  = args->as.cons.car;
+    text_val = args->as.cons.cdr->as.cons.car;
+    if (pat_val == NULL || pat_val->type != MINO_STRING) {
+        set_error(S, "re-find: first argument must be a pattern string");
+        return NULL;
+    }
+    if (text_val == NULL || text_val->type != MINO_STRING) {
+        set_error(S, "re-find: second argument must be a string");
+        return NULL;
+    }
+    match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
+    if (match_idx == -1) {
+        return mino_nil(S);
+    }
+    return mino_string_n(S, text_val->as.s.data + match_idx, (size_t)match_len);
+}
+
+/* (re-matches pattern text) -- true if the entire text matches pattern. */
+mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pat_val, *text_val;
+    int match_len = 0;
+    int match_idx;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error(S, "re-matches requires two arguments");
+        return NULL;
+    }
+    pat_val  = args->as.cons.car;
+    text_val = args->as.cons.cdr->as.cons.car;
+    if (pat_val == NULL || pat_val->type != MINO_STRING) {
+        set_error(S, "re-matches: first argument must be a pattern string");
+        return NULL;
+    }
+    if (text_val == NULL || text_val->type != MINO_STRING) {
+        set_error(S, "re-matches: second argument must be a string");
+        return NULL;
+    }
+    match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
+    if (match_idx == 0 && (size_t)match_len == text_val->as.s.len) {
+        return text_val;
+    }
+    return mino_nil(S);
+}

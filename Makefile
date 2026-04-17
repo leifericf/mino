@@ -13,6 +13,8 @@ LIB_SRCS := src/mino.c src/eval_special.c \
             src/val.c src/vec.c src/map.c src/read.c src/print.c \
             src/prim.c src/prim_numeric.c src/prim_collections.c \
             src/prim_sequences.c src/prim_string.c src/prim_io.c \
+            src/prim_reflection.c src/prim_meta.c src/prim_regex.c \
+            src/prim_stateful.c src/prim_module.c \
             src/clone.c src/re.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 SRCS     := $(LIB_SRCS) main.c
@@ -46,6 +48,11 @@ src/prim_collections.o: src/prim_collections.c src/prim_internal.h src/mino_inte
 src/prim_sequences.o: src/prim_sequences.c src/prim_internal.h src/mino_internal.h
 src/prim_string.o: src/prim_string.c src/prim_internal.h src/mino_internal.h
 src/prim_io.o: src/prim_io.c src/prim_internal.h src/mino_internal.h
+src/prim_reflection.o: src/prim_reflection.c src/prim_internal.h src/mino_internal.h
+src/prim_meta.o: src/prim_meta.c src/prim_internal.h src/mino_internal.h
+src/prim_regex.o: src/prim_regex.c src/prim_internal.h src/mino_internal.h src/re.h
+src/prim_stateful.o: src/prim_stateful.c src/prim_internal.h src/mino_internal.h
+src/prim_module.o: src/prim_module.c src/prim_internal.h src/mino_internal.h
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
