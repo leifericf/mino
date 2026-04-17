@@ -312,6 +312,88 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     return def_val;
                 }
             }
+            if (fn->type == MINO_MAP) {
+                /* Callable maps: ({:a 1} :k) => (get {:a 1} :k),
+                 *                ({:a 1} :k d) => (get {:a 1} :k d). */
+                mino_val_t *m = fn;
+                int         nargs = 0;
+                mino_val_t *tmp;
+                gc_unpin(1);
+                evaled = eval_args(S, args, env);
+                if (evaled == NULL && mino_last_error(S) != NULL)
+                    return NULL;
+                for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    nargs++;
+                if (nargs < 1 || nargs > 2) {
+                    set_error_at(S, form,
+                        "map as function takes 1 or 2 arguments");
+                    return NULL;
+                }
+                {
+                    mino_val_t *key     = evaled->as.cons.car;
+                    mino_val_t *def_val = nargs == 2
+                        ? evaled->as.cons.cdr->as.cons.car
+                        : mino_nil(S);
+                    mino_val_t *v = map_get_val(m, key);
+                    return v == NULL ? def_val : v;
+                }
+            }
+            if (fn->type == MINO_VECTOR) {
+                /* Callable vectors: ([1 2 3] 0) => (nth [1 2 3] 0). */
+                mino_val_t *vec = fn;
+                int         nargs = 0;
+                mino_val_t *tmp;
+                gc_unpin(1);
+                evaled = eval_args(S, args, env);
+                if (evaled == NULL && mino_last_error(S) != NULL)
+                    return NULL;
+                for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    nargs++;
+                if (nargs != 1) {
+                    set_error_at(S, form,
+                        "vector as function takes 1 argument");
+                    return NULL;
+                }
+                {
+                    mino_val_t *idx = evaled->as.cons.car;
+                    long long i;
+                    if (idx == NULL || idx->type != MINO_INT) {
+                        set_error_at(S, form,
+                            "vector index must be an integer");
+                        return NULL;
+                    }
+                    i = idx->as.i;
+                    if (i < 0 || (size_t)i >= vec->as.vec.len) {
+                        set_error_at(S, form,
+                            "vector index out of bounds");
+                        return NULL;
+                    }
+                    return vec_nth(vec, (size_t)i);
+                }
+            }
+            if (fn->type == MINO_SET) {
+                /* Callable sets: (#{:a :b} :a) => :a or nil. */
+                mino_val_t *s = fn;
+                int         nargs = 0;
+                mino_val_t *tmp;
+                gc_unpin(1);
+                evaled = eval_args(S, args, env);
+                if (evaled == NULL && mino_last_error(S) != NULL)
+                    return NULL;
+                for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    nargs++;
+                if (nargs != 1) {
+                    set_error_at(S, form,
+                        "set as function takes 1 argument");
+                    return NULL;
+                }
+                {
+                    mino_val_t *key = evaled->as.cons.car;
+                    uint32_t h = hash_val(key);
+                    return hamt_get(s->as.set.root, key, h, 0u) != NULL
+                        ? key : mino_nil(S);
+                }
+            }
             if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
                 gc_unpin(1);
                 {

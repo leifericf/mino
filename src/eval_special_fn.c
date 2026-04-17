@@ -299,6 +299,89 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             return result;
         }
     }
+    if (fn->type == MINO_KEYWORD) {
+        /* Keyword as function in higher-order context: (:k m) => (get m :k). */
+        int         nargs = 0;
+        mino_val_t *tmp;
+        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+            nargs++;
+        if (nargs < 1 || nargs > 2) {
+            set_error(S, "keyword as function takes 1 or 2 arguments");
+            return NULL;
+        }
+        {
+            mino_val_t *coll    = args->as.cons.car;
+            mino_val_t *def_val = nargs == 2
+                ? args->as.cons.cdr->as.cons.car
+                : mino_nil(S);
+            if (coll != NULL && coll->type == MINO_MAP) {
+                mino_val_t *v = map_get_val(coll, fn);
+                return v == NULL ? def_val : v;
+            }
+            return def_val;
+        }
+    }
+    if (fn->type == MINO_MAP) {
+        /* Map as function in higher-order context: ({:a 1} :k). */
+        int         nargs = 0;
+        mino_val_t *tmp;
+        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+            nargs++;
+        if (nargs < 1 || nargs > 2) {
+            set_error(S, "map as function takes 1 or 2 arguments");
+            return NULL;
+        }
+        {
+            mino_val_t *key     = args->as.cons.car;
+            mino_val_t *def_val = nargs == 2
+                ? args->as.cons.cdr->as.cons.car
+                : mino_nil(S);
+            mino_val_t *v = map_get_val(fn, key);
+            return v == NULL ? def_val : v;
+        }
+    }
+    if (fn->type == MINO_VECTOR) {
+        /* Vector as function in higher-order context: ([1 2 3] 0). */
+        int         nargs = 0;
+        mino_val_t *tmp;
+        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+            nargs++;
+        if (nargs != 1) {
+            set_error(S, "vector as function takes 1 argument");
+            return NULL;
+        }
+        {
+            mino_val_t *idx = args->as.cons.car;
+            long long i;
+            if (idx == NULL || idx->type != MINO_INT) {
+                set_error(S, "vector index must be an integer");
+                return NULL;
+            }
+            i = idx->as.i;
+            if (i < 0 || (size_t)i >= fn->as.vec.len) {
+                set_error(S, "vector index out of bounds");
+                return NULL;
+            }
+            return vec_nth(fn, (size_t)i);
+        }
+    }
+    if (fn->type == MINO_SET) {
+        /* Set as function in higher-order context: (#{:a :b} :a) => :a. */
+        int         nargs = 0;
+        mino_val_t *tmp;
+        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+            nargs++;
+        if (nargs != 1) {
+            set_error(S, "set as function takes 1 argument");
+            return NULL;
+        }
+        {
+            mino_val_t *key = args->as.cons.car;
+            uint32_t h = hash_val(key);
+            return hamt_get(fn->as.set.root, key, h, 0u) != NULL
+                ? key : mino_nil(S);
+        }
+    }
     {
         char msg[128];
         snprintf(msg, sizeof(msg), "not a function (got %s)",

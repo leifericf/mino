@@ -1,0 +1,52 @@
+(require "tests/test")
+
+;; Collections and keywords as callable functions (IFn).
+
+;; --- Maps as functions ---
+
+(deftest map-as-fn-basic
+  (is (= 1 ({:a 1 :b 2} :a)))
+  (is (= 2 ({:a 1 :b 2} :b)))
+  (is (nil? ({:a 1} :z))))
+
+(deftest map-as-fn-default
+  (is (= 42 ({:a 1} :z 42)))
+  (is (= 1 ({:a 1} :a 42))))
+
+(deftest map-as-fn-higher-order
+  (is (= '(1 2 3) (map {:a 1 :b 2 :c 3} [:a :b :c])))
+  (is (= '("a" "b") (map :name [{:name "a"} {:name "b"}]))))
+
+;; --- Vectors as functions ---
+
+(deftest vector-as-fn-basic
+  (is (= :a ([:a :b :c] 0)))
+  (is (= :b ([:a :b :c] 1)))
+  (is (= :c ([:a :b :c] 2))))
+
+(deftest vector-as-fn-higher-order
+  (is (= '(:a :b) (map [10 :a :b] [1 2]))))
+
+;; --- Sets as functions ---
+
+(deftest set-as-fn-basic
+  (is (= :a (#{:a :b :c} :a)))
+  (is (nil? (#{:a :b :c} :z))))
+
+(deftest set-as-fn-filter
+  (is (= '(:a :b) (filter #{:a :b} [:a :c :b :d]))))
+
+;; --- Keywords in higher-order contexts ---
+
+(deftest keyword-higher-order
+  (is (= '(1 2 3) (map :val [{:val 1} {:val 2} {:val 3}])))
+  (is (= '(1 2) (map :a [{:a 1 :b 10} {:a 2 :b 20}]))))
+
+;; --- apply with collections ---
+
+(deftest apply-with-collections
+  (is (= 1 (apply {:a 1 :b 2} [:a])))
+  (is (= :b (apply [:a :b :c] [1])))
+  (is (= :a (apply #{:a :b} [:a]))))
+
+(run-tests)
