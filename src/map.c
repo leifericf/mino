@@ -298,7 +298,7 @@ static mino_hamt_node_t *merge_entries(mino_state_t *S, hamt_entry_t *e1, uint32
     if (h1 == h2 || shift >= 32u) {
         /* Can't separate further: collision bucket. */
         void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, 2 * sizeof(*slots));
-        if (slots == NULL) { abort(); }
+        if (slots == NULL) { return NULL; }
         slots[0] = e1;
         slots[1] = e2;
         return hamt_collision_node(S, h1, slots, 2);
@@ -310,12 +310,12 @@ static mino_hamt_node_t *merge_entries(mino_state_t *S, hamt_entry_t *e1, uint32
             mino_hamt_node_t *child = merge_entries(S, e1, h1, e2, h2,
                                                      shift + HAMT_B);
             void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
-            if (slots == NULL) { abort(); }
+            if (slots == NULL) { return NULL; }
             slots[0] = child;
             return hamt_bitmap_node(S, 1u << i1, 1u << i1, slots);
         } else {
             void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, 2 * sizeof(*slots));
-            if (slots == NULL) { abort(); }
+            if (slots == NULL) { return NULL; }
             if (i1 < i2) {
                 slots[0] = e1; slots[1] = e2;
             } else {
@@ -338,7 +338,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
     if (n == NULL) {
         unsigned  i     = (unsigned)((h >> shift) & HAMT_MASK);
         void    **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
-        if (slots == NULL) { abort(); }
+        if (slots == NULL) { return NULL; }
         slots[0] = new_entry;
         return hamt_bitmap_node(S, 1u << i, 0u, slots);
     }
@@ -352,7 +352,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
                 if (mino_eq(e->key, new_entry->key)) {
                     void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, n->collision_count * sizeof(*slots));
                     unsigned k;
-                    if (slots == NULL) { abort(); }
+                    if (slots == NULL) { return NULL; }
                     for (k = 0; k < n->collision_count; k++) { slots[k] = n->slots[k]; }
                     slots[j] = new_entry;
                     *replaced = 1;
@@ -362,7 +362,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
             {
                 void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, (n->collision_count + 1u) * sizeof(*slots));
                 unsigned k;
-                if (slots == NULL) { abort(); }
+                if (slots == NULL) { return NULL; }
                 for (k = 0; k < n->collision_count; k++) { slots[k] = n->slots[k]; }
                 slots[n->collision_count] = new_entry;
                 return hamt_collision_node(S, h, slots, n->collision_count + 1u);
@@ -378,14 +378,14 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
                 mino_hamt_node_t *sub   = hamt_assoc(S, n, new_entry, h,
                                                       shift + HAMT_B, replaced);
                 void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
-                if (slots == NULL) { abort(); }
+                if (slots == NULL) { return NULL; }
                 slots[0] = sub;
                 return hamt_bitmap_node(S, 1u << ib, 1u << ib, slots);
             } else {
                 void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, 2 * sizeof(*slots));
                 uint32_t bitmap       = (1u << ib) | (1u << in);
                 uint32_t subnode_mask = 1u << ib;
-                if (slots == NULL) { abort(); }
+                if (slots == NULL) { return NULL; }
                 if (ib < in) {
                     slots[0] = (void *)n;
                     slots[1] = new_entry;
@@ -406,7 +406,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
             /* Empty slot: insert directly. */
             void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, (pop + 1u) * sizeof(*slots));
             unsigned k;
-            if (slots == NULL) { abort(); }
+            if (slots == NULL) { return NULL; }
             for (k = 0; k < phys; k++)        { slots[k]        = n->slots[k];       }
             slots[phys] = new_entry;
             for (k = phys; k < pop; k++)      { slots[k + 1]    = n->slots[k];       }
@@ -419,7 +419,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
                 shift + HAMT_B, replaced);
             void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, pop * sizeof(*slots));
             unsigned k;
-            if (slots == NULL) { abort(); }
+            if (slots == NULL) { return NULL; }
             for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
             slots[phys] = new_child;
             return hamt_bitmap_node(S, n->bitmap, n->subnode_mask, slots);
@@ -430,7 +430,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
             if (mino_eq(existing->key, new_entry->key)) {
                 void **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, pop * sizeof(*slots));
                 unsigned k;
-                if (slots == NULL) { abort(); }
+                if (slots == NULL) { return NULL; }
                 for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
                 slots[phys] = new_entry;
                 *replaced = 1;
@@ -443,7 +443,7 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
                                                         shift + HAMT_B);
                 void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, pop * sizeof(*slots));
                 unsigned k;
-                if (slots == NULL) { abort(); }
+                if (slots == NULL) { return NULL; }
                 for (k = 0; k < pop; k++) { slots[k] = n->slots[k]; }
                 slots[phys] = sub;
                 return hamt_bitmap_node(S, n->bitmap,
