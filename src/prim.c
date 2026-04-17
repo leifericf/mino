@@ -1736,6 +1736,17 @@ static mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *found = hamt_get(coll->as.set.root, key, h, 0u);
         return found != NULL ? key : def_val;
     }
+    if (coll->type == MINO_STRING) {
+        long long idx;
+        if (key == NULL || key->type != MINO_INT) {
+            return def_val;
+        }
+        idx = key->as.i;
+        if (idx < 0 || (size_t)idx >= coll->as.s.len) {
+            return def_val;
+        }
+        return mino_string_n(S, coll->as.s.data + idx, 1);
+    }
     return def_val;
 }
 
