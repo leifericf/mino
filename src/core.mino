@@ -305,9 +305,6 @@
       acc))
     (with-meta {} (meta m)) ks)))
 
-(def find (fn [m k]
-  (when (contains? m k) (vector k (get m k)))))
-
 (def zipmap
   (let [zm-impl (fn [acc ks vs]
          (if (and (seq ks) (seq vs))

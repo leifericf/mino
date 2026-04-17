@@ -654,3 +654,29 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return NULL;
 }
+
+mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *m;
+    mino_val_t *k;
+    mino_val_t *v;
+    mino_val_t *kv[2];
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error(S, "find requires two arguments");
+        return NULL;
+    }
+    m = args->as.cons.car;
+    k = args->as.cons.cdr->as.cons.car;
+    if (m == NULL || m->type == MINO_NIL) return mino_nil(S);
+    if (m->type != MINO_MAP) {
+        set_error(S, "find: first argument must be a map");
+        return NULL;
+    }
+    v = map_get_val(m, k);
+    if (v == NULL) return mino_nil(S);
+    kv[0] = k;
+    kv[1] = v;
+    return mino_vector(S, kv, 2);
+}
