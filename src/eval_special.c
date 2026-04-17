@@ -208,6 +208,9 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         }
         if (sym_eq(head, "var")) {
             mino_val_t *sym_arg;
+            mino_val_t *var;
+            char vbuf[256];
+            size_t vn;
             if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
                 set_error_at(S, form, "var requires exactly one argument");
                 return NULL;
@@ -217,7 +220,46 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 set_error_at(S, form, "var requires a symbol argument");
                 return NULL;
             }
-            return eval_symbol(S, sym_arg, env);
+            vn = sym_arg->as.s.len;
+            if (vn >= sizeof(vbuf)) {
+                set_error_at(S, form, "var: symbol name too long");
+                return NULL;
+            }
+            memcpy(vbuf, sym_arg->as.s.data, vn);
+            vbuf[vn] = '\0';
+            /* Try qualified (ns/name) lookup. */
+            {
+                const char *sl = memchr(vbuf, '/', vn);
+                if (sl != NULL && vn > 1) {
+                    char ns_buf[256];
+                    size_t ns_len = (size_t)(sl - vbuf);
+                    const char *name = sl + 1;
+                    memcpy(ns_buf, vbuf, ns_len);
+                    ns_buf[ns_len] = '\0';
+                    var = var_find(S, ns_buf, name);
+                    if (var != NULL) return var;
+                }
+            }
+            /* Unqualified: try current ns, then "user", then scan all. */
+            var = var_find(S, S->current_ns, vbuf);
+            if (var == NULL) var = var_find(S, "user", vbuf);
+            if (var == NULL) {
+                /* Fallback: search by name across all namespaces. */
+                size_t vi;
+                for (vi = 0; vi < S->var_registry_len; vi++) {
+                    if (strcmp(S->var_registry[vi].name, vbuf) == 0) {
+                        var = S->var_registry[vi].var;
+                        break;
+                    }
+                }
+            }
+            if (var != NULL) return var;
+            {
+                char msg[300];
+                snprintf(msg, sizeof(msg), "var: unbound symbol: %s", vbuf);
+                set_error_at(S, form, msg);
+                return NULL;
+            }
         }
         if (sym_eq(head, "def")) {
             return eval_def(S, form, args, env);
