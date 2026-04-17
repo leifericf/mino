@@ -76,6 +76,42 @@ fundamental change to mino's value model. mino's `rest` has `next`
 semantics (returns nil when exhausted). Style guides already recommend
 `next` for nil-punning, so this rarely surprises in practice.
 
+## Core Library (Needs C Support)
+
+### `sorted-map-by` / `sorted-set-by`
+
+Custom comparator sorted collections. The rbtree infrastructure already
+has a `comparator` field and `rb_compare` accepts an optional comparator,
+but the C constructors (`mino_sorted_map`, `mino_sorted_set`) hardcode
+`NULL`. Need new C primitives that accept a comparison function. ~30 lines.
+
+### `subseq` / `rsubseq`
+
+Range queries on sorted collections. Need C-level in-order traversal
+with lower/upper bounds on the rbtree. ~80 lines.
+
+### `subvec`
+
+Efficient O(1) vector slice sharing the underlying trie. Needs a C
+primitive that creates a view with offset and length. ~60 lines.
+
+### `parse-long` / `parse-double`
+
+String-to-number parsing that returns `nil` on failure instead of
+throwing. The current `int` and `float` C primitives produce fatal
+errors on bad input. Need new C primitives with nil-return semantics.
+~30 lines each.
+
+### `NaN?` / `infinite?`
+
+IEEE 754 special value predicates. Need C primitives using `isnan()`
+and `isinf()`. ~10 lines each.
+
+### `pr` / `print` / `newline`
+
+Output without trailing newline. `println` and `prn` always append a
+newline. Need C primitives for no-newline output. ~20 lines each.
+
 ## Architecture
 
 ### mino-std package

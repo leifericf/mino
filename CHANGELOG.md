@@ -24,6 +24,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **`rseq`**: reverse-order traversal of vectors, returning a list.
 - **`take-nth`**: lazy seq function with transducer support.
 - **`lazy-cat`**: macro for lazily concatenating multiple collections.
+- **Sorted collections**: `sorted-map` and `sorted-set` backed by a
+  persistent left-leaning red-black tree (LLRB) with path-copying. Full
+  integration with `seq`, `count`, `first`, `rest`, `get`, `assoc`,
+  `dissoc`, `contains?`, `conj`, `into`, `find`, `empty`, and equality.
+- **`some->`** and **`some->>`**: nil-safe threading macros.
+- **`update-vals`** and **`update-keys`**: apply a function to every
+  value or key in a map.
+- **`min-key`** and **`max-key`**: find elements by keyed comparison.
+- **`random-sample`**: probabilistic filter with transducer arity.
+- **`halt-when`**: transducer that stops processing on a predicate.
+- **`bounded-count`** and **`counted?`**: count with upper limit for
+  lazy sequences; predicate for O(1)-countable collections.
+- **`while`** macro: imperative loop.
+- **`distinct?`**: check all arguments are unique.
+- **Type predicates**: `sorted?`, `associative?`, `reversible?`, `any?`.
+- **`ensure-reduced`**: transducer helper that wraps in `reduced` if not
+  already reduced.
 
 ### Changed
 - **Lazy `rest`**: `rest` on vectors, maps, sets, and strings now returns
