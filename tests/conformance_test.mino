@@ -159,4 +159,40 @@
 (deftest distinct?-empty
   (is (distinct?)))
 
+;; --- type predicates ---
+
+(deftest sorted?-test
+  (is (sorted? (sorted-map :a 1)))
+  (is (sorted? (sorted-set 1 2)))
+  (is (not (sorted? {:a 1})))
+  (is (not (sorted? [1 2]))))
+
+(deftest associative?-test
+  (is (associative? {:a 1}))
+  (is (associative? [1 2]))
+  (is (associative? (sorted-map :a 1)))
+  (is (not (associative? '(1 2))))
+  (is (not (associative? #{1 2}))))
+
+(deftest reversible?-test
+  (is (reversible? [1 2 3]))
+  (is (not (reversible? '(1 2))))
+  (is (not (reversible? {:a 1}))))
+
+(deftest any?-test
+  (is (any? nil))
+  (is (any? false))
+  (is (any? 42))
+  (is (any? "hello")))
+
+;; --- ensure-reduced ---
+
+(deftest ensure-reduced-basic
+  (is (reduced? (ensure-reduced 42)))
+  (is (= 42 @(ensure-reduced 42))))
+
+(deftest ensure-reduced-already-reduced
+  (let [r (reduced 42)]
+    (is (identical? r (ensure-reduced r)))))
+
 ;; (run-tests) -- called by tests/run.mino

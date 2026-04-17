@@ -550,6 +550,10 @@
     true
     (let [s (set xs)]
       (= (count s) (count xs))))))
+(def sorted?      (fn [x] (let [t (type x)] (or (= t :sorted-map) (= t :sorted-set)))))
+(def associative?  (fn [x] (let [t (type x)] (or (= t :map) (= t :vector) (= t :sorted-map)))))
+(def reversible?   (fn [x] (= (type x) :vector)))
+(def any?          (fn [x] true))
 
 ;; --- Sequence navigation ---
 
@@ -1385,6 +1389,9 @@
 
 (def unreduced (fn [x]
   (if (reduced? x) (unreduced @x) x)))
+
+(def ensure-reduced (fn [x]
+  (if (reduced? x) x (reduced x))))
 
 (defn transduce
   ([xf f coll]
