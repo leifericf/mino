@@ -794,12 +794,14 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
     switch (coll->type) {
-    case MINO_VECTOR: return mino_vector(S, NULL, 0);
-    case MINO_MAP:    return mino_map(S, NULL, NULL, 0);
-    case MINO_SET:    return mino_set(S, NULL, 0);
+    case MINO_VECTOR:     return mino_vector(S, NULL, 0);
+    case MINO_MAP:        return mino_map(S, NULL, NULL, 0);
+    case MINO_SET:        return mino_set(S, NULL, 0);
+    case MINO_SORTED_MAP: return mino_sorted_map(S, NULL, NULL, 0);
+    case MINO_SORTED_SET: return mino_sorted_set(S, NULL, 0);
     case MINO_CONS:
-    case MINO_LAZY:   return mino_nil(S);
-    default:          return mino_nil(S);
+    case MINO_LAZY:       return mino_nil(S);
+    default:              return mino_nil(S);
     }
 }
 
