@@ -367,6 +367,28 @@
        (drop-while pred (rest s))
        s)))))
 
+(def take-nth (fn
+  ([n]
+   (fn [rf]
+     (let [i (atom -1)]
+       (fn ([] (rf))
+           ([result] (rf result))
+           ([result input]
+            (swap! i inc)
+            (if (= 0 (mod @i n))
+              (rf result input)
+              result))))))
+  ([n coll]
+   (lazy-seq
+     (let [s (seq coll)]
+       (when s
+         (cons (first s) (take-nth n (drop n s)))))))))
+
+(defmacro lazy-cat [& colls]
+  (if (seq colls)
+    `(lazy-seq (concat ~(first colls) (lazy-cat ~@(rest colls))))
+    `(lazy-seq nil)))
+
 (def iterate (fn [f x]
   (lazy-seq (cons x (iterate f (f x))))))
 

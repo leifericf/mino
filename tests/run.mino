@@ -42,5 +42,7 @@
 (require "tests/error_path_test")
 (require "tests/regex_reentrant_test")
 (require "tests/failure_stress_test")
+(require "tests/ifn_test")
+(require "tests/stack_test")
 
 (run-tests)
