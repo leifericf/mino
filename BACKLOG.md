@@ -51,6 +51,36 @@ through mino's eval (C has no unwinding). C++ primitives must wrap in
 try/catch. A thin `mino.hpp` header with RAII wrappers for
 `mino_env_t*` and pinned values would help C++ adoption. ~100 lines.
 
+## Data Structures (Deferred)
+
+### Sorted map/set
+
+Red-black tree implementation for `sorted-map` and `sorted-set`.
+~300+ LOC. Rare in practice for an embedded runtime.
+
+### Array map
+
+Small-map optimization (linear scan for maps under ~8 entries).
+mino's HAMT is already fast for small maps, so the payoff is minimal.
+
+### Transients
+
+Batch mutation API for bulk collection building. `vec_from_array`
+covers the main internal case. Adds complexity without proportional
+embedded-scale benefit.
+
+### Chunked sequences
+
+32-at-a-time lazy evaluation. Adds complexity to the seq machinery;
+mino's element-at-a-time approach is fine at embedded scale.
+
+### `rest` vs `next` distinction
+
+Would require empty list `()` to be distinct from `nil`, which is a
+fundamental change to mino's value model. mino's `rest` has `next`
+semantics (returns nil when exhausted). Style guides already recommend
+`next` for nil-punning, so this rarely surprises in practice.
+
 ## Architecture
 
 ### mino-std package

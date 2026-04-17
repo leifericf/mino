@@ -6,6 +6,31 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.0] — Collection and sequence conformance
+
+### Added
+- **Collections as callable functions**: maps, vectors, and sets can be
+  called as functions in both direct and higher-order contexts.
+  `({:a 1} :a)` returns `1`, `([1 2 3] 0)` returns `1`,
+  `(#{:a :b} :a)` returns `:a`. Maps and keywords accept an optional
+  default argument. Works with `map`, `filter`, `apply`, and other HOFs.
+- **`peek` and `pop`**: stack abstraction for vectors (from end, O(1))
+  and lists (from front, O(1)). `vec_pop` in the C trie handles boundary
+  cases including trie-leaf promotion and height reduction.
+- **`find` as C primitive**: single HAMT lookup returning `[k v]` or nil,
+  replacing the core.mino definition that used two lookups.
+- **`empty` as C primitive**: type-switch returning the empty version of
+  the same collection type.
+- **`rseq`**: reverse-order traversal of vectors, returning a list.
+- **`take-nth`**: lazy seq function with transducer support.
+- **`lazy-cat`**: macro for lazily concatenating multiple collections.
+
+### Changed
+- **Lazy `rest`**: `rest` on vectors, maps, sets, and strings now returns
+  a lazy cons chain instead of eagerly allocating O(n) cells. Extends
+  `MINO_LAZY` with an optional C thunk function pointer for efficient
+  deferred iteration without eval overhead.
+
 ## [0.21.0] — Architecture hardening
 
 ### Changed
