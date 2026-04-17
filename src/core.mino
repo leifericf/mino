@@ -76,6 +76,14 @@
 (def map?     (fn [x] (let [t (type x)] (or (= t :map) (= t :sorted-map)))))
 (def fn?      (fn [x] (= (type x) :fn)))
 (def set?     (fn [x] (let [t (type x)] (or (= t :set) (= t :sorted-set)))))
+(def ifn?     fn?)
+
+;; --- Qualified symbol/keyword predicates ---
+
+(def qualified-symbol?  (fn [x] (and (symbol? x) (some? (namespace x)))))
+(def simple-symbol?     (fn [x] (and (symbol? x) (nil? (namespace x)))))
+(def qualified-keyword? (fn [x] (and (keyword? x) (some? (namespace x)))))
+(def simple-keyword?    (fn [x] (and (keyword? x) (nil? (namespace x)))))
 
 ;; --- Atoms ---
 
