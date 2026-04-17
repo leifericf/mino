@@ -32,7 +32,8 @@ enum {
     GC_T_HAMT_NODE  = 5,
     GC_T_HAMT_ENTRY = 6,
     GC_T_PTRARR     = 7,
-    GC_T_VALARR     = 8
+    GC_T_VALARR     = 8,
+    GC_T_RB_NODE    = 9
 };
 
 /* ------------------------------------------------------------------------- */
@@ -53,6 +54,15 @@ typedef struct {
     jmp_buf     buf;
     mino_val_t *exception;
 } try_frame_t;
+
+/* Red-black tree node for sorted maps/sets. */
+struct mino_rb_node {
+    mino_val_t     *key;
+    mino_val_t     *val;    /* NULL sentinel for sorted sets */
+    mino_rb_node_t *left;
+    mino_rb_node_t *right;
+    unsigned char   red;    /* 1 = red, 0 = black */
+};
 
 /* Module cache entry. */
 typedef struct {
@@ -402,6 +412,38 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
 mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
                      uint32_t hash, unsigned shift);              /* borrowed */
 mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key); /* borrowed */
+
+/* rbtree.c: persistent red-black tree operations for sorted map/set.
+ * rb_get returns a borrowed pointer; rb_assoc/rb_dissoc return new trees. */
+int val_compare(const mino_val_t *a, const mino_val_t *b);          /* pure */
+int rb_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b,
+               mino_val_t *comparator);
+mino_val_t *rb_get(mino_state_t *S, const mino_rb_node_t *n,
+                   const mino_val_t *key, mino_val_t *comparator);  /* borrowed */
+int rb_contains(mino_state_t *S, const mino_rb_node_t *n,
+                const mino_val_t *key, mino_val_t *comparator);
+mino_rb_node_t *rb_assoc(mino_state_t *S, const mino_rb_node_t *n,
+                          mino_val_t *key, mino_val_t *val,
+                          mino_val_t *comparator, int *replaced);    /* GC-owned */
+mino_rb_node_t *rb_dissoc(mino_state_t *S, const mino_rb_node_t *n,
+                           const mino_val_t *key,
+                           mino_val_t *comparator);                  /* GC-owned */
+void rb_to_list(mino_state_t *S, const mino_rb_node_t *n,
+                mino_val_t **head, mino_val_t **tail);
+int rb_trees_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
+                   int compare_vals);
+mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
+                             mino_val_t **vals, size_t len);
+mino_val_t *mino_sorted_set(mino_state_t *S, mino_val_t **items,
+                             size_t len);
+mino_val_t *sorted_map_assoc1(mino_state_t *S, const mino_val_t *m,
+                               mino_val_t *key, mino_val_t *val);
+mino_val_t *sorted_map_dissoc1(mino_state_t *S, const mino_val_t *m,
+                                const mino_val_t *key);
+mino_val_t *sorted_set_conj1(mino_state_t *S, const mino_val_t *s,
+                              mino_val_t *elem);
+mino_val_t *sorted_seq(mino_state_t *S, const mino_val_t *coll);
+mino_val_t *sorted_rest(mino_state_t *S, const mino_val_t *coll);
 
 /* print.c */
 void print_val(mino_state_t *S, FILE *out, const mino_val_t *v, int readably);

@@ -306,6 +306,11 @@ static void gc_mark_val(mino_state_t *S, mino_val_t *v)
         gc_mark_interior(S, v->as.set.root);
         gc_mark_interior(S, v->as.set.key_order);
         break;
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET:
+        gc_mark_interior(S, v->as.sorted.root);
+        gc_mark_interior(S, v->as.sorted.comparator);
+        break;
     case MINO_FN:
     case MINO_MACRO:
         gc_mark_interior(S, v->as.fn.params);
@@ -433,6 +438,14 @@ static void gc_mark_header(mino_state_t *S, gc_hdr_t *h)
     case GC_T_PTRARR:
         gc_mark_ptr_array(S, (void **)(h + 1), h->size);
         break;
+    case GC_T_RB_NODE: {
+        mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
+        gc_mark_interior(S, rb->key);
+        gc_mark_interior(S, rb->val);
+        gc_mark_interior(S, rb->left);
+        gc_mark_interior(S, rb->right);
+        break;
+    }
     case GC_T_RAW:
     default:
         /* Leaf allocation: no children. */

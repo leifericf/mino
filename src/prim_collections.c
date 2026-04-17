@@ -165,6 +165,8 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_VECTOR: return mino_int(S, (long long)coll->as.vec.len);
     case MINO_MAP:    return mino_int(S, (long long)coll->as.map.len);
     case MINO_SET:    return mino_int(S, (long long)coll->as.set.len);
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET: return mino_int(S, (long long)coll->as.sorted.len);
     case MINO_STRING: return mino_int(S, (long long)coll->as.s.len);
     case MINO_LAZY: {
         /* Force the entire lazy seq and count it. */
@@ -366,6 +368,16 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll->as.set.len == 0) return mino_nil(S);
         return vec_nth(coll->as.set.key_order, 0);
     }
+    if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
+        const mino_rb_node_t *n = coll->as.sorted.root;
+        if (n == NULL) return mino_nil(S);
+        while (n->left != NULL) n = n->left;
+        if (coll->type == MINO_SORTED_MAP) {
+            mino_val_t *kv[2]; kv[0] = n->key; kv[1] = n->val;
+            return mino_vector(S, kv, 2);
+        }
+        return n->key;
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "first: expected a list or vector, got %s",
@@ -477,6 +489,9 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
                         set_rest_thunk));
     }
+    if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
+        return sorted_rest(S, coll);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "rest: expected a list or vector, got %s",
@@ -571,6 +586,16 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_MAP) {
         return map_assoc_pairs(S, coll, args->as.cons.cdr, extra_pairs);
     }
+    if (coll->type == MINO_SORTED_MAP) {
+        mino_val_t *acc = coll;
+        p = args->as.cons.cdr;
+        for (i = 0; i < extra_pairs; i++) {
+            acc = sorted_map_assoc1(S, acc, p->as.cons.car,
+                                    p->as.cons.cdr->as.cons.car);
+            p = p->as.cons.cdr->as.cons.cdr;
+        }
+        return acc;
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "assoc: expected a map or vector, got %s",
@@ -619,6 +644,14 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         uint32_t h = hash_val(key);
         mino_val_t *found = hamt_get(coll->as.set.root, key, h, 0u);
         return found != NULL ? key : def_val;
+    }
+    if (coll->type == MINO_SORTED_MAP) {
+        mino_val_t *v = rb_get(S, coll->as.sorted.root, key, coll->as.sorted.comparator);
+        return v == NULL ? def_val : v;
+    }
+    if (coll->type == MINO_SORTED_SET) {
+        return rb_contains(S, coll->as.sorted.root, key, coll->as.sorted.comparator)
+            ? key : def_val;
     }
     if (coll->type == MINO_STRING) {
         long long idx;
@@ -699,6 +732,27 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             p = p->as.cons.cdr;
         }
         return acc;
+    }
+    if (coll->type == MINO_SORTED_MAP) {
+        mino_val_t *v = coll;
+        while (mino_is_cons(p)) {
+            mino_val_t *item = p->as.cons.car;
+            if (item == NULL || item->type != MINO_VECTOR || item->as.vec.len != 2) {
+                set_error(S, "conj on sorted-map requires 2-element vectors");
+                return NULL;
+            }
+            v = sorted_map_assoc1(S, v, vec_nth(item, 0), vec_nth(item, 1));
+            p = p->as.cons.cdr;
+        }
+        return v;
+    }
+    if (coll->type == MINO_SORTED_SET) {
+        mino_val_t *v = coll;
+        while (mino_is_cons(p)) {
+            v = sorted_set_conj1(S, v, p->as.cons.car);
+            p = p->as.cons.cdr;
+        }
+        return v;
     }
     {
         char msg[96];
@@ -835,6 +889,10 @@ mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return hamt_get(coll->as.set.root, key, h, 0u) != NULL
             ? mino_true(S) : mino_false(S);
     }
+    if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
+        return rb_contains(S, coll->as.sorted.root, key, coll->as.sorted.comparator)
+            ? mino_true(S) : mino_false(S);
+    }
     if (coll->type == MINO_VECTOR) {
         /* For vectors, key is an index. */
         if (key != NULL && key->type == MINO_INT) {
@@ -923,6 +981,14 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
     }
+    if (coll->type == MINO_SORTED_MAP) {
+        p = args->as.cons.cdr;
+        while (mino_is_cons(p)) {
+            coll = sorted_map_dissoc1(S, coll, p->as.cons.car);
+            p = p->as.cons.cdr;
+        }
+        return coll;
+    }
     if (coll->type != MINO_MAP) {
         set_error(S, "dissoc: first argument must be a map");
         return NULL;
@@ -964,103 +1030,4 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * (seq coll) — coerce a collection to a sequence (cons chain).
  * Returns nil for empty collections. Forces lazy sequences.
  */
-mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *coll;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "seq requires one argument");
-        return NULL;
-    }
-    coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
-    if (coll->type == MINO_LAZY) {
-        mino_val_t *forced = lazy_force(S, coll);
-        if (forced == NULL) return NULL;
-        if (forced->type == MINO_NIL) return mino_nil(S);
-        return forced;
-    }
-    if (coll->type == MINO_CONS) return coll;
-    if (coll->type == MINO_VECTOR) {
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        if (coll->as.vec.len == 0) return mino_nil(S);
-        for (i = 0; i < coll->as.vec.len; i++) {
-            mino_val_t *cell = mino_cons(S, vec_nth(coll, i), mino_nil(S));
-            if (tail == NULL) head = cell;
-            else tail->as.cons.cdr = cell;
-            tail = cell;
-        }
-        return head;
-    }
-    if (coll->type == MINO_MAP) {
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        if (coll->as.map.len == 0) return mino_nil(S);
-        for (i = 0; i < coll->as.map.len; i++) {
-            mino_val_t *key = vec_nth(coll->as.map.key_order, i);
-            mino_val_t *val = map_get_val(coll, key);
-            mino_val_t *kv[2];
-            mino_val_t *cell;
-            kv[0] = key; kv[1] = val;
-            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
-            if (tail == NULL) head = cell;
-            else tail->as.cons.cdr = cell;
-            tail = cell;
-        }
-        return head;
-    }
-    if (coll->type == MINO_SET) {
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        if (coll->as.set.len == 0) return mino_nil(S);
-        for (i = 0; i < coll->as.set.len; i++) {
-            mino_val_t *elem = vec_nth(coll->as.set.key_order, i);
-            mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
-            if (tail == NULL) head = cell;
-            else tail->as.cons.cdr = cell;
-            tail = cell;
-        }
-        return head;
-    }
-    if (coll->type == MINO_STRING) {
-        mino_val_t *head = mino_nil(S);
-        mino_val_t *tail = NULL;
-        size_t i;
-        if (coll->as.s.len == 0) return mino_nil(S);
-        for (i = 0; i < coll->as.s.len; i++) {
-            mino_val_t *ch = mino_string_n(S, coll->as.s.data + i, 1);
-            mino_val_t *cell = mino_cons(S, ch, mino_nil(S));
-            if (tail == NULL) head = cell;
-            else tail->as.cons.cdr = cell;
-            tail = cell;
-        }
-        return head;
-    }
-    {
-        char msg[96];
-        snprintf(msg, sizeof(msg), "seq: cannot coerce %s to a sequence",
-                 type_tag_str(coll));
-        set_error(S, msg);
-    }
-    return NULL;
-}
-
-mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *v;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "realized? requires one argument");
-        return NULL;
-    }
-    v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_LAZY) {
-        return v->as.lazy.realized ? mino_true(S) : mino_false(S);
-    }
-    /* Non-lazy values are always realized. */
-    return mino_true(S);
-}
+/* prim_seq and prim_realized_p moved to prim_sequences.c */

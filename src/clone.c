@@ -177,6 +177,11 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         if (clone_meta(dst, v, result) != 0) return NULL;
         return result;
     }
+    /* Sorted collections with custom comparators hold function refs and
+     * cannot be safely cloned across runtimes. Natural-order ones could
+     * be rebuilt, but for now treat all as non-transferable. */
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET:
     /* Non-transferable types. */
     case MINO_FN:
     case MINO_MACRO:
@@ -423,6 +428,12 @@ static void sbuf_print(mino_state_t *S, sbuf_t *b, const mino_val_t *v)
         sbuf_putc(b, '}');
         return;
     }
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET:
+        /* Sorted collections serialize as their unsorted equivalents for
+         * cross-runtime transfer. Full support deferred. */
+        sbuf_puts(b, "nil");
+        return;
     default:
         sbuf_puts(b, "nil");
         return;

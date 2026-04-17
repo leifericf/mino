@@ -35,6 +35,18 @@ static void print_string_escaped(FILE *out, const char *s, size_t len)
  */
 #define MINO_PRINT_DEPTH_MAX 128
 
+static void print_rb_inorder(mino_state_t *S, FILE *out,
+                             const mino_rb_node_t *n, int is_map, int *first)
+{
+    if (n == NULL) return;
+    print_rb_inorder(S, out, n->left, is_map, first);
+    if (!*first) fputs(is_map ? ", " : " ", out);
+    *first = 0;
+    mino_print_to(S, out, n->key);
+    if (is_map) { fputc(' ', out); mino_print_to(S, out, n->val); }
+    print_rb_inorder(S, out, n->right, is_map, first);
+}
+
 void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
     if (v == NULL || v->type == MINO_NIL) {
@@ -155,6 +167,24 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
             }
             mino_print_to(S, out, vec_nth(v->as.set.key_order, i));
         }
+        S->print_depth--;
+        fputc('}', out);
+        return;
+    }
+    case MINO_SORTED_MAP: {
+        int first = 1;
+        fputc('{', out);
+        S->print_depth++;
+        print_rb_inorder(S, out, v->as.sorted.root, 1, &first);
+        S->print_depth--;
+        fputc('}', out);
+        return;
+    }
+    case MINO_SORTED_SET: {
+        int first = 1;
+        fputs("#{", out);
+        S->print_depth++;
+        print_rb_inorder(S, out, v->as.sorted.root, 0, &first);
         S->print_depth--;
         fputc('}', out);
         return;

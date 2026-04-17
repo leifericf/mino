@@ -28,7 +28,9 @@ typedef enum {
     MINO_CONS,
     MINO_VECTOR,
     MINO_MAP,
-    MINO_SET,     /* persistent set: HAMT of keys with sentinel values */
+    MINO_SET,        /* persistent set: HAMT of keys with sentinel values */
+    MINO_SORTED_MAP, /* persistent sorted map: red-black tree */
+    MINO_SORTED_SET, /* persistent sorted set: red-black tree */
     MINO_PRIM,
     MINO_FN,
     MINO_MACRO,   /* user-defined macro (shares the fn struct layout) */
@@ -46,6 +48,7 @@ typedef struct mino_state mino_state_t;
 typedef struct mino_ref   mino_ref_t;
 typedef struct mino_vec_node  mino_vec_node_t;   /* opaque; see mino.c */
 typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque; see mino.c */
+typedef struct mino_rb_node   mino_rb_node_t;    /* opaque; see rbtree.c */
 
 typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);
@@ -85,6 +88,11 @@ struct mino_val {
             mino_val_t       *key_order; /* MINO_VECTOR of elements */
             size_t            len;       /* number of elements */
         } set;
+        struct {          /* MINO_SORTED_MAP / MINO_SORTED_SET: red-black tree */
+            mino_rb_node_t *root;       /* RB tree root (NULL when empty) */
+            mino_val_t     *comparator; /* NULL = natural order, fn = custom */
+            size_t          len;        /* number of entries */
+        } sorted;
         struct {          /* MINO_PRIM */
             const char *name;
             mino_prim_fn fn;

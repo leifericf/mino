@@ -1,10 +1,108 @@
 /*
  * prim_sequences.c -- sequence iteration and higher-order primitives:
- *                     seq_iter_*, reduce, reduced, into, apply,
- *                     reverse, sort, set, rangev, mapv, filterv.
+ *                     seq, realized?, seq_iter_*, reduce, reduced,
+ *                     into, apply, reverse, sort, set, rangev, mapv,
+ *                     filterv, peek, pop, find, empty, rseq,
+ *                     sorted-map, sorted-set.
  */
 
 #include "prim_internal.h"
+
+/* ------------------------------------------------------------------------- */
+/* seq and realized?                                                         */
+/* ------------------------------------------------------------------------- */
+
+mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "seq requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    if (coll->type == MINO_LAZY) {
+        mino_val_t *forced = lazy_force(S, coll);
+        if (forced == NULL) return NULL;
+        if (forced->type == MINO_NIL) return mino_nil(S);
+        return forced;
+    }
+    if (coll->type == MINO_CONS) return coll;
+    if (coll->type == MINO_VECTOR) {
+        mino_val_t *head = mino_nil(S), *tail = NULL;
+        size_t i;
+        if (coll->as.vec.len == 0) return mino_nil(S);
+        for (i = 0; i < coll->as.vec.len; i++) {
+            mino_val_t *cell = mino_cons(S, vec_nth(coll, i), mino_nil(S));
+            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_MAP) {
+        mino_val_t *head = mino_nil(S), *tail = NULL;
+        size_t i;
+        if (coll->as.map.len == 0) return mino_nil(S);
+        for (i = 0; i < coll->as.map.len; i++) {
+            mino_val_t *key = vec_nth(coll->as.map.key_order, i);
+            mino_val_t *val = map_get_val(coll, key);
+            mino_val_t *kv[2], *cell;
+            kv[0] = key; kv[1] = val;
+            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
+            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_SET) {
+        mino_val_t *head = mino_nil(S), *tail = NULL;
+        size_t i;
+        if (coll->as.set.len == 0) return mino_nil(S);
+        for (i = 0; i < coll->as.set.len; i++) {
+            mino_val_t *cell = mino_cons(S, vec_nth(coll->as.set.key_order, i), mino_nil(S));
+            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
+        return sorted_seq(S, coll);
+    }
+    if (coll->type == MINO_STRING) {
+        mino_val_t *head = mino_nil(S), *tail = NULL;
+        size_t i;
+        if (coll->as.s.len == 0) return mino_nil(S);
+        for (i = 0; i < coll->as.s.len; i++) {
+            mino_val_t *cell = mino_cons(S, mino_string_n(S, coll->as.s.data + i, 1), mino_nil(S));
+            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            tail = cell;
+        }
+        return head;
+    }
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "seq: cannot coerce %s to a sequence",
+                 type_tag_str(coll));
+        set_error(S, msg);
+    }
+    return NULL;
+}
+
+mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "realized? requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v != NULL && v->type == MINO_LAZY) {
+        return v->as.lazy.realized ? mino_true(S) : mino_false(S);
+    }
+    return mino_true(S);
+}
 
 /* ------------------------------------------------------------------------- */
 /* Sequence iterator                                                         */
@@ -368,6 +466,29 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
+    if (to->type == MINO_SORTED_MAP) {
+        mino_val_t *acc = to;
+        seq_iter_init(S, &it, from);
+        while (!seq_iter_done(&it)) {
+            mino_val_t *item = seq_iter_val(S, &it);
+            if (item == NULL || item->type != MINO_VECTOR || item->as.vec.len != 2) {
+                set_error(S, "into sorted-map: each element must be a 2-element vector");
+                return NULL;
+            }
+            acc = sorted_map_assoc1(S, acc, vec_nth(item, 0), vec_nth(item, 1));
+            seq_iter_next(S, &it);
+        }
+        return acc;
+    }
+    if (to->type == MINO_SORTED_SET) {
+        mino_val_t *acc = to;
+        seq_iter_init(S, &it, from);
+        while (!seq_iter_done(&it)) {
+            acc = sorted_set_conj1(S, acc, seq_iter_val(S, &it));
+            seq_iter_next(S, &it);
+        }
+        return acc;
+    }
     if (to->type == MINO_CONS) {
         mino_val_t *out = to;
         seq_iter_init(S, &it, from);
@@ -475,39 +596,8 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return out;
 }
 
-/* Simple comparison function for sorting: numbers by value, strings
- * lexicographically, other types by type tag then identity. */
-static int val_compare(const mino_val_t *a, const mino_val_t *b)
-{
-    if (a == b) return 0;
-    if (a == NULL || a->type == MINO_NIL) return -1;
-    if (b == NULL || b->type == MINO_NIL) return 1;
-    if (a->type == MINO_INT && b->type == MINO_INT) {
-        return a->as.i < b->as.i ? -1 : a->as.i > b->as.i ? 1 : 0;
-    }
-    if (a->type == MINO_FLOAT && b->type == MINO_FLOAT) {
-        return a->as.f < b->as.f ? -1 : a->as.f > b->as.f ? 1 : 0;
-    }
-    if (a->type == MINO_INT && b->type == MINO_FLOAT) {
-        double da = (double)a->as.i;
-        return da < b->as.f ? -1 : da > b->as.f ? 1 : 0;
-    }
-    if (a->type == MINO_FLOAT && b->type == MINO_INT) {
-        double db = (double)b->as.i;
-        return a->as.f < db ? -1 : a->as.f > db ? 1 : 0;
-    }
-    if ((a->type == MINO_STRING || a->type == MINO_SYMBOL || a->type == MINO_KEYWORD)
-        && a->type == b->type) {
-        size_t min_len = a->as.s.len < b->as.s.len ? a->as.s.len : b->as.s.len;
-        int c = memcmp(a->as.s.data, b->as.s.data, min_len);
-        if (c != 0) return c;
-        return a->as.s.len < b->as.s.len ? -1 : a->as.s.len > b->as.s.len ? 1 : 0;
-    }
-    /* Fall back to type tag ordering. */
-    return a->type < b->type ? -1 : a->type > b->type ? 1 : 0;
-}
-
-/* Sort comparator state: when sort_comp_fn is non-NULL, the merge sort
+/* val_compare is now in rbtree.c (shared with sorted map/set).
+ * Sort comparator state: when sort_comp_fn is non-NULL, the merge sort
  * calls the user-supplied comparison function instead of val_compare. */
 
 static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
@@ -670,6 +760,13 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     m = args->as.cons.car;
     k = args->as.cons.cdr->as.cons.car;
     if (m == NULL || m->type == MINO_NIL) return mino_nil(S);
+    if (m->type == MINO_SORTED_MAP) {
+        if (!rb_contains(S, m->as.sorted.root, k, m->as.sorted.comparator))
+            return mino_nil(S);
+        v = rb_get(S, m->as.sorted.root, k, m->as.sorted.comparator);
+        kv[0] = k; kv[1] = v;
+        return mino_vector(S, kv, 2);
+    }
     if (m->type != MINO_MAP) {
         set_error(S, "find: first argument must be a map");
         return NULL;
@@ -723,4 +820,42 @@ mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         out = mino_cons(S, vec_nth(coll, i), out);
     }
     return out;
+}
+
+mino_val_t *prim_sorted_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n, pairs, i;
+    mino_val_t **ks, **vs, *p;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n % 2 != 0) {
+        set_error(S, "sorted-map requires an even number of arguments");
+        return NULL;
+    }
+    pairs = n / 2;
+    if (pairs == 0) return mino_sorted_map(S, NULL, NULL, 0);
+    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    p = args;
+    for (i = 0; i < pairs; i++) {
+        ks[i] = p->as.cons.car; p = p->as.cons.cdr;
+        vs[i] = p->as.cons.car; p = p->as.cons.cdr;
+    }
+    return mino_sorted_map(S, ks, vs, pairs);
+}
+
+mino_val_t *prim_sorted_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n, i;
+    mino_val_t **tmp, *p;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n == 0) return mino_sorted_set(S, NULL, 0);
+    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
+    p = args;
+    for (i = 0; i < n; i++) {
+        tmp[i] = p->as.cons.car;
+        p = p->as.cons.cdr;
+    }
+    return mino_sorted_set(S, tmp, n);
 }

@@ -411,6 +411,12 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_LAZY:
         /* Should not reach here — lazy seqs are forced above. */
         return 0;
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET:
+        /* Structural comparison: same length + identical tree structure. */
+        if (a->as.sorted.len != b->as.sorted.len) return 0;
+        return rb_trees_equal(a->as.sorted.root, b->as.sorted.root,
+                              a->type == MINO_SORTED_MAP);
     case MINO_RECUR:
         return a == b;
     case MINO_TAIL_CALL:

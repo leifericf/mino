@@ -1,0 +1,91 @@
+(require "tests/test")
+
+;; Sorted map and sorted set.
+
+;; --- sorted-map ---
+
+(deftest sorted-map-basic
+  (is (= 1 (get (sorted-map :a 1 :b 2) :a)))
+  (is (= 2 (count (sorted-map :a 1 :b 2))))
+  (is (nil? (get (sorted-map :a 1) :z))))
+
+(deftest sorted-map-ordering
+  (let [m (sorted-map :c 3 :a 1 :b 2)]
+    (is (= '([:a 1] [:b 2] [:c 3]) (seq m)))
+    (is (= [:a 1] (first m)))))
+
+(deftest sorted-map-assoc
+  (let [m (assoc (sorted-map :a 1) :c 3 :b 2)]
+    (is (= 3 (count m)))
+    (is (= '([:a 1] [:b 2] [:c 3]) (seq m)))))
+
+(deftest sorted-map-dissoc
+  (let [m (dissoc (sorted-map :a 1 :b 2 :c 3) :b)]
+    (is (= 2 (count m)))
+    (is (= '([:a 1] [:c 3]) (seq m)))))
+
+(deftest sorted-map-conj
+  (let [m (conj (sorted-map :a 1) [:c 3] [:b 2])]
+    (is (= 3 (count m)))
+    (is (= '([:a 1] [:b 2] [:c 3]) (seq m)))))
+
+(deftest sorted-map-contains
+  (is (contains? (sorted-map :a 1 :b 2) :a))
+  (is (not (contains? (sorted-map :a 1) :z))))
+
+(deftest sorted-map-rest
+  (is (= '([:b 2] [:c 3]) (rest (sorted-map :a 1 :b 2 :c 3)))))
+
+(deftest sorted-map-find
+  (is (= [:a 1] (find (sorted-map :a 1 :b 2) :a)))
+  (is (nil? (find (sorted-map :a 1) :z))))
+
+(deftest sorted-map-into
+  (is (= (sorted-map :a 1 :b 2) (into (sorted-map) [[:a 1] [:b 2]]))))
+
+(deftest sorted-map-equality
+  (is (= (sorted-map :a 1 :b 2) (sorted-map :b 2 :a 1)))
+  (is (not= (sorted-map :a 1) (sorted-map :a 2))))
+
+(deftest sorted-map-numeric-keys
+  (let [m (sorted-map 3 "c" 1 "a" 2 "b")]
+    (is (= '([1 "a"] [2 "b"] [3 "c"]) (seq m)))))
+
+;; --- sorted-set ---
+
+(deftest sorted-set-basic
+  (is (= 3 (count (sorted-set 3 1 2))))
+  (is (contains? (sorted-set 1 2 3) 2))
+  (is (not (contains? (sorted-set 1 2) 9))))
+
+(deftest sorted-set-ordering
+  (is (= '(1 2 3) (seq (sorted-set 3 1 2)))))
+
+(deftest sorted-set-dedup
+  (is (= 3 (count (sorted-set 1 2 3 2 1)))))
+
+(deftest sorted-set-conj
+  (let [s (conj (sorted-set 3 1) 2 0)]
+    (is (= '(0 1 2 3) (seq s)))))
+
+(deftest sorted-set-get
+  (is (= 2 (get (sorted-set 1 2 3) 2)))
+  (is (nil? (get (sorted-set 1 2 3) 9))))
+
+(deftest sorted-set-first-rest
+  (is (= 1 (first (sorted-set 3 1 2))))
+  (is (= '(2 3) (rest (sorted-set 3 1 2)))))
+
+(deftest sorted-set-empty
+  (is (= 0 (count (sorted-set))))
+  (is (nil? (seq (sorted-set)))))
+
+(deftest sorted-set-equality
+  (is (= (sorted-set 1 2 3) (sorted-set 3 2 1)))
+  (is (not= (sorted-set 1 2) (sorted-set 1 3))))
+
+(deftest sorted-set-type
+  (is (= :sorted-set (type (sorted-set))))
+  (is (= :sorted-map (type (sorted-map)))))
+
+;; (run-tests) -- called by tests/run.mino

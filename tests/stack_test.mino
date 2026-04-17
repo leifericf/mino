@@ -59,4 +59,4 @@
   (is (thrown? "pop" (pop [])))
   (is (thrown? "pop" (pop nil))))
 
-(run-tests)
+;; (run-tests) -- called by tests/run.mino

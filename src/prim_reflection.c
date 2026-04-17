@@ -111,7 +111,9 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_CONS:    return mino_keyword(S, "list");
     case MINO_VECTOR:  return mino_keyword(S, "vector");
     case MINO_MAP:     return mino_keyword(S, "map");
-    case MINO_SET:     return mino_keyword(S, "set");
+    case MINO_SET:        return mino_keyword(S, "set");
+    case MINO_SORTED_MAP: return mino_keyword(S, "sorted-map");
+    case MINO_SORTED_SET: return mino_keyword(S, "sorted-set");
     case MINO_PRIM:    return mino_keyword(S, "fn");
     case MINO_FN:      return mino_keyword(S, "fn");
     case MINO_MACRO:   return mino_keyword(S, "macro");

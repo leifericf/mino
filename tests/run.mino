@@ -44,5 +44,6 @@
 (require "tests/failure_stress_test")
 (require "tests/ifn_test")
 (require "tests/stack_test")
+(require "tests/sorted_test")
 
 (run-tests)

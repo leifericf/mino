@@ -10,7 +10,7 @@ LIB_SRCS := src/mino.c src/eval_special.c \
             src/eval_special_control.c src/eval_special_fn.c \
             src/runtime_state.c \
             src/runtime_error.c src/runtime_env.c src/runtime_gc.c \
-            src/val.c src/vec.c src/map.c src/read.c src/print.c \
+            src/val.c src/vec.c src/map.c src/rbtree.c src/read.c src/print.c \
             src/prim.c src/prim_numeric.c src/prim_collections.c \
             src/prim_sequences.c src/prim_string.c src/prim_io.c \
             src/prim_reflection.c src/prim_meta.c src/prim_regex.c \

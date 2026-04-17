@@ -160,6 +160,8 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_RECUR:
     case MINO_TAIL_CALL:
     case MINO_REDUCED:
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET:
         return form;
     case MINO_SYMBOL:
         return eval_symbol(S, form, env);
