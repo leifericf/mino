@@ -131,6 +131,12 @@ typedef struct {
     mino_val_t *val;
 } env_binding_t;
 
+/* Namespace alias entry. */
+typedef struct {
+    char *alias;
+    char *full_name;
+} ns_alias_t;
+
 /* Full environment definition. */
 struct mino_env {
     env_binding_t *bindings;
@@ -203,6 +209,13 @@ struct mino_state {
     /* Reader */
     const char     *reader_file;
     int             reader_line;
+    const char     *reader_dialect;   /* "mino" */
+
+    /* Namespace */
+    const char     *current_ns;       /* from (ns ...), default "user" */
+    ns_alias_t     *ns_aliases;
+    size_t          ns_alias_len;
+    size_t          ns_alias_cap;
 
     /* Eval */
     const mino_val_t *eval_current_form;

@@ -21,6 +21,8 @@ static void state_init(mino_state_t *S)
     S->true_singleton.as.b = 1;
     S->false_singleton.type = MINO_BOOL;
     S->reader_line         = 1;
+    S->reader_dialect      = "mino";
+    S->current_ns          = "user";
 }
 
 mino_state_t *mino_state_new(void)
@@ -59,6 +61,11 @@ void mino_state_free(mino_state_t *S)
     for (i = 0; i < S->module_cache_len; i++) {
         free(S->module_cache[i].name);
     }
+    for (i = 0; i < S->ns_alias_len; i++) {
+        free(S->ns_aliases[i].alias);
+        free(S->ns_aliases[i].full_name);
+    }
+    free(S->ns_aliases);
     free(S->module_cache);
     for (i = 0; i < S->meta_table_len; i++) {
         free(S->meta_table[i].name);
