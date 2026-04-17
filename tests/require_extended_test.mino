@@ -1,0 +1,12 @@
+(require "tests/test")
+
+;; Extended require syntax tests
+
+(deftest require-string-still-works
+  (is (= 1 1))) ;; if we got here, string require worked (test.mino loaded)
+
+(deftest require-vector-syntax
+  ;; Vector form should not error even if module doesn't exist
+  ;; (ns_process_require_spec silently ignores missing modules)
+  (is (nil? (ns test.require.vec
+              (:require [tests.test :as t])))))

@@ -6,7 +6,31 @@
 
 #include "prim_internal.h"
 
-/* (require name) -- load a module by name using the host-supplied resolver. */
+static int kw_match(const mino_val_t *v, const char *s)
+{
+    size_t n;
+    if (v == NULL || v->type != MINO_KEYWORD) return 0;
+    n = strlen(s);
+    return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
+}
+
+/* Convert dotted symbol name to slash-separated path in buf.
+ * Returns 0 on success, -1 on error. */
+static int dots_to_slashes(const char *src, size_t srclen,
+                           char *buf, size_t bufsize)
+{
+    size_t i;
+    if (srclen == 0 || srclen >= bufsize) return -1;
+    if (src[0] == '.' || src[srclen - 1] == '.') return -1;
+    for (i = 0; i < srclen; i++)
+        buf[i] = (src[i] == '.') ? '/' : src[i];
+    buf[srclen] = '\0';
+    return 0;
+}
+
+/* (require name) -- load a module by name using the host-supplied resolver.
+ * name can be a string ("path/to/mod") or a quoted vector
+ * '[mod.name :as alias :refer [syms]]. */
 mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *name_val;
@@ -19,8 +43,80 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     name_val = args->as.cons.car;
+
+    /* Vector form: '[mod.name :as alias ...] */
+    if (name_val != NULL && name_val->type == MINO_VECTOR
+        && name_val->as.vec.len >= 1) {
+        mino_val_t *mod_sym = vec_nth(name_val, 0);
+        char pathbuf[256];
+        const char *alias_name = NULL;
+        size_t      alias_len  = 0;
+        size_t      vi;
+        if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
+            set_error(S, "require: vector first element must be a symbol");
+            return NULL;
+        }
+        /* Parse keyword args. */
+        for (vi = 1; vi + 1 < name_val->as.vec.len; vi += 2) {
+            mino_val_t *k = vec_nth(name_val, vi);
+            mino_val_t *v = vec_nth(name_val, vi + 1);
+            if (kw_match(k, "as") && v->type == MINO_SYMBOL) {
+                alias_name = v->as.s.data;
+                alias_len  = v->as.s.len;
+            }
+            /* :refer is a no-op */
+        }
+        /* Convert dotted name and load. */
+        if (dots_to_slashes(mod_sym->as.s.data, mod_sym->as.s.len,
+                            pathbuf, sizeof(pathbuf)) != 0) {
+            set_error(S, "require: invalid module name");
+            return NULL;
+        }
+        {
+            mino_val_t *path_str = mino_string(S, pathbuf);
+            mino_val_t *str_args = mino_cons(S, path_str, mino_nil(S));
+            gc_pin(str_args);
+            result = prim_require(S, str_args, env);
+            gc_unpin(1);
+        }
+        /* Store alias. */
+        if (result != NULL && alias_name != NULL && alias_len > 0
+            && alias_len < 256 && mod_sym->as.s.len < 256) {
+            char abuf[256], fbuf[256];
+            memcpy(abuf, alias_name, alias_len);
+            abuf[alias_len] = '\0';
+            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+            fbuf[mod_sym->as.s.len] = '\0';
+            /* Add to alias table. */
+            if (S->ns_alias_len == S->ns_alias_cap) {
+                size_t nc = S->ns_alias_cap == 0 ? 8 : S->ns_alias_cap * 2;
+                ns_alias_t *nb = (ns_alias_t *)realloc(
+                    S->ns_aliases, nc * sizeof(*nb));
+                if (nb != NULL) {
+                    S->ns_aliases   = nb;
+                    S->ns_alias_cap = nc;
+                }
+            }
+            if (S->ns_alias_len < S->ns_alias_cap) {
+                size_t an = alias_len + 1;
+                size_t fn = mod_sym->as.s.len + 1;
+                S->ns_aliases[S->ns_alias_len].alias =
+                    (char *)malloc(an);
+                S->ns_aliases[S->ns_alias_len].full_name =
+                    (char *)malloc(fn);
+                if (S->ns_aliases[S->ns_alias_len].alias != NULL
+                    && S->ns_aliases[S->ns_alias_len].full_name != NULL) {
+                    memcpy(S->ns_aliases[S->ns_alias_len].alias, abuf, an);
+                    memcpy(S->ns_aliases[S->ns_alias_len].full_name, fbuf, fn);
+                    S->ns_alias_len++;
+                }
+            }
+        }
+        return result != NULL ? result : mino_nil(S);
+    }
+
     if (name_val == NULL || name_val->type != MINO_STRING) {
-        set_error(S, "require: argument must be a string");
+        set_error(S, "require: argument must be a string or vector");
         return NULL;
     }
     name = name_val->as.s.data;
