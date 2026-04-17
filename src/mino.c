@@ -3011,7 +3011,30 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_en
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
                mino_val_t **out)
 {
-    mino_val_t *result = mino_call(S, fn, args, env);
+    int saved_try = try_depth;
+    mino_val_t *result;
+
+    if (try_depth >= MAX_TRY_DEPTH) {
+        if (out != NULL) {
+            *out = NULL;
+        }
+        return -1;
+    }
+
+    try_stack[try_depth].exception = NULL;
+    if (setjmp(try_stack[try_depth].buf) != 0) {
+        /* Landed here from longjmp -- error was thrown. */
+        try_depth = saved_try;
+        if (out != NULL) {
+            *out = NULL;
+        }
+        return -1;
+    }
+    try_depth++;
+
+    result = mino_call(S, fn, args, env);
+    try_depth = saved_try;
+
     if (out != NULL) {
         *out = result;
     }
