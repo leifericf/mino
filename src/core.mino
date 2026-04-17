@@ -896,6 +896,24 @@
                     ~g)
                   ~@(rest (rest clauses)))))))
 
+(defmacro some-> [expr & forms]
+  (if (= 0 (count forms))
+    expr
+    (let [g (gensym)]
+      `(let [~g ~expr]
+         (if (nil? ~g)
+           nil
+           (some-> (-> ~g ~(first forms)) ~@(rest forms)))))))
+
+(defmacro some->> [expr & forms]
+  (if (= 0 (count forms))
+    expr
+    (let [g (gensym)]
+      `(let [~g ~expr]
+         (if (nil? ~g)
+           nil
+           (some->> (->> ~g ~(first forms)) ~@(rest forms)))))))
+
 ;; --- Iteration macros ---
 
 (defmacro doto [x & forms]

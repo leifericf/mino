@@ -45,5 +45,6 @@
 (require "tests/ifn_test")
 (require "tests/stack_test")
 (require "tests/sorted_test")
+(require "tests/conformance_test")
 
 (run-tests)

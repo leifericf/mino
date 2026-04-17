@@ -1,0 +1,39 @@
+(require "tests/test")
+
+;; Tests for core.clj conformance additions.
+
+;; --- some-> ---
+
+(deftest some->-basic
+  (is (= 2 (some-> {:a 1} :a inc)))
+  (is (nil? (some-> {:a 1} :b inc)))
+  (is (nil? (some-> nil :a)))
+  (is (= 1 (some-> 0 inc)))
+  (is (= 3 (some-> 1 inc inc))))
+
+(deftest some->-with-forms
+  (is (= "1" (some-> 1 str)))
+  (is (nil? (some-> nil str)))
+  (is (= 2 (some-> {:a {:b 2}} :a :b)))
+  (is (nil? (some-> {:a {:b 2}} :c :b))))
+
+(deftest some->-no-forms
+  (is (= 42 (some-> 42)))
+  (is (nil? (some-> nil))))
+
+;; --- some->> ---
+
+(deftest some->>-basic
+  (is (= '(2 3 4) (some->> [1 2 3] (map inc))))
+  (is (nil? (some->> nil (map inc))))
+  (is (= 6 (some->> [1 2 3] (reduce +)))))
+
+(deftest some->>-chained
+  (is (= '(2 4) (some->> [1 2 3] (map inc) (filter even?))))
+  (is (nil? (some->> nil (map inc) (filter even?)))))
+
+(deftest some->>-no-forms
+  (is (= 42 (some->> 42)))
+  (is (nil? (some->> nil))))
+
+;; (run-tests) -- called by tests/run.mino
