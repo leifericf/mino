@@ -1405,6 +1405,21 @@
                    (when (seq items) (seq items))))))))
      coll)))
 
+(def halt-when (fn
+  ([pred] (halt-when pred nil))
+  ([pred retf]
+   (fn [rf]
+     (fn ([] (rf))
+         ([result]
+          (if (and (map? result) (contains? result :__halt-when__))
+            (get result :__halt-when__)
+            (rf result)))
+         ([result input]
+          (if (pred input)
+            (reduced {:__halt-when__
+                      (if retf (retf (rf result) input) input)})
+            (rf result input))))))))
+
 (defn eduction [& args]
   (let [coll (last args)
         xfs  (butlast args)]
