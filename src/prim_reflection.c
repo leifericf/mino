@@ -57,18 +57,58 @@ mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "symbol requires one argument");
+    if (!mino_is_cons(args)) {
+        set_error(S, "symbol requires 1 or 2 arguments");
         return NULL;
     }
+    /* 2-arg: (symbol ns name) */
+    if (mino_is_cons(args->as.cons.cdr)) {
+        mino_val_t *ns_arg  = args->as.cons.car;
+        mino_val_t *name_arg = args->as.cons.cdr->as.cons.car;
+        char buf[512];
+        size_t pos = 0;
+        if (name_arg == NULL || name_arg->type != MINO_STRING) {
+            set_error(S, "symbol: name must be a string");
+            return NULL;
+        }
+        if (ns_arg != NULL && ns_arg->type == MINO_STRING
+            && ns_arg->as.s.len > 0) {
+            if (ns_arg->as.s.len + 1 + name_arg->as.s.len >= sizeof(buf)) {
+                set_error(S, "symbol: name too long");
+                return NULL;
+            }
+            memcpy(buf, ns_arg->as.s.data, ns_arg->as.s.len);
+            pos = ns_arg->as.s.len;
+            buf[pos++] = '/';
+        } else if (ns_arg != NULL && ns_arg->type != MINO_NIL
+                   && ns_arg->type != MINO_STRING) {
+            set_error(S, "symbol: namespace must be a string");
+            return NULL;
+        }
+        if (pos + name_arg->as.s.len >= sizeof(buf)) {
+            set_error(S, "symbol: name too long");
+            return NULL;
+        }
+        memcpy(buf + pos, name_arg->as.s.data, name_arg->as.s.len);
+        pos += name_arg->as.s.len;
+        return mino_symbol_n(S, buf, pos);
+    }
+    /* 1-arg */
     v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_STRING) {
+    if (v == NULL || v->type == MINO_NIL) {
+        set_error(S, "symbol: argument must not be nil");
+        return NULL;
+    }
+    if (v->type == MINO_STRING) {
         return mino_symbol_n(S, v->as.s.data, v->as.s.len);
     }
-    if (v != NULL && v->type == MINO_SYMBOL) {
+    if (v->type == MINO_SYMBOL) {
         return v;
     }
-    set_error(S, "symbol: argument must be a string");
+    if (v->type == MINO_KEYWORD) {
+        return mino_symbol_n(S, v->as.s.data, v->as.s.len);
+    }
+    set_error(S, "symbol: argument must be a string, symbol, or keyword");
     return NULL;
 }
 
