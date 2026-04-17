@@ -68,6 +68,8 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
     size_t      modlen;
     const char *alias_name = NULL;
     size_t      alias_len  = 0;
+    mino_val_t *refer_vec  = NULL;
+    int         refer_all  = 0;
 
     if (spec->type == MINO_SYMBOL) {
         modname = spec->as.s.data;
@@ -78,7 +80,7 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
         if (first == NULL || first->type != MINO_SYMBOL) return;
         modname = first->as.s.data;
         modlen  = first->as.s.len;
-        /* Parse keyword args: :as, :refer (no-op) */
+        /* Parse keyword args: :as, :refer */
         for (i = 1; i + 1 < spec->as.vec.len; i += 2) {
             mino_val_t *k = vec_nth(spec, i);
             mino_val_t *v = vec_nth(spec, i + 1);
@@ -86,7 +88,13 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
                 alias_name = v->as.s.data;
                 alias_len  = v->as.s.len;
             }
-            /* :refer is a no-op in the flat env */
+            if (kw_eq(k, "refer") && v->type == MINO_VECTOR) {
+                refer_vec = v;
+            }
+            if (kw_eq(k, "refer") && v->type == MINO_KEYWORD
+                && kw_eq(v, "all")) {
+                refer_all = 1;
+            }
         }
     } else {
         return; /* skip unrecognized spec form */
@@ -115,6 +123,49 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
             memcpy(fbuf, modname, modlen);
             fbuf[modlen] = '\0';
             ns_add_alias(S, abuf, fbuf);
+        }
+    }
+
+    /* Process :refer — bind referred vars into current root env. */
+    {
+        char modbuf[256];
+        if (modlen < sizeof(modbuf)) {
+            memcpy(modbuf, modname, modlen);
+            modbuf[modlen] = '\0';
+            if (refer_vec != NULL) {
+                size_t ri;
+                for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
+                    mino_val_t *rsym = vec_nth(refer_vec, ri);
+                    if (rsym != NULL && rsym->type == MINO_SYMBOL) {
+                        char rbuf[256];
+                        size_t rn = rsym->as.s.len;
+                        mino_val_t *var;
+                        if (rn >= sizeof(rbuf)) continue;
+                        memcpy(rbuf, rsym->as.s.data, rn);
+                        rbuf[rn] = '\0';
+                        var = var_find(S, modbuf, rbuf);
+                        if (var != NULL) {
+                            env_bind(S, env_root(S, env), rbuf,
+                                     var->as.var.root);
+                        } else {
+                            /* Fallback: try looking up in root env by bare name. */
+                            mino_val_t *val = mino_env_get(env, rbuf);
+                            if (val != NULL)
+                                env_bind(S, env_root(S, env), rbuf, val);
+                        }
+                    }
+                }
+            }
+            if (refer_all) {
+                size_t vi;
+                for (vi = 0; vi < S->var_registry_len; vi++) {
+                    if (strcmp(S->var_registry[vi].ns, modbuf) == 0) {
+                        env_bind(S, env_root(S, env),
+                                 S->var_registry[vi].name,
+                                 S->var_registry[vi].var->as.var.root);
+                    }
+                }
+            }
         }
     }
 }
