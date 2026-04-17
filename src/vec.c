@@ -248,18 +248,18 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
      * intermediate layer arrays (plain malloc'd; not visible to the GC) stay
      * consistent. No user code runs inside; the next allocation after return
      * will re-enable periodic collection. */
-    gc_depth++;
+    S->gc_depth++;
     trie_count = len - tail_len;
     tail = vnode_new(S, tail_len, 1);
     memcpy(tail->slots, items + trie_count, tail_len * sizeof(*items));
     if (trie_count == 0) {
-        gc_depth--;
+        S->gc_depth--;
         return vec_assemble(S, NULL, NULL, tail, tail_len, 0u, len);
     }
     num_leaves = trie_count / MINO_VEC_WIDTH;
     layer = (mino_vec_node_t **)malloc(num_leaves * sizeof(*layer));
     if (layer == NULL) {
-        gc_depth--;
+        S->gc_depth--;
         set_error(S, "out of memory");
         return NULL;
     }
@@ -277,7 +277,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
                                        next_n * sizeof(*next));
         if (next == NULL) {
             free(layer);
-            gc_depth--;
+            S->gc_depth--;
             set_error(S, "out of memory");
             return NULL;
         }
@@ -300,7 +300,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
     {
         mino_vec_node_t *root = layer[0];
         free(layer);
-        gc_depth--;
+        S->gc_depth--;
         return vec_assemble(S, NULL, root, tail, tail_len, shift, len);
     }
 }

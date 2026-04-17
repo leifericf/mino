@@ -12,22 +12,22 @@
 
 const char *mino_last_error(mino_state_t *S)
 {
-    return error_buf[0] ? error_buf : NULL;
+    return S->error_buf[0] ? S->error_buf : NULL;
 }
 
 void set_error(mino_state_t *S, const char *msg)
 {
     size_t n = strlen(msg);
-    if (n >= sizeof(error_buf)) {
-        n = sizeof(error_buf) - 1;
+    if (n >= sizeof(S->error_buf)) {
+        n = sizeof(S->error_buf) - 1;
     }
-    memcpy(error_buf, msg, n);
-    error_buf[n] = '\0';
+    memcpy(S->error_buf, msg, n);
+    S->error_buf[n] = '\0';
 }
 
 void clear_error(mino_state_t *S)
 {
-    error_buf[0] = '\0';
+    S->error_buf[0] = '\0';
 }
 
 /* Location-aware error: prepend file:line when the form has source info. */
@@ -79,18 +79,18 @@ const char *type_tag_str(const mino_val_t *v)
 
 void push_frame(mino_state_t *S, const char *name, const char *file, int line)
 {
-    if (call_depth < MAX_CALL_DEPTH) {
-        call_stack[call_depth].name = name;
-        call_stack[call_depth].file = file;
-        call_stack[call_depth].line = line;
-        call_depth++;
+    if (S->call_depth < MAX_CALL_DEPTH) {
+        S->call_stack[S->call_depth].name = name;
+        S->call_stack[S->call_depth].file = file;
+        S->call_stack[S->call_depth].line = line;
+        S->call_depth++;
     }
 }
 
 void pop_frame(mino_state_t *S)
 {
-    if (call_depth > 0) {
-        call_depth--;
+    if (S->call_depth > 0) {
+        S->call_depth--;
     }
 }
 
@@ -99,19 +99,19 @@ void append_trace(mino_state_t *S)
 {
     size_t pos;
     int    i;
-    if (trace_added || call_depth == 0) {
+    if (S->trace_added || S->call_depth == 0) {
         return;
     }
-    trace_added = 1;
-    pos = strlen(error_buf);
-    for (i = call_depth - 1; i >= 0 && pos + 80 < sizeof(error_buf); i--) {
+    S->trace_added = 1;
+    pos = strlen(S->error_buf);
+    for (i = S->call_depth - 1; i >= 0 && pos + 80 < sizeof(S->error_buf); i--) {
         pos += (size_t)snprintf(
-            error_buf + pos, sizeof(error_buf) - pos, "\n  in %s",
-            call_stack[i].name ? call_stack[i].name : "<fn>");
-        if (call_stack[i].file != NULL && pos + 40 < sizeof(error_buf)) {
+            S->error_buf + pos, sizeof(S->error_buf) - pos, "\n  in %s",
+            S->call_stack[i].name ? S->call_stack[i].name : "<fn>");
+        if (S->call_stack[i].file != NULL && pos + 40 < sizeof(S->error_buf)) {
             pos += (size_t)snprintf(
-                error_buf + pos, sizeof(error_buf) - pos, " (%s:%d)",
-                call_stack[i].file, call_stack[i].line);
+                S->error_buf + pos, sizeof(S->error_buf) - pos, " (%s:%d)",
+                S->call_stack[i].file, S->call_stack[i].line);
         }
     }
 }
@@ -123,9 +123,9 @@ void append_trace(mino_state_t *S)
 meta_entry_t *meta_find(mino_state_t *S, const char *name)
 {
     size_t i;
-    for (i = 0; i < meta_table_len; i++) {
-        if (strcmp(meta_table[i].name, name) == 0) {
-            return &meta_table[i];
+    for (i = 0; i < S->meta_table_len; i++) {
+        if (strcmp(S->meta_table[i].name, name) == 0) {
+            return &S->meta_table[i];
         }
     }
     return NULL;
@@ -148,28 +148,28 @@ void meta_set(mino_state_t *S, const char *name, const char *doc,
         e->source = source;
         return;
     }
-    if (meta_table_len == meta_table_cap) {
-        size_t new_cap = meta_table_cap == 0 ? 32 : meta_table_cap * 2;
+    if (S->meta_table_len == S->meta_table_cap) {
+        size_t new_cap = S->meta_table_cap == 0 ? 32 : S->meta_table_cap * 2;
         meta_entry_t *ne = (meta_entry_t *)realloc(
-            meta_table, new_cap * sizeof(*ne));
+            S->meta_table, new_cap * sizeof(*ne));
         if (ne == NULL) { return; }
-        meta_table = ne;
-        meta_table_cap = new_cap;
+        S->meta_table = ne;
+        S->meta_table_cap = new_cap;
     }
     {
         size_t nlen = strlen(name);
-        meta_table[meta_table_len].name = (char *)malloc(nlen + 1);
-        if (meta_table[meta_table_len].name == NULL) { return; }
-        memcpy(meta_table[meta_table_len].name, name, nlen + 1);
+        S->meta_table[S->meta_table_len].name = (char *)malloc(nlen + 1);
+        if (S->meta_table[S->meta_table_len].name == NULL) { return; }
+        memcpy(S->meta_table[S->meta_table_len].name, name, nlen + 1);
     }
-    meta_table[meta_table_len].docstring = NULL;
+    S->meta_table[S->meta_table_len].docstring = NULL;
     if (doc != NULL) {
-        meta_table[meta_table_len].docstring = (char *)malloc(doc_len + 1);
-        if (meta_table[meta_table_len].docstring != NULL) {
-            memcpy(meta_table[meta_table_len].docstring, doc, doc_len);
-            meta_table[meta_table_len].docstring[doc_len] = '\0';
+        S->meta_table[S->meta_table_len].docstring = (char *)malloc(doc_len + 1);
+        if (S->meta_table[S->meta_table_len].docstring != NULL) {
+            memcpy(S->meta_table[S->meta_table_len].docstring, doc, doc_len);
+            S->meta_table[S->meta_table_len].docstring[doc_len] = '\0';
         }
     }
-    meta_table[meta_table_len].source = source;
-    meta_table_len++;
+    S->meta_table[S->meta_table_len].source = source;
+    S->meta_table_len++;
 }

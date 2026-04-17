@@ -41,7 +41,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputs("nil", out);
         return;
     }
-    if (print_depth >= MINO_PRINT_DEPTH_MAX) {
+    if (S->print_depth >= MINO_PRINT_DEPTH_MAX) {
         fputs("#<...>", out);
         return;
     }
@@ -94,7 +94,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     case MINO_CONS: {
         const mino_val_t *p = v;
         fputc('(', out);
-        print_depth++;
+        S->print_depth++;
         while (p != NULL && p->type == MINO_CONS) {
             mino_print_to(S, out, p->as.cons.car);
             p = p->as.cons.cdr;
@@ -110,28 +110,28 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
                 break;
             }
         }
-        print_depth--;
+        S->print_depth--;
         fputc(')', out);
         return;
     }
     case MINO_VECTOR: {
         size_t i;
         fputc('[', out);
-        print_depth++;
+        S->print_depth++;
         for (i = 0; i < v->as.vec.len; i++) {
             if (i > 0) {
                 fputc(' ', out);
             }
             mino_print_to(S, out, vec_nth(v, i));
         }
-        print_depth--;
+        S->print_depth--;
         fputc(']', out);
         return;
     }
     case MINO_MAP: {
         size_t i;
         fputc('{', out);
-        print_depth++;
+        S->print_depth++;
         for (i = 0; i < v->as.map.len; i++) {
             mino_val_t *key = vec_nth(v->as.map.key_order, i);
             if (i > 0) {
@@ -141,21 +141,21 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
             fputc(' ', out);
             mino_print_to(S, out, map_get_val(v, key));
         }
-        print_depth--;
+        S->print_depth--;
         fputc('}', out);
         return;
     }
     case MINO_SET: {
         size_t i;
         fputs("#{", out);
-        print_depth++;
+        S->print_depth++;
         for (i = 0; i < v->as.set.len; i++) {
             if (i > 0) {
                 fputc(' ', out);
             }
             mino_print_to(S, out, vec_nth(v->as.set.key_order, i));
         }
-        print_depth--;
+        S->print_depth--;
         fputc('}', out);
         return;
     }
@@ -182,9 +182,9 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         return;
     case MINO_ATOM:
         fputs("#atom[", out);
-        print_depth++;
+        S->print_depth++;
         mino_print_to(S, out, v->as.atom.val);
-        print_depth--;
+        S->print_depth--;
         fputc(']', out);
         return;
     case MINO_LAZY: {

@@ -234,73 +234,19 @@ struct mino_state {
     long            fi_raw_countdown;
 };
 
-/* ------------------------------------------------------------------------- */
-/* State field accessor macros                                               */
-/* These macros require a local variable named `S` of type mino_state_t *.   */
-/* ------------------------------------------------------------------------- */
-
-#define gc_all              (S->gc_all)
-#define gc_bytes_alloc      (S->gc_bytes_alloc)
-#define gc_bytes_live       (S->gc_bytes_live)
-#define gc_threshold        (S->gc_threshold)
-#define gc_stress           (S->gc_stress)
-#define gc_depth            (S->gc_depth)
-#define gc_stack_bottom     (S->gc_stack_bottom)
-#define gc_root_envs        (S->gc_root_envs)
-#define gc_ranges           (S->gc_ranges)
-#define gc_ranges_len       (S->gc_ranges_len)
-#define gc_ranges_cap       (S->gc_ranges_cap)
-#define gc_ranges_valid     (S->gc_ranges_valid)
-#define gc_ranges_pending   (S->gc_ranges_pending)
-#define gc_ranges_pending_len (S->gc_ranges_pending_len)
-#define nil_singleton       (S->nil_singleton)
-#define true_singleton      (S->true_singleton)
-#define false_singleton     (S->false_singleton)
-#define sym_intern          (S->sym_intern)
-#define kw_intern           (S->kw_intern)
-#define limit_steps         (S->limit_steps)
-#define limit_heap          (S->limit_heap)
-#define eval_steps          (S->eval_steps)
-#define limit_exceeded      (S->limit_exceeded)
-#define try_stack           (S->try_stack)
-#define try_depth           (S->try_depth)
-#define module_resolver     (S->module_resolver)
-#define module_resolver_ctx (S->module_resolver_ctx)
-#define module_cache        (S->module_cache)
-#define module_cache_len    (S->module_cache_len)
-#define module_cache_cap    (S->module_cache_cap)
-#define meta_table          (S->meta_table)
-#define meta_table_len      (S->meta_table_len)
-#define meta_table_cap      (S->meta_table_cap)
-#define print_depth         (S->print_depth)
-#define error_buf           (S->error_buf)
-#define call_stack          (S->call_stack)
-#define call_depth          (S->call_depth)
-#define trace_added         (S->trace_added)
-#define reader_file         (S->reader_file)
-#define reader_line         (S->reader_line)
-#define eval_current_form   (S->eval_current_form)
-#define rand_seeded         (S->rand_seeded)
-#define sort_comp_fn        (S->sort_comp_fn)
-#define sort_comp_env       (S->sort_comp_env)
-#define gensym_counter      (S->gensym_counter)
-#define dyn_stack           (S->dyn_stack)
-#define interrupted         (S->interrupted)
-#define gc_save             (S->gc_save)
-#define gc_save_len         (S->gc_save_len)
-
 /* GC pin/unpin macros.
  * Always increment gc_save_len so pin/unpin pairs stay balanced even
  * when the save array is full.  Only write the pointer when there is
  * space; beyond 64 the value is not pinned but the counter remains
- * correct, preventing underflow on the matching unpin. */
+ * correct, preventing underflow on the matching unpin.
+ * Require a local variable named `S` of type mino_state_t *. */
 #define GC_SAVE_MAX 64
 #define gc_pin(v) \
-    do { if (gc_save_len < GC_SAVE_MAX) gc_save[gc_save_len] = (v); \
-         gc_save_len++; } while (0)
+    do { if (S->gc_save_len < GC_SAVE_MAX) S->gc_save[S->gc_save_len] = (v); \
+         S->gc_save_len++; } while (0)
 #define gc_unpin(n) \
-    do { assert(gc_save_len >= (n)); \
-         gc_save_len -= (n); } while (0)
+    do { assert(S->gc_save_len >= (n)); \
+         S->gc_save_len -= (n); } while (0)
 
 /* ------------------------------------------------------------------------- */
 /* Persistent vector constants                                               */

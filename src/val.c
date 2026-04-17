@@ -10,17 +10,17 @@
 
 mino_val_t *mino_nil(mino_state_t *S)
 {
-    return &nil_singleton;
+    return &S->nil_singleton;
 }
 
 mino_val_t *mino_true(mino_state_t *S)
 {
-    return &true_singleton;
+    return &S->true_singleton;
 }
 
 mino_val_t *mino_false(mino_state_t *S)
 {
-    return &false_singleton;
+    return &S->false_singleton;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -93,7 +93,7 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
 
 mino_val_t *mino_symbol_n(mino_state_t *S, const char *s, size_t len)
 {
-    return intern_lookup_or_create(S, &sym_intern, MINO_SYMBOL, s, len);
+    return intern_lookup_or_create(S, &S->sym_intern, MINO_SYMBOL, s, len);
 }
 
 mino_val_t *mino_symbol(mino_state_t *S, const char *s)
@@ -103,7 +103,7 @@ mino_val_t *mino_symbol(mino_state_t *S, const char *s)
 
 mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len)
 {
-    return intern_lookup_or_create(S, &kw_intern, MINO_KEYWORD, s, len);
+    return intern_lookup_or_create(S, &S->kw_intern, MINO_KEYWORD, s, len);
 }
 
 mino_val_t *mino_keyword(mino_state_t *S, const char *s)

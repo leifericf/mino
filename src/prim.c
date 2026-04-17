@@ -33,9 +33,9 @@ int args_have_float(mino_val_t *args)
 mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
 {
     mino_val_t *ex = mino_string(S, msg);
-    if (try_depth > 0) {
-        try_stack[try_depth - 1].exception = ex;
-        longjmp(try_stack[try_depth - 1].buf, 1);
+    if (S->try_depth > 0) {
+        S->try_stack[S->try_depth - 1].exception = ex;
+        longjmp(S->try_stack[S->try_depth - 1].buf, 1);
     }
     set_error(S, msg);
     return NULL;
@@ -391,7 +391,7 @@ mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         int used;
         memcpy(buf, prefix_src, prefix_len);
         used = snprintf(buf + prefix_len, sizeof(buf) - prefix_len,
-                        "%ld", ++gensym_counter);
+                        "%ld", ++S->gensym_counter);
         if (used < 0) {
             set_error(S, "gensym formatting failed");
             return NULL;
@@ -411,7 +411,7 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     ex = args->as.cons.car;
-    if (try_depth <= 0) {
+    if (S->try_depth <= 0) {
         /* No enclosing try — format as fatal error. */
         char msg[512];
         if (ex != NULL && ex->type == MINO_STRING) {
@@ -423,8 +423,8 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         set_error(S, msg);
         return NULL;
     }
-    try_stack[try_depth - 1].exception = ex;
-    longjmp(try_stack[try_depth - 1].buf, 1);
+    S->try_stack[S->try_depth - 1].exception = ex;
+    longjmp(S->try_stack[S->try_depth - 1].buf, 1);
     return NULL; /* unreachable */
 }
 
@@ -509,17 +509,17 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     name = name_val->as.s.data;
     /* Check cache. */
-    for (i = 0; i < module_cache_len; i++) {
-        if (strcmp(module_cache[i].name, name) == 0) {
-            return module_cache[i].value;
+    for (i = 0; i < S->module_cache_len; i++) {
+        if (strcmp(S->module_cache[i].name, name) == 0) {
+            return S->module_cache[i].value;
         }
     }
     /* Resolve. */
-    if (module_resolver == NULL) {
+    if (S->module_resolver == NULL) {
         set_error(S, "require: no module resolver configured");
         return NULL;
     }
-    path = module_resolver(name, module_resolver_ctx);
+    path = S->module_resolver(name, S->module_resolver_ctx);
     if (path == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "require: cannot resolve module: %s", name);
@@ -532,16 +532,16 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     /* Cache. */
-    if (module_cache_len == module_cache_cap) {
-        size_t         new_cap = module_cache_cap == 0 ? 8 : module_cache_cap * 2;
+    if (S->module_cache_len == S->module_cache_cap) {
+        size_t         new_cap = S->module_cache_cap == 0 ? 8 : S->module_cache_cap * 2;
         module_entry_t *nb     = (module_entry_t *)realloc(
-            module_cache, new_cap * sizeof(*nb));
+            S->module_cache, new_cap * sizeof(*nb));
         if (nb == NULL) {
             set_error(S, "require: out of memory");
             return NULL;
         }
-        module_cache     = nb;
-        module_cache_cap = new_cap;
+        S->module_cache     = nb;
+        S->module_cache_cap = new_cap;
     }
     {
         size_t nlen = strlen(name);
@@ -551,9 +551,9 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return NULL;
         }
         memcpy(dup, name, nlen + 1);
-        module_cache[module_cache_len].name  = dup;
-        module_cache[module_cache_len].value = result;
-        module_cache_len++;
+        S->module_cache[S->module_cache_len].name  = dup;
+        S->module_cache[S->module_cache_len].value = result;
+        S->module_cache_len++;
     }
     return result;
 }
@@ -660,8 +660,8 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx)
 {
-    module_resolver     = fn;
-    module_resolver_ctx = ctx;
+    S->module_resolver     = fn;
+    S->module_resolver_ctx = ctx;
 }
 
 /*
@@ -697,8 +697,8 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
      * that the GC root walker can pin the forms during collection. */
     if (S->core_forms == NULL) {
         const char  *src        = core_mino_src;
-        const char  *saved_file = reader_file;
-        int          saved_line = reader_line;
+        const char  *saved_file = S->reader_file;
+        int          saved_line = S->reader_line;
         size_t       cap        = 256;
 
         S->core_forms     = malloc(cap * sizeof(mino_val_t *));
@@ -708,8 +708,8 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             fprintf(stderr, "core.mino: out of memory\n"); abort();
         }
 
-        reader_file = intern_filename("<core>");
-        reader_line = 1;
+        S->reader_file = intern_filename("<core>");
+        S->reader_line = 1;
         while (*src != '\0') {
             const char *end  = NULL;
             mino_val_t *form = mino_read(S, src, &end);
@@ -741,8 +741,8 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             }
             src = end;
         }
-        reader_file = saved_file;
-        reader_line = saved_line;
+        S->reader_file = saved_file;
+        S->reader_line = saved_line;
         return;
     }
 

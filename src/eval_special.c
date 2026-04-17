@@ -278,7 +278,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     size_t n = form->as.s.len;
     mino_val_t *v;
     if (n >= sizeof(buf)) {
-        set_error_at(S, eval_current_form, "symbol name too long");
+        set_error_at(S, S->eval_current_form, "symbol name too long");
         return NULL;
     }
     memcpy(buf, form->as.s.data, n);
@@ -288,7 +288,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     if (v == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
-        set_error_at(S, eval_current_form, msg);
+        set_error_at(S, S->eval_current_form, msg);
         return NULL;
     }
     return v;
@@ -807,10 +807,10 @@ static mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     char        var_buf[256];
     int         has_catch   = 0;
     int         has_finally = 0;
-    int         saved_try   = try_depth;
-    int         saved_call  = call_depth;
-    int         saved_trace = trace_added;
-    dyn_frame_t *saved_dyn  = dyn_stack;
+    int         saved_try   = S->try_depth;
+    int         saved_call  = S->call_depth;
+    int         saved_trace = S->trace_added;
+    dyn_frame_t *saved_dyn  = S->dyn_stack;
     volatile int         got_exception = 0;
     volatile mino_val_t *vol_result    = NULL;
     volatile mino_val_t *vol_ex        = NULL;
@@ -870,18 +870,18 @@ static mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         }
     }
 
-    if (try_depth >= MAX_TRY_DEPTH) {
+    if (S->try_depth >= MAX_TRY_DEPTH) {
         set_error_at(S, form, "try nesting too deep");
         return NULL;
     }
 
     /* Phase 1: evaluate body forms. */
-    try_stack[try_depth].exception = NULL;
-    if (setjmp(try_stack[try_depth].buf) == 0) {
+    S->try_stack[S->try_depth].exception = NULL;
+    if (setjmp(S->try_stack[S->try_depth].buf) == 0) {
         mino_val_t *r;
-        try_depth++;
+        S->try_depth++;
         r = eval_implicit_do(S, body_head, env);
-        try_depth = saved_try;
+        S->try_depth = saved_try;
         if (r == NULL) {
             /* Fatal runtime error. */
             if (has_finally)
@@ -891,13 +891,13 @@ static mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         vol_result = r;
     } else {
         /* longjmp'd from throw in body. */
-        vol_ex      = try_stack[saved_try].exception;
-        try_depth   = saved_try;
-        call_depth  = saved_call;
-        trace_added = saved_trace;
-        while (dyn_stack != saved_dyn) {
-            dyn_frame_t *f = dyn_stack;
-            dyn_stack = f->prev;
+        vol_ex      = S->try_stack[saved_try].exception;
+        S->try_depth   = saved_try;
+        S->call_depth  = saved_call;
+        S->trace_added = saved_trace;
+        while (S->dyn_stack != saved_dyn) {
+            dyn_frame_t *f = S->dyn_stack;
+            S->dyn_stack = f->prev;
             dyn_binding_list_free(f->bindings);
         }
         clear_error(S);
@@ -911,19 +911,19 @@ static mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         mino_env_t *local  = env_child(S, env);
         env_bind(S, local, var_buf, ex_val);
 
-        if (has_finally && try_depth < MAX_TRY_DEPTH) {
+        if (has_finally && S->try_depth < MAX_TRY_DEPTH) {
             /* Inner try frame catches re-throws from handler
              * so that finally still runs. */
-            int         ic = call_depth;
-            int         it = trace_added;
-            int         is = try_depth; /* save before setjmp */
-            dyn_frame_t *id = dyn_stack;
-            try_stack[is].exception = NULL;
-            if (setjmp(try_stack[is].buf) == 0) {
+            int         ic = S->call_depth;
+            int         it = S->trace_added;
+            int         is = S->try_depth; /* save before setjmp */
+            dyn_frame_t *id = S->dyn_stack;
+            S->try_stack[is].exception = NULL;
+            if (setjmp(S->try_stack[is].buf) == 0) {
                 mino_val_t *r;
-                try_depth++;
+                S->try_depth++;
                 r = eval_implicit_do(S, catch_body, local);
-                try_depth = is;
+                S->try_depth = is;
                 if (r == NULL) {
                     eval_implicit_do(S, finally_body, env);
                     return NULL;
@@ -932,13 +932,13 @@ static mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
                 got_exception = 0;
             } else {
                 /* Catch handler re-threw. */
-                vol_ex      = try_stack[is].exception;
-                try_depth   = is;
-                call_depth  = ic;
-                trace_added = it;
-                while (dyn_stack != id) {
-                    dyn_frame_t *f = dyn_stack;
-                    dyn_stack = f->prev;
+                vol_ex      = S->try_stack[is].exception;
+                S->try_depth   = is;
+                S->call_depth  = ic;
+                S->trace_added = it;
+                while (S->dyn_stack != id) {
+                    dyn_frame_t *f = S->dyn_stack;
+                    S->dyn_stack = f->prev;
                     dyn_binding_list_free(f->bindings);
                 }
                 clear_error(S);
@@ -966,9 +966,9 @@ static mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     /* Phase 4: re-throw if exception was not handled. */
     if (got_exception) {
         mino_val_t *e = (mino_val_t *)vol_ex;
-        if (try_depth > 0) {
-            try_stack[try_depth - 1].exception = e;
-            longjmp(try_stack[try_depth - 1].buf, 1);
+        if (S->try_depth > 0) {
+            S->try_stack[S->try_depth - 1].exception = e;
+            longjmp(S->try_stack[S->try_depth - 1].buf, 1);
         }
         if (e != NULL && e->type == MINO_STRING) {
             char msg[512];
@@ -1092,32 +1092,32 @@ static mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
     }
     /* Push frame. */
     frame.bindings = bhead;
-    frame.prev     = dyn_stack;
-    dyn_stack      = &frame;
+    frame.prev     = S->dyn_stack;
+    S->dyn_stack      = &frame;
     result = eval_implicit_do(S, body, env);
     /* Pop frame. */
-    dyn_stack = frame.prev;
+    S->dyn_stack = frame.prev;
     dyn_binding_list_free(bhead);
     return result;
 }
 
 mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int tail)
 {
-    if (limit_exceeded) {
+    if (S->limit_exceeded) {
         return NULL;
     }
-    if (interrupted) {
-        limit_exceeded = 1;
-        set_error(S, "interrupted");
+    if (S->interrupted) {
+        S->limit_exceeded = 1;
+        set_error(S, "S->interrupted");
         return NULL;
     }
-    if (limit_steps > 0 && ++eval_steps > limit_steps) {
-        limit_exceeded = 1;
+    if (S->limit_steps > 0 && ++S->eval_steps > S->limit_steps) {
+        S->limit_exceeded = 1;
         set_error(S, "step limit exceeded");
         return NULL;
     }
-    if (limit_heap > 0 && gc_bytes_alloc > limit_heap) {
-        limit_exceeded = 1;
+    if (S->limit_heap > 0 && S->gc_bytes_alloc > S->limit_heap) {
+        S->limit_exceeded = 1;
         set_error(S, "heap limit exceeded");
         return NULL;
     }
@@ -1152,7 +1152,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_CONS: {
         mino_val_t *head = form->as.cons.car;
         mino_val_t *args = form->as.cons.cdr;
-        eval_current_form = form;
+        S->eval_current_form = form;
 
         /* Special forms. */
         if (sym_eq(head, "quote")) {
@@ -1412,10 +1412,10 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         const char *file = NULL;
         int         line = 0;
         mino_val_t *result;
-        if (eval_current_form != NULL
-            && eval_current_form->type == MINO_CONS) {
-            file = eval_current_form->as.cons.file;
-            line = eval_current_form->as.cons.line;
+        if (S->eval_current_form != NULL
+            && S->eval_current_form->type == MINO_CONS) {
+            file = S->eval_current_form->as.cons.file;
+            line = S->eval_current_form->as.cons.line;
         }
         push_frame(S, fn->as.prim.name, file, line);
         result = fn->as.prim.fn(S, args, env);
@@ -1434,10 +1434,10 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         const char *file      = NULL;
         int         line      = 0;
         mino_val_t *result;
-        if (eval_current_form != NULL
-            && eval_current_form->type == MINO_CONS) {
-            file = eval_current_form->as.cons.file;
-            line = eval_current_form->as.cons.line;
+        if (S->eval_current_form != NULL
+            && S->eval_current_form->type == MINO_CONS) {
+            file = S->eval_current_form->as.cons.file;
+            line = S->eval_current_form->as.cons.line;
         }
         push_frame(S, tag, file, line);
         /* Multi-arity dispatch: params == NULL means body is a clause list. */

@@ -14,13 +14,13 @@
 static void state_init(mino_state_t *S)
 {
     memset(S, 0, sizeof(*S));
-    gc_threshold        = 1u << 20;
-    gc_stress           = -1;
-    nil_singleton.type  = MINO_NIL;
-    true_singleton.type = MINO_BOOL;
-    true_singleton.as.b = 1;
-    false_singleton.type = MINO_BOOL;
-    reader_line         = 1;
+    S->gc_threshold        = 1u << 20;
+    S->gc_stress           = -1;
+    S->nil_singleton.type  = MINO_NIL;
+    S->true_singleton.type = MINO_BOOL;
+    S->true_singleton.as.b = 1;
+    S->false_singleton.type = MINO_BOOL;
+    S->reader_line         = 1;
 }
 
 mino_state_t *mino_state_new(void)
@@ -43,7 +43,7 @@ void mino_state_free(mino_state_t *S)
     if (S == NULL) {
         return;
     }
-    for (r = gc_root_envs; r != NULL; r = rnext) {
+    for (r = S->gc_root_envs; r != NULL; r = rnext) {
         rnext = r->next;
         free(r);
     }
@@ -56,20 +56,20 @@ void mino_state_free(mino_state_t *S)
             ref = rnxt;
         }
     }
-    for (i = 0; i < module_cache_len; i++) {
-        free(module_cache[i].name);
+    for (i = 0; i < S->module_cache_len; i++) {
+        free(S->module_cache[i].name);
     }
-    free(module_cache);
-    for (i = 0; i < meta_table_len; i++) {
-        free(meta_table[i].name);
-        free(meta_table[i].docstring);
+    free(S->module_cache);
+    for (i = 0; i < S->meta_table_len; i++) {
+        free(S->meta_table[i].name);
+        free(S->meta_table[i].docstring);
     }
-    free(meta_table);
-    free(sym_intern.entries);
-    free(kw_intern.entries);
-    free(gc_ranges);
+    free(S->meta_table);
+    free(S->sym_intern.entries);
+    free(S->kw_intern.entries);
+    free(S->gc_ranges);
     free(S->core_forms);
-    for (h = gc_all; h != NULL; h = hnext) {
+    for (h = S->gc_all; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
@@ -134,49 +134,49 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
     volatile char probe = 0;
     mino_val_t   *v;
-    int           saved_try = try_depth;
+    int           saved_try = S->try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    eval_steps     = 0;
-    limit_exceeded = 0;
-    interrupted    = 0;
-    trace_added    = 0;
-    call_depth     = 0;
+    S->eval_steps     = 0;
+    S->limit_exceeded = 0;
+    S->interrupted    = 0;
+    S->trace_added    = 0;
+    S->call_depth     = 0;
 
     /* Top-level try frame so that OOM and unhandled throw during eval
      * surface as a NULL return instead of aborting the process. */
-    if (try_depth < MAX_TRY_DEPTH) {
-        try_stack[try_depth].exception = NULL;
-        if (setjmp(try_stack[try_depth].buf) != 0) {
+    if (S->try_depth < MAX_TRY_DEPTH) {
+        S->try_stack[S->try_depth].exception = NULL;
+        if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
-            try_depth = saved_try;
+            S->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
                 set_error(S, "unhandled exception");
             }
-            call_depth = 0;
+            S->call_depth = 0;
             return NULL;
         }
-        try_depth++;
+        S->try_depth++;
     }
 
     v = eval(S, form, env);
-    try_depth = saved_try;
+    S->try_depth = saved_try;
     if (v == NULL) {
         append_trace(S);
-        call_depth = 0;
+        S->call_depth = 0;
         return NULL;
     }
     if (v->type == MINO_RECUR) {
         set_error(S, "recur must be in tail position");
-        call_depth = 0;
+        S->call_depth = 0;
         return NULL;
     }
     if (v->type == MINO_TAIL_CALL) {
         set_error(S, "tail call escaped to top level");
-        call_depth = 0;
+        S->call_depth = 0;
         return NULL;
     }
-    call_depth = 0;
+    S->call_depth = 0;
     return v;
 }
 
@@ -184,34 +184,34 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
 {
     volatile char   probe = 0;
     mino_val_t     *last  = mino_nil(S);
-    const char     *saved_file = reader_file;
-    int             saved_line = reader_line;
-    int             saved_try  = try_depth;
+    const char     *saved_file = S->reader_file;
+    int             saved_line = S->reader_line;
+    int             saved_try  = S->try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    eval_steps     = 0;
-    limit_exceeded = 0;
-    interrupted    = 0;
-    if (reader_file == NULL) {
-        reader_file = intern_filename("<string>");
+    S->eval_steps     = 0;
+    S->limit_exceeded = 0;
+    S->interrupted    = 0;
+    if (S->reader_file == NULL) {
+        S->reader_file = intern_filename("<string>");
     }
-    reader_line = 1;
+    S->reader_line = 1;
 
     /* Top-level try frame so that OOM during read or eval surfaces as a
      * NULL return instead of aborting the process. */
-    if (try_depth < MAX_TRY_DEPTH) {
-        try_stack[try_depth].exception = NULL;
-        if (setjmp(try_stack[try_depth].buf) != 0) {
-            try_depth   = saved_try;
-            reader_file = saved_file;
-            reader_line = saved_line;
+    if (S->try_depth < MAX_TRY_DEPTH) {
+        S->try_stack[S->try_depth].exception = NULL;
+        if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
+            S->try_depth   = saved_try;
+            S->reader_file = saved_file;
+            S->reader_line = saved_line;
             if (mino_last_error(S) == NULL) {
                 set_error(S, "unhandled exception");
             }
-            call_depth = 0;
+            S->call_depth = 0;
             return NULL;
         }
-        try_depth++;
+        S->try_depth++;
     }
 
     while (*src != '\0') {
@@ -219,25 +219,25 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
         mino_val_t *form = mino_read(S, src, &end);
         if (form == NULL) {
             if (mino_last_error(S) != NULL) {
-                try_depth   = saved_try;
-                reader_file = saved_file;
-                reader_line = saved_line;
+                S->try_depth   = saved_try;
+                S->reader_file = saved_file;
+                S->reader_line = saved_line;
                 return NULL;
             }
             break; /* EOF */
         }
         last = mino_eval(S, form, env);
         if (last == NULL) {
-            try_depth   = saved_try;
-            reader_file = saved_file;
-            reader_line = saved_line;
+            S->try_depth   = saved_try;
+            S->reader_file = saved_file;
+            S->reader_line = saved_line;
             return NULL;
         }
         src = end;
     }
-    try_depth   = saved_try;
-    reader_file = saved_file;
-    reader_line = saved_line;
+    S->try_depth   = saved_try;
+    S->reader_file = saved_file;
+    S->reader_line = saved_line;
     return last;
 }
 
@@ -290,10 +290,10 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
         return NULL;
     }
     buf[rd] = '\0';
-    saved_file  = reader_file;
-    reader_file = intern_filename(path);
+    saved_file  = S->reader_file;
+    S->reader_file = intern_filename(path);
     result = mino_eval_string(S, buf, env);
-    reader_file = saved_file;
+    S->reader_file = saved_file;
     free(buf);
     return result;
 }
@@ -322,21 +322,21 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_en
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
                mino_val_t **out)
 {
-    int saved_try = try_depth;
+    int saved_try = S->try_depth;
     mino_val_t *result;
 
-    if (try_depth >= MAX_TRY_DEPTH) {
+    if (S->try_depth >= MAX_TRY_DEPTH) {
         if (out != NULL) {
             *out = NULL;
         }
         return -1;
     }
 
-    try_stack[try_depth].exception = NULL;
-    if (setjmp(try_stack[try_depth].buf) != 0) {
+    S->try_stack[S->try_depth].exception = NULL;
+    if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. */
-        mino_val_t *ex = try_stack[saved_try].exception;
-        try_depth = saved_try;
+        mino_val_t *ex = S->try_stack[saved_try].exception;
+        S->try_depth = saved_try;
         /* Populate last_error from the exception value so the host
          * can inspect it via mino_last_error(). */
         if (mino_last_error(S) == NULL || mino_last_error(S)[0] == '\0') {
@@ -353,10 +353,10 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
         }
         return -1;
     }
-    try_depth++;
+    S->try_depth++;
 
     result = mino_call(S, fn, args, env);
-    try_depth = saved_try;
+    S->try_depth = saved_try;
 
     if (out != NULL) {
         *out = result;
@@ -371,8 +371,8 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
 void mino_set_limit(mino_state_t *S, int kind, size_t value)
 {
     switch (kind) {
-    case MINO_LIMIT_STEPS: limit_steps = value; break;
-    case MINO_LIMIT_HEAP:  limit_heap  = value; break;
+    case MINO_LIMIT_STEPS: S->limit_steps = value; break;
+    case MINO_LIMIT_HEAP:  S->limit_heap  = value; break;
     default: break;
     }
 }
@@ -400,10 +400,7 @@ int mino_fi_should_fail_raw(mino_state_t *S)
 
 void mino_interrupt(mino_state_t *S)
 {
-    /* Write directly to avoid S (may be in use by another thread). */
-#undef interrupted
     S->interrupted = 1;
-#define interrupted (S->interrupted)
 }
 
 /* ------------------------------------------------------------------------- */

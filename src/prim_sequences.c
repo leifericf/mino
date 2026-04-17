@@ -512,10 +512,10 @@ static int val_compare(const mino_val_t *a, const mino_val_t *b)
 
 static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
 {
-    if (sort_comp_fn != NULL) {
+    if (S->sort_comp_fn != NULL) {
         mino_val_t *call_args = mino_cons(S, (mino_val_t *)a,
                                   mino_cons(S, (mino_val_t *)b, mino_nil(S)));
-        mino_val_t *result = mino_call(S, sort_comp_fn, call_args, sort_comp_env);
+        mino_val_t *result = mino_call(S, S->sort_comp_fn, call_args, S->sort_comp_env);
         if (result == NULL) return 0;
         /* Numeric result: use sign directly (compare-style) */
         if (result->type == MINO_INT) {
@@ -590,11 +590,11 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     i = 0;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) { arr[i++] = seq_iter_val(S, &it); seq_iter_next(S, &it); }
-    sort_comp_fn  = comp;
-    sort_comp_env = env;
+    S->sort_comp_fn  = comp;
+    S->sort_comp_env = env;
     merge_sort_vals(S, arr, tmp, n_items);
-    sort_comp_fn  = NULL;
-    sort_comp_env = NULL;
+    S->sort_comp_fn  = NULL;
+    S->sort_comp_env = NULL;
     for (i = 0; i < n_items; i++) {
         mino_val_t *cell = mino_cons(S, arr[i], mino_nil(S));
         if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }

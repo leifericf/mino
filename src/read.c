@@ -54,7 +54,7 @@ static void skip_ws(mino_state_t *S, const char **p)
     while (**p) {
         char c = **p;
         if (c == '\n') {
-            reader_line++;
+            S->reader_line++;
             (*p)++;
         } else if (is_ws(c)) {
             (*p)++;
@@ -85,7 +85,7 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     while (**p && **p != '"') {
         char c = **p;
         if (c == '\n') {
-            reader_line++;
+            S->reader_line++;
         }
         if (c == '\\') {
             (*p)++;
@@ -137,7 +137,7 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
 static mino_val_t *read_list_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
-    int         list_line = reader_line;
+    int         list_line = S->reader_line;
     mino_val_t *head = mino_nil(S);
     mino_val_t *tail = NULL;
     (*p)++; /* skip '(' */
@@ -152,7 +152,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             return head;
         }
         {
-            int         elem_line = reader_line;
+            int         elem_line = S->reader_line;
             mino_val_t *elem = read_form(S, p);
             if (elem == NULL && mino_last_error(S) != NULL) {
                 return NULL;
@@ -164,7 +164,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             }
             {
                 mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
-                cell->as.cons.file = reader_file;
+                cell->as.cons.file = S->reader_file;
                 cell->as.cons.line = (tail == NULL) ? list_line : elem_line;
                 if (tail == NULL) {
                     head = cell;
@@ -551,7 +551,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     }
     if (**p == '#' && *(*p + 1) == '(') {
         /* Anonymous function shorthand: #(inc %) => (fn [%1] (inc %1)) */
-        int fn_line = reader_line;
+        int fn_line = S->reader_line;
         int used[9] = {0};
         int max_arg = 0, has_rest = 0;
         mino_val_t *body;
@@ -586,7 +586,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         fn_form = mino_cons(S, mino_symbol(S, "fn"),
                       mino_cons(S, params_vec,
                           mino_cons(S, body, mino_nil(S))));
-        fn_form->as.cons.file = reader_file;
+        fn_form->as.cons.file = S->reader_file;
         fn_form->as.cons.line = fn_line;
         return fn_form;
     }
@@ -594,7 +594,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         return read_string_form(S, p);
     }
     if (**p == '\'') {
-        int q_line = reader_line;
+        int q_line = S->reader_line;
         (*p)++;
         {
             mino_val_t *quoted = read_form(S, p);
@@ -607,13 +607,13 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, "quote"),
                               mino_cons(S, quoted, mino_nil(S)));
-            outer->as.cons.file = reader_file;
+            outer->as.cons.file = S->reader_file;
             outer->as.cons.line = q_line;
             return outer;
         }
     }
     if (**p == '`') {
-        int q_line = reader_line;
+        int q_line = S->reader_line;
         (*p)++;
         {
             mino_val_t *qq = read_form(S, p);
@@ -626,13 +626,13 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, "quasiquote"),
                               mino_cons(S, qq, mino_nil(S)));
-            outer->as.cons.file = reader_file;
+            outer->as.cons.file = S->reader_file;
             outer->as.cons.line = q_line;
             return outer;
         }
     }
     if (**p == '@') {
-        int q_line = reader_line;
+        int q_line = S->reader_line;
         (*p)++;
         {
             mino_val_t *target = read_form(S, p);
@@ -645,7 +645,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, "deref"),
                               mino_cons(S, target, mino_nil(S)));
-            outer->as.cons.file = reader_file;
+            outer->as.cons.file = S->reader_file;
             outer->as.cons.line = q_line;
             return outer;
         }
@@ -747,7 +747,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         }
     }
     if (**p == '~') {
-        int         q_line = reader_line;
+        int         q_line = S->reader_line;
         const char *name = "unquote";
         (*p)++;
         if (**p == '@') {
@@ -765,7 +765,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, name),
                               mino_cons(S, uq, mino_nil(S)));
-            outer->as.cons.file = reader_file;
+            outer->as.cons.file = S->reader_file;
             outer->as.cons.line = q_line;
             return outer;
         }
@@ -782,8 +782,8 @@ mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
      * conservative scan covers the reader's call chain in full. */
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    if (reader_file == NULL) {
-        reader_file = intern_filename("<input>");
+    if (S->reader_file == NULL) {
+        S->reader_file = intern_filename("<input>");
     }
     clear_error(S);
     v = read_form(S, &p);

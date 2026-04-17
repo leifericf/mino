@@ -44,8 +44,8 @@ mino_env_t *mino_env_new(mino_state_t *S)
         return NULL;
     }
     r->env       = env;
-    r->next      = gc_root_envs;
-    gc_root_envs = r;
+    r->next      = S->gc_root_envs;
+    S->gc_root_envs = r;
     return env;
 }
 
@@ -58,7 +58,7 @@ void mino_env_free(mino_state_t *S, mino_env_t *env)
 {
     /* Unroot the env. Its memory, along with any closures and bindings
      * reachable only through it, is reclaimed at the next collection. */
-    root_env_t **pp = &gc_root_envs;
+    root_env_t **pp = &S->gc_root_envs;
     if (env == NULL) {
         return;
     }
@@ -162,7 +162,7 @@ mino_val_t *dyn_lookup(mino_state_t *S, const char *name)
 {
     dyn_frame_t *f;
     dyn_binding_t *b;
-    for (f = dyn_stack; f != NULL; f = f->prev) {
+    for (f = S->dyn_stack; f != NULL; f = f->prev) {
         for (b = f->bindings; b != NULL; b = b->next) {
             if (strcmp(b->name, name) == 0) return b->val;
         }
