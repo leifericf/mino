@@ -145,4 +145,18 @@
       (swap! a inc))
     (is (= 10 @a))))
 
+;; --- distinct? ---
+
+(deftest distinct?-basic
+  (is (distinct? 1 2 3))
+  (is (not (distinct? 1 2 1)))
+  (is (distinct? :a :b :c))
+  (is (not (distinct? :a :b :a))))
+
+(deftest distinct?-single
+  (is (distinct? 1)))
+
+(deftest distinct?-empty
+  (is (distinct?)))
+
 ;; (run-tests) -- called by tests/run.mino

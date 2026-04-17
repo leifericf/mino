@@ -545,6 +545,11 @@
 (def atom?     (fn [x] (= (type x) :atom)))
 (def not-any?  (fn [pred coll] (not (some pred coll))))
 (def not-every? (fn [pred coll] (not (every? pred coll))))
+(def distinct? (fn [& xs]
+  (if (empty? xs)
+    true
+    (let [s (set xs)]
+      (= (count s) (count xs))))))
 
 ;; --- Sequence navigation ---
 
