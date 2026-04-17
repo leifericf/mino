@@ -84,4 +84,21 @@
 (deftest max-key-tie-returns-last
   (is (= "de" (max-key count "ab" "cd" "de"))))
 
+;; --- random-sample ---
+
+(deftest random-sample-zero
+  (is (= '() (random-sample 0 [1 2 3 4 5]))))
+
+(deftest random-sample-one
+  (is (= '(1 2 3 4 5) (random-sample 1 [1 2 3 4 5]))))
+
+(deftest random-sample-returns-subset
+  (let [result (random-sample 0.5 (range 1000))]
+    (is (< (count result) 1000))
+    (is (> (count result) 0))))
+
+(deftest random-sample-transducer
+  (is (= '() (into [] (random-sample 0) [1 2 3 4 5])))
+  (is (= [1 2 3 4 5] (into [] (random-sample 1) [1 2 3 4 5]))))
+
 ;; (run-tests) -- called by tests/run.mino

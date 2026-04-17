@@ -569,6 +569,11 @@
 
 (def rand-int  (fn [n] (int (* (rand) n))))
 (def rand-nth  (fn [coll] (nth coll (rand-int (count coll)))))
+(def random-sample (fn
+  ([prob]
+   (filter (fn [_] (< (rand) prob))))
+  ([prob coll]
+   (filter (fn [_] (< (rand) prob)) coll))))
 
 ;; --- Side-effecting traversal ---
 
