@@ -210,6 +210,8 @@ const char *mino_last_error(mino_state_t *S);
  * Create a new isolated runtime state. Each state owns its own GC, intern
  * tables, module cache, and singletons. Multiple states may coexist in the
  * same process; they share no mutable data.
+ *
+ * Fatal: aborts on allocation failure (no state exists to report through).
  */
 mino_state_t *mino_state_new(void);
 
@@ -230,6 +232,8 @@ void mino_state_free(mino_state_t *S);
  * the returned env weakly: mino_env_free unregisters it and lets the next
  * sweep reclaim the frame and any closures that were reachable only from
  * within it. The host does not free any mino-owned pointers directly.
+ *
+ * Returns NULL on allocation failure (check mino_last_error).
  */
 mino_env_t *mino_env_new(mino_state_t *S);
 void        mino_env_free(mino_state_t *S, mino_env_t *env);
@@ -301,12 +305,20 @@ void        mino_install_io(mino_state_t *S, mino_env_t *env);
 /*
  * Evaluate one form. Returns NULL on error and writes a message via
  * mino_last_error(). Returns mino_nil() for an explicit nil result.
+ *
+ * A top-level try frame catches out-of-memory conditions and unhandled
+ * exceptions during evaluation, surfacing them as NULL + error message
+ * rather than aborting the process. The state remains usable after an
+ * OOM return.
  */
 mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
 
 /*
  * Read and evaluate all forms in `src`. Returns the value of the last
  * form, or NULL on error. An empty string returns mino_nil().
+ *
+ * Installs its own try frame: OOM during read or eval returns NULL
+ * with an error message rather than aborting.
  */
 mino_val_t *mino_eval_string(mino_state_t *S, const char *src,
                              mino_env_t *env);
