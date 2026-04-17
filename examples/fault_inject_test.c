@@ -167,31 +167,114 @@ static void test_oom_catchable(void)
     OK();
 }
 
-/* Test: OOM during serialization (clone) is recoverable. */
-static void test_clone_oom(void)
+/* Test: OOM during clone (vector) via raw fault injection is recoverable. */
+static void test_clone_vector_oom(void)
 {
-    TEST("clone OOM returns NULL, not crash");
+    TEST("clone vector OOM returns NULL, not crash");
     mino_state_t *src = mino_state_new();
     mino_state_t *dst = mino_state_new();
     mino_env_t *se = mino_new(src);
     mino_env_t *de = mino_new(dst);
+    long n;
 
-    mino_val_t *v = mino_eval_string(src,
-        "{:a [1 2 3] :b \"hello\" :c true}", se);
+    mino_val_t *v = mino_eval_string(src, "[1 2 3 4 5]", se);
     CHK(v != NULL, "eval failed");
 
-    /* Clone with fault injection active in dst.
-     * clone uses raw malloc (not gc_alloc_typed), so the fault injection
-     * counter won't hit it directly. We test that the clone path's own
-     * error handling (NULL checks on malloc) works. */
-    mino_val_t *cloned = mino_clone(dst, src, v);
-    /* Without fault injection on raw mallocs, clone should succeed. */
-    CHK(cloned != NULL, "clone should succeed without injection");
+    /* Find failure point in raw allocation path. */
+    for (n = 1; n <= 20; n++) {
+        mino_set_fail_raw_at(dst, n);
+        if (mino_clone(dst, src, v) == NULL) {
+            mino_set_fail_raw_at(dst, 0);
+            break;
+        }
+        mino_set_fail_raw_at(dst, 0);
+    }
+    CHK(n <= 20, "no failure point found");
+
+    /* Verify recovery: clone succeeds after clearing injection. */
+    {
+        mino_val_t *ok = mino_clone(dst, src, v);
+        CHK(ok != NULL, "clone should succeed after clearing injection");
+    }
 
     mino_env_free(src, se);
     mino_env_free(dst, de);
     mino_state_free(src);
     mino_state_free(dst);
+    OK();
+}
+
+/* Test: OOM during clone (map) via raw fault injection is recoverable. */
+static void test_clone_map_oom(void)
+{
+    TEST("clone map OOM returns NULL, not crash");
+    mino_state_t *src = mino_state_new();
+    mino_state_t *dst = mino_state_new();
+    mino_env_t *se = mino_new(src);
+    mino_env_t *de = mino_new(dst);
+    long n;
+
+    mino_val_t *v = mino_eval_string(src, "{:a 1 :b 2 :c 3}", se);
+    CHK(v != NULL, "eval failed");
+
+    for (n = 1; n <= 20; n++) {
+        mino_set_fail_raw_at(dst, n);
+        if (mino_clone(dst, src, v) == NULL) {
+            mino_set_fail_raw_at(dst, 0);
+            break;
+        }
+        mino_set_fail_raw_at(dst, 0);
+    }
+    CHK(n <= 20, "no failure point found");
+
+    {
+        mino_val_t *ok = mino_clone(dst, src, v);
+        CHK(ok != NULL, "clone should succeed after clearing injection");
+    }
+
+    mino_env_free(src, se);
+    mino_env_free(dst, de);
+    mino_state_free(src);
+    mino_state_free(dst);
+    OK();
+}
+
+/* Test: OOM during mailbox serialization via raw fault injection. */
+static void test_mailbox_send_oom(void)
+{
+    TEST("mailbox send OOM returns error, not crash");
+    mino_state_t *S = mino_state_new();
+    mino_env_t *env = mino_new(S);
+    mino_mailbox_t *mb = mino_mailbox_new();
+    long n;
+    int rc;
+
+    mino_val_t *v = mino_eval_string(S, "{:a [1 2 3] :b \"hello\"}", env);
+    CHK(v != NULL, "eval failed");
+    CHK(mb != NULL, "mailbox alloc failed");
+
+    /* Find failure point in serialization path. */
+    for (n = 1; n <= 50; n++) {
+        mino_set_fail_raw_at(S, n);
+        rc = mino_mailbox_send(mb, S, v);
+        mino_set_fail_raw_at(S, 0);
+        if (rc != 0) break;
+    }
+    CHK(n <= 50, "no failure point found");
+
+    /* Verify recovery: send succeeds after clearing injection. */
+    rc = mino_mailbox_send(mb, S, v);
+    CHK(rc == 0, "send should succeed after clearing injection");
+
+    /* Verify the message arrived intact. */
+    {
+        mino_val_t *msg = mino_mailbox_recv(mb, S);
+        CHK(msg != NULL, "recv should return the sent value");
+    }
+
+    mino_mailbox_free(mb);
+    mino_env_free(S, env);
+    mino_state_free(S);
     OK();
 }
 
@@ -229,7 +312,9 @@ int main(void)
     test_binding_oom();
     test_regex_oom();
     test_oom_catchable();
-    test_clone_oom();
+    test_clone_vector_oom();
+    test_clone_map_oom();
+    test_mailbox_send_oom();
     test_repeated_oom_recovery();
 
     printf("---------------------\n");

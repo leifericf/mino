@@ -400,6 +400,20 @@ void mino_interrupt(mino_state_t *S);
  */
 void mino_set_fail_alloc_at(mino_state_t *S, long n);
 
+/*
+ * Fault injection for raw (non-GC) allocation paths: clone serialization,
+ * mailbox buffers, etc. After `n` raw allocation attempts the next one
+ * returns NULL. Pass 0 to disable. Intended for testing only.
+ */
+void mino_set_fail_raw_at(mino_state_t *S, long n);
+
+/*
+ * Check and decrement the raw fault injection counter. Returns 1 if
+ * the allocation should be failed (simulated OOM), 0 otherwise.
+ * Internal helper exposed for clone.c; not intended for embedder use.
+ */
+int mino_fi_should_fail_raw(mino_state_t *S);
+
 /* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */
 /* ------------------------------------------------------------------------- */

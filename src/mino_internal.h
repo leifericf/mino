@@ -228,6 +228,10 @@ struct mino_state {
     /* Fault injection: when fi_alloc_countdown > 0, decrement on each
      * gc_alloc_typed call; when it reaches zero, simulate OOM. */
     long            fi_alloc_countdown;
+
+    /* Fault injection for raw (non-GC) allocation paths such as clone
+     * serialization and mailbox buffers. Same semantics as above. */
+    long            fi_raw_countdown;
 };
 
 /* ------------------------------------------------------------------------- */

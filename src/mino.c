@@ -3068,6 +3068,22 @@ void mino_set_fail_alloc_at(mino_state_t *S, long n)
     S->fi_alloc_countdown = n;
 }
 
+void mino_set_fail_raw_at(mino_state_t *S, long n)
+{
+    S->fi_raw_countdown = n;
+}
+
+int mino_fi_should_fail_raw(mino_state_t *S)
+{
+    if (S->fi_raw_countdown > 0) {
+        S->fi_raw_countdown--;
+        if (S->fi_raw_countdown == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void mino_interrupt(mino_state_t *S)
 {
     /* Write directly to avoid S (may be in use by another thread). */

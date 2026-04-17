@@ -68,6 +68,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         mino_val_t *result;
         mino_ref_t **refs;
         if (len == 0) return mino_vector(dst, NULL, 0);
+        if (mino_fi_should_fail_raw(dst)) return NULL;
         items = (mino_val_t **)malloc(len * sizeof(*items));
         refs  = (mino_ref_t **)malloc(len * sizeof(*refs));
         if (items == NULL || refs == NULL) {
@@ -101,6 +102,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         mino_ref_t **krefs, **vrefs;
         mino_val_t *result;
         if (len == 0) return mino_map(dst, NULL, NULL, 0);
+        if (mino_fi_should_fail_raw(dst)) return NULL;
         keys  = (mino_val_t **)malloc(len * sizeof(*keys));
         vals  = (mino_val_t **)malloc(len * sizeof(*vals));
         krefs = (mino_ref_t **)malloc(len * sizeof(*krefs));
@@ -151,6 +153,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         mino_ref_t **refs;
         mino_val_t *result;
         if (len == 0) return mino_set(dst, NULL, 0);
+        if (mino_fi_should_fail_raw(dst)) return NULL;
         items = (mino_val_t **)malloc(len * sizeof(*items));
         refs  = (mino_ref_t **)malloc(len * sizeof(*refs));
         if (!items || !refs) { free(items); free(refs); return NULL; }
@@ -257,23 +260,29 @@ void mino_mailbox_free(mino_mailbox_t *mb)
 /* --- Growable buffer for serialization (avoids tmpfile syscalls) --- */
 
 typedef struct {
-    char  *data;
-    size_t len;
-    size_t cap;
-    int    failed; /* set on allocation failure; all writes become no-ops */
+    char           *data;
+    size_t          len;
+    size_t          cap;
+    int             failed; /* set on allocation failure; all writes become no-ops */
+    mino_state_t   *fi_state; /* for raw fault injection; may be NULL */
 } sbuf_t;
 
-static void sbuf_init(sbuf_t *b)
+static void sbuf_init(sbuf_t *b, mino_state_t *S)
 {
-    b->data   = NULL;
-    b->len    = 0;
-    b->cap    = 0;
-    b->failed = 0;
+    b->data     = NULL;
+    b->len      = 0;
+    b->cap      = 0;
+    b->failed   = 0;
+    b->fi_state = S;
 }
 
 static int sbuf_ensure(sbuf_t *b, size_t extra)
 {
     if (b->failed) return -1;
+    if (b->fi_state != NULL && mino_fi_should_fail_raw(b->fi_state)) {
+        b->failed = 1;
+        return -1;
+    }
     if (b->len + extra + 1 > b->cap) {
         size_t need = b->len + extra + 1;
         size_t nc   = b->cap == 0 ? 128 : b->cap;
@@ -424,7 +433,7 @@ static void sbuf_print(mino_state_t *S, sbuf_t *b, const mino_val_t *v)
 static char *val_serialize(mino_state_t *S, mino_val_t *val, size_t *out_len)
 {
     sbuf_t buf;
-    sbuf_init(&buf);
+    sbuf_init(&buf, S);
     sbuf_print(S, &buf, val);
     if (buf.data == NULL || buf.failed) {
         free(buf.data);
@@ -443,6 +452,7 @@ int mino_mailbox_send(mino_mailbox_t *mb, mino_state_t *S, mino_val_t *val)
     if (mb == NULL || val == NULL) return -1;
     data = val_serialize(S, val, &len);
     if (data == NULL) return -1;
+    if (mino_fi_should_fail_raw(S)) { free(data); return -1; }
     msg = (mb_msg_t *)calloc(1, sizeof(*msg));
     if (msg == NULL) { free(data); return -1; }
     msg->data = data;
