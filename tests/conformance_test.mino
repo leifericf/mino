@@ -131,4 +131,18 @@
   (is (= 0 (bounded-count 10 [])))
   (is (= 0 (bounded-count 10 nil))))
 
+;; --- while ---
+
+(deftest while-basic
+  (let [a (atom 0)]
+    (while (< @a 5)
+      (swap! a inc))
+    (is (= 5 @a))))
+
+(deftest while-never-runs
+  (let [a (atom 10)]
+    (while (< @a 5)
+      (swap! a inc))
+    (is (= 10 @a))))
+
 ;; (run-tests) -- called by tests/run.mino

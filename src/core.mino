@@ -974,6 +974,11 @@
                    (~go (inc ~sym))))]
        (~go 0))))
 
+(defmacro while [test & body]
+  (let [go (gensym)]
+    `(let [~go (fn [] (when ~test ~@body (~go)))]
+       (~go))))
+
 (defmacro doseq [bindings & body]
   (if (<= (count bindings) 2)
     ;; Single binding: (doseq [x coll] body...)
