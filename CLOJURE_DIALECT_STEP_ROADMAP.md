@@ -55,7 +55,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 2 - Namespace + Var Semantics
+## ~~Step 2 - Namespace + Var Semantics~~
 
 ### Smaller steps
 - Introduce runtime namespace objects and current-namespace tracking (`*ns*` equivalent behavior).
