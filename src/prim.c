@@ -2,7 +2,7 @@
  * prim.c -- built-in primitive functions.
  */
 
-#include "mino_internal.h"
+#include "prim_internal.h"
 #include "re.h"
 
 /* ------------------------------------------------------------------------- */
@@ -14,7 +14,7 @@
  * Otherwise integer arithmetic is used end-to-end.
  */
 
-static int args_have_float(mino_val_t *args)
+int args_have_float(mino_val_t *args)
 {
     while (mino_is_cons(args)) {
         mino_val_t *a = args->as.cons.car;
@@ -29,7 +29,7 @@ static int args_have_float(mino_val_t *args)
 /* Throw a catchable exception from a primitive.  If inside a try block,
  * this longjmps to the catch handler.  Otherwise it sets a fatal error
  * and the caller returns NULL to propagate to the host. */
-static mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
+mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
 {
     mino_val_t *ex = mino_string(S, msg);
     if (try_depth > 0) {
@@ -40,7 +40,7 @@ static mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
     return NULL;
 }
 
-static int as_double(const mino_val_t *v, double *out)
+int as_double(const mino_val_t *v, double *out)
 {
     if (v == NULL) {
         return 0;
@@ -56,7 +56,7 @@ static int as_double(const mino_val_t *v, double *out)
     return 0;
 }
 
-static int as_long(const mino_val_t *v, long long *out)
+int as_long(const mino_val_t *v, long long *out)
 {
     if (v == NULL || v->type != MINO_INT) {
         return 0;
@@ -65,450 +65,12 @@ static int as_long(const mino_val_t *v, long long *out)
     return 1;
 }
 
-static mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (args_have_float(args)) {
-        double acc = 0.0;
-        while (mino_is_cons(args)) {
-            double x;
-            if (!as_double(args->as.cons.car, &x)) {
-                set_error(S, "+ expects numbers");
-                return NULL;
-            }
-            acc += x;
-            args = args->as.cons.cdr;
-        }
-        return mino_float(S, acc);
-    } else {
-        long long acc = 0;
-        while (mino_is_cons(args)) {
-            long long x;
-            if (!as_long(args->as.cons.car, &x)) {
-                set_error(S, "+ expects numbers");
-                return NULL;
-            }
-            acc += x;
-            args = args->as.cons.cdr;
-        }
-        return mino_int(S, acc);
-    }
-}
-
-static mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (!mino_is_cons(args)) {
-        set_error(S, "- requires at least one argument");
-        return NULL;
-    }
-    if (args_have_float(args)) {
-        double acc;
-        if (!as_double(args->as.cons.car, &acc)) {
-            set_error(S, "- expects numbers");
-            return NULL;
-        }
-        args = args->as.cons.cdr;
-        if (!mino_is_cons(args)) {
-            return mino_float(S, -acc);
-        }
-        while (mino_is_cons(args)) {
-            double x;
-            if (!as_double(args->as.cons.car, &x)) {
-                set_error(S, "- expects numbers");
-                return NULL;
-            }
-            acc -= x;
-            args = args->as.cons.cdr;
-        }
-        return mino_float(S, acc);
-    } else {
-        long long acc;
-        if (!as_long(args->as.cons.car, &acc)) {
-            set_error(S, "- expects numbers");
-            return NULL;
-        }
-        args = args->as.cons.cdr;
-        if (!mino_is_cons(args)) {
-            return mino_int(S, -acc);
-        }
-        while (mino_is_cons(args)) {
-            long long x;
-            if (!as_long(args->as.cons.car, &x)) {
-                set_error(S, "- expects numbers");
-                return NULL;
-            }
-            acc -= x;
-            args = args->as.cons.cdr;
-        }
-        return mino_int(S, acc);
-    }
-}
-
-static mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (args_have_float(args)) {
-        double acc = 1.0;
-        while (mino_is_cons(args)) {
-            double x;
-            if (!as_double(args->as.cons.car, &x)) {
-                set_error(S, "* expects numbers");
-                return NULL;
-            }
-            acc *= x;
-            args = args->as.cons.cdr;
-        }
-        return mino_float(S, acc);
-    } else {
-        long long acc = 1;
-        while (mino_is_cons(args)) {
-            long long x;
-            if (!as_long(args->as.cons.car, &x)) {
-                set_error(S, "* expects numbers");
-                return NULL;
-            }
-            acc *= x;
-            args = args->as.cons.cdr;
-        }
-        return mino_int(S, acc);
-    }
-}
-
-static mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    /* Division returns an integer when all operands are integers and the
-     * result is exact, a float otherwise. */
-    double acc;
-    int all_int = 1;
-    (void)env;
-    if (!mino_is_cons(args)) {
-        set_error(S, "/ requires at least one argument");
-        return NULL;
-    }
-    if (args->as.cons.car == NULL
-        || (args->as.cons.car->type != MINO_INT
-            && args->as.cons.car->type != MINO_FLOAT)) {
-        set_error(S, "/ expects numbers");
-        return NULL;
-    }
-    if (args->as.cons.car->type == MINO_FLOAT) all_int = 0;
-    if (!as_double(args->as.cons.car, &acc)) {
-        set_error(S, "/ expects numbers");
-        return NULL;
-    }
-    args = args->as.cons.cdr;
-    if (!mino_is_cons(args)) {
-        if (acc == 0.0) {
-            return prim_throw_error(S, "division by zero");
-        }
-        return mino_float(S, 1.0 / acc);
-    }
-    while (mino_is_cons(args)) {
-        double x;
-        if (args->as.cons.car == NULL
-            || (args->as.cons.car->type != MINO_INT
-                && args->as.cons.car->type != MINO_FLOAT)) {
-            set_error(S, "/ expects numbers");
-            return NULL;
-        }
-        if (args->as.cons.car->type == MINO_FLOAT) all_int = 0;
-        if (!as_double(args->as.cons.car, &x)) {
-            set_error(S, "/ expects numbers");
-            return NULL;
-        }
-        if (x == 0.0) {
-            return prim_throw_error(S, "division by zero");
-        }
-        acc /= x;
-        args = args->as.cons.cdr;
-    }
-    /* Return integer when all operands were ints and result is exact. */
-    if (all_int && acc == (double)(long long)acc) {
-        return mino_int(S, (long long)acc);
-    }
-    return mino_float(S, acc);
-}
-
-static mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    double a, b, r;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "mod requires two arguments");
-        return NULL;
-    }
-    if (!as_double(args->as.cons.car, &a) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "mod expects numbers");
-        return NULL;
-    }
-    if (b == 0.0) {
-        return prim_throw_error(S, "mod: division by zero");
-    }
-    r = fmod(a, b);
-    /* Floored modulo: result has same sign as divisor. */
-    if (r != 0.0 && ((r < 0.0) != (b < 0.0))) r += b;
-    /* Return int if both args are ints. */
-    if (args->as.cons.car->type == MINO_INT &&
-        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int(S, (long long)r);
-    }
-    return mino_float(S, r);
-}
-
-static mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    double a, b, r;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "rem requires two arguments");
-        return NULL;
-    }
-    if (!as_double(args->as.cons.car, &a) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "rem expects numbers");
-        return NULL;
-    }
-    if (b == 0.0) {
-        return prim_throw_error(S, "rem: division by zero");
-    }
-    r = fmod(a, b);
-    if (args->as.cons.car->type == MINO_INT &&
-        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int(S, (long long)r);
-    }
-    return mino_float(S, r);
-}
-
-static mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    double a, b, q;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "quot requires two arguments");
-        return NULL;
-    }
-    if (!as_double(args->as.cons.car, &a) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "quot expects numbers");
-        return NULL;
-    }
-    if (b == 0.0) {
-        return prim_throw_error(S, "quot: division by zero");
-    }
-    q = a / b;
-    q = q >= 0 ? floor(q) : ceil(q);
-    if (args->as.cons.car->type == MINO_INT &&
-        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int(S, (long long)q);
-    }
-    return mino_float(S, q);
-}
-
-/* --- Math functions (thin wrappers around math.h) --- */
-
-#define MATH_UNARY(cname, cfn, label)                                  \
-    static mino_val_t *cname(mino_state_t *S, mino_val_t *args, mino_env_t *env) \
-    {                                                                   \
-        double x;                                                       \
-        (void)env;                                                      \
-        if (!mino_is_cons(args) ||                                      \
-            mino_is_cons(args->as.cons.cdr)) {                          \
-            set_error(S, label " requires one argument");                  \
-            return NULL;                                                \
-        }                                                               \
-        if (!as_double(args->as.cons.car, &x)) {                       \
-            set_error(S, label " expects a number");                       \
-            return NULL;                                                \
-        }                                                               \
-        return mino_float(S, cfn(x));                                      \
-    }
-
-MATH_UNARY(prim_math_floor, floor, "math-floor")
-MATH_UNARY(prim_math_ceil,  ceil,  "math-ceil")
-MATH_UNARY(prim_math_round, round, "math-round")
-MATH_UNARY(prim_math_sqrt,  sqrt,  "math-sqrt")
-MATH_UNARY(prim_math_log,   log,   "math-log")
-MATH_UNARY(prim_math_exp,   exp,   "math-exp")
-MATH_UNARY(prim_math_sin,   sin,   "math-sin")
-MATH_UNARY(prim_math_cos,   cos,   "math-cos")
-MATH_UNARY(prim_math_tan,   tan,   "math-tan")
-
-#undef MATH_UNARY
-
-static mino_val_t *prim_math_pow(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    double base, exponent;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "math-pow requires two arguments");
-        return NULL;
-    }
-    if (!as_double(args->as.cons.car, &base) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &exponent)) {
-        set_error(S, "math-pow expects numbers");
-        return NULL;
-    }
-    return mino_float(S, pow(base, exponent));
-}
-
-static mino_val_t *prim_math_atan2(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    double y, x;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "math-atan2 requires two arguments");
-        return NULL;
-    }
-    if (!as_double(args->as.cons.car, &y) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &x)) {
-        set_error(S, "math-atan2 expects numbers");
-        return NULL;
-    }
-    return mino_float(S, atan2(y, x));
-}
-
-static mino_val_t *prim_bit_and(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    long long a, b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-and requires two arguments");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-and expects integers");
-        return NULL;
-    }
-    return mino_int(S, a & b);
-}
-
-static mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    long long a, b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-or requires two arguments");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-or expects integers");
-        return NULL;
-    }
-    return mino_int(S, a | b);
-}
-
-static mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    long long a, b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-xor requires two arguments");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-xor expects integers");
-        return NULL;
-    }
-    return mino_int(S, a ^ b);
-}
-
-static mino_val_t *prim_bit_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    long long a;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "bit-not requires one argument");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &a)) {
-        set_error(S, "bit-not expects an integer");
-        return NULL;
-    }
-    return mino_int(S, ~a);
-}
-
-static mino_val_t *prim_bit_shift_left(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    long long a, b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-shift-left requires two arguments");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-shift-left expects integers");
-        return NULL;
-    }
-    return mino_int(S, a << b);
-}
-
-static mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    long long a, b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-shift-right requires two arguments");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &a) ||
-        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-shift-right expects integers");
-        return NULL;
-    }
-    return mino_int(S, a >> b);
-}
-
-static mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *v;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "int requires one argument");
-        return NULL;
-    }
-    v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_INT) return v;
-    if (v != NULL && v->type == MINO_FLOAT) return mino_int(S, (long long)v->as.f);
-    set_error(S, "int: expected a number");
-    return NULL;
-}
-
-static mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *v;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "float requires one argument");
-        return NULL;
-    }
-    v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_FLOAT) return v;
-    if (v != NULL && v->type == MINO_INT) return mino_float(S, (double)v->as.i);
-    set_error(S, "float: expected a number");
-    return NULL;
-}
 
 /*
  * Helper: print a value to a string buffer using the standard printer.
  * Returns a mino string. Uses tmpfile() for ANSI C portability.
  */
-static mino_val_t *print_to_string(mino_state_t *S, const mino_val_t *v)
+mino_val_t *print_to_string(mino_state_t *S, const mino_val_t *v)
 {
     FILE  *f = tmpfile();
     long   n;
@@ -543,7 +105,7 @@ static mino_val_t *print_to_string(mino_state_t *S, const mino_val_t *v)
  * (format fmt & args) — simple string formatting.
  * Directives: %s (str of arg), %d (integer), %f (float), %% (literal %).
  */
-static mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fmt_val;
     const char *fmt;
@@ -703,7 +265,7 @@ static mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *en
     }
 }
 
-static mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s;
     mino_val_t *result;
@@ -739,7 +301,7 @@ static mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_
     return result != NULL ? result : mino_nil(S);
 }
 
-static mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     char  *buf = NULL;
     size_t len = 0;
@@ -773,7 +335,7 @@ static mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *en
     }
 }
 
-static mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s;
     long long   idx;
@@ -798,7 +360,7 @@ static mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *e
     return mino_string_n(S, s->as.s.data + idx, 1);
 }
 
-static mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
@@ -816,7 +378,7 @@ static mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (rand) — return a random float in [0.0, 1.0). */
-static mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (mino_is_cons(args)) {
@@ -831,7 +393,7 @@ static mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (eval form) — evaluate a form at runtime. */
-static mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         set_error(S, "eval requires one argument");
@@ -841,7 +403,7 @@ static mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (symbol str) — create a symbol from a string. */
-static mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
@@ -858,7 +420,7 @@ static mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *en
 }
 
 /* (keyword str) — create a keyword from a string. */
-static mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
@@ -875,7 +437,7 @@ static mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *e
 }
 
 /* (hash val) — return the integer hash code of any value. */
-static mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -883,74 +445,6 @@ static mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     return mino_int(S, (long long)hash_val(args->as.cons.car));
-}
-
-/* (compare a b) — general comparison returning -1, 0, or 1.
- * Compares numbers, strings, keywords, symbols, and nil. */
-static mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *a, *b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "compare requires two arguments");
-        return NULL;
-    }
-    a = args->as.cons.car;
-    b = args->as.cons.cdr->as.cons.car;
-    /* nil sorts before everything */
-    if ((a == NULL || (a->type == MINO_NIL)) &&
-        (b == NULL || (b->type == MINO_NIL))) return mino_int(S, 0);
-    if (a == NULL || a->type == MINO_NIL) return mino_int(S, -1);
-    if (b == NULL || b->type == MINO_NIL) return mino_int(S, 1);
-    /* numbers */
-    {
-        double da, db;
-        if (as_double(a, &da) && as_double(b, &db)) {
-            return mino_int(S, da < db ? -1 : da > db ? 1 : 0);
-        }
-    }
-    /* strings, keywords, symbols — lexicographic */
-    if ((a->type == MINO_STRING || a->type == MINO_KEYWORD ||
-         a->type == MINO_SYMBOL) && a->type == b->type) {
-        int cmp = strcmp(a->as.s.data, b->as.s.data);
-        return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
-    }
-    set_error(S, "compare: cannot compare values of different types");
-    return NULL;
-}
-
-static mino_val_t *prim_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    if (!mino_is_cons(args)) {
-        return mino_true(S);
-    }
-    {
-        mino_val_t *first = args->as.cons.car;
-        args = args->as.cons.cdr;
-        while (mino_is_cons(args)) {
-            if (!mino_eq_force(S, first, args->as.cons.car)) {
-                return mino_false(S);
-            }
-            args = args->as.cons.cdr;
-        }
-    }
-    return mino_true(S);
-}
-
-static mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
-{
-    mino_val_t *a, *b;
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "identical? requires 2 arguments");
-        return NULL;
-    }
-    a = args->as.cons.car;
-    b = args->as.cons.cdr->as.cons.car;
-    return (a == b) ? mino_true(S) : mino_false(S);
 }
 
 /* --- Metadata primitives ------------------------------------------------- */
@@ -967,7 +461,7 @@ static int supports_meta(mino_type_t t)
 }
 
 /* (meta obj) — return the metadata map, or nil if none. */
-static mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
+mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
                              mino_env_t *env)
 {
     mino_val_t *obj;
@@ -987,7 +481,7 @@ static mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
  * (with-meta obj m) — return a shallow copy of obj with metadata m.
  * m must be a map or nil.
  */
-static mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
+mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
                                   mino_env_t *env)
 {
     mino_val_t *obj, *m, *copy;
@@ -1016,7 +510,7 @@ static mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
 /*
  * (vary-meta obj f & args) — return (with-meta obj (apply f (meta obj) args)).
  */
-static mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
+mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
                                   mino_env_t *env)
 {
     mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta, *copy;
@@ -1053,7 +547,7 @@ static mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
  * Applies f to the current metadata of ref (plus any extra args)
  * and sets the result as the new metadata.
  */
-static mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
+mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
                                    mino_env_t *env)
 {
     mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta;
@@ -1082,56 +576,7 @@ static mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
     return obj->meta != NULL ? obj->meta : mino_nil(S);
 }
 
-/*
- * Chained numeric comparison. `op` selects the relation:
- *   0: <    1: <=    2: >    3: >=
- * Returns true if each successive pair satisfies the relation (and
- * trivially true on zero or one argument).
- */
-static mino_val_t *compare_chain(mino_state_t *S, mino_val_t *args, const char *name, int op)
-{
-    double prev;
-    if (!mino_is_cons(args)) {
-        return mino_true(S);
-    }
-    if (!as_double(args->as.cons.car, &prev)) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "%s expects numbers", name);
-        set_error(S, msg);
-        return NULL;
-    }
-    args = args->as.cons.cdr;
-    while (mino_is_cons(args)) {
-        double x;
-        int    ok;
-        if (!as_double(args->as.cons.car, &x)) {
-            char msg[64];
-            snprintf(msg, sizeof(msg), "%s expects numbers", name);
-            set_error(S, msg);
-            return NULL;
-        }
-        switch (op) {
-        case 0:  ok = prev <  x; break;
-        case 1:  ok = prev <= x; break;
-        case 2:  ok = prev >  x; break;
-        default: ok = prev >= x; break;
-        }
-        if (!ok) {
-            return mino_false(S);
-        }
-        prev = x;
-        args = args->as.cons.cdr;
-    }
-    return mino_true(S);
-}
-
-static mino_val_t *prim_lt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    return compare_chain(S, args, "<", 0);
-}
-
-static mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -1141,7 +586,7 @@ static mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_car(args->as.cons.car);
 }
 
-static mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
@@ -1155,12 +600,12 @@ static mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * Returns nil for empty/nil, cons for lists, and builds a cons list for
  * vectors, maps, sets, and strings.  Used by prim_cons so that
  * (cons 1 #{2 3}) returns (1 2 3), not (1 . #{2 3}). */
-static mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v);
+mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v);
 
 /* Forward-declared; body after prim_seq which has the full logic.
  * For now we use a simple wrapper that calls prim_seq's guts inline. */
 
-static mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
+mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
 {
     mino_val_t *head;
     mino_val_t *tail;
@@ -1231,7 +676,7 @@ static mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
     return v;
 }
 
-static mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *cdr;
     (void)env;
@@ -1253,10 +698,10 @@ static mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* without changing the public primitive contracts.                          */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem);
-static mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem);
+mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-static size_t list_length(mino_state_t *S, mino_val_t *list)
+size_t list_length(mino_state_t *S, mino_val_t *list)
 {
     size_t n = 0;
     while (list != NULL && list->type == MINO_LAZY) {
@@ -1273,13 +718,13 @@ static size_t list_length(mino_state_t *S, mino_val_t *list)
     return n;
 }
 
-static int arg_count(mino_state_t *S, mino_val_t *args, size_t *out)
+int arg_count(mino_state_t *S, mino_val_t *args, size_t *out)
 {
     *out = list_length(S, args);
     return 1;
 }
 
-static mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     (void)env;
@@ -1315,7 +760,7 @@ static mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env
     }
 }
 
-static mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     size_t n;
     size_t i;
@@ -1338,7 +783,7 @@ static mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *en
     return mino_vector(S, tmp, n);
 }
 
-static mino_val_t *prim_hash_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_hash_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     size_t n;
     size_t pairs;
@@ -1368,7 +813,7 @@ static mino_val_t *prim_hash_map(mino_state_t *S, mino_val_t *args, mino_env_t *
     return mino_map(S, ks, vs, pairs);
 }
 
-static mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *idx_val;
@@ -1450,7 +895,7 @@ static mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
-static mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     (void)env;
@@ -1506,7 +951,7 @@ static mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env
     return NULL;
 }
 
-static mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     (void)env;
@@ -1645,7 +1090,7 @@ static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
     }
 }
 
-static mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     size_t      n;
@@ -1696,7 +1141,7 @@ static mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env
     return NULL;
 }
 
-static mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *key;
@@ -1750,7 +1195,7 @@ static mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return def_val;
 }
 
-static mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     size_t      n;
@@ -1826,7 +1271,7 @@ static mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
-static mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *head = mino_nil(S);
@@ -1858,7 +1303,7 @@ static mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return head;
 }
 
-static mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *head = mino_nil(S);
@@ -1891,7 +1336,7 @@ static mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* Set helper: add one element to a set, returning a new set. */
-static mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem)
+mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem)
 {
     mino_val_t       *v        = alloc_val(S, MINO_SET);
     mino_val_t       *sentinel = mino_true(S);
@@ -1911,7 +1356,7 @@ static mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *e
     return v;
 }
 
-static mino_val_t *prim_hash_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_hash_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     size_t      n;
     size_t      i;
@@ -1928,7 +1373,7 @@ static mino_val_t *prim_hash_set(mino_state_t *S, mino_val_t *args, mino_env_t *
     return mino_set(S, tmp, n);
 }
 
-static mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *key;
@@ -1970,7 +1415,7 @@ static mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t
     return NULL;
 }
 
-static mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *p;
@@ -2024,7 +1469,7 @@ static mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return coll;
 }
 
-static mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *p;
@@ -2086,14 +1531,7 @@ static mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *en
  * through pointers so the caller can append efficiently.
  */
 
-/* Iterator abstraction over any sequential collection. */
-typedef struct {
-    const mino_val_t *coll;
-    size_t            idx;       /* for vectors, maps, sets */
-    const mino_val_t *cons_p;   /* for cons lists */
-} seq_iter_t;
-
-static void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
+void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
 {
     /* Force lazy seqs so they behave as cons lists. */
     if (coll != NULL && coll->type == MINO_LAZY) {
@@ -2104,7 +1542,7 @@ static void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *col
     it->cons_p = (coll != NULL && coll->type == MINO_CONS) ? coll : NULL;
 }
 
-static int seq_iter_done(const seq_iter_t *it)
+int seq_iter_done(const seq_iter_t *it)
 {
     const mino_val_t *c = it->coll;
     if (c == NULL || c->type == MINO_NIL) return 1;
@@ -2118,7 +1556,7 @@ static int seq_iter_done(const seq_iter_t *it)
     }
 }
 
-static mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
+mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
 {
     const mino_val_t *c = it->coll;
     switch (c->type) {
@@ -2139,7 +1577,7 @@ static mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
     }
 }
 
-static void seq_iter_next(mino_state_t *S, seq_iter_t *it)
+void seq_iter_next(mino_state_t *S, seq_iter_t *it)
 {
     if (it->coll != NULL && it->coll->type == MINO_CONS) {
         if (it->cons_p != NULL && it->cons_p->type == MINO_CONS) {
@@ -2158,7 +1596,7 @@ static void seq_iter_next(mino_state_t *S, seq_iter_t *it)
 /* (map, filter are now lazy in core.mino) */
 
 /* (reduced val) — wrap val to signal early termination in reduce. */
-static mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
@@ -2172,7 +1610,7 @@ static mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *e
 }
 
 /* (reduced? x) — true if x is a reduced wrapper. */
-static mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -2183,7 +1621,7 @@ static mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t 
         ? mino_true(S) : mino_false(S);
 }
 
-static mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn;
     mino_val_t *acc;
@@ -2230,7 +1668,7 @@ static mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *en
 }
 
 /* (set coll) — create a set from a collection. */
-static mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *result;
@@ -2259,7 +1697,7 @@ static mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* Eager range returning a vector. Avoids lazy thunk overhead for tight loops.
  * (rangev end) or (rangev start end) or (rangev start end step). */
-static mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     long long start = 0, end = 0, step = 1, i;
     size_t n, len;
@@ -2305,7 +1743,7 @@ static mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *en
 }
 
 /* Eager map returning a vector. (mapv f coll) */
-static mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn, *coll;
     seq_iter_t  it;
@@ -2345,7 +1783,7 @@ static mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* Eager filter returning a vector. (filterv pred coll) */
-static mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pred, *coll;
     seq_iter_t  it;
@@ -2386,7 +1824,7 @@ static mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *e
     return result;
 }
 
-static mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *to;
     mino_val_t *from;
@@ -2468,7 +1906,7 @@ static mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
-static mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn;
     mino_val_t *last;
@@ -2534,7 +1972,7 @@ static mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env
     return apply_callable(S, fn, call_args, env);
 }
 
-static mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *out = mino_nil(S);
@@ -2556,7 +1994,7 @@ static mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *e
     return out;
 }
 
-static mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* Simple comparison function for sorting: numbers by value, strings
  * lexicographically, other types by type tag then identity. */
@@ -2634,7 +2072,7 @@ static void merge_sort_vals(mino_state_t *S, mino_val_t **arr, mino_val_t **tmp,
 }
 
 /* (sort coll) or (sort comp coll) */
-static mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     mino_val_t *comp = NULL;
@@ -2690,7 +2128,7 @@ static mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* String primitives                                                         */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s_val;
     long long   start, end_idx;
@@ -2728,7 +2166,7 @@ static mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_string_n(S, s_val->as.s.data + start, (size_t)(end_idx - start));
 }
 
-static mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t  *s_val;
     mino_val_t  *sep_val;
@@ -2794,7 +2232,7 @@ static mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env
     return mino_vector(S, buf, len);
 }
 
-static mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t  *sep_val;
     mino_val_t  *coll;
@@ -2872,7 +2310,7 @@ static mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-static mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s, *prefix;
     (void)env;
@@ -2892,7 +2330,7 @@ static mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_en
         ? mino_true(S) : mino_false(S);
 }
 
-static mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s, *suffix;
     (void)env;
@@ -2913,7 +2351,7 @@ static mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_
         ? mino_true(S) : mino_false(S);
 }
 
-static mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s, *sub;
     const char *p;
@@ -2939,7 +2377,7 @@ static mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t
     return mino_false(S);
 }
 
-static mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s;
     char       *buf;
@@ -2968,7 +2406,7 @@ static mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t
     }
 }
 
-static mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s;
     char       *buf;
@@ -2997,7 +2435,7 @@ static mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t
     }
 }
 
-static mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s;
     const char *start, *end_ptr;
@@ -3022,7 +2460,7 @@ static mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Utility primitives                                                        */
 /* ------------------------------------------------------------------------- */
 
-static mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
@@ -3061,7 +2499,7 @@ static mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * (str & args) — concatenate printed representations. Strings contribute
  * their raw content (no quotes); everything else uses the printer form.
  */
-static mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     char  *buf = NULL;
     size_t len = 0;
@@ -3172,7 +2610,7 @@ static mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-static void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
+void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
     if (v != NULL && v->type == MINO_STRING) {
         fwrite(v->as.s.data, 1, v->as.s.len, out);
@@ -3181,7 +2619,7 @@ static void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     }
 }
 
-static mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int first = 1;
     (void)env;
@@ -3196,7 +2634,7 @@ static mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *e
     return mino_nil(S);
 }
 
-static mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int first = 1;
     (void)env;
@@ -3211,7 +2649,7 @@ static mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_nil(S);
 }
 
-static mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int expanded;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -3221,7 +2659,7 @@ static mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_en
     return macroexpand1(S, args->as.cons.car, env, &expanded);
 }
 
-static mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         set_error(S, "macroexpand requires one argument");
@@ -3230,7 +2668,7 @@ static mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_
     return macroexpand_all(S, args->as.cons.car, env);
 }
 
-static mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     const char *prefix_src = "G__";
     size_t      prefix_len = 3;
@@ -3270,7 +2708,7 @@ static mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *en
 
 /* (throw value) — raise a script exception. Caught by try/catch; if no
  * enclosing try, becomes a fatal runtime error. */
-static mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *ex;
     (void)env;
@@ -3298,7 +2736,7 @@ static mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env
 
 /* (slurp path) — read a file's entire contents as a string. I/O capability;
  * only installed by mino_install_io, not mino_install_core. */
-static mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *path_val;
     const char *path;
@@ -3347,7 +2785,7 @@ static mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env
     return result;
 }
 
-static mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *path_val;
     mino_val_t *content;
@@ -3384,7 +2822,7 @@ static mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (exit code) — terminate the process with the given exit code.
  * Defaults to 0 if no argument is given. */
-static mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int code = 0;
     (void)env;
@@ -3404,7 +2842,7 @@ static mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (re-find pattern text) — find first match of pattern in text.
  * Returns the matched substring, or nil if no match. */
-static mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pat_val, *text_val;
     int match_len = 0;
@@ -3433,7 +2871,7 @@ static mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *e
 }
 
 /* (re-matches pattern text) — true if the entire text matches pattern. */
-static mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pat_val, *text_val;
     int match_len = 0;
@@ -3463,7 +2901,7 @@ static mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t
 
 /* (time-ms) — return process time in milliseconds as a float.
  * Uses ANSI C clock() for portability across all C99 platforms. */
-static mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)args;
     (void)env;
@@ -3476,7 +2914,7 @@ static mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *e
 
 /* (require name) — load a module by name using the host-supplied resolver.
  * Returns the cached value on subsequent calls with the same name. */
-static mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *name_val;
     const char *name;
@@ -3545,7 +2983,7 @@ static mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *e
 
 /* (doc name) — print the docstring for a def/defmacro binding.
  * Returns the docstring as a string, or nil if no docstring. */
-static mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t   *name_val;
     char          buf[256];
@@ -3576,7 +3014,7 @@ static mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (source name) — return the source form of a def/defmacro binding. */
-static mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t   *name_val;
     char          buf[256];
@@ -3607,7 +3045,7 @@ static mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *en
 }
 
 /* (apropos substring) — return a list of bound names containing substring. */
-static mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pat_val;
     const char *pat;
@@ -3747,7 +3185,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
  * (seq coll) — coerce a collection to a sequence (cons chain).
  * Returns nil for empty collections. Forces lazy sequences.
  */
-static mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     (void)env;
@@ -3832,7 +3270,7 @@ static mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return NULL;
 }
 
-static mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
@@ -3848,7 +3286,7 @@ static mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t
     return mino_true(S);
 }
 
-static mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -3858,7 +3296,7 @@ static mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_atom(S, args->as.cons.car);
 }
 
-static mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a;
     (void)env;
@@ -3877,7 +3315,7 @@ static mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env
     return NULL;
 }
 
-static mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a, *val;
     (void)env;
@@ -3897,7 +3335,7 @@ static mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t
 }
 
 /* (swap! atom f & args) — applies (f current-val args...) and sets result. */
-static mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a, *fn, *cur, *call_args, *extra, *tail, *result;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -3936,7 +3374,7 @@ static mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t 
     return result;
 }
 
-static mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
