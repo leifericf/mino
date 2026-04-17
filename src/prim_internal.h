@@ -124,6 +124,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_string.c */
 mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env);

@@ -275,14 +275,6 @@
                   ([a b] (if (< a b) a b))
                   ([a b & more] (reduce min (min a b) more))))
 (def not-empty  (fn [coll] (if (seq coll) coll nil)))
-(def empty      (fn [coll]
-                  (cond
-                    (nil? coll) nil
-                    (vector? coll) []
-                    (map? coll) {}
-                    (set? coll) #{}
-                    (seq? coll) '()
-                    :else nil)))
 (def constantly (fn [x] (fn [& _] x)))
 (def boolean    (fn [x] (if x true false)))
 (def seq?       (fn [x] (or (cons? x) (= (type x) :lazy-seq))))

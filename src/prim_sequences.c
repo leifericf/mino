@@ -680,3 +680,23 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     kv[1] = v;
     return mino_vector(S, kv, 2);
 }
+
+mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "empty requires one argument");
+        return NULL;
+    }
+    coll = args->as.cons.car;
+    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    switch (coll->type) {
+    case MINO_VECTOR: return mino_vector(S, NULL, 0);
+    case MINO_MAP:    return mino_map(S, NULL, NULL, 0);
+    case MINO_SET:    return mino_set(S, NULL, 0);
+    case MINO_CONS:
+    case MINO_LAZY:   return mino_nil(S);
+    default:          return mino_nil(S);
+    }
+}
