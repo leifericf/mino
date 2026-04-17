@@ -294,32 +294,54 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
     }
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
-    /* (def name) -- declaration only, bind to nil. */
-    if (!mino_is_cons(args->as.cons.cdr)) {
-        env_bind(S, env_root(S, env), buf, mino_nil(S));
-        meta_set(S, buf, NULL, 0, form);
-        return mino_nil(S);
-    }
-    /* Optional docstring: (def name "doc" value) */
-    if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        mino_val_t *maybe_doc = args->as.cons.cdr->as.cons.car;
-        if (maybe_doc != NULL && maybe_doc->type == MINO_STRING) {
-            doc       = maybe_doc->as.s.data;
-            doc_len   = maybe_doc->as.s.len;
-            value_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    /* Check for ^:dynamic metadata on the name symbol. */
+    {
+        int is_dynamic = 0;
+        mino_val_t *m = name_form->meta;
+        if (m != NULL && m->type == MINO_MAP) {
+            mino_val_t *dk = mino_keyword(S, "dynamic");
+            mino_val_t *dv = map_get_val(m, dk);
+            if (dv != NULL && mino_is_truthy(dv)) is_dynamic = 1;
+        }
+        /* (def name) -- declaration only, bind to nil. */
+        if (!mino_is_cons(args->as.cons.cdr)) {
+            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            if (var != NULL) {
+                var_set_root(S, var, mino_nil(S));
+                if (is_dynamic) var->as.var.dynamic = 1;
+            }
+            env_bind(S, env_root(S, env), buf, mino_nil(S));
+            meta_set(S, buf, NULL, 0, form);
+            return mino_nil(S);
+        }
+        /* Optional docstring: (def name "doc" value) */
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+            mino_val_t *maybe_doc = args->as.cons.cdr->as.cons.car;
+            if (maybe_doc != NULL && maybe_doc->type == MINO_STRING) {
+                doc       = maybe_doc->as.s.data;
+                doc_len   = maybe_doc->as.s.len;
+                value_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+            } else {
+                value_form = args->as.cons.cdr->as.cons.car;
+            }
         } else {
             value_form = args->as.cons.cdr->as.cons.car;
         }
-    } else {
-        value_form = args->as.cons.cdr->as.cons.car;
+        value = eval_value(S, value_form, env);
+        if (value == NULL) {
+            return NULL;
+        }
+        gc_pin(value);
+        {
+            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            if (var != NULL) {
+                var_set_root(S, var, value);
+                if (is_dynamic) var->as.var.dynamic = 1;
+            }
+        }
+        env_bind(S, env_root(S, env), buf, value);
+        gc_unpin(1);
+        meta_set(S, buf, doc, doc_len, form);
+        return value;
     }
-    value = eval_value(S, value_form, env);
-    if (value == NULL) {
-        return NULL;
-    }
-    gc_pin(value);
-    env_bind(S, env_root(S, env), buf, value);
-    gc_unpin(1);
-    meta_set(S, buf, doc, doc_len, form);
-    return value;
 }

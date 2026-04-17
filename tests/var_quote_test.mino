@@ -2,20 +2,19 @@
 
 ;; var-quote reader macro and var special form tests
 
-(deftest var-returns-value
-  (let [x 42]
-    (is (= (var x) 42))))
+(def my-var 42)
 
-(deftest var-quote-reader-macro
-  (let [x 99]
-    (is (= #'x 99))))
+(deftest var-returns-var-object
+  (is (= :var (type (var my-var)))))
+
+(deftest var-quote-returns-var-object
+  (is (= :var (type #'my-var))))
+
+(deftest var-same-identity
+  (is (= (var my-var) #'my-var)))
 
 (deftest var-on-function
-  (is (= (var inc) inc)))
-
-(deftest var-quote-on-function
-  (is (= #'inc inc)))
+  (is (= :var (type #'inc))))
 
 (deftest var-quote-round-trip
-  (let [f #'map]
-    (is (= f map))))
+  (is (= #'map #'map)))

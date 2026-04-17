@@ -4,10 +4,31 @@
 
 #include "mino_internal.h"
 
+/* Intern a string into a persistent table (separate from the filename table). */
+static const char *intern_var_str(const char *s)
+{
+    static const char *tbl[2048];
+    static size_t      tbl_len = 0;
+    size_t i;
+    for (i = 0; i < tbl_len; i++) {
+        if (strcmp(tbl[i], s) == 0) return tbl[i];
+    }
+    if (tbl_len < sizeof(tbl) / sizeof(tbl[0])) {
+        size_t n = strlen(s);
+        char *d = (char *)malloc(n + 1);
+        if (d == NULL) return s;
+        memcpy(d, s, n + 1);
+        tbl[tbl_len++] = d;
+        return d;
+    }
+    return s; /* fallback: not interned */
+}
+
 mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
 {
     size_t i;
     mino_val_t *v;
+    const char *i_ns, *i_name;
 
     /* Look for existing var with matching ns + name. */
     for (i = 0; i < S->var_registry_len; i++) {
@@ -17,9 +38,12 @@ mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
         }
     }
 
+    /* Intern the strings so they outlive any stack-local buffers. */
+    i_ns   = intern_var_str(ns);
+    i_name = intern_var_str(name);
+
     /* Create new var. */
-    v = mino_mk_var(S, intern_filename(ns), intern_filename(name),
-                    mino_nil(S));
+    v = mino_mk_var(S, i_ns, i_name, mino_nil(S));
     gc_pin(v);
 
     /* Grow registry if needed. */
@@ -36,8 +60,8 @@ mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
         S->var_registry_cap = new_cap;
     }
 
-    S->var_registry[S->var_registry_len].ns   = v->as.var.ns;
-    S->var_registry[S->var_registry_len].name = v->as.var.sym;
+    S->var_registry[S->var_registry_len].ns   = i_ns;
+    S->var_registry[S->var_registry_len].name = i_name;
     S->var_registry[S->var_registry_len].var  = v;
     S->var_registry_len++;
 
