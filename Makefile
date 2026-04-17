@@ -14,7 +14,7 @@ TARGET   := mino
 
 .PHONY: all clean test test-gc-stress test-gc-stress-sharded \
        test-fault-inject test-regex-thread \
-       bench bench-map bench-seq fuzz-stdin
+       bench bench-map bench-seq fuzz-stdin qa-arch
 
 all: $(TARGET)
 
@@ -111,3 +111,7 @@ fuzz-stdin: fuzz/fuzz_reader
 
 fuzz/fuzz_reader: fuzz/fuzz_reader.c $(LIB_SRCS) src/mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -DFUZZ_STDIN -o $@ fuzz/fuzz_reader.c $(LIB_SRCS) $(LIBS)
+
+# Architecture quality gates: TU size, function span, abort inventory.
+qa-arch:
+	@sh scripts/qa-arch.sh
