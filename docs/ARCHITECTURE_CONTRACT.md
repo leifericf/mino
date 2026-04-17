@@ -88,12 +88,16 @@ These structures use direct `malloc`/`calloc`/`realloc`:
 - GC range index
 - Clone serialization buffers (`sbuf_t`)
 
-**Naming conventions (target, not yet fully applied):**
+**Naming conventions:**
 
 - `*_new` / `*_alloc` = caller owns the result
 - `*_free` / `*_destroy` = caller releases ownership
 - `*_get` / `*_peek` = borrowed pointer, do not free
 - `*_take` = ownership transfers to caller
+
+**State access:** All state field access uses explicit `S->field` syntax.
+No alias macros exist. The `gc_pin`/`gc_unpin` macros in `mino_internal.h`
+are the only macros that implicitly require a local `S` variable.
 
 ## 5. Error Model
 
@@ -106,11 +110,11 @@ inconsistent state or no state exists to report through.
 
 Current abort sites (all verified Class I):
 
-- `mino.c:23` -- `mino_state_new` initial alloc failure (no state exists)
-- `mino.c:238,249` -- `gc_alloc_typed` OOM with no try frame
-- `mino.c:585,662` -- GC range index realloc inside GC (mid-collection)
-- `mino.c:1031` -- unexpected `setjmp` return value (corrupted stack)
-- `prim.c:3693,3706,3717,3725,3739` -- core.mino bootstrap failures
+- `runtime_state.c` -- `mino_state_new` initial alloc failure (no state exists)
+- `runtime_gc.c` -- `gc_alloc_typed` OOM with no try frame (2 sites)
+- `runtime_gc.c` -- GC range index realloc inside GC (2 sites)
+- `runtime_gc.c` -- unexpected `setjmp` return in `gc_collect`
+- `prim.c` -- core.mino bootstrap failures (5 sites: OOM, parse, eval)
 
 **Rule:** Every `abort()` must have a comment explaining why recovery is
 impossible. New abort sites require explicit justification.
@@ -169,8 +173,9 @@ justification. Special forms cannot be shadowed by environment bindings
 ## 9. ANSI C Portability
 
 - All runtime code targets C99 (`-std=c99`).
-- Platform-specific code is isolated: currently mutex shims in `clone.c`
-  (`_WIN32` vs pthreads) and GCC/Clang volatile hints in `mino.c`.
+- Platform-specific code is isolated: mutex shims in `clone.c`
+  (`_WIN32` vs pthreads) and GCC/Clang warning pragmas in `runtime_gc.c`
+  and `prim.c`.
 - The regex engine (`re.c`) is a self-contained translation unit with its
   own header.
 - No compiler extensions are required for core functionality.
