@@ -284,11 +284,17 @@ struct mino_state {
 #define gc_save             (S->gc_save)
 #define gc_save_len         (S->gc_save_len)
 
-/* GC pin/unpin macros. */
+/* GC pin/unpin macros.
+ * Always increment gc_save_len so pin/unpin pairs stay balanced even
+ * when the save array is full.  Only write the pointer when there is
+ * space; beyond 32 the value is not pinned but the counter remains
+ * correct, preventing underflow on the matching unpin. */
 #define gc_pin(v) \
-    do { if (gc_save_len < 32) gc_save[gc_save_len++] = (v); } while (0)
+    do { if (gc_save_len < 32) gc_save[gc_save_len] = (v); \
+         gc_save_len++; } while (0)
 #define gc_unpin(n) \
-    do { gc_save_len -= (n); } while (0)
+    do { gc_save_len -= (n); \
+         if (gc_save_len < 0) gc_save_len = 0; } while (0)
 
 /* ------------------------------------------------------------------------- */
 /* Persistent vector constants                                               */
