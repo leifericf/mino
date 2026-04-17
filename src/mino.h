@@ -381,6 +381,13 @@ void mino_set_limit(mino_state_t *S, int kind, size_t value);
  */
 void mino_interrupt(mino_state_t *S);
 
+/*
+ * Fault injection: schedule a simulated OOM after the next `n` GC-managed
+ * allocations. When the counter reaches zero, gc_alloc_typed behaves as
+ * if calloc returned NULL. Pass 0 to disable. Intended for testing only.
+ */
+void mino_set_fail_alloc_at(mino_state_t *S, long n);
+
 /* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */
 /* ------------------------------------------------------------------------- */

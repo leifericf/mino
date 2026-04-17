@@ -226,6 +226,18 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         && (gc_stress || gc_bytes_alloc - gc_bytes_live > gc_threshold)) {
         gc_collect(S);
     }
+    /* Fault injection: simulate OOM when the countdown reaches zero. */
+    if (S->fi_alloc_countdown > 0) {
+        S->fi_alloc_countdown--;
+        if (S->fi_alloc_countdown == 0) {
+            if (try_depth > 0) {
+                set_error(S, "out of memory (fault injection)");
+                try_stack[try_depth - 1].exception = NULL;
+                longjmp(try_stack[try_depth - 1].buf, 1);
+            }
+            abort(); /* Class I: no error frame to recover through */
+        }
+    }
     h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
     if (h == NULL) {
         /* Recoverable when an eval try-frame exists; fatal otherwise. */
@@ -2972,6 +2984,11 @@ void mino_set_limit(mino_state_t *S, int kind, size_t value)
     case MINO_LIMIT_HEAP:  limit_heap  = value; break;
     default: break;
     }
+}
+
+void mino_set_fail_alloc_at(mino_state_t *S, long n)
+{
+    S->fi_alloc_countdown = n;
 }
 
 void mino_interrupt(mino_state_t *S)

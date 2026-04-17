@@ -223,6 +223,10 @@ struct mino_state {
      * mino_install_core call within the same state). */
     mino_val_t    **core_forms;
     size_t          core_forms_len;
+
+    /* Fault injection: when fi_alloc_countdown > 0, decrement on each
+     * gc_alloc_typed call; when it reaches zero, simulate OOM. */
+    long            fi_alloc_countdown;
 };
 
 /* ------------------------------------------------------------------------- */
