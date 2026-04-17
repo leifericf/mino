@@ -969,7 +969,7 @@ static void gc_mark_roots(mino_state_t *S)
     /* Pin values on the GC save stack. */
     {
         int si;
-        int limit = gc_save_len < 32 ? gc_save_len : 32;
+        int limit = gc_save_len < GC_SAVE_MAX ? gc_save_len : GC_SAVE_MAX;
         for (si = 0; si < limit; si++) {
             gc_mark_interior(S, gc_save[si]);
         }

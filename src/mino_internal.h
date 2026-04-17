@@ -10,6 +10,7 @@
 
 #include "mino.h"
 
+#include <assert.h>
 #include <ctype.h>
 #include <math.h>
 #include <setjmp.h>
@@ -216,7 +217,7 @@ struct mino_state {
     volatile int    interrupted;
 
     /* GC save stack */
-    mino_val_t     *gc_save[32];
+    mino_val_t     *gc_save[64];
     int             gc_save_len;
 
     /* Cached parsed core.mino forms (avoids re-parsing on second
@@ -287,14 +288,15 @@ struct mino_state {
 /* GC pin/unpin macros.
  * Always increment gc_save_len so pin/unpin pairs stay balanced even
  * when the save array is full.  Only write the pointer when there is
- * space; beyond 32 the value is not pinned but the counter remains
+ * space; beyond 64 the value is not pinned but the counter remains
  * correct, preventing underflow on the matching unpin. */
+#define GC_SAVE_MAX 64
 #define gc_pin(v) \
-    do { if (gc_save_len < 32) gc_save[gc_save_len] = (v); \
+    do { if (gc_save_len < GC_SAVE_MAX) gc_save[gc_save_len] = (v); \
          gc_save_len++; } while (0)
 #define gc_unpin(n) \
-    do { gc_save_len -= (n); \
-         if (gc_save_len < 0) gc_save_len = 0; } while (0)
+    do { assert(gc_save_len >= (n)); \
+         gc_save_len -= (n); } while (0)
 
 /* ------------------------------------------------------------------------- */
 /* Persistent vector constants                                               */
