@@ -78,7 +78,8 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
         mino_val_t **ne = (mino_val_t **)realloc(
             tbl->entries, new_cap * sizeof(*ne));
         if (ne == NULL) {
-            abort();
+            set_error(S, "out of memory");
+            return NULL;
         }
         tbl->entries = ne;
         tbl->cap = new_cap;

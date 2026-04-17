@@ -420,7 +420,8 @@ mino_env_t *mino_env_new(mino_state_t *S)
     env = env_alloc(S, NULL);
     r   = (root_env_t *)malloc(sizeof(*r));
     if (r == NULL) {
-        abort();
+        set_error(S, "out of memory");
+        return NULL;
     }
     r->env       = env;
     r->next      = gc_root_envs;
@@ -569,7 +570,7 @@ static void gc_build_range_index(mino_state_t *S)
         gc_range_t *nr      = (gc_range_t *)realloc(
             gc_ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
-            abort();
+            abort(); /* Class I: inside GC; no safe recovery path */
         }
         gc_ranges     = nr;
         gc_ranges_cap = new_cap;
@@ -646,7 +647,7 @@ static void gc_range_compact(mino_state_t *S)
         gc_range_t *nr      = (gc_range_t *)realloc(
             gc_ranges, new_cap * sizeof(*nr));
         if (nr == NULL) {
-            abort();
+            abort(); /* Class I: inside GC; no safe recovery path */
         }
         gc_ranges     = nr;
         gc_ranges_cap = new_cap;
@@ -1012,8 +1013,8 @@ void gc_collect(mino_state_t *S)
      * stack frame. gc_scan_stack scans from a deeper frame up through ours,
      * so any pointer that was register-resident at entry is visible. */
     if (setjmp(jb) != 0) {
-        /* We never longjmp; a nonzero return indicates a jump from
-         * somewhere unexpected. Surface the bug. */
+        /* Class I: we never longjmp here; a nonzero return indicates
+         * corruption or an unexpected jump. */
         abort();
     }
     (void)jb;

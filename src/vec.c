@@ -259,7 +259,9 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
     num_leaves = trie_count / MINO_VEC_WIDTH;
     layer = (mino_vec_node_t **)malloc(num_leaves * sizeof(*layer));
     if (layer == NULL) {
-        abort();
+        gc_depth--;
+        set_error(S, "out of memory");
+        return NULL;
     }
     for (i = 0; i < num_leaves; i++) {
         mino_vec_node_t *leaf = vnode_new(S, MINO_VEC_WIDTH, 1);
@@ -274,7 +276,10 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
         mino_vec_node_t **next   = (mino_vec_node_t **)malloc(
                                        next_n * sizeof(*next));
         if (next == NULL) {
-            abort();
+            free(layer);
+            gc_depth--;
+            set_error(S, "out of memory");
+            return NULL;
         }
         for (i = 0; i < next_n; i++) {
             size_t           base = i * MINO_VEC_WIDTH;

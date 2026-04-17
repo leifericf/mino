@@ -3689,6 +3689,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
         S->core_forms     = malloc(cap * sizeof(mino_val_t *));
         S->core_forms_len = 0;
         if (!S->core_forms) {
+            /* Class I: init-time; no try-frame to recover through */
             fprintf(stderr, "core.mino: out of memory\n"); abort();
         }
 
@@ -3699,6 +3700,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             mino_val_t *form = mino_read(S, src, &end);
             if (form == NULL) {
                 if (mino_last_error(S) != NULL) {
+                    /* Class I: core library parse failure is unrecoverable */
                     fprintf(stderr, "core.mino parse error: %s\n",
                             mino_last_error(S));
                     abort();
@@ -3710,12 +3712,14 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
                 S->core_forms = realloc(S->core_forms,
                                         cap * sizeof(mino_val_t *));
                 if (!S->core_forms) {
+                    /* Class I: init-time; no try-frame to recover through */
                     fprintf(stderr, "core.mino: out of memory\n");
                     abort();
                 }
             }
             S->core_forms[S->core_forms_len++] = form;
             if (mino_eval(S, form, env) == NULL) {
+                /* Class I: core library eval failure is unrecoverable */
                 fprintf(stderr, "core.mino eval error: %s\n",
                         mino_last_error(S));
                 abort();
@@ -3730,6 +3734,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
     /* Subsequent calls: evaluate cached forms into the target env. */
     for (i = 0; i < S->core_forms_len; i++) {
         if (mino_eval(S, S->core_forms[i], env) == NULL) {
+            /* Class I: cached core form eval failure is unrecoverable */
             fprintf(stderr, "core.mino eval error: %s\n", mino_last_error(S));
             abort();
         }
