@@ -134,6 +134,75 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     }
 }
 
+/* Read a reader-conditional body: (keyword form keyword form ...).
+ * Matches S->reader_dialect first, then "default".
+ * Returns the matched form in *found, or NULL if no match.
+ * Caller must have consumed the opening '('. */
+static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
+                                  mino_val_t **found)
+{
+    mino_val_t *result = NULL;
+    int         matched = 0;
+    *found = NULL;
+    for (;;) {
+        mino_val_t *key;
+        mino_val_t *val;
+        skip_ws(S, p);
+        if (**p == '\0') {
+            set_error(S, "unterminated reader conditional");
+            return NULL;
+        }
+        if (**p == ')') {
+            (*p)++;
+            *found = result;
+            return result; /* may be NULL if no branch matched */
+        }
+        key = read_form(S, p);
+        if (key == NULL) {
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "unterminated reader conditional");
+            }
+            return NULL;
+        }
+        if (key->type != MINO_KEYWORD) {
+            set_error(S, "reader conditional key must be a keyword");
+            return NULL;
+        }
+        skip_ws(S, p);
+        val = read_form(S, p);
+        if (val == NULL) {
+            if (mino_last_error(S) == NULL) {
+                set_error(S, "reader conditional: missing value for key");
+            }
+            return NULL;
+        }
+        if (!matched) {
+            const char *kname = key->as.s.data;
+            size_t      klen  = key->as.s.len;
+            if ((klen == strlen(S->reader_dialect)
+                 && memcmp(kname, S->reader_dialect, klen) == 0)
+                || (klen == 7 && memcmp(kname, "default", 7) == 0)) {
+                result  = val;
+                matched = (klen != 7
+                           || memcmp(kname, "default", 7) != 0);
+                gc_pin(result);
+            }
+        }
+    }
+}
+
+/* Check whether the cursor is at a #?@ splice sequence. If so, consume
+ * the prefix (leaving the cursor on the opening '(' of the body) and
+ * return 1. Otherwise return 0 without advancing. */
+static int peek_reader_cond_splice(const char **p)
+{
+    if ((*p)[0] == '#' && (*p)[1] == '?' && (*p)[2] == '@') {
+        *p += 3;
+        return 1;
+    }
+    return 0;
+}
+
 static mino_val_t *read_list_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
@@ -150,6 +219,39 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
         if (**p == ')') {
             (*p)++;
             return head;
+        }
+        if (peek_reader_cond_splice(p)) {
+            /* #?@ splice: read conditional body, splice matching list */
+            mino_val_t *found = NULL;
+            int         splice_line = S->reader_line;
+            skip_ws(S, p);
+            if (**p != '(') {
+                set_error(S, "#?@ must be followed by a list");
+                return NULL;
+            }
+            (*p)++;
+            read_cond_body(S, p, &found);
+            if (mino_last_error(S) != NULL) return NULL;
+            if (found != NULL) {
+                /* Splice: found must be a list -- iterate and append */
+                mino_val_t *cur = found;
+                while (mino_is_cons(cur)) {
+                    mino_val_t *cell = mino_cons(S, cur->as.cons.car,
+                                                 mino_nil(S));
+                    cell->as.cons.file = S->reader_file;
+                    cell->as.cons.line = (tail == NULL)
+                                          ? list_line : splice_line;
+                    if (tail == NULL) {
+                        head = cell;
+                    } else {
+                        tail->as.cons.cdr = cell;
+                    }
+                    tail = cell;
+                    cur = cur->as.cons.cdr;
+                }
+                gc_unpin(1);
+            }
+            continue;
         }
         {
             int         elem_line = S->reader_line;
@@ -196,6 +298,52 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
         if (**p == ']') {
             (*p)++;
             break;
+        }
+        if (peek_reader_cond_splice(p)) {
+            /* #?@ splice in vector */
+            mino_val_t *found = NULL;
+            skip_ws(S, p);
+            if (**p != '(') {
+                set_error(S, "#?@ must be followed by a list");
+                return NULL;
+            }
+            (*p)++;
+            read_cond_body(S, p, &found);
+            if (mino_last_error(S) != NULL) return NULL;
+            if (found != NULL) {
+                /* Splice elements from matched vector/list into buf */
+                if (found->type == MINO_VECTOR) {
+                    size_t i;
+                    size_t flen = found->as.vec.len;
+                    for (i = 0; i < flen; i++) {
+                        if (len == cap) {
+                            size_t new_cap = cap == 0 ? 8 : cap * 2;
+                            mino_val_t **nb = (mino_val_t **)gc_alloc_typed(
+                                S, GC_T_VALARR, new_cap * sizeof(*nb));
+                            if (buf != NULL && len > 0)
+                                memcpy(nb, buf, len * sizeof(*nb));
+                            buf = nb; cap = new_cap;
+                        }
+                        buf[len++] = vec_nth(found, i);
+                    }
+                } else {
+                    mino_val_t *cur = found;
+                    while (mino_is_cons(cur)) {
+                        if (len == cap) {
+                            size_t new_cap = cap == 0 ? 8 : cap * 2;
+                            mino_val_t **nb = (mino_val_t **)gc_alloc_typed(
+                                S, GC_T_VALARR, new_cap * sizeof(*nb));
+                            if (buf != NULL && len > 0)
+                                memcpy(nb, buf, len * sizeof(*nb));
+                            buf = nb; cap = new_cap;
+                        }
+                        buf[len++] = cur->as.cons.car;
+                        cur = cur->as.cons.cdr;
+                    }
+                }
+                gc_unpin(1);
+            }
+            continue;
         }
         {
             mino_val_t *elem = read_form(S, p);
@@ -708,6 +856,28 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             outer->as.cons.line = vq_line;
             return outer;
         }
+    }
+    if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) == '@') {
+        set_error(S, "#?@ splice not allowed at top level");
+        return NULL;
+    }
+    if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) != '@') {
+        mino_val_t *found = NULL;
+        (*p) += 2;
+        skip_ws(S, p);
+        if (**p != '(') {
+            set_error(S, "#? must be followed by a list");
+            return NULL;
+        }
+        (*p)++;
+        read_cond_body(S, p, &found);
+        if (mino_last_error(S) != NULL) return NULL;
+        if (found != NULL) {
+            gc_unpin(1);
+            return found;
+        }
+        /* No branch matched: read next form transparently */
+        return read_form(S, p);
     }
     if (**p == '"') {
         return read_string_form(S, p);

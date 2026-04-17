@@ -47,5 +47,6 @@
 (require "tests/sorted_test")
 (require "tests/conformance_test")
 (require "tests/var_quote_test")
+(require "tests/reader_cond_test")
 
 (run-tests)

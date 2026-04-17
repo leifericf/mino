@@ -1,0 +1,33 @@
+(require "tests/test")
+
+;; Reader conditional tests
+
+(deftest reader-cond-mino-branch
+  (is (= 1 #?(:mino 1 :clj 2))))
+
+(deftest reader-cond-default-fallback
+  (is (= 99 #?(:clj 42 :default 99))))
+
+(deftest reader-cond-no-match-skips
+  (is (= 10 (+ 3 #?(:clj 100 :default 7)))))
+
+(deftest reader-cond-mino-over-default
+  (is (= :mino #?(:default :fallback :mino :mino))))
+
+(deftest reader-cond-in-vector
+  (is (= [1 2 3] [1 #?(:mino 2 :clj 99) 3])))
+
+(deftest reader-cond-in-list
+  (is (= 6 (+ #?(:mino 1 :clj 0) 2 3))))
+
+(deftest reader-cond-splice-in-vector
+  (is (= [1 2 3 4] [1 #?@(:mino [2 3] :clj [99]) 4])))
+
+(deftest reader-cond-splice-in-list
+  (is (= 10 (+ 1 #?@(:mino (2 3) :clj (0 0)) 4))))
+
+(deftest reader-cond-splice-no-match
+  (is (= [1 4] [1 #?@(:clj [2 3]) 4])))
+
+(deftest reader-cond-nested
+  (is (= :yes #?(:mino #?(:mino :yes :default :no) :default :nope))))
