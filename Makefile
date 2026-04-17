@@ -5,9 +5,10 @@ CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2 -Isrc
 LDFLAGS ?=
 LIBS    ?= -lm
 
-LIB_SRCS := src/mino.c src/runtime_error.c src/runtime_env.c \
-            src/runtime_gc.c src/val.c src/vec.c src/map.c \
-            src/read.c src/print.c src/prim.c src/clone.c src/re.c
+LIB_SRCS := src/mino.c src/runtime_state.c src/runtime_error.c \
+            src/runtime_env.c src/runtime_gc.c src/val.c src/vec.c \
+            src/map.c src/read.c src/print.c src/prim.c src/clone.c \
+            src/re.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 SRCS     := $(LIB_SRCS) main.c
 OBJS     := $(SRCS:.c=.o)
