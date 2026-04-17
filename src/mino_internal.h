@@ -348,7 +348,7 @@ char  *dup_n(mino_state_t *S, const char *s, size_t len);
 void   gc_collect(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
 
-/* mino.c: error reporting */
+/* runtime_error.c: error reporting, call stack, metadata */
 void        set_error(mino_state_t *S, const char *msg);
 void        set_error_at(mino_state_t *S, const mino_val_t *form,
                          const char *msg);
@@ -357,21 +357,20 @@ const char *type_tag_str(const mino_val_t *v);
 void        push_frame(mino_state_t *S, const char *name, const char *file,
                        int line);
 void        pop_frame(mino_state_t *S);
-
-/* mino.c: metadata */
+void        append_trace(mino_state_t *S);
 meta_entry_t *meta_find(mino_state_t *S, const char *name);
 void meta_set(mino_state_t *S, const char *name, const char *doc,
               size_t doc_len, mino_val_t *source);
 
-/* mino.c: environment */
+/* runtime_env.c: environment and dynamic bindings */
+mino_env_t    *env_alloc(mino_state_t *S, mino_env_t *parent);
 env_binding_t *env_find_here(mino_env_t *env, const char *name);
 void           env_bind(mino_state_t *S, mino_env_t *env, const char *name,
                         mino_val_t *val);
 mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent);
 mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);
-
-/* mino.c: dynamic lookup */
-mino_val_t *dyn_lookup(mino_state_t *S, const char *name);
+mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);
+void           dyn_binding_list_free(dyn_binding_t *head);
 
 /* mino.c: evaluator */
 mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env,
