@@ -3025,7 +3025,19 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
     try_stack[try_depth].exception = NULL;
     if (setjmp(try_stack[try_depth].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. */
+        mino_val_t *ex = try_stack[saved_try].exception;
         try_depth = saved_try;
+        /* Populate last_error from the exception value so the host
+         * can inspect it via mino_last_error(). */
+        if (mino_last_error(S) == NULL || mino_last_error(S)[0] == '\0') {
+            const char *s = NULL;
+            size_t slen = 0;
+            if (ex != NULL && mino_to_string(ex, &s, &slen)) {
+                set_error(S, s);
+            } else {
+                set_error(S, "unhandled exception");
+            }
+        }
         if (out != NULL) {
             *out = NULL;
         }
