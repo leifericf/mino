@@ -228,7 +228,13 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     }
     h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
     if (h == NULL) {
-        abort();
+        /* Recoverable when an eval try-frame exists; fatal otherwise. */
+        if (try_depth > 0) {
+            set_error(S, "out of memory");
+            try_stack[try_depth - 1].exception = NULL;
+            longjmp(try_stack[try_depth - 1].buf, 1);
+        }
+        abort(); /* Class I: no error frame to recover through */
     }
     h->type_tag      = tag;
     h->mark          = 0;
