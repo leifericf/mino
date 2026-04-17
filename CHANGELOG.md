@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] — Architecture hardening
+
 ### Changed
 - **Module extraction**: evaluator, runtime, and primitive code further
   split into focused translation units. `eval_special.c` split into
