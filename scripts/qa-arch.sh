@@ -17,7 +17,7 @@ SRC_DIR="src"
 
 # Allowlist: files that are known to exceed the threshold during the
 # decomposition work.  Remove entries as files are split.
-TU_LIMIT=1200
+TU_LIMIT=1100
 TU_ALLOWLIST=""
 
 printf "=== Translation unit sizes (limit: %d LOC) ===\n" "$TU_LIMIT"
@@ -58,7 +58,7 @@ echo ""
 # This is approximate -- good enough for a gate, not a parser.
 
 FN_LIMIT=250
-FN_ALLOWLIST="eval_impl install_core_mino mino_install_core"
+FN_ALLOWLIST=""
 
 printf "=== Long functions (limit: %d lines) ===\n" "$FN_LIMIT"
 
