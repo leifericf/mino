@@ -311,6 +311,11 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                         mino_val_t *v = map_get_val(coll, kw);
                         return v == NULL ? def_val : v;
                     }
+                    if (coll != NULL && coll->type == MINO_SORTED_MAP) {
+                        mino_val_t *v = rb_get(S, coll->as.sorted.root, kw,
+                                                coll->as.sorted.comparator);
+                        return v == NULL ? def_val : v;
+                    }
                     return def_val;
                 }
             }
@@ -393,6 +398,55 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     mino_val_t *key = evaled->as.cons.car;
                     uint32_t h = hash_val(key);
                     return hamt_get(s->as.set.root, key, h, 0u) != NULL
+                        ? key : mino_nil(S);
+                }
+            }
+            if (fn->type == MINO_SORTED_MAP) {
+                /* Callable sorted maps: (sm :k) => (get sm :k). */
+                mino_val_t *m = fn;
+                int         nargs = 0;
+                mino_val_t *tmp;
+                gc_unpin(1);
+                evaled = eval_args(S, args, env);
+                if (evaled == NULL && mino_last_error(S) != NULL)
+                    return NULL;
+                for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    nargs++;
+                if (nargs < 1 || nargs > 2) {
+                    set_error_at(S, form,
+                        "sorted-map as function takes 1 or 2 arguments");
+                    return NULL;
+                }
+                {
+                    mino_val_t *key     = evaled->as.cons.car;
+                    mino_val_t *def_val = nargs == 2
+                        ? evaled->as.cons.cdr->as.cons.car
+                        : mino_nil(S);
+                    mino_val_t *v = rb_get(S, m->as.sorted.root, key,
+                                            m->as.sorted.comparator);
+                    return v == NULL ? def_val : v;
+                }
+            }
+            if (fn->type == MINO_SORTED_SET) {
+                /* Callable sorted sets: (ss :a) => :a or nil. */
+                mino_val_t *s = fn;
+                int         nargs = 0;
+                mino_val_t *tmp;
+                gc_unpin(1);
+                evaled = eval_args(S, args, env);
+                if (evaled == NULL && mino_last_error(S) != NULL)
+                    return NULL;
+                for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    nargs++;
+                if (nargs != 1) {
+                    set_error_at(S, form,
+                        "sorted-set as function takes 1 argument");
+                    return NULL;
+                }
+                {
+                    mino_val_t *key = evaled->as.cons.car;
+                    return rb_contains(S, s->as.sorted.root, key,
+                                        s->as.sorted.comparator)
                         ? key : mino_nil(S);
                 }
             }

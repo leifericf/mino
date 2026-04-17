@@ -318,6 +318,11 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 mino_val_t *v = map_get_val(coll, fn);
                 return v == NULL ? def_val : v;
             }
+            if (coll != NULL && coll->type == MINO_SORTED_MAP) {
+                mino_val_t *v = rb_get(S, coll->as.sorted.root, fn,
+                                        coll->as.sorted.comparator);
+                return v == NULL ? def_val : v;
+            }
             return def_val;
         }
     }
@@ -379,6 +384,41 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             mino_val_t *key = args->as.cons.car;
             uint32_t h = hash_val(key);
             return hamt_get(fn->as.set.root, key, h, 0u) != NULL
+                ? key : mino_nil(S);
+        }
+    }
+    if (fn->type == MINO_SORTED_MAP) {
+        int         nargs = 0;
+        mino_val_t *tmp;
+        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+            nargs++;
+        if (nargs < 1 || nargs > 2) {
+            set_error(S, "sorted-map as function takes 1 or 2 arguments");
+            return NULL;
+        }
+        {
+            mino_val_t *key     = args->as.cons.car;
+            mino_val_t *def_val = nargs == 2
+                ? args->as.cons.cdr->as.cons.car
+                : mino_nil(S);
+            mino_val_t *v = rb_get(S, fn->as.sorted.root, key,
+                                    fn->as.sorted.comparator);
+            return v == NULL ? def_val : v;
+        }
+    }
+    if (fn->type == MINO_SORTED_SET) {
+        int         nargs = 0;
+        mino_val_t *tmp;
+        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+            nargs++;
+        if (nargs != 1) {
+            set_error(S, "sorted-set as function takes 1 argument");
+            return NULL;
+        }
+        {
+            mino_val_t *key = args->as.cons.car;
+            return rb_contains(S, fn->as.sorted.root, key,
+                                fn->as.sorted.comparator)
                 ? key : mino_nil(S);
         }
     }
