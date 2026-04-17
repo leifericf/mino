@@ -39,7 +39,8 @@ typedef enum {
     MINO_LAZY,    /* lazy sequence: thunk body + env, cached on first force */
     MINO_RECUR,   /* internal tail-call trampoline sentinel */
     MINO_TAIL_CALL, /* proper tail call: carries {fn, args} for trampoline */
-    MINO_REDUCED  /* early termination wrapper for reduce */
+    MINO_REDUCED, /* early termination wrapper for reduce */
+    MINO_VAR      /* first-class var: ns + name + root binding */
 } mino_type_t;
 
 typedef struct mino_val   mino_val_t;
@@ -128,6 +129,12 @@ struct mino_val {
         struct {          /* MINO_REDUCED: early termination wrapper */
             mino_val_t *val;
         } reduced;
+        struct {          /* MINO_VAR: first-class var */
+            const char *ns;      /* namespace (interned) */
+            const char *sym;     /* name (interned) */
+            mino_val_t *root;    /* root binding value */
+            int         dynamic; /* 1 if ^:dynamic */
+        } var;
     } as;
 };
 

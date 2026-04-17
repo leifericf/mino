@@ -235,6 +235,14 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         mino_print_to(S, out, v->as.reduced.val);
         fputc('>', out);
         return;
+    case MINO_VAR:
+        fputs("#'", out);
+        if (v->as.var.ns != NULL) {
+            fputs(v->as.var.ns, out);
+            fputc('/', out);
+        }
+        fputs(v->as.var.sym, out);
+        return;
     }
 }
 

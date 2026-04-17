@@ -338,6 +338,9 @@ static void gc_mark_val(mino_state_t *S, mino_val_t *v)
     case MINO_REDUCED:
         gc_mark_interior(S, v->as.reduced.val);
         break;
+    case MINO_VAR:
+        gc_mark_interior(S, v->as.var.root);
+        break;
     default:
         /* NIL, BOOL, INT, FLOAT, PRIM, HANDLE: no owned children. prim.name
          * and handle.tag are static/host-owned C strings. */
@@ -512,6 +515,13 @@ static void gc_mark_roots(mino_state_t *S)
         size_t mi;
         for (mi = 0; mi < S->meta_table_len; mi++) {
             gc_mark_interior(S, S->meta_table[mi].source);
+        }
+    }
+    /* Pin var registry entries. */
+    {
+        size_t vi;
+        for (vi = 0; vi < S->var_registry_len; vi++) {
+            gc_mark_interior(S, S->var_registry[vi].var);
         }
     }
     /* Pin host-retained refs. */

@@ -137,6 +137,13 @@ typedef struct {
     char *full_name;
 } ns_alias_t;
 
+/* Var registry entry. */
+typedef struct {
+    const char *ns;      /* interned namespace */
+    const char *name;    /* interned name */
+    mino_val_t *var;     /* the MINO_VAR value */
+} var_entry_t;
+
 /* Full environment definition. */
 struct mino_env {
     env_binding_t *bindings;
@@ -216,6 +223,11 @@ struct mino_state {
     ns_alias_t     *ns_aliases;
     size_t          ns_alias_len;
     size_t          ns_alias_cap;
+
+    /* Var registry */
+    var_entry_t    *var_registry;
+    size_t          var_registry_len;
+    size_t          var_registry_cap;
 
     /* Eval */
     const mino_val_t *eval_current_form;
@@ -359,6 +371,15 @@ mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent); /* GC-owned */
 mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);     /* borrowed (walks up) */
 mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */
 void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
+
+/* val.c: var constructor. */
+mino_val_t    *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
+                           mino_val_t *root);
+
+/* runtime_var.c: var registry helpers. */
+mino_val_t    *var_intern(mino_state_t *S, const char *ns, const char *name);
+void           var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val);
+mino_val_t    *var_find(mino_state_t *S, const char *ns, const char *name);
 
 /* mino.c: evaluator core helpers.
  * All eval/expand functions return GC-owned values (NULL on error). */
