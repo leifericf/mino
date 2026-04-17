@@ -114,7 +114,7 @@ Current abort sites (all verified Class I):
 - `runtime_gc.c` -- `gc_alloc_typed` OOM with no try frame (2 sites)
 - `runtime_gc.c` -- GC range index realloc inside GC (2 sites)
 - `runtime_gc.c` -- unexpected `setjmp` return in `gc_collect`
-- `prim.c` -- core.mino bootstrap failures (5 sites: OOM, parse, eval)
+- `prim.c` -- `install_core_mino` bootstrap failures (5 sites: OOM, parse, eval)
 
 **Rule:** Every `abort()` must have a comment explaining why recovery is
 impossible. New abort sites require explicit justification.

@@ -42,7 +42,7 @@ src/eval_special_defs.o: src/eval_special_defs.c src/eval_special_internal.h src
 src/eval_special_bindings.o: src/eval_special_bindings.c src/eval_special_internal.h src/mino_internal.h
 src/eval_special_control.o: src/eval_special_control.c src/eval_special_internal.h src/mino_internal.h
 src/eval_special_fn.o: src/eval_special_fn.c src/eval_special_internal.h src/mino_internal.h
-src/prim.o: src/prim.c src/prim_internal.h src/mino_internal.h src/core_mino.h src/re.h
+src/prim.o: src/prim.c src/prim_internal.h src/mino_internal.h src/core_mino.h
 src/prim_numeric.o: src/prim_numeric.c src/prim_internal.h src/mino_internal.h
 src/prim_collections.o: src/prim_collections.c src/prim_internal.h src/mino_internal.h
 src/prim_sequences.o: src/prim_sequences.c src/prim_internal.h src/mino_internal.h
