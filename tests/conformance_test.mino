@@ -36,4 +36,28 @@
   (is (= 42 (some->> 42)))
   (is (nil? (some->> nil))))
 
+;; --- update-vals ---
+
+(deftest update-vals-basic
+  (is (= {:a 2 :b 4 :c 6} (update-vals {:a 1 :b 2 :c 3} (fn [v] (* v 2)))))
+  (is (= {:a 2 :b 3 :c 4} (update-vals {:a 1 :b 2 :c 3} inc))))
+
+(deftest update-vals-empty
+  (is (= {} (update-vals {} inc))))
+
+(deftest update-vals-identity
+  (is (= {:a 1 :b 2} (update-vals {:a 1 :b 2} identity))))
+
+;; --- update-keys ---
+
+(deftest update-keys-basic
+  (is (= {"a" 1 "b" 2} (update-keys {:a 1 :b 2} name)))
+  (is (= {2 :a 4 :b} (update-keys {1 :a 2 :b} (fn [k] (* k 2))))))
+
+(deftest update-keys-empty
+  (is (= {} (update-keys {} inc))))
+
+(deftest update-keys-identity
+  (is (= {:a 1 :b 2} (update-keys {:a 1 :b 2} identity))))
+
 ;; (run-tests) -- called by tests/run.mino

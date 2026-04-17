@@ -698,6 +698,12 @@
   (reduce (fn [acc kv] (f acc (first kv) (second kv)))
           init (seq m))))
 
+(def update-vals (fn [m f]
+  (reduce-kv (fn [acc k v] (assoc acc k (f v))) {} m)))
+
+(def update-keys (fn [m f]
+  (reduce-kv (fn [acc k v] (assoc acc (f k) v)) {} m)))
+
 (def replace (fn [smap coll]
   (let [f (fn [x] (if-let [e (find smap x)] (val e) x))]
     (if (vector? coll)
