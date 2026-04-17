@@ -41,5 +41,6 @@
 (require "tests/clj_metadata_test")
 (require "tests/error_path_test")
 (require "tests/regex_reentrant_test")
+(require "tests/failure_stress_test")
 
 (run-tests)

@@ -1,0 +1,69 @@
+(require "tests/test")
+
+;; Focused stress tests for paths touched by abort-to-error conversions.
+;; Each test runs many iterations of an operation that exercises
+;; allocation-heavy code paths to verify no crashes, hangs, or leaks.
+
+(deftest stress-binding-enter-exit
+  (testing "repeated dynamic binding enter/exit (500 cycles)"
+    (def ^:dynamic *stress-x* 0)
+    (let [results (map (fn (i) (binding [*stress-x* i] *stress-x*))
+                       (range 500))]
+      (is (= 0 (first results)))
+      (is (= 499 (last results)))
+      (is (= 0 *stress-x*)))))
+
+(deftest stress-serialization-roundtrip
+  (testing "repeated serialize/deserialize (200 cycles)"
+    (let [data {:a [1 2 3] :b "hello" :c true :d nil}]
+      (dotimes [_ 200]
+        (let [s (pr-str data)
+              r (read-string s)]
+          (is (= data r)))))))
+
+(deftest stress-regex-compile-match
+  (testing "repeated regex compile/match (500 cycles)"
+    (dotimes [_ 500]
+      (is (= "123" (re-find "\\d+" "abc123def")))
+      (is (= nil (re-find "zzz" "abc"))))))
+
+(deftest stress-map-assoc
+  (testing "build large map with repeated assoc (200 keys)"
+    (let [m (reduce (fn [acc i]
+                      (assoc acc (keyword (str "k" i)) i))
+                    {} (range 200))]
+      (is (= 200 (count m)))
+      (is (= 0 (get m :k0)))
+      (is (= 199 (get m :k199))))))
+
+(deftest stress-vector-conj
+  (testing "build large vector with repeated conj (500 elements)"
+    (let [v (into [] (range 500))]
+      (is (= 500 (count v)))
+      (is (= 0 (nth v 0)))
+      (is (= 499 (nth v 499))))))
+
+(deftest stress-exception-cycles
+  (testing "repeated throw/catch (200 cycles)"
+    (dotimes [i 200]
+      (let [result (try (throw (str "err" i))
+                        (catch e e))]
+        (is (= (str "err" i) result))))))
+
+(deftest stress-lazy-seq-force
+  (testing "repeated lazy sequence realization (100 cycles)"
+    (dotimes [_ 100]
+      (let [s (take 50 (iterate inc 0))]
+        (is (= 50 (count s)))
+        (is (= 49 (last s)))))))
+
+(deftest stress-set-operations
+  (testing "repeated set conj/disj (200 elements)"
+    (let [s (reduce conj #{} (range 200))]
+      (is (= 200 (count s)))
+      (is (contains? s 0))
+      (is (contains? s 199))
+      (let [s2 (reduce disj s (range 100))]
+        (is (= 100 (count s2)))
+        (is (not (contains? s2 0)))
+        (is (contains? s2 100))))))
