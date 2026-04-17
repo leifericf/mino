@@ -274,6 +274,18 @@
                   ([a] a)
                   ([a b] (if (< a b) a b))
                   ([a b & more] (reduce min (min a b) more))))
+(def min-key    (fn
+                  ([k x] x)
+                  ([k x y] (if (< (k x) (k y)) x y))
+                  ([k x y & more]
+                    (reduce (fn [best v] (min-key k best v))
+                            (min-key k x y) more))))
+(def max-key    (fn
+                  ([k x] x)
+                  ([k x y] (if (> (k x) (k y)) x y))
+                  ([k x y & more]
+                    (reduce (fn [best v] (max-key k best v))
+                            (max-key k x y) more))))
 (def not-empty  (fn [coll] (if (seq coll) coll nil)))
 (def constantly (fn [x] (fn [& _] x)))
 (def boolean    (fn [x] (if x true false)))

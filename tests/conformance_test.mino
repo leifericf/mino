@@ -60,4 +60,28 @@
 (deftest update-keys-identity
   (is (= {:a 1 :b 2} (update-keys {:a 1 :b 2} identity))))
 
+;; --- min-key ---
+
+(deftest min-key-basic
+  (is (= "a" (min-key count "ab" "a" "abc")))
+  (is (= {:x 1} (min-key :x {:x 3} {:x 1} {:x 2}))))
+
+(deftest min-key-single
+  (is (= 42 (min-key identity 42))))
+
+(deftest min-key-tie-returns-last
+  (is (= "de" (min-key count "ab" "cd" "de"))))
+
+;; --- max-key ---
+
+(deftest max-key-basic
+  (is (= "abc" (max-key count "ab" "a" "abc")))
+  (is (= {:x 3} (max-key :x {:x 3} {:x 1} {:x 2}))))
+
+(deftest max-key-single
+  (is (= 42 (max-key identity 42))))
+
+(deftest max-key-tie-returns-last
+  (is (= "de" (max-key count "ab" "cd" "de"))))
+
 ;; (run-tests) -- called by tests/run.mino
