@@ -1325,7 +1325,33 @@
   ([to xf from] (transduce xf conj to from))))
 
 (defn sequence [xf coll]
-  (lazy-seq (seq (into [] xf coll))))
+  (let [acc   (atom [])
+        xrf   (xf (fn
+                     ([] nil)
+                     ([result] result)
+                     ([_ input] (swap! acc conj input) nil)))]
+    ((fn step [s]
+       (lazy-seq
+         (loop [s s]
+           (if-let [s (seq s)]
+             (do
+               (let [ret (xrf nil (first s))]
+                 (if (reduced? ret)
+                   (do (xrf nil)
+                       (let [items @acc]
+                         (reset! acc [])
+                         (when (seq items)
+                           (concat items nil))))
+                   (let [items @acc]
+                     (if (seq items)
+                       (do (reset! acc [])
+                           (concat items (step (rest s))))
+                       (recur (rest s)))))))
+             (do (xrf nil)
+                 (let [items @acc]
+                   (reset! acc [])
+                   (when (seq items) (seq items))))))))
+     coll)))
 
 (defn eduction [& args]
   (let [coll (last args)
