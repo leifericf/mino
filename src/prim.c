@@ -263,8 +263,11 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
                  mino_prim(S, "macroexpand", prim_macroexpand));
     mino_env_set(S, env, "gensym",   mino_prim(S, "gensym",   prim_gensym));
     mino_env_set(S, env, "type",     mino_prim(S, "type",     prim_type));
-    mino_env_set(S, env, "name",     mino_prim(S, "name",     prim_name));
-    mino_env_set(S, env, "rand",     mino_prim(S, "rand",     prim_rand));
+    mino_env_set(S, env, "name",      mino_prim(S, "name",      prim_name));
+    mino_env_set(S, env, "namespace", mino_prim(S, "namespace", prim_namespace));
+    mino_env_set(S, env, "var?",      mino_prim(S, "var?",      prim_var_p));
+    mino_env_set(S, env, "resolve",   mino_prim(S, "resolve",   prim_resolve));
+    mino_env_set(S, env, "rand",      mino_prim(S, "rand",      prim_rand));
     /* regex */
     mino_env_set(S, env, "re-find",    mino_prim(S, "re-find",    prim_re_find));
     mino_env_set(S, env, "re-matches", mino_prim(S, "re-matches", prim_re_matches));
