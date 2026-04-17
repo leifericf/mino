@@ -136,7 +136,11 @@
 (deftest get-fn
   (is (= 1 (get {:a 1 :b 2} :a)))
   (is (= :def (get {:a 1} :no :def)))
-  (is (= 20 (get [10 20 30] 1))))
+  (is (= 20 (get [10 20 30] 1)))
+  (is (= "h" (get "hello" 0)))
+  (is (= "o" (get "hello" 4)))
+  (is (= nil (get "hello" 99)))
+  (is (= :miss (get "hello" 99 :miss))))
 
 (deftest conj-fn
   (is (= '(4 3 1 2) (conj '(1 2) 3 4)))

@@ -19,7 +19,8 @@
 
 (deftest join-fn
   (is (= "a-b-c" (join "-" ["a" "b" "c"])))
-  (is (= "abc" (join ["a" "b" "c"]))))
+  (is (= "abc" (join ["a" "b" "c"])))
+  (is (= "123" (join nil [1 2 3]))))
 
 (deftest string-predicates
   (is (starts-with? "hello" "he"))
