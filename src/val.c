@@ -293,6 +293,58 @@ static int seq_equal(const mino_val_t *a, const mino_val_t *b)
     }
 }
 
+/*
+ * Cross-type map equality: compare MINO_MAP with MINO_SORTED_MAP.
+ * Both must have the same length and identical key-value pairs.
+ */
+static int mino_eq_maps_cross(const mino_val_t *a, const mino_val_t *b)
+{
+    const mino_val_t *hmap, *smap;
+    size_t i;
+
+    /* Normalize: hmap is the HAMT map, smap is the sorted map. */
+    if (a->type == MINO_MAP) { hmap = a; smap = b; }
+    else                     { hmap = b; smap = a; }
+
+    if (hmap->as.map.len != smap->as.sorted.len) return 0;
+
+    /* Custom comparators need a state for eval; skip cross-type equality. */
+    if (smap->as.sorted.comparator != NULL) return 0;
+
+    /* Iterate HAMT entries, look each up in the sorted map. */
+    for (i = 0; i < hmap->as.map.len; i++) {
+        mino_val_t *key = vec_nth(hmap->as.map.key_order, i);
+        mino_val_t *hv  = map_get_val(hmap, key);
+        mino_val_t *sv  = rb_get(NULL, smap->as.sorted.root, key, NULL);
+        if (sv == NULL || !mino_eq(hv, sv)) return 0;
+    }
+    return 1;
+}
+
+/*
+ * Cross-type set equality: compare MINO_SET with MINO_SORTED_SET.
+ */
+static int mino_eq_sets_cross(const mino_val_t *a, const mino_val_t *b)
+{
+    const mino_val_t *hset, *sset;
+    size_t i;
+
+    if (a->type == MINO_SET) { hset = a; sset = b; }
+    else                     { hset = b; sset = a; }
+
+    if (hset->as.set.len != sset->as.sorted.len) return 0;
+
+    if (sset->as.sorted.comparator != NULL) return 0;
+
+    for (i = 0; i < hset->as.set.len; i++) {
+        mino_val_t *elem = vec_nth(hset->as.set.key_order, i);
+        if (!rb_contains(NULL, sset->as.sorted.root, elem, NULL)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int mino_eq(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == b) {
@@ -329,6 +381,26 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
                          || b->type == MINO_NIL || b->type == MINO_LAZY);
             if (a_seq && b_seq) {
                 return seq_equal(a, b);
+            }
+        }
+        /*
+         * Cross-type map equality: sorted-map and map compare by entries.
+         */
+        {
+            int a_map = (a->type == MINO_MAP || a->type == MINO_SORTED_MAP);
+            int b_map = (b->type == MINO_MAP || b->type == MINO_SORTED_MAP);
+            if (a_map && b_map) {
+                return mino_eq_maps_cross(a, b);
+            }
+        }
+        /*
+         * Cross-type set equality: sorted-set and set compare by elements.
+         */
+        {
+            int a_set = (a->type == MINO_SET || a->type == MINO_SORTED_SET);
+            int b_set = (b->type == MINO_SET || b->type == MINO_SORTED_SET);
+            if (a_set && b_set) {
+                return mino_eq_sets_cross(a, b);
             }
         }
         return 0;
