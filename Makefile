@@ -36,6 +36,7 @@ clean:
 	      bench/map_bench bench/map_bench.o bench/seq_bench bench/seq_bench.o \
 	      fuzz/fuzz_reader fuzz/fuzz_reader.o \
 	      examples/embed examples/embed.o \
+	      examples/fault_inject_test examples/fault_inject_test.o \
 	      cookbook/config cookbook/rules cookbook/repl_socket \
 	      cookbook/plugin cookbook/pipeline cookbook/console
 
@@ -75,6 +76,13 @@ examples/embed: examples/embed.c $(LIB_OBJS) src/mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ examples/embed.c $(LIB_OBJS) $(LIBS)
 
 # Fuzz targets: stdin mode for crash_test.sh; libFuzzer for CI.
+# Fault-injection test: deterministic OOM recovery tests.
+test-fault-inject: examples/fault_inject_test
+	./examples/fault_inject_test
+
+examples/fault_inject_test: examples/fault_inject_test.c $(LIB_OBJS) src/mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ examples/fault_inject_test.c $(LIB_OBJS) $(LIBS)
+
 fuzz-stdin: fuzz/fuzz_reader
 	@echo "fuzz_reader built (stdin mode). Run: ./fuzz/crash_test.sh"
 
