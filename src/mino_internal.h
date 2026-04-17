@@ -372,22 +372,28 @@ mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);
 mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);
 void           dyn_binding_list_free(dyn_binding_t *head);
 
-/* mino.c: evaluator */
-mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env,
-                      int tail);
-mino_val_t *eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
+/* mino.c: evaluator core helpers */
+int         sym_eq(const mino_val_t *v, const char *s);
 mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env);
 mino_val_t *eval_implicit_do(mino_state_t *S, mino_val_t *body,
                              mino_env_t *env);
+mino_val_t *eval_implicit_do_impl(mino_state_t *S, mino_val_t *body,
+                                  mino_env_t *env, int tail);
 mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v);
-mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
-                           mino_env_t *env);
-int         sym_eq(const mino_val_t *v, const char *s);
 mino_val_t *eval_args(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
                          int *expanded);
 mino_val_t *macroexpand_all(mino_state_t *S, mino_val_t *form,
                             mino_env_t *env);
+mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
+                              mino_env_t *env);
+
+/* eval_special.c: dispatch, special forms, destructuring, apply */
+mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env,
+                      int tail);
+mino_val_t *eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
+mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
+                           mino_env_t *env);
 
 /* val.c: constructors and interning */
 mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
