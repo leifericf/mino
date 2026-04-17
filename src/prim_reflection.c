@@ -17,8 +17,19 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL) return mino_nil(S);
     if (v->type == MINO_STRING)  return v;
-    if (v->type == MINO_KEYWORD) return mino_string_n(S, v->as.s.data, v->as.s.len);
-    if (v->type == MINO_SYMBOL)  return mino_string_n(S, v->as.s.data, v->as.s.len);
+    if (v->type == MINO_KEYWORD || v->type == MINO_SYMBOL) {
+        const char *data = v->as.s.data;
+        size_t len = v->as.s.len;
+        /* For qualified names (foo/bar), return only the part after /. */
+        if (len > 1) {
+            const char *slash = memchr(data, '/', len);
+            if (slash != NULL) {
+                size_t after = len - (size_t)(slash - data) - 1;
+                return mino_string_n(S, slash + 1, after);
+            }
+        }
+        return mino_string_n(S, data, len);
+    }
     set_error(S, "name: expected a keyword, symbol, or string");
     return NULL;
 }
@@ -210,4 +221,106 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     S->try_stack[S->try_depth - 1].exception = ex;
     longjmp(S->try_stack[S->try_depth - 1].buf, 1);
     return NULL; /* unreachable */
+}
+
+mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "var? requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    return (v != NULL && v->type == MINO_VAR) ? mino_true(S) : mino_false(S);
+}
+
+mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *sym;
+    char buf[256];
+    size_t n;
+    const char *slash;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "resolve requires one argument");
+        return NULL;
+    }
+    sym = args->as.cons.car;
+    if (sym == NULL || sym->type != MINO_SYMBOL) {
+        set_error(S, "resolve: argument must be a symbol");
+        return NULL;
+    }
+    n = sym->as.s.len;
+    if (n >= sizeof(buf)) return mino_nil(S);
+    memcpy(buf, sym->as.s.data, n);
+    buf[n] = '\0';
+
+    /* Qualified symbol: ns/name */
+    slash = (n > 1) ? strchr(buf, '/') : NULL;
+    if (slash != NULL) {
+        char ns_buf[256];
+        size_t ns_len = (size_t)(slash - buf);
+        const char *sym_name = slash + 1;
+        const char *resolved_ns;
+        mino_val_t *var;
+        size_t i;
+
+        memcpy(ns_buf, buf, ns_len);
+        ns_buf[ns_len] = '\0';
+
+        /* Check alias table. */
+        for (i = 0; i < S->ns_alias_len; i++) {
+            if (strcmp(S->ns_aliases[i].alias, ns_buf) == 0) {
+                resolved_ns = S->ns_aliases[i].full_name;
+                goto found_ns;
+            }
+        }
+        resolved_ns = ns_buf;
+found_ns:
+        var = var_find(S, resolved_ns, sym_name);
+        return var != NULL ? var : mino_nil(S);
+    }
+
+    /* Unqualified: try current ns, then "user", then scan all. */
+    {
+        mino_val_t *var = var_find(S, S->current_ns, buf);
+        if (var == NULL) var = var_find(S, "user", buf);
+        if (var == NULL) {
+            size_t i;
+            for (i = 0; i < S->var_registry_len; i++) {
+                if (strcmp(S->var_registry[i].name, buf) == 0) {
+                    return S->var_registry[i].var;
+                }
+            }
+        }
+        return var != NULL ? var : mino_nil(S);
+    }
+}
+
+mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    const char *data;
+    size_t len;
+    const char *slash;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "namespace requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type == MINO_NIL) {
+        set_error(S, "namespace: argument must not be nil");
+        return NULL;
+    }
+    if (v->type != MINO_SYMBOL && v->type != MINO_KEYWORD) {
+        set_error(S, "namespace: expected a symbol or keyword");
+        return NULL;
+    }
+    data = v->as.s.data;
+    len  = v->as.s.len;
+    slash = memchr(data, '/', len);
+    if (slash == NULL || len == 1) return mino_nil(S);
+    return mino_string_n(S, data, (size_t)(slash - data));
 }

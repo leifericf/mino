@@ -155,6 +155,9 @@ mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_reflection.c */
 mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env);
