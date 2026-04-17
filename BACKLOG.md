@@ -53,11 +53,6 @@ try/catch. A thin `mino.hpp` header with RAII wrappers for
 
 ## Data Structures (Deferred)
 
-### Sorted map/set
-
-Red-black tree implementation for `sorted-map` and `sorted-set`.
-~300+ LOC. Rare in practice for an embedded runtime.
-
 ### Array map
 
 Small-map optimization (linear scan for maps under ~8 entries).
