@@ -202,6 +202,19 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         if (sym_eq(head, "declare")) {
             return eval_declare(S, form, args, env);
         }
+        if (sym_eq(head, "var")) {
+            mino_val_t *sym_arg;
+            if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+                set_error_at(S, form, "var requires exactly one argument");
+                return NULL;
+            }
+            sym_arg = args->as.cons.car;
+            if (sym_arg->type != MINO_SYMBOL) {
+                set_error_at(S, form, "var requires a symbol argument");
+                return NULL;
+            }
+            return eval_symbol(S, sym_arg, env);
+        }
         if (sym_eq(head, "def")) {
             return eval_def(S, form, args, env);
         }

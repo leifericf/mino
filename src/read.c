@@ -690,6 +690,25 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     if (**p == '#' && *(*p + 1) == '(') {
         return read_anon_fn_form(S, p);
     }
+    if (**p == '#' && *(*p + 1) == '\'') {
+        int vq_line = S->reader_line;
+        (*p) += 2;
+        {
+            mino_val_t *sym = read_form(S, p);
+            mino_val_t *outer;
+            if (sym == NULL) {
+                if (mino_last_error(S) == NULL) {
+                    set_error(S, "expected form after #'");
+                }
+                return NULL;
+            }
+            outer = mino_cons(S, mino_symbol(S, "var"),
+                              mino_cons(S, sym, mino_nil(S)));
+            outer->as.cons.file = S->reader_file;
+            outer->as.cons.line = vq_line;
+            return outer;
+        }
+    }
     if (**p == '"') {
         return read_string_form(S, p);
     }
