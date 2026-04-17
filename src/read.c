@@ -508,6 +508,144 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
     return form;
 }
 
+/*
+ * read_anon_fn_form: #(inc %) => (fn [%1] (inc %1))
+ * Called after '#' has been verified; caller already checked *(*p+1)=='('.
+ */
+static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
+{
+    int fn_line = S->reader_line;
+    int used[9] = {0};
+    int max_arg = 0, has_rest = 0;
+    mino_val_t *body;
+    mino_val_t *params_vec;
+    mino_val_t *fn_form;
+    (*p)++; /* skip '#', read_list_form will handle '(' */
+    body = read_list_form(S, p);
+    if (body == NULL) return NULL;
+    scan_percent_args(body, used, &max_arg, &has_rest);
+    body = normalize_percent(S, body);
+    {
+        mino_val_t *items[12]; /* max 9 + & + %& */
+        size_t      nparams = 0;
+        int         i;
+        char        name[4];
+        for (i = 0; i < max_arg; i++) {
+            name[0] = '%';
+            name[1] = (char)('1' + i);
+            name[2] = '\0';
+            items[nparams++] = mino_symbol(S, name);
+        }
+        if (has_rest) {
+            items[nparams++] = mino_symbol(S, "&");
+            items[nparams++] = mino_symbol(S, "%&");
+        }
+        params_vec = mino_vector(S, items, nparams);
+    }
+    fn_form = mino_cons(S, mino_symbol(S, "fn"),
+                  mino_cons(S, params_vec,
+                      mino_cons(S, body, mino_nil(S))));
+    fn_form->as.cons.file = S->reader_file;
+    fn_form->as.cons.line = fn_line;
+    return fn_form;
+}
+
+/*
+ * read_metadata_form: ^{:k v} form, ^:k form, ^Symbol form, ^"S" form.
+ * Called after '^' has been verified at **p.
+ */
+static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
+{
+    mino_val_t *meta_val, *target;
+    (*p)++;
+    meta_val = read_form(S, p);
+    if (meta_val == NULL) {
+        if (mino_last_error(S) == NULL) {
+            set_error(S, "expected metadata after ^");
+        }
+        return NULL;
+    }
+    /* ^:key shorthand: expand to {:key true}. */
+    if (meta_val->type == MINO_KEYWORD) {
+        mino_val_t *kv[1], *vv[1];
+        kv[0] = meta_val;
+        vv[0] = mino_true(S);
+        meta_val = mino_map(S, kv, vv, 1);
+    }
+    /* ^Symbol shorthand: expand to {:tag Symbol}. */
+    if (meta_val->type == MINO_SYMBOL) {
+        mino_val_t *kv[1], *vv[1];
+        kv[0] = mino_keyword(S, "tag");
+        vv[0] = meta_val;
+        meta_val = mino_map(S, kv, vv, 1);
+    }
+    /* ^"String" shorthand: expand to {:tag "String"}. */
+    if (meta_val->type == MINO_STRING) {
+        mino_val_t *kv[1], *vv[1];
+        kv[0] = mino_keyword(S, "tag");
+        vv[0] = meta_val;
+        meta_val = mino_map(S, kv, vv, 1);
+    }
+    if (meta_val->type != MINO_MAP) {
+        set_error(S, "metadata must be a map, keyword, symbol, or string");
+        return NULL;
+    }
+    target = read_form(S, p);
+    if (target == NULL) {
+        if (mino_last_error(S) == NULL) {
+            set_error(S, "expected form after metadata");
+        }
+        return NULL;
+    }
+    /* Attach metadata directly to the value instead of desugaring. */
+    if (target->type == MINO_SYMBOL || target->type == MINO_VECTOR
+        || target->type == MINO_MAP || target->type == MINO_CONS
+        || target->type == MINO_SET) {
+        /* Symbols are interned (shared). Make a fresh copy so we
+         * do not mutate the interned instance. */
+        if (target->type == MINO_SYMBOL) {
+            mino_val_t *fresh = alloc_val(S, MINO_SYMBOL);
+            fresh->as.s.data = target->as.s.data;
+            fresh->as.s.len  = target->as.s.len;
+            target = fresh;
+        }
+        /* Merge with any existing metadata from chained ^ syntax. */
+        if (target->meta != NULL && target->meta->type == MINO_MAP) {
+            size_t i;
+            size_t ko_len;
+            mino_val_t *ko = meta_val->as.map.key_order;
+            ko_len = (ko != NULL) ? ko->as.vec.len : 0;
+            for (i = 0; i < ko_len; i++) {
+                mino_val_t *k = vec_nth(ko, i);
+                mino_val_t *v = map_get_val(meta_val, k);
+                int replaced = 0;
+                hamt_entry_t *e = hamt_entry_new(S, k, v);
+                uint32_t h = hash_val(k);
+                mino_hamt_node_t *nr = hamt_assoc(S,
+                    target->meta->as.map.root, e, h, 0, &replaced);
+                if (!replaced) {
+                    target->meta->as.map.key_order =
+                        vec_conj1(S, target->meta->as.map.key_order, k);
+                    target->meta->as.map.len++;
+                }
+                target->meta->as.map.root = nr;
+            }
+        } else {
+            target->meta = meta_val;
+        }
+        return target;
+    }
+    /* Fallback for types that do not support metadata: desugar to
+     * (with-meta target meta-map) so it fails at eval time. */
+    {
+        mino_val_t *outer;
+        outer = mino_cons(S, mino_symbol(S, "with-meta"),
+                    mino_cons(S, target,
+                        mino_cons(S, meta_val, mino_nil(S))));
+        return outer;
+    }
+}
+
 static mino_val_t *read_form(mino_state_t *S, const char **p)
 {
     skip_ws(S, p);
@@ -550,45 +688,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         }
     }
     if (**p == '#' && *(*p + 1) == '(') {
-        /* Anonymous function shorthand: #(inc %) => (fn [%1] (inc %1)) */
-        int fn_line = S->reader_line;
-        int used[9] = {0};
-        int max_arg = 0, has_rest = 0;
-        mino_val_t *body;
-        mino_val_t *params_vec;
-        mino_val_t *fn_form;
-        (*p)++; /* skip '#', read_list_form will handle '(' */
-        body = read_list_form(S, p);
-        if (body == NULL) return NULL;
-        /* Scan for % arg slots. */
-        scan_percent_args(body, used, &max_arg, &has_rest);
-        /* Normalize bare % to %1. */
-        body = normalize_percent(S, body);
-        /* Build params vector: [%1 %2 ... & %&] */
-        {
-            mino_val_t *items[12]; /* max 9 + & + %& */
-            size_t      nparams = 0;
-            int         i;
-            char        name[4];
-            for (i = 0; i < max_arg; i++) {
-                name[0] = '%';
-                name[1] = (char)('1' + i);
-                name[2] = '\0';
-                items[nparams++] = mino_symbol(S, name);
-            }
-            if (has_rest) {
-                items[nparams++] = mino_symbol(S, "&");
-                items[nparams++] = mino_symbol(S, "%&");
-            }
-            params_vec = mino_vector(S, items, nparams);
-        }
-        /* Build (fn [params] (body...)) — body is already a list form. */
-        fn_form = mino_cons(S, mino_symbol(S, "fn"),
-                      mino_cons(S, params_vec,
-                          mino_cons(S, body, mino_nil(S))));
-        fn_form->as.cons.file = S->reader_file;
-        fn_form->as.cons.line = fn_line;
-        return fn_form;
+        return read_anon_fn_form(S, p);
     }
     if (**p == '"') {
         return read_string_form(S, p);
@@ -651,100 +751,7 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         }
     }
     if (**p == '^') {
-        /* Metadata reader syntax — attach metadata directly at read time:
-         *   ^{:k v} form   — map metadata
-         *   ^:k form       — keyword shorthand {:k true}
-         *   ^Symbol form   — type hint {:tag Symbol}
-         *   ^"String" form — type hint {:tag "String"}
-         */
-        mino_val_t *meta_val, *target;
-        (*p)++;
-        meta_val = read_form(S, p);
-        if (meta_val == NULL) {
-            if (mino_last_error(S) == NULL) {
-                set_error(S, "expected metadata after ^");
-            }
-            return NULL;
-        }
-        /* ^:key shorthand: expand to {:key true}. */
-        if (meta_val->type == MINO_KEYWORD) {
-            mino_val_t *kv[1], *vv[1];
-            kv[0] = meta_val;
-            vv[0] = mino_true(S);
-            meta_val = mino_map(S, kv, vv, 1);
-        }
-        /* ^Symbol shorthand: expand to {:tag Symbol}. */
-        if (meta_val->type == MINO_SYMBOL) {
-            mino_val_t *kv[1], *vv[1];
-            kv[0] = mino_keyword(S, "tag");
-            vv[0] = meta_val;
-            meta_val = mino_map(S, kv, vv, 1);
-        }
-        /* ^"String" shorthand: expand to {:tag "String"}. */
-        if (meta_val->type == MINO_STRING) {
-            mino_val_t *kv[1], *vv[1];
-            kv[0] = mino_keyword(S, "tag");
-            vv[0] = meta_val;
-            meta_val = mino_map(S, kv, vv, 1);
-        }
-        if (meta_val->type != MINO_MAP) {
-            set_error(S, "metadata must be a map, keyword, symbol, or string");
-            return NULL;
-        }
-        target = read_form(S, p);
-        if (target == NULL) {
-            if (mino_last_error(S) == NULL) {
-                set_error(S, "expected form after metadata");
-            }
-            return NULL;
-        }
-        /* Attach metadata directly to the value instead of desugaring. */
-        if (target->type == MINO_SYMBOL || target->type == MINO_VECTOR
-            || target->type == MINO_MAP || target->type == MINO_CONS
-            || target->type == MINO_SET) {
-            /* Symbols are interned (shared). Make a fresh copy so we
-             * do not mutate the interned instance. */
-            if (target->type == MINO_SYMBOL) {
-                mino_val_t *fresh = alloc_val(S, MINO_SYMBOL);
-                fresh->as.s.data = target->as.s.data;
-                fresh->as.s.len  = target->as.s.len;
-                target = fresh;
-            }
-            /* Merge with any existing metadata from chained ^ syntax. */
-            if (target->meta != NULL && target->meta->type == MINO_MAP) {
-                size_t i;
-                size_t ko_len;
-                mino_val_t *ko = meta_val->as.map.key_order;
-                ko_len = (ko != NULL) ? ko->as.vec.len : 0;
-                for (i = 0; i < ko_len; i++) {
-                    mino_val_t *k = vec_nth(ko, i);
-                    mino_val_t *v = map_get_val(meta_val, k);
-                    int replaced = 0;
-                    hamt_entry_t *e = hamt_entry_new(S, k, v);
-                    uint32_t h = hash_val(k);
-                    mino_hamt_node_t *nr = hamt_assoc(S,
-                        target->meta->as.map.root, e, h, 0, &replaced);
-                    if (!replaced) {
-                        target->meta->as.map.key_order =
-                            vec_conj1(S, target->meta->as.map.key_order, k);
-                        target->meta->as.map.len++;
-                    }
-                    target->meta->as.map.root = nr;
-                }
-            } else {
-                target->meta = meta_val;
-            }
-            return target;
-        }
-        /* Fallback for types that do not support metadata: desugar to
-         * (with-meta target meta-map) so it fails at eval time. */
-        {
-            mino_val_t *outer;
-            outer = mino_cons(S, mino_symbol(S, "with-meta"),
-                        mino_cons(S, target,
-                            mino_cons(S, meta_val, mino_nil(S))));
-            return outer;
-        }
+        return read_metadata_form(S, p);
     }
     if (**p == '~') {
         int         q_line = S->reader_line;
