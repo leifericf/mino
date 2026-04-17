@@ -4,6 +4,36 @@ All notable changes to mino are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Module extraction**: evaluator, runtime, and primitive code further
+  split into focused translation units. `mino.c` split into `mino.c`
+  (eval front door) + `eval_special.c` (special forms) + `runtime_state.c`
+  + `runtime_gc.c` + `runtime_env.c` + `runtime_error.c`. `prim.c` split
+  into `prim.c` (shared helpers, install) + `prim_numeric.c` +
+  `prim_collections.c` + `prim_sequences.c` + `prim_string.c` +
+  `prim_io.c`. Reader helpers `read_anon_fn_form` and
+  `read_metadata_form` extracted from `read_form`.
+- **State access**: all state field alias macros removed. Internal code
+  uses explicit `S->field` access throughout.
+- **Ownership annotations**: function declarations in `mino_internal.h`
+  and `prim_internal.h` now carry ownership annotations (GC-owned,
+  borrowed, static, malloc-owned).
+- **GC hardening**: `gc_save` array increased from 32 to 64 slots.
+  `gc_unpin` asserts on underflow in debug builds instead of silently
+  clamping.
+- **Fault injection**: `mino_set_fail_raw_at` API for testing non-GC
+  allocation paths (clone, mailbox, serialization buffers).
+
+### Fixed
+- `mino_pcall` now establishes a try frame before calling, preventing
+  abort on throw from user code.
+- `gc_pin`/`gc_unpin` counter imbalance in `mino_pcall` error path.
+- `mino_pcall` propagates the error message from `mino_last_error`
+  when the inner eval returns NULL without throwing.
+- Regex thread test joins thread 1 if thread 2 creation fails.
+
 ## [0.20.0] — Dialect alignment
 
 Brings mino's surface language into close alignment with standard
