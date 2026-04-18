@@ -1,0 +1,51 @@
+(ns clojure.string)
+
+;; Capture core references before shadowing.
+(def core-upper-case_   upper-case)
+(def core-lower-case_   lower-case)
+(def core-starts-with?_ starts-with?)
+(def core-ends-with?_   ends-with?)
+(def core-reverse_      reverse)
+(def core-blank?_       blank?)
+
+(defn assert-string_ [s]
+  (when-not (string? s)
+    (throw (ex-info (str "Argument must be a string, got " (type s))
+                    {:arg s}))))
+
+(defn blank? [s]
+  (if (nil? s)
+    true
+    (do (assert-string_ s)
+        (core-blank?_ s))))
+
+(defn capitalize [s]
+  (assert-string_ s)
+  (if (= s "")
+    ""
+    (str (core-upper-case_ (subs s 0 1))
+         (core-lower-case_ (subs s 1)))))
+
+(defn starts-with? [s prefix]
+  (assert-string_ s)
+  (core-starts-with?_ s prefix))
+
+(defn ends-with? [s suffix]
+  (assert-string_ s)
+  (core-ends-with?_ s suffix))
+
+(defn escape [s cmap]
+  (assert-string_ s)
+  (apply str (map (fn [c] (or (get cmap c) c)) (seq s))))
+
+(defn lower-case [s]
+  (assert-string_ s)
+  (core-lower-case_ s))
+
+(defn upper-case [s]
+  (assert-string_ s)
+  (core-upper-case_ s))
+
+(defn reverse [s]
+  (assert-string_ s)
+  (apply str (core-reverse_ (seq s))))
