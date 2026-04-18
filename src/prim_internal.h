@@ -185,6 +185,12 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_get_validator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_reset_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_module.c */
 mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);

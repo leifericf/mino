@@ -340,11 +340,17 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "seq",       mino_prim(S, "seq",       prim_seq));
     mino_env_set(S, env, "realized?", mino_prim(S, "realized?", prim_realized_p));
     /* atoms */
-    mino_env_set(S, env, "atom",     mino_prim(S, "atom",     prim_atom));
-    mino_env_set(S, env, "deref",    mino_prim(S, "deref",    prim_deref));
-    mino_env_set(S, env, "reset!",   mino_prim(S, "reset!",   prim_reset_bang));
-    mino_env_set(S, env, "swap!",    mino_prim(S, "swap!",    prim_swap_bang));
-    mino_env_set(S, env, "atom?",    mino_prim(S, "atom?",    prim_atom_p));
+    mino_env_set(S, env, "atom",           mino_prim(S, "atom",           prim_atom));
+    mino_env_set(S, env, "deref",          mino_prim(S, "deref",          prim_deref));
+    mino_env_set(S, env, "reset!",         mino_prim(S, "reset!",         prim_reset_bang));
+    mino_env_set(S, env, "swap!",          mino_prim(S, "swap!",          prim_swap_bang));
+    mino_env_set(S, env, "atom?",          mino_prim(S, "atom?",          prim_atom_p));
+    mino_env_set(S, env, "add-watch",      mino_prim(S, "add-watch",      prim_add_watch));
+    mino_env_set(S, env, "remove-watch",   mino_prim(S, "remove-watch",   prim_remove_watch));
+    mino_env_set(S, env, "set-validator!", mino_prim(S, "set-validator!", prim_set_validator));
+    mino_env_set(S, env, "get-validator",  mino_prim(S, "get-validator",  prim_get_validator));
+    mino_env_set(S, env, "reset-vals!",    mino_prim(S, "reset-vals!",    prim_reset_vals));
+    mino_env_set(S, env, "swap-vals!",     mino_prim(S, "swap-vals!",     prim_swap_vals));
     /* actors */
     mino_env_set(S, env, "spawn*",   mino_prim(S, "spawn*",   prim_spawn));
     mino_env_set(S, env, "send!",    mino_prim(S, "send!",    prim_send_bang));
