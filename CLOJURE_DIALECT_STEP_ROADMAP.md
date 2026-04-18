@@ -250,7 +250,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 9 - `clojure.string` Namespace Parity
+## ~~Step 9 - `clojure.string` Namespace Parity~~
 
 ### Smaller steps
 - Provide `clojure.string` namespace with canonical var names.
