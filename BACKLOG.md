@@ -90,11 +90,6 @@ but the C constructors (`mino_sorted_map`, `mino_sorted_set`) hardcode
 Range queries on sorted collections. Need C-level in-order traversal
 with lower/upper bounds on the rbtree. ~80 lines.
 
-### `subvec`
-
-Efficient O(1) vector slice sharing the underlying trie. Needs a C
-primitive that creates a view with offset and length. ~60 lines.
-
 ### `pr` / `print` / `newline`
 
 Output without trailing newline. `println` and `prn` always append a
