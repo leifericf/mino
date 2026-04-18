@@ -551,6 +551,39 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
             looks_numeric = 0;
         }
 
+        /* Radix: [+-]?NrDIGITS where N is base 2-36 (e.g. 2r1010, 16rFF) */
+        if (looks_numeric) {
+            const char *r_pos = NULL;
+            for (i = scan_start; i < len; i++) {
+                if (buf[i] == 'r' || buf[i] == 'R') { r_pos = buf + i; break; }
+            }
+            if (r_pos != NULL && r_pos > buf + scan_start && r_pos < buf + len - 1) {
+                int all_base_digits = 1;
+                for (i = scan_start; i < (size_t)(r_pos - buf); i++) {
+                    if (!isdigit((unsigned char)buf[i])) { all_base_digits = 0; break; }
+                }
+                if (all_base_digits) {
+                    long base = strtol(buf + scan_start, NULL, 10);
+                    if (base >= 2 && base <= 36) {
+                        /* Parse the digits after 'r' in the given base. */
+                        char radix_buf[64];
+                        size_t radix_len = len - (size_t)(r_pos - buf) - 1;
+                        int sign = 1;
+                        if (scan_start > 0 && buf[0] == '-') sign = -1;
+                        if (radix_len > 0 && radix_len < sizeof(radix_buf)) {
+                            memcpy(radix_buf, r_pos + 1, radix_len);
+                            radix_buf[radix_len] = '\0';
+                            {
+                                long long n = strtoll(radix_buf, &endp, (int)base);
+                                if (endp == radix_buf + radix_len)
+                                    return mino_int(S, sign * n);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         /* Ratio: digits/digits with optional sign prefix.
          * Must not match namespace-qualified symbols (alpha/alpha). */
         if (looks_numeric) {
@@ -967,6 +1000,28 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             return mino_float(S, NAN);
         set_error(S, "unknown tagged literal");
         return NULL;
+    }
+    /* Tagged literals: #tag form — read and wrap as (tagged-literal tag form).
+     * Handles unknown tags like #js, #inst, #uuid gracefully. */
+    if (**p == '#' && isalpha((unsigned char)*(*p + 1))) {
+        const char *tag_start;
+        size_t      tag_len;
+        mino_val_t *tag_val;
+        mino_val_t *body;
+        (*p)++;
+        tag_start = *p;
+        tag_len = 0;
+        while (!is_terminator((*p)[tag_len])) tag_len++;
+        *p += tag_len;
+        /* Read the body form that follows the tag. */
+        skip_ws(S, p);
+        body = read_form(S, p);
+        if (body == NULL && mino_last_error(S) != NULL) return NULL;
+        /* Wrap as (tagged-literal :tag body). */
+        tag_val = mino_keyword_n(S, tag_start, tag_len);
+        return mino_cons(S, mino_symbol(S, "tagged-literal"),
+                         mino_cons(S, tag_val,
+                                   mino_cons(S, body, mino_nil(S))));
     }
     if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) == '@') {
         set_error(S, "#?@ splice not allowed at top level");
