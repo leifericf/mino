@@ -131,6 +131,7 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sorted_map(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sorted_set(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 

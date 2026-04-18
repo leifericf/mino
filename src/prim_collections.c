@@ -1057,3 +1057,43 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * Returns nil for empty collections. Forces lazy sequences.
  */
 /* prim_seq and prim_realized_p moved to prim_sequences.c */
+
+mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    long long   start, end;
+    size_t      nargs = 0;
+    mino_val_t *p;
+    (void)env;
+    for (p = args; mino_is_cons(p); p = p->as.cons.cdr) nargs++;
+    if (nargs < 2 || nargs > 3) {
+        set_error(S, "subvec requires 2 or 3 arguments");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_VECTOR) {
+        set_error(S, "subvec: first argument must be a vector");
+        return NULL;
+    }
+    if (args->as.cons.cdr->as.cons.car == NULL
+        || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
+        set_error(S, "subvec: start must be an integer");
+        return NULL;
+    }
+    start = args->as.cons.cdr->as.cons.car->as.i;
+    if (nargs == 3) {
+        if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
+            || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
+            set_error(S, "subvec: end must be an integer");
+            return NULL;
+        }
+        end = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
+    } else {
+        end = (long long)v->as.vec.len;
+    }
+    if (start < 0 || end < start || (size_t)end > v->as.vec.len) {
+        set_error(S, "subvec: index out of bounds");
+        return NULL;
+    }
+    return vec_subvec(S, v, (size_t)start, (size_t)end);
+}

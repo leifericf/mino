@@ -119,28 +119,54 @@ static mino_val_t *vec_assemble(mino_state_t *S, const mino_val_t *src,
     v->as.vec.tail_len = tail_len;
     v->as.vec.shift    = shift;
     v->as.vec.len      = len;
+    v->as.vec.offset   = 0;
+    v->as.vec.blen     = len;
     if (src != NULL) {
         v->meta = src->meta;
     }
     return v;
 }
 
-/* Read one element by flat index; undefined if i >= len. */
+/* Read one element by flat index; undefined if i >= visible len.
+ * For subvecs (offset > 0), translates the visible index to the backing
+ * trie's absolute index before lookup. */
 mino_val_t *vec_nth(const mino_val_t *v, size_t i)
 {
-    size_t                  trie_count = v->as.vec.len - v->as.vec.tail_len;
+    size_t                  trie_count = v->as.vec.blen - v->as.vec.tail_len;
+    size_t                  abs_i      = i + v->as.vec.offset;
     const mino_vec_node_t  *node;
     unsigned                shift;
-    if (i >= trie_count) {
-        return (mino_val_t *)v->as.vec.tail->slots[i - trie_count];
+    if (abs_i >= trie_count) {
+        return (mino_val_t *)v->as.vec.tail->slots[abs_i - trie_count];
     }
     node  = v->as.vec.root;
     shift = v->as.vec.shift;
     while (shift > 0) {
-        node = (const mino_vec_node_t *)node->slots[(i >> shift) & MINO_VEC_MASK];
+        node = (const mino_vec_node_t *)node->slots[(abs_i >> shift) & MINO_VEC_MASK];
         shift -= MINO_VEC_B;
     }
-    return (mino_val_t *)node->slots[i & MINO_VEC_MASK];
+    return (mino_val_t *)node->slots[abs_i & MINO_VEC_MASK];
+}
+
+/* Materialize a subvec (offset > 0) into a fresh vector with offset 0.
+ * Required before structural mutations (conj, pop) that assume offset == 0. */
+static mino_val_t *vec_materialize(mino_state_t *S, const mino_val_t *v)
+{
+    size_t       len = v->as.vec.len;
+    mino_val_t **buf;
+    mino_val_t  *result;
+    size_t       i;
+    if (len == 0) {
+        result = vec_from_array(S, NULL, 0);
+        result->meta = v->meta;
+        return result;
+    }
+    buf = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, len * sizeof(*buf));
+    for (i = 0; i < len; i++)
+        buf[i] = vec_nth(v, i);
+    result = vec_from_array(S, buf, len);
+    result->meta = v->meta;
+    return result;
 }
 
 /* Append one element. O(log32 n) worst case, O(1) amortized for tail appends. */
@@ -150,6 +176,8 @@ mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v, mino_val_t *item)
     mino_vec_node_t *new_root;
     unsigned         new_shift;
     size_t           trie_count;
+    if (v->as.vec.offset > 0)
+        return vec_conj1(S, vec_materialize(S, v), item);
     if (v->as.vec.tail_len < MINO_VEC_WIDTH) {
         /* Tail has room: copy it and append. */
         if (v->as.vec.tail == NULL) {
@@ -196,6 +224,8 @@ mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
     size_t           trie_count;
     mino_vec_node_t *new_tail;
     mino_vec_node_t *new_root;
+    if (v->as.vec.offset > 0)
+        return vec_assoc1(S, vec_materialize(S, v), i, item);
     if (i == v->as.vec.len) {
         return vec_conj1(S, v, item);
     }
@@ -344,7 +374,10 @@ static mino_vec_node_t *pop_tail(mino_state_t *S,
  * Caller must ensure len > 0. */
 mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v)
 {
-    size_t new_len = v->as.vec.len - 1;
+    size_t new_len;
+    if (v->as.vec.offset > 0)
+        return vec_pop(S, vec_materialize(S, v));
+    new_len = v->as.vec.len - 1;
     if (new_len == 0) {
         return vec_assemble(S, v, NULL, NULL, 0u, 0u, 0);
     }
@@ -386,6 +419,27 @@ mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v)
                             new_leaf != NULL ? new_leaf->count : 0u,
                             new_shift, new_len);
     }
+}
+
+/* O(1) subvec: share the backing trie with an offset and reduced len. */
+mino_val_t *vec_subvec(mino_state_t *S, const mino_val_t *v,
+                       size_t start, size_t end)
+{
+    mino_val_t *sv;
+    if (start == 0 && end == v->as.vec.len)
+        return (mino_val_t *)v;
+    if (start == end)
+        return vec_from_array(S, NULL, 0);
+    sv = alloc_val(S, MINO_VECTOR);
+    sv->as.vec.root     = v->as.vec.root;
+    sv->as.vec.tail     = v->as.vec.tail;
+    sv->as.vec.tail_len = v->as.vec.tail_len;
+    sv->as.vec.shift    = v->as.vec.shift;
+    sv->as.vec.len      = end - start;
+    sv->as.vec.offset   = v->as.vec.offset + start;
+    sv->as.vec.blen     = v->as.vec.blen;
+    sv->meta            = v->meta;
+    return sv;
 }
 
 mino_val_t *mino_vector(mino_state_t *S, mino_val_t **items, size_t len)
