@@ -793,15 +793,37 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
-    switch (coll->type) {
-    case MINO_VECTOR:     return mino_vector(S, NULL, 0);
-    case MINO_MAP:        return mino_map(S, NULL, NULL, 0);
-    case MINO_SET:        return mino_set(S, NULL, 0);
-    case MINO_SORTED_MAP: return mino_sorted_map(S, NULL, NULL, 0);
-    case MINO_SORTED_SET: return mino_sorted_set(S, NULL, 0);
-    case MINO_CONS:
-    case MINO_LAZY:       return mino_nil(S);
-    default:              return mino_nil(S);
+    {
+        mino_val_t *r;
+        switch (coll->type) {
+        case MINO_VECTOR:
+            r = mino_vector(S, NULL, 0);
+            r->meta = coll->meta;
+            return r;
+        case MINO_MAP:
+            r = mino_map(S, NULL, NULL, 0);
+            r->meta = coll->meta;
+            return r;
+        case MINO_SET:
+            r = mino_set(S, NULL, 0);
+            r->meta = coll->meta;
+            return r;
+        case MINO_SORTED_MAP:
+            r = mino_sorted_map(S, NULL, NULL, 0);
+            r->meta = coll->meta;
+            return r;
+        case MINO_SORTED_SET:
+            r = mino_sorted_set(S, NULL, 0);
+            r->meta = coll->meta;
+            return r;
+        case MINO_STRING:
+            return mino_string(S, "");
+        case MINO_CONS:
+        case MINO_LAZY:
+            return mino_nil(S);
+        default:
+            return mino_nil(S);
+        }
     }
 }
 
