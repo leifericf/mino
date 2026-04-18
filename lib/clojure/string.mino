@@ -49,3 +49,14 @@
 (defn reverse [s]
   (assert-string_ s)
   (apply str (core-reverse_ (seq s))))
+
+;; Restore core globals that were shadowed by same-named defs above.
+;; Switch back to user namespace so these defs write to root env
+;; without overwriting the clojure.string var registry entries.
+(ns user)
+(def blank?       core-blank?_)
+(def starts-with? core-starts-with?_)
+(def ends-with?   core-ends-with?_)
+(def upper-case   core-upper-case_)
+(def lower-case   core-lower-case_)
+(def reverse      core-reverse_)
