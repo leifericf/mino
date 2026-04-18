@@ -19,7 +19,7 @@
 
 /* ── Expose ────────────────────────────────────────────────────────── */
 
-/* Each measurement is a map with :metric, :host, :value, :ts keys.
+/* Each measurement is a map with `:metric`, `:host`, `:value`, `:ts` keys.
  * Maps are immutable once created. The script receives read-only
  * snapshots of the C++ data. */
 
@@ -42,10 +42,10 @@ static mino_val_t *make_measurement(mino_state_t *S, const Measurement &m)
 
 /* ── Script ────────────────────────────────────────────────────────── */
 
-/* The pipeline uses ->> to thread data through each stage.
- * Keywords like :metric and :value act directly as accessor
- * functions. Sets like #{:cpu :mem} act as membership predicates
- * in filter. Named helpers keep the top-level pipeline flat. */
+/* The pipeline uses `->>` to thread data through each stage.
+ * Keywords like `:metric` and `:value` act directly as accessor
+ * functions. Sets like `#{:cpu :mem}` act as membership predicates
+ * in `filter`. Named helpers keep the top-level pipeline flat. */
 
 static const char *script =
     ";; Average of a numeric sequence.\n"

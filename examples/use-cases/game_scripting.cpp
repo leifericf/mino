@@ -134,7 +134,7 @@ static mino_val_t *host_damage(mino_state_t *S, mino_val_t *args,
 /* ── Script ────────────────────────────────────────────────────────── */
 
 /* Scripts define queries and commands over the entity system.
- * Keywords like :hp and :tags act as data accessors. Sets act
+ * Keywords like `:hp` and `:tags` act as data accessors. Sets act
  * as predicates for tag matching. */
 
 static const char *script =

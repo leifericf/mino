@@ -45,8 +45,8 @@ static mino_val_t *make_applicant(mino_state_t *S, const Applicant &a)
 
 /* ── Script ────────────────────────────────────────────────────────── */
 
-/* Keywords like :credit-score act as data accessors.
- * Sets like #{:approved :review} act as membership predicates.
+/* Keywords like `:credit-score` act as data accessors.
+ * Sets like `#{:approved :review}` act as membership predicates.
  * The pipeline is flat: each step takes and returns data. */
 
 static const char *script =

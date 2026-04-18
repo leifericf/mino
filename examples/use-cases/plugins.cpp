@@ -18,7 +18,7 @@
 
 /* ── Expose ────────────────────────────────────────────────────────── */
 
-/* Documents are mino maps with :title, :body, :tags keys.
+/* Documents are mino maps with `:title`, `:body`, `:tags` keys.
  * Plugins receive immutable documents and return transformed copies.
  * The plugin cannot modify the original through the value it receives. */
 

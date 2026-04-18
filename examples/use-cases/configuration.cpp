@@ -18,7 +18,7 @@
 /* ── Expose ────────────────────────────────────────────────────────── */
 
 /* The C++ engineer wraps host environment queries as typed handles.
- * The BuildEnv handle exposes platform, mode, and version as
+ * The `BuildEnv` handle exposes platform, mode, and version as
  * read-only getters. The script sees structured data without
  * touching the process environment directly. */
 

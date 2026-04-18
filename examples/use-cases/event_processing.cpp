@@ -20,9 +20,9 @@
 
 /* ── Expose ────────────────────────────────────────────────────────── */
 
-/* The EventSource wraps a C++ vector of sensor readings. Each reading
+/* The `EventSource` wraps a C++ vector of sensor readings. Each reading
  * is a mino map built at construction time. The script consumes events
- * one at a time through the .next method. The handle's finalizer
+ * one at a time through the `.next` method. The handle's finalizer
  * cleans up the C++ object when the GC collects it. */
 
 struct EventSource {
@@ -81,9 +81,9 @@ static mino_val_t *source_count(mino_state_t *S, mino_val_t *target,
 
 /* ── Script ────────────────────────────────────────────────────────── */
 
-/* drain uses self-recursion with an accumulator. Automatic tail-call
+/* `drain` uses self-recursion with an accumulator. Automatic tail-call
  * optimization means this runs in constant stack space regardless
- * of stream length. The set #{:temp} is used directly as a filter
+ * of stream length. The set `#{:temp}` is used directly as a filter
  * predicate because collections are callable. */
 
 static const char *script =

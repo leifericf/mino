@@ -22,7 +22,7 @@
 /* ── Expose ────────────────────────────────────────────────────────── */
 
 /* Tasks have a name, status, and result. The host simulates
- * execution: each task transitions from :pending to :done. */
+ * execution: each task transitions from `:pending` to `:done`. */
 
 struct Task {
     std::string name;
@@ -79,8 +79,8 @@ static mino_val_t *host_task_status(mino_state_t *S, mino_val_t *args,
 /* ── Script ────────────────────────────────────────────────────────── */
 
 /* Workflows are built by composing task primitives.
- * step takes a name, creates and runs a task, returns its status.
- * pipeline chains steps and collects results. */
+ * `step` takes a name, creates and runs a task, returns its status.
+ * `pipeline` chains steps and collects results. */
 
 static const char *script =
     ";; Execute one step: create, run, report.\n"
