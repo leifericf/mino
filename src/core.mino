@@ -743,7 +743,7 @@
 (def split-with (fn [pred coll]
   (vector (take-while pred coll) (drop-while pred coll))))
 
-(def mapv    (fn [f coll] (into [] (map f coll))))
+(def mapv    (fn [f & colls] (into [] (apply map f colls))))
 (def filterv (fn [pred coll] (into [] (filter pred coll))))
 
 (def sort-by (fn [keyfn & args]
