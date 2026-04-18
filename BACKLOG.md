@@ -60,9 +60,13 @@ mino's HAMT is already fast for small maps, so the payoff is minimal.
 
 ### Transients
 
-Batch mutation API for bulk collection building. `vec_from_array`
-covers the main internal case. Adds complexity without proportional
-embedded-scale benefit.
+Batch mutation API for bulk collection building (`transient`,
+`persistent!`, `assoc!`, `conj!`, `disj!`, `dissoc!`, `pop!`).
+`vec_from_array` covers the main internal case. Deferred from the
+dialect roadmap (Step 7) because it adds complexity without
+proportional embedded-scale benefit. The atom struct and watch
+system are orthogonal; nothing prevents adding transients later
+as new collection types with a validity flag.
 
 ### Chunked sequences
 

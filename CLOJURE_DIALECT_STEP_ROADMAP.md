@@ -195,7 +195,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 7 - Stateful + Transients + Watches
+## ~~Step 7 - Stateful + Watches~~ (transients deferred to BACKLOG)
 
 ### Smaller steps
 - Align transient lifecycle (`transient` -> transient ops -> `persistent!`).
