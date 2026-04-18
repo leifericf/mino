@@ -332,9 +332,11 @@ int rb_trees_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
 mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
                              mino_val_t **vals, size_t len)
 {
-    mino_val_t     *v = alloc_val(S, MINO_SORTED_MAP);
+    mino_val_t     *v;
     mino_rb_node_t *root = NULL;
     size_t i;
+    S->gc_depth++;
+    v = alloc_val(S, MINO_SORTED_MAP);
     v->as.sorted.comparator = NULL;
     v->as.sorted.len = 0;
     for (i = 0; i < len; i++) {
@@ -343,14 +345,17 @@ mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
         if (!replaced) v->as.sorted.len++;
     }
     v->as.sorted.root = root;
+    S->gc_depth--;
     return v;
 }
 
 mino_val_t *mino_sorted_set(mino_state_t *S, mino_val_t **items, size_t len)
 {
-    mino_val_t     *v = alloc_val(S, MINO_SORTED_SET);
+    mino_val_t     *v;
     mino_rb_node_t *root = NULL;
     size_t i;
+    S->gc_depth++;
+    v = alloc_val(S, MINO_SORTED_SET);
     v->as.sorted.comparator = NULL;
     v->as.sorted.len = 0;
     for (i = 0; i < len; i++) {
@@ -359,6 +364,7 @@ mino_val_t *mino_sorted_set(mino_state_t *S, mino_val_t **items, size_t len)
         if (!replaced) v->as.sorted.len++;
     }
     v->as.sorted.root = root;
+    S->gc_depth--;
     return v;
 }
 

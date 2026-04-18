@@ -505,12 +505,18 @@ mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key)
  */
 mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size_t len)
 {
-
-    mino_val_t       *v        = alloc_val(S, MINO_MAP);
+    mino_val_t       *v;
     mino_hamt_node_t *root     = NULL;
-    mino_val_t       *order    = mino_vector(S, NULL, 0);
+    mino_val_t       *order;
     size_t            len_out  = 0;
     size_t            i;
+    /* Suppress GC during construction so caller-owned key/value arrays
+     * stay valid. Without this, intermediate allocations (hamt_entry_new,
+     * vec_conj1) could trigger collection that reclaims values the caller
+     * holds only on the C stack. */
+    S->gc_depth++;
+    v     = alloc_val(S, MINO_MAP);
+    order = mino_vector(S, NULL, 0);
     for (i = 0; i < len; i++) {
         hamt_entry_t *e        = hamt_entry_new(S, keys[i], vals[i]);
         uint32_t      h        = hash_val(keys[i]);
@@ -524,19 +530,22 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size
     v->as.map.root      = root;
     v->as.map.key_order = order;
     v->as.map.len       = len_out;
+    S->gc_depth--;
     return v;
 }
 
 mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len)
 {
-
-    mino_val_t       *v        = alloc_val(S, MINO_SET);
+    mino_val_t       *v;
     mino_hamt_node_t *root     = NULL;
-    mino_val_t       *order    = mino_vector(S, NULL, 0);
+    mino_val_t       *order;
     size_t            len_out  = 0;
     size_t            i;
-    /* Sentinel value: all set entries map to true. */
-    mino_val_t       *sentinel = mino_true(S);
+    mino_val_t       *sentinel;
+    S->gc_depth++;
+    v        = alloc_val(S, MINO_SET);
+    order    = mino_vector(S, NULL, 0);
+    sentinel = mino_true(S);
     for (i = 0; i < len; i++) {
         hamt_entry_t *e        = hamt_entry_new(S, items[i], sentinel);
         uint32_t      h        = hash_val(items[i]);
@@ -550,6 +559,7 @@ mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len)
     v->as.set.root      = root;
     v->as.set.key_order = order;
     v->as.set.len       = len_out;
+    S->gc_depth--;
     return v;
 }
 

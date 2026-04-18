@@ -743,7 +743,7 @@
 (def split-with (fn [pred coll]
   (vector (take-while pred coll) (drop-while pred coll))))
 
-(def mapv    (fn [f & colls] (into [] (apply map f colls))))
+(def mapv    (fn [f coll] (into [] (map f coll))))
 (def filterv (fn [pred coll] (into [] (filter pred coll))))
 
 (def sort-by (fn [keyfn & args]
@@ -1296,15 +1296,6 @@
   "Extract the message from an exception created with ex-info."
   [ex]
   (when (map? ex) (:message ex)))
-
-;; ---------------------------------------------------------------------------
-;; Tagged literals
-;; ---------------------------------------------------------------------------
-
-(defn tagged-literal
-  "Wrap an unknown reader tag and its body as data."
-  [tag form]
-  {:tag tag :form form})
 
 (def agent atom)
 
