@@ -65,6 +65,7 @@ mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bit_not(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bit_shift_left(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_math_floor(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_math_ceil(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_math_round(mino_state_t *S, mino_val_t *args, mino_env_t *env);

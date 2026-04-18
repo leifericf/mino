@@ -243,6 +243,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
                  mino_prim(S, "bit-shift-left", prim_bit_shift_left));
     mino_env_set(S, env, "bit-shift-right",
                  mino_prim(S, "bit-shift-right", prim_bit_shift_right));
+    mino_env_set(S, env, "unsigned-bit-shift-right",
+                 mino_prim(S, "unsigned-bit-shift-right", prim_unsigned_bit_shift_right));
     mino_env_set(S, env, "car",      mino_prim(S, "car",      prim_car));
     mino_env_set(S, env, "cdr",      mino_prim(S, "cdr",      prim_cdr));
     mino_env_set(S, env, "cons",     mino_prim(S, "cons",     prim_cons));
