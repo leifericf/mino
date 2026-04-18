@@ -699,6 +699,12 @@
     `(let [~g ~expr]
        (when ~g (let [~sym ~g] ~@body)))))
 
+(defmacro when-first "Binds the first element of a collection, evaluates body if the collection is non-empty." [[x coll] & body]
+  `(when-let [s# (seq ~coll)]
+     (let [~x (first s#)] ~@body)))
+
+(defmacro comment "Ignores body, returns nil." [& body] nil)
+
 (defmacro if-some "Binds the result of expr, evaluates then if non-nil, else otherwise." [bindings then & else]
   (let [sym  (first bindings)
         expr (first (rest bindings))
