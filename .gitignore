@@ -72,5 +72,10 @@ examples/use-cases/plugins
 examples/use-cases/console
 examples/use-cases/game_scripting
 examples/use-cases/automation
+examples/bindings/embed_c
+examples/bindings/embed_cpp
+examples/bindings/*.class
+examples/bindings/*.dylib
+examples/bindings/*.so
 data/
 .clj-kondo/
