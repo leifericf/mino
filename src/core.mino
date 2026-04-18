@@ -76,7 +76,7 @@
 (def map?     (fn [x] (let [t (type x)] (or (= t :map) (= t :sorted-map)))))
 (def fn?      (fn [x] (= (type x) :fn)))
 (def set?     (fn [x] (let [t (type x)] (or (= t :set) (= t :sorted-set)))))
-(def ifn?     fn?)
+(def ifn?     (fn [x] (or (fn? x) (keyword? x) (map? x) (vector? x) (set? x))))
 
 ;; --- Qualified symbol/keyword predicates ---
 
