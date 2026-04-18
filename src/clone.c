@@ -357,11 +357,16 @@ static void sbuf_print(mino_state_t *S, sbuf_t *b, const mino_val_t *v)
     }
     case MINO_FLOAT: {
         char tmp[64];
-        int n = snprintf(tmp, sizeof(tmp), "%g", v->as.f);
-        int needs_dot = 1, k;
+        int n, needs_dot, k;
+        if (isnan(v->as.f)) { sbuf_puts(b, "##NaN"); return; }
+        if (isinf(v->as.f)) {
+            sbuf_puts(b, v->as.f > 0 ? "##Inf" : "##-Inf");
+            return;
+        }
+        n = snprintf(tmp, sizeof(tmp), "%g", v->as.f);
+        needs_dot = 1;
         for (k = 0; k < n; k++) {
-            if (tmp[k] == '.' || tmp[k] == 'e' || tmp[k] == 'E'
-                || tmp[k] == 'n' || tmp[k] == 'i') {
+            if (tmp[k] == '.' || tmp[k] == 'e' || tmp[k] == 'E') {
                 needs_dot = 0; break;
             }
         }

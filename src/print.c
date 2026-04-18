@@ -68,21 +68,22 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fprintf(out, "%lld", v->as.i);
         return;
     case MINO_FLOAT: {
+        char buf[64];
+        int n, needs_dot, i;
+        if (isnan(v->as.f)) { fputs("##NaN", out); return; }
+        if (isinf(v->as.f)) {
+            fputs(v->as.f > 0 ? "##Inf" : "##-Inf", out);
+            return;
+        }
         /*
          * Always include a decimal point so the printed form re-reads as a
          * float, not an int. %g may drop the dot for whole numbers.
          */
-        char buf[64];
-        int n = snprintf(buf, sizeof(buf), "%g", v->as.f);
-        int needs_dot = 1;
-        int i;
-        if (n < 0) {
-            fputs("nan", out);
-            return;
-        }
+        n = snprintf(buf, sizeof(buf), "%g", v->as.f);
+        needs_dot = 1;
+        if (n < 0) { fputs("0.0", out); return; }
         for (i = 0; i < n; i++) {
-            if (buf[i] == '.' || buf[i] == 'e' || buf[i] == 'E'
-                || buf[i] == 'n' || buf[i] == 'i') {
+            if (buf[i] == '.' || buf[i] == 'e' || buf[i] == 'E') {
                 needs_dot = 0;
                 break;
             }
