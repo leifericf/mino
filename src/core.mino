@@ -1184,17 +1184,31 @@
           (build clauses)))))
 
 (defmacro case "Dispatches on the value of expr. Matches constants in pairs, with an optional default." [expr & clauses]
-  (let [gexpr (gensym)]
+  (let [gexpr   (gensym)
+        quote-c (fn [c]
+                  (cond
+                    (nil? c)     nil
+                    (keyword? c) c
+                    (number? c)  c
+                    (string? c)  c
+                    (= c true)  true
+                    (= c false) false
+                    :else        (list 'quote c)))
+        match1  (fn [g c]
+                  (if (cons? c)
+                    ;; Multi-match list: (a b c) => (or (= g 'a) (= g 'b) ...)
+                    (apply list 'or (map (fn [v] (list '= g (quote-c v))) c))
+                    (list '= g (quote-c c))))
+        build   (fn [cls]
+                  (if (< (count cls) 2)
+                    (if (= (count cls) 1)
+                      (first cls)
+                      (list 'throw (list 'ex-info "no matching case" {})))
+                    (list 'if (match1 gexpr (first cls))
+                          (first (rest cls))
+                          (build (rest (rest cls))))))]
     `(let [~gexpr ~expr]
-       ~(let [build (fn [cls]
-                      (if (< (count cls) 2)
-                        (if (= (count cls) 1)
-                          (first cls)
-                          nil)
-                        `(if (= ~gexpr ~(first cls))
-                           ~(first (rest cls))
-                           ~(build (rest (rest cls))))))]
-          (build clauses)))))
+       ~(build clauses))))
 
 (defmacro for "List comprehension. Takes binding vectors and body, returns a lazy sequence." [bindings & body]
   (let [sym  (first bindings)
