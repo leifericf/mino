@@ -509,47 +509,114 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
     }
 
     /* Try numeric. */
-    {
+    if (len < sizeof(((struct { char b[64]; } *)0)->b)) {
         char buf[64];
         char *endp = NULL;
-        if (len < sizeof(buf)) {
-            int has_dot_or_exp = 0;
-            int looks_numeric = 1;
-            size_t i = 0;
-            size_t scan_start = 0;
-            memcpy(buf, start, len);
-            buf[len] = '\0';
-            if (buf[0] == '+' || buf[0] == '-') {
-                scan_start = 1;
-            }
-            if (scan_start == len) {
-                looks_numeric = 0;
-            }
+        size_t scan_start = 0;
+        size_t num_len = len;
+        int has_dot_or_exp = 0;
+        int looks_numeric = 1;
+        size_t i;
+        memcpy(buf, start, len);
+        buf[len] = '\0';
+
+        /* Sign prefix. */
+        if (buf[0] == '+' || buf[0] == '-') scan_start = 1;
+        if (scan_start == len) looks_numeric = 0;
+
+        /* Hex: 0x... or [+-]0x... */
+        if (looks_numeric && scan_start + 2 < len
+            && buf[scan_start] == '0'
+            && (buf[scan_start + 1] == 'x' || buf[scan_start + 1] == 'X')) {
+            long long n = strtoll(buf, &endp, 16);
+            if (endp == buf + len)
+                return mino_int(S, n);
+            looks_numeric = 0;
+        }
+
+        /* Ratio: digits/digits with optional sign prefix.
+         * Must not match namespace-qualified symbols (alpha/alpha). */
+        if (looks_numeric) {
+            const char *slash = NULL;
             for (i = scan_start; i < len; i++) {
-                char c = buf[i];
-                if (c == '.' || c == 'e' || c == 'E') {
-                    has_dot_or_exp = 1;
-                    if ((c == 'e' || c == 'E') && i + 1 < len &&
-                        (buf[i + 1] == '+' || buf[i + 1] == '-')) {
-                        i++;
+                if (buf[i] == '/') { slash = buf + i; break; }
+            }
+            if (slash != NULL && slash > buf + scan_start && slash < buf + len - 1) {
+                int all_digits = 1;
+                for (i = scan_start; i < (size_t)(slash - buf); i++) {
+                    if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
+                }
+                if (all_digits) {
+                    for (i = (size_t)(slash - buf) + 1; i < len; i++) {
+                        if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
                     }
-                } else if (!isdigit((unsigned char)c)) {
-                    looks_numeric = 0;
-                    break;
+                }
+                if (all_digits) {
+                    long long num = strtoll(buf, &endp, 10);
+                    long long den;
+                    (void)num;
+                    den = strtoll(slash + 1, &endp, 10);
+                    if (den == 0) {
+                        set_error(S, "divide by zero in ratio literal");
+                        return NULL;
+                    }
+                    num = strtoll(buf, &endp, 10);
+                    if (num % den == 0)
+                        return mino_int(S, num / den);
+                    return mino_float(S, (double)num / (double)den);
                 }
             }
-            if (looks_numeric) {
-                if (has_dot_or_exp) {
-                    double d = strtod(buf, &endp);
-                    if (endp == buf + len) {
-                        return mino_float(S, d);
-                    }
-                } else {
-                    long long n = strtoll(buf, &endp, 10);
-                    if (endp == buf + len) {
-                        return mino_int(S, n);
-                    }
+        }
+
+        /* Bigint N suffix: 42N -> 42 */
+        if (looks_numeric && len > 1 && buf[len - 1] == 'N') {
+            num_len = len - 1;
+            buf[num_len] = '\0';
+            {
+                long long n = strtoll(buf, &endp, 10);
+                if (endp == buf + num_len)
+                    return mino_int(S, n);
+            }
+            buf[num_len] = 'N';
+            num_len = len;
+        }
+
+        /* Bigdec M suffix: 1.5M -> 1.5 */
+        if (looks_numeric && len > 1 && buf[len - 1] == 'M') {
+            num_len = len - 1;
+            buf[num_len] = '\0';
+            {
+                double d = strtod(buf, &endp);
+                if (endp == buf + num_len)
+                    return mino_float(S, d);
+            }
+            buf[num_len] = 'M';
+            num_len = len;
+        }
+
+        /* Standard decimal. */
+        for (i = scan_start; i < len; i++) {
+            char c = buf[i];
+            if (c == '.' || c == 'e' || c == 'E') {
+                has_dot_or_exp = 1;
+                if ((c == 'e' || c == 'E') && i + 1 < len &&
+                    (buf[i + 1] == '+' || buf[i + 1] == '-')) {
+                    i++;
                 }
+            } else if (!isdigit((unsigned char)c)) {
+                looks_numeric = 0;
+                break;
+            }
+        }
+        if (looks_numeric) {
+            if (has_dot_or_exp) {
+                double d = strtod(buf, &endp);
+                if (endp == buf + len)
+                    return mino_float(S, d);
+            } else {
+                long long n = strtoll(buf, &endp, 10);
+                if (endp == buf + len)
+                    return mino_int(S, n);
             }
         }
     }
@@ -866,6 +933,24 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             return outer;
         }
     }
+    if (**p == '#' && *(*p + 1) == '#') {
+        /* Special float tokens: ##Inf, ##-Inf, ##NaN */
+        const char *start;
+        size_t tlen;
+        (*p) += 2;
+        start = *p;
+        tlen = 0;
+        while (!is_terminator((*p)[tlen])) tlen++;
+        *p += tlen;
+        if (tlen == 3 && memcmp(start, "Inf", 3) == 0)
+            return mino_float(S, INFINITY);
+        if (tlen == 4 && memcmp(start, "-Inf", 4) == 0)
+            return mino_float(S, -INFINITY);
+        if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
+            return mino_float(S, NAN);
+        set_error(S, "unknown tagged literal");
+        return NULL;
+    }
     if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) == '@') {
         set_error(S, "#?@ splice not allowed at top level");
         return NULL;
@@ -981,6 +1066,39 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             outer->as.cons.line = q_line;
             return outer;
         }
+    }
+    if (**p == '\\') {
+        /* Character literals: \space, \newline, \A, etc.
+         * Represented as single-character strings (CLJS-style). */
+        const char *start = *p + 1;
+        size_t tlen = 0;
+        char ch;
+        (*p)++;
+        if (**p == '\0') {
+            set_error(S, "unexpected end of input after \\");
+            return NULL;
+        }
+        while (!is_terminator(start[tlen])) tlen++;
+        *p = start + tlen;
+        if (tlen == 5 && memcmp(start, "space", 5) == 0) {
+            ch = ' ';
+        } else if (tlen == 7 && memcmp(start, "newline", 7) == 0) {
+            ch = '\n';
+        } else if (tlen == 3 && memcmp(start, "tab", 3) == 0) {
+            ch = '\t';
+        } else if (tlen == 6 && memcmp(start, "return", 6) == 0) {
+            ch = '\r';
+        } else if (tlen == 9 && memcmp(start, "backspace", 9) == 0) {
+            ch = '\b';
+        } else if (tlen == 8 && memcmp(start, "formfeed", 8) == 0) {
+            ch = '\f';
+        } else if (tlen == 1) {
+            ch = start[0];
+        } else {
+            set_error(S, "unknown character literal");
+            return NULL;
+        }
+        return mino_string_n(S, &ch, 1);
     }
     return read_atom(S, p);
 }
