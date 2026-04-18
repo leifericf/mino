@@ -3,17 +3,23 @@
 
 ;; --- Macros ---
 
-(defmacro when [c & body]
+(defmacro when
+  "Evaluates body when test is truthy. Returns nil otherwise."
+  [c & body]
   `(if ~c (do ~@body)))
 
-(defmacro cond [& clauses]
+(defmacro cond
+  "Takes pairs of test/expr. Returns the expr for the first truthy test."
+  [& clauses]
   (if (< (count clauses) 2)
     nil
     `(if ~(first clauses)
          ~(first (rest clauses))
          (cond ~@(rest (rest clauses))))))
 
-(defmacro and [& xs]
+(defmacro and
+  "Returns the first falsy value, or the last value if all are truthy."
+  [& xs]
   (if (= 0 (count xs))
     true
     (if (= 1 (count xs))
@@ -22,7 +28,9 @@
         `(let [~g ~(first xs)]
            (if ~g (and ~@(rest xs)) ~g))))))
 
-(defmacro or [& xs]
+(defmacro or
+  "Returns the first truthy value, or the last value if none are truthy."
+  [& xs]
   (if (= 0 (count xs))
     nil
     (if (= 1 (count xs))
@@ -31,7 +39,10 @@
         `(let [~g ~(first xs)]
            (if ~g ~g (or ~@(rest xs))))))))
 
-(defmacro -> [x & forms]
+(defmacro ->
+  "Thread-first. Inserts x as the second item in the first form, then
+  inserts the result as the second item in the next form, and so on."
+  [x & forms]
   (if (= 0 (count forms))
     x
     (let [step (first forms)]
@@ -39,7 +50,10 @@
         `(-> (~(first step) ~x ~@(rest step)) ~@(rest forms))
         `(-> (~step ~x) ~@(rest forms))))))
 
-(defmacro ->> [x & forms]
+(defmacro ->>
+  "Thread-last. Inserts x as the last item in the first form, then
+  inserts the result as the last item in the next form, and so on."
+  [x & forms]
   (if (= 0 (count forms))
     x
     (let [step (first forms)]
@@ -49,49 +63,49 @@
 
 ;; --- Logic and utilities ---
 
-(def not      (fn [x] (if x false true)))
-(def not=     (fn
+(def not      "Returns true if x is logical false, false otherwise." (fn [x] (if x false true)))
+(def not=     "Returns true if the arguments are not equal." (fn
                 ([x] false)
                 ([x y] (not (= x y)))
                 ([x y & more] (not (apply = x y more)))))
-(def identity (fn [x] x))
-(def list     (fn [& args] args))
-(def empty?   (fn [coll] (= (count coll) 0)))
+(def identity "Returns its argument." (fn [x] x))
+(def list     "Creates a list of the given arguments." (fn [& args] args))
+(def empty?   "Returns true if coll has no items." (fn [coll] (= (count coll) 0)))
 
 ;; --- Comparison (chained, built on <) ---
 
-(def >  (fn [a b & more] (if (< b a)  (if (nil? more) true (apply >  b more)) false)))
-(def <= (fn [a b & more] (if (< b a)  false (if (nil? more) true (apply <= b more)))))
-(def >= (fn [a b & more] (if (< a b)  false (if (nil? more) true (apply >= b more)))))
+(def >  "Returns true if nums are in monotonically decreasing order." (fn [a b & more] (if (< b a)  (if (nil? more) true (apply >  b more)) false)))
+(def <= "Returns true if nums are in monotonically non-decreasing order." (fn [a b & more] (if (< b a)  false (if (nil? more) true (apply <= b more)))))
+(def >= "Returns true if nums are in monotonically non-increasing order." (fn [a b & more] (if (< a b)  false (if (nil? more) true (apply >= b more)))))
 
 ;; --- Type predicates (built on type) ---
 
-(def nil?     (fn [x] (= (type x) :nil)))
-(def cons?    (fn [x] (= (type x) :list)))
-(def string?  (fn [x] (= (type x) :string)))
-(def number?  (fn [x] (let [t (type x)] (or (= t :int) (= t :float)))))
-(def keyword? (fn [x] (= (type x) :keyword)))
-(def symbol?  (fn [x] (= (type x) :symbol)))
-(def vector?  (fn [x] (= (type x) :vector)))
-(def map?     (fn [x] (let [t (type x)] (or (= t :map) (= t :sorted-map)))))
-(def fn?      (fn [x] (= (type x) :fn)))
-(def set?     (fn [x] (let [t (type x)] (or (= t :set) (= t :sorted-set)))))
-(def ifn?     (fn [x] (or (fn? x) (keyword? x) (map? x) (vector? x) (set? x))))
+(def nil?     "Returns true if x is nil." (fn [x] (= (type x) :nil)))
+(def cons?    "Returns true if x is a list." (fn [x] (= (type x) :list)))
+(def string?  "Returns true if x is a string." (fn [x] (= (type x) :string)))
+(def number?  "Returns true if x is a number (int or float)." (fn [x] (let [t (type x)] (or (= t :int) (= t :float)))))
+(def keyword? "Returns true if x is a keyword." (fn [x] (= (type x) :keyword)))
+(def symbol?  "Returns true if x is a symbol." (fn [x] (= (type x) :symbol)))
+(def vector?  "Returns true if x is a vector." (fn [x] (= (type x) :vector)))
+(def map?     "Returns true if x is a map." (fn [x] (let [t (type x)] (or (= t :map) (= t :sorted-map)))))
+(def fn?      "Returns true if x is a function." (fn [x] (= (type x) :fn)))
+(def set?     "Returns true if x is a set." (fn [x] (let [t (type x)] (or (= t :set) (= t :sorted-set)))))
+(def ifn?     "Returns true if x can be called as a function." (fn [x] (or (fn? x) (keyword? x) (map? x) (vector? x) (set? x))))
 
 ;; --- Qualified symbol/keyword predicates ---
 
-(def qualified-symbol?  (fn [x] (and (symbol? x) (some? (namespace x)))))
-(def simple-symbol?     (fn [x] (and (symbol? x) (nil? (namespace x)))))
-(def qualified-keyword? (fn [x] (and (keyword? x) (some? (namespace x)))))
-(def simple-keyword?    (fn [x] (and (keyword? x) (nil? (namespace x)))))
+(def qualified-symbol?  "Returns true if x is a namespace-qualified symbol." (fn [x] (and (symbol? x) (some? (namespace x)))))
+(def simple-symbol?     "Returns true if x is a symbol with no namespace." (fn [x] (and (symbol? x) (nil? (namespace x)))))
+(def qualified-keyword? "Returns true if x is a namespace-qualified keyword." (fn [x] (and (keyword? x) (some? (namespace x)))))
+(def simple-keyword?    "Returns true if x is a keyword with no namespace." (fn [x] (and (keyword? x) (nil? (namespace x)))))
 
 ;; --- Atoms ---
 
-(def swap! (fn [a f & args] (reset! a (apply f (deref a) args))))
+(def swap! "Atomically applies f to the current value of atom a and any args." (fn [a f & args] (reset! a (apply f (deref a) args))))
 
 ;; --- Definitions ---
 
-(defmacro defn [name & fdecl]
+(defmacro defn "Defines a named function. Supports docstrings and multi-arity." [name & fdecl]
   (let [has-doc  (string? (first fdecl))
         doc      (if has-doc (first fdecl) nil)
         fdecl    (if has-doc (rest fdecl) fdecl)
@@ -124,7 +138,7 @@
         (cons (apply f (map1_ first ss))
               (map-n_ f (map1_ rest ss))))))))
 
-(def map (fn
+(def map "Returns a lazy sequence of applying f to each item in coll. When called with multiple collections, maps f across them in parallel. When called with no collection, returns a transducer." (fn
   ([f]
    (fn [rf]
      (fn ([] (rf))
@@ -135,7 +149,7 @@
      (map1_ f (first colls))
      (map-n_ f colls)))))
 
-(def filter (fn
+(def filter "Returns a lazy sequence of items in coll for which pred returns truthy. When called with no collection, returns a transducer." (fn
   ([pred]
    (fn [rf]
      (fn ([] (rf))
@@ -152,7 +166,7 @@
            (cons (first s) (filter pred (rest s)))
            (filter pred (rest s)))))))))
 
-(def take (fn
+(def take "Returns a lazy sequence of the first n items in coll. When called with no collection, returns a transducer." (fn
   ([n]
    (fn [rf]
      (let [remaining (atom n)]
@@ -174,7 +188,7 @@
          (when s
            (cons (first s) (take (- n 1) (rest s))))))))))
 
-(def drop (fn
+(def drop "Returns a lazy sequence of all but the first n items in coll. When called with no collection, returns a transducer." (fn
   ([n]
    (fn [rf]
      (let [remaining (atom n)]
@@ -192,7 +206,7 @@
          (drop (- n 1) (rest s))
          nil))))))
 
-(def concat (fn [& colls]
+(def concat "Returns a lazy sequence of the concatenation of the given collections." (fn [& colls]
   (lazy-seq
     (when (seq colls)
       (let [s (seq (first colls))]
@@ -200,7 +214,7 @@
           (cons (first s) (apply concat (cons (rest s) (rest colls))))
           (apply concat (rest colls))))))))
 
-(def range
+(def range "Returns a lazy sequence of nums from start (inclusive) to end (exclusive), by step. With no args, returns an infinite sequence from 0."
   (let [range-impl (fn [start end step]
          (lazy-seq
            (when (if (> step 0) (< start end) (> start end))
@@ -216,7 +230,7 @@
           (= n 3) (range-impl (first args) (first (rest args)) (first (rest (rest args))))
           true     nil)))))
 
-(def repeat (fn
+(def repeat "Returns a lazy sequence of xs. With two args, returns n repetitions of x." (fn
   ([x]
    (lazy-seq (cons x (repeat x))))
   ([n x]
@@ -226,17 +240,17 @@
 
 ;; --- Collection utilities ---
 
-(def update (fn [m k f & args]
+(def update "Updates the value at key k in map m by applying f to the old value and any args." (fn [m k f & args]
   (assoc m k (apply f (get m k) args))))
 
 ;; --- Utility functions ---
 
-(def some (fn [pred coll]
+(def some "Returns the first truthy value of (pred x) for any x in coll, else nil." (fn [pred coll]
   (when (not (empty? coll))
     (or (pred (first coll))
         (some pred (rest coll))))))
 
-(def every? (fn [pred coll]
+(def every? "Returns true if (pred x) is truthy for every x in coll." (fn [pred coll]
   (if (empty? coll)
     true
     (if (pred (first coll))
@@ -245,63 +259,63 @@
 
 ;; --- Higher-order functions ---
 
-(def comp (fn [& fns]
+(def comp "Returns a function that is the composition of the given functions." (fn [& fns]
   (if (empty? fns)
     identity
     (if (empty? (rest fns))
       (first fns)
       (let [comp2 (fn comp2 [f g] (fn [& args] (f (apply g args))))]
         (reduce comp2 fns))))))
-(def partial (fn [f & bound] (fn [& args] (apply f (concat bound args)))))
-(def complement (fn [f] (fn [& args] (not (apply f args)))))
+(def partial "Returns a function that applies f with the given arguments prepended." (fn [f & bound] (fn [& args] (apply f (concat bound args)))))
+(def complement "Returns a function that returns the logical opposite of f." (fn [f] (fn [& args] (not (apply f args)))))
 
 ;; --- Trivial compositions ---
 
-(def second     (fn [coll] (first (rest coll))))
-(def ffirst     (fn [coll] (first (first coll))))
-(def inc        (fn [x] (+ x 1)))
-(def dec        (fn [x] (- x 1)))
-(def zero?      (fn [x] (when (not (number? x)) (throw "zero? requires a number")) (= x 0)))
-(def ==         (fn
+(def second     "Returns the second item in coll." (fn [coll] (first (rest coll))))
+(def ffirst     "Returns the first item of the first item in coll." (fn [coll] (first (first coll))))
+(def inc        "Returns x plus 1." (fn [x] (+ x 1)))
+(def dec        "Returns x minus 1." (fn [x] (- x 1)))
+(def zero?      "Returns true if x is zero." (fn [x] (when (not (number? x)) (throw "zero? requires a number")) (= x 0)))
+(def ==         "Returns true if nums are numerically equal, treating ints and floats uniformly." (fn
                   ([x] true)
                   ([x y] (= (+ 0.0 x) (+ 0.0 y)))
                   ([x y & more]
                     (if (== x y)
                       (apply == y more)
                       false))))
-(def pos?       (fn [x] (> x 0)))
-(def neg?       (fn [x] (< x 0)))
-(def even?      (fn [x] (when (not (int? x)) (throw "even? requires an integer")) (= (mod x 2) 0)))
-(def odd?       (fn [x] (when (not (int? x)) (throw "odd? requires an integer")) (not (= (mod x 2) 0))))
-(def abs        (fn [x] (if (< x 0) (- x) x)))
-(def max        (fn
+(def pos?       "Returns true if x is greater than zero." (fn [x] (> x 0)))
+(def neg?       "Returns true if x is less than zero." (fn [x] (< x 0)))
+(def even?      "Returns true if x is even." (fn [x] (when (not (int? x)) (throw "even? requires an integer")) (= (mod x 2) 0)))
+(def odd?       "Returns true if x is odd." (fn [x] (when (not (int? x)) (throw "odd? requires an integer")) (not (= (mod x 2) 0))))
+(def abs        "Returns the absolute value of x." (fn [x] (if (< x 0) (- x) x)))
+(def max        "Returns the greatest of the given values." (fn
                   ([a] a)
                   ([a b] (if (> a b) a b))
                   ([a b & more] (reduce max (max a b) more))))
-(def min        (fn
+(def min        "Returns the least of the given values." (fn
                   ([a] a)
                   ([a b] (if (< a b) a b))
                   ([a b & more] (reduce min (min a b) more))))
-(def min-key    (fn
+(def min-key    "Returns the x for which (k x) is least." (fn
                   ([k x] x)
                   ([k x y] (if (< (k x) (k y)) x y))
                   ([k x y & more]
                     (reduce (fn [best v] (min-key k best v))
                             (min-key k x y) more))))
-(def max-key    (fn
+(def max-key    "Returns the x for which (k x) is greatest." (fn
                   ([k x] x)
                   ([k x y] (if (> (k x) (k y)) x y))
                   ([k x y & more]
                     (reduce (fn [best v] (max-key k best v))
                             (max-key k x y) more))))
-(def not-empty  (fn [coll] (if (seq coll) coll nil)))
-(def constantly (fn [x] (fn [& _] x)))
-(def boolean    (fn [x] (if x true false)))
-(def seq?       (fn [x] (or (cons? x) (= (type x) :lazy-seq))))
+(def not-empty  "Returns coll if it has items, nil otherwise." (fn [coll] (if (seq coll) coll nil)))
+(def constantly "Returns a function that always returns x." (fn [x] (fn [& _] x)))
+(def boolean    "Coerces x to a boolean value." (fn [x] (if x true false)))
+(def seq?       "Returns true if x is a seq (list or lazy-seq)." (fn [x] (or (cons? x) (= (type x) :lazy-seq))))
 
 ;; --- Collection utilities ---
 
-(def merge (fn [& maps]
+(def merge "Returns a map that is the merge of the given maps." (fn [& maps]
   (when (some identity maps)
     (reduce (fn [acc m]
       (if m
@@ -310,14 +324,14 @@
         acc))
       nil maps))))
 
-(def select-keys (fn [m ks]
+(def select-keys "Returns a map containing only the entries whose keys are in ks." (fn [m ks]
   (reduce (fn [acc k]
     (if (contains? m k)
       (assoc acc k (get m k))
       acc))
     (with-meta {} (meta m)) ks)))
 
-(def zipmap
+(def zipmap "Returns a map with keys mapped to corresponding vals."
   (let [zm-impl (fn [acc ks vs]
          (if (and (seq ks) (seq vs))
            (zm-impl (assoc acc (first ks) (first vs))
@@ -325,12 +339,12 @@
            acc))]
     (fn [ks vs] (zm-impl {} ks vs))))
 
-(def frequencies (fn [coll]
+(def frequencies "Returns a map from distinct items in coll to the number of times they appear." (fn [coll]
   (reduce (fn [acc x]
     (update acc x (fn [n] (+ (if n n 0) 1))))
     {} coll)))
 
-(def group-by (fn [f coll]
+(def group-by "Returns a map of the items in coll grouped by the result of f." (fn [f coll]
   (reduce (fn [acc x]
     (let [k (f x)]
       (update acc k (fn [v] (conj (if v v []) x)))))
@@ -338,10 +352,10 @@
 
 ;; --- More higher-order ---
 
-(def juxt (fn [& fs]
+(def juxt "Returns a function that returns a vector of applying each f to its args." (fn [& fs]
   (fn [& args] (vec (map (fn [f] (apply f args)) fs)))))
 
-(def mapcat (fn
+(def mapcat "Returns the result of applying concat to the result of mapping f over coll. When called with no collection, returns a transducer." (fn
   ([f] (comp (map f) cat))
   ([f coll]
    (let [cat-lazy (fn cat-lazy [s]
@@ -361,7 +375,7 @@
 
 ;; --- Lazy combinators ---
 
-(def take-while (fn
+(def take-while "Returns a lazy sequence of items from coll while pred returns truthy. When called with no collection, returns a transducer." (fn
   ([pred]
    (fn [rf]
      (fn ([] (rf))
@@ -376,7 +390,7 @@
        (when (and s (pred (first s)))
          (cons (first s) (take-while pred (rest s)))))))))
 
-(def drop-while (fn
+(def drop-while "Returns a lazy sequence of items from coll after pred returns falsy. When called with no collection, returns a transducer." (fn
   ([pred]
    (fn [rf]
      (let [dropping (atom true)]
@@ -393,7 +407,7 @@
        (drop-while pred (rest s))
        s)))))
 
-(def take-nth (fn
+(def take-nth "Returns a lazy sequence of every nth item in coll. When called with no collection, returns a transducer." (fn
   ([n]
    (fn [rf]
      (let [i (atom -1)]
@@ -410,15 +424,15 @@
        (when s
          (cons (first s) (take-nth n (drop n s)))))))))
 
-(defmacro lazy-cat [& colls]
+(defmacro lazy-cat "Expands to code that yields a lazy concatenation of the given collections." [& colls]
   (if (seq colls)
     `(lazy-seq (concat ~(first colls) (lazy-cat ~@(rest colls))))
     `(lazy-seq nil)))
 
-(def iterate (fn [f x]
+(def iterate "Returns a lazy sequence of x, (f x), (f (f x)), and so on." (fn [f x]
   (lazy-seq (cons x (iterate f (f x))))))
 
-(def cycle
+(def cycle "Returns a lazy infinite sequence of repetitions of the items in coll."
   (let [cycle-impl (fn [orig coll]
          (lazy-seq
            (let [s (seq coll)]
@@ -428,11 +442,11 @@
                  (cycle-impl orig orig))))))]
     (fn [coll] (cycle-impl coll coll))))
 
-(def repeatedly (fn
+(def repeatedly "Returns a lazy sequence of calls to f. With two args, returns n calls." (fn
   ([f]   (lazy-seq (cons (f) (repeatedly f))))
   ([n f] (take n (repeatedly f)))))
 
-(def interleave
+(def interleave "Returns a lazy sequence of the first item in each collection, then the second, and so on."
   (let [interleave2 (fn [c1 c2]
          (lazy-seq
            (let [s1 (seq c1) s2 (seq c2)]
@@ -450,7 +464,7 @@
              (concat (map first ss)
                      (apply interleave (map rest ss))))))))))
 
-(def interpose (fn
+(def interpose "Returns a lazy sequence of the items in coll separated by sep. When called with no collection, returns a transducer." (fn
   ([sep]
    (fn [rf]
      (let [started (atom false)]
@@ -469,7 +483,7 @@
          (cons (first s)
            (mapcat (fn [x] (list sep x)) (rest s)))))))))
 
-(def distinct (fn
+(def distinct "Returns a lazy sequence of the distinct items in coll. When called with no collection, returns a transducer." (fn
   ([]
    (fn [rf]
      (let [seen (atom #{})]
@@ -491,7 +505,7 @@
                                 (cons x (dist-impl (conj seen x) (rest s)))))))))]
      (dist-impl #{} coll)))))
 
-(def partition
+(def partition "Returns a lazy sequence of lists of n items each, at offsets step apart."
   (let [part-impl (fn [n step coll]
          (lazy-seq
            (when-let [s (seq coll)]
@@ -502,7 +516,7 @@
       ([n coll] (part-impl n n coll))
       ([n step coll] (part-impl n step coll)))))
 
-(def partition-by (fn
+(def partition-by "Splits coll into lazy sequences of consecutive items with the same (f item) value. When called with no collection, returns a transducer." (fn
   ([f]
    (fn [rf]
      (let [buf (atom [])
@@ -535,65 +549,65 @@
 
 ;; --- Forcing ---
 
-(def doall (fn [coll]
+(def doall "Forces realization of a lazy sequence. Returns coll." (fn [coll]
   (let [walk (fn [s] (when (seq s) (walk (rest s))))]
     (walk coll)
     coll)))
 
-(def dorun (fn [coll]
+(def dorun "Forces realization of a lazy sequence. Returns nil." (fn [coll]
   (let [walk (fn [s] (when (seq s) (walk (rest s))))]
     (walk coll)
     nil)))
 
 ;; --- Type predicates and trivial compositions ---
 
-(def true?     (fn [x] (= x true)))
-(def false?    (fn [x] (= x false)))
-(def boolean?  (fn [x] (or (= x true) (= x false))))
-(def int?      (fn [x] (= (type x) :int)))
-(def integer?  int?)
-(def float?    (fn [x] (= (type x) :float)))
-(def pos-int?  (fn [x] (and (int? x) (pos? x))))
-(def neg-int?  (fn [x] (and (int? x) (neg? x))))
-(def nat-int?  (fn [x] (and (int? x) (not (neg? x)))))
-(def double?   float?)
-(def char?     (fn [x] (= (type x) :char)))
-(def ratio?    (fn [x] false))
-(def decimal?  (fn [x] false))
-(def rational? (fn [x] (int? x)))
-(def long      int)
-(def double    float)
-(def num       (fn [x] (if (number? x) x (throw "num expects a number"))))
-(def coll?     (fn [x] (or (seq? x) (vector? x) (map? x) (set? x))))
-(def some?     (fn [x] (not (nil? x))))
-(def list?     cons?)
-(def atom?     (fn [x] (= (type x) :atom)))
-(def not-any?  (fn [pred coll] (not (some pred coll))))
-(def not-every? (fn [pred coll] (not (every? pred coll))))
-(def distinct? (fn [& xs]
+(def true?     "Returns true if x is the value true." (fn [x] (= x true)))
+(def false?    "Returns true if x is the value false." (fn [x] (= x false)))
+(def boolean?  "Returns true if x is true or false." (fn [x] (or (= x true) (= x false))))
+(def int?      "Returns true if x is an integer." (fn [x] (= (type x) :int)))
+(def integer?  "Returns true if x is an integer." int?)
+(def float?    "Returns true if x is a float." (fn [x] (= (type x) :float)))
+(def pos-int?  "Returns true if x is a positive integer." (fn [x] (and (int? x) (pos? x))))
+(def neg-int?  "Returns true if x is a negative integer." (fn [x] (and (int? x) (neg? x))))
+(def nat-int?  "Returns true if x is a non-negative integer." (fn [x] (and (int? x) (not (neg? x)))))
+(def double?   "Returns true if x is a float." float?)
+(def char?     "Returns true if x is a character." (fn [x] (= (type x) :char)))
+(def ratio?    "Returns false. Ratios are not supported." (fn [x] false))
+(def decimal?  "Returns false. Decimals are not supported." (fn [x] false))
+(def rational? "Returns true if x is rational (integer)." (fn [x] (int? x)))
+(def long      "Coerces x to an integer." int)
+(def double    "Coerces x to a float." float)
+(def num       "Returns x if it is a number, otherwise throws." (fn [x] (if (number? x) x (throw "num expects a number"))))
+(def coll?     "Returns true if x is a collection." (fn [x] (or (seq? x) (vector? x) (map? x) (set? x))))
+(def some?     "Returns true if x is not nil." (fn [x] (not (nil? x))))
+(def list?     "Returns true if x is a list." cons?)
+(def atom?     "Returns true if x is an atom." (fn [x] (= (type x) :atom)))
+(def not-any?  "Returns true if (pred x) is falsy for every x in coll." (fn [pred coll] (not (some pred coll))))
+(def not-every? "Returns true if (pred x) is falsy for at least one x in coll." (fn [pred coll] (not (every? pred coll))))
+(def distinct? "Returns true if no two of the arguments are equal." (fn [& xs]
   (if (empty? xs)
     true
     (let [s (set xs)]
       (= (count s) (count xs))))))
-(def array-map    hash-map)
-(def sorted?      (fn [x] (let [t (type x)] (or (= t :sorted-map) (= t :sorted-set)))))
-(def associative?  (fn [x] (let [t (type x)] (or (= t :map) (= t :vector) (= t :sorted-map)))))
-(def reversible?   (fn [x] (= (type x) :vector)))
-(def any?          (fn [x] true))
-(def seqable?      (fn [x] (or (nil? x) (coll? x) (string? x))))
-(def indexed?      (fn [x] (vector? x)))
+(def array-map    "Creates a hash-map." hash-map)
+(def sorted?      "Returns true if x is a sorted collection." (fn [x] (let [t (type x)] (or (= t :sorted-map) (= t :sorted-set)))))
+(def associative?  "Returns true if x supports assoc (maps and vectors)." (fn [x] (let [t (type x)] (or (= t :map) (= t :vector) (= t :sorted-map)))))
+(def reversible?   "Returns true if x supports rseq (vectors)." (fn [x] (= (type x) :vector)))
+(def any?          "Returns true for any argument." (fn [x] true))
+(def seqable?      "Returns true if (seq x) is supported." (fn [x] (or (nil? x) (coll? x) (string? x))))
+(def indexed?      "Returns true if x supports nth in constant time (vectors)." (fn [x] (vector? x)))
 
 ;; --- Volatile (lightweight mutable box, backed by atom) ---
 
-(def volatile!   (fn [val] (atom val)))
-(def volatile?   atom?)
-(def vreset!     reset!)
-(def vswap!      swap!)
+(def volatile!   "Creates a volatile with the given initial value." (fn [val] (atom val)))
+(def volatile?   "Returns true if x is a volatile." atom?)
+(def vreset!     "Sets the value of a volatile to val." reset!)
+(def vswap!      "Applies f to the current value of a volatile and any args." swap!)
 
 ;; --- Delay (lazy thunk) ---
 
-(def delay?      (fn [x] (and (map? x) (contains? x :delay/fn))))
-(defmacro delay [& body]
+(def delay?      "Returns true if x is a delay." (fn [x] (and (map? x) (contains? x :delay/fn))))
+(defmacro delay "Creates a delay that evaluates body on first deref." [& body]
   `(let [state# (atom {:status :pending})]
      {:delay/fn  (fn []
                    (let [s# @state#]
@@ -603,11 +617,11 @@
                          (reset! state# {:status :done :value v#})
                          v#))))
       :delay/state state#}))
-(def deref-delay (fn [d] ((:delay/fn d))))
-(def force       (fn [x] (if (delay? x) (deref-delay x) x)))
+(def deref-delay "Forces evaluation of a delay and returns its value." (fn [d] ((:delay/fn d))))
+(def force       "Forces evaluation of a delay. If x is not a delay, returns x." (fn [x] (if (delay? x) (deref-delay x) x)))
 ;; Override C realized? to also handle delays
 (let [c-realized? realized?]
-  (def realized? (fn [x]
+  (def realized? "Returns true if a delay or lazy sequence has been realized." (fn [x]
     (cond
       (nil? x)   (throw "realized? requires a non-nil argument")
       (delay? x) (= :done (:status @(:delay/state x)))
@@ -615,22 +629,22 @@
 
 ;; --- Sequence navigation ---
 
-(def next      (fn [coll] (seq (rest coll))))
-(def nfirst    (fn [coll] (next (first coll))))
-(def fnext     (fn [coll] (first (next coll))))
-(def nnext     (fn [coll] (next (next coll))))
+(def next      "Returns a seq of the items after the first. Returns nil if no more items." (fn [coll] (seq (rest coll))))
+(def nfirst    "Same as (next (first coll))." (fn [coll] (next (first coll))))
+(def fnext     "Same as (first (next coll))." (fn [coll] (first (next coll))))
+(def nnext     "Same as (next (next coll))." (fn [coll] (next (next coll))))
 
 ;; --- Map entry accessors ---
 
-(def key       (fn [entry] (first entry)))
-(def val       (fn [entry] (second entry)))
+(def key       "Returns the key of a map entry." (fn [entry] (first entry)))
+(def val       "Returns the value of a map entry." (fn [entry] (second entry)))
 
-(def counted?   (fn [x]
+(def counted?   "Returns true if (count x) is a constant-time operation." (fn [x]
   (let [t (type x)]
     (or (= t :vector) (= t :map) (= t :set) (= t :string)
         (= t :sorted-map) (= t :sorted-set)))))
 
-(def bounded-count (fn [n coll]
+(def bounded-count "Returns the count of coll, but stops counting at n." (fn [n coll]
   (if (counted? coll)
     (count coll)
     (loop [i 0 s (seq coll)]
@@ -640,16 +654,16 @@
 
 ;; --- Collection conversions ---
 
-(def remove (fn
+(def remove "Returns a lazy sequence of items in coll for which pred returns falsy. When called with no collection, returns a transducer." (fn
   ([pred] (filter (complement pred)))
   ([pred coll] (filter (complement pred) coll))))
-(def vec       (fn [coll] (into [] coll)))
+(def vec       "Converts coll into a vector." (fn [coll] (into [] coll)))
 
 ;; --- Random utilities ---
 
-(def rand-int  (fn [n] (int (* (rand) n))))
-(def rand-nth  (fn [coll] (nth coll (rand-int (count coll)))))
-(def random-sample (fn
+(def rand-int  "Returns a random integer between 0 (inclusive) and n (exclusive)." (fn [n] (int (* (rand) n))))
+(def rand-nth  "Returns a random element from coll." (fn [coll] (nth coll (rand-int (count coll)))))
+(def random-sample "Returns items from coll with probability prob. When called with no collection, returns a transducer." (fn
   ([prob]
    (filter (fn [_] (< (rand) prob))))
   ([prob coll]
@@ -657,22 +671,22 @@
 
 ;; --- Side-effecting traversal ---
 
-(def run!      (fn [f coll]
+(def run!      "Applies f to each item in coll for side effects. Returns nil." (fn [f coll]
   (let [go (fn [s] (when (seq s) (f (first s)) (go (rest s))))]
     (go coll)
     nil)))
 
 ;; --- Control flow macros ---
 
-(defmacro if-not [test then & else]
+(defmacro if-not "Evaluates then when test is falsy, else otherwise." [test then & else]
   (if (seq else)
     `(if (not ~test) ~then ~(first else))
     `(if (not ~test) ~then)))
 
-(defmacro when-not [test & body]
+(defmacro when-not "Evaluates body when test is falsy." [test & body]
   `(when (not ~test) ~@body))
 
-(defmacro if-let [bindings then & else]
+(defmacro if-let "Binds the result of expr, evaluates then if truthy, else otherwise." [bindings then & else]
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]
@@ -682,14 +696,14 @@
       `(let [~g ~expr]
          (if ~g (let [~sym ~g] ~then))))))
 
-(defmacro when-let [bindings & body]
+(defmacro when-let "Binds the result of expr, evaluates body if truthy." [bindings & body]
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]
     `(let [~g ~expr]
        (when ~g (let [~sym ~g] ~@body)))))
 
-(defmacro if-some [bindings then & else]
+(defmacro if-some "Binds the result of expr, evaluates then if non-nil, else otherwise." [bindings then & else]
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]
@@ -699,7 +713,7 @@
       `(let [~g ~expr]
          (if (not (nil? ~g)) (let [~sym ~g] ~then))))))
 
-(defmacro when-some [bindings & body]
+(defmacro when-some "Binds the result of expr, evaluates body if non-nil." [bindings & body]
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]
@@ -708,24 +722,24 @@
 
 ;; --- Sequence functions ---
 
-(def last (fn [coll]
+(def last "Returns the last item in coll." (fn [coll]
   (let [s (seq coll)]
     (if (next s)
       (last (next s))
       (first s)))))
 
-(def butlast (fn [coll]
+(def butlast "Returns a seq of all but the last item in coll." (fn [coll]
   (let [s (seq coll)]
     (when (next s)
       (cons (first s) (butlast (next s)))))))
 
-(def nthrest (fn [coll n]
+(def nthrest "Returns the result of calling rest n times on coll." (fn [coll n]
   (if (<= n 0) coll (nthrest (rest coll) (- n 1)))))
 
-(def nthnext (fn [coll n]
+(def nthnext "Returns the result of calling next n times on coll." (fn [coll n]
   (if (<= n 0) (seq coll) (nthnext (next coll) (- n 1)))))
 
-(def take-last (fn [n coll]
+(def take-last "Returns a seq of the last n items in coll." (fn [n coll]
   (let [lead (drop n coll)
         step (fn [s lead]
                (if (seq lead)
@@ -733,27 +747,27 @@
                  s))]
     (step (seq coll) (seq lead)))))
 
-(def drop-last (fn
+(def drop-last "Returns a lazy sequence of all but the last n items in coll." (fn
   ([coll]   (drop-last 1 coll))
   ([n coll] (map (fn [x _] x) coll (drop n coll)))))
 
-(def split-at (fn [n coll]
+(def split-at "Returns a vector of [(take n coll) (drop n coll)]." (fn [n coll]
   (vector (take n coll) (drop n coll))))
 
-(def split-with (fn [pred coll]
+(def split-with "Returns a vector of [(take-while pred coll) (drop-while pred coll)]." (fn [pred coll]
   (vector (take-while pred coll) (drop-while pred coll))))
 
-(def mapv    (fn [f coll] (into [] (map f coll))))
-(def filterv (fn [pred coll] (into [] (filter pred coll))))
+(def mapv    "Returns a vector of applying f to each item in coll." (fn [f coll] (into [] (map f coll))))
+(def filterv "Returns a vector of items in coll for which pred returns truthy." (fn [pred coll] (into [] (filter pred coll))))
 
-(def sort-by (fn [keyfn & args]
+(def sort-by "Returns a sorted sequence of the items in coll, ordered by (keyfn item)." (fn [keyfn & args]
   (let [cmp  (if (= (count args) 2) (first args) compare)
         coll (last args)]
     (sort (fn [a b] (cmp (keyfn a) (keyfn b))) coll))))
 
 ;; --- Collection utilities ---
 
-(def get-in
+(def get-in "Returns the value in a nested associative structure at the given key path."
   (let [step (fn step [m ks nf sentinel]
                (if ks
                  (let [v (get m (first ks) sentinel)]
@@ -765,19 +779,19 @@
       ([m ks]     (reduce get m ks))
       ([m ks nf]  (step m (seq ks) nf (gensym))))))
 
-(def assoc-in (fn [m ks v]
+(def assoc-in "Associates a value in a nested associative structure at the given key path." (fn [m ks v]
   (let [k (first ks)]
     (if (next ks)
       (assoc m k (assoc-in (get m k) (rest ks) v))
       (assoc m k v)))))
 
-(def update-in (fn [m ks f & args]
+(def update-in "Updates a value in a nested associative structure by applying f at the given key path." (fn [m ks f & args]
   (let [k (first ks)]
     (if (next ks)
       (assoc m k (apply update-in (get m k) (rest ks) f args))
       (assoc m k (apply f (get m k) args))))))
 
-(def merge-with (fn [f & maps]
+(def merge-with "Returns a map that is the merge of the given maps, using f to combine values at shared keys." (fn [f & maps]
   (when (some identity maps)
     (reduce (fn [acc m]
       (if m
@@ -791,44 +805,44 @@
         acc))
       nil maps))))
 
-(def reduce-kv (fn [f init m]
+(def reduce-kv "Reduces a map with f taking accumulator, key, and value." (fn [f init m]
   (reduce (fn [acc kv] (f acc (first kv) (second kv)))
           init (seq m))))
 
-(def update-vals (fn [m f]
+(def update-vals "Returns a map with f applied to each value." (fn [m f]
   (reduce-kv (fn [acc k v] (assoc acc k (f v))) {} m)))
 
-(def update-keys (fn [m f]
+(def update-keys "Returns a map with f applied to each key." (fn [m f]
   (reduce-kv (fn [acc k v] (assoc acc (f k) v)) {} m)))
 
-(def replace (fn [smap coll]
+(def replace "Returns a collection with items in coll replaced by entries in smap." (fn [smap coll]
   (let [f (fn [x] (if-let [e (find smap x)] (val e) x))]
     (if (vector? coll)
       (with-meta (mapv f coll) (meta coll))
       (map f coll)))))
 
-(def str-replace (fn [s match replacement]
+(def str-replace "Replaces all occurrences of match in s with replacement." (fn [s match replacement]
   (join replacement (split s match))))
 
 ;; --- Bitwise compositions ---
 
-(def bit-and-not (fn [x y] (bit-and x (bit-not y))))
-(def bit-test    (fn [x n] (not (= 0 (bit-and x (bit-shift-left 1 n))))))
-(def bit-set     (fn [x n] (bit-or x (bit-shift-left 1 n))))
-(def bit-clear   (fn [x n] (bit-and x (bit-not (bit-shift-left 1 n)))))
-(def bit-flip    (fn [x n] (bit-xor x (bit-shift-left 1 n))))
+(def bit-and-not "Returns the bitwise AND of x and the complement of y." (fn [x y] (bit-and x (bit-not y))))
+(def bit-test    "Returns true if bit n of x is set." (fn [x n] (not (= 0 (bit-and x (bit-shift-left 1 n))))))
+(def bit-set     "Returns x with bit n set." (fn [x n] (bit-or x (bit-shift-left 1 n))))
+(def bit-clear   "Returns x with bit n cleared." (fn [x n] (bit-and x (bit-not (bit-shift-left 1 n)))))
+(def bit-flip    "Returns x with bit n flipped." (fn [x n] (bit-xor x (bit-shift-left 1 n))))
 
 ;; --- Misc utilities ---
 
-(def blank? (fn [s]
+(def blank? "Returns true if s is nil or contains only whitespace." (fn [s]
   (or (nil? s) (= (trim s) ""))))
 
-(def comparator (fn [pred]
+(def comparator "Returns a comparator function from a two-arg predicate." (fn [pred]
   (fn [a b] (cond (pred a b) -1 (pred b a) 1 true 0))))
 
 ;; --- Lazy combinators ---
 
-(def keep (fn
+(def keep "Returns a lazy sequence of non-nil results of (f item). When called with no collection, returns a transducer." (fn
   ([f]
    (fn [rf]
      (fn ([] (rf))
@@ -847,7 +861,7 @@
              (keep f (rest s))
              (cons v (keep f (rest s)))))))))))
 
-(def keep-indexed (fn [f coll]
+(def keep-indexed "Returns a lazy sequence of non-nil results of (f index item)." (fn [f coll]
   (let [step (fn [i s]
                (lazy-seq
                  (when (seq s)
@@ -857,7 +871,7 @@
                        (cons v (step (inc i) (rest s))))))))]
     (step 0 coll))))
 
-(def map-indexed (fn
+(def map-indexed "Returns a lazy sequence of (f index item) for each item in coll. When called with no collection, returns a transducer." (fn
   ([f]
    (fn [rf]
      (let [i (atom -1)]
@@ -873,7 +887,7 @@
                           (step (inc i) (rest s))))))]
      (step 0 coll)))))
 
-(def partition-all
+(def partition-all "Like partition, but includes a final partial group if items remain."
   (let [pa-impl (fn [n step coll]
          (lazy-seq
            (let [s (seq coll)]
@@ -900,7 +914,7 @@
       ([n coll] (pa-impl n n coll))
       ([n step coll] (pa-impl n step coll)))))
 
-(def reductions (fn [f & args]
+(def reductions "Returns a lazy sequence of the intermediate values of a reduction." (fn [f & args]
   (let [init (if (= (count args) 2) (first args) (first (first args)))
         coll (if (= (count args) 2) (second args) (rest (first args)))
         step (fn [acc s]
@@ -910,7 +924,7 @@
                      (cons v (step v (rest s)))))))]
     (cons init (step init coll)))))
 
-(def dedupe (fn
+(def dedupe "Returns a lazy sequence removing consecutive duplicates. When called with no collection, returns a transducer." (fn
   ([]
    (fn [rf]
      (let [prev (atom ::none)]
@@ -935,15 +949,15 @@
 
 ;; --- Higher-order combinators ---
 
-(def every-pred (fn [& preds]
+(def every-pred "Returns a function that returns true when all preds are satisfied by all its arguments." (fn [& preds]
   (fn [& args]
     (every? (fn [p] (every? p args)) preds))))
 
-(def some-fn (fn [& preds]
+(def some-fn "Returns a function that returns the first truthy value from any pred applied to any argument." (fn [& preds]
   (fn [& args]
     (some (fn [p] (some p args)) preds))))
 
-(def fnil (fn
+(def fnil "Returns a function like f, but replaces nil arguments with the given defaults." (fn
   ([f d1]
    (fn [x & args]
      (apply f (if (nil? x) d1 x) args)))
@@ -954,7 +968,7 @@
    (fn [x y z & args]
      (apply f (if (nil? x) d1 x) (if (nil? y) d2 y) (if (nil? z) d3 z) args)))))
 
-(def memoize (fn [f]
+(def memoize "Returns a memoized version of f that caches return values by arguments." (fn [f]
   (let [cache (atom {})]
     (fn [& args]
       (let [e (find (deref cache) args)]
@@ -964,20 +978,20 @@
             (swap! cache assoc args v)
             v)))))))
 
-(def trampoline (fn [f & args]
+(def trampoline "Calls f with args, then repeatedly calls the result if it is a function." (fn [f & args]
   (let [result (apply f args)
         bounce (fn [r] (if (fn? r) (bounce (r)) r))]
     (bounce result))))
 
 ;; --- Threading macros ---
 
-(defmacro as-> [expr sym & forms]
+(defmacro as-> "Binds expr to sym, then threads it through each form where sym can appear anywhere." [expr sym & forms]
   (if (= 0 (count forms))
     expr
     `(let [~sym ~expr]
        (as-> ~(first forms) ~sym ~@(rest forms)))))
 
-(defmacro cond-> [expr & clauses]
+(defmacro cond-> "Thread-first through forms whose tests are truthy." [expr & clauses]
   (if (< (count clauses) 2)
     expr
     (let [g    (gensym)
@@ -991,7 +1005,7 @@
                    ~g)
                  ~@(rest (rest clauses)))))))
 
-(defmacro cond->> [expr & clauses]
+(defmacro cond->> "Thread-last through forms whose tests are truthy." [expr & clauses]
   (if (< (count clauses) 2)
     expr
     (let [g    (gensym)
@@ -1005,7 +1019,7 @@
                     ~g)
                   ~@(rest (rest clauses)))))))
 
-(defmacro some-> [expr & forms]
+(defmacro some-> "Thread-first through forms, short-circuiting on nil." [expr & forms]
   (if (= 0 (count forms))
     expr
     (let [g (gensym)]
@@ -1014,7 +1028,7 @@
            nil
            (some-> (-> ~g ~(first forms)) ~@(rest forms)))))))
 
-(defmacro some->> [expr & forms]
+(defmacro some->> "Thread-last through forms, short-circuiting on nil." [expr & forms]
   (if (= 0 (count forms))
     expr
     (let [g (gensym)]
@@ -1025,7 +1039,7 @@
 
 ;; --- Iteration macros ---
 
-(defmacro doto [x & forms]
+(defmacro doto "Evaluates x, then calls each form with x as the first argument. Returns x." [x & forms]
   (let [g       (gensym)
         stmts   (apply list (map (fn [f] (if (cons? f)
                                             `(~(first f) ~g ~@(rest f))
@@ -1035,7 +1049,7 @@
        ~@stmts
        ~g)))
 
-(defmacro dotimes [bindings & body]
+(defmacro dotimes "Evaluates body n times with sym bound to 0 through n-1." [bindings & body]
   (let [sym (first bindings)
         n   (first (rest bindings))
         gn  (gensym)
@@ -1047,12 +1061,12 @@
                    (~go (inc ~sym))))]
        (~go 0))))
 
-(defmacro while [test & body]
+(defmacro while "Repeatedly evaluates body while test is truthy." [test & body]
   (let [go (gensym)]
     `(let [~go (fn [] (when ~test ~@body (~go)))]
        (~go))))
 
-(defmacro doseq [bindings & body]
+(defmacro doseq "Iterates over collections for side effects. Supports nested bindings." [bindings & body]
   (if (<= (count bindings) 2)
     ;; Single binding: (doseq [x coll] body...)
     (let [sym  (first bindings)
@@ -1080,7 +1094,7 @@
 
 ;; --- Shuffle (Fisher-Yates) ---
 
-(def shuffle (fn [coll]
+(def shuffle "Returns a randomly shuffled vector of the items in coll." (fn [coll]
   (when (not (coll? coll)) (throw "shuffle requires a collection"))
   (let [v   (vec coll)
         n   (count v)
@@ -1094,7 +1108,7 @@
 
 ;; --- Timing ---
 
-(defmacro time [& body]
+(defmacro time "Evaluates body, prints elapsed time, and returns the result." [& body]
   (let [start  (gensym)
         result (gensym)]
     `(let [~start  (time-ms)
@@ -1104,14 +1118,14 @@
 
 ;; --- Tree walking ---
 
-(def sequential? (fn [x]
+(def sequential? "Returns true if x is a sequential collection (list, vector, or lazy-seq)." (fn [x]
   (or (cons? x) (vector? x) (seq? x))))
 
-(def flatten (fn [x]
+(def flatten "Returns a lazy sequence of the non-sequential items from a nested structure." (fn [x]
   (filter (complement sequential?)
           (rest (tree-seq sequential? seq x)))))
 
-(def tree-seq (fn [branch? children root]
+(def tree-seq "Returns a lazy depth-first sequence of nodes in a tree." (fn [branch? children root]
   (let [walk (fn [node]
                (lazy-seq
                  (cons node
@@ -1119,7 +1133,7 @@
                      (mapcat walk (children node))))))]
     (walk root))))
 
-(def walk (fn [inner outer form]
+(def walk "Traverses form, applying inner to each element and outer to the result." (fn [inner outer form]
   (cond
     (cons?   form) (outer (apply list (map inner form)))
     (vector? form) (outer (mapv inner form))
@@ -1127,20 +1141,20 @@
     (set?    form) (outer (into (empty form) (map inner form)))
     true           (outer form))))
 
-(def postwalk  (fn [f form] (walk (fn [x] (postwalk f x)) f form)))
-(def prewalk   (fn [f form] (walk (fn [x] (prewalk f x)) identity (f form))))
+(def postwalk  "Walks form depth-first, applying f to each sub-form after its children." (fn [f form] (walk (fn [x] (postwalk f x)) f form)))
+(def prewalk   "Walks form depth-first, applying f to each sub-form before its children." (fn [f form] (walk (fn [x] (prewalk f x)) identity (f form))))
 
-(def postwalk-replace (fn [smap form]
+(def postwalk-replace "Replaces items in form that appear as keys in smap, walking bottom-up." (fn [smap form]
   (postwalk (fn [x] (if (contains? smap x) (get smap x) x)) form)))
 
-(def prewalk-replace (fn [smap form]
+(def prewalk-replace "Replaces items in form that appear as keys in smap, walking top-down." (fn [smap form]
   (prewalk (fn [x] (if (contains? smap x) (get smap x) x)) form)))
 
 ;; --- Regex ---
 
-(def re-pattern identity)
+(def re-pattern "Returns pattern unchanged. Provided for compatibility." identity)
 
-(def re-seq
+(def re-seq "Returns a lazy sequence of all matches of pattern in string s."
   (let [find-index (fn [s sub i]
                      (if (> (+ i (count sub)) (count s))
                        nil
@@ -1157,7 +1171,7 @@
 
 ;; --- Complex macros ---
 
-(defmacro condp [pred expr & clauses]
+(defmacro condp "Takes a binary predicate, an expression, and clauses. Returns the first clause value where (pred test-val expr) is truthy." [pred expr & clauses]
   (let [gexpr (gensym)]
     `(let [~gexpr ~expr]
        ~(let [build (fn [cls]
@@ -1173,7 +1187,7 @@
                              ~(build more)))))]
           (build clauses)))))
 
-(defmacro case [expr & clauses]
+(defmacro case "Dispatches on the value of expr. Matches constants in pairs, with an optional default." [expr & clauses]
   (let [gexpr (gensym)]
     `(let [~gexpr ~expr]
        ~(let [build (fn [cls]
@@ -1186,7 +1200,7 @@
                            ~(build (rest (rest cls))))))]
           (build clauses)))))
 
-(defmacro for [bindings & body]
+(defmacro for "List comprehension. Takes binding vectors and body, returns a lazy sequence." [bindings & body]
   (let [sym  (first bindings)
         coll (first (rest bindings))
         rest-bindings (drop 2 bindings)]
@@ -1297,12 +1311,12 @@
   [ex]
   (when (map? ex) (:message ex)))
 
-(def agent atom)
+(def agent "Creates an agent wrapping the given initial value." atom)
 
-(defn send-to [ag f & args]
+(defn send-to "Applies f to the agent's current value and any args, updating the agent." [ag f & args]
   (apply swap! ag f args))
 
-(defn agent-error [ag] nil)
+(defn agent-error "Returns the error of the agent, or nil if none." [ag] nil)
 
 ;; ---------------------------------------------------------------------------
 ;; Actors: isolated runtimes with mailbox communication.
@@ -1348,7 +1362,7 @@
           (throw (ex-info (str "No implementation of " mname " for type " (name t))
                           {:method mname :type t})))))))
 
-(defmacro defprotocol [proto-name & methods]
+(defmacro defprotocol "Defines a protocol with the given method signatures." [proto-name & methods]
   (let [pname (name proto-name)
         method-info (into [] (map (fn [m]
                            (let [mname (first m)
@@ -1376,7 +1390,7 @@
         all-forms (concat atom-defs fn-defs (list proto-def))]
     (apply list 'do all-forms)))
 
-(defmacro extend-type [type-kw proto & methods]
+(defmacro extend-type "Extends a protocol with method implementations for the given type." [type-kw proto & methods]
   (let [pname (name proto)
         swaps (into [] (map (fn [m]
              (let [mname (first m)
@@ -1399,14 +1413,14 @@
                  [item])
           (recur (rest remaining) groups (conj current item)))))))
 
-(defmacro extend-protocol [proto & specs]
+(defmacro extend-protocol "Extends a protocol with implementations for multiple types." [proto & specs]
   (let [groups (partition-protocol-specs_ specs)
         forms (into [] (map (fn [group]
                 (apply list 'extend-type (first group) proto (rest group)))
               groups))]
     (apply list 'do forms)))
 
-(defn satisfies? [proto x]
+(defn satisfies? "Returns true if x's type has implementations for all methods of proto." [proto x]
   (let [t (type x)
         methods (vals (:methods proto))]
     (every? (fn [dispatch-atom]
@@ -1430,7 +1444,7 @@
 
 (def global-hierarchy_ (atom {:parents {} :ancestors {} :descendants {}}))
 
-(defn make-hierarchy [] {:parents {} :ancestors {} :descendants {}})
+(defn make-hierarchy "Returns an empty hierarchy." [] {:parents {} :ancestors {} :descendants {}})
 
 (defn tc-ancestors_ [parents-map node]
   (loop [frontier (get parents-map node #{})
@@ -1459,7 +1473,7 @@
                                 {} all-nodes)]
     (assoc h :ancestors ancestors-map :descendants descendants-map)))
 
-(defn derive
+(defn derive "Establishes a parent/child relationship between child and parent in a hierarchy."
   ([child parent]
    (swap! global-hierarchy_ derive child parent)
    @global-hierarchy_)
@@ -1472,7 +1486,7 @@
                              (fn [s] (conj (or s #{}) parent)))]
      (recompute-hierarchy_ (assoc h :parents new-parents)))))
 
-(defn underive
+(defn underive "Removes a parent/child relationship between child and parent."
   ([child parent]
    (swap! global-hierarchy_ underive child parent)
    @global-hierarchy_)
@@ -1486,25 +1500,25 @@
          (recompute-hierarchy_ (assoc h :parents new-parents)))
        h))))
 
-(defn parents
+(defn parents "Returns the immediate parents of tag in the hierarchy."
   ([tag] (parents @global-hierarchy_ tag))
   ([h tag]
    (let [p (get (:parents h) tag)]
      (if (and p (not (empty? p))) p nil))))
 
-(defn ancestors
+(defn ancestors "Returns all ancestors of tag in the hierarchy."
   ([tag] (ancestors @global-hierarchy_ tag))
   ([h tag]
    (let [a (get (:ancestors h) tag)]
      (if (and a (not (empty? a))) a nil))))
 
-(defn descendants
+(defn descendants "Returns all descendants of tag in the hierarchy."
   ([tag] (descendants @global-hierarchy_ tag))
   ([h tag]
    (let [d (get (:descendants h) tag)]
      (if (and d (not (empty? d))) d nil))))
 
-(defn isa?
+(defn isa? "Returns true if child is equal to or derives from parent."
   ([child parent] (isa? @global-hierarchy_ child parent))
   ([h child parent]
    (or (= child parent)
@@ -1513,7 +1527,7 @@
             (= (count child) (count parent))
             (every? identity (map (fn [c p] (isa? h c p)) child parent))))))
 
-(defmacro with-open [bindings & body]
+(defmacro with-open "Binds resources, evaluates body, then closes each resource." [bindings & body]
   (if (empty? bindings)
     `(do ~@body)
     (let [name (first bindings)
@@ -1533,7 +1547,7 @@
 ;; Use (transduce xf f coll) or (into to xf from) to apply.
 ;; ---------------------------------------------------------------------------
 
-(def cat
+(def cat "A transducer that concatenates the contents of each input."
   (fn [rf]
     (fn ([] (rf))
         ([result] (rf result))
@@ -1543,20 +1557,20 @@
                      (if (reduced? ret) (reduced ret) ret)))
                  result input)))))
 
-(defn completing
+(defn completing "Returns a reducing function with a completion step."
   ([f] (completing f identity))
   ([f cf]
    (fn ([] (f))
        ([result] (cf result))
        ([result input] (f result input)))))
 
-(def unreduced (fn [x]
+(def unreduced "Unwraps a reduced value. If not reduced, returns x." (fn [x]
   (if (reduced? x) (unreduced @x) x)))
 
-(def ensure-reduced (fn [x]
+(def ensure-reduced "Wraps x in reduced if it is not already reduced." (fn [x]
   (if (reduced? x) x (reduced x))))
 
-(defn transduce
+(defn transduce "Reduces coll using the transducer xf applied to the reducing function f."
   ([xf f coll]
    (transduce xf f (f) coll))
   ([xf f init coll]
@@ -1565,11 +1579,11 @@
      (xrf (unreduced result)))))
 
 (def into_ into)
-(def into (fn
+(def into "Adds all items from from into to. With a transducer, transforms items first." (fn
   ([to from] (into_ to from))
   ([to xf from] (transduce xf conj to from))))
 
-(defn sequence [xf coll]
+(defn sequence "Returns a lazy sequence of applying transducer xf to coll." [xf coll]
   (let [acc   (atom [])
         xrf   (xf (fn
                      ([] nil)
@@ -1598,7 +1612,7 @@
                    (when (seq items) (seq items))))))))
      coll)))
 
-(def halt-when (fn
+(def halt-when "Returns a transducer that halts reduction when pred is satisfied." (fn
   ([pred] (halt-when pred nil))
   ([pred retf]
    (fn [rf]
@@ -1613,13 +1627,13 @@
                       (if retf (retf (rf result) input) input)})
             (rf result input))))))))
 
-(defn eduction [& args]
+(defn eduction "Returns a lazy sequence of applying the given transducers to coll." [& args]
   (let [coll (last args)
         xfs  (butlast args)]
     (if (= 1 (count xfs))
       (sequence (first xfs) coll)
       (sequence (apply comp xfs) coll))))
 
-(defmacro spawn [& body]
+(defmacro spawn "Creates a new actor that evaluates body in its own runtime." [& body]
   (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]
     `(spawn* ~src)))
