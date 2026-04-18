@@ -767,6 +767,10 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         rb_to_list(S, coll->as.sorted.root, &head, &tail);
         return head;
     }
+    if (coll->type == MINO_VECTOR && coll->as.vec.len == 0) return mino_nil(S);
+    if (coll->type == MINO_SET    && coll->as.set.len == 0) return mino_nil(S);
+    if (coll->type == MINO_SORTED_SET)                      return mino_nil(S);
+    if (coll->type == MINO_STRING && coll->as.s.len == 0) return mino_nil(S);
     if (coll->type != MINO_MAP) {
         return prim_throw_error(S, "keys: argument must be a map");
     }
@@ -811,6 +815,10 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return head;
     }
+    if (coll->type == MINO_VECTOR && coll->as.vec.len == 0) return mino_nil(S);
+    if (coll->type == MINO_SET    && coll->as.set.len == 0) return mino_nil(S);
+    if (coll->type == MINO_SORTED_SET)                      return mino_nil(S);
+    if (coll->type == MINO_STRING && coll->as.s.len == 0)   return mino_nil(S);
     if (coll->type != MINO_MAP) {
         return prim_throw_error(S, "vals: argument must be a map");
     }
