@@ -5,10 +5,10 @@ covering `clojure.core` functions).
 
 ## Current Metrics
 
-- **97 / 222** test files pass cleanly (44%)
-- **170 / 222** test files run to completion (77%)
-- **2489 / 2760** assertions pass on runnable files (90%)
-- **1030 assertions** in the curated regression runner (100% pass)
+- **114 / 222** test files pass cleanly (51%)
+- **181 / 222** test files run to completion (82%)
+- **2602 / 2850** assertions pass on runnable files (91%)
+- Curated regression runner covers all cleanly passing files (100% pass)
 
 Run `make test-external` to execute the curated regression runner.
 

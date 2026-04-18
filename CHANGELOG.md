@@ -6,6 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.34.0] — Conformance hardening phase 2
+
+### Added
+- Radix integer literals (`2r1010`, `8r77`, `16rFF`, bases 2-36).
+- Tagged literal handling (`#tag form`) for unknown reader dispatch
+  macros, enabling `.cljc` files with platform-specific tags.
+- `array-map` alias for `hash-map`.
+- `rseq` support for sorted maps and sets.
+
+### Changed
+- `str` prints `Infinity`/`-Infinity`/`NaN` for special floats
+  (was `inf`/`-inf`/`nan`).
+- `even?`/`odd?` throw on non-integer arguments.
+- `zero?` throws on non-number arguments.
+- `NaN?`/`infinite?` throw on nil.
+- `namespace` throws on nil argument.
+- `realized?` throws on nil.
+- `contains?` on strings throws for non-integer keys.
+- `shuffle` validates collection argument.
+- `mapcat` supports multiple collection arguments.
+
 ## [0.33.0] — Conformance hardening
 
 ### Added
