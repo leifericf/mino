@@ -319,6 +319,8 @@ static void gc_mark_val(mino_state_t *S, mino_val_t *v)
         break;
     case MINO_ATOM:
         gc_mark_interior(S, v->as.atom.val);
+        gc_mark_interior(S, v->as.atom.watches);
+        gc_mark_interior(S, v->as.atom.validator);
         break;
     case MINO_LAZY:
         if (v->as.lazy.realized) {

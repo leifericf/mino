@@ -112,6 +112,8 @@ struct mino_val {
         } handle;
         struct {          /* MINO_ATOM: mutable reference cell */
             mino_val_t *val;
+            mino_val_t *watches;    /* MINO_MAP: key -> callback fn, or NULL */
+            mino_val_t *validator;  /* fn or NULL */
         } atom;
         struct {          /* MINO_LAZY: deferred sequence */
             mino_val_t *body;     /* unevaluated form list (NULL after force) */
