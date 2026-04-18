@@ -322,7 +322,7 @@ found_ns:
         return var != NULL ? var : mino_nil(S);
     }
 
-    /* Unqualified: try current ns, then "user", then scan all. */
+    /* Unqualified: try current ns, then "user", then scan all vars. */
     {
         mino_val_t *var = var_find(S, S->current_ns, buf);
         if (var == NULL) var = var_find(S, "user", buf);
@@ -334,7 +334,18 @@ found_ns:
                 }
             }
         }
-        return var != NULL ? var : mino_nil(S);
+        if (var != NULL) return var;
+        /* Fallback: check root env for C primitives (no var object). */
+        {
+            mino_val_t *val = mino_env_get(env, buf);
+            if (val != NULL) {
+                /* Auto-create a var for this binding. */
+                var = var_intern(S, "mino.core", buf);
+                var_set_root(S, var, val);
+                return var;
+            }
+        }
+        return mino_nil(S);
     }
 }
 
