@@ -97,8 +97,13 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
         }
         return head;
     }
-    /* Unsupported types: just return as-is (cons cell will be a dotted pair) */
-    return v;
+    /* Unsupported types: throw */
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "seq: cannot coerce %s to a sequence", type_tag_str(v));
+        return prim_throw_error(S, msg);
+    }
 }
 
 mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
