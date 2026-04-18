@@ -62,5 +62,7 @@ examples/state_switch_test
 examples/integration_test
 examples/fault_inject_test
 examples/regex_thread_test
+examples/interop_test
+examples/event_processing
 data/
 .clj-kondo/
