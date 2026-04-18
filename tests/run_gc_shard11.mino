@@ -10,4 +10,5 @@
 (require "tests/collections_semantics_test")
 (require "tests/stateful_test")
 (require "tests/hierarchy_test")
+(require "tests/clojure_string_test")
 (run-tests)
