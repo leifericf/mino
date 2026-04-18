@@ -571,6 +571,8 @@
 (def associative?  (fn [x] (let [t (type x)] (or (= t :map) (= t :vector) (= t :sorted-map)))))
 (def reversible?   (fn [x] (= (type x) :vector)))
 (def any?          (fn [x] true))
+(def seqable?      (fn [x] (or (nil? x) (coll? x) (string? x))))
+(def indexed?      (fn [x] (vector? x)))
 
 ;; --- Sequence navigation ---
 
