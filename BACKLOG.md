@@ -41,12 +41,42 @@ through mino's eval (C has no unwinding). C++ primitives must wrap in
 try/catch. A thin `mino.hpp` header with RAII wrappers for
 `mino_env_t*` and pinned values would help C++ adoption. ~100 lines.
 
+## Conformance
+
+### Integer overflow detection
+
+`(+ Long/MAX_VALUE 1)` wraps silently per C semantics. Should throw
+an arithmetic overflow exception. Requires pre-operation overflow
+checks in `prim_add`, `prim_sub`, `prim_mul`. ~40 lines. Affects 4
+external test files.
+
+### Arbitrary-precision numbers
+
+Ratio, BigInt, and BigDecimal types parse but convert to int/float.
+Proper implementation requires either an external library (GMP,
+libtommath) or a custom implementation. Significant effort. Affects
+~30 external test files (~90 assertions).
+
+### Character type
+
+Character literals (`\A`, `\space`) are represented as
+single-character strings. A proper `MINO_CHAR` value type would make
+`char?` return true, `string?` return false, and `pr-str` print `\A`
+instead of `"A"`. Affects ~10 external test files.
+
+### `sorted-map-by` / `sorted-set-by`
+
+Custom comparator sorted collections. Infrastructure exists in
+rbtree. Need new C primitives that accept a comparison function.
+~30 lines. Affects 2 external test files.
+
+### `case` macro bare symbol matching
+
+`(case x sym :result)` should match against the symbol `sym` as a
+literal value, not evaluate it. Current macro implementation
+evaluates the test values.
+
 ## Data Structures (Deferred)
-
-### Array map
-
-Small-map optimization (linear scan for maps under ~8 entries).
-mino's HAMT is already fast for small maps, so the payoff is minimal.
 
 ### Transients
 
