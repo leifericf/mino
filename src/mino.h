@@ -77,7 +77,9 @@ struct mino_val {
             mino_vec_node_t *tail;     /* partial leaf, 1..32 slots used */
             unsigned         tail_len; /* number of valid slots in tail */
             unsigned         shift;    /* height of root in multiples of 5 */
-            size_t           len;      /* total element count */
+            size_t           len;      /* visible element count */
+            size_t           offset;   /* first visible element (0 unless subvec) */
+            size_t           blen;     /* backing total (len+offset when no nesting) */
         } vec;
         struct {          /* MINO_MAP: HAMT keyed by hash(key) */
             mino_hamt_node_t *root;      /* HAMT root (NULL when len == 0) */

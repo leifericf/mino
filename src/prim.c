@@ -317,6 +317,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "find",     mino_prim(S, "find",     prim_find));
     mino_env_set(S, env, "empty",    mino_prim(S, "empty",    prim_empty));
     mino_env_set(S, env, "rseq",     mino_prim(S, "rseq",     prim_rseq));
+    mino_env_set(S, env, "subvec",   mino_prim(S, "subvec",   prim_subvec));
     mino_env_set(S, env, "sorted-map", mino_prim(S, "sorted-map", prim_sorted_map));
     mino_env_set(S, env, "sorted-set", mino_prim(S, "sorted-set", prim_sorted_set));
     /* string operations */

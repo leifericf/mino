@@ -431,6 +431,8 @@ mino_val_t *vec_conj1(mino_state_t *S, const mino_val_t *v,
 mino_val_t *vec_assoc1(mino_state_t *S, const mino_val_t *v, size_t i,
                        mino_val_t *item);                         /* GC-owned */
 mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v);       /* GC-owned */
+mino_val_t *vec_subvec(mino_state_t *S, const mino_val_t *v,
+                       size_t start, size_t end);                 /* GC-owned */
 mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items,
                            size_t len);                           /* GC-owned */
 
