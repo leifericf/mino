@@ -17,6 +17,14 @@
 
 /* ---- CWD-relative module resolver ---- */
 
+static int file_exists(const char *path)
+{
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) return 0;
+    fclose(f);
+    return 1;
+}
+
 static const char *cwd_resolve(const char *name, void *ctx)
 {
     static char path_buf[4096];
@@ -24,16 +32,33 @@ static const char *cwd_resolve(const char *name, void *ctx)
     (void)ctx;
     if (name == NULL) return NULL;
     nlen = strlen(name);
-    /* If name already ends with ".mino", use as-is; otherwise append. */
-    if (nlen >= 5 && strcmp(name + nlen - 5, ".mino") == 0) {
-        if (nlen >= sizeof(path_buf)) return NULL;
+    if (nlen + 10 >= sizeof(path_buf)) return NULL;
+
+    /* If name already has an extension, use as-is. */
+    if (nlen >= 5 && (strcmp(name + nlen - 5, ".mino") == 0
+                   || strcmp(name + nlen - 5, ".cljc") == 0)) {
         memcpy(path_buf, name, nlen + 1);
-    } else {
-        if (nlen + 5 >= sizeof(path_buf)) return NULL;
-        memcpy(path_buf, name, nlen);
-        memcpy(path_buf + nlen, ".mino", 6);
+        if (file_exists(path_buf)) return path_buf;
+        /* Try lib/ prefix. */
+        snprintf(path_buf, sizeof(path_buf), "lib/%s", name);
+        if (file_exists(path_buf)) return path_buf;
+        return NULL;
     }
-    return path_buf;
+
+    /* Try: name.mino, lib/name.mino, name.cljc, lib/name.cljc */
+    snprintf(path_buf, sizeof(path_buf), "%s.mino", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    snprintf(path_buf, sizeof(path_buf), "lib/%s.mino", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    snprintf(path_buf, sizeof(path_buf), "%s.cljc", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    snprintf(path_buf, sizeof(path_buf), "lib/%s.cljc", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    return NULL;
 }
 
 /* ---- helpers ---- */
