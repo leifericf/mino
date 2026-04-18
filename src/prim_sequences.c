@@ -811,9 +811,35 @@ mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_error(S, "rseq requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return prim_throw_error(S, "rseq: argument must not be nil");
+    }
+    if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
+        /* Reverse of sorted collection — build reverse cons list from
+         * the in-order key list. */
+        mino_val_t *keys = mino_nil(S);
+        mino_val_t *kt   = NULL;
+        rb_to_list(S, coll->as.sorted.root, &keys, &kt);
+        out = mino_nil(S);
+        if (coll->type == MINO_SORTED_MAP) {
+            while (mino_is_cons(keys)) {
+                mino_val_t *k = keys->as.cons.car;
+                mino_val_t *v = rb_get(S, coll->as.sorted.root, k,
+                                       coll->as.sorted.comparator);
+                mino_val_t *kv[2]; kv[0] = k; kv[1] = v;
+                out = mino_cons(S, mino_vector(S, kv, 2), out);
+                keys = keys->as.cons.cdr;
+            }
+        } else {
+            while (mino_is_cons(keys)) {
+                out = mino_cons(S, keys->as.cons.car, out);
+                keys = keys->as.cons.cdr;
+            }
+        }
+        return out;
+    }
     if (coll->type != MINO_VECTOR) {
-        return prim_throw_error(S, "rseq: argument must be a vector");
+        return prim_throw_error(S, "rseq: argument must be a vector or sorted collection");
     }
     if (coll->as.vec.len == 0) return mino_nil(S);
     out = mino_nil(S);

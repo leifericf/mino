@@ -338,7 +338,7 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL) {
-        return mino_nil(S);
+        return prim_throw_error(S, "namespace: argument must not be nil");
     }
     if (v->type != MINO_SYMBOL && v->type != MINO_KEYWORD) {
         return prim_throw_error(S, "namespace: expected a symbol or keyword");

@@ -901,13 +901,17 @@ mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_false(S);
     }
     if (coll->type == MINO_STRING) {
-        /* For strings, key is an index. */
-        if (key != NULL && key->type == MINO_INT) {
+        /* For strings, key must be an integer index. */
+        if (key == NULL || key->type == MINO_NIL)
+            return prim_throw_error(S,
+                "contains?: string key must be an integer");
+        if (key->type == MINO_INT) {
             long long idx = key->as.i;
             return (idx >= 0 && (size_t)idx < coll->as.s.len)
                 ? mino_true(S) : mino_false(S);
         }
-        return mino_false(S);
+        return prim_throw_error(S,
+            "contains?: string key must be an integer");
     }
     {
         char msg[96];

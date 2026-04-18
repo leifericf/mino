@@ -609,6 +609,7 @@
 (let [c-realized? realized?]
   (def realized? (fn [x]
     (cond
+      (nil? x)   (throw "realized? requires a non-nil argument")
       (delay? x) (= :done (:status @(:delay/state x)))
       :else      (c-realized? x)))))
 
@@ -1080,6 +1081,7 @@
 ;; --- Shuffle (Fisher-Yates) ---
 
 (def shuffle (fn [coll]
+  (when (not (coll? coll)) (throw "shuffle requires a collection"))
   (let [v   (vec coll)
         n   (count v)
         step (fn [v i]
