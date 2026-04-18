@@ -223,7 +223,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 8 - Hierarchies + Dispatch Essentials
+## ~~Step 8 - Hierarchies + Dispatch Essentials~~ (multimethods deferred to BACKLOG)
 
 ### Smaller steps
 - Implement hierarchy construction and update APIs (`make-hierarchy`, `derive`, `underive`).
