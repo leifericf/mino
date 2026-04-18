@@ -84,6 +84,9 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
         }
         return head;
     }
+    if (v->type == MINO_SORTED_MAP || v->type == MINO_SORTED_SET) {
+        return sorted_seq(S, v);
+    }
     if (v->type == MINO_STRING) {
         if (v->as.s.len == 0) return mino_nil(S);
         head = mino_nil(S);
