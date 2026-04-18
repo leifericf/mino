@@ -95,13 +95,6 @@ with lower/upper bounds on the rbtree. ~80 lines.
 Efficient O(1) vector slice sharing the underlying trie. Needs a C
 primitive that creates a view with offset and length. ~60 lines.
 
-### `parse-long` / `parse-double`
-
-String-to-number parsing that returns `nil` on failure instead of
-throwing. The current `int` and `float` C primitives produce fatal
-errors on bad input. Need new C primitives with nil-return semantics.
-~30 lines each.
-
 ### `pr` / `print` / `newline`
 
 Output without trailing newline. `println` and `prn` always append a

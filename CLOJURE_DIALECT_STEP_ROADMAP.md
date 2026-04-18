@@ -139,7 +139,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 5 - Numeric Tower Behavior
+## ~~Step 5 - Numeric Tower Behavior~~
 
 ### Smaller steps
 - Define canonical numeric coercion matrix across int/float/ratio/bigint/bigdec.

@@ -6,6 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.27.0] — Numeric tower behavior
+
+### Added
+- **`unsigned-bit-shift-right`**: C primitive for unsigned (logical)
+  right shift, casting to unsigned before shifting.
+- **`parse-long`**: parses a string to an integer, returns nil on
+  failure instead of throwing.
+- **`parse-double`**: parses a string to a float, returns nil on
+  failure. Accepts `"Infinity"`, `"-Infinity"`, `"NaN"`.
+- **`pos-int?`**, **`neg-int?`**, **`nat-int?`**: integer range
+  predicates.
+- **`ratio?`**, **`decimal?`**: type stubs that always return false
+  (no ratio or bigdecimal types).
+- **`rational?`**: returns true for integers, false otherwise.
+- **`long`**, **`double`**: coercion aliases for `int` and `float`.
+- **`num`**: validates that its argument is numeric, returns it as-is.
+
+## [0.26.0] — Reader literal parity
+
+### Added
+- **Special float tokens**: `##Inf`, `##-Inf`, `##NaN` reader tokens
+  and aligned printer output.
+- **Character literals**: `\space`, `\newline`, `\tab`, `\return`,
+  `\backspace`, `\formfeed`, and single-char `\A` forms, read as
+  single-character strings.
+- **Hex integer literals**: `0xFF` style, parsed via base-16.
+- **Ratio literals**: `1/2` reads as float, `6/3` as int when exact.
+- **Bigint/bigdec suffixes**: `42N` consumed as int, `1.5M` as float.
+- **`NaN?`**, **`infinite?`**: C predicates for special float values.
+- **Float division by zero**: float operands produce IEEE infinity/NaN
+  instead of throwing.
+
 ## [0.25.0] — Test framework compatibility
 
 ### Added
