@@ -233,21 +233,38 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             read_cond_body(S, p, &found);
             if (mino_last_error(S) != NULL) return NULL;
             if (found != NULL) {
-                /* Splice: found must be a list -- iterate and append */
-                mino_val_t *cur = found;
-                while (mino_is_cons(cur)) {
-                    mino_val_t *cell = mino_cons(S, cur->as.cons.car,
-                                                 mino_nil(S));
-                    cell->as.cons.file = S->reader_file;
-                    cell->as.cons.line = (tail == NULL)
-                                          ? list_line : splice_line;
-                    if (tail == NULL) {
-                        head = cell;
-                    } else {
-                        tail->as.cons.cdr = cell;
+                /* Splice: iterate found and append elements */
+                if (found->type == MINO_VECTOR) {
+                    size_t i;
+                    for (i = 0; i < found->as.vec.len; i++) {
+                        mino_val_t *cell = mino_cons(S,
+                            vec_nth(found, i), mino_nil(S));
+                        cell->as.cons.file = S->reader_file;
+                        cell->as.cons.line = (tail == NULL)
+                                              ? list_line : splice_line;
+                        if (tail == NULL) {
+                            head = cell;
+                        } else {
+                            tail->as.cons.cdr = cell;
+                        }
+                        tail = cell;
                     }
-                    tail = cell;
-                    cur = cur->as.cons.cdr;
+                } else {
+                    mino_val_t *cur = found;
+                    while (mino_is_cons(cur)) {
+                        mino_val_t *cell = mino_cons(S,
+                            cur->as.cons.car, mino_nil(S));
+                        cell->as.cons.file = S->reader_file;
+                        cell->as.cons.line = (tail == NULL)
+                                              ? list_line : splice_line;
+                        if (tail == NULL) {
+                            head = cell;
+                        } else {
+                            tail->as.cons.cdr = cell;
+                        }
+                        tail = cell;
+                        cur = cur->as.cons.cdr;
+                    }
                 }
                 gc_unpin(1);
             }
