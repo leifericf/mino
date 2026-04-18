@@ -6,6 +6,63 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.25.0] — Test framework compatibility
+
+### Added
+- **`are` macro**: parameterized assertion macro for the test framework.
+  Takes a binding vector, a template expression, and rows of values;
+  expands each row into an `(is ...)` assertion.
+- **`p/thrown?` support**: the `is` macro recognizes namespace-qualified
+  `thrown?` forms (e.g. `(is (p/thrown? ...))`) by checking the symbol
+  name, not the full qualified path.
+- **`lib/` load path**: the module resolver now searches `lib/` as a
+  prefix and accepts `.cljc` file extensions in addition to `.mino`.
+- **`lib/clojure/test.mino`**: thin shim that loads the mino test
+  framework, enabling `(:require [clojure.test :refer [deftest is
+  are testing]])` in external `.cljc` files.
+- **`lib/clojure/core-test/portability.mino`**: `when-var-exists` macro
+  and portability helpers for the external test suite.
+- **`lib/clojure/core-test/number_range.mino`**: numeric range constants
+  used by the external test suite.
+- **`resolve` auto-var creation**: `resolve` now falls back to the root
+  environment for C primitives and auto-interns a var, so
+  `when-var-exists` works for all built-in functions.
+
+## [0.24.0] — Namespace and var semantics
+
+### Added
+- **`MINO_VAR` value type**: first-class vars with namespace, name,
+  and root binding. Vars are interned in a per-state registry.
+- **Var registry**: `def` creates vars in the registry. `var` returns
+  var objects. `#'sym` (var-quote) desugars to `(var sym)`.
+- **Namespace-qualified symbol resolution**: `foo/bar` resolves through
+  the alias table to find the correct namespace and var.
+- **`:refer` support**: `(require '[ns :refer [x y]])` imports specific
+  vars into the current namespace.
+- **`var?`**: predicate for var values.
+- **`resolve`**: returns the var for a symbol, or nil if unbound.
+  Supports qualified and unqualified symbols.
+- **`namespace`**: returns the namespace string of a qualified symbol
+  or keyword.
+- **2-arity `symbol`**: `(symbol ns name)` constructs a qualified
+  symbol.
+- **`qualified-keyword?`**, **`qualified-symbol?`**,
+  **`simple-keyword?`**, **`simple-symbol?`**: qualification predicates.
+
+## [0.23.0] — Reader and loadability baseline
+
+### Added
+- **`ns` special form**: establishes the current namespace and processes
+  `:require` clauses with `:as` aliases and `:refer` imports.
+- **Reader conditionals**: `#?(:mino expr :default expr)` and splicing
+  `#?@(...)` select platform-specific code at read time. The mino
+  dialect key is `"mino"`; `:default` is the fallback.
+- **`#'` var-quote reader macro**: `#'sym` desugars to `(var sym)`.
+- **Vector syntax for `require`**: `(require '[x.y :as z])` accepted
+  alongside the existing string form.
+- **Namespace and reader dialect state**: `mino_state_t` tracks
+  `current_ns` and `reader_dialect` fields.
+
 ## [0.22.0] — Collection and sequence conformance
 
 ### Added
