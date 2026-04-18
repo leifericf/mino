@@ -44,6 +44,8 @@ Thumbs.db
 # Local-only design notes (kept out of the repo intentionally)
 /*.md
 docs/*.md
+!docs/ARCHITECTURE_CONTRACT.md
+!docs/INTERNAL_MODULE_MAP.md
 !README.md
 !CHANGELOG.md
 !BACKLOG.md
