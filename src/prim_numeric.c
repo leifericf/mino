@@ -576,6 +576,9 @@ static mino_val_t *compare_chain(mino_state_t *S, mino_val_t *args, const char *
     if (!mino_is_cons(args)) {
         return mino_true(S);
     }
+    if (!mino_is_cons(args->as.cons.cdr)) {
+        return mino_true(S);
+    }
     if (!as_double(args->as.cons.car, &prev)) {
         char msg[64];
         snprintf(msg, sizeof(msg), "%s expects numbers", name);
@@ -609,6 +612,24 @@ mino_val_t *prim_lt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     return compare_chain(S, args, "<", 0);
+}
+
+mino_val_t *prim_lte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return compare_chain(S, args, "<=", 1);
+}
+
+mino_val_t *prim_gt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return compare_chain(S, args, ">", 2);
+}
+
+mino_val_t *prim_gte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return compare_chain(S, args, ">=", 3);
 }
 
 mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)

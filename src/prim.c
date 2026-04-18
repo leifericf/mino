@@ -227,6 +227,12 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Atomically applies f to the metadata of a reference.");
     DEF_PRIM(env, "<",        prim_lt,
              "Returns true if nums are in monotonically increasing order.");
+    DEF_PRIM(env, "<=",       prim_lte,
+             "Returns true if nums are in monotonically non-decreasing order.");
+    DEF_PRIM(env, ">",        prim_gt,
+             "Returns true if nums are in monotonically decreasing order.");
+    DEF_PRIM(env, ">=",       prim_gte,
+             "Returns true if nums are in monotonically non-increasing order.");
     DEF_PRIM(env, "mod",      prim_mod,
              "Returns the modulus of dividing num by div. Truncates toward negative infinity.");
     DEF_PRIM(env, "rem",      prim_rem,

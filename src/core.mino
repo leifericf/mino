@@ -72,11 +72,7 @@
 (def list     "Creates a list of the given arguments." (fn [& args] args))
 (def empty?   "Returns true if coll has no items." (fn [coll] (= (count coll) 0)))
 
-;; --- Comparison (chained, built on <) ---
-
-(def >  "Returns true if nums are in monotonically decreasing order." (fn [a b & more] (if (< b a)  (if (nil? more) true (apply >  b more)) false)))
-(def <= "Returns true if nums are in monotonically non-decreasing order." (fn [a b & more] (if (< b a)  false (if (nil? more) true (apply <= b more)))))
-(def >= "Returns true if nums are in monotonically non-increasing order." (fn [a b & more] (if (< a b)  false (if (nil? more) true (apply >= b more)))))
+;; >, <=, >= are C primitives (compare_chain) — see prim_numeric.c
 
 ;; --- Type predicates (built on type) ---
 
