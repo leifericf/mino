@@ -607,21 +607,27 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 n = snprintf(tmp, sizeof(tmp), "%lld", a->as.i);
                 break;
             case MINO_FLOAT: {
-                char fb[64];
-                int fn2 = snprintf(fb, sizeof(fb), "%g", a->as.f);
-                int needs_dot = 1, k;
-                for (k = 0; k < fn2; k++) {
-                    if (fb[k] == '.' || fb[k] == 'e' || fb[k] == 'E'
-                        || fb[k] == 'n' || fb[k] == 'i') {
-                        needs_dot = 0; break;
+                if (isnan(a->as.f)) {
+                    n = snprintf(tmp, sizeof(tmp), "NaN");
+                } else if (isinf(a->as.f)) {
+                    n = snprintf(tmp, sizeof(tmp), "%sInfinity",
+                                 a->as.f > 0 ? "" : "-");
+                } else {
+                    char fb[64];
+                    int fn2 = snprintf(fb, sizeof(fb), "%g", a->as.f);
+                    int needs_dot = 1, k;
+                    for (k = 0; k < fn2; k++) {
+                        if (fb[k] == '.' || fb[k] == 'e' || fb[k] == 'E') {
+                            needs_dot = 0; break;
+                        }
                     }
+                    if (needs_dot) {
+                        fb[fn2] = '.'; fb[fn2+1] = '0'; fb[fn2+2] = '\0';
+                        fn2 += 2;
+                    }
+                    n = fn2;
+                    memcpy(tmp, fb, (size_t)n + 1);
                 }
-                if (needs_dot) {
-                    fb[fn2] = '.'; fb[fn2+1] = '0'; fb[fn2+2] = '\0';
-                    fn2 += 2;
-                }
-                n = fn2;
-                memcpy(tmp, fb, (size_t)n + 1);
                 break;
             }
             case MINO_SYMBOL:

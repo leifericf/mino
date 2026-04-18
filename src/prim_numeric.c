@@ -619,7 +619,9 @@ mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_error(S, "NaN? requires one argument");
     }
     v = args->as.cons.car;
-    return (v != NULL && v->type == MINO_FLOAT && isnan(v->as.f))
+    if (v == NULL || v->type == MINO_NIL)
+        return prim_throw_error(S, "NaN? requires a number");
+    return (v->type == MINO_FLOAT && isnan(v->as.f))
            ? mino_true(S) : mino_false(S);
 }
 
@@ -631,6 +633,8 @@ mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_error(S, "infinite? requires one argument");
     }
     v = args->as.cons.car;
-    return (v != NULL && v->type == MINO_FLOAT && isinf(v->as.f))
+    if (v == NULL || v->type == MINO_NIL)
+        return prim_throw_error(S, "infinite? requires a number");
+    return (v->type == MINO_FLOAT && isinf(v->as.f))
            ? mino_true(S) : mino_false(S);
 }

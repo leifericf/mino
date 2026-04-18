@@ -261,7 +261,7 @@
 (def ffirst     (fn [coll] (first (first coll))))
 (def inc        (fn [x] (+ x 1)))
 (def dec        (fn [x] (- x 1)))
-(def zero?      (fn [x] (= x 0)))
+(def zero?      (fn [x] (when (not (number? x)) (throw "zero? requires a number")) (= x 0)))
 (def ==         (fn
                   ([x] true)
                   ([x y] (= (+ 0.0 x) (+ 0.0 y)))
@@ -271,8 +271,8 @@
                       false))))
 (def pos?       (fn [x] (> x 0)))
 (def neg?       (fn [x] (< x 0)))
-(def even?      (fn [x] (= (mod x 2) 0)))
-(def odd?       (fn [x] (not (even? x))))
+(def even?      (fn [x] (when (not (int? x)) (throw "even? requires an integer")) (= (mod x 2) 0)))
+(def odd?       (fn [x] (when (not (int? x)) (throw "odd? requires an integer")) (not (= (mod x 2) 0))))
 (def abs        (fn [x] (if (< x 0) (- x) x)))
 (def max        (fn
                   ([a] a)
@@ -351,7 +351,13 @@
                           (if inner
                             (concat inner (cat-lazy (rest s)))
                             (cat-lazy (rest s)))))))]
-     (cat-lazy coll)))))
+     (cat-lazy coll)))
+  ([f c1 c2]
+   (mapcat (fn [pair] (apply f pair))
+           (map vector c1 c2)))
+  ([f c1 c2 & colls]
+   (mapcat (fn [args] (apply f args))
+           (apply map vector c1 c2 colls)))))
 
 ;; --- Lazy combinators ---
 
@@ -569,6 +575,7 @@
     true
     (let [s (set xs)]
       (= (count s) (count xs))))))
+(def array-map    hash-map)
 (def sorted?      (fn [x] (let [t (type x)] (or (= t :sorted-map) (= t :sorted-set)))))
 (def associative?  (fn [x] (let [t (type x)] (or (= t :map) (= t :vector) (= t :sorted-map)))))
 (def reversible?   (fn [x] (= (type x) :vector)))
