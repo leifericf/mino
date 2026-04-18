@@ -138,10 +138,15 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         set_error(S, msg);
         return NULL;
     }
-    /* Load. */
-    result = mino_load_file(S, path, env);
-    if (result == NULL) {
-        return NULL;
+    /* Load — save/restore current namespace so ns forms inside the
+     * loaded file don't leak into the caller's namespace. */
+    {
+        const char *saved_ns = S->current_ns;
+        result = mino_load_file(S, path, env);
+        S->current_ns = saved_ns;
+        if (result == NULL) {
+            return NULL;
+        }
     }
     /* Cache. */
     if (S->module_cache_len == S->module_cache_cap) {
