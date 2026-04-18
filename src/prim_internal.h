@@ -45,6 +45,12 @@ mino_val_t  *set_conj1(mino_state_t *S, const mino_val_t *s,
 /* print_str_to: write v to out; strings as raw bytes, others via printer. */
 void         print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 
+/* DEF_PRIM: register a primitive with a docstring in the meta table. */
+#define DEF_PRIM(env, name, fn, doc) do {                  \
+    mino_env_set(S, env, name, mino_prim(S, name, fn));    \
+    meta_set(S, name, doc, sizeof(doc) - 1, NULL);         \
+} while (0)
+
 /* Primitives declared per domain (each prim_*.c defines these).
  * All follow the standard primitive signature: args are borrowed,
  * return value is GC-owned (NULL on error via set_error). */

@@ -205,153 +205,268 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     volatile char probe = 0;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    mino_env_set(S, env, "+",        mino_prim(S, "+",        prim_add));
-    mino_env_set(S, env, "-",        mino_prim(S, "-",        prim_sub));
-    mino_env_set(S, env, "*",        mino_prim(S, "*",        prim_mul));
-    mino_env_set(S, env, "/",        mino_prim(S, "/",        prim_div));
-    mino_env_set(S, env, "=",        mino_prim(S, "=",        prim_eq));
-    mino_env_set(S, env, "identical?", mino_prim(S, "identical?", prim_identical));
-    mino_env_set(S, env, "meta",      mino_prim(S, "meta",      prim_meta));
-    mino_env_set(S, env, "with-meta", mino_prim(S, "with-meta", prim_with_meta));
-    mino_env_set(S, env, "vary-meta", mino_prim(S, "vary-meta", prim_vary_meta));
-    mino_env_set(S, env, "alter-meta!", mino_prim(S, "alter-meta!", prim_alter_meta));
-    mino_env_set(S, env, "<",        mino_prim(S, "<",        prim_lt));
-    mino_env_set(S, env, "mod",      mino_prim(S, "mod",      prim_mod));
-    mino_env_set(S, env, "rem",      mino_prim(S, "rem",      prim_rem));
-    mino_env_set(S, env, "quot",     mino_prim(S, "quot",     prim_quot));
+    DEF_PRIM(env, "+",        prim_add,
+             "Returns the sum of the arguments.");
+    DEF_PRIM(env, "-",        prim_sub,
+             "Returns the difference of the arguments. With one arg, returns the negation.");
+    DEF_PRIM(env, "*",        prim_mul,
+             "Returns the product of the arguments.");
+    DEF_PRIM(env, "/",        prim_div,
+             "Returns the quotient of the arguments.");
+    DEF_PRIM(env, "=",        prim_eq,
+             "Returns true if all arguments are equal.");
+    DEF_PRIM(env, "identical?", prim_identical,
+             "Returns true if the arguments are the same object.");
+    DEF_PRIM(env, "meta",      prim_meta,
+             "Returns the metadata map of the given value, or nil.");
+    DEF_PRIM(env, "with-meta", prim_with_meta,
+             "Returns a copy of the value with the given metadata map.");
+    DEF_PRIM(env, "vary-meta", prim_vary_meta,
+             "Returns a copy of the value with (apply f meta args) as its metadata.");
+    DEF_PRIM(env, "alter-meta!", prim_alter_meta,
+             "Atomically applies f to the metadata of a reference.");
+    DEF_PRIM(env, "<",        prim_lt,
+             "Returns true if nums are in monotonically increasing order.");
+    DEF_PRIM(env, "mod",      prim_mod,
+             "Returns the modulus of dividing num by div. Truncates toward negative infinity.");
+    DEF_PRIM(env, "rem",      prim_rem,
+             "Returns the remainder of dividing num by div.");
+    DEF_PRIM(env, "quot",     prim_quot,
+             "Returns the quotient of dividing num by div, truncated toward zero.");
     /* math */
-    mino_env_set(S, env, "math-floor", mino_prim(S, "math-floor", prim_math_floor));
-    mino_env_set(S, env, "math-ceil",  mino_prim(S, "math-ceil",  prim_math_ceil));
-    mino_env_set(S, env, "math-round", mino_prim(S, "math-round", prim_math_round));
-    mino_env_set(S, env, "math-sqrt",  mino_prim(S, "math-sqrt",  prim_math_sqrt));
-    mino_env_set(S, env, "math-pow",   mino_prim(S, "math-pow",   prim_math_pow));
-    mino_env_set(S, env, "math-log",   mino_prim(S, "math-log",   prim_math_log));
-    mino_env_set(S, env, "math-exp",   mino_prim(S, "math-exp",   prim_math_exp));
-    mino_env_set(S, env, "math-sin",   mino_prim(S, "math-sin",   prim_math_sin));
-    mino_env_set(S, env, "math-cos",   mino_prim(S, "math-cos",   prim_math_cos));
-    mino_env_set(S, env, "math-tan",   mino_prim(S, "math-tan",   prim_math_tan));
-    mino_env_set(S, env, "math-atan2", mino_prim(S, "math-atan2", prim_math_atan2));
+    DEF_PRIM(env, "math-floor", prim_math_floor,
+             "Returns the largest integer not greater than n.");
+    DEF_PRIM(env, "math-ceil",  prim_math_ceil,
+             "Returns the smallest integer not less than n.");
+    DEF_PRIM(env, "math-round", prim_math_round,
+             "Returns the closest integer to n.");
+    DEF_PRIM(env, "math-sqrt",  prim_math_sqrt,
+             "Returns the square root of n.");
+    DEF_PRIM(env, "math-pow",   prim_math_pow,
+             "Returns base raised to the power of exp.");
+    DEF_PRIM(env, "math-log",   prim_math_log,
+             "Returns the natural logarithm of n.");
+    DEF_PRIM(env, "math-exp",   prim_math_exp,
+             "Returns e raised to the power of n.");
+    DEF_PRIM(env, "math-sin",   prim_math_sin,
+             "Returns the sine of n (in radians).");
+    DEF_PRIM(env, "math-cos",   prim_math_cos,
+             "Returns the cosine of n (in radians).");
+    DEF_PRIM(env, "math-tan",   prim_math_tan,
+             "Returns the tangent of n (in radians).");
+    DEF_PRIM(env, "math-atan2", prim_math_atan2,
+             "Returns the angle in radians between the positive x-axis and the point (x, y).");
     mino_env_set(S, env, "math-pi",    mino_float(S, 3.14159265358979323846));
-    mino_env_set(S, env, "bit-and", mino_prim(S, "bit-and", prim_bit_and));
-    mino_env_set(S, env, "bit-or",  mino_prim(S, "bit-or",  prim_bit_or));
-    mino_env_set(S, env, "bit-xor", mino_prim(S, "bit-xor", prim_bit_xor));
-    mino_env_set(S, env, "bit-not", mino_prim(S, "bit-not", prim_bit_not));
-    mino_env_set(S, env, "bit-shift-left",
-                 mino_prim(S, "bit-shift-left", prim_bit_shift_left));
-    mino_env_set(S, env, "bit-shift-right",
-                 mino_prim(S, "bit-shift-right", prim_bit_shift_right));
-    mino_env_set(S, env, "unsigned-bit-shift-right",
-                 mino_prim(S, "unsigned-bit-shift-right", prim_unsigned_bit_shift_right));
-    mino_env_set(S, env, "car",      mino_prim(S, "car",      prim_car));
-    mino_env_set(S, env, "cdr",      mino_prim(S, "cdr",      prim_cdr));
-    mino_env_set(S, env, "cons",     mino_prim(S, "cons",     prim_cons));
-    mino_env_set(S, env, "count",    mino_prim(S, "count",    prim_count));
-    mino_env_set(S, env, "nth",      mino_prim(S, "nth",      prim_nth));
-    mino_env_set(S, env, "first",    mino_prim(S, "first",    prim_first));
-    mino_env_set(S, env, "rest",     mino_prim(S, "rest",     prim_rest));
-    mino_env_set(S, env, "vector",   mino_prim(S, "vector",   prim_vector));
-    mino_env_set(S, env, "hash-map", mino_prim(S, "hash-map", prim_hash_map));
-    mino_env_set(S, env, "assoc",    mino_prim(S, "assoc",    prim_assoc));
-    mino_env_set(S, env, "get",      mino_prim(S, "get",      prim_get));
-    mino_env_set(S, env, "conj",     mino_prim(S, "conj",     prim_conj));
-    mino_env_set(S, env, "keys",     mino_prim(S, "keys",     prim_keys));
-    mino_env_set(S, env, "vals",     mino_prim(S, "vals",     prim_vals));
-    mino_env_set(S, env, "macroexpand-1",
-                 mino_prim(S, "macroexpand-1", prim_macroexpand_1));
-    mino_env_set(S, env, "macroexpand",
-                 mino_prim(S, "macroexpand", prim_macroexpand));
-    mino_env_set(S, env, "gensym",   mino_prim(S, "gensym",   prim_gensym));
-    mino_env_set(S, env, "type",     mino_prim(S, "type",     prim_type));
-    mino_env_set(S, env, "name",      mino_prim(S, "name",      prim_name));
-    mino_env_set(S, env, "namespace", mino_prim(S, "namespace", prim_namespace));
-    mino_env_set(S, env, "var?",      mino_prim(S, "var?",      prim_var_p));
-    mino_env_set(S, env, "resolve",   mino_prim(S, "resolve",   prim_resolve));
-    mino_env_set(S, env, "rand",      mino_prim(S, "rand",      prim_rand));
+    DEF_PRIM(env, "bit-and", prim_bit_and,
+             "Returns the bitwise AND of the arguments.");
+    DEF_PRIM(env, "bit-or",  prim_bit_or,
+             "Returns the bitwise OR of the arguments.");
+    DEF_PRIM(env, "bit-xor", prim_bit_xor,
+             "Returns the bitwise XOR of the arguments.");
+    DEF_PRIM(env, "bit-not", prim_bit_not,
+             "Returns the bitwise complement of n.");
+    DEF_PRIM(env, "bit-shift-left", prim_bit_shift_left,
+             "Returns n shifted left by count bits.");
+    DEF_PRIM(env, "bit-shift-right", prim_bit_shift_right,
+             "Returns n arithmetically shifted right by count bits.");
+    DEF_PRIM(env, "unsigned-bit-shift-right", prim_unsigned_bit_shift_right,
+             "Returns n logically shifted right by count bits.");
+    DEF_PRIM(env, "car",      prim_car,
+             "Returns the first element of a cons cell.");
+    DEF_PRIM(env, "cdr",      prim_cdr,
+             "Returns the rest of a cons cell.");
+    DEF_PRIM(env, "cons",     prim_cons,
+             "Returns a new list with x prepended to coll.");
+    DEF_PRIM(env, "count",    prim_count,
+             "Returns the number of items in a collection.");
+    DEF_PRIM(env, "nth",      prim_nth,
+             "Returns the item at index n in a collection.");
+    DEF_PRIM(env, "first",    prim_first,
+             "Returns the first item in a collection, or nil if empty.");
+    DEF_PRIM(env, "rest",     prim_rest,
+             "Returns all but the first item in a collection.");
+    DEF_PRIM(env, "vector",   prim_vector,
+             "Returns a new vector containing the arguments.");
+    DEF_PRIM(env, "hash-map", prim_hash_map,
+             "Returns a new hash map with the given key-value pairs.");
+    DEF_PRIM(env, "assoc",    prim_assoc,
+             "Returns a new map with the given key-value pairs added.");
+    DEF_PRIM(env, "get",      prim_get,
+             "Returns the value mapped to key in a collection, or not-found.");
+    DEF_PRIM(env, "conj",     prim_conj,
+             "Returns a new collection with items added.");
+    DEF_PRIM(env, "keys",     prim_keys,
+             "Returns a sequence of the keys in a map.");
+    DEF_PRIM(env, "vals",     prim_vals,
+             "Returns a sequence of the values in a map.");
+    DEF_PRIM(env, "macroexpand-1", prim_macroexpand_1,
+             "Expands a macro form once.");
+    DEF_PRIM(env, "macroexpand", prim_macroexpand,
+             "Repeatedly expands a macro form until it is no longer a macro call.");
+    DEF_PRIM(env, "gensym",   prim_gensym,
+             "Returns a new symbol with a unique name.");
+    DEF_PRIM(env, "type",     prim_type,
+             "Returns a keyword indicating the type of the value.");
+    DEF_PRIM(env, "name",      prim_name,
+             "Returns the name string of a symbol, keyword, or string.");
+    DEF_PRIM(env, "namespace", prim_namespace,
+             "Returns the namespace string of a symbol or keyword, or nil.");
+    DEF_PRIM(env, "var?",      prim_var_p,
+             "Returns true if x is a var.");
+    DEF_PRIM(env, "resolve",   prim_resolve,
+             "Returns the var to which a symbol resolves, or nil.");
+    DEF_PRIM(env, "rand",      prim_rand,
+             "Returns a random float between 0 inclusive and 1 exclusive, or between 0 and n.");
     /* regex */
-    mino_env_set(S, env, "re-find",    mino_prim(S, "re-find",    prim_re_find));
-    mino_env_set(S, env, "re-matches", mino_prim(S, "re-matches", prim_re_matches));
-    mino_env_set(S, env, "eval",     mino_prim(S, "eval",     prim_eval));
-    mino_env_set(S, env, "symbol",   mino_prim(S, "symbol",   prim_symbol));
-    mino_env_set(S, env, "keyword",  mino_prim(S, "keyword",  prim_keyword));
-    mino_env_set(S, env, "hash",     mino_prim(S, "hash",     prim_hash));
-    mino_env_set(S, env, "compare",  mino_prim(S, "compare",  prim_compare));
-    mino_env_set(S, env, "NaN?",     mino_prim(S, "NaN?",     prim_nan_p));
-    mino_env_set(S, env, "infinite?", mino_prim(S, "infinite?", prim_infinite_p));
-    mino_env_set(S, env, "int",      mino_prim(S, "int",      prim_int));
-    mino_env_set(S, env, "float",    mino_prim(S, "float",    prim_float));
-    mino_env_set(S, env, "parse-long",   mino_prim(S, "parse-long",   prim_parse_long));
-    mino_env_set(S, env, "parse-double", mino_prim(S, "parse-double", prim_parse_double));
-    mino_env_set(S, env, "str",      mino_prim(S, "str",      prim_str));
-    mino_env_set(S, env, "pr-str",   mino_prim(S, "pr-str",   prim_pr_str));
-    mino_env_set(S, env, "read-string",
-                 mino_prim(S, "read-string", prim_read_string));
-    mino_env_set(S, env, "format",   mino_prim(S, "format",   prim_format));
-    mino_env_set(S, env, "throw",    mino_prim(S, "throw",    prim_throw));
-    mino_env_set(S, env, "require",  mino_prim(S, "require",  prim_require));
-    mino_env_set(S, env, "doc",      mino_prim(S, "doc",      prim_doc));
-    mino_env_set(S, env, "source",   mino_prim(S, "source",   prim_source));
-    mino_env_set(S, env, "apropos",  mino_prim(S, "apropos",  prim_apropos));
+    DEF_PRIM(env, "re-find",    prim_re_find,
+             "Returns the first regex match in the string, or nil.");
+    DEF_PRIM(env, "re-matches", prim_re_matches,
+             "Returns the match if the entire string matches the regex, or nil.");
+    DEF_PRIM(env, "eval",     prim_eval,
+             "Evaluates the given form.");
+    DEF_PRIM(env, "symbol",   prim_symbol,
+             "Returns a symbol with the given name.");
+    DEF_PRIM(env, "keyword",  prim_keyword,
+             "Returns a keyword with the given name.");
+    DEF_PRIM(env, "hash",     prim_hash,
+             "Returns the hash code of the value.");
+    DEF_PRIM(env, "compare",  prim_compare,
+             "Returns a negative, zero, or positive integer comparing x and y.");
+    DEF_PRIM(env, "NaN?",     prim_nan_p,
+             "Returns true if x is NaN.");
+    DEF_PRIM(env, "infinite?", prim_infinite_p,
+             "Returns true if x is positive or negative infinity.");
+    DEF_PRIM(env, "int",      prim_int,
+             "Coerces x to an integer.");
+    DEF_PRIM(env, "float",    prim_float,
+             "Coerces x to a float.");
+    DEF_PRIM(env, "parse-long",   prim_parse_long,
+             "Parses a string into a long integer, or returns nil on failure.");
+    DEF_PRIM(env, "parse-double", prim_parse_double,
+             "Parses a string into a double, or returns nil on failure.");
+    DEF_PRIM(env, "str",      prim_str,
+             "Returns the string representation of the arguments concatenated.");
+    DEF_PRIM(env, "pr-str",   prim_pr_str,
+             "Returns a readable string representation of the arguments.");
+    DEF_PRIM(env, "read-string", prim_read_string,
+             "Reads one form from the string.");
+    DEF_PRIM(env, "format",   prim_format,
+             "Returns a formatted string using a format specifier and arguments.");
+    DEF_PRIM(env, "throw",    prim_throw,
+             "Throws an exception with the given value.");
+    DEF_PRIM(env, "require",  prim_require,
+             "Loads and evaluates a mino source file.");
+    DEF_PRIM(env, "doc",      prim_doc,
+             "Prints the documentation for the named var.");
+    DEF_PRIM(env, "source",   prim_source,
+             "Prints the source code of the named var.");
+    DEF_PRIM(env, "apropos",  prim_apropos,
+             "Returns a list of vars whose names match the given pattern.");
     /* set operations */
-    mino_env_set(S, env, "hash-set", mino_prim(S, "hash-set", prim_hash_set));
-    mino_env_set(S, env, "set",      mino_prim(S, "set",      prim_set));
-    mino_env_set(S, env, "contains?",mino_prim(S, "contains?",prim_contains_p));
-    mino_env_set(S, env, "disj",     mino_prim(S, "disj",     prim_disj));
-    mino_env_set(S, env, "dissoc",   mino_prim(S, "dissoc",   prim_dissoc));
+    DEF_PRIM(env, "hash-set", prim_hash_set,
+             "Returns a new hash set containing the arguments.");
+    DEF_PRIM(env, "set",      prim_set,
+             "Returns a set of the items in coll.");
+    DEF_PRIM(env, "contains?", prim_contains_p,
+             "Returns true if the collection contains the key.");
+    DEF_PRIM(env, "disj",     prim_disj,
+             "Returns a set with the given keys removed.");
+    DEF_PRIM(env, "dissoc",   prim_dissoc,
+             "Returns a map with the given keys removed.");
     /* sequence operations */
-    mino_env_set(S, env, "reduce",   mino_prim(S, "reduce",   prim_reduce));
-    mino_env_set(S, env, "reduced",  mino_prim(S, "reduced",  prim_reduced));
-    mino_env_set(S, env, "reduced?", mino_prim(S, "reduced?", prim_reduced_p));
-    mino_env_set(S, env, "into",     mino_prim(S, "into",     prim_into));
+    DEF_PRIM(env, "reduce",   prim_reduce,
+             "Reduces a collection using f. With no init, uses the first item.");
+    DEF_PRIM(env, "reduced",  prim_reduced,
+             "Wraps a value to signal early termination of reduce.");
+    DEF_PRIM(env, "reduced?", prim_reduced_p,
+             "Returns true if x is a reduced value.");
+    DEF_PRIM(env, "into",     prim_into,
+             "Returns a new collection with all items from the source conj'd in.");
     /* eager collection builders */
-    mino_env_set(S, env, "rangev",   mino_prim(S, "rangev",   prim_rangev));
-    mino_env_set(S, env, "mapv",     mino_prim(S, "mapv",     prim_mapv));
-    mino_env_set(S, env, "filterv",  mino_prim(S, "filterv",  prim_filterv));
-    mino_env_set(S, env, "apply",    mino_prim(S, "apply",    prim_apply));
-    mino_env_set(S, env, "reverse",  mino_prim(S, "reverse",  prim_reverse));
-    mino_env_set(S, env, "sort",     mino_prim(S, "sort",     prim_sort));
-    mino_env_set(S, env, "peek",     mino_prim(S, "peek",     prim_peek));
-    mino_env_set(S, env, "pop",      mino_prim(S, "pop",      prim_pop));
-    mino_env_set(S, env, "find",     mino_prim(S, "find",     prim_find));
-    mino_env_set(S, env, "empty",    mino_prim(S, "empty",    prim_empty));
-    mino_env_set(S, env, "rseq",     mino_prim(S, "rseq",     prim_rseq));
-    mino_env_set(S, env, "subvec",   mino_prim(S, "subvec",   prim_subvec));
-    mino_env_set(S, env, "sorted-map", mino_prim(S, "sorted-map", prim_sorted_map));
-    mino_env_set(S, env, "sorted-set", mino_prim(S, "sorted-set", prim_sorted_set));
+    DEF_PRIM(env, "rangev",   prim_rangev,
+             "Returns a vector of integers from start (inclusive) to end (exclusive).");
+    DEF_PRIM(env, "mapv",     prim_mapv,
+             "Returns a vector of applying f to each item in one or more collections.");
+    DEF_PRIM(env, "filterv",  prim_filterv,
+             "Returns a vector of items in coll for which pred returns logical true.");
+    DEF_PRIM(env, "apply",    prim_apply,
+             "Applies f to the arguments, with the last argument spread as a sequence.");
+    DEF_PRIM(env, "reverse",  prim_reverse,
+             "Returns a sequence of the items in coll in reverse order.");
+    DEF_PRIM(env, "sort",     prim_sort,
+             "Returns a sorted sequence of the items in coll.");
+    DEF_PRIM(env, "peek",     prim_peek,
+             "Returns the first item of a list or last item of a vector.");
+    DEF_PRIM(env, "pop",      prim_pop,
+             "Returns a collection without the peek item.");
+    DEF_PRIM(env, "find",     prim_find,
+             "Returns the map entry for the key, or nil.");
+    DEF_PRIM(env, "empty",    prim_empty,
+             "Returns an empty collection of the same type.");
+    DEF_PRIM(env, "rseq",     prim_rseq,
+             "Returns a reverse sequence of a vector, or nil if empty.");
+    DEF_PRIM(env, "subvec",   prim_subvec,
+             "Returns a subvector from start (inclusive) to end (exclusive).");
+    DEF_PRIM(env, "sorted-map", prim_sorted_map,
+             "Returns a new sorted map with the given key-value pairs.");
+    DEF_PRIM(env, "sorted-set", prim_sorted_set,
+             "Returns a new sorted set containing the arguments.");
     /* string operations */
-    mino_env_set(S, env, "subs",     mino_prim(S, "subs",     prim_subs));
-    mino_env_set(S, env, "split",    mino_prim(S, "split",    prim_split));
-    mino_env_set(S, env, "join",     mino_prim(S, "join",     prim_join));
-    mino_env_set(S, env, "starts-with?",
-                 mino_prim(S, "starts-with?", prim_starts_with_p));
-    mino_env_set(S, env, "ends-with?",
-                 mino_prim(S, "ends-with?", prim_ends_with_p));
-    mino_env_set(S, env, "includes?",
-                 mino_prim(S, "includes?", prim_includes_p));
-    mino_env_set(S, env, "upper-case",
-                 mino_prim(S, "upper-case", prim_upper_case));
-    mino_env_set(S, env, "lower-case",
-                 mino_prim(S, "lower-case", prim_lower_case));
-    mino_env_set(S, env, "trim",     mino_prim(S, "trim",     prim_trim));
-    mino_env_set(S, env, "char-at",  mino_prim(S, "char-at",  prim_char_at));
+    DEF_PRIM(env, "subs",     prim_subs,
+             "Returns a substring from start (inclusive) to end (exclusive).");
+    DEF_PRIM(env, "split",    prim_split,
+             "Splits a string on a regex pattern.");
+    DEF_PRIM(env, "join",     prim_join,
+             "Returns a string of the items in coll joined by separator.");
+    DEF_PRIM(env, "starts-with?", prim_starts_with_p,
+             "Returns true if the string starts with the given prefix.");
+    DEF_PRIM(env, "ends-with?", prim_ends_with_p,
+             "Returns true if the string ends with the given suffix.");
+    DEF_PRIM(env, "includes?", prim_includes_p,
+             "Returns true if the string contains the given substring.");
+    DEF_PRIM(env, "upper-case", prim_upper_case,
+             "Returns the string converted to upper case.");
+    DEF_PRIM(env, "lower-case", prim_lower_case,
+             "Returns the string converted to lower case.");
+    DEF_PRIM(env, "trim",     prim_trim,
+             "Returns the string with leading and trailing whitespace removed.");
+    DEF_PRIM(env, "char-at",  prim_char_at,
+             "Returns the character at the given index as a string.");
     /* sequences */
-    mino_env_set(S, env, "seq",       mino_prim(S, "seq",       prim_seq));
-    mino_env_set(S, env, "realized?", mino_prim(S, "realized?", prim_realized_p));
+    DEF_PRIM(env, "seq",       prim_seq,
+             "Returns a seq on the collection, or nil if empty.");
+    DEF_PRIM(env, "realized?", prim_realized_p,
+             "Returns true if the lazy value has been realized.");
     /* atoms */
-    mino_env_set(S, env, "atom",           mino_prim(S, "atom",           prim_atom));
-    mino_env_set(S, env, "deref",          mino_prim(S, "deref",          prim_deref));
-    mino_env_set(S, env, "reset!",         mino_prim(S, "reset!",         prim_reset_bang));
-    mino_env_set(S, env, "swap!",          mino_prim(S, "swap!",          prim_swap_bang));
-    mino_env_set(S, env, "atom?",          mino_prim(S, "atom?",          prim_atom_p));
-    mino_env_set(S, env, "add-watch",      mino_prim(S, "add-watch",      prim_add_watch));
-    mino_env_set(S, env, "remove-watch",   mino_prim(S, "remove-watch",   prim_remove_watch));
-    mino_env_set(S, env, "set-validator!", mino_prim(S, "set-validator!", prim_set_validator));
-    mino_env_set(S, env, "get-validator",  mino_prim(S, "get-validator",  prim_get_validator));
-    mino_env_set(S, env, "reset-vals!",    mino_prim(S, "reset-vals!",    prim_reset_vals));
-    mino_env_set(S, env, "swap-vals!",     mino_prim(S, "swap-vals!",     prim_swap_vals));
+    DEF_PRIM(env, "atom",           prim_atom,
+             "Creates an atom with the given initial value.");
+    DEF_PRIM(env, "deref",          prim_deref,
+             "Returns the current value of a reference (atom, delay, etc.).");
+    DEF_PRIM(env, "reset!",         prim_reset_bang,
+             "Sets the value of an atom to newval and returns newval.");
+    DEF_PRIM(env, "swap!",          prim_swap_bang,
+             "Atomically applies f to the current value of the atom and any additional args.");
+    DEF_PRIM(env, "atom?",          prim_atom_p,
+             "Returns true if x is an atom.");
+    DEF_PRIM(env, "add-watch",      prim_add_watch,
+             "Adds a watch function to an atom, called on state changes.");
+    DEF_PRIM(env, "remove-watch",   prim_remove_watch,
+             "Removes a watch function from an atom by key.");
+    DEF_PRIM(env, "set-validator!", prim_set_validator,
+             "Sets a validator function on an atom.");
+    DEF_PRIM(env, "get-validator",  prim_get_validator,
+             "Returns the validator function of an atom, or nil.");
+    DEF_PRIM(env, "reset-vals!",    prim_reset_vals,
+             "Sets the value of an atom and returns [old new].");
+    DEF_PRIM(env, "swap-vals!",     prim_swap_vals,
+             "Atomically applies f to the atom and returns [old new].");
     /* actors */
-    mino_env_set(S, env, "spawn*",   mino_prim(S, "spawn*",   prim_spawn));
-    mino_env_set(S, env, "send!",    mino_prim(S, "send!",    prim_send_bang));
-    mino_env_set(S, env, "receive",  mino_prim(S, "receive",  prim_receive));
+    DEF_PRIM(env, "spawn*",   prim_spawn,
+             "Creates a new actor with the given handler function.");
+    DEF_PRIM(env, "send!",    prim_send_bang,
+             "Sends a message to an actor.");
+    DEF_PRIM(env, "receive",  prim_receive,
+             "Receives the next message from the actor's mailbox.");
     /* host interop */
     mino_install_host(S, env);
     install_core_mino(S, env);
@@ -359,10 +474,16 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
 
 void mino_install_io(mino_state_t *S, mino_env_t *env)
 {
-    mino_env_set(S, env, "println",  mino_prim(S, "println",  prim_println));
-    mino_env_set(S, env, "prn",      mino_prim(S, "prn",      prim_prn));
-    mino_env_set(S, env, "slurp",    mino_prim(S, "slurp",    prim_slurp));
-    mino_env_set(S, env, "spit",     mino_prim(S, "spit",     prim_spit));
-    mino_env_set(S, env, "exit",     mino_prim(S, "exit",     prim_exit));
-    mino_env_set(S, env, "time-ms",  mino_prim(S, "time-ms",  prim_time_ms));
+    DEF_PRIM(env, "println",  prim_println,
+             "Prints the arguments followed by a newline.");
+    DEF_PRIM(env, "prn",      prim_prn,
+             "Prints the arguments readably followed by a newline.");
+    DEF_PRIM(env, "slurp",    prim_slurp,
+             "Reads the entire contents of a file as a string.");
+    DEF_PRIM(env, "spit",     prim_spit,
+             "Writes the string content to a file.");
+    DEF_PRIM(env, "exit",     prim_exit,
+             "Exits the process with the given status code.");
+    DEF_PRIM(env, "time-ms",  prim_time_ms,
+             "Returns the current time in milliseconds.");
 }

@@ -241,12 +241,12 @@ static mino_val_t *prim_host_get(mino_state_t *S, mino_val_t *args,
 
 void mino_install_host(mino_state_t *S, mino_env_t *env)
 {
-    mino_env_set(S, env, "host/new",
-                 mino_prim(S, "host/new", prim_host_new));
-    mino_env_set(S, env, "host/call",
-                 mino_prim(S, "host/call", prim_host_call));
-    mino_env_set(S, env, "host/static-call",
-                 mino_prim(S, "host/static-call", prim_host_static_call));
-    mino_env_set(S, env, "host/get",
-                 mino_prim(S, "host/get", prim_host_get));
+    DEF_PRIM(env, "host/new", prim_host_new,
+             "Creates a new instance of a host-registered type.");
+    DEF_PRIM(env, "host/call", prim_host_call,
+             "Calls a method on a host handle.");
+    DEF_PRIM(env, "host/static-call", prim_host_static_call,
+             "Calls a static method on a host-registered type.");
+    DEF_PRIM(env, "host/get", prim_host_get,
+             "Returns the value of a field on a host handle.");
 }
