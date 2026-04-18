@@ -80,6 +80,8 @@ mino_val_t *prim_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lt(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_meta.c */
 mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);

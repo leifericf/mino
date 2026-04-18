@@ -147,7 +147,9 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     args = args->as.cons.cdr;
     if (!mino_is_cons(args)) {
         if (acc == 0.0) {
-            return prim_throw_error(S, "division by zero");
+            if (all_int)
+                return prim_throw_error(S, "division by zero");
+            return mino_float(S, 1.0 / acc);
         }
         return mino_float(S, 1.0 / acc);
     }
@@ -164,7 +166,7 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             set_error(S, "/ expects numbers");
             return NULL;
         }
-        if (x == 0.0) {
+        if (x == 0.0 && all_int) {
             return prim_throw_error(S, "division by zero");
         }
         acc /= x;
@@ -192,7 +194,10 @@ mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (b == 0.0) {
-        return prim_throw_error(S, "mod: division by zero");
+        if (args->as.cons.car->type == MINO_INT &&
+            args->as.cons.cdr->as.cons.car->type == MINO_INT)
+            return prim_throw_error(S, "mod: division by zero");
+        return mino_float(S, fmod(a, b));
     }
     r = fmod(a, b);
     /* Floored modulo: result has same sign as divisor. */
@@ -220,7 +225,10 @@ mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (b == 0.0) {
-        return prim_throw_error(S, "rem: division by zero");
+        if (args->as.cons.car->type == MINO_INT &&
+            args->as.cons.cdr->as.cons.car->type == MINO_INT)
+            return prim_throw_error(S, "rem: division by zero");
+        return mino_float(S, fmod(a, b));
     }
     r = fmod(a, b);
     if (args->as.cons.car->type == MINO_INT &&
@@ -245,7 +253,13 @@ mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     if (b == 0.0) {
-        return prim_throw_error(S, "quot: division by zero");
+        if (args->as.cons.car->type == MINO_INT &&
+            args->as.cons.cdr->as.cons.car->type == MINO_INT)
+            return prim_throw_error(S, "quot: division by zero");
+        {
+            double qq = a / b;
+            return mino_float(S, qq >= 0 ? floor(qq) : ceil(qq));
+        }
     }
     q = a / b;
     q = q >= 0 ? floor(q) : ceil(q);
@@ -580,4 +594,30 @@ mino_val_t *prim_lt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     return compare_chain(S, args, "<", 0);
+}
+
+mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "NaN? requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    return (v != NULL && v->type == MINO_FLOAT && isnan(v->as.f))
+           ? mino_true(S) : mino_false(S);
+}
+
+mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "infinite? requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    return (v != NULL && v->type == MINO_FLOAT && isinf(v->as.f))
+           ? mino_true(S) : mino_false(S);
 }

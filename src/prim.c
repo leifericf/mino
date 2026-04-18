@@ -276,6 +276,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "keyword",  mino_prim(S, "keyword",  prim_keyword));
     mino_env_set(S, env, "hash",     mino_prim(S, "hash",     prim_hash));
     mino_env_set(S, env, "compare",  mino_prim(S, "compare",  prim_compare));
+    mino_env_set(S, env, "NaN?",     mino_prim(S, "NaN?",     prim_nan_p));
+    mino_env_set(S, env, "infinite?", mino_prim(S, "infinite?", prim_infinite_p));
     mino_env_set(S, env, "int",      mino_prim(S, "int",      prim_int));
     mino_env_set(S, env, "float",    mino_prim(S, "float",    prim_float));
     mino_env_set(S, env, "str",      mino_prim(S, "str",      prim_str));
