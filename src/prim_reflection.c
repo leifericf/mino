@@ -35,11 +35,20 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    double r;
     (void)env;
-    if (mino_is_cons(args)) {
-        return prim_throw_error(S, "rand takes no arguments");
+    if (mino_is_cons(args) && mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_error(S, "rand takes zero or one argument");
     }
-    return mino_float(S, (double)rand() / ((double)RAND_MAX + 1.0));
+    r = (double)rand() / ((double)RAND_MAX + 1.0);
+    if (mino_is_cons(args)) {
+        double n;
+        if (!as_double(args->as.cons.car, &n)) {
+            return prim_throw_error(S, "rand expects a number");
+        }
+        r *= n;
+    }
+    return mino_float(S, r);
 }
 
 mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -106,8 +115,27 @@ mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "keyword requires one argument");
+    if (!mino_is_cons(args)) {
+        return prim_throw_error(S, "keyword requires one or two arguments");
+    }
+    /* 2-arity: (keyword ns name) */
+    if (mino_is_cons(args->as.cons.cdr)) {
+        mino_val_t *ns_val  = args->as.cons.car;
+        mino_val_t *nm_val  = args->as.cons.cdr->as.cons.car;
+        char buf[256];
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr))
+            return prim_throw_error(S, "keyword requires one or two arguments");
+        if (nm_val->type != MINO_STRING)
+            return prim_throw_error(S, "keyword: name must be a string");
+        if (ns_val == NULL || ns_val->type == MINO_NIL) {
+            return mino_keyword_n(S, nm_val->as.s.data, nm_val->as.s.len);
+        }
+        if (ns_val->type != MINO_STRING)
+            return prim_throw_error(S, "keyword: namespace must be a string or nil");
+        snprintf(buf, sizeof(buf), "%.*s/%.*s",
+                 (int)ns_val->as.s.len, ns_val->as.s.data,
+                 (int)nm_val->as.s.len, nm_val->as.s.data);
+        return mino_keyword_n(S, buf, strlen(buf));
     }
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL)
