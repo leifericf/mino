@@ -750,8 +750,17 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         kv[0] = k; kv[1] = v;
         return mino_vector(S, kv, 2);
     }
+    if (m->type == MINO_VECTOR) {
+        long long idx;
+        if (k->type != MINO_INT) return mino_nil(S);
+        idx = k->as.i;
+        if (idx < 0 || (size_t)idx >= m->as.vec.len) return mino_nil(S);
+        kv[0] = k;
+        kv[1] = vec_nth(m, (size_t)idx);
+        return mino_vector(S, kv, 2);
+    }
     if (m->type != MINO_MAP) {
-        return prim_throw_error(S, "find: first argument must be a map");
+        return prim_throw_error(S, "find: first argument must be an associative collection");
     }
     v = map_get_val(m, k);
     if (v == NULL) return mino_nil(S);
