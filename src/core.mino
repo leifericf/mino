@@ -1297,6 +1297,15 @@
   [ex]
   (when (map? ex) (:message ex)))
 
+;; ---------------------------------------------------------------------------
+;; Tagged literals
+;; ---------------------------------------------------------------------------
+
+(defn tagged-literal
+  "Wrap an unknown reader tag and its body as data."
+  [tag form]
+  {:tag tag :form form})
+
 (def agent atom)
 
 (defn send-to [ag f & args]
