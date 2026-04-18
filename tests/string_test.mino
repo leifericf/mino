@@ -61,7 +61,7 @@
   (is (= "hello" (name :hello)))
   (is (= "world" (name 'world)))
   (is (= "str" (name "str")))
-  (is (= nil (name nil))))
+  (is (thrown? (name nil))))
 
 (deftest symbol-constructor
   (is (= 'hello (symbol "hello")))

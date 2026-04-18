@@ -77,7 +77,7 @@
   (is (nil? (parse-long "abc")))
   (is (nil? (parse-long "3.14")))
   (is (nil? (parse-long "")))
-  (is (nil? (parse-long nil)))
+  (is (thrown? (parse-long nil)))
   (is (nil? (parse-long " 42")))
   (is (nil? (parse-long "42 ")))
   (is (nil? (parse-long "0xFF"))))
@@ -91,7 +91,7 @@
 (deftest parse-double-failure
   (is (nil? (parse-double "abc")))
   (is (nil? (parse-double "")))
-  (is (nil? (parse-double nil)))
+  (is (thrown? (parse-double nil)))
   (is (nil? (parse-double " 3.14"))))
 
 (deftest parse-double-special

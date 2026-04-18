@@ -461,7 +461,7 @@ mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v == NULL || v->type != MINO_STRING)
-        return mino_nil(S);
+        return prim_throw_error(S, "parse-long: argument must be a string");
     s = v->as.s.data;
     if (v->as.s.len == 0 || isspace((unsigned char)s[0]))
         return mino_nil(S);
@@ -484,7 +484,7 @@ mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env
     }
     v = args->as.cons.car;
     if (v == NULL || v->type != MINO_STRING)
-        return mino_nil(S);
+        return prim_throw_error(S, "parse-double: argument must be a string");
     s = v->as.s.data;
     if (v->as.s.len == 0 || isspace((unsigned char)s[0]))
         return mino_nil(S);

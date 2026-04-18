@@ -550,6 +550,8 @@
 (def pos-int?  (fn [x] (and (int? x) (pos? x))))
 (def neg-int?  (fn [x] (and (int? x) (neg? x))))
 (def nat-int?  (fn [x] (and (int? x) (not (neg? x)))))
+(def double?   float?)
+(def char?     (fn [x] (= (type x) :char)))
 (def ratio?    (fn [x] false))
 (def decimal?  (fn [x] false))
 (def rational? (fn [x] (int? x)))
@@ -573,6 +575,35 @@
 (def any?          (fn [x] true))
 (def seqable?      (fn [x] (or (nil? x) (coll? x) (string? x))))
 (def indexed?      (fn [x] (vector? x)))
+
+;; --- Volatile (lightweight mutable box, backed by atom) ---
+
+(def volatile!   (fn [val] (atom val)))
+(def volatile?   atom?)
+(def vreset!     reset!)
+(def vswap!      swap!)
+
+;; --- Delay (lazy thunk) ---
+
+(def delay?      (fn [x] (and (map? x) (contains? x :delay/fn))))
+(defmacro delay [& body]
+  `(let [state# (atom {:status :pending})]
+     {:delay/fn  (fn []
+                   (let [s# @state#]
+                     (if (= (:status s#) :done)
+                       (:value s#)
+                       (let [v# (do ~@body)]
+                         (reset! state# {:status :done :value v#})
+                         v#))))
+      :delay/state state#}))
+(def deref-delay (fn [d] ((:delay/fn d))))
+(def force       (fn [x] (if (delay? x) (deref-delay x) x)))
+;; Override C realized? to also handle delays
+(let [c-realized? realized?]
+  (def realized? (fn [x]
+    (cond
+      (delay? x) (= :done (:status @(:delay/state x)))
+      :else      (c-realized? x)))))
 
 ;; --- Sequence navigation ---
 
