@@ -7,4 +7,5 @@
 (require "tests/are_test")
 (require "tests/literal_test")
 (require "tests/numeric_tower_test")
+(require "tests/collections_semantics_test")
 (run-tests)
