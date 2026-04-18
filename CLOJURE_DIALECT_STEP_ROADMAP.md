@@ -83,7 +83,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 3 - `clojure.test` Compatibility
+## ~~Step 3 - `clojure.test` Compatibility~~
 
 ### Smaller steps
 - Implement `deftest` registration and execution model.
