@@ -4,4 +4,5 @@
 (require "tests/lazy_test")
 (require "tests/var_test")
 (require "tests/ns_resolution_test")
+(require "tests/are_test")
 (run-tests)
