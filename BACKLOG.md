@@ -68,6 +68,15 @@ proportional embedded-scale benefit. The atom struct and watch
 system are orthogonal; nothing prevents adding transients later
 as new collection types with a validity flag.
 
+### Multimethods
+
+Value-dispatched polymorphism (`defmulti`, `defmethod`,
+`prefer-method`, `remove-method`, `methods`). Deferred from the
+dialect roadmap (Step 8) because no existing tests require them.
+The hierarchy system is in place and `isa?`-based dispatch can
+layer on top when needed. Protocol-based type dispatch covers
+current use cases.
+
 ### Chunked sequences
 
 32-at-a-time lazy evaluation. Adds complexity to the seq machinery;

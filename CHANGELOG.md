@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.30.0] — Hierarchies + dispatch essentials
+
+### Added
+- **`make-hierarchy`**: create an empty hierarchy map.
+- **`derive`**: establish parent-child relationship between tags. Supports
+  explicit hierarchy (3-arg) and global hierarchy (2-arg) forms. Includes
+  cycle detection and self-derivation guard.
+- **`underive`**: remove a parent-child relationship. Recomputes transitive
+  closure automatically.
+- **`parents`**: query direct parents of a tag.
+- **`ancestors`**: query all transitive ancestors of a tag.
+- **`descendants`**: query all transitive descendants of a tag.
+- **`isa?`**: check if child derives from parent. Supports equality,
+  hierarchy lookup, and element-wise vector comparison.
+- Global hierarchy atom for convenient 1-arg/2-arg function variants.
+
 ## [0.29.0] — Stateful operations + watches
 
 ### Added
