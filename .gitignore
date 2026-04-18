@@ -43,6 +43,7 @@ Thumbs.db
 
 # Local-only design notes (kept out of the repo intentionally)
 /*.md
+docs/*.md
 !README.md
 !CHANGELOG.md
 !BACKLOG.md
