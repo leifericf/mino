@@ -895,10 +895,19 @@ mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return mino_false(S);
     }
+    if (coll->type == MINO_STRING) {
+        /* For strings, key is an index. */
+        if (key != NULL && key->type == MINO_INT) {
+            long long idx = key->as.i;
+            return (idx >= 0 && (size_t)idx < coll->as.s.len)
+                ? mino_true(S) : mino_false(S);
+        }
+        return mino_false(S);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg),
-                 "contains?: expected a map, set, or vector, got %s",
+                 "contains?: expected a map, set, vector, or string, got %s",
                  type_tag_str(coll));
         return prim_throw_error(S, msg);
     }

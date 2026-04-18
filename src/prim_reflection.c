@@ -14,7 +14,8 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_error(S, "name requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL) return mino_nil(S);
+    if (v == NULL || v->type == MINO_NIL)
+        return prim_throw_error(S, "name: argument must not be nil");
     if (v->type == MINO_STRING)  return v;
     if (v->type == MINO_KEYWORD || v->type == MINO_SYMBOL) {
         const char *data = v->as.s.data;
@@ -109,13 +110,15 @@ mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_error(S, "keyword requires one argument");
     }
     v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_STRING) {
+    if (v == NULL || v->type == MINO_NIL)
+        return mino_nil(S);
+    if (v->type == MINO_STRING)
         return mino_keyword_n(S, v->as.s.data, v->as.s.len);
-    }
-    if (v != NULL && v->type == MINO_KEYWORD) {
+    if (v->type == MINO_KEYWORD)
         return v;
-    }
-    return prim_throw_error(S, "keyword: argument must be a string");
+    if (v->type == MINO_SYMBOL)
+        return mino_keyword_n(S, v->as.s.data, v->as.s.len);
+    return prim_throw_error(S, "keyword: argument must be a string, keyword, or symbol");
 }
 
 mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -335,7 +338,7 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL) {
-        return prim_throw_error(S, "namespace: argument must not be nil");
+        return mino_nil(S);
     }
     if (v->type != MINO_SYMBOL && v->type != MINO_KEYWORD) {
         return prim_throw_error(S, "namespace: expected a symbol or keyword");
