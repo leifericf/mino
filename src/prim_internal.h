@@ -59,6 +59,8 @@ mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bit_and(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env);

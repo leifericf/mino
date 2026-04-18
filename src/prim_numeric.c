@@ -7,6 +7,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <errno.h>
 
 /* ------------------------------------------------------------------------- */
 /* Arithmetic                                                                */
@@ -490,6 +491,54 @@ mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (v != NULL && v->type == MINO_INT) return mino_float(S, (double)v->as.i);
     set_error(S, "float: expected a number");
     return NULL;
+}
+
+mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    const char *s;
+    char *end;
+    long long result;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "parse-long requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_STRING)
+        return mino_nil(S);
+    s = v->as.s.data;
+    if (v->as.s.len == 0 || isspace((unsigned char)s[0]))
+        return mino_nil(S);
+    errno = 0;
+    result = strtoll(s, &end, 10);
+    if (end == s || *end != '\0' || errno == ERANGE)
+        return mino_nil(S);
+    return mino_int(S, result);
+}
+
+mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    const char *s;
+    char *end;
+    double result;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        set_error(S, "parse-double requires one argument");
+        return NULL;
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_STRING)
+        return mino_nil(S);
+    s = v->as.s.data;
+    if (v->as.s.len == 0 || isspace((unsigned char)s[0]))
+        return mino_nil(S);
+    errno = 0;
+    result = strtod(s, &end);
+    if (end == s || *end != '\0')
+        return mino_nil(S);
+    return mino_float(S, result);
 }
 
 /* ------------------------------------------------------------------------- */
