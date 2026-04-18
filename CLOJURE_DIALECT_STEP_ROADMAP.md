@@ -111,7 +111,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 4 - Reader Literal Parity
+## ~~Step 4 - Reader Literal Parity~~
 
 ### Smaller steps
 - Add character literals (`\\space`, `\\newline`, `\\tab`, `\\A`, etc.).

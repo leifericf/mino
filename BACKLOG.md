@@ -102,11 +102,6 @@ throwing. The current `int` and `float` C primitives produce fatal
 errors on bad input. Need new C primitives with nil-return semantics.
 ~30 lines each.
 
-### `NaN?` / `infinite?`
-
-IEEE 754 special value predicates. Need C primitives using `isnan()`
-and `isinf()`. ~10 lines each.
-
 ### `pr` / `print` / `newline`
 
 Output without trailing newline. `println` and `prn` always append a
