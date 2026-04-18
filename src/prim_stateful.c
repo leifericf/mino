@@ -28,7 +28,8 @@ static int atom_validate(mino_state_t *S, mino_val_t *atom,
 }
 
 /* Notify all watches after a state change.  Callback signature:
- * (fn key atom old-state new-state).  Exceptions in watches are ignored. */
+ * (fn key atom old-state new-state).  Exceptions in watches are ignored:
+ * each callback runs inside its own try frame so throws don't escape. */
 static void atom_notify_watches(mino_state_t *S, mino_val_t *atom,
                                 mino_val_t *old_val, mino_val_t *new_val,
                                 mino_env_t *env)
@@ -42,13 +43,25 @@ static void atom_notify_watches(mino_state_t *S, mino_val_t *atom,
         mino_val_t *key = vec_nth(watches->as.map.key_order, i);
         mino_val_t *fn  = map_get_val(watches, key);
         mino_val_t *wargs;
+        int saved_try;
         if (fn == NULL) continue;
         wargs = mino_cons(S, key,
                   mino_cons(S, atom,
                     mino_cons(S, old_val,
                       mino_cons(S, new_val, mino_nil(S)))));
-        /* Ignore watch errors -- state is already committed. */
-        (void)mino_call(S, fn, wargs, env);
+        /* Wrap in a try frame so watch exceptions don't propagate. */
+        saved_try = S->try_depth;
+        if (S->try_depth < MAX_TRY_DEPTH) {
+            S->try_stack[S->try_depth].exception = NULL;
+            if (setjmp(S->try_stack[S->try_depth].buf) == 0) {
+                S->try_depth++;
+                (void)mino_call(S, fn, wargs, env);
+                S->try_depth = saved_try;
+            } else {
+                /* Watch threw -- swallow and continue. */
+                S->try_depth = saved_try;
+            }
+        }
     }
 }
 
