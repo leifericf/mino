@@ -672,7 +672,8 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     p    = args->as.cons.cdr;
-    if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_CONS) {
+    if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_CONS
+        || coll->type == MINO_LAZY) {
         /* List/nil: prepend each item so (conj '(1 2) 3 4) => (4 3 1 2). */
         mino_val_t *out = (coll == NULL || coll->type == MINO_NIL)
             ? mino_nil(S) : coll;
@@ -700,14 +701,23 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t      i;
         for (i = 0; i < extra; i++) {
             mino_val_t *item = p->as.cons.car;
-            mino_val_t *pair_args;
-            if (item == NULL || item->type != MINO_VECTOR
-                || item->as.vec.len != 2) {
-                return prim_throw_error(S, "conj on map requires 2-element vectors");
+            if (item != NULL && item->type == MINO_MAP) {
+                /* Merge map entries: (conj {:a 0} {:b 1}) */
+                size_t j;
+                for (j = 0; j < item->as.map.len; j++) {
+                    mino_val_t *k = vec_nth(item->as.map.key_order, j);
+                    mino_val_t *v = map_get_val(item, k);
+                    mino_val_t *pair_args = mino_cons(S, k, mino_cons(S, v, mino_nil(S)));
+                    acc = map_assoc_pairs(S, acc, pair_args, 1);
+                }
+            } else if (item != NULL && item->type == MINO_VECTOR
+                       && item->as.vec.len == 2) {
+                mino_val_t *pair_args = mino_cons(S, vec_nth(item, 0),
+                                       mino_cons(S, vec_nth(item, 1), mino_nil(S)));
+                acc = map_assoc_pairs(S, acc, pair_args, 1);
+            } else {
+                return prim_throw_error(S, "conj on map requires map entries or 2-element vectors");
             }
-            pair_args = mino_cons(S, vec_nth(item, 0),
-                                   mino_cons(S, vec_nth(item, 1), mino_nil(S)));
-            acc = map_assoc_pairs(S, acc, pair_args, 1);
             p = p->as.cons.cdr;
         }
         return acc;
