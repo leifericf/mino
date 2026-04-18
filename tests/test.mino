@@ -27,11 +27,14 @@
 
 ;; --- Public API ---
 
+(defn thrown?-form? [sym]
+  (and (symbol? sym) (= "thrown?" (name sym))))
+
 (defmacro is [& args]
   (let [expr (first args)
         msg  (second args)]
-    (if (and (cons? expr) (= (first expr) 'thrown?))
-      ;; (is (thrown? body...)) — expect an exception
+    (if (and (cons? expr) (thrown?-form? (first expr)))
+      ;; (is (thrown? body...)) or (is (p/thrown? body...))
       `(try
          (do ~@(rest expr)
              (assert-fail! (pr-str '~expr) ~msg "expected exception but none thrown"))
@@ -64,6 +67,16 @@
      (let [__r (do ~@body)]
        (reset! *testing-context* (rest @*testing-context*))
        __r)))
+
+(defmacro are [bindings expr & args]
+  (let [n     (count bindings)
+        rows  (partition n args)
+        tests (apply list
+                (map (fn [row]
+                       (let [smap (zipmap bindings row)]
+                         `(is ~(postwalk-replace smap expr))))
+                     rows))]
+    `(do ~@tests)))
 
 ;; --- Runner ---
 
