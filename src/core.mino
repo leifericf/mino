@@ -1369,6 +1369,104 @@
                     (contains? dm :default))))
             methods)))
 
+;; ---------------------------------------------------------------------------
+;; Hierarchies: immutable parent/child/ancestor/descendant relationships.
+;;
+;; A hierarchy is a map with :parents, :ancestors, and :descendants keys.
+;; Values are maps from tag -> set of related tags.
+;;
+;; (make-hierarchy) returns an empty hierarchy.
+;; (derive h child parent) adds a relationship (3-arg) or uses global (2-arg).
+;; (underive h child parent) removes a relationship.
+;; (parents h tag), (ancestors h tag), (descendants h tag) query relationships.
+;; (isa? h child parent) checks if child derives from parent.
+;; ---------------------------------------------------------------------------
+
+(def global-hierarchy_ (atom {:parents {} :ancestors {} :descendants {}}))
+
+(defn make-hierarchy [] {:parents {} :ancestors {} :descendants {}})
+
+(defn tc-ancestors_ [parents-map node]
+  (loop [frontier (get parents-map node #{})
+         result #{}]
+    (if (empty? frontier)
+      result
+      (let [p (first frontier)
+            rst (disj frontier p)]
+        (if (contains? result p)
+          (recur rst result)
+          (recur (into rst (get parents-map p #{}))
+                 (conj result p)))))))
+
+(defn recompute-hierarchy_ [h]
+  (let [pm (:parents h)
+        all-nodes (into (set (keys pm))
+                        (apply concat (vals pm)))
+        ancestors-map (reduce (fn [m node]
+                                (let [ancs (tc-ancestors_ pm node)]
+                                  (if (empty? ancs) m (assoc m node ancs))))
+                              {} all-nodes)
+        descendants-map (reduce (fn [m node]
+                                  (reduce (fn [m2 anc]
+                                            (update m2 anc (fn [s] (conj (or s #{}) node))))
+                                          m (get ancestors-map node #{})))
+                                {} all-nodes)]
+    (assoc h :ancestors ancestors-map :descendants descendants-map)))
+
+(defn derive
+  ([child parent]
+   (swap! global-hierarchy_ derive child parent)
+   @global-hierarchy_)
+  ([h child parent]
+   (when (= child parent)
+     (throw (ex-info "Cannot derive tag from itself" {:child child :parent parent})))
+   (when (contains? (get (:ancestors h) parent #{}) child)
+     (throw (ex-info "Cyclic derivation" {:child child :parent parent})))
+   (let [new-parents (update (:parents h) child
+                             (fn [s] (conj (or s #{}) parent)))]
+     (recompute-hierarchy_ (assoc h :parents new-parents)))))
+
+(defn underive
+  ([child parent]
+   (swap! global-hierarchy_ underive child parent)
+   @global-hierarchy_)
+  ([h child parent]
+   (let [cur (get (:parents h) child #{})]
+     (if (contains? cur parent)
+       (let [new-set (disj cur parent)
+             new-parents (if (empty? new-set)
+                           (dissoc (:parents h) child)
+                           (assoc (:parents h) child new-set))]
+         (recompute-hierarchy_ (assoc h :parents new-parents)))
+       h))))
+
+(defn parents
+  ([tag] (parents @global-hierarchy_ tag))
+  ([h tag]
+   (let [p (get (:parents h) tag)]
+     (if (and p (not (empty? p))) p nil))))
+
+(defn ancestors
+  ([tag] (ancestors @global-hierarchy_ tag))
+  ([h tag]
+   (let [a (get (:ancestors h) tag)]
+     (if (and a (not (empty? a))) a nil))))
+
+(defn descendants
+  ([tag] (descendants @global-hierarchy_ tag))
+  ([h tag]
+   (let [d (get (:descendants h) tag)]
+     (if (and d (not (empty? d))) d nil))))
+
+(defn isa?
+  ([child parent] (isa? @global-hierarchy_ child parent))
+  ([h child parent]
+   (or (= child parent)
+       (contains? (get (:ancestors h) child #{}) parent)
+       (and (vector? child) (vector? parent)
+            (= (count child) (count parent))
+            (every? identity (map (fn [c p] (isa? h c p)) child parent))))))
+
 (defmacro with-open [bindings & body]
   (if (empty? bindings)
     `(do ~@body)
