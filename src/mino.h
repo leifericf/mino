@@ -352,37 +352,10 @@ void        mino_env_set(mino_state_t *S, mino_env_t *env, const char *name,
 mino_val_t *mino_env_get(mino_env_t *env, const char *name);
 
 /*
- * Install the core primitive bindings into `env`:
- *   arithmetic   + - * / mod rem quot
- *   bitwise      bit-and bit-or bit-xor bit-not bit-shift-left
- *                bit-shift-right
- *   comparison   = < <= > >= not=
- *   list         car cdr cons list
- *   collection   count nth first rest vector hash-map assoc dissoc get conj
- *                keys vals
- *   sets         hash-set set? contains? disj
- *   sequences    seq realized? reduce into apply reverse sort
- *   predicates   cons? nil? string? number? keyword? symbol? vector? map?
- *                set? fn? empty?
- *   metadata     meta with-meta vary-meta
- *   utility      not identity
- *   coercion     int float
- *   reflection   type name doc source apropos
- *   strings      str pr-str read-string format subs split join char-at
- *                starts-with? ends-with? includes? upper-case lower-case
- *                trim
- *   exceptions   throw
- *   modules      require
- *   macros       macroexpand macroexpand-1 gensym
- *   core.mino: when cond and or -> ->> map filter take drop range repeat
- *              concat update some every? comp partial complement
- * Special forms (quote, quasiquote, unquote, unquote-splicing, def,
- * defmacro, if, do, let, fn, loop, recur, try, lazy-seq) are recognized by
- * the evaluator and do not need to be installed.
- *
- * NOTE: no I/O primitives are installed by this function. Call
- * mino_install_io to opt in to println, prn, and slurp.
- * Safe to call on a fresh env.
+ * Install all core primitive bindings and the standard library into `env`.
+ * This includes arithmetic, comparison, collections, sequences, predicates,
+ * strings, reflection, and the `core.mino` stdlib. Does not install I/O
+ * primitives; call `mino_install_io` separately to opt in.
  */
 void        mino_install_core(mino_state_t *S, mino_env_t *env);
 
