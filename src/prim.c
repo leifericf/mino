@@ -47,8 +47,7 @@ mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
         S->try_stack[S->try_depth - 1].exception = ex;
         longjmp(S->try_stack[S->try_depth - 1].buf, 1);
     }
-    set_error(S, msg);
-    return NULL;
+    return prim_throw_error(S, msg);
 }
 
 int as_double(const mino_val_t *v, double *out)
@@ -88,8 +87,7 @@ mino_val_t *print_to_string(mino_state_t *S, const mino_val_t *v)
     char  *buf;
     mino_val_t *result;
     if (f == NULL) {
-        set_error(S, "pr-str: tmpfile failed");
-        return NULL;
+        return prim_throw_error(S, "pr-str: tmpfile failed");
     }
     mino_print_to(S, f, v);
     n = ftell(f);
@@ -98,8 +96,7 @@ mino_val_t *print_to_string(mino_state_t *S, const mino_val_t *v)
     buf = (char *)malloc((size_t)n + 1);
     if (buf == NULL) {
         fclose(f);
-        set_error(S, "out of memory");
-        return NULL;
+        return prim_throw_error(S, "out of memory");
     }
     if (n > 0) {
         size_t rd = fread(buf, 1, (size_t)n, f);

@@ -22,13 +22,11 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t i;
     (void)env;
     if (!mino_is_cons(args)) {
-        set_error(S, "format requires at least a format string");
-        return NULL;
+        return prim_throw_error(S, "format requires at least a format string");
     }
     fmt_val = args->as.cons.car;
     if (fmt_val == NULL || fmt_val->type != MINO_STRING) {
-        set_error(S, "format: first argument must be a string");
-        return NULL;
+        return prim_throw_error(S, "format: first argument must be a string");
     }
     fmt     = fmt_val->as.s.data;
     fmt_len = fmt_val->as.s.len;
@@ -176,13 +174,11 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "read-string requires one string argument");
-        return NULL;
+        return prim_throw_error(S, "read-string requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        set_error(S, "read-string: argument must be a string");
-        return NULL;
+        return prim_throw_error(S, "read-string: argument must be a string");
     }
     clear_error(S);
     result = mino_read(S, s->as.s.data, NULL);
@@ -199,9 +195,8 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             char msg[512];
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
-            set_error(S, msg);
+            return prim_throw_error(S, msg);
         }
-        return NULL;
     }
     return result != NULL ? result : mino_nil(S);
 }
@@ -246,15 +241,13 @@ mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     long long idx;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "char-at requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "char-at requires two arguments");
     }
     s       = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || idx_val == NULL || idx_val->type != MINO_INT) {
-        set_error(S, "char-at: requires a string and integer index");
-        return NULL;
+        return prim_throw_error(S, "char-at: requires a string and integer index");
     }
     idx = idx_val->as.i;
     if (idx < 0 || (size_t)idx >= s->as.s.len) {
@@ -275,25 +268,21 @@ mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 2 && n != 3) {
-        set_error(S, "subs requires 2 or 3 arguments");
-        return NULL;
+        return prim_throw_error(S, "subs requires 2 or 3 arguments");
     }
     s_val = args->as.cons.car;
     if (s_val == NULL || s_val->type != MINO_STRING) {
-        set_error(S, "subs: first argument must be a string");
-        return NULL;
+        return prim_throw_error(S, "subs: first argument must be a string");
     }
     if (args->as.cons.cdr->as.cons.car == NULL
         || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
-        set_error(S, "subs: start index must be an integer");
-        return NULL;
+        return prim_throw_error(S, "subs: start index must be an integer");
     }
     start = args->as.cons.cdr->as.cons.car->as.i;
     if (n == 3) {
         if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
             || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
-            set_error(S, "subs: end index must be an integer");
-            return NULL;
+            return prim_throw_error(S, "subs: end index must be an integer");
         }
         end_idx = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
     } else {
@@ -318,15 +307,13 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char  *p;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "split requires a string and a separator");
-        return NULL;
+        return prim_throw_error(S, "split requires a string and a separator");
     }
     s_val   = args->as.cons.car;
     sep_val = args->as.cons.cdr->as.cons.car;
     if (s_val == NULL || s_val->type != MINO_STRING
         || sep_val == NULL || sep_val->type != MINO_STRING) {
-        set_error(S, "split: both arguments must be strings");
-        return NULL;
+        return prim_throw_error(S, "split: both arguments must be strings");
     }
     s       = s_val->as.s.data;
     slen    = s_val->as.s.len;
@@ -395,12 +382,10 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             sep     = sep_val->as.s.data;
             sep_len = sep_val->as.s.len;
         } else if (sep_val != NULL && sep_val->type != MINO_NIL) {
-            set_error(S, "join: separator must be a string or nil");
-            return NULL;
+            return prim_throw_error(S, "join: separator must be a string or nil");
         }
     } else {
-        set_error(S, "join requires 1 or 2 arguments");
-        return NULL;
+        return prim_throw_error(S, "join requires 1 or 2 arguments");
     }
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_string(S, "");
@@ -454,15 +439,13 @@ mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *en
     mino_val_t *s, *prefix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "starts-with? requires two string arguments");
-        return NULL;
+        return prim_throw_error(S, "starts-with? requires two string arguments");
     }
     s      = args->as.cons.car;
     prefix = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || prefix == NULL || prefix->type != MINO_STRING) {
-        set_error(S, "starts-with? requires two string arguments");
-        return NULL;
+        return prim_throw_error(S, "starts-with? requires two string arguments");
     }
     if (prefix->as.s.len > s->as.s.len) return mino_false(S);
     return memcmp(s->as.s.data, prefix->as.s.data, prefix->as.s.len) == 0
@@ -474,15 +457,13 @@ mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *s, *suffix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "ends-with? requires two string arguments");
-        return NULL;
+        return prim_throw_error(S, "ends-with? requires two string arguments");
     }
     s      = args->as.cons.car;
     suffix = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || suffix == NULL || suffix->type != MINO_STRING) {
-        set_error(S, "ends-with? requires two string arguments");
-        return NULL;
+        return prim_throw_error(S, "ends-with? requires two string arguments");
     }
     if (suffix->as.s.len > s->as.s.len) return mino_false(S);
     return memcmp(s->as.s.data + s->as.s.len - suffix->as.s.len,
@@ -496,15 +477,13 @@ mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char *p;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "includes? requires two string arguments");
-        return NULL;
+        return prim_throw_error(S, "includes? requires two string arguments");
     }
     s   = args->as.cons.car;
     sub = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || sub == NULL || sub->type != MINO_STRING) {
-        set_error(S, "includes? requires two string arguments");
-        return NULL;
+        return prim_throw_error(S, "includes? requires two string arguments");
     }
     if (sub->as.s.len == 0) return mino_true(S);
     if (sub->as.s.len > s->as.s.len) return mino_false(S);
@@ -523,13 +502,11 @@ mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "upper-case requires one string argument");
-        return NULL;
+        return prim_throw_error(S, "upper-case requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        set_error(S, "upper-case requires one string argument");
-        return NULL;
+        return prim_throw_error(S, "upper-case requires one string argument");
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
@@ -552,13 +529,11 @@ mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "lower-case requires one string argument");
-        return NULL;
+        return prim_throw_error(S, "lower-case requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        set_error(S, "lower-case requires one string argument");
-        return NULL;
+        return prim_throw_error(S, "lower-case requires one string argument");
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
@@ -580,13 +555,11 @@ mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char *start, *end_ptr;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "trim requires one string argument");
-        return NULL;
+        return prim_throw_error(S, "trim requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        set_error(S, "trim requires one string argument");
-        return NULL;
+        return prim_throw_error(S, "trim requires one string argument");
     }
     start   = s->as.s.data;
     end_ptr = s->as.s.data + s->as.s.len;

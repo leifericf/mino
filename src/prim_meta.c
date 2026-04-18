@@ -20,8 +20,7 @@ mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
     mino_val_t *obj;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "meta requires one argument");
-        return NULL;
+        return prim_throw_error(S, "meta requires one argument");
     }
     obj = args->as.cons.car;
     if (obj == NULL || !supports_meta(obj->type)) {
@@ -36,18 +35,15 @@ mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
     mino_val_t *obj, *m, *copy;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "with-meta requires 2 arguments");
-        return NULL;
+        return prim_throw_error(S, "with-meta requires 2 arguments");
     }
     obj = args->as.cons.car;
     m   = args->as.cons.cdr->as.cons.car;
     if (obj == NULL || !supports_meta(obj->type)) {
-        set_error(S, "with-meta: type does not support metadata");
-        return NULL;
+        return prim_throw_error(S, "with-meta: type does not support metadata");
     }
     if (m != NULL && m->type != MINO_NIL && m->type != MINO_MAP) {
-        set_error(S, "with-meta: metadata must be a map or nil");
-        return NULL;
+        return prim_throw_error(S, "with-meta: metadata must be a map or nil");
     }
     /* Shallow-copy the value and attach the new metadata. */
     copy = alloc_val(S, obj->type);
@@ -61,15 +57,13 @@ mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
 {
     mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta, *copy;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "vary-meta requires at least 2 arguments");
-        return NULL;
+        return prim_throw_error(S, "vary-meta requires at least 2 arguments");
     }
     obj = args->as.cons.car;
     f   = args->as.cons.cdr->as.cons.car;
     extra = args->as.cons.cdr->as.cons.cdr; /* remaining args (cons list or nil) */
     if (obj == NULL || !supports_meta(obj->type)) {
-        set_error(S, "vary-meta: type does not support metadata");
-        return NULL;
+        return prim_throw_error(S, "vary-meta: type does not support metadata");
     }
     old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
     /* Build (old-meta extra...) argument list for f. */
@@ -79,8 +73,7 @@ mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
         return NULL;
     }
     if (new_meta->type != MINO_NIL && new_meta->type != MINO_MAP) {
-        set_error(S, "vary-meta: f must return a map or nil");
-        return NULL;
+        return prim_throw_error(S, "vary-meta: f must return a map or nil");
     }
     copy = alloc_val(S, obj->type);
     copy->as = obj->as;
@@ -93,15 +86,13 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
 {
     mino_val_t *obj, *f, *old_meta, *extra, *call_args, *new_meta;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "alter-meta! requires at least 2 arguments");
-        return NULL;
+        return prim_throw_error(S, "alter-meta! requires at least 2 arguments");
     }
     obj   = args->as.cons.car;
     f     = args->as.cons.cdr->as.cons.car;
     extra = args->as.cons.cdr->as.cons.cdr;
     if (obj == NULL || !supports_meta(obj->type)) {
-        set_error(S, "alter-meta!: type does not support metadata");
-        return NULL;
+        return prim_throw_error(S, "alter-meta!: type does not support metadata");
     }
     old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
     call_args = mino_cons(S, old_meta, extra);
@@ -110,8 +101,7 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
         return NULL;
     }
     if (new_meta->type != MINO_NIL && new_meta->type != MINO_MAP) {
-        set_error(S, "alter-meta!: f must return a map or nil");
-        return NULL;
+        return prim_throw_error(S, "alter-meta!: f must return a map or nil");
     }
     obj->meta = (new_meta->type == MINO_NIL) ? NULL : new_meta;
     return obj->meta != NULL ? obj->meta : mino_nil(S);

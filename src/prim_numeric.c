@@ -21,8 +21,7 @@ mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (mino_is_cons(args)) {
             double x;
             if (!as_double(args->as.cons.car, &x)) {
-                set_error(S, "+ expects numbers");
-                return NULL;
+                return prim_throw_error(S, "+ expects numbers");
             }
             acc += x;
             args = args->as.cons.cdr;
@@ -33,8 +32,7 @@ mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (mino_is_cons(args)) {
             long long x;
             if (!as_long(args->as.cons.car, &x)) {
-                set_error(S, "+ expects numbers");
-                return NULL;
+                return prim_throw_error(S, "+ expects numbers");
             }
             acc += x;
             args = args->as.cons.cdr;
@@ -47,14 +45,12 @@ mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args)) {
-        set_error(S, "- requires at least one argument");
-        return NULL;
+        return prim_throw_error(S, "- requires at least one argument");
     }
     if (args_have_float(args)) {
         double acc;
         if (!as_double(args->as.cons.car, &acc)) {
-            set_error(S, "- expects numbers");
-            return NULL;
+            return prim_throw_error(S, "- expects numbers");
         }
         args = args->as.cons.cdr;
         if (!mino_is_cons(args)) {
@@ -63,8 +59,7 @@ mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (mino_is_cons(args)) {
             double x;
             if (!as_double(args->as.cons.car, &x)) {
-                set_error(S, "- expects numbers");
-                return NULL;
+                return prim_throw_error(S, "- expects numbers");
             }
             acc -= x;
             args = args->as.cons.cdr;
@@ -73,8 +68,7 @@ mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     } else {
         long long acc;
         if (!as_long(args->as.cons.car, &acc)) {
-            set_error(S, "- expects numbers");
-            return NULL;
+            return prim_throw_error(S, "- expects numbers");
         }
         args = args->as.cons.cdr;
         if (!mino_is_cons(args)) {
@@ -83,8 +77,7 @@ mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (mino_is_cons(args)) {
             long long x;
             if (!as_long(args->as.cons.car, &x)) {
-                set_error(S, "- expects numbers");
-                return NULL;
+                return prim_throw_error(S, "- expects numbers");
             }
             acc -= x;
             args = args->as.cons.cdr;
@@ -101,8 +94,7 @@ mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (mino_is_cons(args)) {
             double x;
             if (!as_double(args->as.cons.car, &x)) {
-                set_error(S, "* expects numbers");
-                return NULL;
+                return prim_throw_error(S, "* expects numbers");
             }
             acc *= x;
             args = args->as.cons.cdr;
@@ -113,8 +105,7 @@ mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (mino_is_cons(args)) {
             long long x;
             if (!as_long(args->as.cons.car, &x)) {
-                set_error(S, "* expects numbers");
-                return NULL;
+                return prim_throw_error(S, "* expects numbers");
             }
             acc *= x;
             args = args->as.cons.cdr;
@@ -131,19 +122,16 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     int all_int = 1;
     (void)env;
     if (!mino_is_cons(args)) {
-        set_error(S, "/ requires at least one argument");
-        return NULL;
+        return prim_throw_error(S, "/ requires at least one argument");
     }
     if (args->as.cons.car == NULL
         || (args->as.cons.car->type != MINO_INT
             && args->as.cons.car->type != MINO_FLOAT)) {
-        set_error(S, "/ expects numbers");
-        return NULL;
+        return prim_throw_error(S, "/ expects numbers");
     }
     if (args->as.cons.car->type == MINO_FLOAT) all_int = 0;
     if (!as_double(args->as.cons.car, &acc)) {
-        set_error(S, "/ expects numbers");
-        return NULL;
+        return prim_throw_error(S, "/ expects numbers");
     }
     args = args->as.cons.cdr;
     if (!mino_is_cons(args)) {
@@ -159,13 +147,11 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (args->as.cons.car == NULL
             || (args->as.cons.car->type != MINO_INT
                 && args->as.cons.car->type != MINO_FLOAT)) {
-            set_error(S, "/ expects numbers");
-            return NULL;
+            return prim_throw_error(S, "/ expects numbers");
         }
         if (args->as.cons.car->type == MINO_FLOAT) all_int = 0;
         if (!as_double(args->as.cons.car, &x)) {
-            set_error(S, "/ expects numbers");
-            return NULL;
+            return prim_throw_error(S, "/ expects numbers");
         }
         if (x == 0.0 && all_int) {
             return prim_throw_error(S, "division by zero");
@@ -186,13 +172,11 @@ mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "mod requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "mod requires two arguments");
     }
     if (!as_double(args->as.cons.car, &a) ||
         !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "mod expects numbers");
-        return NULL;
+        return prim_throw_error(S, "mod expects numbers");
     }
     if (b == 0.0) {
         if (args->as.cons.car->type == MINO_INT &&
@@ -217,13 +201,11 @@ mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "rem requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "rem requires two arguments");
     }
     if (!as_double(args->as.cons.car, &a) ||
         !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "rem expects numbers");
-        return NULL;
+        return prim_throw_error(S, "rem expects numbers");
     }
     if (b == 0.0) {
         if (args->as.cons.car->type == MINO_INT &&
@@ -245,13 +227,11 @@ mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "quot requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "quot requires two arguments");
     }
     if (!as_double(args->as.cons.car, &a) ||
         !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "quot expects numbers");
-        return NULL;
+        return prim_throw_error(S, "quot expects numbers");
     }
     if (b == 0.0) {
         if (args->as.cons.car->type == MINO_INT &&
@@ -282,12 +262,10 @@ mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         (void)env;                                                      \
         if (!mino_is_cons(args) ||                                      \
             mino_is_cons(args->as.cons.cdr)) {                          \
-            set_error(S, label " requires one argument");                  \
-            return NULL;                                                \
+            return prim_throw_error(S, label " requires one argument");  \
         }                                                               \
         if (!as_double(args->as.cons.car, &x)) {                       \
-            set_error(S, label " expects a number");                       \
-            return NULL;                                                \
+            return prim_throw_error(S, label " expects a number");     \
         }                                                               \
         return mino_float(S, cfn(x));                                      \
     }
@@ -310,13 +288,11 @@ mino_val_t *prim_math_pow(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "math-pow requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "math-pow requires two arguments");
     }
     if (!as_double(args->as.cons.car, &base) ||
         !as_double(args->as.cons.cdr->as.cons.car, &exponent)) {
-        set_error(S, "math-pow expects numbers");
-        return NULL;
+        return prim_throw_error(S, "math-pow expects numbers");
     }
     return mino_float(S, pow(base, exponent));
 }
@@ -327,13 +303,11 @@ mino_val_t *prim_math_atan2(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "math-atan2 requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "math-atan2 requires two arguments");
     }
     if (!as_double(args->as.cons.car, &y) ||
         !as_double(args->as.cons.cdr->as.cons.car, &x)) {
-        set_error(S, "math-atan2 expects numbers");
-        return NULL;
+        return prim_throw_error(S, "math-atan2 expects numbers");
     }
     return mino_float(S, atan2(y, x));
 }
@@ -348,13 +322,11 @@ mino_val_t *prim_bit_and(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-and requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "bit-and requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-and expects integers");
-        return NULL;
+        return prim_throw_error(S, "bit-and expects integers");
     }
     return mino_int(S, a & b);
 }
@@ -365,13 +337,11 @@ mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-or requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "bit-or requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-or expects integers");
-        return NULL;
+        return prim_throw_error(S, "bit-or expects integers");
     }
     return mino_int(S, a | b);
 }
@@ -382,13 +352,11 @@ mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-xor requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "bit-xor requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-xor expects integers");
-        return NULL;
+        return prim_throw_error(S, "bit-xor expects integers");
     }
     return mino_int(S, a ^ b);
 }
@@ -398,12 +366,10 @@ mino_val_t *prim_bit_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     long long a;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "bit-not requires one argument");
-        return NULL;
+        return prim_throw_error(S, "bit-not requires one argument");
     }
     if (!as_long(args->as.cons.car, &a)) {
-        set_error(S, "bit-not expects an integer");
-        return NULL;
+        return prim_throw_error(S, "bit-not expects an integer");
     }
     return mino_int(S, ~a);
 }
@@ -414,13 +380,11 @@ mino_val_t *prim_bit_shift_left(mino_state_t *S, mino_val_t *args, mino_env_t *e
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-shift-left requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "bit-shift-left requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-shift-left expects integers");
-        return NULL;
+        return prim_throw_error(S, "bit-shift-left expects integers");
     }
     return mino_int(S, a << b);
 }
@@ -431,13 +395,11 @@ mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "bit-shift-right requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "bit-shift-right requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "bit-shift-right expects integers");
-        return NULL;
+        return prim_throw_error(S, "bit-shift-right expects integers");
     }
     return mino_int(S, a >> b);
 }
@@ -448,13 +410,11 @@ mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, min
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "unsigned-bit-shift-right requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "unsigned-bit-shift-right requires two arguments");
     }
     if (!as_long(args->as.cons.car, &a) ||
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
-        set_error(S, "unsigned-bit-shift-right expects integers");
-        return NULL;
+        return prim_throw_error(S, "unsigned-bit-shift-right expects integers");
     }
     return mino_int(S, (long long)((unsigned long long)a >> b));
 }
@@ -468,14 +428,12 @@ mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "int requires one argument");
-        return NULL;
+        return prim_throw_error(S, "int requires one argument");
     }
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_INT) return v;
     if (v != NULL && v->type == MINO_FLOAT) return mino_int(S, (long long)v->as.f);
-    set_error(S, "int: expected a number");
-    return NULL;
+    return prim_throw_error(S, "int: expected a number");
 }
 
 mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -483,14 +441,12 @@ mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "float requires one argument");
-        return NULL;
+        return prim_throw_error(S, "float requires one argument");
     }
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_FLOAT) return v;
     if (v != NULL && v->type == MINO_INT) return mino_float(S, (double)v->as.i);
-    set_error(S, "float: expected a number");
-    return NULL;
+    return prim_throw_error(S, "float: expected a number");
 }
 
 mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -501,8 +457,7 @@ mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     long long result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "parse-long requires one argument");
-        return NULL;
+        return prim_throw_error(S, "parse-long requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || v->type != MINO_STRING)
@@ -525,8 +480,7 @@ mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env
     double result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "parse-double requires one argument");
-        return NULL;
+        return prim_throw_error(S, "parse-double requires one argument");
     }
     v = args->as.cons.car;
     if (v == NULL || v->type != MINO_STRING)
@@ -553,8 +507,7 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "compare requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "compare requires two arguments");
     }
     a = args->as.cons.car;
     b = args->as.cons.cdr->as.cons.car;
@@ -576,8 +529,7 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         int cmp = strcmp(a->as.s.data, b->as.s.data);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
-    set_error(S, "compare: cannot compare values of different types");
-    return NULL;
+    return prim_throw_error(S, "compare: cannot compare values of different types");
 }
 
 mino_val_t *prim_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -605,8 +557,7 @@ mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args,
     mino_val_t *a, *b;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "identical? requires 2 arguments");
-        return NULL;
+        return prim_throw_error(S, "identical? requires 2 arguments");
     }
     a = args->as.cons.car;
     b = args->as.cons.cdr->as.cons.car;
@@ -628,8 +579,7 @@ static mino_val_t *compare_chain(mino_state_t *S, mino_val_t *args, const char *
     if (!as_double(args->as.cons.car, &prev)) {
         char msg[64];
         snprintf(msg, sizeof(msg), "%s expects numbers", name);
-        set_error(S, msg);
-        return NULL;
+        return prim_throw_error(S, msg);
     }
     args = args->as.cons.cdr;
     while (mino_is_cons(args)) {
@@ -638,8 +588,7 @@ static mino_val_t *compare_chain(mino_state_t *S, mino_val_t *args, const char *
         if (!as_double(args->as.cons.car, &x)) {
             char msg[64];
             snprintf(msg, sizeof(msg), "%s expects numbers", name);
-            set_error(S, msg);
-            return NULL;
+            return prim_throw_error(S, msg);
         }
         switch (op) {
         case 0:  ok = prev <  x; break;
@@ -667,8 +616,7 @@ mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "NaN? requires one argument");
-        return NULL;
+        return prim_throw_error(S, "NaN? requires one argument");
     }
     v = args->as.cons.car;
     return (v != NULL && v->type == MINO_FLOAT && isnan(v->as.f))
@@ -680,8 +628,7 @@ mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "infinite? requires one argument");
-        return NULL;
+        return prim_throw_error(S, "infinite? requires one argument");
     }
     v = args->as.cons.car;
     return (v != NULL && v->type == MINO_FLOAT && isinf(v->as.f))
