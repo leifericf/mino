@@ -935,10 +935,16 @@
   (fn [& args]
     (some (fn [p] (some p args)) preds))))
 
-(def fnil (fn [f default]
-  (fn [& args]
-    (apply f (cons (if (nil? (first args)) default (first args))
-                   (rest args))))))
+(def fnil (fn
+  ([f d1]
+   (fn [x & args]
+     (apply f (if (nil? x) d1 x) args)))
+  ([f d1 d2]
+   (fn [x y & args]
+     (apply f (if (nil? x) d1 x) (if (nil? y) d2 y) args)))
+  ([f d1 d2 d3]
+   (fn [x y z & args]
+     (apply f (if (nil? x) d1 x) (if (nil? y) d2 y) (if (nil? z) d3 z) args)))))
 
 (def memoize (fn [f]
   (let [cache (atom {})]
