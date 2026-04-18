@@ -228,6 +228,163 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         mino_val_t *args = form->as.cons.cdr;
         S->eval_current_form = form;
 
+        /* Interop syntax desugaring. */
+        if (head != NULL && head->type == MINO_SYMBOL
+            && head->as.s.len > 0) {
+            const char *hname = head->as.s.data;
+            size_t      hlen  = head->as.s.len;
+
+            /* (.method target args...) -> (host/call target :method args...)
+             * (.-field target)         -> (host/get  target :field) */
+            if (hname[0] == '.' && hlen > 1) {
+                int is_getter = (hlen > 2 && hname[1] == '-');
+                const char *member = hname + (is_getter ? 2 : 1);
+                mino_val_t *kw = mino_keyword(S, member);
+                gc_pin(kw);
+                if (is_getter) {
+                    /* (host/get target :field) */
+                    mino_val_t *target_form;
+                    mino_val_t *target_val;
+                    mino_val_t *prim;
+                    if (!mino_is_cons(args)) {
+                        gc_unpin(1);
+                        set_error_at(S, form, ".-field requires a target");
+                        return NULL;
+                    }
+                    target_form = args->as.cons.car;
+                    target_val = eval_value(S, target_form, env);
+                    if (target_val == NULL) { gc_unpin(1); return NULL; }
+                    gc_pin(target_val);
+                    prim = mino_env_get(env, "host/get");
+                    if (prim == NULL) {
+                        gc_unpin(2);
+                        set_error_at(S, form, "host/get not bound");
+                        return NULL;
+                    }
+                    {
+                        mino_val_t *a = mino_cons(S, kw, mino_nil(S));
+                        gc_pin(a);
+                        a = mino_cons(S, target_val, a);
+                        gc_unpin(3);
+                        return apply_callable(S, prim, a, env);
+                    }
+                } else {
+                    /* (host/call target :method args...) */
+                    mino_val_t *target_form;
+                    mino_val_t *target_val;
+                    mino_val_t *prim;
+                    mino_val_t *rest;
+                    mino_val_t *evaled_rest;
+                    if (!mino_is_cons(args)) {
+                        gc_unpin(1);
+                        set_error_at(S, form, ".method requires a target");
+                        return NULL;
+                    }
+                    target_form = args->as.cons.car;
+                    rest = args->as.cons.cdr;
+                    target_val = eval_value(S, target_form, env);
+                    if (target_val == NULL) { gc_unpin(1); return NULL; }
+                    gc_pin(target_val);
+                    evaled_rest = eval_args(S, rest, env);
+                    if (evaled_rest == NULL && mino_is_cons(rest)) {
+                        gc_unpin(2); return NULL;
+                    }
+                    gc_pin(evaled_rest);
+                    prim = mino_env_get(env, "host/call");
+                    if (prim == NULL) {
+                        gc_unpin(3);
+                        set_error_at(S, form, "host/call not bound");
+                        return NULL;
+                    }
+                    {
+                        mino_val_t *a = mino_cons(S, kw, evaled_rest);
+                        gc_pin(a);
+                        a = mino_cons(S, target_val, a);
+                        gc_unpin(4);
+                        return apply_callable(S, prim, a, env);
+                    }
+                }
+            }
+
+            /* (new TypeName args...) -> (host/new :TypeName args...) */
+            if (hlen == 3 && memcmp(hname, "new", 3) == 0
+                && mino_is_cons(args)) {
+                mino_val_t *type_sym = args->as.cons.car;
+                if (type_sym != NULL && type_sym->type == MINO_SYMBOL) {
+                    mino_val_t *kw = mino_keyword(S, type_sym->as.s.data);
+                    mino_val_t *rest = args->as.cons.cdr;
+                    mino_val_t *evaled_rest;
+                    mino_val_t *prim;
+                    gc_pin(kw);
+                    evaled_rest = eval_args(S, rest, env);
+                    if (evaled_rest == NULL && mino_is_cons(rest)) {
+                        gc_unpin(1); return NULL;
+                    }
+                    gc_pin(evaled_rest);
+                    prim = mino_env_get(env, "host/new");
+                    if (prim == NULL) {
+                        gc_unpin(2);
+                        set_error_at(S, form, "host/new not bound");
+                        return NULL;
+                    }
+                    {
+                        mino_val_t *a = mino_cons(S, kw, evaled_rest);
+                        gc_unpin(2);
+                        return apply_callable(S, prim, a, env);
+                    }
+                }
+            }
+
+            /* (TypeName/staticMethod args...)
+             * -> (host/static-call :TypeName :staticMethod args...)
+             * Only if the namespace part matches a registered host type
+             * and the full name is not a literal env binding. */
+            {
+                const char *sl = (hlen > 1) ? memchr(hname, '/', hlen) : NULL;
+                if (sl != NULL) {
+                    char tbuf[256];
+                    size_t tlen = (size_t)(sl - hname);
+                    const char *mname = sl + 1;
+                    if (tlen < sizeof(tbuf) && tlen > 0
+                        && *mname != '\0'
+                        && mino_env_get(env, hname) == NULL) {
+                        host_type_t *ht;
+                        memcpy(tbuf, hname, tlen);
+                        tbuf[tlen] = '\0';
+                        ht = host_type_find(S, tbuf);
+                        if (ht != NULL) {
+                            mino_val_t *tkw = mino_keyword(S, tbuf);
+                            mino_val_t *mkw = mino_keyword(S, mname);
+                            mino_val_t *evaled_rest;
+                            mino_val_t *prim;
+                            gc_pin(tkw);
+                            gc_pin(mkw);
+                            evaled_rest = eval_args(S, args, env);
+                            if (evaled_rest == NULL && mino_is_cons(args)) {
+                                gc_unpin(2); return NULL;
+                            }
+                            gc_pin(evaled_rest);
+                            prim = mino_env_get(env, "host/static-call");
+                            if (prim == NULL) {
+                                gc_unpin(3);
+                                set_error_at(S, form,
+                                             "host/static-call not bound");
+                                return NULL;
+                            }
+                            {
+                                mino_val_t *a = mino_cons(S, mkw,
+                                                          evaled_rest);
+                                gc_pin(a);
+                                a = mino_cons(S, tkw, a);
+                                gc_unpin(4);
+                                return apply_callable(S, prim, a, env);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         /* Special forms. */
         if (sym_eq(head, "quote")) {
             if (!mino_is_cons(args)) {
