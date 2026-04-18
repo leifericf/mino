@@ -26,16 +26,6 @@ and extracts values. This is repetitive and error-prone.
 Add `mino_args_parse(args, "ii", &x, &y)` that validates arity and
 types in one call, setting `mino_last_error` on mismatch. ~100 lines.
 
-### Handle method dispatch
-
-Operating on a handle requires global primitives that check the tag
-with `strcmp`. This does not compose when multiple libraries register
-handles.
-
-Add `mino_register_method(tag, name, fn)` so that mino code can call
-methods on handles by tag. Connects to the protocols item above.
-~200 lines.
-
 ### Structured error propagation
 
 C primitives return NULL and set a string via `mino_last_error`. There

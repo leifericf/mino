@@ -6,6 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.32.0] — Host interop
+
+### Added
+- **Capability registry**: type-oriented registry for host interop.
+  Hosts register constructors, methods, static methods, and getters
+  per type tag via the C API (`mino_host_register_*` functions).
+- **Interop primitives**: `host/new`, `host/call`, `host/static-call`,
+  `host/get` dispatch through the capability registry with
+  default-deny policy (disabled unless `mino_host_enable()` is called).
+- **Interop syntax**: evaluator recognizes dot-method calls
+  (`(.method target args)`), field access (`(.-field target)`),
+  constructor calls (`(new TypeName args)`), and static method calls
+  (`(TypeName/method args)`) and desugars them to the explicit
+  host primitives.
+- All interop errors are catchable via `try`/`catch`.
+
+### Changed
+- Symbol resolver now checks literal env bindings before qualified
+  name resolution, allowing slash-containing names like `host/new`.
+
 ## [0.31.0] — clojure.string namespace
 
 ### Added
