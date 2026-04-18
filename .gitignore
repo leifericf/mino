@@ -48,6 +48,7 @@ Thumbs.db
 !BACKLOG.md
 !EMBEDDING.md
 !NREPL.md
+!CONFORMANCE.md
 /design-notes/
 examples/embed
 examples/actor_test

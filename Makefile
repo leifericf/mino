@@ -22,8 +22,8 @@ SRCS     := $(LIB_SRCS) main.c
 OBJS     := $(SRCS:.c=.o)
 TARGET   := mino
 
-.PHONY: all clean test test-interop test-gc-stress test-gc-stress-sharded \
-       test-fault-inject test-regex-thread \
+.PHONY: all clean test test-interop test-external test-gc-stress \
+       test-gc-stress-sharded test-fault-inject test-regex-thread \
        bench bench-map bench-seq fuzz-stdin qa-arch
 
 all: $(TARGET)
@@ -73,6 +73,9 @@ clean:
 
 test: $(TARGET)
 	./mino tests/run.mino
+
+test-external: $(TARGET)
+	./mino tests/external_runner.mino
 
 # Collect on every allocation: exercises the marker and sweeper on each
 # alloc site and catches any caller that holds unrooted pointers across

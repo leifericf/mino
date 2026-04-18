@@ -276,7 +276,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 10 - Conformance Hardening
+## ~~Step 10 - Conformance Hardening~~
 
 ### Smaller steps
 - Run full external suite repeatedly and bucket failures by semantic category.

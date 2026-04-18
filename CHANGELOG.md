@@ -6,6 +6,36 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.33.0] — Conformance hardening
+
+### Added
+- `double?` and `char?` type predicates.
+- `volatile!`, `vreset!`, `vswap!` (lightweight mutable box, backed by atom).
+- `delay`, `force`, `delay?` (lazy thunk macro).
+- `realized?` extended to handle delay values.
+- Vector element-by-element comparison in `val_compare`, enabling
+  proper sorting of vectors and map entries.
+- String support for `contains?` (index-based, like vectors).
+- External conformance test runner (`make test-external`).
+- `CONFORMANCE.md` documenting intentional divergences.
+
+### Changed
+- All type and arity validation errors in C primitives now use
+  `prim_throw_error` instead of `set_error`/return NULL, making them
+  catchable by `try`/`catch`.
+- `name` throws on nil argument (was returning nil).
+- `namespace` returns nil on nil argument (was throwing).
+- `keyword` accepts symbol and nil arguments.
+- `parse-long` and `parse-double` throw on non-string arguments
+  (was returning nil).
+- `cons` throws on non-seqable second argument (was creating
+  dotted pairs).
+- `fnil` supports 2-arity and 3-arity default forms.
+
+### Fixed
+- Reader conditional `#?@` splice now handles vector values in
+  list context (was silently dropping elements).
+
 ## [0.32.0] — Host interop
 
 ### Added
