@@ -57,5 +57,6 @@
 (require "tests/numeric_tower_test")
 (require "tests/collections_semantics_test")
 (require "tests/stateful_test")
+(require "tests/hierarchy_test")
 
 (run-tests)
