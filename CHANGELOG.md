@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.31.0] — clojure.string namespace
+
+### Added
+- **`clojure.string` namespace** (`lib/clojure/string.mino`): provides
+  `blank?`, `capitalize`, `starts-with?`, `ends-with?`, `escape`,
+  `lower-case`, `upper-case`, and `reverse` as namespace-qualified
+  functions accessible via `(require '[clojure.string :as str])`.
+- **`capitalize`**: uppercase first character, lowercase the rest.
+- **`escape`**: replace characters in a string according to a map.
+- **String-specific `reverse`**: reverse a string (vs. the sequence
+  `reverse` which operates on collections).
+- All namespace functions include type guards that throw on non-string
+  inputs, matching standard library behavior.
+
+### Fixed
+- `require` now saves and restores the current namespace, preventing
+  `ns` forms in loaded files from leaking into the caller's context.
+
 ## [0.30.0] — Hierarchies + dispatch essentials
 
 ### Added
