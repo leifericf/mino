@@ -1,0 +1,5 @@
+;; clojure.test shim — loads the mino test framework so that
+;; (:require [clojure.test :refer [deftest is are testing]])
+;; works in external .cljc files.
+
+(require "tests/test")
