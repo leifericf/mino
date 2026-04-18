@@ -61,19 +61,19 @@ typedef mino_val_t *(*mino_host_fn)(mino_state_t *S, mino_val_t *target,
                                     mino_val_t *args, void *ctx);
 
 struct mino_val {
-    mino_type_t type;
+    mino_type_t type;     /* value type tag */
     mino_val_t *meta;     /* metadata map (NULL when absent) */
     union {
         int b;            /* MINO_BOOL: 0 or 1 */
         long long i;      /* MINO_INT */
         double f;         /* MINO_FLOAT */
         struct {          /* MINO_STRING, MINO_SYMBOL, MINO_KEYWORD */
-            char *data;
-            size_t len;
+            char *data;   /* byte content (NUL-terminated) */
+            size_t len;   /* length in bytes (excluding NUL) */
         } s;
         struct {          /* MINO_CONS */
-            mino_val_t *car;
-            mino_val_t *cdr;
+            mino_val_t *car;   /* first element */
+            mino_val_t *cdr;   /* rest of the list */
             const char *file;  /* source file (NULL if unknown) */
             int         line;  /* source line (0 if unknown) */
         } cons;
@@ -102,23 +102,24 @@ struct mino_val {
             size_t          len;        /* number of entries */
         } sorted;
         struct {          /* MINO_PRIM */
-            const char *name;
-            mino_prim_fn fn;
+            const char *name;  /* primitive name */
+            mino_prim_fn fn;   /* C function pointer */
         } prim;
         struct {          /* MINO_FN: user-defined closure */
-            mino_val_t *params;
-            mino_val_t *body;
-            mino_env_t *env;
+            mino_val_t *params; /* parameter list or vector */
+            mino_val_t *body;   /* body forms */
+            mino_env_t *env;    /* captured lexical environment */
         } fn;
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
-            void       *ptr;
-            const char *tag;    /* static or interned; not GC-owned */
+            void       *ptr;   /* host-owned pointer */
+            const char *tag;   /* type tag (static or interned) */
             void       (*finalizer)(void *ptr, const char *tag);
+                               /* called on GC (NULL if none) */
         } handle;
         struct {          /* MINO_ATOM: mutable reference cell */
-            mino_val_t *val;
-            mino_val_t *watches;    /* MINO_MAP: key -> callback fn, or NULL */
-            mino_val_t *validator;  /* fn or NULL */
+            mino_val_t *val;       /* current value */
+            mino_val_t *watches;   /* key -> callback fn, or NULL */
+            mino_val_t *validator; /* validation fn or NULL */
         } atom;
         struct {          /* MINO_LAZY: deferred sequence */
             mino_val_t *body;     /* unevaluated form list (NULL after force) */
@@ -129,14 +130,14 @@ struct mino_val {
             int         realized; /* 0 = pending, 1 = forced */
         } lazy;
         struct {          /* MINO_RECUR: carries rebind args for trampoline */
-            mino_val_t *args;
+            mino_val_t *args;  /* argument list for next iteration */
         } recur;
         struct {          /* MINO_TAIL_CALL: proper tail call trampoline */
-            mino_val_t *fn;
-            mino_val_t *args;
+            mino_val_t *fn;    /* function to call */
+            mino_val_t *args;  /* argument list */
         } tail_call;
         struct {          /* MINO_REDUCED: early termination wrapper */
-            mino_val_t *val;
+            mino_val_t *val;   /* wrapped value */
         } reduced;
         struct {          /* MINO_VAR: first-class var */
             const char *ns;      /* namespace (interned) */
