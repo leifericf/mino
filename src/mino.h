@@ -151,49 +151,106 @@ struct mino_val {
 /* Constructors                                                              */
 /* ------------------------------------------------------------------------- */
 
+/* Return the singleton nil value. */
 mino_val_t *mino_nil(mino_state_t *S);
+
+/* Return the singleton true value. */
 mino_val_t *mino_true(mino_state_t *S);
+
+/* Return the singleton false value. */
 mino_val_t *mino_false(mino_state_t *S);
+
+/* Create an integer value. */
 mino_val_t *mino_int(mino_state_t *S, long long n);
+
+/* Create a floating-point value. */
 mino_val_t *mino_float(mino_state_t *S, double f);
+
+/* Create a string from a NUL-terminated C string. The data is copied. */
 mino_val_t *mino_string(mino_state_t *S, const char *s);
+
+/* Create a string from a buffer of length len. The data is copied. */
 mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len);
+
+/* Intern a symbol from a NUL-terminated C string. */
 mino_val_t *mino_symbol(mino_state_t *S, const char *s);
+
+/* Intern a symbol from a buffer of length len. */
 mino_val_t *mino_symbol_n(mino_state_t *S, const char *s, size_t len);
+
+/* Intern a keyword from a NUL-terminated C string (without the leading :). */
 mino_val_t *mino_keyword(mino_state_t *S, const char *s);
+
+/* Intern a keyword from a buffer of length len (without the leading :). */
 mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len);
+
+/* Create a cons cell (list node) with the given car and cdr. */
 mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr);
+
+/* Create a persistent vector from a C array of values. */
 mino_val_t *mino_vector(mino_state_t *S, mino_val_t **items, size_t len);
+
+/* Create a persistent hash map from parallel key and value arrays. */
 mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals,
                      size_t len);
+
+/* Create a persistent hash set from a C array of values. */
 mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len);
+
+/* Create a primitive function value from a C function pointer. */
 mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn);
+
+/* Wrap a host pointer as an opaque handle with a type tag. */
 mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag);
+
+/* Wrap a host pointer with a type tag and a finalizer called on GC. */
 mino_val_t *mino_handle_ex(mino_state_t *S, void *ptr, const char *tag,
                            mino_finalizer_fn finalizer);
+
+/* Create a mutable atom initialized with val. */
 mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val);
 
-/* Handle accessors — return NULL/0 if the value is not a handle. */
+/* Return 1 if v is a handle, 0 otherwise. */
 int         mino_is_handle(const mino_val_t *v);
+
+/* Return the host pointer from a handle, or NULL if v is not a handle. */
 void       *mino_handle_ptr(const mino_val_t *v);
+
+/* Return the type tag from a handle, or NULL if v is not a handle. */
 const char *mino_handle_tag(const mino_val_t *v);
 
-/* Atom accessors — mutable reference cells. */
+/* Return 1 if v is an atom, 0 otherwise. */
 int         mino_is_atom(const mino_val_t *v);
+
+/* Return the current value of an atom. */
 mino_val_t *mino_atom_deref(const mino_val_t *a);
+
+/* Set the value of an atom. */
 void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
 
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */
 /* ------------------------------------------------------------------------- */
 
+/* Return 1 if v is nil, 0 otherwise. */
 int mino_is_nil(const mino_val_t *v);
+
+/* Return 1 if v is truthy (everything except nil and false). */
 int mino_is_truthy(const mino_val_t *v);
+
+/* Return 1 if v is a cons cell (list node), 0 otherwise. */
 int mino_is_cons(const mino_val_t *v);
+
+/* Structural equality. Returns 1 if a and b are equal, 0 otherwise. */
 int mino_eq(const mino_val_t *a, const mino_val_t *b);
 
+/* Return the first element of a cons cell, or NULL. */
 mino_val_t *mino_car(const mino_val_t *v);
+
+/* Return the rest of a cons cell, or NULL. */
 mino_val_t *mino_cdr(const mino_val_t *v);
+
+/* Return the number of cons cells in a list. */
 size_t mino_length(const mino_val_t *list);
 
 /* Type-safe C extraction. Each returns 1 on success, 0 on type mismatch.
@@ -209,8 +266,13 @@ int mino_to_bool(const mino_val_t *v);
 
 #include <stdio.h>
 
+/* Print a value to stdout in readable form. */
 void mino_print(mino_state_t *S, const mino_val_t *v);
+
+/* Print a value to stdout followed by a newline. */
 void mino_println(mino_state_t *S, const mino_val_t *v);
+
+/* Print a value to the given FILE stream. */
 void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 
 /* ------------------------------------------------------------------------- */
@@ -226,6 +288,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v);
  */
 mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end);
 
+/* Return the last error message, or NULL if no error occurred. */
 const char *mino_last_error(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
@@ -262,6 +325,7 @@ void mino_state_free(mino_state_t *S);
  * Returns NULL on allocation failure (check mino_last_error).
  */
 mino_env_t *mino_env_new(mino_state_t *S);
+/* Free an environment and unregister it from the collector. */
 void        mino_env_free(mino_state_t *S, mino_env_t *env);
 
 /*
@@ -563,6 +627,7 @@ mino_val_t *mino_clone(mino_state_t *dst, mino_state_t *src, mino_val_t *val);
  */
 typedef struct mino_mailbox mino_mailbox_t;
 
+/* Create a new empty mailbox. */
 mino_mailbox_t *mino_mailbox_new(void);
 
 /*
@@ -600,13 +665,26 @@ void            mino_mailbox_free(mino_mailbox_t *mb);
  */
 typedef struct mino_actor mino_actor_t;
 
+/* Create a new actor with its own state, environment, and mailbox. */
 mino_actor_t   *mino_actor_new(void);
+
+/* Return the actor's runtime state. */
 mino_state_t   *mino_actor_state(mino_actor_t *a);
+
+/* Return the actor's root environment. */
 mino_env_t     *mino_actor_env(mino_actor_t *a);
+
+/* Return the actor's mailbox. */
 mino_mailbox_t *mino_actor_mailbox(mino_actor_t *a);
+
+/* Send a value to an actor's mailbox (serialized from src). */
 void            mino_actor_send(mino_actor_t *a, mino_state_t *src,
                                 mino_val_t *val);
+
+/* Receive the next message from an actor's mailbox, or NULL if empty. */
 mino_val_t     *mino_actor_recv(mino_actor_t *a);
+
+/* Free the actor and all its resources (state, env, mailbox). */
 void            mino_actor_free(mino_actor_t *a);
 
 #ifdef __cplusplus
