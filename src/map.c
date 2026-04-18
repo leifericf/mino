@@ -606,9 +606,10 @@ const char *mino_handle_tag(const mino_val_t *v)
 
 mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val)
 {
-
     mino_val_t *v = alloc_val(S, MINO_ATOM);
-    v->as.atom.val = val;
+    v->as.atom.val       = val;
+    v->as.atom.watches   = NULL;
+    v->as.atom.validator = NULL;
     return v;
 }
 
