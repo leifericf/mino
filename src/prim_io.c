@@ -57,35 +57,30 @@ mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "slurp requires one argument");
-        return NULL;
+        return prim_throw_error(S, "slurp requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || path_val->type != MINO_STRING) {
-        set_error(S, "slurp: argument must be a string");
-        return NULL;
+        return prim_throw_error(S, "slurp: argument must be a string");
     }
     path = path_val->as.s.data;
     f = fopen(path, "rb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "slurp: cannot open file: %s", path);
-        set_error(S, msg);
-        return NULL;
+        return prim_throw_error(S, msg);
     }
     fseek(f, 0, SEEK_END);
     sz = ftell(f);
     if (sz < 0) {
         fclose(f);
-        set_error(S, "slurp: cannot determine file size");
-        return NULL;
+        return prim_throw_error(S, "slurp: cannot determine file size");
     }
     fseek(f, 0, SEEK_SET);
     buf = (char *)malloc((size_t)sz + 1);
     if (buf == NULL) {
         fclose(f);
-        set_error(S, "slurp: out of memory");
-        return NULL;
+        return prim_throw_error(S, "slurp: out of memory");
     }
     rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
@@ -104,22 +99,19 @@ mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "spit requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "spit requires two arguments");
     }
     path_val = args->as.cons.car;
     content  = args->as.cons.cdr->as.cons.car;
     if (path_val == NULL || path_val->type != MINO_STRING) {
-        set_error(S, "spit: first argument must be a string path");
-        return NULL;
+        return prim_throw_error(S, "spit: first argument must be a string path");
     }
     path = path_val->as.s.data;
     f = fopen(path, "wb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "spit: cannot open file: %s", path);
-        set_error(S, msg);
-        return NULL;
+        return prim_throw_error(S, msg);
     }
     if (content != NULL && content->type == MINO_STRING) {
         fwrite(content->as.s.data, 1, content->as.s.len, f);
@@ -155,8 +147,7 @@ mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)args;
     (void)env;
     if (mino_is_cons(args)) {
-        set_error(S, "time-ms takes no arguments");
-        return NULL;
+        return prim_throw_error(S, "time-ms takes no arguments");
     }
     return mino_float(S, (double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
 }

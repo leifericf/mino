@@ -17,8 +17,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "seq requires one argument");
-        return NULL;
+        return prim_throw_error(S, "seq requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
@@ -84,9 +83,8 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         char msg[96];
         snprintf(msg, sizeof(msg), "seq: cannot coerce %s to a sequence",
                  type_tag_str(coll));
-        set_error(S, msg);
+        return prim_throw_error(S, msg);
     }
-    return NULL;
 }
 
 mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -94,8 +92,7 @@ mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "realized? requires one argument");
-        return NULL;
+        return prim_throw_error(S, "realized? requires one argument");
     }
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_LAZY) {
@@ -185,8 +182,7 @@ mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "reduced requires exactly 1 argument");
-        return NULL;
+        return prim_throw_error(S, "reduced requires exactly 1 argument");
     }
     v = alloc_val(S, MINO_REDUCED);
     v->as.reduced.val = args->as.cons.car;
@@ -198,8 +194,7 @@ mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "reduced? requires exactly 1 argument");
-        return NULL;
+        return prim_throw_error(S, "reduced? requires exactly 1 argument");
     }
     return (args->as.cons.car != NULL && args->as.cons.car->type == MINO_REDUCED)
         ? mino_true(S) : mino_false(S);
@@ -237,8 +232,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         seq_iter_init(S, &it, coll);
     } else {
-        set_error(S, "reduce requires 2 or 3 arguments");
-        return NULL;
+        return prim_throw_error(S, "reduce requires 2 or 3 arguments");
     }
     while (!seq_iter_done(&it)) {
         mino_val_t *elem   = seq_iter_val(S, &it);
@@ -259,8 +253,7 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "set requires exactly 1 argument");
-        return NULL;
+        return prim_throw_error(S, "set requires exactly 1 argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
@@ -291,24 +284,24 @@ mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     arg_count(S, args, &n);
     if (n == 1) {
         if (!mino_to_int(args->as.cons.car, &end)) {
-            set_error(S, "rangev argument must be an integer"); return NULL;
+            return prim_throw_error(S, "rangev argument must be an integer");
         }
     } else if (n == 2) {
         if (!mino_to_int(args->as.cons.car, &start) ||
             !mino_to_int(args->as.cons.cdr->as.cons.car, &end)) {
-            set_error(S, "rangev arguments must be integers"); return NULL;
+            return prim_throw_error(S, "rangev arguments must be integers");
         }
     } else if (n == 3) {
         if (!mino_to_int(args->as.cons.car, &start) ||
             !mino_to_int(args->as.cons.cdr->as.cons.car, &end) ||
             !mino_to_int(args->as.cons.cdr->as.cons.cdr->as.cons.car, &step)) {
-            set_error(S, "rangev arguments must be integers"); return NULL;
+            return prim_throw_error(S, "rangev arguments must be integers");
         }
         if (step == 0) {
-            set_error(S, "rangev step must not be zero"); return NULL;
+            return prim_throw_error(S, "rangev step must not be zero");
         }
     } else {
-        set_error(S, "rangev requires 1, 2, or 3 arguments"); return NULL;
+        return prim_throw_error(S, "rangev requires 1, 2, or 3 arguments");
     }
     /* Compute length. */
     if (step > 0) {
@@ -317,7 +310,7 @@ mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         len = (start > end) ? (size_t)((start - end + (-step) - 1) / (-step)) : 0;
     }
     items = malloc(len * sizeof(mino_val_t *));
-    if (!items && len > 0) { set_error(S, "rangev: out of memory"); return NULL; }
+    if (!items && len > 0) { return prim_throw_error(S, "rangev: out of memory"); }
     for (i = start, n = 0; n < len; i += step, n++) {
         items[n] = mino_int(S, i);
     }
@@ -337,8 +330,7 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t n;
     arg_count(S, args, &n);
     if (n != 2) {
-        set_error(S, "mapv requires 2 arguments: function and collection");
-        return NULL;
+        return prim_throw_error(S, "mapv requires 2 arguments: function and collection");
     }
     fn   = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
@@ -346,7 +338,7 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_vector(S, NULL, 0);
     }
     items = malloc(cap * sizeof(mino_val_t *));
-    if (!items) { set_error(S, "mapv: out of memory"); return NULL; }
+    if (!items) { return prim_throw_error(S, "mapv: out of memory"); }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
@@ -356,7 +348,7 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (len >= cap) {
             cap *= 2;
             items = realloc(items, cap * sizeof(mino_val_t *));
-            if (!items) { set_error(S, "mapv: out of memory"); return NULL; }
+            if (!items) { return prim_throw_error(S, "mapv: out of memory"); }
         }
         items[len++] = val;
         seq_iter_next(S, &it);
@@ -377,8 +369,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t n;
     arg_count(S, args, &n);
     if (n != 2) {
-        set_error(S, "filterv requires 2 arguments: predicate and collection");
-        return NULL;
+        return prim_throw_error(S, "filterv requires 2 arguments: predicate and collection");
     }
     pred = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
@@ -386,7 +377,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_vector(S, NULL, 0);
     }
     items = malloc(cap * sizeof(mino_val_t *));
-    if (!items) { set_error(S, "filterv: out of memory"); return NULL; }
+    if (!items) { return prim_throw_error(S, "filterv: out of memory"); }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
@@ -397,7 +388,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (len >= cap) {
                 cap *= 2;
                 items = realloc(items, cap * sizeof(mino_val_t *));
-                if (!items) { set_error(S, "filterv: out of memory"); return NULL; }
+                if (!items) { return prim_throw_error(S, "filterv: out of memory"); }
             }
             items[len++] = elem;
         }
@@ -415,8 +406,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "into requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "into requires two arguments");
     }
     to   = args->as.cons.car;
     from = args->as.cons.cdr->as.cons.car;
@@ -452,8 +442,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             mino_val_t *pair_args;
             if (item == NULL || item->type != MINO_VECTOR
                 || item->as.vec.len != 2) {
-                set_error(S, "into map: each element must be a 2-element vector");
-                return NULL;
+                return prim_throw_error(S, "into map: each element must be a 2-element vector");
             }
             pair_args = mino_cons(S, vec_nth(item, 0),
                                    mino_cons(S, vec_nth(item, 1), mino_nil(S)));
@@ -477,8 +466,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (!seq_iter_done(&it)) {
             mino_val_t *item = seq_iter_val(S, &it);
             if (item == NULL || item->type != MINO_VECTOR || item->as.vec.len != 2) {
-                set_error(S, "into sorted-map: each element must be a 2-element vector");
-                return NULL;
+                return prim_throw_error(S, "into sorted-map: each element must be a 2-element vector");
             }
             acc = sorted_map_assoc1(S, acc, vec_nth(item, 0), vec_nth(item, 1));
             seq_iter_next(S, &it);
@@ -508,9 +496,8 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         snprintf(msg, sizeof(msg),
                  "into: expected a list, vector, map, or set as target, got %s",
                  type_tag_str(to));
-        set_error(S, msg);
+        return prim_throw_error(S, msg);
     }
-    return NULL;
 }
 
 mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -522,8 +509,7 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      n;
     arg_count(S, args, &n);
     if (n < 2) {
-        set_error(S, "apply requires a function and arguments");
-        return NULL;
+        return prim_throw_error(S, "apply requires a function and arguments");
     }
     fn = args->as.cons.car;
     if (n == 2) {
@@ -586,8 +572,7 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "reverse requires one argument");
-        return NULL;
+        return prim_throw_error(S, "reverse requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
@@ -657,8 +642,7 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      n_items, i;
     seq_iter_t  it;
     if (!mino_is_cons(args)) {
-        set_error(S, "sort requires one or two arguments");
-        return NULL;
+        return prim_throw_error(S, "sort requires one or two arguments");
     }
     if (mino_is_cons(args->as.cons.cdr) &&
         !mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -669,8 +653,7 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* One arg: (sort coll) */
         coll = args->as.cons.car;
     } else {
-        set_error(S, "sort requires one or two arguments");
-        return NULL;
+        return prim_throw_error(S, "sort requires one or two arguments");
     }
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
@@ -703,8 +686,7 @@ mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "peek requires one argument");
-        return NULL;
+        return prim_throw_error(S, "peek requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
@@ -717,9 +699,8 @@ mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         char msg[96];
         snprintf(msg, sizeof(msg), "peek: expected a vector or list, got %s",
                  type_tag_str(coll));
-        set_error(S, msg);
+        return prim_throw_error(S, msg);
     }
-    return NULL;
 }
 
 mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -727,8 +708,7 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "pop requires one argument");
-        return NULL;
+        return prim_throw_error(S, "pop requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
@@ -745,9 +725,8 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         char msg[96];
         snprintf(msg, sizeof(msg), "pop: expected a vector or list, got %s",
                  type_tag_str(coll));
-        set_error(S, msg);
+        return prim_throw_error(S, msg);
     }
-    return NULL;
 }
 
 mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -759,8 +738,7 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "find requires two arguments");
-        return NULL;
+        return prim_throw_error(S, "find requires two arguments");
     }
     m = args->as.cons.car;
     k = args->as.cons.cdr->as.cons.car;
@@ -773,8 +751,7 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_vector(S, kv, 2);
     }
     if (m->type != MINO_MAP) {
-        set_error(S, "find: first argument must be a map");
-        return NULL;
+        return prim_throw_error(S, "find: first argument must be a map");
     }
     v = map_get_val(m, k);
     if (v == NULL) return mino_nil(S);
@@ -788,8 +765,7 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *coll;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "empty requires one argument");
-        return NULL;
+        return prim_throw_error(S, "empty requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
@@ -832,14 +808,12 @@ mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "rseq requires one argument");
-        return NULL;
+        return prim_throw_error(S, "rseq requires one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
     if (coll->type != MINO_VECTOR) {
-        set_error(S, "rseq: argument must be a vector");
-        return NULL;
+        return prim_throw_error(S, "rseq: argument must be a vector");
     }
     if (coll->as.vec.len == 0) return mino_nil(S);
     out = mino_nil(S);
@@ -856,8 +830,7 @@ mino_val_t *prim_sorted_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     arg_count(S, args, &n);
     if (n % 2 != 0) {
-        set_error(S, "sorted-map requires an even number of arguments");
-        return NULL;
+        return prim_throw_error(S, "sorted-map requires an even number of arguments");
     }
     pairs = n / 2;
     if (pairs == 0) return mino_sorted_map(S, NULL, NULL, 0);
