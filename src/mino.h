@@ -55,6 +55,11 @@ typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);
 typedef void (*mino_finalizer_fn)(void *ptr, const char *tag);
 
+/* Host interop callback. target is the handle (NULL for ctor/static),
+ * args is a cons list of evaluated arguments. */
+typedef mino_val_t *(*mino_host_fn)(mino_state_t *S, mino_val_t *target,
+                                    mino_val_t *args, void *ctx);
+
 struct mino_val {
     mino_type_t type;
     mino_val_t *meta;     /* metadata map (NULL when absent) */
@@ -372,6 +377,34 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
  */
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                mino_env_t *env, mino_val_t **out);
+
+/* ------------------------------------------------------------------------- */
+/* Host interop                                                              */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Enable interop dispatch. By default all host primitives return
+ * "interop disabled". Call this after registration to activate them.
+ */
+void mino_host_enable(mino_state_t *S);
+
+/*
+ * Register host capabilities. String arguments must outlive the state.
+ * Call before eval -- the registry is intended to be immutable after init.
+ *
+ * arity: expected argument count, or -1 for variadic.
+ */
+void mino_host_register_ctor(mino_state_t *S, const char *type_key,
+                              int arity, mino_host_fn fn, void *ctx);
+void mino_host_register_method(mino_state_t *S, const char *type_key,
+                                const char *method_key, int arity,
+                                mino_host_fn fn, void *ctx);
+void mino_host_register_static(mino_state_t *S, const char *type_key,
+                                const char *method_key, int arity,
+                                mino_host_fn fn, void *ctx);
+void mino_host_register_getter(mino_state_t *S, const char *type_key,
+                                const char *field_key, mino_host_fn fn,
+                                void *ctx);
 
 /* ------------------------------------------------------------------------- */
 /* Modules                                                                   */

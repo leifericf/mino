@@ -355,6 +355,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "spawn*",   mino_prim(S, "spawn*",   prim_spawn));
     mino_env_set(S, env, "send!",    mino_prim(S, "send!",    prim_send_bang));
     mino_env_set(S, env, "receive",  mino_prim(S, "receive",  prim_receive));
+    /* host interop */
+    mino_install_host(S, env);
     install_core_mino(S, env);
 }
 

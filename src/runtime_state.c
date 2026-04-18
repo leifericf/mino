@@ -67,6 +67,10 @@ void mino_state_free(mino_state_t *S)
     }
     free(S->ns_aliases);
     free(S->var_registry);
+    for (i = 0; i < S->host_types_len; i++) {
+        free(S->host_types[i].members);
+    }
+    free(S->host_types);
     free(S->module_cache);
     for (i = 0; i < S->meta_table_len; i++) {
         free(S->meta_table[i].name);
