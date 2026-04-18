@@ -2,8 +2,8 @@
 ;; Loads tests from clojure-test-suite that pass cleanly.
 ;; Assumes clojure-test-suite is a sibling directory of mino.
 
-(require "tests/core-test/portability")
-(require "tests/core-test/number_range")
+(require "tests/shims/portability")
+(require "tests/shims/number_range")
 
 (require "../clojure-test-suite/test/clojure/core_test/abs.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/aclone.cljc")
