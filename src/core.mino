@@ -950,8 +950,21 @@
     (every? (fn [p] (every? p args)) preds))))
 
 (def some-fn "Returns a function that returns the first truthy value from any pred applied to any argument." (fn [& preds]
+  (when (empty? preds)
+    (throw (ex-info "some-fn requires at least one predicate" {})))
   (fn [& args]
-    (some (fn [p] (some p args)) preds))))
+    (loop [ps preds
+           result nil]
+      (if (empty? ps)
+        result
+        (let [p (first ps)
+              r (loop [as args
+                       last-r nil]
+                  (if (empty? as)
+                    last-r
+                    (let [v (p (first as))]
+                      (if v v (recur (rest as) v)))))]
+          (if r r (recur (rest ps) r))))))))
 
 (def fnil "Returns a function like f, but replaces nil arguments with the given defaults." (fn
   ([f d1]
