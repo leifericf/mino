@@ -441,6 +441,23 @@ mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *
     return mino_int(S, a >> b);
 }
 
+mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        set_error(S, "unsigned-bit-shift-right requires two arguments");
+        return NULL;
+    }
+    if (!as_long(args->as.cons.car, &a) ||
+        !as_long(args->as.cons.cdr->as.cons.car, &b)) {
+        set_error(S, "unsigned-bit-shift-right expects integers");
+        return NULL;
+    }
+    return mino_int(S, (long long)((unsigned long long)a >> b));
+}
+
 /* ------------------------------------------------------------------------- */
 /* Type coercion                                                             */
 /* ------------------------------------------------------------------------- */
