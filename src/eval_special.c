@@ -48,6 +48,10 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         const char *resolved_ns;
         mino_val_t *var;
 
+        /* Try full name as a literal env binding first (e.g. "host/new"). */
+        v = mino_env_get(env, buf);
+        if (v != NULL) return v;
+
         memcpy(ns_buf, buf, ns_len);
         ns_buf[ns_len] = '\0';
 

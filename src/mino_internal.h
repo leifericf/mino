@@ -144,6 +144,29 @@ typedef struct {
     mino_val_t *var;     /* the MINO_VAR value */
 } var_entry_t;
 
+/* Host interop: capability registry types. */
+enum {
+    HOST_CTOR   = 0,
+    HOST_METHOD = 1,
+    HOST_STATIC = 2,
+    HOST_GETTER = 3
+};
+
+typedef struct {
+    const char  *name;    /* interned member name (NULL for ctor) */
+    int          arity;   /* expected arg count (-1 = variadic) */
+    int          kind;    /* HOST_CTOR, HOST_METHOD, HOST_STATIC, HOST_GETTER */
+    mino_host_fn fn;
+    void        *fn_ctx;
+} host_member_t;
+
+typedef struct {
+    const char    *type_key;  /* interned type tag */
+    host_member_t *members;   /* malloc-owned array */
+    size_t         members_len;
+    size_t         members_cap;
+} host_type_t;
+
 /* Full environment definition. */
 struct mino_env {
     env_binding_t *bindings;
@@ -228,6 +251,12 @@ struct mino_state {
     var_entry_t    *var_registry;
     size_t          var_registry_len;
     size_t          var_registry_cap;
+
+    /* Host interop */
+    int             interop_enabled;
+    host_type_t    *host_types;
+    size_t          host_types_len;
+    size_t          host_types_cap;
 
     /* Eval */
     const mino_val_t *eval_current_form;
@@ -497,5 +526,10 @@ mino_val_t *prim_receive(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* GC marking (used by gc_collect) */
 void gc_mark_interior(mino_state_t *S, const void *p);
+
+/* host_interop.c: capability registry lookup. */
+host_type_t   *host_type_find(mino_state_t *S, const char *type_key);
+host_member_t *host_member_find(host_type_t *t, const char *name,
+                                int kind, int arity);
 
 #endif /* MINO_INTERNAL_H */

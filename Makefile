@@ -15,13 +15,14 @@ LIB_SRCS := src/mino.c src/eval_special.c \
             src/prim_sequences.c src/prim_string.c src/prim_io.c \
             src/prim_reflection.c src/prim_meta.c src/prim_regex.c \
             src/prim_stateful.c src/prim_module.c \
+            src/prim_host.c src/host_interop.c \
             src/clone.c src/re.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 SRCS     := $(LIB_SRCS) main.c
 OBJS     := $(SRCS:.c=.o)
 TARGET   := mino
 
-.PHONY: all clean test test-gc-stress test-gc-stress-sharded \
+.PHONY: all clean test test-interop test-gc-stress test-gc-stress-sharded \
        test-fault-inject test-regex-thread \
        bench bench-map bench-seq fuzz-stdin qa-arch
 
@@ -53,6 +54,8 @@ src/prim_meta.o: src/prim_meta.c src/prim_internal.h src/mino_internal.h
 src/prim_regex.o: src/prim_regex.c src/prim_internal.h src/mino_internal.h src/re.h
 src/prim_stateful.o: src/prim_stateful.c src/prim_internal.h src/mino_internal.h
 src/prim_module.o: src/prim_module.c src/prim_internal.h src/mino_internal.h
+src/prim_host.o: src/prim_host.c src/prim_internal.h src/mino_internal.h
+src/host_interop.o: src/host_interop.c src/mino_internal.h
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -63,6 +66,7 @@ clean:
 	      fuzz/fuzz_reader fuzz/fuzz_reader.o \
 	      examples/embed examples/embed.o \
 	      examples/fault_inject_test examples/fault_inject_test.o \
+	      examples/interop_test examples/interop_test.o \
 	      examples/regex_thread_test examples/regex_thread_test.o \
 	      cookbook/config cookbook/rules cookbook/repl_socket \
 	      cookbook/plugin cookbook/pipeline cookbook/console
@@ -114,6 +118,13 @@ example: examples/embed
 
 examples/embed: examples/embed.c $(LIB_OBJS) src/mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ examples/embed.c $(LIB_OBJS) $(LIBS)
+
+# Host interop test.
+test-interop: examples/interop_test
+	./examples/interop_test
+
+examples/interop_test: examples/interop_test.c $(LIB_OBJS) src/mino.h
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ examples/interop_test.c $(LIB_OBJS) $(LIBS)
 
 # Fuzz targets: stdin mode for crash_test.sh; libFuzzer for CI.
 # Fault-injection test: deterministic OOM recovery tests.
