@@ -38,6 +38,17 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
         return a->as.s.len < b->as.s.len ? -1
              : a->as.s.len > b->as.s.len ? 1 : 0;
     }
+    if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
+        size_t i;
+        size_t min_len = a->as.vec.len < b->as.vec.len
+                       ? a->as.vec.len : b->as.vec.len;
+        for (i = 0; i < min_len; i++) {
+            int c = val_compare(vec_nth(a, i), vec_nth(b, i));
+            if (c != 0) return c;
+        }
+        return a->as.vec.len < b->as.vec.len ? -1
+             : a->as.vec.len > b->as.vec.len ? 1 : 0;
+    }
     return a->type < b->type ? -1 : a->type > b->type ? 1 : 0;
 }
 
