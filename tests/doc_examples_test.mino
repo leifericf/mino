@@ -305,6 +305,112 @@
     (vreset! v 42)
     (is (= 42 @v))))
 
+;; --- Macros and reflection ---
+
+(deftest gensym
+  (is (= true (symbol? (gensym))))
+  (is (= false (= (gensym) (gensym)))))
+
+(deftest macroexpand-1
+  (is (= '(if true (do 1 2)) (macroexpand-1 '(when true 1 2)))))
+
+(deftest macroexpand
+  (is (= '(if true (do 1 2)) (macroexpand '(when true 1 2)))))
+
+(deftest quote
+  (is (= 'foo 'foo))
+  (is (= '(1 2 3) '(1 2 3))))
+
+(deftest doc
+  (is (= true (string? (doc 'map)))))
+
+(deftest source
+  (is (= true (cons? (source 'when)))))
+
+;; --- Strings ---
+
+(deftest starts-with?
+  (is (= true (starts-with? "hello" "hel")))
+  (is (= false (starts-with? "hello" "world"))))
+
+(deftest ends-with?
+  (is (= true (ends-with? "hello" "llo")))
+  (is (= false (ends-with? "hello" "hel"))))
+
+(deftest includes?
+  (is (= true (includes? "hello world" "world")))
+  (is (= false (includes? "hello" "xyz"))))
+
+;; --- Delay ---
+
+(deftest delay
+  (let [d (delay (+ 1 2))]
+    (is (= 3 (force d)))))
+
+(deftest delay?
+  (is (= true (delay? (delay 1))))
+  (is (= false (delay? 42))))
+
+(deftest force
+  (is (= 42 (force (delay 42))))
+  (is (= 42 (force 42))))
+
+(deftest deref-delay
+  (let [d (delay (+ 1 2))]
+    (is (= 3 (deref-delay d)))))
+
+;; --- Higher-order ---
+
+(deftest memoize
+  (let [f (memoize (fn [x] (* x x)))]
+    (is (= 25 (f 5)))
+    (is (= 25 (f 5)))))
+
+(deftest doto
+  (is (= [1 2 3] (doto [1 2 3] count))))
+
+;; --- Iteration ---
+
+(deftest shuffle
+  (let [s (shuffle [1 2 3 4 5])]
+    (is (= 5 (count s)))
+    (is (= #{1 2 3 4 5} (set s)))))
+
+;; --- Tree walking ---
+
+(deftest walk
+  (is (= [2 3 4] (walk inc vec [1 2 3]))))
+
+(deftest prewalk
+  (is (= [2 [3 [4]]] (prewalk #(if (number? %) (inc %) %) [1 [2 [3]]]))))
+
+;; --- Transducers ---
+
+(deftest cat
+  (is (= [1 2 3 4] (into [] cat [[1 2] [3 4]]))))
+
+(deftest unreduced
+  (is (= 42 (unreduced (reduced 42))))
+  (is (= 42 (unreduced 42))))
+
+;; --- Type predicates ---
+
+(deftest char?
+  (is (= false (char? "a")))
+  (is (= false (char? 65))))
+
+(deftest ratio?
+  (is (= false (ratio? 1)))
+  (is (= false (ratio? 1.5))))
+
+(deftest decimal?
+  (is (= false (decimal? 1.0)))
+  (is (= false (decimal? 1))))
+
+(deftest rational?
+  (is (= true (rational? 42)))
+  (is (= false (rational? 3.14))))
+
 ;; --- Random ---
 
 (deftest rand-int
