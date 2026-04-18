@@ -1092,8 +1092,7 @@ mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         end = (long long)v->as.vec.len;
     }
     if (start < 0 || end < start || (size_t)end > v->as.vec.len) {
-        set_error(S, "subvec: index out of bounds");
-        return NULL;
+        return prim_throw_error(S, "subvec: index out of bounds");
     }
     return vec_subvec(S, v, (size_t)start, (size_t)end);
 }

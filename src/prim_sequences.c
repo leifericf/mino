@@ -816,8 +816,6 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             r = mino_sorted_set(S, NULL, 0);
             r->meta = coll->meta;
             return r;
-        case MINO_STRING:
-            return mino_string(S, "");
         case MINO_CONS:
         case MINO_LAZY:
             return mino_nil(S);
