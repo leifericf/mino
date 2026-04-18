@@ -178,12 +178,14 @@ mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         !as_double(args->as.cons.cdr->as.cons.car, &b)) {
         return prim_throw_error(S, "mod expects numbers");
     }
-    if (b == 0.0) {
-        if (args->as.cons.car->type == MINO_INT &&
-            args->as.cons.cdr->as.cons.car->type == MINO_INT)
-            return prim_throw_error(S, "mod: division by zero");
-        return mino_float(S, fmod(a, b));
-    }
+    if (isnan(a) || isinf(a))
+        return prim_throw_error(S, "mod: NaN or Infinite dividend");
+    if (isnan(b))
+        return prim_throw_error(S, "mod: NaN divisor");
+    if (b == 0.0)
+        return prim_throw_error(S, "mod: division by zero");
+    if (isinf(b))
+        return mino_float(S, NAN);
     r = fmod(a, b);
     /* Floored modulo: result has same sign as divisor. */
     if (r != 0.0 && ((r < 0.0) != (b < 0.0))) r += b;
@@ -207,12 +209,14 @@ mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         !as_double(args->as.cons.cdr->as.cons.car, &b)) {
         return prim_throw_error(S, "rem expects numbers");
     }
-    if (b == 0.0) {
-        if (args->as.cons.car->type == MINO_INT &&
-            args->as.cons.cdr->as.cons.car->type == MINO_INT)
-            return prim_throw_error(S, "rem: division by zero");
-        return mino_float(S, fmod(a, b));
-    }
+    if (isnan(a) || isinf(a))
+        return prim_throw_error(S, "rem: NaN or Infinite dividend");
+    if (isnan(b))
+        return prim_throw_error(S, "rem: NaN divisor");
+    if (b == 0.0)
+        return prim_throw_error(S, "rem: division by zero");
+    if (isinf(b))
+        return mino_float(S, NAN);
     r = fmod(a, b);
     if (args->as.cons.car->type == MINO_INT &&
         args->as.cons.cdr->as.cons.car->type == MINO_INT) {
@@ -233,15 +237,14 @@ mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         !as_double(args->as.cons.cdr->as.cons.car, &b)) {
         return prim_throw_error(S, "quot expects numbers");
     }
-    if (b == 0.0) {
-        if (args->as.cons.car->type == MINO_INT &&
-            args->as.cons.cdr->as.cons.car->type == MINO_INT)
-            return prim_throw_error(S, "quot: division by zero");
-        {
-            double qq = a / b;
-            return mino_float(S, qq >= 0 ? floor(qq) : ceil(qq));
-        }
-    }
+    if (isnan(a) || isinf(a))
+        return prim_throw_error(S, "quot: NaN or Infinite dividend");
+    if (isnan(b))
+        return prim_throw_error(S, "quot: NaN divisor");
+    if (b == 0.0)
+        return prim_throw_error(S, "quot: division by zero");
+    if (isinf(b))
+        return mino_float(S, 0.0);
     q = a / b;
     q = q >= 0 ? floor(q) : ceil(q);
     if (args->as.cons.car->type == MINO_INT &&
