@@ -77,4 +77,58 @@
   (is (= "target is not a host handle"
          (try (host/call "string" :method) (catch e e)))))
 
+;; --- syntax: .method ---
+
+(deftest syntax-dot-method
+  (let [c (new Counter)]
+    (.inc c)
+    (is (= 1 (.get c)))))
+
+(deftest syntax-dot-method-with-args
+  (let [c (new Counter)]
+    (.add c 10)
+    (is (= 10 (.get c)))))
+
+;; --- syntax: .-field ---
+
+(deftest syntax-dash-field
+  (let [c (new Counter)]
+    (.add c 99)
+    (is (= 99 (.-value c)))))
+
+;; --- syntax: new ---
+
+(deftest syntax-new
+  (let [c (new Counter)]
+    (is (= :handle (type c)))))
+
+;; --- syntax: Type/static ---
+
+(deftest syntax-static-call
+  (is (= 7 (Math/add 3 4))))
+
+(deftest syntax-static-no-args
+  (is (< 3.14 (Math/pi)))
+  (is (> 3.15 (Math/pi))))
+
+;; --- syntax parity with explicit forms ---
+
+(deftest syntax-parity
+  (let [c1 (host/new :Counter)
+        c2 (new Counter)]
+    (host/call c1 :add 5)
+    (.add c2 5)
+    (is (= (host/call c1 :get) (.get c2)))
+    (is (= (host/get c1 :value) (.-value c2)))
+    (is (= (host/static-call :Math :add 1 2) (Math/add 1 2)))))
+
+;; --- syntax error handling ---
+
+(deftest syntax-dot-unknown-method
+  (let [c (new Counter)]
+    (is (thrown? (.bogus c)))))
+
+(deftest syntax-static-unknown
+  (is (thrown? (Math/bogus 1))))
+
 (run-tests)
