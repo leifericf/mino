@@ -712,7 +712,7 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return prim_throw_error(S, "pop: cannot pop an empty collection");
+        return mino_nil(S);
     }
     if (coll->type == MINO_VECTOR) {
         if (coll->as.vec.len == 0) {
