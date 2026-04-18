@@ -64,5 +64,13 @@ examples/fault_inject_test
 examples/regex_thread_test
 examples/interop_test
 examples/event_processing
+examples/use-cases/configuration
+examples/use-cases/rules_engine
+examples/use-cases/data_pipeline
+examples/use-cases/event_processing
+examples/use-cases/plugins
+examples/use-cases/console
+examples/use-cases/game_scripting
+examples/use-cases/automation
 data/
 .clj-kondo/
