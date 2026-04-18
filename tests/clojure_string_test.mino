@@ -28,9 +28,9 @@
   (is (= "" (str/capitalize "")))
   (is (= "A" (str/capitalize "a"))))
 
-(deftest str-capitalize-throws
-  (is (thrown? (str/capitalize nil)))
-  (is (thrown? (str/capitalize 1))))
+(deftest str-capitalize-coerces
+  (is (= "" (str/capitalize nil)))
+  (is (= "1" (str/capitalize 1))))
 
 ;; --- starts-with? ---
 
@@ -39,9 +39,9 @@
   (is (true? (str/starts-with? "hello" "")))
   (is (false? (str/starts-with? "hello" "world"))))
 
-(deftest str-starts-with-throws
-  (is (thrown? (str/starts-with? nil "x")))
-  (is (thrown? (str/starts-with? 1 "x"))))
+(deftest str-starts-with-coerces
+  (is (false? (str/starts-with? nil "x")))
+  (is (false? (str/starts-with? 1 "x"))))
 
 ;; --- ends-with? ---
 
@@ -50,9 +50,9 @@
   (is (true? (str/ends-with? "hello" "")))
   (is (false? (str/ends-with? "hello" "world"))))
 
-(deftest str-ends-with-throws
-  (is (thrown? (str/ends-with? nil "x")))
-  (is (thrown? (str/ends-with? 1 "x"))))
+(deftest str-ends-with-coerces
+  (is (false? (str/ends-with? nil "x")))
+  (is (false? (str/ends-with? 1 "x"))))
 
 ;; --- escape ---
 
@@ -71,9 +71,9 @@
   (is (= "hello" (str/lower-case "HELLO")))
   (is (= "" (str/lower-case ""))))
 
-(deftest str-lower-case-throws
-  (is (thrown? (str/lower-case nil)))
-  (is (thrown? (str/lower-case 1))))
+(deftest str-lower-case-coerces
+  (is (= "" (str/lower-case nil)))
+  (is (= "1" (str/lower-case 1))))
 
 ;; --- upper-case ---
 
@@ -81,9 +81,9 @@
   (is (= "HELLO" (str/upper-case "hello")))
   (is (= "" (str/upper-case ""))))
 
-(deftest str-upper-case-throws
-  (is (thrown? (str/upper-case nil)))
-  (is (thrown? (str/upper-case 1))))
+(deftest str-upper-case-coerces
+  (is (= "" (str/upper-case nil)))
+  (is (= "1" (str/upper-case 1))))
 
 ;; --- reverse ---
 

@@ -7,11 +7,17 @@
 (def core-ends-with?_   ends-with?)
 (def core-reverse_      reverse)
 (def core-blank?_       blank?)
+(def core-includes?_    includes?)
+(def core-str-replace_  str-replace)
+(def core-replace_      replace)
 
 (defn assert-string_ [s]
   (when-not (string? s)
-    (throw (ex-info (str "Argument must be a string, got " (type s))
-                    {:arg s}))))
+    (throw (ex-info (str "Argument must be a string, got " (type s)) {:arg s})))
+  s)
+
+(defn as-str_ [s]
+  (if (string? s) s (str s)))
 
 (defn blank? [s]
   (if (nil? s)
@@ -20,39 +26,82 @@
         (core-blank?_ s))))
 
 (defn capitalize [s]
-  (assert-string_ s)
-  (if (= s "")
-    ""
-    (str (core-upper-case_ (subs s 0 1))
-         (core-lower-case_ (subs s 1)))))
+  (let [s (as-str_ s)]
+    (if (= s "")
+      ""
+      (str (core-upper-case_ (subs s 0 1))
+           (core-lower-case_ (subs s 1))))))
 
 (defn starts-with? [s prefix]
-  (assert-string_ s)
-  (core-starts-with?_ s prefix))
+  (core-starts-with?_ (as-str_ s) prefix))
 
 (defn ends-with? [s suffix]
-  (assert-string_ s)
-  (core-ends-with?_ s suffix))
+  (core-ends-with?_ (as-str_ s) suffix))
 
 (defn escape [s cmap]
-  (assert-string_ s)
-  (apply str (map (fn [c] (or (get cmap c) c)) (seq s))))
+  (let [s (assert-string_ s)]
+    (apply str (map (fn [c] (or (get cmap c) c)) (seq s)))))
 
 (defn lower-case [s]
-  (assert-string_ s)
-  (core-lower-case_ s))
+  (core-lower-case_ (as-str_ s)))
 
 (defn upper-case [s]
-  (assert-string_ s)
-  (core-upper-case_ s))
+  (core-upper-case_ (as-str_ s)))
 
 (defn reverse [s]
-  (assert-string_ s)
-  (apply str (core-reverse_ (seq s))))
+  (apply str (core-reverse_ (seq (assert-string_ s)))))
+
+(defn replace [s match replacement]
+  (core-str-replace_ (assert-string_ s) match replacement))
+
+(defn split-lines [s]
+  (split (assert-string_ s) "\n"))
+
+(defn triml [s]
+  (let [s (assert-string_ s)
+        len (count s)]
+    (loop [i 0]
+      (if (>= i len)
+        ""
+        (let [c (char-at s i)]
+          (if (or (= c " ") (= c "\t") (= c "\n") (= c "\r"))
+            (recur (+ i 1))
+            (subs s i)))))))
+
+(defn trimr [s]
+  (let [s (assert-string_ s)
+        len (count s)]
+    (loop [i len]
+      (if (<= i 0)
+        ""
+        (let [c (char-at s (- i 1))]
+          (if (or (= c " ") (= c "\t") (= c "\n") (= c "\r"))
+            (recur (- i 1))
+            (subs s 0 i)))))))
+
+(defn trim [s]
+  (trimr (triml s)))
+
+(defn trim-newline [s]
+  (let [s (assert-string_ s)
+        len (count s)]
+    (loop [i len]
+      (if (<= i 0)
+        ""
+        (let [c (char-at s (- i 1))]
+          (if (or (= c "\n") (= c "\r"))
+            (recur (- i 1))
+            (subs s 0 i)))))))
+
+(defn includes? [s substr]
+  (core-includes?_ (assert-string_ s) (assert-string_ substr)))
+
+(defn join
+  ([] "")
+  ([coll] (apply str coll))
+  ([separator coll] (apply str (interpose separator coll))))
 
 ;; Restore core globals that were shadowed by same-named defs above.
-;; Switch back to user namespace so these defs write to root env
-;; without overwriting the clojure.string var registry entries.
 (ns user)
 (def blank?       core-blank?_)
 (def starts-with? core-starts-with?_)
@@ -60,3 +109,5 @@
 (def upper-case   core-upper-case_)
 (def lower-case   core-lower-case_)
 (def reverse      core-reverse_)
+(def includes?    core-includes?_)
+(def replace      core-replace_)
