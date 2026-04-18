@@ -64,12 +64,6 @@ single-character strings. A proper `MINO_CHAR` value type would make
 `char?` return true, `string?` return false, and `pr-str` print `\A`
 instead of `"A"`. Affects ~10 external test files.
 
-### `sorted-map-by` / `sorted-set-by`
-
-Custom comparator sorted collections. Infrastructure exists in
-rbtree. Need new C primitives that accept a comparison function.
-~30 lines. Affects 2 external test files.
-
 ### `case` macro bare symbol matching
 
 `(case x sym :result)` should match against the symbol `sym` as a

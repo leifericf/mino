@@ -63,6 +63,7 @@ or auto-promoting. This matches C semantics.
 No exact rational arithmetic. `(+ 1 -0.666667)` may not exactly equal
 `0.333333` due to floating point representation.
 
-### Binary integer literals not supported
+### No binary integer literals via `0b` prefix
 
-`2r1111` (binary 15) is not recognized by the reader. Use `0xF` or `15`.
+The `0b1111` prefix form is not supported. Use radix literals instead:
+`2r1111` (binary), `8r17` (octal), `16rF` (hex), or any base 2-36.

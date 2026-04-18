@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.34.1] — Examples and documentation
+
+### Added
+- Language binding examples for C, C++, and Java.
+- Eight use case example programs (configuration, rules engine, data
+  pipeline, event processing, plugins, console, game scripting,
+  automation) with C++ host code and mino scripts.
+- `test-use-cases` Makefile target.
+
+### Fixed
+- README version updated from v0.19.0 to v0.34.0 with current feature
+  summary.
+- CONFORMANCE.md corrected: binary radix literals (`2r1010`) are
+  supported since v0.34.0.
+- BACKLOG.md: removed duplicate `sorted-map-by`/`sorted-set-by` entry.
+
 ## [0.34.0] — Conformance hardening phase 2
 
 ### Added
