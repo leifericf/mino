@@ -1496,11 +1496,16 @@
                              (fn [s] (conj (or s #{}) parent)))]
      (recompute-hierarchy_ (assoc h :parents new-parents)))))
 
+(defn valid-hierarchy?_ [h]
+  (and (map? h) (contains? h :parents) (contains? h :ancestors) (contains? h :descendants)))
+
 (defn underive "Removes a parent/child relationship between child and parent."
   ([child parent]
    (swap! global-hierarchy_ underive child parent)
-   @global-hierarchy_)
+   nil)
   ([h child parent]
+   (when-not (valid-hierarchy?_ h)
+     (throw (ex-info "invalid hierarchy" {:h h})))
    (let [cur (get (:parents h) child #{})]
      (if (contains? cur parent)
        (let [new-set (disj cur parent)
