@@ -22,44 +22,45 @@ static double now_sec(void)
 /* Build a map {0 0, 1 1, ..., n-1 n-1} via repeated assoc. ns/element. */
 static double bench_build(size_t n)
 {
+    mino_state_t *S = mino_state_new();
     char        expr[256];
-    mino_env_t *env = mino_env_new();
+    mino_env_t *env = mino_new(S);
     mino_val_t *form;
     const char *end;
     double      t0, elapsed;
-    mino_install_core(env);
     snprintf(expr, sizeof(expr),
              "(loop (i 0 m {})"
              "  (if (< i %zu) (recur (+ i 1) (assoc m i i)) m))",
              n);
     t0   = now_sec();
-    form = mino_read(expr, &end);
-    if (form == NULL || mino_eval(form, env) == NULL) {
-        fprintf(stderr, "bench_build failed: %s\n", mino_last_error());
+    form = mino_read(S, expr, &end);
+    if (form == NULL || mino_eval(S, form, env) == NULL) {
+        fprintf(stderr, "bench_build failed: %s\n", mino_last_error(S));
         exit(1);
     }
     elapsed = now_sec() - t0;
-    mino_env_free(env);
+    mino_env_free(S, env);
+    mino_state_free(S);
     return elapsed * 1e9 / (double)n;
 }
 
 /* Build map of size n, then time `reps` (get m key) lookups. ns/op. */
 static double bench_get(size_t n, size_t reps)
 {
+    mino_state_t *S = mino_state_new();
     char        expr[256];
-    mino_env_t *env = mino_env_new();
+    mino_env_t *env = mino_new(S);
     mino_val_t *form;
     const char *end;
     double      t0;
     size_t      r;
-    mino_install_core(env);
     snprintf(expr, sizeof(expr),
              "(def m (loop (i 0 m {})"
              "  (if (< i %zu) (recur (+ i 1) (assoc m i i)) m)))",
              n);
-    form = mino_read(expr, &end);
-    if (form == NULL || mino_eval(form, env) == NULL) {
-        fprintf(stderr, "bench_get build failed: %s\n", mino_last_error());
+    form = mino_read(S, expr, &end);
+    if (form == NULL || mino_eval(S, form, env) == NULL) {
+        fprintf(stderr, "bench_get build failed: %s\n", mino_last_error(S));
         exit(1);
     }
     t0 = now_sec();
@@ -69,12 +70,13 @@ static double bench_get(size_t n, size_t reps)
         const char *e2;
         mino_val_t *f2;
         snprintf(prog, sizeof(prog), "(get m %zu)", key);
-        f2 = mino_read(prog, &e2);
-        (void)mino_eval(f2, env);
+        f2 = mino_read(S, prog, &e2);
+        (void)mino_eval(S, f2, env);
     }
     {
         double elapsed = now_sec() - t0;
-        mino_env_free(env);
+        mino_env_free(S, env);
+        mino_state_free(S);
         return elapsed * 1e9 / (double)reps;
     }
 }
@@ -82,20 +84,20 @@ static double bench_get(size_t n, size_t reps)
 /* Build map, then time `reps` (assoc m key 999) updates. ns/op. */
 static double bench_assoc(size_t n, size_t reps)
 {
+    mino_state_t *S = mino_state_new();
     char        expr[256];
-    mino_env_t *env = mino_env_new();
+    mino_env_t *env = mino_new(S);
     mino_val_t *form;
     const char *end;
     double      t0;
     size_t      r;
-    mino_install_core(env);
     snprintf(expr, sizeof(expr),
              "(def m (loop (i 0 m {})"
              "  (if (< i %zu) (recur (+ i 1) (assoc m i i)) m)))",
              n);
-    form = mino_read(expr, &end);
-    if (form == NULL || mino_eval(form, env) == NULL) {
-        fprintf(stderr, "bench_assoc build failed: %s\n", mino_last_error());
+    form = mino_read(S, expr, &end);
+    if (form == NULL || mino_eval(S, form, env) == NULL) {
+        fprintf(stderr, "bench_assoc build failed: %s\n", mino_last_error(S));
         exit(1);
     }
     t0 = now_sec();
@@ -105,12 +107,13 @@ static double bench_assoc(size_t n, size_t reps)
         const char *e2;
         mino_val_t *f2;
         snprintf(prog, sizeof(prog), "(assoc m %zu 999)", key);
-        f2 = mino_read(prog, &e2);
-        (void)mino_eval(f2, env);
+        f2 = mino_read(S, prog, &e2);
+        (void)mino_eval(S, f2, env);
     }
     {
         double elapsed = now_sec() - t0;
-        mino_env_free(env);
+        mino_env_free(S, env);
+        mino_state_free(S);
         return elapsed * 1e9 / (double)reps;
     }
 }

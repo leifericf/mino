@@ -27,23 +27,25 @@ static double now_sec(void)
 /* Build a vector of [0, n) through vec_from_array and return ns/element. */
 static double bench_build(size_t n)
 {
-    mino_val_t **items = (mino_val_t **)malloc(n * sizeof(*items));
-    mino_val_t  *v;
-    double       t0;
-    double       elapsed;
-    size_t       i;
+    mino_state_t *S = mino_state_new();
+    mino_val_t  **items = (mino_val_t **)malloc(n * sizeof(*items));
+    mino_val_t   *v;
+    double        t0;
+    double        elapsed;
+    size_t        i;
     if (items == NULL) {
         perror("malloc");
         exit(1);
     }
     for (i = 0; i < n; i++) {
-        items[i] = mino_int((long long)i);
+        items[i] = mino_int(S, (long long)i);
     }
     t0 = now_sec();
-    v  = mino_vector(items, n);
+    v  = mino_vector(S, items, n);
     elapsed = now_sec() - t0;
     free(items);
     (void)v;
+    mino_state_free(S);
     return elapsed * 1e9 / (double)n;
 }
 
@@ -51,20 +53,20 @@ static double bench_build(size_t n)
  * at pseudo-random indices. Reports ns/op. */
 static double bench_nth(size_t n, size_t reps)
 {
+    mino_state_t *S = mino_state_new();
     char        expr[256];
-    mino_env_t *env = mino_env_new();
+    mino_env_t *env = mino_new(S);
     mino_val_t *form;
     const char *end;
     double      t0;
     size_t      r;
-    mino_install_core(env);
     snprintf(expr, sizeof(expr),
              "(def v (loop (i 0 v []) "
              "  (if (< i %zu) (recur (+ i 1) (conj v i)) v)))",
              n);
-    form = mino_read(expr, &end);
-    if (form == NULL || mino_eval(form, env) == NULL) {
-        fprintf(stderr, "bench_nth build failed: %s\n", mino_last_error());
+    form = mino_read(S, expr, &end);
+    if (form == NULL || mino_eval(S, form, env) == NULL) {
+        fprintf(stderr, "bench_nth build failed: %s\n", mino_last_error(S));
         exit(1);
     }
     t0 = now_sec();
@@ -74,12 +76,13 @@ static double bench_nth(size_t n, size_t reps)
         const char *e2;
         mino_val_t *f2;
         snprintf(prog, sizeof(prog), "(nth v %zu)", idx);
-        f2 = mino_read(prog, &e2);
-        (void)mino_eval(f2, env);
+        f2 = mino_read(S, prog, &e2);
+        (void)mino_eval(S, f2, env);
     }
     {
         double elapsed = now_sec() - t0;
-        mino_env_free(env);
+        mino_env_free(S, env);
+        mino_state_free(S);
         return elapsed * 1e9 / (double)reps;
     }
 }
@@ -87,20 +90,20 @@ static double bench_nth(size_t n, size_t reps)
 /* Build v and time `reps` (assoc v idx 999) calls, each path-copying. */
 static double bench_assoc(size_t n, size_t reps)
 {
+    mino_state_t *S = mino_state_new();
     char        expr[256];
-    mino_env_t *env = mino_env_new();
+    mino_env_t *env = mino_new(S);
     mino_val_t *form;
     const char *end;
     double      t0;
     size_t      r;
-    mino_install_core(env);
     snprintf(expr, sizeof(expr),
              "(def v (loop (i 0 v []) "
              "  (if (< i %zu) (recur (+ i 1) (conj v i)) v)))",
              n);
-    form = mino_read(expr, &end);
-    if (form == NULL || mino_eval(form, env) == NULL) {
-        fprintf(stderr, "bench_assoc build failed: %s\n", mino_last_error());
+    form = mino_read(S, expr, &end);
+    if (form == NULL || mino_eval(S, form, env) == NULL) {
+        fprintf(stderr, "bench_assoc build failed: %s\n", mino_last_error(S));
         exit(1);
     }
     t0 = now_sec();
@@ -110,12 +113,13 @@ static double bench_assoc(size_t n, size_t reps)
         const char *e2;
         mino_val_t *f2;
         snprintf(prog, sizeof(prog), "(assoc v %zu 999)", idx);
-        f2 = mino_read(prog, &e2);
-        (void)mino_eval(f2, env);
+        f2 = mino_read(S, prog, &e2);
+        (void)mino_eval(S, f2, env);
     }
     {
         double elapsed = now_sec() - t0;
-        mino_env_free(env);
+        mino_env_free(S, env);
+        mino_state_free(S);
         return elapsed * 1e9 / (double)reps;
     }
 }
