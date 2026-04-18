@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.28.0] — Core collections semantics
+
+### Added
+- **`subvec`**: O(1) vector slice sharing the backing trie via offset.
+  Supports 2-arity `(subvec v start)` and 3-arity `(subvec v start end)`.
+- **`seqable?`**: predicate for nil, collections, and strings.
+- **`indexed?`**: predicate for vectors.
+
+### Changed
+- **`ifn?`**: now returns true for keywords, maps, vectors, and sets
+  in addition to functions.
+- **`empty`**: preserves metadata from input collection on the empty
+  result for vectors, maps, sets, and sorted variants.
+
 ## [0.27.0] — Numeric tower behavior
 
 ### Added

@@ -167,7 +167,7 @@ This roadmap is ordered by dependency: each step unlocks the next.
 
 ---
 
-## Step 6 - Core Collections Semantics
+## ~~Step 6 - Core Collections Semantics~~
 
 ### Smaller steps
 - Align `get`, `assoc`, `dissoc`, `conj`, `contains?`, `find`, `empty`, `count` edge cases.
