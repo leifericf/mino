@@ -6,30 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.34.1] — Examples and documentation
-
-### Added
-- Language binding examples for C, C++, and Java.
-- Eight use case example programs (configuration, rules engine, data
-  pipeline, event processing, plugins, console, game scripting,
-  automation) with C++ host code and mino scripts.
-- `test-use-cases` Makefile target.
-
-### Fixed
-- README version updated from v0.19.0 to v0.34.0 with current feature
-  summary.
-- CONFORMANCE.md corrected: binary radix literals (`2r1010`) are
-  supported since v0.34.0.
-- BACKLOG.md: removed duplicate `sorted-map-by`/`sorted-set-by` entry.
-
 ## [0.34.0] — Conformance hardening phase 2
 
 ### Added
 - Radix integer literals (`2r1010`, `8r77`, `16rFF`, bases 2-36).
 - Tagged literal handling (`#tag form`) for unknown reader dispatch
   macros, enabling `.cljc` files with platform-specific tags.
+- `tagged-literal` function so unknown reader tags (`#inst`, `#uuid`,
+  etc.) evaluate to `{:tag :name :form body}` data.
 - `array-map` alias for `hash-map`.
 - `rseq` support for sorted maps and sets.
+- Language binding examples for C, C++, and Java.
+- Eight use case example programs (configuration, rules engine, data
+  pipeline, event processing, plugins, console, game scripting,
+  automation) with C++ host code and mino scripts.
+- `test-use-cases` Makefile target.
 
 ### Changed
 - `str` prints `Infinity`/`-Infinity`/`NaN` for special floats
@@ -42,6 +33,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `contains?` on strings throws for non-integer keys.
 - `shuffle` validates collection argument.
 - `mapcat` supports multiple collection arguments.
+- `mapv` supports multiple collections: `(mapv + [1 2] [3 4])`.
+
+### Fixed
+- GC use-after-free in `mino_map`, `mino_set`, `mino_sorted_map`, and
+  `mino_sorted_set`: intermediate allocations during construction could
+  reclaim caller-held values. Fixed by suppressing GC during the
+  construction loop.
+- Benchmarks updated for the explicit `mino_state_t` API.
 
 ## [0.33.0] — Conformance hardening
 
