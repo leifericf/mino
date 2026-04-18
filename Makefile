@@ -24,7 +24,8 @@ TARGET   := mino
 
 .PHONY: all clean test test-interop test-external test-gc-stress \
        test-gc-stress-sharded test-fault-inject test-regex-thread \
-       bench bench-map bench-seq fuzz-stdin qa-arch
+       bench bench-map bench-seq fuzz-stdin qa-arch \
+       test-use-cases
 
 all: $(TARGET)
 
@@ -69,7 +70,11 @@ clean:
 	      examples/interop_test examples/interop_test.o \
 	      examples/regex_thread_test examples/regex_thread_test.o \
 	      cookbook/config cookbook/rules cookbook/repl_socket \
-	      cookbook/plugin cookbook/pipeline cookbook/console
+	      cookbook/plugin cookbook/pipeline cookbook/console \
+	      $(wildcard examples/use-cases/configuration examples/use-cases/rules_engine \
+	        examples/use-cases/data_pipeline examples/use-cases/event_processing \
+	        examples/use-cases/plugins examples/use-cases/console \
+	        examples/use-cases/game_scripting examples/use-cases/automation)
 
 test: $(TARGET)
 	./mino tests/run.mino
@@ -149,6 +154,24 @@ fuzz-stdin: fuzz/fuzz_reader
 
 fuzz/fuzz_reader: fuzz/fuzz_reader.c $(LIB_SRCS) src/mino.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -DFUZZ_STDIN -o $@ fuzz/fuzz_reader.c $(LIB_SRCS) $(LIBS)
+
+# Use case examples (C++17).
+CXX      ?= c++
+CXXFLAGS ?= -std=c++17 -Wall -Wextra -O2 -Isrc
+
+USE_CASE_SRCS := $(wildcard examples/use-cases/*.cpp)
+USE_CASE_BINS := $(USE_CASE_SRCS:.cpp=)
+
+examples/use-cases/%: examples/use-cases/%.cpp $(LIB_OBJS) src/mino.h
+	$(CXX) $(CXXFLAGS) -o $@ $< $(LIB_OBJS) $(LIBS)
+
+test-use-cases: $(USE_CASE_BINS)
+	@for bin in $(USE_CASE_BINS); do \
+	  printf "%-40s " "$$bin"; \
+	  if $$bin > /dev/null 2>&1; then echo "ok"; \
+	  else echo "FAIL"; exit 1; fi; \
+	done
+	@echo "all use case examples passed"
 
 # Architecture quality gates: TU size, function span, abort inventory.
 qa-arch:
