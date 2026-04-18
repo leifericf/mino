@@ -6,4 +6,5 @@
 (require "tests/ns_resolution_test")
 (require "tests/are_test")
 (require "tests/literal_test")
+(require "tests/numeric_tower_test")
 (run-tests)
