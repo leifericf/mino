@@ -9,16 +9,6 @@ build/
 bin/
 mino
 src/core_mino.h
-bench/vector_bench
-bench/map_bench
-bench/seq_bench
-fuzz/fuzz_reader
-cookbook/config
-cookbook/rules
-cookbook/repl_socket
-cookbook/plugin
-cookbook/pipeline
-cookbook/console
 
 # Test artifacts
 *.gcda
@@ -41,44 +31,13 @@ Thumbs.db
 .*.swp
 .*.swo
 
-# Local-only design notes (kept out of the repo intentionally)
+# Local working files
+.local/
 /*.md
 docs/*.md
 !docs/ARCHITECTURE_CONTRACT.md
 !docs/INTERNAL_MODULE_MAP.md
 !README.md
 !CHANGELOG.md
-!BACKLOG.md
-!EMBEDDING.md
-!NREPL.md
-!CONFORMANCE.md
 /design-notes/
-examples/embed
-examples/actor_test
-examples/clone_test
-examples/ref_test
-examples/api_stress_test
-examples/actor_stress_test
-examples/actor_scale_test
-examples/cpp_embed_test
-examples/state_switch_test
-examples/integration_test
-examples/fault_inject_test
-examples/regex_thread_test
-examples/interop_test
-examples/event_processing
-examples/use-cases/configuration
-examples/use-cases/rules_engine
-examples/use-cases/data_pipeline
-examples/use-cases/event_processing
-examples/use-cases/plugins
-examples/use-cases/console
-examples/use-cases/game_scripting
-examples/use-cases/automation
-examples/bindings/embed_c
-examples/bindings/embed_cpp
-examples/bindings/*.class
-examples/bindings/*.dylib
-examples/bindings/*.so
-data/
 .clj-kondo/

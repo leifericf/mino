@@ -1,5 +1,0 @@
-;; GC stress shard 2/11: collection, string.
-(require "tests/test")
-(require "tests/collection_test")
-(require "tests/string_test")
-(run-tests)

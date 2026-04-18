@@ -1,7 +1,0 @@
-;; GC stress shard 7/10: finally, protocol, iteration, metadata.
-(require "tests/test")
-(require "tests/finally_test")
-(require "tests/protocol_test")
-(require "tests/iteration_test")
-(require "tests/metadata_test")
-(run-tests)

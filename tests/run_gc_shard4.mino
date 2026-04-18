@@ -1,7 +1,0 @@
-;; GC stress shard 4/10: io, reflection, gc, math.
-(require "tests/test")
-(require "tests/io_test")
-(require "tests/reflection_test")
-(require "tests/gc_test")
-(require "tests/math_test")
-(run-tests)

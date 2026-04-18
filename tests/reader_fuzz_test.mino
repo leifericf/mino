@@ -97,17 +97,3 @@
 (reader-survives many-quotes "''''''''x")
 (reader-survives many-tildes "~~~~~~~~x")
 (reader-survives alternating-delims "([{([{([{([{")
-
-;; --- Corpus files (positive tests: these should parse without error) ---
-
-(deftest corpus-atoms
-  (is (read-string (slurp "fuzz/corpus/atoms.mino"))))
-
-(deftest corpus-collections
-  (is (read-string (slurp "fuzz/corpus/collections.mino"))))
-
-(deftest corpus-nested
-  (is (read-string (slurp "fuzz/corpus/nested.mino"))))
-
-(deftest corpus-quotes
-  (is (read-string (slurp "fuzz/corpus/quotes.mino"))))

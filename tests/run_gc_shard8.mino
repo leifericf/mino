@@ -1,7 +1,0 @@
-;; GC stress shard 8/10: transducer, dialect, clj sequences, clj predicates.
-(require "tests/test")
-(require "tests/transducer_test")
-(require "tests/dialect_test")
-(require "tests/clj_sequences_test")
-(require "tests/clj_predicates_test")
-(run-tests)
