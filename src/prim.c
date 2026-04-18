@@ -282,6 +282,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, env, "infinite?", mino_prim(S, "infinite?", prim_infinite_p));
     mino_env_set(S, env, "int",      mino_prim(S, "int",      prim_int));
     mino_env_set(S, env, "float",    mino_prim(S, "float",    prim_float));
+    mino_env_set(S, env, "parse-long",   mino_prim(S, "parse-long",   prim_parse_long));
+    mino_env_set(S, env, "parse-double", mino_prim(S, "parse-double", prim_parse_double));
     mino_env_set(S, env, "str",      mino_prim(S, "str",      prim_str));
     mino_env_set(S, env, "pr-str",   mino_prim(S, "pr-str",   prim_pr_str));
     mino_env_set(S, env, "read-string",
