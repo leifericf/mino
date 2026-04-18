@@ -2,6 +2,7 @@
 ;; Usage: ./mino tests/run.mino
 
 (require "tests/test")
+(require "tests/doc_examples_test")
 (require "tests/arithmetic_test")
 (require "tests/binding_test")
 (require "tests/control_test")
