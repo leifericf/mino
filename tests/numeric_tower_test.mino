@@ -1,0 +1,116 @@
+(require "tests/test")
+
+;; Integer range predicates
+
+(deftest pos-int-predicate
+  (is (pos-int? 1))
+  (is (pos-int? 100))
+  (is (not (pos-int? 0)))
+  (is (not (pos-int? -1)))
+  (is (not (pos-int? 1.0)))
+  (is (not (pos-int? "x"))))
+
+(deftest neg-int-predicate
+  (is (neg-int? -1))
+  (is (neg-int? -100))
+  (is (not (neg-int? 0)))
+  (is (not (neg-int? 1)))
+  (is (not (neg-int? -1.0)))
+  (is (not (neg-int? nil))))
+
+(deftest nat-int-predicate
+  (is (nat-int? 0))
+  (is (nat-int? 1))
+  (is (nat-int? 100))
+  (is (not (nat-int? -1)))
+  (is (not (nat-int? 0.0)))
+  (is (not (nat-int? "x"))))
+
+;; Type stubs
+
+(deftest ratio-predicate
+  (is (not (ratio? 1)))
+  (is (not (ratio? 1.0)))
+  (is (not (ratio? "x")))
+  (is (not (ratio? nil))))
+
+(deftest rational-predicate
+  (is (rational? 0))
+  (is (rational? 1))
+  (is (rational? -1))
+  (is (not (rational? 1.0)))
+  (is (not (rational? "x")))
+  (is (not (rational? nil))))
+
+(deftest decimal-predicate
+  (is (not (decimal? 1)))
+  (is (not (decimal? 1.0)))
+  (is (not (decimal? nil))))
+
+;; Coercion aliases
+
+(deftest long-coercion
+  (is (= 3 (long 3.7)))
+  (is (= 3 (long 3)))
+  (is (int? (long 3.7))))
+
+(deftest double-coercion
+  (is (= 3.0 (double 3)))
+  (is (= 3.0 (double 3.0)))
+  (is (float? (double 3))))
+
+(deftest num-coercion
+  (is (= 3 (num 3)))
+  (is (= 3.14 (num 3.14)))
+  (is (thrown? (num "x")))
+  (is (thrown? (num nil))))
+
+;; Parse functions
+
+(deftest parse-long-basic
+  (is (= 42 (parse-long "42")))
+  (is (= -7 (parse-long "-7")))
+  (is (= 0 (parse-long "0")))
+  (is (int? (parse-long "42"))))
+
+(deftest parse-long-failure
+  (is (nil? (parse-long "abc")))
+  (is (nil? (parse-long "3.14")))
+  (is (nil? (parse-long "")))
+  (is (nil? (parse-long nil)))
+  (is (nil? (parse-long " 42")))
+  (is (nil? (parse-long "42 ")))
+  (is (nil? (parse-long "0xFF"))))
+
+(deftest parse-double-basic
+  (is (= 3.14 (parse-double "3.14")))
+  (is (= 42.0 (parse-double "42")))
+  (is (= -0.5 (parse-double "-0.5")))
+  (is (float? (parse-double "3.14"))))
+
+(deftest parse-double-failure
+  (is (nil? (parse-double "abc")))
+  (is (nil? (parse-double "")))
+  (is (nil? (parse-double nil)))
+  (is (nil? (parse-double " 3.14"))))
+
+(deftest parse-double-special
+  (is (= ##Inf (parse-double "Infinity")))
+  (is (= ##-Inf (parse-double "-Infinity")))
+  (is (NaN? (parse-double "NaN"))))
+
+;; Unsigned bit shift
+
+(deftest unsigned-bit-shift-right-basic
+  (is (= 9223372036854775807 (unsigned-bit-shift-right -1 1)))
+  (is (= 2 (unsigned-bit-shift-right 4 1)))
+  (is (= 1 (unsigned-bit-shift-right -1 63)))
+  (is (= 0 (unsigned-bit-shift-right 0 5))))
+
+;; == rejects non-numbers (errors via + coercion)
+
+(deftest numeric-eq-basic
+  (is (== 1 1.0))
+  (is (== 0 0.0))
+  (is (not (== 1 2)))
+  (is (== 1 1 1.0 1)))
