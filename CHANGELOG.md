@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.29.0] — Stateful operations + watches
+
+### Added
+- **`add-watch`**: register a callback on an atom that fires on every
+  state change with `(fn key atom old-state new-state)` signature.
+- **`remove-watch`**: unregister a watch by key.
+- **`set-validator!`**: attach a validation function to an atom. Rejects
+  mutations where the validator returns false or throws.
+- **`get-validator`**: return the current validator function or nil.
+- **`swap-vals!`**: like `swap!` but returns `[old new]` vector.
+- **`reset-vals!`**: like `reset!` but returns `[old new]` vector.
+
+### Changed
+- **`reset!`** and **`swap!`**: now invoke validators before committing
+  and notify watches after committing.
+
 ## [0.28.0] — Core collections semantics
 
 ### Added
