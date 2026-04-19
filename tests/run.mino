@@ -67,5 +67,6 @@
 (require "tests/async_combinators_test")
 (require "tests/async_blocking_test")
 (require "tests/async_mult_pub_test")
+(require "tests/async_conformance_test")
 
 (run-tests)

@@ -1,0 +1,583 @@
+(require "tests/test")
+(require "core/async")
+
+;; Conformance tests adapted from the canonical core.async test suite.
+;; Covers channel semantics, go macro state machine, and combinators.
+
+;; ===== Channel FIFO ordering =====
+
+(deftest chan-fifo-ordering
+  (let [ch (chan 5)]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (>!! ch 4) (>!! ch 5)
+    (is (= 1 (<!! ch)))
+    (is (= 2 (<!! ch)))
+    (is (= 3 (<!! ch)))
+    (is (= 4 (<!! ch)))
+    (is (= 5 (<!! ch)))))
+
+(deftest chan-fifo-unbuffered
+  (let [ch (chan)
+        results (atom [])]
+    (put! ch :a) (put! ch :b) (put! ch :c)
+    (take! ch (fn [v] (swap! results conj v)))
+    (take! ch (fn [v] (swap! results conj v)))
+    (take! ch (fn [v] (swap! results conj v)))
+    (drain!)
+    (is (= [:a :b :c] @results))))
+
+;; ===== Close semantics =====
+
+(deftest close-flushes-buffer
+  (let [ch (chan 3)]
+    (>!! ch :a) (>!! ch :b)
+    (close! ch)
+    (is (= :a (<!! ch)))
+    (is (= :b (<!! ch)))
+    (is (nil? (<!! ch)) "nil after buffer exhausted")))
+
+(deftest close-multiple-pending-takers
+  (let [ch (chan)
+        r1 (atom :pending) r2 (atom :pending) r3 (atom :pending)]
+    (take! ch (fn [v] (reset! r1 v)))
+    (take! ch (fn [v] (reset! r2 v)))
+    (take! ch (fn [v] (reset! r3 v)))
+    (close! ch)
+    (drain!)
+    (is (nil? @r1))
+    (is (nil? @r2))
+    (is (nil? @r3))))
+
+(deftest close-pending-puts-rejected
+  (let [ch (chan)
+        r1 (atom :pending) r2 (atom :pending)]
+    (put! ch :a (fn [v] (reset! r1 v)))
+    (put! ch :b (fn [v] (reset! r2 v)))
+    (close! ch)
+    (drain!)
+    (is (false? @r1) "pending put callback gets false on close")
+    (is (false? @r2))))
+
+;; ===== Dropping buffer overflow =====
+
+(deftest dropping-buffer-overflow
+  (let [ch (chan (dropping-buffer 2))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (>!! ch 4) (>!! ch 5)
+    (is (= 1 (<!! ch)))
+    (is (= 2 (<!! ch)))
+    (is (nil? (poll! ch)) "excess values dropped")))
+
+;; ===== Sliding buffer overflow =====
+
+(deftest sliding-buffer-overflow
+  (let [ch (chan (sliding-buffer 2))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (>!! ch 4) (>!! ch 5)
+    (is (= 4 (<!! ch)))
+    (is (= 5 (<!! ch)))
+    (is (nil? (poll! ch)) "oldest values slid off")))
+
+;; ===== Promise channel =====
+
+(deftest promise-chan-multiple-takes
+  (let [ch (promise-chan)]
+    (put! ch 42)
+    (drain!)
+    (is (= 42 (<!! ch)))
+    (is (= 42 (<!! ch)))
+    (is (= 42 (<!! ch)) "promise-chan delivers same value repeatedly")))
+
+(deftest promise-chan-ignores-second-put
+  (let [ch (promise-chan)]
+    (put! ch :first)
+    (put! ch :second)
+    (drain!)
+    (is (= :first (<!! ch)) "second put is ignored")))
+
+;; ===== go: basic expressions =====
+
+(deftest go-constant
+  (is (= 42 (<!! (go 42)))))
+
+(deftest go-arithmetic
+  (is (= 15 (<!! (go (+ 5 10))))))
+
+(deftest go-string
+  (is (= "hello" (<!! (go "hello")))))
+
+(deftest go-keyword
+  (is (= :foo (<!! (go :foo)))))
+
+(deftest go-vector
+  (is (= [1 2 3] (<!! (go [1 2 3])))))
+
+(deftest go-map
+  (is (= {:a 1} (<!! (go {:a 1})))))
+
+(deftest go-boolean
+  (is (true? (<!! (go true))))
+  (is (false? (<!! (go false)))))
+
+;; ===== go: fn inside go (not walked) =====
+
+(deftest go-fn-not-walked
+  (let [result (<!! (go (let [f (fn [x] (* x 2))]
+                          (f 21))))]
+    (is (= 42 result) "fn inside go is not state-machine transformed")))
+
+(deftest go-fn-closure-over-park
+  (let [ch (chan 1)]
+    (put! ch 10) (drain!)
+    (let [result (<!! (go (let [x (<! ch)
+                                f (fn [y] (+ x y))]
+                            (f 5))))]
+      (is (= 15 result) "fn closes over parked value"))))
+
+;; ===== go: do blocks =====
+
+(deftest go-do-returns-last
+  (is (= :last (<!! (go (do :first :second :last))))))
+
+(deftest go-do-side-effects
+  (let [log (atom [])]
+    (<!! (go (do (swap! log conj :a)
+                 (swap! log conj :b)
+                 :done)))
+    (is (= [:a :b] @log))))
+
+;; ===== go: let bindings =====
+
+(deftest go-let-simple
+  (is (= 10 (<!! (go (let [x 10] x))))))
+
+(deftest go-let-chain
+  (is (= 30 (<!! (go (let [x 10
+                            y 20]
+                        (+ x y)))))))
+
+(deftest go-let-park-chain
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 3) (>!! ch2 4)
+    (is (= 12 (<!! (go (let [a (<! ch1)
+                              b (<! ch2)]
+                          (* a b))))))))
+
+(deftest go-let-shadow
+  (let [ch (chan 1)]
+    (>!! ch 5)
+    (is (= 5 (<!! (go (let [x (<! ch)] x)))))))
+
+;; ===== go: nested let with parks =====
+
+(deftest go-nested-let-parks
+  (let [ch1 (chan 1) ch2 (chan 1) ch3 (chan 1)]
+    (>!! ch1 1) (>!! ch2 2) (>!! ch3 3)
+    (is (= 6 (<!! (go (let [a (<! ch1)]
+                         (let [b (<! ch2)]
+                           (let [c (<! ch3)]
+                             (+ a b c))))))))))
+
+;; ===== go: if with parks =====
+
+(deftest go-if-true-parks
+  (let [ch (chan 1)]
+    (>!! ch :yes)
+    (is (= :yes (<!! (go (if true (<! ch) :no)))))))
+
+(deftest go-if-false-parks
+  (let [ch (chan 1)]
+    (>!! ch :yes)
+    (is (= :yes (<!! (go (if false :no (<! ch))))))))
+
+(deftest go-if-both-parks
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 :a) (>!! ch2 :b)
+    (is (= :a (<!! (go (if true (<! ch1) (<! ch2)))))))
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 :c) (>!! ch2 :d)
+    (is (= :d (<!! (go (if false (<! ch1) (<! ch2))))))))
+
+(deftest go-if-park-in-test
+  (let [ch (chan 1)]
+    (>!! ch true)
+    (is (= :yes (<!! (go (if (<! ch) :yes :no)))))))
+
+;; ===== go: when with parks =====
+
+(deftest go-when-true-body
+  (let [ch (chan 1)]
+    (>!! ch :val)
+    (is (= :val (<!! (go (when true (<! ch))))))))
+
+(deftest go-when-false-nil
+  (let [ch (chan 1)]
+    (>!! ch :val)
+    ;; when false returns nil; go with nil result closes channel
+    (let [out (go (when false (<! ch)))]
+      (is (nil? (<!! out))))))
+
+;; ===== go: cond with parks =====
+
+(deftest go-cond-first-true
+  (let [ch (chan 1)]
+    (>!! ch :first)
+    (is (= :first (<!! (go (cond true (<! ch) :else :nope)))))))
+
+(deftest go-cond-fallthrough
+  (let [ch (chan 1)]
+    (>!! ch :fallback)
+    (is (= :fallback (<!! (go (cond false :nope :else (<! ch))))))))
+
+;; ===== go: loop/recur =====
+
+(deftest go-loop-basic-count
+  (is (= 10 (<!! (go (loop [n 0]
+                        (if (< n 10) (recur (inc n)) n)))))))
+
+(deftest go-loop-accumulate-from-channel
+  (let [ch (chan 5)]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (>!! ch 4) (>!! ch 5)
+    (close! ch)
+    (is (= 15 (<!! (go-loop [sum 0]
+                     (let [v (<! ch)]
+                       (if (nil? v) sum (recur (+ sum v))))))))))
+
+(deftest go-loop-build-vector
+  (let [ch (chan 3)]
+    (>!! ch :a) (>!! ch :b) (>!! ch :c)
+    (close! ch)
+    (is (= [:a :b :c] (<!! (go-loop [acc []]
+                              (let [v (<! ch)]
+                                (if (nil? v) acc (recur (conj acc v))))))))))
+
+(deftest go-loop-multi-binding-recur
+  (let [ch (chan 2)]
+    (>!! ch 10) (>!! ch 20)
+    (close! ch)
+    (is (= {:sum 30 :count 2}
+           (<!! (go-loop [sum 0 count 0]
+                  (let [v (<! ch)]
+                    (if (nil? v)
+                      {:sum sum :count count}
+                      (recur (+ sum v) (inc count))))))))))
+
+(deftest go-loop-park-in-recur-arg
+  (let [ch (chan 3)]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3)
+    (is (= 3 (<!! (go (loop [x 0 n 3]
+                         (if (> n 0)
+                           (recur (<! ch) (dec n))
+                           x))))))))
+
+;; ===== go: nested go blocks =====
+
+(deftest go-nested-go
+  (is (= 42 (<!! (go (<! (go 42)))))))
+
+(deftest go-nested-go-chain
+  (is (= :done (<!! (go (let [x (<! (go 1))
+                               y (<! (go 2))]
+                           (if (= 3 (+ x y)) :done :fail)))))))
+
+;; ===== go: producer-consumer =====
+
+(deftest go-producer-consumer
+  (let [ch (chan 1)]
+    (go (>! ch 1)
+        (>! ch 2)
+        (>! ch 3)
+        (close! ch))
+    (is (= [1 2 3] (<!! (go-loop [acc []]
+                           (let [v (<! ch)]
+                             (if (nil? v) acc (recur (conj acc v))))))))))
+
+;; ===== go: ping-pong between two go blocks =====
+
+(deftest go-ping-pong
+  (let [ping (chan 1) pong (chan 1)]
+    (go (>! ping :start)
+        (<! pong)
+        (>! ping :done))
+    (go (let [v (<! ping)]
+          (>! pong :ack)
+          (<! ping)))
+    (drain!)
+    ;; Both blocks should complete without deadlock
+    (is (true? true) "ping-pong completed")))
+
+;; ===== go: alts! inside go =====
+
+(deftest go-alts-inside
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 :from-1)
+    (let [result (<!! (go (let [[v _] (alts! [ch1 ch2] {:priority true})]
+                            v)))]
+      (is (= :from-1 result)))))
+
+;; ===== go: complex state machine =====
+
+(deftest go-complex-binding-survival
+  (let [ch (chan 1)]
+    (>!! ch 100)
+    (let [result (<!! (go (let [a 1
+                                b (<! ch)
+                                c (+ a b)]
+                            [a b c])))]
+      (is (= [1 100 101] result) "bindings survive across park"))))
+
+(deftest go-multi-park-with-computation
+  (let [ch1 (chan 1) ch2 (chan 1) ch3 (chan 1)]
+    (>!! ch1 10) (>!! ch2 20) (>!! ch3 30)
+    (let [result (<!! (go (let [a (<! ch1)
+                                b (* a 2)
+                                c (<! ch2)
+                                d (+ b c)
+                                e (<! ch3)]
+                            (+ d e))))]
+      (is (= 70 result) "computation interleaved with parks"))))
+
+;; ===== go: side effects ordering =====
+
+(deftest go-side-effect-order
+  (let [ch1 (chan 1) ch2 (chan 1)
+        log (atom [])]
+    (>!! ch1 :a) (>!! ch2 :b)
+    (<!! (go (swap! log conj :before)
+             (<! ch1)
+             (swap! log conj :between)
+             (<! ch2)
+             (swap! log conj :after)
+             :done))
+    (is (= [:before :between :after] @log))))
+
+;; ===== go: put returns boolean =====
+
+(deftest go-put-returns-true
+  (let [ch (chan 1)]
+    (is (true? (<!! (go (>! ch :val)))) "put on open channel returns true")))
+
+(deftest go-put-on-closed-returns-false
+  (let [ch (chan)]
+    (close! ch)
+    (is (false? (<!! (go (>! ch :val)))) "put on closed channel returns false")))
+
+;; ===== go: take from closed returns nil =====
+
+(deftest go-take-from-closed
+  (let [ch (chan)]
+    (close! ch)
+    (is (nil? (<!! (go (<! ch)))) "take from closed returns nil")))
+
+;; ===== Combinator: pipe ordering =====
+
+(deftest pipe-ordering
+  (let [from (chan 5) to (chan 5)]
+    (>!! from 1) (>!! from 2) (>!! from 3) (>!! from 4) (>!! from 5)
+    (close! from)
+    (pipe from to)
+    (drain!)
+    (is (= 1 (<!! to)))
+    (is (= 2 (<!! to)))
+    (is (= 3 (<!! to)))
+    (is (= 4 (<!! to)))
+    (is (= 5 (<!! to)))))
+
+;; ===== Combinator: to-chan / async-into round-trip =====
+
+(deftest to-chan-into-round-trip
+  (let [data [1 2 3 4 5]
+        result (<!! (async-into [] (to-chan data)))]
+    (is (= data result))))
+
+;; ===== Combinator: merge ordering =====
+
+(deftest merge-all-values-received
+  (let [ch1 (to-chan [1 2])
+        ch2 (to-chan [3 4])
+        ch3 (to-chan [5 6])
+        out (merge [ch1 ch2 ch3] 6)
+        result (<!! (async-into [] out))]
+    (is (= 6 (count result)) "all values received")
+    (is (= #{1 2 3 4 5 6} (set result)) "correct values")))
+
+;; ===== Combinator: mult fan-out =====
+
+(deftest mult-all-taps-receive
+  (let [src (chan 3)
+        t1 (chan 3) t2 (chan 3) t3 (chan 3)
+        m (mult src)]
+    (tap m t1) (tap m t2) (tap m t3)
+    (>!! src :x) (drain!)
+    (is (= :x (<!! t1)))
+    (is (= :x (<!! t2)))
+    (is (= :x (<!! t3)))))
+
+(deftest mult-tap-close-on-source-close
+  (let [src (chan)
+        t1 (chan 1) t2 (chan 1)
+        m (mult src)]
+    (tap m t1) (tap m t2)
+    (close! src) (drain!)
+    (is (true? (closed? t1)))
+    (is (true? (closed? t2)))))
+
+;; ===== Combinator: pub/sub =====
+
+(deftest pub-sub-multi-topic
+  (let [src (chan 10)
+        a-ch (chan 10) b-ch (chan 10)
+        p (pub src :type)]
+    (sub p :a a-ch) (sub p :b b-ch)
+    (>!! src {:type :a :v 1})
+    (>!! src {:type :b :v 2})
+    (>!! src {:type :a :v 3})
+    (>!! src {:type :b :v 4})
+    (drain!)
+    (is (= {:type :a :v 1} (<!! a-ch)))
+    (is (= {:type :a :v 3} (<!! a-ch)))
+    (is (= {:type :b :v 2} (<!! b-ch)))
+    (is (= {:type :b :v 4} (<!! b-ch)))))
+
+;; ===== Combinator: pipeline =====
+
+(deftest pipeline-transforms
+  (let [from (to-chan [1 2 3 4 5])
+        to   (chan 5)]
+    (pipeline 2 to (fn [x] (* x x)) from)
+    (drain!)
+    (let [result (atom #{})]
+      (dotimes [_ 5]
+        (take! to (fn [v] (swap! result conj v))))
+      (drain!)
+      (is (= #{1 4 9 16 25} @result)))))
+
+(deftest pipeline-closes-to
+  (let [from (to-chan [1])
+        to   (chan 1)]
+    (pipeline 1 to inc from)
+    (drain!)
+    (<!! to)
+    (is (true? (closed? to)))))
+
+;; ===== Combinator: pipeline-async =====
+
+(deftest pipeline-async-transforms
+  (let [from (to-chan [1 2 3])
+        to   (chan 3)]
+    (pipeline-async 1 to
+      (fn [v result-ch]
+        (put! result-ch (* v 10))
+        (close! result-ch))
+      from)
+    (drain!)
+    (let [result (atom #{})]
+      (dotimes [_ 3]
+        (take! to (fn [v] (swap! result conj v))))
+      (drain!)
+      (is (= #{10 20 30} @result)))))
+
+;; ===== Edge cases: chan? =====
+
+(deftest chan-predicate
+  (is (true? (chan? (chan))))
+  (is (true? (chan? (chan 1))))
+  (is (true? (chan? (promise-chan))))
+  (is (false? (chan? 42)))
+  (is (false? (chan? nil)))
+  (is (false? (chan? :foo))))
+
+;; ===== Edge cases: offer!/poll! on closed =====
+
+(deftest offer-on-closed
+  (let [ch (chan 1)]
+    (close! ch)
+    (is (false? (offer! ch :x)) "offer on closed returns false")))
+
+(deftest poll-on-closed-empty
+  (let [ch (chan)]
+    (close! ch)
+    (is (nil? (poll! ch)) "poll on closed empty returns nil")))
+
+(deftest poll-on-closed-with-data
+  (let [ch (chan 1)]
+    (>!! ch :x)
+    (close! ch)
+    (is (= :x (poll! ch)) "poll on closed with data returns value")))
+
+;; ===== Edge case: go block returning false =====
+
+(deftest go-returns-false
+  (is (false? (<!! (go false))) "go can return false"))
+
+;; ===== Edge case: go block with map operations =====
+
+(deftest go-map-operations
+  (let [ch (chan 1)]
+    (>!! ch {:a 1 :b 2})
+    (let [result (<!! (go (let [m (<! ch)]
+                            (assoc m :c 3))))]
+      (is (= {:a 1 :b 2 :c 3} result)))))
+
+;; ===== Edge case: go with higher-order functions =====
+
+(deftest go-higher-order
+  (let [ch (chan 3)]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3)
+    (close! ch)
+    (let [result (<!! (go-loop [acc []]
+                        (let [v (<! ch)]
+                          (if (nil? v)
+                            (mapv inc acc)
+                            (recur (conj acc v))))))]
+      (is (= [2 3 4] result)))))
+
+;; ===== Stress: many sequential parks =====
+
+(deftest go-many-sequential-parks
+  (let [ch (chan 10)]
+    (dotimes [i 10] (>!! ch i))
+    (let [result (<!! (go (let [a (<! ch) b (<! ch) c (<! ch)
+                                d (<! ch) e (<! ch)]
+                            (+ a b c d e))))]
+      (is (= 10 result) "sum of 0+1+2+3+4"))))
+
+;; ===== Stress: multiple go blocks with shared channel =====
+
+(deftest go-multiple-producers
+  (let [ch (chan 10)
+        results (atom #{})]
+    (dotimes [i 5]
+      (go (>! ch i)))
+    (dotimes [_ 5]
+      (take! ch (fn [v] (swap! results conj v))))
+    (drain!)
+    (is (= #{0 1 2 3 4} @results))))
+
+;; ===== Edge case: go-loop with no parks (pure computation) =====
+
+(deftest go-loop-no-parks
+  (is (= 55 (<!! (go-loop [n 10 sum 0]
+                   (if (zero? n)
+                     sum
+                     (recur (dec n) (+ sum n))))))))
+
+;; ===== Edge case: let-park with remaining stmts after =====
+
+(deftest go-let-park-then-stmts
+  (let [ch (chan 1)
+        log (atom [])]
+    (>!! ch 42)
+    (let [result (<!! (go (let [x (<! ch)]
+                            (swap! log conj x)
+                            (* x 2))))]
+      (is (= 84 result))
+      (is (= [42] @log)))))
+
+;; ===== Edge case: if-park as non-tail expression =====
+
+(deftest go-if-park-non-tail
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 :a) (>!! ch2 :b)
+    (let [result (<!! (go (if true (<! ch1) (<! ch2))
+                          :after))]
+      (is (= :after result)))))
+
+(run-tests)

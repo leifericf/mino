@@ -279,8 +279,7 @@
     ;; loop with parks in init bindings -> lift to let-park before loop
     (and (= 'loop (first form))
          (vector? (second form))
-         (some go-park? (map (fn [i] (nth (second form) i))
-                             (filter odd? (range (count (second form)))))))
+         (go-bindings-have-park? (second form)))
     (let [bindings (second form)
           pairs (partition 2 bindings)
           lifted (vec (map (fn [pair]
@@ -297,15 +296,33 @@
     ;; Recurse into other forms
     :else (apply list (map go-expand-if form))))
 
+(defn go-bindings-have-park?
+  "Returns true if a binding vector [name val name val ...] contains
+   any park operation in the value positions."
+  [bindings]
+  (boolean (some go-park?
+             (map (fn [i] (nth bindings i))
+                  (filter odd? (range (count bindings)))))))
+
+(defn go-first-park-idx
+  "Given a seq of binding pairs, return the index of the first pair
+   whose value is a park operation."
+  [pairs]
+  (loop [i 0 ps (seq pairs)]
+    (when ps
+      (if (go-park? (second (first ps)))
+        i
+        (recur (inc i) (next ps))))))
+
 (defn go-let-park?
-  "Returns true if form is (let [x (<! ch) ...] body) where a binding
+  "Returns true if form is (let [... x (<! ch) ...] body) where any binding
    value is a park operation."
   [form]
   (and (cons? form)
        (= 'let (first form))
        (vector? (second form))
        (>= (count (second form)) 2)
-       (go-park? (nth (second form) 1))))
+       (go-bindings-have-park? (second form))))
 
 (defn go-transform
   "Transform a go body into a vector of states.
@@ -342,20 +359,30 @@
               (recur (inc i) (conj states new-state) []
                      true nil))
 
-            ;; Let with park in first binding: (let [x (<! ch)] body)
+            ;; Let with park in any binding: (let [... x (<! ch) ...] body)
             (go-let-park? stmt)
             (let [bindings    (second stmt)
-                  sym         (nth bindings 0)
-                  park-form   (nth bindings 1)
+                  pairs       (vec (partition 2 bindings))
+                  park-idx    (go-first-park-idx pairs)
+                  ;; Split into pre-park, park, and post-park
+                  pre-pairs   (subvec pairs 0 park-idx)
+                  park-pair   (nth pairs park-idx)
+                  post-pairs  (subvec pairs (inc park-idx))
+                  sym         (first park-pair)
+                  park-form   (second park-pair)
                   op          (name (first park-form))
                   kind        (if (= op "<!") :take :put)
                   park        (if (= kind :take)
                                 {:kind :take :ch (second park-form)}
                                 {:kind :put :ch (second park-form) :val (nth park-form 2)})
-                  rest-bindings (subvec bindings 2)
+                  rest-bindings (vec (mapcat identity post-pairs))
                   body-forms  (vec (rest (rest stmt)))
+                  ;; Pre-park binding pairs (flattened [name val ...]) for
+                  ;; threading through the state machine locals map
+                  pre-bind-lets (vec (mapcat identity pre-pairs))
                   new-state   {:body current :park park
-                               :use-val has-park :bind bind-sym}
+                               :use-val has-park :bind bind-sym
+                               :pre-bind-lets pre-bind-lets}
                   ;; Build the continuation body
                   cont-body   (if (empty? rest-bindings)
                                 body-forms
@@ -560,14 +587,18 @@
               use-val  (:use-val state)
               bind     (:bind state)
               val-sym  (gensym "v_")
-              ;; Previous binds: all :bind syms from states before this one
-              prev-binds  (vec (keep :bind (take i states)))
+              ;; Previous binds: all :bind syms and pre-bind names from states before this one
+              prev-binds  (vec (concat (keep :bind (take i states))
+                                       (mapcat (fn [s] (take-nth 2 (or (:pre-bind-lets s) [])))
+                                               (take i states))))
               ;; Loop context bindings to restore (for states after loop-start)
               loop-ctx-binds (if (and (:recur-ctx state) (not (:loop-id state)))
                                (:binds (:recur-ctx state))
                                [])
               ;; Loop-start bindings to pack (for the loop-start state)
               loop-own-binds (if (:loop-id state) (:loop-binds state) [])
+              ;; Pre-bind names from current state (need to be packed into locals)
+              cur-pre-binds (vec (take-nth 2 (or (:pre-bind-lets state) [])))
               ;; All bindings that need to be in scope
               has-locals  (or (not (empty? prev-binds)) (not (empty? loop-ctx-binds)))
               ;; Destructure locals from val#
@@ -585,6 +616,7 @@
               pack-val    (fn [v]
                             (let [cur-binds (vec (concat loop-own-binds
                                                          prev-binds
+                                                         cur-pre-binds
                                                          (when bind [bind])))]
                               (if (empty? cur-binds)
                                 v
@@ -604,8 +636,10 @@
                                     (:loop-binds state)
                                     (:loop-inits state)))
                              [])
+                pre-lets   (or (:pre-bind-lets state) [])
                 all-lets   (vec (concat bridge-lets loop-lets restore-lets
-                                       (when bind [bind cur-val])))]
+                                       (when bind [bind cur-val])
+                                       pre-lets))]
           (swap! arms conj i)
           (cond
             ;; Recur state: jump back to loop start
