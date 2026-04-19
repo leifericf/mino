@@ -37,19 +37,26 @@ int args_have_float(mino_val_t *args)
     return 0;
 }
 
-/* Throw a catchable exception from a primitive.  If inside a try block,
- * this longjmps to the catch handler.  Otherwise it sets a fatal error
- * and the caller returns NULL to propagate to the host. */
-mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
+/* Throw a classified catchable exception from a primitive.  If inside a
+ * try block, this longjmps to the catch handler.  Otherwise it sets a
+ * fatal error and the caller returns NULL to propagate to the host. */
+mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
+                                  const char *code, const char *msg)
 {
     mino_val_t *ex = mino_string(S, msg);
     if (S->try_depth > 0) {
         S->try_stack[S->try_depth - 1].exception = ex;
         longjmp(S->try_stack[S->try_depth - 1].buf, 1);
     }
-    set_error(S, msg);
+    set_eval_diag(S, S->eval_current_form, kind, code, msg);
     append_trace(S);
     return NULL;
+}
+
+/* Backward-compat wrapper: throws with internal/MIN001 classification. */
+mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
+{
+    return prim_throw_classified(S, "internal", "MIN001", msg);
 }
 
 int as_double(const mino_val_t *v, double *out)

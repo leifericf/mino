@@ -13,7 +13,9 @@
 /* Shared helpers (defined in prim.c).
  * These operate on borrowed args and return GC-owned values unless noted. */
 int          args_have_float(mino_val_t *args);             /* pure predicate */
-mino_val_t  *prim_throw_error(mino_state_t *S, const char *msg); /* longjmp, never returns normally */
+mino_val_t  *prim_throw_error(mino_state_t *S, const char *msg); /* longjmp or set_error+NULL */
+mino_val_t  *prim_throw_classified(mino_state_t *S, const char *kind,
+                                   const char *code, const char *msg);
 int          as_double(const mino_val_t *v, double *out);   /* pure extraction */
 int          as_long(const mino_val_t *v, long long *out);  /* pure extraction */
 size_t       list_length(mino_state_t *S, mino_val_t *list); /* pure traversal */
