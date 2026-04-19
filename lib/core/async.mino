@@ -1032,3 +1032,5 @@
                              (take! results collector))))]
        (take! results collector))
      to)))
+
+(def pipeline-blocking pipeline)
