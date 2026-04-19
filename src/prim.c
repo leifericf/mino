@@ -369,6 +369,14 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns a formatted string using a format specifier and arguments.");
     DEF_PRIM(env, "throw",    prim_throw,
              "Throws an exception with the given value.");
+    DEF_PRIM(env, "last-error", prim_last_error,
+             "Returns the last error as a diagnostic map, or nil.");
+    DEF_PRIM(env, "error?",  prim_error_p,
+             "Returns true if the value is a diagnostic map.");
+    DEF_PRIM(env, "ex-data", prim_ex_data,
+             "Returns :mino/data from a diagnostic map, or nil.");
+    DEF_PRIM(env, "ex-message", prim_ex_message,
+             "Returns :mino/message from a diagnostic map, or nil.");
     DEF_PRIM(env, "require",  prim_require,
              "Loads and evaluates a mino source file.");
     DEF_PRIM(env, "doc",      prim_doc,

@@ -377,3 +377,54 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (slash == NULL || len == 1) return mino_nil(S);
     return mino_string_n(S, data, (size_t)(slash - data));
 }
+
+/* (last-error) -- return the last diagnostic as a map, or nil. */
+mino_val_t *prim_last_error(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)args; (void)env;
+    return mino_last_error_map(S);
+}
+
+/* (error? x) -- true if x is a map with :mino/kind. */
+mino_val_t *prim_error_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v, *kind_key;
+    (void)env;
+    if (!mino_is_cons(args)) return mino_false(S);
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_MAP) return mino_false(S);
+    kind_key = mino_keyword(S, "mino/kind");
+    return map_get_val(v, kind_key) != NULL ? mino_true(S) : mino_false(S);
+}
+
+/* (ex-data e) -- extract :mino/data from a diagnostic map. */
+mino_val_t *prim_ex_data(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v, *data_key, *result;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "ex-data requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_MAP) return mino_nil(S);
+    data_key = mino_keyword(S, "mino/data");
+    result = map_get_val(v, data_key);
+    return result != NULL ? result : mino_nil(S);
+}
+
+/* (ex-message e) -- extract :mino/message from a diagnostic map. */
+mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v, *msg_key, *result;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "ex-message requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_MAP) return mino_nil(S);
+    msg_key = mino_keyword(S, "mino/message");
+    result = map_get_val(v, msg_key);
+    return result != NULL ? result : mino_nil(S);
+}
