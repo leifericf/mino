@@ -1,0 +1,80 @@
+;; core.async -- CSP channels and async operations.
+;;
+;; Public API wrapping the C-level async primitives.
+
+;; --- Buffers ---
+
+(defn buffer
+  "Creates a fixed-size buffer of capacity n."
+  [n]
+  (buf-fixed* n))
+
+(defn dropping-buffer
+  "Creates a dropping buffer of capacity n.
+   Puts to a full channel silently drop the value."
+  [n]
+  (buf-dropping* n))
+
+(defn sliding-buffer
+  "Creates a sliding buffer of capacity n.
+   Puts to a full channel drop the oldest value."
+  [n]
+  (buf-sliding* n))
+
+;; --- Channels ---
+
+(defn chan
+  "Creates a channel. With no args, creates an unbuffered channel.
+   With a buffer-or-n argument, creates a buffered channel.
+   If a number is given, creates a fixed buffer of that size."
+  ([] (chan*))
+  ([buf-or-n]
+   (if (number? buf-or-n)
+     (chan* (buf-fixed* buf-or-n))
+     (chan* buf-or-n))))
+
+(defn promise-chan
+  "Creates a promise channel. The first value put will be delivered
+   to all pending and future takes. Subsequent puts are ignored."
+  []
+  (chan* (buf-promise*)))
+
+;; --- Core operations ---
+
+(defn close!
+  "Closes a channel. Pending takes receive nil.
+   Values already in the buffer can still be taken."
+  [ch]
+  (chan-close* ch))
+
+(defn closed?
+  "Returns true if the channel is closed."
+  [ch]
+  (chan-closed?* ch))
+
+(defn put!
+  "Asynchronously puts a value on a channel.
+   Optional callback fn is called with true if successful, false if closed.
+   Returns nil."
+  ([ch val] (chan-put* ch val nil))
+  ([ch val fn1] (chan-put* ch val fn1)))
+
+(defn take!
+  "Asynchronously takes a value from a channel.
+   Callback fn1 is called with the value (or nil if channel is closed and empty).
+   Returns nil."
+  ([ch fn1] (chan-take* ch fn1)))
+
+(defn offer!
+  "Puts val into channel if immediately possible.
+   Returns true if the value was accepted, false otherwise.
+   Never blocks or enqueues as pending."
+  [ch val]
+  (offer!* ch val))
+
+(defn poll!
+  "Takes a value from channel if immediately available.
+   Returns the value, or nil if nothing available.
+   Never blocks or enqueues as pending."
+  [ch]
+  (poll!* ch))
