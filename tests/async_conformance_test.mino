@@ -687,4 +687,197 @@
       (is (= :else (<!! (go (try (if false (<! ch3) (<! ch4))
                               (catch e :error)))))))))
 
+;; ===== Handler commit / alts pending =====
+
+(deftest alts-pending-exactly-one-wins
+  (let [ch1 (chan)
+        ch2 (chan)
+        results (atom [])]
+    (let [cb (fn [v] (swap! results conj v))]
+      (alts* [ch1 ch2] {} cb)
+      (put! ch1 10)
+      (put! ch2 20)
+      (drain!)
+      (is (= 1 (count @results))))))
+
+(deftest alts-pending-take-completes
+  (let [ch1 (chan)
+        ch2 (chan)]
+    (let [result (atom nil)
+          cb     (fn [v] (reset! result v))]
+      (alts* [ch1 ch2] {} cb)
+      (put! ch2 42)
+      (drain!)
+      (is (= 42 (first @result)))
+      (is (= ch2 (second @result))))))
+
+(deftest alts-pending-put-completes
+  (let [ch1 (chan)
+        ch2 (chan)]
+    (take! ch1 (fn [v] nil))
+    (drain!)
+    (let [result (atom nil)
+          cb     (fn [v] (reset! result v))]
+      (alts* [[ch1 77] [ch2 88]] {} cb)
+      (drain!)
+      (is (= true (first @result)))
+      (is (= ch1 (second @result))))))
+
+;; ===== Multi-turn blocking drain =====
+
+(deftest blocking-cascaded-go
+  (is (= 42 (<!! (go (<! (go (<! (go 42)))))))))
+
+(deftest blocking-multi-park-go
+  (let [ch (chan)]
+    (go (let [a (<! (go 10))
+              b (<! (go 20))]
+          (>! ch (+ a b))))
+    (is (= 30 (<!! ch)))))
+
+;; ===== Channel transducers =====
+
+(deftest chan-xform-map
+  (let [ch (chan 10 (map inc))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3)
+    (is (= 2 (<!! ch)))
+    (is (= 3 (<!! ch)))
+    (is (= 4 (<!! ch)))))
+
+(deftest chan-xform-filter
+  (let [ch (chan 10 (filter even?))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (>!! ch 4)
+    (is (= 2 (<!! ch)))
+    (is (= 4 (<!! ch)))))
+
+(deftest chan-xform-comp
+  (let [ch (chan 10 (comp (map inc) (filter even?)))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (>!! ch 4)
+    (is (= 2 (<!! ch)))
+    (is (= 4 (<!! ch)))))
+
+(deftest chan-xform-mapcat
+  (let [ch (chan 10 (mapcat (fn [v] [v (* v 10)])))]
+    (>!! ch 1) (>!! ch 2)
+    (is (= 1 (<!! ch)))
+    (is (= 10 (<!! ch)))
+    (is (= 2 (<!! ch)))
+    (is (= 20 (<!! ch)))))
+
+(deftest chan-xform-ex-handler
+  (let [ch (chan 10 (map (fn [v] (if (= v :bad)
+                                    (throw "xform error!")
+                                    (* v 2))))
+                (fn [err] :recovered))]
+    (>!! ch 5)
+    (>!! ch :bad)
+    (>!! ch 7)
+    (is (= 10 (<!! ch)))
+    (is (= :recovered (<!! ch)))
+    (is (= 14 (<!! ch)))))
+
+(deftest chan-xform-close-flushes
+  (let [ch (chan 10 (partition-all 3))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (>!! ch 4) (>!! ch 5)
+    (close! ch)
+    (drain!)
+    (let [v1 (poll! ch) v2 (poll! ch)]
+      (is (= 3 (count v1)))
+      (is (= 2 (count v2))))))
+
+;; ===== Close edge cases =====
+
+(deftest close-idempotent
+  (let [ch (chan 1)]
+    (close! ch)
+    (close! ch)
+    (is (closed? ch))))
+
+(deftest close-pending-taker-gets-nil
+  (let [ch (chan)
+        result (atom :unset)]
+    (take! ch (fn [v] (reset! result v)))
+    (close! ch)
+    (drain!)
+    (is (= nil @result))))
+
+(deftest close-buffered-values-still-available
+  (let [ch (chan 3)]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3)
+    (close! ch)
+    (is (= 1 (<!! ch)))
+    (is (= 2 (<!! ch)))
+    (is (= 3 (<!! ch)))
+    (is (= nil (<!! ch)))))
+
+;; ===== Buffer edge cases =====
+
+(deftest sliding-buffer-cap-1
+  (let [ch (chan (sliding-buffer 1))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3)
+    (is (= 3 (<!! ch)))))
+
+(deftest dropping-buffer-cap-1
+  (let [ch (chan (dropping-buffer 1))]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3)
+    (is (= 1 (<!! ch)))))
+
+;; ===== Combinator edge cases =====
+
+(deftest pipe-from-closed
+  (let [from (chan 1)
+        to   (chan 1)]
+    (close! from)
+    (pipe from to)
+    (drain!) (drain!)
+    (is (closed? to))))
+
+(deftest mult-zero-taps
+  (let [src (chan 1)
+        m   (mult src)]
+    (>!! src 1)
+    (drain!) (drain!)
+    (is true)))
+
+(deftest unsub-all-clears
+  (let [src (chan 10)
+        p   (pub src (fn [v] (:topic v)))
+        s1  (chan 10)]
+    (sub p :a s1)
+    (unsub-all p)
+    (put! src {:topic :a :val 1})
+    (drain!)
+    (is (= nil (poll! s1)))))
+
+(deftest unmix-all-clears
+  (let [out (chan 10)
+        m   (mix out)
+        ch1 (chan 10)]
+    (admix m ch1)
+    (unmix-all m)
+    (put! ch1 1)
+    (drain!)
+    (is (= nil (poll! out)))))
+
+;; ===== Multiple go blocks on same channel =====
+
+(deftest multiple-go-writers
+  (let [ch (chan 10)]
+    (go (>! ch 1))
+    (go (>! ch 2))
+    (go (>! ch 3))
+    (drain!) (drain!)
+    (let [results (atom #{})]
+      (dotimes [_ 3]
+        (swap! results conj (<!! ch)))
+      (is (= #{1 2 3} @results)))))
+
+(deftest go-exception-propagates
+  (let [caught (atom false)]
+    (try
+      (let [ch (go (throw "boom"))]
+        (drain!))
+      (catch e (reset! caught true)))
+    (is @caught)))
+
 (run-tests)
