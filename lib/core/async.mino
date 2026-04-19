@@ -965,6 +965,14 @@
     (fn [chs] (disj (or chs #{}) ch)))
   nil)
 
+(defn unsub-all
+  "Unsubscribes all channels from pub p, or all channels from a
+   specific topic if provided."
+  ([p] (reset! (:subs p) {}) nil)
+  ([p topic]
+   (swap! (:subs p) dissoc topic)
+   nil))
+
 ;; --- mix ---
 
 (defn mix
@@ -1021,6 +1029,12 @@
   "Removes ch from the mix."
   [m ch]
   (swap! (:state m) update :channels dissoc ch)
+  nil)
+
+(defn unmix-all
+  "Removes all inputs from the mix."
+  [m]
+  (swap! (:state m) assoc :channels {})
   nil)
 
 (defn toggle
