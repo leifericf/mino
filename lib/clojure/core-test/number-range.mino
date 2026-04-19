@@ -1,0 +1,15 @@
+;; Numeric range constants for the external test suite.
+;; Matches the :default reader-conditional branches in
+;; clojure.core-test.number-range.
+
+(ns clojure.core-test.number-range)
+
+(def max-int 9223372036854775807)
+(def min-int -9223372036854775808)
+(def all-ones-int -1)
+(def full-width-checker-pos 6148914691236517205)
+(def full-width-checker-neg -6148914691236517206)
+(def max-double 1.7976931348623157e+308)
+(def min-double 4.9e-324)
+
+(ns user)
