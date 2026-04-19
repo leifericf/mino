@@ -918,14 +918,16 @@
   ([chs buf-or-n]
    (let [out       (if buf-or-n (chan buf-or-n) (chan))
          remaining (atom (count chs))]
-     (doseq [ch chs]
-       (let [do-take (fn do-take [v]
-                       (if (nil? v)
-                         (when (= 0 (swap! remaining dec))
-                           (close! out))
-                         (do (put! out v)
-                             (take! ch do-take))))]
-         (take! ch do-take)))
+     (if (= 0 (count chs))
+       (close! out)
+       (doseq [ch chs]
+         (let [do-take (fn do-take [v]
+                         (if (nil? v)
+                           (when (= 0 (swap! remaining dec))
+                             (close! out))
+                           (do (put! out v)
+                               (take! ch do-take))))]
+           (take! ch do-take))))
      out)))
 
 ;; --- mult ---
