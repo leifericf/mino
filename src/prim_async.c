@@ -338,6 +338,40 @@ static mino_val_t *prim_drain(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
+/* (drain-loop! done-thunk)
+ * Repeatedly drains the scheduler and checks timers until either:
+ *   (a) (done-thunk) returns truthy, or
+ *   (b) a full pass produces no progress (no callbacks ran, no timers
+ *       fired) -- meaning further draining cannot help.
+ * Returns true if done-thunk returned truthy, false if no progress. */
+static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
+                                   mino_env_t *env)
+{
+    mino_val_t *done_thunk, *result;
+
+    if (args == NULL || args->type != MINO_CONS) {
+        set_error(S, "drain-loop! requires a done-check thunk");
+        return NULL;
+    }
+    done_thunk = args->as.cons.car;
+
+    for (;;) {
+        int progress = async_sched_drain(S, env);
+
+        /* Check if done. */
+        gc_pin(done_thunk);
+        result = mino_call(S, done_thunk, NULL, env);
+        gc_unpin(1);
+        if (result != NULL && result->type != MINO_NIL &&
+            !(result->type == MINO_BOOL && !result->as.b)) {
+            return mino_true(S);
+        }
+
+        if (!progress)
+            return mino_false(S);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Registration                                                       */
 /* ------------------------------------------------------------------ */
@@ -364,4 +398,5 @@ void mino_install_async(mino_state_t *S, mino_env_t *env)
 
     /* Scheduler */
     DEF_PRIM(env, "drain!",       prim_drain,          "Drain the async run queue.");
+    DEF_PRIM(env, "drain-loop!",  prim_drain_loop,     "Drain until done or no progress.");
 }

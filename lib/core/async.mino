@@ -794,36 +794,42 @@
 ;; --- Blocking bridge ---
 
 (defn <!!
-  "Blocking take from a channel. Drains the scheduler until
-   a value is available. Returns the taken value (nil if closed)."
+  "Blocking take from a channel. Drains the scheduler in a loop
+   until a value is available. Returns the taken value (nil if closed).
+   Throws if no progress can be made (deadlock)."
   [ch]
   (let [result (atom ::pending)]
     (take! ch (fn [v] (reset! result v)))
-    (drain!)
-    (if (= ::pending @result)
-      (throw "<!!: would deadlock -- no producer for this channel")
-      @result)))
+    (let [ok (drain-loop! (fn [] (not (= ::pending @result))))]
+      (if ok
+        @result
+        (throw "<!!: would deadlock -- no producer for this channel")))))
 
 (defn >!!
-  "Blocking put onto a channel. Drains the scheduler until
-   the put completes. Returns true if successful, false if closed."
+  "Blocking put onto a channel. Drains the scheduler in a loop
+   until the put completes. Returns true if successful, false if closed.
+   Throws if no progress can be made (deadlock)."
   [ch val]
   (let [result (atom ::pending)]
     (put! ch val (fn [v] (reset! result v)))
-    (drain!)
-    (if (= ::pending @result)
-      (throw ">!!: would deadlock -- no consumer for this channel")
-      @result)))
+    (let [ok (drain-loop! (fn [] (not (= ::pending @result))))]
+      (if ok
+        @result
+        (throw ">!!: would deadlock -- no consumer for this channel")))))
 
 (defn alts!!
-  "Blocking version of alts!. Drains the scheduler until one
-   operation completes. Returns [val ch]."
+  "Blocking version of alts!. Drains the scheduler in a loop until
+   one operation completes. Returns [val ch].
+   Throws if no progress can be made (deadlock)."
   ([ops] (alts!! ops {}))
   ([ops opts]
-   (let [result (alts! ops opts)]
-     (if (nil? result)
-       (throw "alts!!: would deadlock -- no operations can complete")
-       result))))
+   (let [result (atom nil)
+         cb     (fn [v] (reset! result v))]
+     (alts* ops opts cb)
+     (let [ok (drain-loop! (fn [] (not (nil? @result))))]
+       (if ok
+         @result
+         (throw "alts!!: would deadlock -- no operations can complete"))))))
 
 ;; --- Combinators ---
 
