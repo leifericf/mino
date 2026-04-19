@@ -4,6 +4,15 @@
  * A handler wraps a callback with single-commit semantics.
  * Handlers share a flag for alts arbitration: when one handler
  * commits, all siblings become inactive.
+ *
+ * Ownership model:
+ *   - Flags are malloc'd (async_flag_create) and refcounted.
+ *     Each pending op or handler that references a flag holds one
+ *     ref via async_flag_ref.  async_flag_unref frees when the last
+ *     ref is released.
+ *   - Handler MINO_HANDLE values are GC-managed.  The handler
+ *     finalizer frees the handler struct but does NOT free the flag
+ *     (flag lifetime is managed by refcount, not handle lifetime).
  */
 
 #ifndef ASYNC_HANDLER_H

@@ -3,6 +3,11 @@
  *
  * Four buffer kinds: fixed, dropping, sliding, promise.
  * All buffers use a ring-buffer array for value storage.
+ *
+ * Ownership: buffers are created via async_buf_create and passed to
+ * async_chan_create, which takes ownership.  The channel finalizer
+ * frees the buffer's ring array, refs array, and the buffer struct.
+ * Values stored in the buffer are GC-managed via mino_ref roots.
  */
 
 #ifndef ASYNC_BUFFER_H

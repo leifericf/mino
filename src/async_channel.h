@@ -3,6 +3,21 @@
  *
  * A channel coordinates pending puts and takes through an optional buffer.
  * Channels are represented as MINO_HANDLE values with tag "async/chan".
+ *
+ * Ownership model:
+ *   - async_chan_create takes ownership of the buffer (buf); the channel
+ *     frees the buffer in its finalizer.
+ *   - Pending ops are malloc'd and owned by the channel's queues.
+ *     Each pending op holds mino_ref GC roots for its val, callback,
+ *     and ch_val (if alts).  async_op_free unrefs all roots and
+ *     decrements the alts flag refcount.
+ *   - async_chan_close properly drains all pending ops (unrefs + frees).
+ *     The finalizer is a last-resort path that frees malloc'd memory
+ *     but cannot unref (the state may be gone); channels should be
+ *     closed before becoming unreachable.
+ *   - Alts flags are refcounted (async_flag_ref/unref).  Each pending
+ *     op that references a flag holds one ref.  The flag is freed
+ *     when the last ref is released.
  */
 
 #ifndef ASYNC_CHANNEL_H
