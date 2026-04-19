@@ -6,6 +6,69 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.35.0] — core.async and conformance
+
+### Added
+- **core.async**: full CSP channel implementation with go macro.
+  - C modules: `async_buffer`, `async_channel`, `async_handler`,
+    `async_select`, `async_scheduler`, `async_timer`, `prim_async`
+    (17 primitives).
+  - Channels: `chan`, `buffer`, `dropping-buffer`, `sliding-buffer`,
+    `promise-chan`, `timeout`, `put!`, `take!`, `close!`, `closed?`,
+    `offer!`, `poll!`, `chan?`.
+  - Transducer and exception handler support on channels.
+  - `alts!`, `alts!!` with `:priority` and `:default` options.
+    Kernel-level arbitration via shared flag with refcounting.
+  - `go`, `go-loop` macros with state machine transform supporting
+    parks in let bindings, if/cond/when branches, loop/recur bodies,
+    and try/catch/finally.
+  - Blocking bridge: `<!!`, `>!!`, `alts!!` with multi-turn drain
+    and deadlock detection.
+  - Combinators: `pipe`, `onto-chan`, `to-chan`, `async-into`, `merge`,
+    `mult`/`tap`/`untap`, `pub`/`sub`/`unsub`/`unsub-all`,
+    `mix`/`admix`/`unmix`/`unmix-all`/`toggle`/`solo-mode`,
+    `pipeline`, `pipeline-async`, `pipeline-blocking`.
+  - Pending puts/takes limit of 1024 per channel.
+  - 242 async tests across 9 test files, 346 assertions.
+- `clojure.set` namespace (`union`, `intersection`, `difference`,
+  `select`, `project`, `rename-keys`, `rename`, `index`, `join`,
+  `map-invert`, `subset?`, `superset?`).
+- `clojure.string` additions: `escape`, `re-quote-replacement`,
+  `capitalize`, `upper-case`, `lower-case`.
+- `comment` and `when-first` macros.
+- `make-array`, `aset`, `aget`, `alength`, `aclone` array functions.
+- `case` macro rewrite with proper constant quoting and
+  multi-value match support.
+
+### Changed
+- `>`, `<=`, `>=` moved to C primitives with NaN and single-arity
+  handling.
+- `pop` on nil returns nil instead of throwing.
+- `keys`/`vals` on empty non-map collections return nil.
+- `find` on vectors supports index-based lookup.
+- `mod`, `rem`, `quot` check for NaN/Infinity arguments.
+- `rand` supports `(rand n)` arity.
+- `keyword` supports `(keyword ns name)` arity.
+- `conj` supports maps and lazy-seqs as targets.
+- `cons` and `seq` work on sorted-map and sorted-set.
+- `some-fn` returns false instead of nil when no predicate matches
+  and validates arity.
+- `underive` returns nil for 2-arity and validates hierarchy shape.
+- `min`/`max` propagate NaN correctly.
+- `ifn?` returns true for symbols and vars.
+
+### Fixed
+- Reader handles unmatched `#?` followed by `#?@` in
+  lists/vectors/maps.
+- Pipeline feeder backpressure stall with inputs larger than 2*n.
+- Go macro: parks in non-last position of do blocks inside loop
+  bodies, standalone park operations as loop exit values, let-park
+  continuation body transform, loop init bindings from park points,
+  non-park let forms wrapping park bodies, nested do block flattening.
+- Mix pause/resume: paused channels are always read from (values
+  consumed but not forwarded).
+- Merge with zero channels closes output immediately.
+
 ## [0.34.0] — Conformance hardening phase 2
 
 ### Added
