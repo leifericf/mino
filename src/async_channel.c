@@ -225,6 +225,12 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
         return 1;
     }
 
+    /* Enforce pending puts limit. */
+    if (ch->pending_puts_count >= ASYNC_MAX_PENDING) {
+        set_error(S, "channel has too many pending puts (> 1024)");
+        return 0;
+    }
+
     /* Otherwise enqueue as pending put. */
     {
         pending_op_t *op = op_new(S, val, put_cb);
@@ -288,6 +294,12 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
         if (take_cb)
             async_sched_enqueue(S, take_cb, mino_nil(S));
         return 1;
+    }
+
+    /* Enforce pending takes limit. */
+    if (ch->pending_takes_count >= ASYNC_MAX_PENDING) {
+        set_error(S, "channel has too many pending takes (> 1024)");
+        return 0;
     }
 
     /* Otherwise enqueue as pending take. */

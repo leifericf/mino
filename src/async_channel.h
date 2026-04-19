@@ -12,6 +12,9 @@
 #include "async_buffer.h"
 #include "async_handler.h"
 
+/* Maximum pending puts or takes per channel (matches core.async). */
+#define ASYNC_MAX_PENDING 1024
+
 /* Pending put or take operation.
  * For alts ops, flag and ch_val are set; for regular ops they are NULL. */
 typedef struct pending_op {
