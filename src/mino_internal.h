@@ -391,6 +391,9 @@ void        set_error_at(mino_state_t *S, const mino_val_t *form, /* form: borro
                          const char *msg);                         /* msg: borrowed */
 void        clear_error(mino_state_t *S);
 void        set_diag(mino_state_t *S, mino_diag_t *d);           /* d: consumed */
+void        set_eval_diag(mino_state_t *S, const mino_val_t *form,
+                          const char *kind, const char *code,
+                          const char *msg);
 const char *type_tag_str(const mino_val_t *v);                    /* static string */
 void        push_frame(mino_state_t *S, const char *name,     /* name: borrowed */
                        const char *file, int line,            /* file: borrowed */
