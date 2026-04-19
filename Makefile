@@ -16,7 +16,9 @@ LIB_SRCS := src/mino.c src/eval_special.c \
             src/prim_reflection.c src/prim_meta.c src/prim_regex.c \
             src/prim_stateful.c src/prim_module.c \
             src/prim_host.c src/host_interop.c \
-            src/clone.c src/re.c
+            src/clone.c src/re.c \
+            src/async_buffer.c src/async_channel.c \
+            src/async_scheduler.c src/prim_async.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 SRCS     := $(LIB_SRCS) main.c
 OBJS     := $(SRCS:.c=.o)
@@ -54,6 +56,10 @@ src/prim_stateful.o: src/prim_stateful.c src/prim_internal.h src/mino_internal.h
 src/prim_module.o: src/prim_module.c src/prim_internal.h src/mino_internal.h
 src/prim_host.o: src/prim_host.c src/prim_internal.h src/mino_internal.h
 src/host_interop.o: src/host_interop.c src/mino_internal.h
+src/async_buffer.o: src/async_buffer.c src/async_buffer.h src/mino_internal.h
+src/async_channel.o: src/async_channel.c src/async_channel.h src/async_buffer.h src/async_scheduler.h src/mino_internal.h
+src/async_scheduler.o: src/async_scheduler.c src/async_scheduler.h src/mino_internal.h
+src/prim_async.o: src/prim_async.c src/prim_internal.h src/async_buffer.h src/async_channel.h src/async_scheduler.h src/mino_internal.h
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<

@@ -5,6 +5,7 @@
  */
 
 #include "mino_internal.h"
+#include "async_scheduler.h"
 
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the
@@ -558,6 +559,14 @@ static void gc_mark_roots(mino_state_t *S)
         size_t ci;
         for (ci = 0; ci < S->core_forms_len; ci++) {
             gc_mark_interior(S, S->core_forms[ci]);
+        }
+    }
+    /* Pin async scheduler run queue values. */
+    {
+        struct sched_entry *e;
+        for (e = S->async_run_head; e != NULL; e = e->next) {
+            gc_mark_interior(S, e->callback);
+            gc_mark_interior(S, e->value);
         }
     }
 }

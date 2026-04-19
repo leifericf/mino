@@ -296,6 +296,10 @@ struct mino_state {
     /* Fault injection for raw (non-GC) allocation paths such as clone
      * serialization and mailbox buffers. Same semantics as above. */
     long            fi_raw_countdown;
+
+    /* Async scheduler run queue (sched_entry_t defined in async_scheduler.h). */
+    struct sched_entry *async_run_head;
+    struct sched_entry *async_run_tail;
 };
 
 /* GC pin/unpin macros.

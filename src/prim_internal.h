@@ -210,4 +210,7 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 /* prim_host.c */
 void mino_install_host(mino_state_t *S, mino_env_t *env);
 
+/* prim_async.c */
+void mino_install_async(mino_state_t *S, mino_env_t *env);
+
 #endif /* PRIM_INTERNAL_H */

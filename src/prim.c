@@ -475,6 +475,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Receives the next message from the actor's mailbox.");
     /* host interop */
     mino_install_host(S, env);
+    /* async channels */
+    mino_install_async(S, env);
     install_core_mino(S, env);
 }
 

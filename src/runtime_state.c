@@ -6,6 +6,7 @@
  */
 
 #include "mino_internal.h"
+#include "async_scheduler.h"
 
 /* ------------------------------------------------------------------------- */
 /* State lifecycle                                                           */
@@ -81,6 +82,18 @@ void mino_state_free(mino_state_t *S)
     free(S->kw_intern.entries);
     free(S->gc_ranges);
     free(S->core_forms);
+    /* Free async scheduler run queue. */
+    {
+        struct sched_entry *e = S->async_run_head;
+        struct sched_entry *enext;
+        while (e != NULL) {
+            enext = e->next;
+            /* refs already unreffed by async_sched_free or
+             * will be freed when ref_roots is freed above */
+            free(e);
+            e = enext;
+        }
+    }
     for (h = S->gc_all; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
@@ -189,6 +202,8 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
         return NULL;
     }
     S->call_depth = 0;
+    /* Drain async scheduler run queue after each top-level eval. */
+    async_sched_drain(S, env);
     return v;
 }
 
