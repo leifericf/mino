@@ -154,15 +154,6 @@
        (let [n (name (first form))]
          (or (= n "<!") (= n ">!")))))
 
-(defn go-has-park?
-  "Returns true if form or any sub-form contains a park point."
-  [form]
-  (cond
-    (go-park? form) true
-    (cons? form)    (some go-has-park? form)
-    (vector? form)  (some go-has-park? form)
-    :else           false))
-
 (defn go-transform
   "Transform a go body into a vector of states.
    Each state is {:body [...] :park park-info :use-val bool}.
@@ -209,15 +200,7 @@
               body     (:body state)
               park     (:park state)
               use-val  (:use-val state)
-              val-sym  (gensym "v_")
-              ;; If this state follows a park, and body is empty,
-              ;; the result expression is val# (the parked value).
-              ;; Otherwise wrap body in do.
-              result-expr (if (and use-val (empty? body))
-                            'val#
-                            (if use-val
-                              `(do ~@(seq body))
-                              `(do ~@(seq body))))]
+              val-sym  (gensym "v_")]
           (swap! arms conj i)
           (if park
             ;; This state has a park operation

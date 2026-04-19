@@ -302,7 +302,7 @@ struct mino_state {
     struct sched_entry *async_run_tail;
 
     /* Async timer queue (timer_entry_t defined in async_timer.h). */
-    void               *async_timers;   /* timer_entry_t * */
+    struct timer_entry *async_timers;
 };
 
 /* GC pin/unpin macros.

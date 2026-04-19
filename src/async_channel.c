@@ -75,7 +75,7 @@ static pending_op_t *op_new(mino_state_t *S, mino_val_t *val,
     return op;
 }
 
-static void op_free(mino_state_t *S, pending_op_t *op)
+void async_op_free(mino_state_t *S, pending_op_t *op)
 {
     if (op->val_ref) mino_unref(S, op->val_ref);
     if (op->cb_ref)  mino_unref(S, op->cb_ref);
@@ -90,7 +90,7 @@ static void enqueue_put(mino_async_chan_t *ch, pending_op_t *op)
     ch->pending_puts_count++;
 }
 
-static pending_op_t *dequeue_put(mino_async_chan_t *ch)
+pending_op_t *async_dequeue_put(mino_async_chan_t *ch)
 {
     pending_op_t *op = ch->puts_head;
     if (op == NULL) return NULL;
@@ -109,7 +109,7 @@ static void enqueue_take(mino_async_chan_t *ch, pending_op_t *op)
     ch->pending_takes_count++;
 }
 
-static pending_op_t *dequeue_take(mino_async_chan_t *ch)
+pending_op_t *async_dequeue_take(mino_async_chan_t *ch)
 {
     pending_op_t *op = ch->takes_head;
     if (op == NULL) return NULL;
@@ -137,11 +137,11 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
     }
 
     /* If a taker is waiting, transfer directly. */
-    taker = dequeue_take(ch);
+    taker = async_dequeue_take(ch);
     if (taker != NULL) {
         if (taker->callback)
             async_sched_enqueue(S, taker->callback, val);
-        op_free(S, taker);
+        async_op_free(S, taker);
         if (put_cb)
             async_sched_enqueue(S, put_cb, mino_true(S));
         return 1;
@@ -180,12 +180,12 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
 
         /* If a putter is waiting, move its value into the buffer. */
         {
-            pending_op_t *putter = dequeue_put(ch);
+            pending_op_t *putter = async_dequeue_put(ch);
             if (putter != NULL) {
                 async_buf_add(S, ch->buf, putter->val);
                 if (putter->callback)
                     async_sched_enqueue(S, putter->callback, mino_true(S));
-                op_free(S, putter);
+                async_op_free(S, putter);
             }
         }
 
@@ -196,14 +196,14 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
 
     /* If a putter is waiting, transfer directly. */
     {
-        pending_op_t *putter = dequeue_put(ch);
+        pending_op_t *putter = async_dequeue_put(ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
             if (putter->callback)
                 async_sched_enqueue(S, putter->callback, mino_true(S));
             if (take_cb)
                 async_sched_enqueue(S, take_cb, val);
-            op_free(S, putter);
+            async_op_free(S, putter);
             return 1;
         }
     }
@@ -239,17 +239,17 @@ void async_chan_close(mino_state_t *S, mino_async_chan_t *ch)
     ch->closed = 1;
 
     /* Deliver nil to all pending takers. */
-    while ((op = dequeue_take(ch)) != NULL) {
+    while ((op = async_dequeue_take(ch)) != NULL) {
         if (op->callback)
             async_sched_enqueue(S, op->callback, mino_nil(S));
-        op_free(S, op);
+        async_op_free(S, op);
     }
 
     /* Discard all pending puts. */
-    while ((op = dequeue_put(ch)) != NULL) {
+    while ((op = async_dequeue_put(ch)) != NULL) {
         if (op->callback)
             async_sched_enqueue(S, op->callback, mino_false(S));
-        op_free(S, op);
+        async_op_free(S, op);
     }
 }
 
@@ -268,11 +268,11 @@ int async_chan_offer(mino_state_t *S, mino_async_chan_t *ch, mino_val_t *val)
 
     if (ch->closed) return 0;
 
-    taker = dequeue_take(ch);
+    taker = async_dequeue_take(ch);
     if (taker != NULL) {
         if (taker->callback)
             async_sched_enqueue(S, taker->callback, val);
-        op_free(S, taker);
+        async_op_free(S, taker);
         return 1;
     }
 
@@ -288,23 +288,23 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
 {
     if (ch->buf && async_buf_count(ch->buf) > 0) {
         mino_val_t *val = async_buf_remove(S, ch->buf);
-        pending_op_t *putter = dequeue_put(ch);
+        pending_op_t *putter = async_dequeue_put(ch);
         if (putter != NULL) {
             async_buf_add(S, ch->buf, putter->val);
             if (putter->callback)
                 async_sched_enqueue(S, putter->callback, mino_true(S));
-            op_free(S, putter);
+            async_op_free(S, putter);
         }
         return val;
     }
 
     {
-        pending_op_t *putter = dequeue_put(ch);
+        pending_op_t *putter = async_dequeue_put(ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
             if (putter->callback)
                 async_sched_enqueue(S, putter->callback, mino_true(S));
-            op_free(S, putter);
+            async_op_free(S, putter);
             return val;
         }
     }

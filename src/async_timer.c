@@ -6,10 +6,26 @@
 #include "async_channel.h"
 #include "mino_internal.h"
 
-/* Get current time in milliseconds (ANSI C portable). */
+#if defined(__APPLE__) || defined(__unix__) || defined(__linux__)
+#include <sys/time.h>
+#endif
+
+/* Get current wall-clock time in milliseconds. */
 static double now_ms(void)
 {
-    return (double)clock() / (double)CLOCKS_PER_SEC * 1000.0;
+#if defined(_WIN32)
+    LARGE_INTEGER freq, ctr;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&ctr);
+    return (double)ctr.QuadPart / (double)freq.QuadPart * 1000.0;
+#elif defined(__APPLE__) || defined(__unix__) || defined(__linux__)
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (double)tv.tv_sec * 1000.0 + (double)tv.tv_usec / 1000.0;
+#else
+    /* Fallback: ANSI C time() gives seconds resolution. */
+    return (double)time(NULL) * 1000.0;
+#endif
 }
 
 mino_val_t *async_timeout(mino_state_t *S, double ms)
@@ -40,11 +56,11 @@ mino_val_t *async_timeout(mino_state_t *S, double ms)
     /* Insert sorted by deadline (earliest first). */
     if (S->async_timers == NULL ||
         entry->deadline_ms <=
-            ((timer_entry_t *)S->async_timers)->deadline_ms) {
-        entry->next = (timer_entry_t *)S->async_timers;
+            S->async_timers->deadline_ms) {
+        entry->next = S->async_timers;
         S->async_timers = entry;
     } else {
-        timer_entry_t *cur = (timer_entry_t *)S->async_timers;
+        timer_entry_t *cur = S->async_timers;
         while (cur->next != NULL &&
                cur->next->deadline_ms < entry->deadline_ms) {
             cur = cur->next;
@@ -62,7 +78,7 @@ void async_timers_check(mino_state_t *S)
     timer_entry_t *entry;
 
     while (S->async_timers != NULL) {
-        entry = (timer_entry_t *)S->async_timers;
+        entry = S->async_timers;
         if (entry->deadline_ms > t) break;
 
         S->async_timers = entry->next;
@@ -81,7 +97,7 @@ void async_timers_check(mino_state_t *S)
 
 void async_timers_free(mino_state_t *S)
 {
-    timer_entry_t *entry = (timer_entry_t *)S->async_timers;
+    timer_entry_t *entry = S->async_timers;
     while (entry != NULL) {
         timer_entry_t *next = entry->next;
         if (entry->chan_ref) mino_unref(S, entry->chan_ref);
@@ -94,7 +110,7 @@ void async_timers_free(mino_state_t *S)
 void async_timers_mark(mino_state_t *S)
 {
     timer_entry_t *entry;
-    for (entry = (timer_entry_t *)S->async_timers; entry != NULL;
+    for (entry = S->async_timers; entry != NULL;
          entry = entry->next) {
         gc_mark_interior(S, entry->chan_handle);
     }

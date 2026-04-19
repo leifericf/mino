@@ -73,4 +73,9 @@ int async_chan_offer(mino_state_t *S, mino_async_chan_t *ch, mino_val_t *val);
  * Does not enqueue as pending. */
 mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch);
 
+/* Pending-op helpers (shared with async_select.c). */
+pending_op_t *async_dequeue_put(mino_async_chan_t *ch);
+pending_op_t *async_dequeue_take(mino_async_chan_t *ch);
+void async_op_free(mino_state_t *S, pending_op_t *op);
+
 #endif /* ASYNC_CHANNEL_H */

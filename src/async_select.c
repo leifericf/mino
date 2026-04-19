@@ -113,17 +113,11 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
             }
 
             if (ch->takes_head != NULL) {
-                pending_op_t *taker = ch->takes_head;
+                pending_op_t *taker = async_dequeue_take(ch);
                 mino_val_t *result;
-                ch->takes_head = taker->next;
-                if (ch->takes_head == NULL) ch->takes_tail = NULL;
-                taker->next = NULL;
-                ch->pending_takes_count--;
                 if (taker->callback)
                     async_sched_enqueue(S, taker->callback, put_val);
-                if (taker->val_ref) mino_unref(S, taker->val_ref);
-                if (taker->cb_ref)  mino_unref(S, taker->cb_ref);
-                free(taker);
+                async_op_free(S, taker);
                 gc_pin(callback); gc_pin(ch_val);
                 result = vec2(S, mino_true(S), ch_val);
                 async_sched_enqueue(S, callback, result);
@@ -156,18 +150,12 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
                 mino_val_t *val = async_buf_remove(S, ch->buf);
                 mino_val_t *result;
                 if (ch->puts_head != NULL) {
-                    pending_op_t *putter = ch->puts_head;
-                    ch->puts_head = putter->next;
-                    if (ch->puts_head == NULL) ch->puts_tail = NULL;
-                    putter->next = NULL;
-                    ch->pending_puts_count--;
+                    pending_op_t *putter = async_dequeue_put(ch);
                     async_buf_add(S, ch->buf, putter->val);
                     if (putter->callback)
                         async_sched_enqueue(S, putter->callback,
                                             mino_true(S));
-                    if (putter->val_ref) mino_unref(S, putter->val_ref);
-                    if (putter->cb_ref)  mino_unref(S, putter->cb_ref);
-                    free(putter);
+                    async_op_free(S, putter);
                 }
                 gc_pin(callback); gc_pin(ch_val); gc_pin(val);
                 result = vec2(S, val, ch_val);
@@ -178,22 +166,16 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
             }
 
             if (ch->puts_head != NULL) {
-                pending_op_t *putter = ch->puts_head;
+                pending_op_t *putter = async_dequeue_put(ch);
                 mino_val_t *val = putter->val;
                 mino_val_t *result;
-                ch->puts_head = putter->next;
-                if (ch->puts_head == NULL) ch->puts_tail = NULL;
-                putter->next = NULL;
-                ch->pending_puts_count--;
                 if (putter->callback)
                     async_sched_enqueue(S, putter->callback, mino_true(S));
                 gc_pin(callback); gc_pin(ch_val); gc_pin(val);
                 result = vec2(S, val, ch_val);
                 async_sched_enqueue(S, callback, result);
                 gc_unpin(3);
-                if (putter->val_ref) mino_unref(S, putter->val_ref);
-                if (putter->cb_ref)  mino_unref(S, putter->cb_ref);
-                free(putter);
+                async_op_free(S, putter);
                 free(indices);
                 return 1;
             }

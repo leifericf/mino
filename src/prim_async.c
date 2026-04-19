@@ -13,12 +13,10 @@
 /* Buffer constructors                                                */
 /* ------------------------------------------------------------------ */
 
-static mino_val_t *prim_buf_fixed(mino_state_t *S, mino_val_t *args,
-                                  mino_env_t *env)
+static mino_val_t *buf_ctor(mino_state_t *S, mino_val_t *args, int kind)
 {
     long long n;
     mino_async_buf_t *buf;
-    (void)env;
     if (args == NULL || args->type != MINO_CONS) {
         set_error(S, "buffer requires a capacity argument");
         return NULL;
@@ -27,56 +25,33 @@ static mino_val_t *prim_buf_fixed(mino_state_t *S, mino_val_t *args,
         set_error(S, "buffer capacity must be a positive integer");
         return NULL;
     }
-    buf = async_buf_create(S, ASYNC_BUF_FIXED, (size_t)n);
+    buf = async_buf_create(S, kind, (size_t)n);
     if (buf == NULL) {
         set_error(S, "out of memory creating buffer");
         return NULL;
     }
     return mino_handle(S, buf, "async/buf");
+}
+
+static mino_val_t *prim_buf_fixed(mino_state_t *S, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    (void)env;
+    return buf_ctor(S, args, ASYNC_BUF_FIXED);
 }
 
 static mino_val_t *prim_buf_dropping(mino_state_t *S, mino_val_t *args,
                                      mino_env_t *env)
 {
-    long long n;
-    mino_async_buf_t *buf;
     (void)env;
-    if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "dropping-buffer requires a capacity argument");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &n) || n <= 0) {
-        set_error(S, "buffer capacity must be a positive integer");
-        return NULL;
-    }
-    buf = async_buf_create(S, ASYNC_BUF_DROPPING, (size_t)n);
-    if (buf == NULL) {
-        set_error(S, "out of memory creating buffer");
-        return NULL;
-    }
-    return mino_handle(S, buf, "async/buf");
+    return buf_ctor(S, args, ASYNC_BUF_DROPPING);
 }
 
 static mino_val_t *prim_buf_sliding(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env)
 {
-    long long n;
-    mino_async_buf_t *buf;
     (void)env;
-    if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "sliding-buffer requires a capacity argument");
-        return NULL;
-    }
-    if (!as_long(args->as.cons.car, &n) || n <= 0) {
-        set_error(S, "buffer capacity must be a positive integer");
-        return NULL;
-    }
-    buf = async_buf_create(S, ASYNC_BUF_SLIDING, (size_t)n);
-    if (buf == NULL) {
-        set_error(S, "out of memory creating buffer");
-        return NULL;
-    }
-    return mino_handle(S, buf, "async/buf");
+    return buf_ctor(S, args, ASYNC_BUF_SLIDING);
 }
 
 static mino_val_t *prim_buf_promise(mino_state_t *S, mino_val_t *args,
