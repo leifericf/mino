@@ -571,13 +571,39 @@
       `(if ~test-form
          ~(go-loop-body-exit then-form machine-sym target binds result-ch val-sym)
          ~(go-loop-body-exit else-form machine-sym target binds result-ch val-sym)))
-    ;; do → transform last expression
+    ;; do → check for parks in non-last position, transform last expression
     (and (cons? form) (= 'do (first form)))
     (let [body-forms (vec (rest form))
-          init (butlast body-forms)
-          last-form (last body-forms)]
-      `(do ~@(seq init)
-           ~(go-loop-body-exit last-form machine-sym target binds result-ch val-sym)))
+          ;; Find first park in non-last position
+          park-idx (loop [idx 0]
+                     (if (>= idx (dec (count body-forms)))
+                       nil
+                       (if (go-park? (nth body-forms idx))
+                         idx
+                         (recur (inc idx)))))]
+      (if park-idx
+        ;; Park in non-last position: chain as callback
+        (let [before   (subvec body-forms 0 park-idx)
+              park-form (nth body-forms park-idx)
+              after    (subvec body-forms (inc park-idx))
+              op       (name (first park-form))
+              cb-sym   (gensym "do_cb_")
+              cont     (go-loop-body-exit
+                         (if (= 1 (count after))
+                           (first after)
+                           (cons 'do (seq after)))
+                         machine-sym target binds result-ch val-sym)
+              park-expr (if (= op "<!")
+                          `(chan-take* ~(second park-form) (fn [~cb-sym] ~cont))
+                          `(chan-put* ~(second park-form) ~(nth park-form 2) (fn [~cb-sym] ~cont)))]
+          (if (empty? before)
+            park-expr
+            `(do ~@(seq before) ~park-expr)))
+        ;; No park in non-last position: just transform last
+        (let [init (butlast body-forms)
+              last-form (last body-forms)]
+          `(do ~@(seq init)
+               ~(go-loop-body-exit last-form machine-sym target binds result-ch val-sym)))))
     ;; let with park binding → chan-take* callback with continuation
     (and (cons? form) (= 'let (first form))
          (vector? (second form))
@@ -590,9 +616,10 @@
           rest-binds (subvec let-binds 2)
           body-forms (vec (rest (rest form)))
           cont (if (empty? rest-binds)
-                 `(do ~@(seq (map (fn [f]
-                                    (go-loop-body-exit f machine-sym target binds result-ch val-sym))
-                                  body-forms)))
+                 (let [init-forms (butlast body-forms)
+                       last-form  (last body-forms)]
+                   `(do ~@(seq init-forms)
+                        ~(go-loop-body-exit last-form machine-sym target binds result-ch val-sym)))
                  (go-loop-body-exit
                    `(let ~(apply vector (seq rest-binds)) ~@(seq body-forms))
                    machine-sym target binds result-ch val-sym))
@@ -679,8 +706,14 @@
               ;; All bindings that need to be in scope
               has-locals  (or (not (empty? prev-binds)) (not (empty? loop-ctx-binds)))
               ;; Destructure locals from val#
-              restore-lets (mapcat (fn [s] [s `(get (:locals ~'val#) '~s)])
-                                   (concat loop-ctx-binds prev-binds))
+              ;; For loop-start states, guard with (:locals val#) check so
+              ;; first entry (raw val#) doesn't clobber init values with nil
+              restore-lets (if (:loop-id state)
+                             (mapcat (fn [s] [s `(when (:locals ~'val#)
+                                                   (get (:locals ~'val#) '~s))])
+                                     (concat loop-ctx-binds prev-binds))
+                             (mapcat (fn [s] [s `(get (:locals ~'val#) '~s)])
+                                     (concat loop-ctx-binds prev-binds)))
               ;; Current value from park
               cur-val     (if use-val
                             (if has-locals '(:val val#) 'val#)
@@ -703,18 +736,29 @@
                                                     base cur-binds)]
                                   `{:val ~v :locals ~locals-expr}))))]
           ;; Loop-start: add loop bindings to all-lets
-          ;; On first entry (val# nil), use init values. On re-entry, use locals.
-          (let [loop-lets  (if (:loop-id state)
+          ;; On first entry, use init values. On re-entry (val# has :locals), use locals.
+          ;; First entry is detected by absence of :locals key (not by nil? val#)
+          ;; because val# may carry a value from a preceding park point.
+          ;; When an init value is a prev-bind sym (from a park in the loop init
+          ;; bindings), substitute val# directly since the sym is only meaningful
+          ;; in the previous state's scope.
+          ;; restore-lets must run BEFORE loop-lets so init syms are in scope.
+          (let [prev-bind-set (set prev-binds)
+                loop-lets  (if (:loop-id state)
                              (vec (mapcat
                                     (fn [bname init]
-                                      [bname `(if (nil? ~'val#)
-                                                ~init
-                                                (get (:locals ~'val#) '~bname))])
+                                      (let [actual-init (if (and (symbol? init)
+                                                                 (prev-bind-set init))
+                                                          'val#
+                                                          init)]
+                                        [bname `(if (:locals ~'val#)
+                                                  (get (:locals ~'val#) '~bname)
+                                                  ~actual-init)]))
                                     (:loop-binds state)
                                     (:loop-inits state)))
                              [])
                 pre-lets   (or (:pre-bind-lets state) [])
-                all-lets   (vec (concat bridge-lets loop-lets restore-lets
+                all-lets   (vec (concat bridge-lets restore-lets loop-lets
                                        (when bind [bind cur-val])
                                        pre-lets))]
           (swap! arms conj i)
