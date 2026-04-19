@@ -364,9 +364,15 @@
    loop-ctx: nil or {:start-idx n :binds [names]} for loop context."
   ([body result-ch] (go-transform body result-ch nil))
   ([body result-ch loop-ctx]
-  (let [stmts (if (and (cons? body) (= 'do (first body)))
-                (vec (rest body))
-                [body])]
+  (let [raw-stmts (if (and (cons? body) (= 'do (first body)))
+                    (vec (rest body))
+                    [body])
+        ;; Flatten nested do forms so (do (do a b) c) becomes [a b c]
+        stmts (vec (mapcat (fn [s]
+                             (if (and (cons? s) (= 'do (first s)))
+                               (rest s)
+                               [s]))
+                           raw-stmts))]
     (loop [i       0
            states  []
            current []
@@ -533,6 +539,29 @@
                              :recur-binds (:binds loop-ctx)}]
               ;; Recur is terminal - no more states after it
               (conj states new-state))
+
+            ;; Let with non-park bindings but park-containing body:
+            ;; wrap the let around the inner body and recurse, preserving
+            ;; the let scope by prepending it as pre-bind-lets
+            (and (cons? stmt) (= 'let (first stmt))
+                 (vector? (second stmt))
+                 (not (go-bindings-have-park? (second stmt)))
+                 (go-contains-park? stmt))
+            (let [let-binds   (second stmt)
+                  body-forms  (vec (rest (rest stmt)))
+                  ;; Wrap body forms into a do, recurse with remaining stmts
+                  remaining   (vec (concat body-forms (subvec stmts (inc i))))
+                  sub-body    (cons 'do remaining)
+                  sub-states  (go-transform sub-body result-ch loop-ctx)
+                  ;; Inject the let bindings as pre-bind-lets on the first
+                  ;; sub-state so they're in scope for the park operations
+                  first-sub   (update (first sub-states) :pre-bind-lets
+                                (fn [existing]
+                                  (vec (concat let-binds (or existing [])))))
+                  ;; Build: current accumulated body → first-sub (with let) → rest
+                  pre-state   {:body current :park nil
+                               :use-val has-park :bind bind-sym}]
+              (vec (concat (conj states pre-state first-sub) (rest sub-states))))
 
             ;; Normal statement
             :else
