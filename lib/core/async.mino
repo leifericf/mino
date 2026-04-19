@@ -296,28 +296,18 @@
     ;; Recurse into other forms
     :else (apply list (map go-expand-if form))))
 
-(defn go-try-park?
-  "Returns true if form is (try body... (catch e handler)) where body contains parks."
+(defn go-try-clause?
+  "Returns true if form is a (catch ...) or (finally ...) clause."
   [form]
   (and (cons? form)
-       (= 'try (first form))
-       (let [args (rest form)
-             body-forms (take-while
-                          (fn [c] (not (and (cons? c)
-                                            (or (= 'catch (first c))
-                                                (= 'finally (first c))))))
-                          args)]
-         (boolean (some go-contains-park? body-forms)))))
+       (or (= 'catch (first form))
+           (= 'finally (first form)))))
 
 (defn go-parse-try
   "Parse a try form into {:body-forms [...] :catch-sym sym :catch-body [...] :finally-body [...]}."
   [form]
   (let [args (vec (rest form))
-        body-forms (vec (take-while
-                          (fn [c] (not (and (cons? c)
-                                            (or (= 'catch (first c))
-                                                (= 'finally (first c))))))
-                          args))
+        body-forms (vec (take-while (complement go-try-clause?) args))
         rest-clauses (drop (count body-forms) args)
         catch-clause (first (filter (fn [c] (and (cons? c) (= 'catch (first c)))) rest-clauses))
         finally-clause (first (filter (fn [c] (and (cons? c) (= 'finally (first c)))) rest-clauses))]
@@ -325,6 +315,13 @@
      :catch-sym (when catch-clause (second catch-clause))
      :catch-body (when catch-clause (vec (rest (rest catch-clause))))
      :finally-body (when finally-clause (vec (rest finally-clause)))}))
+
+(defn go-try-park?
+  "Returns true if form is (try body... (catch e handler)) where body contains parks."
+  [form]
+  (and (cons? form)
+       (= 'try (first form))
+       (boolean (some go-contains-park? (:body-forms (go-parse-try form))))))
 
 (defn go-bindings-have-park?
   "Returns true if a binding vector [name val name val ...] contains
@@ -628,17 +625,13 @@
           finally-body (:finally-body tc)
           catch-result (gensym "catch_r_")
           cb-sym       (gensym "tc_")
+          catch-core    `(let [~catch-result (do ~@(seq catch-body))]
+                           (when (not (nil? ~catch-result))
+                             (chan-put* ~result-ch ~catch-result (fn [~cb-sym] nil)))
+                           (chan-close* ~result-ch))
           catch-handler (if (and finally-body (not last-try?))
-                          ;; Intermediate: run finally inline after catch (exception exit only)
-                          `(do (let [~catch-result (do ~@(seq catch-body))]
-                                 (when (not (nil? ~catch-result))
-                                   (chan-put* ~result-ch ~catch-result (fn [~cb-sym] nil)))
-                                 (chan-close* ~result-ch))
-                               ~@(seq finally-body))
-                          `(let [~catch-result (do ~@(seq catch-body))]
-                             (when (not (nil? ~catch-result))
-                               (chan-put* ~result-ch ~catch-result (fn [~cb-sym] nil)))
-                             (chan-close* ~result-ch)))]
+                          `(do ~catch-core ~@(seq finally-body))
+                          catch-core)]
       (if (and finally-body last-try?)
         `(try ~expr (catch ~catch-sym ~catch-handler) (finally ~@(seq finally-body)))
         `(try ~expr (catch ~catch-sym ~catch-handler))))
