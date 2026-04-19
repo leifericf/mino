@@ -1093,74 +1093,88 @@
 (defn pipeline
   "Takes items from the from channel, applies xf to each (using n
    parallel go blocks), and puts results on the to channel.
-   Closes to when from is exhausted (unless close? is false)."
+   Closes to when from is exhausted (unless close? is false).
+   Preserves input ordering regardless of worker completion order."
   ([n to xf from] (pipeline n to xf from true))
   ([n to xf from close?]
-   (let [jobs     (chan n)
-         results  (chan n)
-         done     (atom 0)]
-     ;; Feed jobs
+   (let [jobs    (chan n)
+         results (chan n)
+         done    (atom 0)]
+     ;; Feed: for each input, create a result channel, send [val res-ch]
+     ;; to workers, and send res-ch to collector (in order)
      (let [feeder (fn feeder [v]
                     (if (nil? v)
                       (close! jobs)
-                      (do (put! jobs v)
-                          (take! from feeder))))]
+                      (let [res-ch (chan 1)]
+                        (put! jobs [v res-ch])
+                        (put! results res-ch)
+                        (take! from feeder))))]
        (take! from feeder))
-     ;; Worker: take from jobs, apply xf, put result
+     ;; Workers: take [val res-ch], apply xf, put result on res-ch
      (dotimes [_ n]
-       (let [worker (fn worker [v]
-                      (if (nil? v)
+       (let [worker (fn worker [job]
+                      (if (nil? job)
                         (when (= n (swap! done inc))
                           (close! results))
-                        (do (put! results (xf v))
-                            (take! jobs worker))))]
+                        (let [v      (first job)
+                              res-ch (second job)]
+                          (put! res-ch (xf v))
+                          (close! res-ch)
+                          (take! jobs worker))))]
          (take! jobs worker)))
-     ;; Collector: take from results, put on to
-     (let [collector (fn collector [v]
-                       (if (nil? v)
+     ;; Collector: take res-chs in order, drain each to output
+     (let [collector (fn collector [res-ch]
+                       (if (nil? res-ch)
                          (when close? (close! to))
-                         (do (put! to v)
-                             (take! results collector))))]
+                         (let [drain (fn drain [v]
+                                       (if (nil? v)
+                                         (take! results collector)
+                                         (do (put! to v)
+                                             (take! res-ch drain))))]
+                           (take! res-ch drain))))]
        (take! results collector))
      to)))
 
 (defn pipeline-async
   "Like pipeline, but af is an async function that takes [val result-ch].
-   af should put results on result-ch and close it when done."
+   af should put results on result-ch and close it when done.
+   Preserves input ordering regardless of worker completion order."
   ([n to af from] (pipeline-async n to af from true))
   ([n to af from close?]
    (let [jobs    (chan n)
          results (chan n)
          done    (atom 0)]
-     ;; Feed jobs
+     ;; Feed: for each input, create a result channel, send [val res-ch]
+     ;; to workers, and send res-ch to collector (in order)
      (let [feeder (fn feeder [v]
                     (if (nil? v)
                       (close! jobs)
-                      (do (put! jobs v)
-                          (take! from feeder))))]
+                      (let [res-ch (chan 1)]
+                        (put! jobs [v res-ch])
+                        (put! results res-ch)
+                        (take! from feeder))))]
        (take! from feeder))
-     ;; Worker: take from jobs, call af with a result channel
+     ;; Workers: take [val res-ch], call af which puts results on res-ch
      (dotimes [_ n]
-       (let [worker (fn worker [v]
-                      (if (nil? v)
+       (let [worker (fn worker [job]
+                      (if (nil? job)
                         (when (= n (swap! done inc))
                           (close! results))
-                        (let [res-ch (chan 1)]
+                        (let [v      (first job)
+                              res-ch (second job)]
                           (af v res-ch)
-                          ;; Collect from af's result channel
-                          (let [collect (fn collect [r]
-                                          (if (nil? r)
-                                            (take! jobs worker)
-                                            (do (put! results r)
-                                                (take! res-ch collect))))]
-                            (take! res-ch collect)))))]
+                          (take! jobs worker))))]
          (take! jobs worker)))
-     ;; Collector
-     (let [collector (fn collector [v]
-                       (if (nil? v)
+     ;; Collector: take res-chs in order, drain each to output
+     (let [collector (fn collector [res-ch]
+                       (if (nil? res-ch)
                          (when close? (close! to))
-                         (do (put! to v)
-                             (take! results collector))))]
+                         (let [drain (fn drain [v]
+                                       (if (nil? v)
+                                         (take! results collector)
+                                         (do (put! to v)
+                                             (take! res-ch drain))))]
+                           (take! res-ch drain))))]
        (take! results collector))
      to)))
 
