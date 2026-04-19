@@ -992,3 +992,43 @@
                              (take! results collector))))]
        (take! results collector))
      to)))
+
+(defn pipeline-async
+  "Like pipeline, but af is an async function that takes [val result-ch].
+   af should put results on result-ch and close it when done."
+  ([n to af from] (pipeline-async n to af from true))
+  ([n to af from close?]
+   (let [jobs    (chan n)
+         results (chan n)
+         done    (atom 0)]
+     ;; Feed jobs
+     (let [feeder (fn feeder [v]
+                    (if (nil? v)
+                      (close! jobs)
+                      (do (put! jobs v)
+                          (take! from feeder))))]
+       (take! from feeder))
+     ;; Worker: take from jobs, call af with a result channel
+     (dotimes [_ n]
+       (let [worker (fn worker [v]
+                      (if (nil? v)
+                        (when (= n (swap! done inc))
+                          (close! results))
+                        (let [res-ch (chan 1)]
+                          (af v res-ch)
+                          ;; Collect from af's result channel
+                          (let [collect (fn collect [r]
+                                          (if (nil? r)
+                                            (take! jobs worker)
+                                            (do (put! results r)
+                                                (take! res-ch collect))))]
+                            (take! res-ch collect)))))]
+         (take! jobs worker)))
+     ;; Collector
+     (let [collector (fn collector [v]
+                       (if (nil? v)
+                         (when close? (close! to))
+                         (do (put! to v)
+                             (take! results collector))))]
+       (take! results collector))
+     to)))
