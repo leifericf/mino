@@ -133,3 +133,130 @@
                      (reset! done true)))))))
          (drain!)
          @result)))))
+
+;; --- go macro ---
+;;
+;; The go macro transforms its body into a state machine where each
+;; <! and >! call is a park point. The body is split into states at
+;; each park point, and each state is a callback that runs when the
+;; channel operation completes.
+
+(defn go-park?
+  "Returns true if form is a parking operation (<! or >!)."
+  [form]
+  (and (cons? form)
+       (symbol? (first form))
+       (let [n (name (first form))]
+         (or (= n "<!") (= n ">!")))))
+
+(defn go-has-park?
+  "Returns true if form or any sub-form contains a park point."
+  [form]
+  (cond
+    (go-park? form) true
+    (cons? form)    (some go-has-park? form)
+    (vector? form)  (some go-has-park? form)
+    :else           false))
+
+(defn go-transform
+  "Transform a go body into a vector of states.
+   Each state is {:body [...] :park park-info :use-val bool}.
+   :use-val true means this state should bind val# to a local symbol
+   so it can be used by body expressions.
+   Park info: {:kind :take/:put :ch expr :val expr}."
+  [body result-ch]
+  (let [stmts    (if (and (cons? body) (= 'do (first body)))
+                   (rest body)
+                   (list body))
+        states   (atom [])
+        current  (atom [])
+        has-park (atom false)
+        add-state (fn [body park]
+                    (swap! states conj {:body body :park park
+                                        :use-val @has-park})
+                    (reset! has-park (not (nil? park))))]
+    ;; Walk statements, splitting at park points
+    (doseq [stmt stmts]
+      (if (go-park? stmt)
+        (let [op   (name (first stmt))
+              kind (if (= op "<!") :take :put)]
+          (if (= kind :take)
+            (do
+              (add-state @current {:kind :take :ch (second stmt)})
+              (reset! current []))
+            (do
+              (add-state @current {:kind :put :ch (second stmt) :val (nth stmt 2)})
+              (reset! current []))))
+        (swap! current conj stmt)))
+    ;; Final state
+    (add-state @current nil)
+    @states))
+
+(defn go-emit-machine
+  "Emit the state machine function for a go block."
+  [states result-ch]
+  (let [n      (count states)
+        machine-sym (gensym "go_machine_")]
+    ;; Build the case arms
+    (let [arms (atom [])]
+      (dotimes [i n]
+        (let [state    (nth states i)
+              body     (:body state)
+              park     (:park state)
+              use-val  (:use-val state)
+              val-sym  (gensym "v_")
+              ;; If this state follows a park, and body is empty,
+              ;; the result expression is val# (the parked value).
+              ;; Otherwise wrap body in do.
+              result-expr (if (and use-val (empty? body))
+                            'val#
+                            (if use-val
+                              `(do ~@(seq body))
+                              `(do ~@(seq body))))]
+          (swap! arms conj i)
+          (if park
+            ;; This state has a park operation
+            (let [next-state (inc i)]
+              (if (= (:kind park) :take)
+                (swap! arms conj
+                  `(do ~@(seq body)
+                       (chan-take* ~(:ch park)
+                         (fn [~val-sym]
+                           (~machine-sym ~next-state ~val-sym)))))
+                (swap! arms conj
+                  `(do ~@(seq body)
+                       (chan-put* ~(:ch park) ~(:val park)
+                         (fn [~val-sym]
+                           (~machine-sym ~next-state ~val-sym)))))))
+            ;; Final state: run body or use val#, put result on result-ch
+            (let [final-body (if (and use-val (empty? body))
+                               'val#
+                               `(do ~@(seq body)))]
+              (swap! arms conj
+                `(let [final-result# ~final-body]
+                   (when (not (nil? final-result#))
+                     (chan-put* ~result-ch final-result#
+                       (fn [~val-sym] nil)))
+                   (chan-close* ~result-ch)))))))
+      ;; Emit the letrec-style machine
+      `(fn ~machine-sym [state# val#]
+         (case state# ~@(seq (deref arms)))))))
+
+(defmacro go
+  "Asynchronously executes the body in a lightweight state machine.
+   Returns a channel which will receive the result of the body
+   when it completes. <! and >! are parking operations that
+   suspend the go block until the channel operation completes."
+  [& body]
+  (let [result-ch-sym (gensym "go_result_")
+        machine-sym   (gensym "go_fn_")
+        states        (go-transform (cons 'do body) result-ch-sym)]
+    `(let [~result-ch-sym (chan* (buf-fixed* 1))
+           ~machine-sym   ~(go-emit-machine states result-ch-sym)]
+       (~machine-sym 0 nil)
+       ~result-ch-sym)))
+
+(defmacro go-loop
+  "Like (go (loop bindings body...))."
+  [bindings & body]
+  `(go (loop ~bindings ~@(seq body))))

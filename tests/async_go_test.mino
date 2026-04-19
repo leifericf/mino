@@ -1,0 +1,127 @@
+(require "tests/test")
+(require "core/async")
+
+;; --- Phase 6a: straight-line go blocks ---
+
+(deftest go-returns-channel
+  (let [ch (go :hello)]
+    (is (true? (chan? ch)) "go returns a channel")))
+
+(deftest go-simple-value
+  (let [ch (go 42)
+        result (atom nil)]
+    (take! ch (fn [v] (reset! result v)))
+    (drain!)
+    (is (= 42 @result))))
+
+(deftest go-expression
+  (let [ch (go (+ 1 2 3))
+        result (atom nil)]
+    (take! ch (fn [v] (reset! result v)))
+    (drain!)
+    (is (= 6 @result))))
+
+(deftest go-nil-result
+  (let [ch (go nil)]
+    (let [result (atom :sentinel)]
+      (take! ch (fn [v] (reset! result v)))
+      (drain!)
+      (is (nil? @result) "nil result closes channel without put"))))
+
+;; --- go with <! ---
+
+(deftest go-take-immediate
+  (let [src (chan 1)
+        result (atom nil)]
+    (put! src :val)
+    (drain!)
+    (let [ch (go (<! src))]
+      (take! ch (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :val @result)))))
+
+(deftest go-take-pending
+  (let [src    (chan)
+        result (atom nil)]
+    (let [out (go (<! src))]
+      (put! src :delivered)
+      (drain!)
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :delivered @result)))))
+
+;; --- go with >! ---
+
+(deftest go-put
+  (let [dst    (chan 1)
+        result (atom nil)]
+    (let [ch (go (>! dst :sent) :done)]
+      (take! dst (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :sent @result)))))
+
+(deftest go-put-pending
+  (let [dst    (chan)
+        result (atom nil)]
+    (let [out (go (>! dst :val) :done)]
+      (take! dst (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :val @result)))))
+
+;; --- go with sequential parks ---
+
+(deftest go-sequential-takes
+  (let [ch1 (chan 1)
+        ch2 (chan 1)
+        result (atom nil)]
+    (put! ch1 :a)
+    (put! ch2 :b)
+    (drain!)
+    (let [out (go
+                (<! ch1)
+                (<! ch2)
+                :both-done)]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :both-done @result)))))
+
+(deftest go-sequential-put-take
+  (let [ch     (chan 1)
+        result (atom nil)]
+    (let [out (go
+                (>! ch :x)
+                (<! ch))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :x @result) "put then take on same channel"))))
+
+(deftest go-code-between-parks
+  (let [src1   (chan 1)
+        src2   (chan 1)
+        side   (atom nil)
+        result (atom nil)]
+    (put! src1 10)
+    (put! src2 20)
+    (drain!)
+    (let [out (go
+                (<! src1)
+                (reset! side :between)
+                (<! src2))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :between @side) "side effect runs between parks")
+      (is (= 20 @result) "final take result returned"))))
+
+;; --- Multiple go blocks ---
+
+(deftest multiple-go-blocks
+  (let [ch     (chan 1)
+        result (atom nil)]
+    ;; One go puts, another takes
+    (go (>! ch :transferred))
+    (let [out (go (<! ch))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :transferred @result)))))
+
+(run-tests)
