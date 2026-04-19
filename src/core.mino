@@ -1686,10 +1686,6 @@
 (def byte-array  "Creates a vector from a size or collection." object-array)
 (def char-array  "Creates a vector from a size or collection." object-array)
 (def boolean-array "Creates a vector from a size or collection." object-array)
-(def aclone      "Clones a vector (identity, since vectors are immutable)." vec)
-(defn aset       "Sets the value at index i in a vector. Returns a new vector." [arr i val] (assoc arr i val))
-(defn aget       "Gets the value at index i in a vector." [arr i] (nth arr i))
-(defn alength    "Returns the length of a vector." [arr] (count arr))
 
 (defmacro spawn "Creates a new actor that evaluates body in its own runtime." [& body]
   (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]

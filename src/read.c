@@ -277,14 +277,18 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 return NULL;
             }
             if (elem == NULL) {
-                /* No form produced (e.g. unmatched #?). Re-check for
+                /* No form produced (e.g. unmatched #?). Check for
                  * closing delimiter before declaring unterminated. */
+                skip_ws(S, p);
                 if (**p == ')') {
                     (*p)++;
                     return head;
                 }
-                set_error(S, "unterminated list");
-                return NULL;
+                if (**p == '\0') {
+                    set_error(S, "unterminated list");
+                    return NULL;
+                }
+                continue;
             }
             {
                 mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
@@ -370,14 +374,16 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
         {
             mino_val_t *elem = read_form(S, p);
             if (elem == NULL) {
-                if (mino_last_error(S) == NULL && **p == ']') {
-                    (*p)++;
-                    break; /* unmatched #? at end of vector */
-                }
-                if (mino_last_error(S) == NULL) {
+                if (mino_last_error(S) != NULL) return NULL;
+                /* No form produced (e.g. unmatched #?). Check for
+                 * closing delimiter before declaring unterminated. */
+                skip_ws(S, p);
+                if (**p == ']') { (*p)++; break; }
+                if (**p == '\0') {
                     set_error(S, "unterminated vector");
+                    return NULL;
                 }
-                return NULL;
+                continue;
             }
             if (len == cap) {
                 size_t       new_cap = cap == 0 ? 8 : cap * 2;
@@ -420,10 +426,12 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
         }
         key = read_form(S, p);
         if (key == NULL) {
-            if (mino_last_error(S) == NULL) {
-                set_error(S, "unterminated map");
-            }
-            return NULL;
+            if (mino_last_error(S) != NULL) return NULL;
+            /* No form produced (e.g. unmatched #?). Check for closing
+             * delimiter before declaring unterminated. */
+            skip_ws(S, p);
+            if (**p == '}') { (*p)++; break; }
+            continue;
         }
         skip_ws(S, p);
         if (**p == '}' || **p == '\0') {
@@ -432,10 +440,11 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
         }
         val = read_form(S, p);
         if (val == NULL) {
-            if (mino_last_error(S) == NULL) {
-                set_error(S, "unterminated map");
-            }
-            return NULL;
+            if (mino_last_error(S) != NULL) return NULL;
+            /* Value form produced nothing — skip the key too. */
+            skip_ws(S, p);
+            if (**p == '}') { (*p)++; break; }
+            continue;
         }
         if (len == cap) {
             size_t       new_cap = cap == 0 ? 8 : cap * 2;
@@ -1048,6 +1057,11 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
          * Otherwise, read the next form transparently. */
         skip_ws(S, p);
         if (**p == '\0' || **p == ')' || **p == ']' || **p == '}') {
+            return NULL;
+        }
+        /* If the next token is #?@, return NULL so the enclosing
+         * list/vector reader handles the splice via its own peek. */
+        if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) == '@') {
             return NULL;
         }
         return read_form(S, p);
