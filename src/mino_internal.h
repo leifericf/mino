@@ -9,6 +9,7 @@
 #define MINO_INTERNAL_H
 
 #include "mino.h"
+#include "diag.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -235,6 +236,7 @@ struct mino_state {
     call_frame_t    call_stack[MAX_CALL_DEPTH];
     int             call_depth;
     int             trace_added;
+    mino_diag_t    *last_diag;      /* malloc-owned structured diagnostic */
 
     /* Reader */
     const char     *reader_file;
@@ -386,6 +388,7 @@ void        set_error(mino_state_t *S, const char *msg);          /* msg: borrow
 void        set_error_at(mino_state_t *S, const mino_val_t *form, /* form: borrowed */
                          const char *msg);                         /* msg: borrowed */
 void        clear_error(mino_state_t *S);
+void        set_diag(mino_state_t *S, mino_diag_t *d);           /* d: consumed */
 const char *type_tag_str(const mino_val_t *v);                    /* static string */
 void        push_frame(mino_state_t *S, const char *name,     /* name: borrowed */
                        const char *file, int line);            /* file: borrowed */

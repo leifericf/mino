@@ -15,19 +15,49 @@ const char *mino_last_error(mino_state_t *S)
     return S->error_buf[0] ? S->error_buf : NULL;
 }
 
+const mino_diag_t *mino_last_diag(mino_state_t *S)
+{
+    return S->last_diag;
+}
+
+/* Install a fully-built diagnostic as the current error. Takes ownership
+ * of d. Renders a compact form into error_buf for backward compat. */
+void set_diag(mino_state_t *S, mino_diag_t *d)
+{
+    if (S->last_diag != NULL) {
+        diag_free(S->last_diag);
+    }
+    S->last_diag = d;
+    if (d != NULL) {
+        diag_render_compact(d, S->error_buf, sizeof(S->error_buf));
+    } else {
+        S->error_buf[0] = '\0';
+    }
+}
+
 void set_error(mino_state_t *S, const char *msg)
 {
+    mino_diag_t *d;
     size_t n = strlen(msg);
     if (n >= sizeof(S->error_buf)) {
         n = sizeof(S->error_buf) - 1;
     }
     memcpy(S->error_buf, msg, n);
     S->error_buf[n] = '\0';
+
+    /* Build a minimal unclassified diagnostic alongside. */
+    d = diag_new("internal", "MIN001", "eval", msg);
+    if (S->last_diag != NULL) diag_free(S->last_diag);
+    S->last_diag = d;
 }
 
 void clear_error(mino_state_t *S)
 {
     S->error_buf[0] = '\0';
+    if (S->last_diag != NULL) {
+        diag_free(S->last_diag);
+        S->last_diag = NULL;
+    }
 }
 
 /* Location-aware error: prepend file:line when the form has source info. */
@@ -36,9 +66,17 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
     if (form != NULL && form->type == MINO_CONS
         && form->as.cons.file != NULL && form->as.cons.line > 0) {
         char buf[2048];
+        mino_span_t span;
         snprintf(buf, sizeof(buf), "%s:%d: %s",
                  form->as.cons.file, form->as.cons.line, msg);
         set_error(S, buf);
+        /* Enrich the diagnostic with source span. */
+        if (S->last_diag != NULL) {
+            memset(&span, 0, sizeof(span));
+            span.file = form->as.cons.file;
+            span.line = form->as.cons.line;
+            diag_set_span(S->last_diag, span);
+        }
     } else {
         set_error(S, msg);
     }

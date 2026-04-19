@@ -83,6 +83,9 @@ void mino_state_free(mino_state_t *S)
     free(S->kw_intern.entries);
     free(S->gc_ranges);
     free(S->core_forms);
+    /* Free structured diagnostic. */
+    diag_free(S->last_diag);
+    S->last_diag = NULL;
     /* Free async scheduler run queue. */
     {
         struct sched_entry *e = S->async_run_head;

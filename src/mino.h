@@ -292,6 +292,13 @@ mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end);
 /* Return the last error message, or NULL if no error occurred. */
 const char *mino_last_error(mino_state_t *S);
 
+/* Opaque structured diagnostic type. Use mino_last_diag() to retrieve. */
+typedef struct mino_diag mino_diag_t;
+
+/* Return the last structured diagnostic, or NULL if no error occurred.
+ * The returned pointer is valid until the next error or clear_error. */
+const mino_diag_t *mino_last_diag(mino_state_t *S);
+
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */

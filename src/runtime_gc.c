@@ -545,6 +545,11 @@ static void gc_mark_roots(mino_state_t *S)
             }
         }
     }
+    /* Pin diagnostic data and cached map. */
+    if (S->last_diag != NULL) {
+        gc_mark_interior(S, S->last_diag->data);
+        gc_mark_interior(S, S->last_diag->cached_map);
+    }
     /* Pin sort comparator if active. */
     gc_mark_interior(S, S->sort_comp_fn);
     /* Pin values on the GC save stack. */

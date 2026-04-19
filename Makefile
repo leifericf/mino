@@ -5,7 +5,7 @@ CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2 -Isrc
 LDFLAGS ?=
 LIBS    ?= -lm
 
-LIB_SRCS := src/mino.c src/eval_special.c \
+LIB_SRCS := src/mino.c src/diag.c src/eval_special.c \
             src/eval_special_defs.c src/eval_special_bindings.c \
             src/eval_special_control.c src/eval_special_fn.c \
             src/runtime_state.c src/runtime_var.c \
