@@ -130,8 +130,16 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             keys[2] = mino_keyword(S, "mino/phase");
             vals[2] = mino_keyword(S, "eval");
             keys[3] = mino_keyword(S, "mino/message");
-            vals[3] = (ex_val->type == MINO_STRING)
-                ? ex_val : mino_string(S, "uncaught exception");
+            if (ex_val->type == MINO_STRING) {
+                vals[3] = ex_val;
+            } else if (ex_val->type == MINO_MAP) {
+                mino_val_t *msg_val = map_get_val(ex_val,
+                    mino_keyword(S, "message"));
+                vals[3] = (msg_val != NULL && msg_val->type == MINO_STRING)
+                    ? msg_val : mino_string(S, "uncaught exception");
+            } else {
+                vals[3] = mino_string(S, "uncaught exception");
+            }
             keys[4] = mino_keyword(S, "mino/data");
             vals[4] = ex_val;
             ex_val = mino_map(S, keys, vals, 5);
