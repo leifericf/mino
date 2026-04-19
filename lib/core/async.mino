@@ -879,6 +879,84 @@
     (fn [chs] (disj (or chs #{}) ch)))
   nil)
 
+;; --- mix ---
+
+(defn mix
+  "Creates a mix on the output channel out. Multiple input channels can
+   be added with admix. Each input channel can have modes:
+   :solo, :mute, :pause (all default false).
+   solo-mode controls what happens to non-soloed channels: :mute or :pause."
+  [out]
+  {:out out
+   :state (atom {:channels {} :solo-mode :mute})})
+
+(defn mix-should-pass?
+  "Returns true if a value from ch should be forwarded to the mix output."
+  [state ch]
+  (let [modes    (get (:channels state) ch)
+        any-solo (some (fn [entry] (:solo (val entry))) (:channels state))]
+    (cond
+      (nil? modes) false
+      any-solo     (and (:solo modes) (not (:mute modes)))
+      :else        (not (:mute modes)))))
+
+(defn mix-paused?
+  "Returns true if ch is paused in the mix."
+  [state ch]
+  (let [modes    (get (:channels state) ch)
+        any-solo (some (fn [entry] (:solo (val entry))) (:channels state))]
+    (cond
+      (nil? modes) true
+      any-solo     (and (not (:solo modes))
+                        (= :pause (:solo-mode state)))
+      :else        (:pause modes))))
+
+(defn admix
+  "Adds ch as an input to the mix. Starts reading from it."
+  [m ch]
+  (swap! (:state m) update :channels assoc ch
+         {:solo false :mute false :pause false})
+  (let [do-read (fn do-read [v]
+                  (let [s @(:state m)]
+                    (if (nil? v)
+                      ;; Channel closed: remove from mix
+                      (swap! (:state m) update :channels dissoc ch)
+                      (do
+                        (when (mix-should-pass? s ch)
+                          (put! (:out m) v))
+                        ;; Continue reading if still in mix and not paused
+                        (when (and (get (:channels @(:state m)) ch)
+                                   (not (mix-paused? @(:state m) ch)))
+                          (take! ch do-read))))))]
+    (take! ch do-read))
+  nil)
+
+(defn unmix
+  "Removes ch from the mix."
+  [m ch]
+  (swap! (:state m) update :channels dissoc ch)
+  nil)
+
+(defn toggle
+  "Sets modes on channels in the mix.
+   state-map is {ch {:solo bool :mute bool :pause bool}}."
+  [m state-map]
+  (doseq [entry state-map]
+    (let [ch    (key entry)
+          modes (val entry)]
+      (swap! (:state m) update :channels
+        (fn [channels]
+          (if (get channels ch)
+            (update channels ch (fn [old] (into old modes)))
+            channels)))))
+  nil)
+
+(defn solo-mode
+  "Sets the solo mode for the mix. mode is :mute or :pause."
+  [m mode]
+  (swap! (:state m) assoc :solo-mode mode)
+  nil)
+
 ;; --- pipeline ---
 
 (defn pipeline

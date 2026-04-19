@@ -76,4 +76,51 @@
     (drain!)
     (is (nil? (poll! a-ch)) "unsubbed channel gets nothing")))
 
+;; --- mix ---
+
+(deftest mix-basic
+  (let [out (chan 10)
+        ch1 (chan 2)
+        ch2 (chan 2)
+        m   (mix out)
+        result (atom #{})]
+    (admix m ch1)
+    (admix m ch2)
+    (put! ch1 :a) (put! ch2 :b) (drain!)
+    (take! out (fn [v] (swap! result conj v)))
+    (take! out (fn [v] (swap! result conj v)))
+    (drain!)
+    (is (= #{:a :b} @result) "mix forwards from all inputs")))
+
+(deftest mix-unmix
+  (let [out (chan 10)
+        ch1 (chan 2)
+        m   (mix out)
+        result (atom [])]
+    (admix m ch1)
+    (put! ch1 :before) (drain!)
+    (take! out (fn [v] (swap! result conj v)))
+    (drain!)
+    (unmix m ch1)
+    (put! ch1 :after) (drain!)
+    (is (= [:before] @result) "unmixed channel no longer forwarded")))
+
+(deftest mix-mute
+  (let [out (chan 10)
+        ch1 (chan 2)
+        m   (mix out)]
+    (admix m ch1)
+    (toggle m {ch1 {:mute true}})
+    (put! ch1 :muted) (drain!)
+    (is (nil? (poll! out)) "muted channel values not forwarded")))
+
+(deftest mix-close-removes
+  (let [out (chan 10)
+        ch1 (chan 1)
+        m   (mix out)]
+    (admix m ch1)
+    (close! ch1)
+    (drain!)
+    (is (= {} (:channels @(:state m))) "closed channel removed from mix")))
+
 (run-tests)
