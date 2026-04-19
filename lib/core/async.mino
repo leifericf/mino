@@ -170,7 +170,8 @@
     :else false))
 
 (defn go-if-park?
-  "Returns true if form is (if test then else?) where a branch contains a park."
+  "Returns true if form is (if test then else?) where a branch contains a park
+   but NOT recur (recur branches are handled by the loop body exit transform)."
   [form]
   (and (cons? form)
        (= 'if (first form))
@@ -178,7 +179,38 @@
          (and (>= (count fv) 3)
               (or (go-contains-park? (nth fv 2))
                   (and (>= (count fv) 4)
-                       (go-contains-park? (nth fv 3))))))))
+                       (go-contains-park? (nth fv 3))))
+              ;; Exclude if branches contain recur
+              (not (go-contains-recur? (nth fv 2)))
+              (not (and (>= (count fv) 4)
+                        (go-contains-recur? (nth fv 3))))))))
+
+(defn go-recur?
+  "Returns true if form is a (recur ...) call."
+  [form]
+  (and (cons? form) (= 'recur (first form))))
+
+(defn go-contains-recur?
+  "Returns true if form contains a recur call.
+   Does not descend into fn, go, or loop forms."
+  [form]
+  (cond
+    (go-recur? form) true
+    (and (cons? form) (symbol? (first form))
+         (let [n (name (first form))]
+           (or (= n "fn") (= n "fn*") (= n "go") (= n "loop"))))
+    false
+    (cons? form) (boolean (some go-contains-recur? form))
+    (vector? form) (boolean (some go-contains-recur? (seq form)))
+    :else false))
+
+(defn go-loop-park?
+  "Returns true if form is (loop [bindings] body) where body contains parks."
+  [form]
+  (and (cons? form)
+       (= 'loop (first form))
+       (vector? (second form))
+       (go-contains-park? form)))
 
 (defn go-expand-if
   "Recursively expand when/cond forms to if within a go body,
@@ -230,6 +262,38 @@
       (go-expand-if
         `(let [~tmp ~(nth fv 1)]
            (if ~tmp ~@(seq rest-forms)))))
+    ;; recur with park args -> lift to let-park
+    (and (= 'recur (first form))
+         (some go-park? (rest form)))
+    (let [args (vec (rest form))
+          pairs (vec (map-indexed
+                       (fn [i a]
+                         (if (go-park? a)
+                           (let [tmp (gensym "recur_")]
+                             {:sym tmp :park a})
+                           {:sym a :park nil}))
+                       args))
+          park-lets (vec (mapcat (fn [p] (when (:park p) [(:sym p) (:park p)])) pairs))
+          new-args  (vec (map :sym pairs))]
+      (go-expand-if `(let ~park-lets (recur ~@(seq new-args)))))
+    ;; loop with parks in init bindings -> lift to let-park before loop
+    (and (= 'loop (first form))
+         (vector? (second form))
+         (some go-park? (map (fn [i] (nth (second form) i))
+                             (filter odd? (range (count (second form)))))))
+    (let [bindings (second form)
+          pairs (partition 2 bindings)
+          lifted (vec (map (fn [pair]
+                             (let [bname (first pair)
+                                   init  (second pair)]
+                               (if (go-park? init)
+                                 {:name bname :init (gensym "loop_init_") :park init}
+                                 {:name bname :init init :park nil})))
+                           pairs))
+          outer-lets (vec (mapcat (fn [l] (when (:park l) [(:init l) (:park l)])) lifted))
+          new-bindings (vec (mapcat (fn [l] [(:name l) (:init l)]) lifted))
+          body (rest (rest form))]
+      (go-expand-if `(let ~outer-lets (loop ~new-bindings ~@(seq body)))))
     ;; Recurse into other forms
     :else (apply list (map go-expand-if form))))
 
@@ -248,8 +312,10 @@
    Each state is {:body [...] :park park-info :use-val bool :bind sym}.
    :bind sym means the next state should bind val# to sym via let.
    Park info: {:kind :take/:put :ch expr :val expr}.
-   Recursively processes nested let-park forms."
-  [body result-ch]
+   Recursively processes nested let-park and loop/recur forms.
+   loop-ctx: nil or {:start-idx n :binds [names]} for loop context."
+  ([body result-ch] (go-transform body result-ch nil))
+  ([body result-ch loop-ctx]
   (let [stmts (if (and (cons? body) (= 'do (first body)))
                 (vec (rest body))
                 [body])]
@@ -297,7 +363,7 @@
                                    ~@(seq body-forms))])
                   ;; Recursively transform continuation + remaining stmts
                   remaining   (vec (concat cont-body (subvec stmts (inc i))))
-                  sub-states  (go-transform (cons 'do remaining) result-ch)
+                  sub-states  (go-transform (cons 'do remaining) result-ch loop-ctx)
                   first-sub   (assoc (first sub-states) :use-val true :bind sym)
                   rest-subs   (rest sub-states)]
               (vec (concat (conj states new-state first-sub) rest-subs)))
@@ -348,10 +414,132 @@
               (recur (inc i) (conj states new-state) []
                      true nil))
 
+            ;; Loop with parks in body
+            (go-loop-park? stmt)
+            (let [bindings-vec (second stmt)
+                  pairs       (vec (partition 2 bindings-vec))
+                  bind-names  (vec (map first pairs))
+                  bind-inits  (vec (map second pairs))
+                  ;; Pre-loop state: accumulated body so far
+                  pre-state   {:body current :park nil
+                               :use-val has-park :bind bind-sym}
+                  ;; Loop-start state index: after pre-state
+                  loop-start  (inc (count states))
+                  ;; Process body with loop context
+                  body-form   (cons 'do (rest (rest stmt)))
+                  body-states (go-transform body-form result-ch
+                                {:start-idx loop-start :binds bind-names})
+                  ;; Add recur context to all body states
+                  body-with-ctx (mapv (fn [s] (assoc s :recur-ctx
+                                               {:target loop-start :binds bind-names}))
+                                     body-states)
+                  ;; Mark first body state with loop info
+                  first-body  (assoc (first body-with-ctx)
+                                     :loop-id true
+                                     :loop-binds bind-names
+                                     :loop-inits bind-inits
+                                     :loop-start-idx loop-start)
+                  rest-body   (rest body-with-ctx)
+                  ;; Remaining stmts after the loop
+                  remaining   (subvec stmts (inc i))]
+              (if (empty? remaining)
+                ;; Loop is the last expression
+                (vec (concat (conj states pre-state first-body) rest-body))
+                ;; There are stmts after the loop - TODO
+                (vec (concat (conj states pre-state first-body) rest-body))))
+
+            ;; Recur (inside a loop)
+            (go-recur? stmt)
+            (let [args      (vec (rest stmt))
+                  new-state {:body current :park nil
+                             :use-val has-park :bind bind-sym
+                             :recur-target (:start-idx loop-ctx)
+                             :recur-args args
+                             :recur-binds (:binds loop-ctx)}]
+              ;; Recur is terminal - no more states after it
+              (conj states new-state))
+
             ;; Normal statement
             :else
             (recur (inc i) states (conj current stmt)
-                   has-park bind-sym)))))))
+                   has-park bind-sym))))))))
+
+(defn go-loop-body-exit
+  "Transform the last expression of a loop body:
+   - (recur args) → machine self-call back to loop start
+   - (if test recur-expr exit-expr) → if with both paths handled
+   - non-recur exit value → put on result-ch and close
+   Does not descend into fn, go, or loop forms."
+  [form machine-sym target binds result-ch val-sym]
+  (cond
+    ;; recur → jump back
+    (go-recur? form)
+    (let [args (vec (rest form))
+          locals-map (apply hash-map
+                       (mapcat (fn [b a] [`'~b a]) binds args))]
+      `(~machine-sym ~target {:val nil :locals ~locals-map}))
+    ;; Don't descend into fn/go/loop
+    (and (cons? form) (symbol? (first form))
+         (let [n (name (first form))]
+           (or (= n "fn") (= n "fn*") (= n "go") (= n "loop"))))
+    ;; Treat as exit value
+    `(let [exit-val# ~form]
+       (when (not (nil? exit-val#))
+         (chan-put* ~result-ch exit-val# (fn [~val-sym] nil)))
+       (chan-close* ~result-ch))
+    ;; if → transform both branches
+    (and (cons? form) (= 'if (first form)))
+    (let [fv (vec form)
+          test-form (nth fv 1)
+          then-form (nth fv 2)
+          else-form (if (>= (count fv) 4) (nth fv 3) nil)]
+      `(if ~test-form
+         ~(go-loop-body-exit then-form machine-sym target binds result-ch val-sym)
+         ~(go-loop-body-exit else-form machine-sym target binds result-ch val-sym)))
+    ;; do → transform last expression
+    (and (cons? form) (= 'do (first form)))
+    (let [body-forms (vec (rest form))
+          init (butlast body-forms)
+          last-form (last body-forms)]
+      `(do ~@(seq init)
+           ~(go-loop-body-exit last-form machine-sym target binds result-ch val-sym)))
+    ;; let with park binding → chan-take* callback with continuation
+    (and (cons? form) (= 'let (first form))
+         (vector? (second form))
+         (>= (count (second form)) 2)
+         (go-park? (nth (second form) 1)))
+    (let [let-binds (second form)
+          sym (nth let-binds 0)
+          park-form (nth let-binds 1)
+          op (name (first park-form))
+          rest-binds (subvec let-binds 2)
+          body-forms (vec (rest (rest form)))
+          cont (if (empty? rest-binds)
+                 `(do ~@(seq (map (fn [f]
+                                    (go-loop-body-exit f machine-sym target binds result-ch val-sym))
+                                  body-forms)))
+                 (go-loop-body-exit
+                   `(let ~(apply vector (seq rest-binds)) ~@(seq body-forms))
+                   machine-sym target binds result-ch val-sym))
+          cb-sym (gensym "lcb_")]
+      (if (= op "<!")
+        `(chan-take* ~(second park-form) (fn [~cb-sym] (let [~sym ~cb-sym] ~cont)))
+        `(chan-put* ~(second park-form) ~(nth park-form 2) (fn [~cb-sym] (let [~sym ~cb-sym] ~cont)))))
+    ;; let → transform body (no park in bindings)
+    (and (cons? form) (= 'let (first form)))
+    (let [bindings-form (second form)
+          body-forms (vec (rest (rest form)))
+          init (butlast body-forms)
+          last-form (last body-forms)]
+      `(let ~bindings-form
+         ~@(seq init)
+         ~(go-loop-body-exit last-form machine-sym target binds result-ch val-sym)))
+    ;; Non-recur exit value → put on result-ch
+    :else
+    `(let [exit-val# ~form]
+       (when (not (nil? exit-val#))
+         (chan-put* ~result-ch exit-val# (fn [~val-sym] nil)))
+       (chan-close* ~result-ch))))
 
 (defn go-emit-machine
   "Emit the state machine function for a go block.
@@ -372,42 +560,74 @@
               use-val  (:use-val state)
               bind     (:bind state)
               val-sym  (gensym "v_")
-              ;; Build local bindings restoration + new binding
-              local-binds (vec (keep :bind (take (inc i) states)))
-              ;; Previous binds: all binds from states before this one
+              ;; Previous binds: all :bind syms from states before this one
               prev-binds  (vec (keep :bind (take i states)))
+              ;; Loop context bindings to restore (for states after loop-start)
+              loop-ctx-binds (if (and (:recur-ctx state) (not (:loop-id state)))
+                               (:binds (:recur-ctx state))
+                               [])
+              ;; Loop-start bindings to pack (for the loop-start state)
+              loop-own-binds (if (:loop-id state) (:loop-binds state) [])
+              ;; All bindings that need to be in scope
+              has-locals  (or (not (empty? prev-binds)) (not (empty? loop-ctx-binds)))
               ;; Destructure locals from val#
-              restore-lets (mapcat (fn [s] [s `(get (:locals ~'val#) '~s)]) prev-binds)
+              restore-lets (mapcat (fn [s] [s `(get (:locals ~'val#) '~s)])
+                                   (concat loop-ctx-binds prev-binds))
               ;; Current value from park
               cur-val     (if use-val
-                            (if (empty? prev-binds)
-                              'val#
-                              '(:val val#))
+                            (if has-locals '(:val val#) 'val#)
                             nil)
               ;; Bridge channel for if-park states (unwrap parks)
               bridge-lets (if (and park (:unwrap park))
                             [(:ch park) `(chan* (buf-fixed* 1))]
                             [])
-              ;; Wrap body with restored locals + new bind
-              all-lets    (vec (concat bridge-lets restore-lets
-                                 (when bind [bind cur-val])))
-              wrapped     (if (empty? all-lets)
-                            body
-                            (list `(let ~(apply vector (seq all-lets))
-                                    ~@(seq body))))
               ;; Build the value to pass to next state (with locals map)
               pack-val    (fn [v]
-                            (let [cur-binds (vec (concat prev-binds (when bind [bind])))]
+                            (let [cur-binds (vec (concat loop-own-binds
+                                                         prev-binds
+                                                         (when bind [bind])))]
                               (if (empty? cur-binds)
                                 v
-                                `{:val ~v
-                                  :locals (assoc
-                                    ~(if (empty? prev-binds)
-                                       {}
-                                       '(:locals val#))
-                                    '~(last cur-binds) ~(last cur-binds))})))]
+                                (let [base (if has-locals '(:locals val#) {})
+                                      locals-expr (reduce
+                                                    (fn [m b] `(assoc ~m '~b ~b))
+                                                    base cur-binds)]
+                                  `{:val ~v :locals ~locals-expr}))))]
+          ;; Loop-start: add loop bindings to all-lets
+          ;; On first entry (val# nil), use init values. On re-entry, use locals.
+          (let [loop-lets  (if (:loop-id state)
+                             (vec (mapcat
+                                    (fn [bname init]
+                                      [bname `(if (nil? ~'val#)
+                                                ~init
+                                                (get (:locals ~'val#) '~bname))])
+                                    (:loop-binds state)
+                                    (:loop-inits state)))
+                             [])
+                all-lets   (vec (concat bridge-lets loop-lets restore-lets
+                                       (when bind [bind cur-val])))]
           (swap! arms conj i)
-          (if park
+          (cond
+            ;; Recur state: jump back to loop start
+            (:recur-target state)
+            (let [target      (:recur-target state)
+                  r-args      (:recur-args state)
+                  r-binds     (:recur-binds state)
+                  ;; Pack new bindings into locals map
+                  pack-recur  `{:val nil
+                                :locals ~(zipmap
+                                           (map (fn [b] `'~b) r-binds)
+                                           r-args)}
+                  recur-expr  `(~machine-sym ~target ~pack-recur)
+                  full-expr   (if (empty? all-lets)
+                                `(do ~@(seq body) ~recur-expr)
+                                `(let ~(apply vector (seq all-lets))
+                                   ~@(seq body)
+                                   ~recur-expr))]
+              (swap! arms conj full-expr))
+
+            ;; Park state
+            park
             (let [next-state (inc i)
                   unwrap?    (:unwrap park)
                   pack-arg   (if unwrap? `(first ~val-sym) val-sym)
@@ -425,8 +645,41 @@
                                   ~@(seq body)
                                   ~park-expr))]
               (swap! arms conj full-expr))
-            ;; Final state
-            (let [final-body (if (and use-val (empty? body) (not bind))
+
+            ;; Loop body state with recur: use go-loop-body-exit on last body expr
+            (and (:recur-ctx state) (not (empty? body))
+                 (go-contains-recur? (last body)))
+            (let [ctx        (:recur-ctx state)
+                  init-body  (butlast body)
+                  last-expr  (last body)
+                  exit-expr  (go-loop-body-exit last-expr machine-sym
+                               (:target ctx) (:binds ctx) result-ch val-sym)
+                  full-expr  (if (empty? all-lets)
+                               `(do ~@(seq init-body) ~exit-expr)
+                               `(let ~(apply vector (seq all-lets))
+                                  ~@(seq init-body)
+                                  ~exit-expr))]
+              (swap! arms conj full-expr))
+
+            ;; Pass-through state (no park, no recur, not the last state)
+            (< i (dec n))
+            (let [next-state (inc i)
+                  full-expr  (if (empty? all-lets)
+                               (if (empty? body)
+                                 `(~machine-sym ~next-state ~'val#)
+                                 `(do ~@(seq body) (~machine-sym ~next-state ~'val#)))
+                               `(let ~(apply vector (seq all-lets))
+                                  ~@(seq body)
+                                  (~machine-sym ~next-state ~'val#)))]
+              (swap! arms conj full-expr))
+
+            ;; Final state (no park, no recur, last state)
+            :else
+            (let [wrapped    (if (empty? all-lets)
+                               body
+                               (list `(let ~(apply vector (seq all-lets))
+                                       ~@(seq body))))
+                  final-body (if (and use-val (empty? body) (not bind))
                                (if (empty? prev-binds) 'val# '(:val val#))
                                `(do ~@(seq wrapped)))]
               (swap! arms conj
@@ -434,7 +687,7 @@
                    (when (not (nil? final-result#))
                      (chan-put* ~result-ch final-result#
                        (fn [~val-sym] nil)))
-                   (chan-close* ~result-ch)))))))
+                   (chan-close* ~result-ch))))))))
       `(fn ~machine-sym [state# val#]
          (case state# ~@(seq (deref arms)))))))
 

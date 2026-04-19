@@ -317,4 +317,80 @@
       (drain!)
       (is (= :delayed @result) "if-park with pending channel"))))
 
+;; --- go with loop/recur across park points (Phase 6d) ---
+
+(deftest go-loop-collect
+  (let [ch (chan 3) result (atom nil)]
+    (put! ch 1) (put! ch 2) (put! ch 3) (drain!)
+    (close! ch)
+    (let [out (go (loop [acc []]
+                    (let [v (<! ch)]
+                      (if (nil? v) acc (recur (conj acc v))))))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= [1 2 3] @result)))))
+
+(deftest go-loop-sum
+  (let [ch (chan 2) result (atom nil)]
+    (put! ch 10) (put! ch 20) (drain!)
+    (close! ch)
+    (let [out (go-loop [sum 0]
+                (let [v (<! ch)]
+                  (if (nil? v) sum (recur (+ sum v)))))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= 30 @result)))))
+
+(deftest go-loop-recur-park
+  (let [ch (chan 3) result (atom nil)]
+    (put! ch 1) (put! ch 2) (put! ch 3) (drain!)
+    (let [out (go (loop [x 0 n 3]
+                    (if (> n 0) (recur (<! ch) (dec n)) x)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= 3 @result) "park in recur argument"))))
+
+(deftest go-loop-multi-bindings
+  (let [ch (chan 2) result (atom nil)]
+    (put! ch :a) (put! ch :b) (drain!)
+    (close! ch)
+    (let [out (go-loop [items [] n 0]
+                (let [v (<! ch)]
+                  (if (nil? v)
+                    {:items items :count n}
+                    (recur (conj items v) (inc n)))))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= {:items [:a :b] :count 2} @result)))))
+
+(deftest go-loop-swap-bindings
+  (let [result (atom nil)]
+    (let [out (go (loop [a :a b :b n 1]
+                    (if (pos? n)
+                      (recur b a (dec n))
+                      [a b])))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= [:b :a] @result) "loop swaps bindings"))))
+
+(deftest go-loop-take-in-binding
+  (let [ch (chan 1) result (atom nil)]
+    (put! ch 42) (drain!)
+    (let [out (go (loop [x (<! ch)] x))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= 42 @result) "park in loop binding"))))
+
+(deftest go-loop-pending-channels
+  (let [ch (chan) result (atom nil)]
+    (let [out (go-loop [acc []]
+                (let [v (<! ch)]
+                  (if (nil? v) acc (recur (conj acc v)))))]
+      (put! ch :x) (drain!)
+      (put! ch :y) (drain!)
+      (close! ch) (drain!)
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= [:x :y] @result) "loop with pending channels"))))
+
 (run-tests)
