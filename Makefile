@@ -19,7 +19,7 @@ LIB_SRCS := src/mino.c src/eval_special.c \
             src/clone.c src/re.c \
             src/async_buffer.c src/async_channel.c \
             src/async_handler.c src/async_select.c \
-            src/async_scheduler.c src/prim_async.c
+            src/async_scheduler.c src/async_timer.c src/prim_async.c
 LIB_OBJS := $(LIB_SRCS:.c=.o)
 SRCS     := $(LIB_SRCS) main.c
 OBJS     := $(SRCS:.c=.o)
@@ -61,7 +61,8 @@ src/async_buffer.o: src/async_buffer.c src/async_buffer.h src/mino_internal.h
 src/async_channel.o: src/async_channel.c src/async_channel.h src/async_buffer.h src/async_scheduler.h src/mino_internal.h
 src/async_handler.o: src/async_handler.c src/async_handler.h src/mino_internal.h
 src/async_select.o: src/async_select.c src/async_select.h src/async_channel.h src/async_scheduler.h src/prim_internal.h
-src/async_scheduler.o: src/async_scheduler.c src/async_scheduler.h src/mino_internal.h
+src/async_scheduler.o: src/async_scheduler.c src/async_scheduler.h src/async_timer.h src/mino_internal.h
+src/async_timer.o: src/async_timer.c src/async_timer.h src/async_channel.h src/mino_internal.h
 src/prim_async.o: src/prim_async.c src/prim_internal.h src/async_buffer.h src/async_channel.h src/async_scheduler.h src/async_select.h src/mino_internal.h
 
 %.o: %.c

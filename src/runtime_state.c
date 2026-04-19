@@ -7,6 +7,7 @@
 
 #include "mino_internal.h"
 #include "async_scheduler.h"
+#include "async_timer.h"
 
 /* ------------------------------------------------------------------------- */
 /* State lifecycle                                                           */
@@ -88,12 +89,12 @@ void mino_state_free(mino_state_t *S)
         struct sched_entry *enext;
         while (e != NULL) {
             enext = e->next;
-            /* refs already unreffed by async_sched_free or
-             * will be freed when ref_roots is freed above */
             free(e);
             e = enext;
         }
     }
+    /* Free async timer queue. */
+    async_timers_free(S);
     for (h = S->gc_all; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {

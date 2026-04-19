@@ -3,6 +3,7 @@
  */
 
 #include "async_scheduler.h"
+#include "async_timer.h"
 #include "mino_internal.h"
 
 void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
@@ -30,6 +31,9 @@ void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
 int async_sched_drain(mino_state_t *S, mino_env_t *env)
 {
     int ran = 0;
+
+    /* Check expired timers before draining. */
+    async_timers_check(S);
 
     while (S->async_run_head != NULL) {
         sched_entry_t *e = S->async_run_head;

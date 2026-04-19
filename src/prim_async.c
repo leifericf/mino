@@ -7,6 +7,7 @@
 #include "async_channel.h"
 #include "async_scheduler.h"
 #include "async_select.h"
+#include "async_timer.h"
 
 /* ------------------------------------------------------------------ */
 /* Buffer constructors                                                */
@@ -328,6 +329,29 @@ static mino_val_t *prim_alts(mino_state_t *S, mino_val_t *args,
 }
 
 /* ------------------------------------------------------------------ */
+/* Timer primitive                                                    */
+/* ------------------------------------------------------------------ */
+
+static mino_val_t *prim_timeout(mino_state_t *S, mino_val_t *args,
+                                mino_env_t *env)
+{
+    double ms;
+    (void)env;
+
+    if (args == NULL || args->type != MINO_CONS) {
+        set_error(S, "timeout* requires a millisecond argument");
+        return NULL;
+    }
+    if (!as_double(args->as.cons.car, &ms)) {
+        set_error(S, "timeout* argument must be a number");
+        return NULL;
+    }
+    if (ms < 0) ms = 0;
+
+    return async_timeout(S, ms);
+}
+
+/* ------------------------------------------------------------------ */
 /* Scheduler primitives                                               */
 /* ------------------------------------------------------------------ */
 
@@ -361,6 +385,7 @@ void mino_install_async(mino_state_t *S, mino_env_t *env)
     DEF_PRIM(env, "offer!*",      prim_chan_offer,     "Non-blocking put on a channel.");
     DEF_PRIM(env, "poll!*",       prim_chan_poll,       "Non-blocking take from a channel.");
     DEF_PRIM(env, "alts*",        prim_alts,           "Alts arbitration primitive.");
+    DEF_PRIM(env, "timeout*",     prim_timeout,        "Create a timeout channel.");
 
     /* Scheduler */
     DEF_PRIM(env, "drain!",       prim_drain,          "Drain the async run queue.");

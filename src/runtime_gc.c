@@ -6,6 +6,7 @@
 
 #include "mino_internal.h"
 #include "async_scheduler.h"
+#include "async_timer.h"
 
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the
@@ -569,6 +570,8 @@ static void gc_mark_roots(mino_state_t *S)
             gc_mark_interior(S, e->value);
         }
     }
+    /* Pin async timer channel values. */
+    async_timers_mark(S);
 }
 
 static void gc_sweep(mino_state_t *S)

@@ -84,6 +84,11 @@
   [x]
   (chan?* x))
 
+(defn timeout
+  "Returns a channel that closes after ms milliseconds."
+  [ms]
+  (timeout* ms))
+
 ;; --- alts! ---
 
 (defn alts!
