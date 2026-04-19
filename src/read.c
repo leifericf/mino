@@ -36,6 +36,33 @@ const char *intern_filename(const char *name)
     return name;
 }
 
+/* Reader error codes. */
+#define MRE001 "MRE001" /* unterminated string literal */
+#define MRE002 "MRE002" /* unexpected closing delimiter */
+#define MRE003 "MRE003" /* unterminated list/vector/map/set */
+#define MRE004 "MRE004" /* out of memory during read */
+#define MRE005 "MRE005" /* unterminated reader conditional */
+#define MRE006 "MRE006" /* invalid reader conditional form */
+#define MRE007 "MRE007" /* invalid reader macro usage */
+#define MRE008 "MRE008" /* malformed literal */
+#define MRE009 "MRE009" /* expected form after reader macro */
+#define MRE010 "MRE010" /* invalid metadata */
+
+static void set_reader_diag(mino_state_t *S, const char *code,
+                            const char *msg, int line, int col)
+{
+    mino_diag_t *d = diag_new("reader", code, "read", msg);
+    if (d != NULL) {
+        mino_span_t span;
+        memset(&span, 0, sizeof(span));
+        span.file   = S->reader_file;
+        span.line   = line;
+        span.column = col;
+        diag_set_span(d, span);
+    }
+    set_diag(S, d);
+}
+
 /* Advance the cursor by one character and track column position. */
 #define ADVANCE(S, p) do { (*(p))++; (S)->reader_col++; } while (0)
 
@@ -80,13 +107,16 @@ static mino_val_t *read_form(mino_state_t *S, const char **p);
 static mino_val_t *read_string_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '"'. */
+    int str_line = S->reader_line;
+    int str_col  = S->reader_col;
     char *buf;
     size_t cap = 16;
     size_t len = 0;
     ADVANCE(S, p); /* skip opening quote */
     buf = (char *)malloc(cap);
     if (buf == NULL) {
-        set_error(S, "out of memory reading string");
+        set_reader_diag(S, MRE004, "out of memory reading string",
+                        str_line, str_col);
         return NULL;
     }
     while (**p && **p != '"') {
@@ -106,7 +136,8 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
             case '0':  c = '\0'; break;
             case '\0':
                 free(buf);
-                set_error(S, "unterminated string literal");
+                set_reader_diag(S, MRE001, "unterminated string literal",
+                                str_line, str_col);
                 return NULL;
             default:
                 /* Unknown escape: keep the character literally. */
@@ -120,7 +151,9 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
                 char *nb = (char *)realloc(buf, cap);
                 if (nb == NULL) {
                     free(buf);
-                    set_error(S, "out of memory reading string");
+                    set_reader_diag(S, MRE004,
+                                    "out of memory reading string",
+                                    str_line, str_col);
                     return NULL;
                 }
                 buf = nb;
@@ -131,7 +164,8 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     }
     if (**p != '"') {
         free(buf);
-        set_error(S, "unterminated string literal");
+        set_reader_diag(S, MRE001, "unterminated string literal",
+                        str_line, str_col);
         return NULL;
     }
     ADVANCE(S, p); /* skip closing quote */
@@ -157,7 +191,8 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
         mino_val_t *val;
         skip_ws(S, p);
         if (**p == '\0') {
-            set_error(S, "unterminated reader conditional");
+            set_reader_diag(S, MRE005, "unterminated reader conditional",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         if (**p == ')') {
@@ -168,19 +203,24 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
         key = read_form(S, p);
         if (key == NULL) {
             if (mino_last_error(S) == NULL) {
-                set_error(S, "unterminated reader conditional");
+                set_reader_diag(S, MRE005, "unterminated reader conditional",
+                            S->reader_line, S->reader_col);
             }
             return NULL;
         }
         if (key->type != MINO_KEYWORD) {
-            set_error(S, "reader conditional key must be a keyword");
+            set_reader_diag(S, MRE006,
+                            "reader conditional key must be a keyword",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         skip_ws(S, p);
         val = read_form(S, p);
         if (val == NULL) {
             if (mino_last_error(S) == NULL) {
-                set_error(S, "reader conditional: missing value for key");
+                set_reader_diag(S, MRE006,
+                            "reader conditional: missing value for key",
+                            S->reader_line, S->reader_col);
             }
             return NULL;
         }
@@ -222,7 +262,8 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
     for (;;) {
         skip_ws(S, p);
         if (**p == '\0') {
-            set_error(S, "unterminated list");
+            set_reader_diag(S, MRE003, "unterminated list",
+                            list_line, list_col);
             return NULL;
         }
         if (**p == ')') {
@@ -235,7 +276,9 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             int         splice_line = S->reader_line;
             skip_ws(S, p);
             if (**p != '(') {
-                set_error(S, "#?@ must be followed by a list");
+                set_reader_diag(S, MRE007,
+                                "#?@ must be followed by a list",
+                                S->reader_line, S->reader_col);
                 return NULL;
             }
             ADVANCE(S, p);
@@ -299,7 +342,8 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                     return head;
                 }
                 if (**p == '\0') {
-                    set_error(S, "unterminated list");
+                    set_reader_diag(S, MRE003, "unterminated list",
+                            list_line, list_col);
                     return NULL;
                 }
                 continue;
@@ -333,7 +377,8 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
     for (;;) {
         skip_ws(S, p);
         if (**p == '\0') {
-            set_error(S, "unterminated vector");
+            set_reader_diag(S, MRE003, "unterminated vector",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         if (**p == ']') {
@@ -345,7 +390,9 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
             mino_val_t *found = NULL;
             skip_ws(S, p);
             if (**p != '(') {
-                set_error(S, "#?@ must be followed by a list");
+                set_reader_diag(S, MRE007,
+                                "#?@ must be followed by a list",
+                                S->reader_line, S->reader_col);
                 return NULL;
             }
             ADVANCE(S, p);
@@ -395,7 +442,8 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                 skip_ws(S, p);
                 if (**p == ']') { ADVANCE(S, p); break; }
                 if (**p == '\0') {
-                    set_error(S, "unterminated vector");
+                    set_reader_diag(S, MRE003, "unterminated vector",
+                            S->reader_line, S->reader_col);
                     return NULL;
                 }
                 continue;
@@ -432,7 +480,8 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
         mino_val_t *val;
         skip_ws(S, p);
         if (**p == '\0') {
-            set_error(S, "unterminated map");
+            set_reader_diag(S, MRE003, "unterminated map",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         if (**p == '}') {
@@ -450,7 +499,9 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
         }
         skip_ws(S, p);
         if (**p == '}' || **p == '\0') {
-            set_error(S, "map literal has odd number of forms");
+            set_reader_diag(S, MRE008,
+                            "map literal has odd number of forms",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         val = read_form(S, p);
@@ -493,7 +544,8 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
         mino_val_t *elem;
         skip_ws(S, p);
         if (**p == '\0') {
-            set_error(S, "unterminated set");
+            set_reader_diag(S, MRE003, "unterminated set",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         if (**p == '}') {
@@ -503,7 +555,8 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
         elem = read_form(S, p);
         if (elem == NULL) {
             if (mino_last_error(S) == NULL) {
-                set_error(S, "unterminated set");
+                set_reader_diag(S, MRE003, "unterminated set",
+                            S->reader_line, S->reader_col);
             }
             return NULL;
         }
@@ -535,7 +588,8 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
         return mino_keyword_n(S, start + 1, len - 1);
     }
     if (len == 1 && start[0] == ':') {
-        set_error(S, "keyword missing name");
+        set_reader_diag(S, MRE008, "keyword missing name",
+                        S->reader_line, S->reader_col);
         return NULL;
     }
 
@@ -631,7 +685,9 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
                     (void)num;
                     den = strtoll(slash + 1, &endp, 10);
                     if (den == 0) {
-                        set_error(S, "divide by zero in ratio literal");
+                        set_reader_diag(S, MRE008,
+                                        "divide by zero in ratio literal",
+                                        S->reader_line, S->reader_col);
                         return NULL;
                     }
                     num = strtoll(buf, &endp, 10);
@@ -790,7 +846,9 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
         } else {
             items = (mino_val_t **)malloc(len * sizeof(*items));
             if (items == NULL) {
-                set_error(S, "out of memory in anonymous fn expansion");
+                set_reader_diag(S, MRE004,
+                                "out of memory in anonymous fn expansion",
+                                S->reader_line, S->reader_col);
                 return NULL;
             }
         }
@@ -862,7 +920,8 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
     meta_val = read_form(S, p);
     if (meta_val == NULL) {
         if (mino_last_error(S) == NULL) {
-            set_error(S, "expected metadata after ^");
+            set_reader_diag(S, MRE010, "expected metadata after ^",
+                            S->reader_line, S->reader_col);
         }
         return NULL;
     }
@@ -888,13 +947,16 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
         meta_val = mino_map(S, kv, vv, 1);
     }
     if (meta_val->type != MINO_MAP) {
-        set_error(S, "metadata must be a map, keyword, symbol, or string");
+        set_reader_diag(S, MRE010,
+                        "metadata must be a map, keyword, symbol, or string",
+                        S->reader_line, S->reader_col);
         return NULL;
     }
     target = read_form(S, p);
     if (target == NULL) {
         if (mino_last_error(S) == NULL) {
-            set_error(S, "expected form after metadata");
+            set_reader_diag(S, MRE009, "expected form after metadata",
+                            S->reader_line, S->reader_col);
         }
         return NULL;
     }
@@ -957,21 +1019,24 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         return read_list_form(S, p);
     }
     if (**p == ')') {
-        set_error(S, "unexpected ')'");
+        set_reader_diag(S, MRE002, "unexpected ')'",
+                        S->reader_line, S->reader_col);
         return NULL;
     }
     if (**p == '[') {
         return read_vector_form(S, p);
     }
     if (**p == ']') {
-        set_error(S, "unexpected ']'");
+        set_reader_diag(S, MRE002, "unexpected ']'",
+                        S->reader_line, S->reader_col);
         return NULL;
     }
     if (**p == '{') {
         return read_map_form(S, p);
     }
     if (**p == '}') {
-        set_error(S, "unexpected '}'");
+        set_reader_diag(S, MRE002, "unexpected '}'",
+                        S->reader_line, S->reader_col);
         return NULL;
     }
     if (**p == '#' && *(*p + 1) == '{') {
@@ -1000,7 +1065,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             mino_val_t *outer;
             if (sym == NULL) {
                 if (mino_last_error(S) == NULL) {
-                    set_error(S, "expected form after #'");
+                    set_reader_diag(S, MRE009, "expected form after #'",
+                                    S->reader_line, S->reader_col);
                 }
                 return NULL;
             }
@@ -1027,7 +1093,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             return mino_float(S, -INFINITY);
         if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
             return mino_float(S, NAN);
-        set_error(S, "unknown tagged literal");
+        set_reader_diag(S, MRE008, "unknown tagged literal",
+                        S->reader_line, S->reader_col);
         return NULL;
     }
     /* Tagged literals: #tag form — read and wrap as (tagged-literal tag form).
@@ -1053,7 +1120,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
                                    mino_cons(S, body, mino_nil(S))));
     }
     if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) == '@') {
-        set_error(S, "#?@ splice not allowed at top level");
+        set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
+                        S->reader_line, S->reader_col);
         return NULL;
     }
     if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) != '@') {
@@ -1061,7 +1129,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         ADVANCE_N(S, p, 2);
         skip_ws(S, p);
         if (**p != '(') {
-            set_error(S, "#? must be followed by a list");
+            set_reader_diag(S, MRE007, "#? must be followed by a list",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         ADVANCE(S, p);
@@ -1098,7 +1167,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             mino_val_t *outer;
             if (quoted == NULL) {
                 if (mino_last_error(S) == NULL) {
-                    set_error(S, "expected form after quote");
+                    set_reader_diag(S, MRE009,
+                                    "expected form after quote",
+                                    S->reader_line, S->reader_col);
                 }
                 return NULL;
             }
@@ -1119,7 +1190,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             mino_val_t *outer;
             if (qq == NULL) {
                 if (mino_last_error(S) == NULL) {
-                    set_error(S, "expected form after `");
+                    set_reader_diag(S, MRE009,
+                                    "expected form after `",
+                                    S->reader_line, S->reader_col);
                 }
                 return NULL;
             }
@@ -1140,7 +1213,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             mino_val_t *outer;
             if (target == NULL) {
                 if (mino_last_error(S) == NULL) {
-                    set_error(S, "expected form after @");
+                    set_reader_diag(S, MRE009,
+                                    "expected form after @",
+                                    S->reader_line, S->reader_col);
                 }
                 return NULL;
             }
@@ -1169,7 +1244,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             mino_val_t *outer;
             if (uq == NULL) {
                 if (mino_last_error(S) == NULL) {
-                    set_error(S, "expected form after ~");
+                    set_reader_diag(S, MRE009,
+                                    "expected form after ~",
+                                    S->reader_line, S->reader_col);
                 }
                 return NULL;
             }
@@ -1189,7 +1266,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         char ch;
         ADVANCE(S, p);
         if (**p == '\0') {
-            set_error(S, "unexpected end of input after \\");
+            set_reader_diag(S, MRE001,
+                            "unexpected end of input after \\",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         while (!is_terminator(start[tlen])) tlen++;
@@ -1209,7 +1288,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         } else if (tlen == 1) {
             ch = start[0];
         } else {
-            set_error(S, "unknown character literal");
+            set_reader_diag(S, MRE008, "unknown character literal",
+                            S->reader_line, S->reader_col);
             return NULL;
         }
         return mino_string_n(S, &ch, 1);
