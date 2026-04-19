@@ -35,19 +35,19 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
                 mino_val_t *cv;
                 size_t      vl;
                 if (!mino_is_cons(clause->as.cons.cdr)) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "syntax", "MSY001",
                         "catch requires a binding symbol");
                     return NULL;
                 }
                 cv = clause->as.cons.cdr->as.cons.car;
                 if (cv == NULL || cv->type != MINO_SYMBOL) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "syntax", "MSY001",
                         "catch binding must be a symbol");
                     return NULL;
                 }
                 vl = cv->as.s.len;
                 if (vl >= sizeof(var_buf)) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "syntax", "MSY001",
                         "catch variable name too long");
                     return NULL;
                 }
@@ -80,7 +80,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     }
 
     if (S->try_depth >= MAX_TRY_DEPTH) {
-        set_error_at(S, form, "try nesting too deep");
+        set_eval_diag(S, form, "limit", "MLM002", "try nesting too deep");
         return NULL;
     }
 
@@ -184,9 +184,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             snprintf(msg, sizeof(msg),
                      "unhandled exception: %.*s",
                      (int)e->as.s.len, e->as.s.data);
-            set_error(S, msg);
+            set_eval_diag(S, S->eval_current_form, "user", "MUS001", msg);
         } else {
-            set_error(S, "unhandled exception");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "unhandled exception");
         }
         return NULL;
     }
