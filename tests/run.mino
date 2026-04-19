@@ -64,5 +64,6 @@
 (require "tests/async_alts_test")
 (require "tests/async_go_test")
 (require "tests/async_timer_test")
+(require "tests/async_combinators_test")
 
 (run-tests)

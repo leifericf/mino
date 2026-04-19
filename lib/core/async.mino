@@ -265,3 +265,69 @@
   "Like (go (loop bindings body...))."
   [bindings & body]
   `(go (loop ~bindings ~@(seq body))))
+
+;; --- Combinators ---
+
+(defn pipe
+  "Takes elements from the from channel and puts them on the to channel.
+   Closes the to channel when from is exhausted (unless close? is false).
+   Returns the to channel."
+  ([from to] (pipe from to true))
+  ([from to close?]
+   (let [do-pipe (fn do-pipe [v]
+                   (if (nil? v)
+                     (when close? (close! to))
+                     (do (put! to v)
+                         (take! from do-pipe))))]
+     (take! from do-pipe))
+   to))
+
+(defn onto-chan
+  "Puts each element of coll onto the channel ch, then closes ch
+   (unless close? is false). Returns ch."
+  ([ch coll] (onto-chan ch coll true))
+  ([ch coll close?]
+   (doseq [v coll]
+     (put! ch v))
+   (when close? (close! ch))
+   ch))
+
+(defn to-chan
+  "Creates and returns a channel that receives all elements of coll,
+   then closes."
+  [coll]
+  (let [ch (chan (count coll))]
+    (onto-chan ch coll)))
+
+(defn into
+  "Returns a channel containing the single result of reducing
+   all values from ch into init using conj."
+  [init ch]
+  (let [result-ch (chan 1)
+        acc       (atom init)
+        do-take   (fn do-take [v]
+                    (if (nil? v)
+                      (do (put! result-ch @acc)
+                          (close! result-ch))
+                      (do (swap! acc conj v)
+                          (take! ch do-take))))]
+    (take! ch do-take)
+    result-ch))
+
+(defn merge
+  "Takes a collection of source channels and returns a channel that
+   contains all values from all source channels. Closes when all
+   source channels are closed."
+  ([chs] (merge chs nil))
+  ([chs buf-or-n]
+   (let [out       (if buf-or-n (chan buf-or-n) (chan))
+         remaining (atom (count chs))]
+     (doseq [ch chs]
+       (let [do-take (fn do-take [v]
+                       (if (nil? v)
+                         (when (= 0 (swap! remaining dec))
+                           (close! out))
+                         (do (put! out v)
+                             (take! ch do-take))))]
+         (take! ch do-take)))
+     out)))

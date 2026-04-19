@@ -1,0 +1,98 @@
+(require "tests/test")
+(require "core/async")
+
+;; --- pipe ---
+
+(deftest pipe-transfers-values
+  (let [from (chan 3)
+        to   (chan 3)]
+    (put! from :a)
+    (put! from :b)
+    (put! from :c)
+    (drain!)
+    (close! from)
+    (pipe from to)
+    (drain!)
+    (let [result (atom [])]
+      (take! to (fn [v] (swap! result conj v)))
+      (take! to (fn [v] (swap! result conj v)))
+      (take! to (fn [v] (swap! result conj v)))
+      (drain!)
+      (is (= [:a :b :c] @result)))))
+
+(deftest pipe-closes-to
+  (let [from (chan 1)
+        to   (chan 1)]
+    (close! from)
+    (pipe from to)
+    (drain!)
+    (is (true? (closed? to)) "pipe closes to channel when from is done")))
+
+(deftest pipe-no-close
+  (let [from (chan 1)
+        to   (chan 1)]
+    (close! from)
+    (pipe from to false)
+    (drain!)
+    (is (false? (closed? to)) "pipe does not close to when close? is false")))
+
+;; --- to-chan ---
+
+(deftest to-chan-basics
+  (let [ch (to-chan [1 2 3])
+        result (atom [])]
+    (take! ch (fn [v] (swap! result conj v)))
+    (take! ch (fn [v] (swap! result conj v)))
+    (take! ch (fn [v] (swap! result conj v)))
+    (drain!)
+    (is (= [1 2 3] @result))))
+
+(deftest to-chan-closes
+  (let [ch (to-chan [:x])]
+    (take! ch (fn [v] nil))  ;; consume the value
+    (drain!)
+    (is (true? (closed? ch)))))
+
+;; --- into ---
+
+(deftest into-collects
+  (let [ch  (to-chan [1 2 3])
+        out (into [] ch)
+        result (atom nil)]
+    (take! out (fn [v] (reset! result v)))
+    (drain!)
+    (is (= [1 2 3] @result))))
+
+(deftest into-empty
+  (let [ch  (chan)]
+    (close! ch)
+    (let [out (into [] ch)
+          result (atom nil)]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= [] @result)))))
+
+;; --- merge ---
+
+(deftest merge-combines-channels
+  (let [ch1 (to-chan [:a :b])
+        ch2 (to-chan [:c :d])
+        out (merge [ch1 ch2] 4)
+        result (atom #{})]
+    (dotimes [_ 4]
+      (take! out (fn [v] (swap! result conj v))))
+    (drain!)
+    (is (= #{:a :b :c :d} @result))))
+
+(deftest merge-closes-when-all-done
+  (let [ch1 (chan)
+        ch2 (chan)
+        out (merge [ch1 ch2])]
+    (close! ch1)
+    (drain!)
+    (is (false? (closed? out)) "not closed while one source remains")
+    (close! ch2)
+    (drain!)
+    (is (true? (closed? out)) "closed when all sources done")))
+
+(run-tests)
