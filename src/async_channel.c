@@ -44,7 +44,7 @@ mino_val_t *async_chan_create(mino_state_t *S, mino_async_buf_t *buf)
 {
     mino_async_chan_t *ch = calloc(1, sizeof(*ch));
     if (ch == NULL) {
-        set_error(S, "out of memory creating channel");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating channel");
         return NULL;
     }
     ch->buf    = buf;
@@ -282,7 +282,7 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
 
     /* Enforce pending puts limit. */
     if (ch->pending_puts_count >= ASYNC_MAX_PENDING) {
-        set_error(S, "channel has too many pending puts (> 1024)");
+        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "channel has too many pending puts (> 1024)");
         return 0;
     }
 
@@ -290,7 +290,7 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
     {
         pending_op_t *op = op_new(S, val, put_cb);
         if (op == NULL) {
-            set_error(S, "out of memory in channel put");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory in channel put");
             return 0;
         }
         enqueue_put(ch, op);
@@ -353,7 +353,7 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
 
     /* Enforce pending takes limit. */
     if (ch->pending_takes_count >= ASYNC_MAX_PENDING) {
-        set_error(S, "channel has too many pending takes (> 1024)");
+        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "channel has too many pending takes (> 1024)");
         return 0;
     }
 
@@ -361,7 +361,7 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
     {
         pending_op_t *op = op_new(S, NULL, take_cb);
         if (op == NULL) {
-            set_error(S, "out of memory in channel take");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory in channel take");
             return 0;
         }
         enqueue_take(ch, op);
@@ -492,7 +492,7 @@ void async_chan_enqueue_put_alts(mino_state_t *S, mino_async_chan_t *ch,
 {
     pending_op_t *op = op_new(S, val, callback);
     if (op == NULL) {
-        set_error(S, "out of memory in alts put registration");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory in alts put registration");
         return;
     }
     op_set_alts(S, op, flag, ch_handle);
@@ -506,7 +506,7 @@ void async_chan_enqueue_take_alts(mino_state_t *S, mino_async_chan_t *ch,
 {
     pending_op_t *op = op_new(S, NULL, callback);
     if (op == NULL) {
-        set_error(S, "out of memory in alts take registration");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory in alts take registration");
         return;
     }
     op_set_alts(S, op, flag, ch_handle);

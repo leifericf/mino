@@ -44,7 +44,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         S->fi_alloc_countdown--;
         if (S->fi_alloc_countdown == 0) {
             if (S->try_depth > 0) {
-                set_error(S, "out of memory (fault injection)");
+                set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory (fault injection)");
                 S->try_stack[S->try_depth - 1].exception = NULL;
                 longjmp(S->try_stack[S->try_depth - 1].buf, 1);
             }
@@ -55,7 +55,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     if (h == NULL) {
         /* Recoverable when an eval try-frame exists; fatal otherwise. */
         if (S->try_depth > 0) {
-            set_error(S, "out of memory");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory");
             S->try_stack[S->try_depth - 1].exception = NULL;
             longjmp(S->try_stack[S->try_depth - 1].buf, 1);
         }

@@ -49,12 +49,12 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
     (void)env;
 
     if (ops == NULL || ops->type != MINO_VECTOR) {
-        set_error(S, "alts: operations must be a vector");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "alts: operations must be a vector");
         return 0;
     }
     n = ops->as.vec.len;
     if (n == 0) {
-        set_error(S, "alts: must have at least one operation");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "alts: must have at least one operation");
         return 0;
     }
 
@@ -75,7 +75,7 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
     /* Build shuffled index array. */
     indices = malloc(n * sizeof(size_t));
     if (indices == NULL) {
-        set_error(S, "alts: out of memory");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "alts: out of memory");
         return 0;
     }
     for (i = 0; i < n; i++) indices[i] = i;
@@ -96,12 +96,12 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
             ch = async_chan_get(ch_val);
             if (ch == NULL) {
                 free(indices);
-                set_error(S, "alts: invalid channel in put operation");
+                set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "alts: invalid channel in put operation");
                 return 0;
             }
             if (put_val->type == MINO_NIL) {
                 free(indices);
-                prim_throw_error(S, "alts: cannot put nil on a channel");
+                prim_throw_classified(S, "eval/contract", "MCT001", "alts: cannot put nil on a channel");
                 return 0;
             }
 
@@ -147,7 +147,7 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
             ch = async_chan_get(ch_val);
             if (ch == NULL) {
                 free(indices);
-                set_error(S, "alts: invalid channel in take operation");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "alts: invalid channel in take operation");
                 return 0;
             }
 
@@ -222,7 +222,7 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
         mino_async_flag_t *flag = async_flag_create();
         if (flag == NULL) {
             free(indices);
-            set_error(S, "alts: out of memory creating flag");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "alts: out of memory creating flag");
             return 0;
         }
 

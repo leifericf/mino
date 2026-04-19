@@ -40,7 +40,7 @@ mino_env_t *mino_env_new(mino_state_t *S)
     env = env_alloc(S, NULL);
     r   = (root_env_t *)malloc(sizeof(*r));
     if (r == NULL) {
-        set_error(S, "out of memory");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory");
         return NULL;
     }
     r->env       = env;

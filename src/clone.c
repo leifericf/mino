@@ -204,7 +204,8 @@ mino_val_t *mino_clone(mino_state_t *dst, mino_state_t *src, mino_val_t *val)
     (void)src;
     result = clone_val(dst, val);
     if (result == NULL && val != NULL) {
-        set_error(dst, "clone: value contains non-transferable types "
+        set_eval_diag(dst, dst->eval_current_form, "internal", "MIN001",
+                  "clone: value contains non-transferable types "
                   "(fn, macro, prim, handle, atom, or lazy-seq)");
     }
     return result;
@@ -580,14 +581,14 @@ mino_val_t *prim_send_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL || args->as.cons.cdr->type != MINO_CONS) {
-        set_error(S, "send! requires 2 arguments: actor and value");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "send! requires 2 arguments: actor and value");
         return NULL;
     }
     handle = args->as.cons.car;
     val    = args->as.cons.cdr->as.cons.car;
     if (handle == NULL || handle->type != MINO_HANDLE ||
         strcmp(handle->as.handle.tag, "actor") != 0) {
-        set_error(S, "send! first argument must be an actor handle");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "send! first argument must be an actor handle");
         return NULL;
     }
     a = (mino_actor_t *)handle->as.handle.ptr;
@@ -607,7 +608,7 @@ mino_val_t *prim_receive(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     self = mino_env_get(env, "*self*");
     if (self == NULL || self->type != MINO_HANDLE ||
         strcmp(self->as.handle.tag, "actor") != 0) {
-        set_error(S, "receive: no actor context (*self* not bound)");
+        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "receive: no actor context (*self* not bound)");
         return NULL;
     }
     a = (mino_actor_t *)self->as.handle.ptr;
@@ -626,18 +627,18 @@ mino_val_t *prim_spawn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     char buf[256];
     (void)env;
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "spawn requires 1 argument: init source string");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "spawn requires 1 argument: init source string");
         return NULL;
     }
     src_val = args->as.cons.car;
     if (src_val == NULL || src_val->type != MINO_STRING) {
-        set_error(S, "spawn argument must be a string");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "spawn argument must be a string");
         return NULL;
     }
     src = src_val->as.s.data;
     a = mino_actor_new();
     if (a == NULL) {
-        set_error(S, "spawn: failed to create actor");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "spawn: failed to create actor");
         return NULL;
     }
     /* Install I/O in the actor so it can print etc. */
@@ -650,7 +651,7 @@ mino_val_t *prim_spawn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         const char *err = mino_last_error(a->state);
         snprintf(buf, sizeof(buf),
                  "spawn: init eval failed: %s", err ? err : "unknown error");
-        set_error(S, buf);
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", buf);
         mino_actor_free(a);
         return NULL;
     }

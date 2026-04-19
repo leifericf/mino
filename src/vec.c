@@ -290,7 +290,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
     layer = (mino_vec_node_t **)malloc(num_leaves * sizeof(*layer));
     if (layer == NULL) {
         S->gc_depth--;
-        set_error(S, "out of memory");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory");
         return NULL;
     }
     for (i = 0; i < num_leaves; i++) {
@@ -308,7 +308,7 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
         if (next == NULL) {
             free(layer);
             S->gc_depth--;
-            set_error(S, "out of memory");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory");
             return NULL;
         }
         for (i = 0; i < next_n; i++) {

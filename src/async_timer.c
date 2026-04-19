@@ -37,7 +37,7 @@ mino_val_t *async_timeout(mino_state_t *S, double ms)
     /* Create a buffered channel (1) for the timeout. */
     buf = async_buf_create(S, ASYNC_BUF_FIXED, 1);
     if (buf == NULL) {
-        set_error(S, "out of memory creating timeout buffer");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating timeout buffer");
         return NULL;
     }
     ch = async_chan_create(S, buf);
@@ -45,7 +45,7 @@ mino_val_t *async_timeout(mino_state_t *S, double ms)
 
     entry = calloc(1, sizeof(*entry));
     if (entry == NULL) {
-        set_error(S, "out of memory creating timer entry");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating timer entry");
         return NULL;
     }
     entry->deadline_ms = now_ms() + ms;

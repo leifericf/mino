@@ -181,7 +181,7 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
             /* Landed here from longjmp (OOM or uncaught throw). */
             S->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
-                set_error(S, "unhandled exception");
+                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
             }
             S->call_depth = 0;
             return NULL;
@@ -197,12 +197,12 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
         return NULL;
     }
     if (v->type == MINO_RECUR) {
-        set_error(S, "recur must be in tail position");
+        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "recur must be in tail position");
         S->call_depth = 0;
         return NULL;
     }
     if (v->type == MINO_TAIL_CALL) {
-        set_error(S, "tail call escaped to top level");
+        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "tail call escaped to top level");
         S->call_depth = 0;
         return NULL;
     }
@@ -238,7 +238,7 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
             S->reader_file = saved_file;
             S->reader_line = saved_line;
             if (mino_last_error(S) == NULL) {
-                set_error(S, "unhandled exception");
+                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
             }
             S->call_depth = 0;
             return NULL;
@@ -282,43 +282,43 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
     mino_val_t    *result;
     const char    *saved_file;
     if (path == NULL || env == NULL) {
-        set_error(S, "mino_load_file: NULL argument");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "mino_load_file: NULL argument");
         return NULL;
     }
     f = fopen(path, "rb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "cannot open file: %s", path);
-        set_error(S, msg);
+        set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
         return NULL;
     }
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
-        set_error(S, "cannot seek to end of file");
+        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "cannot seek to end of file");
         return NULL;
     }
     sz = ftell(f);
     if (sz < 0) {
         fclose(f);
-        set_error(S, "cannot determine file size");
+        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "cannot determine file size");
         return NULL;
     }
     if (fseek(f, 0, SEEK_SET) != 0) {
         fclose(f);
-        set_error(S, "cannot seek to start of file");
+        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "cannot seek to start of file");
         return NULL;
     }
     buf = (char *)malloc((size_t)sz + 1);
     if (buf == NULL) {
         fclose(f);
-        set_error(S, "out of memory loading file");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory loading file");
         return NULL;
     }
     rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     if (rd != (size_t)sz) {
         free(buf);
-        set_error(S, "short read loading file");
+        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "short read loading file");
         return NULL;
     }
     buf[rd] = '\0';
@@ -375,9 +375,9 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
             const char *s = NULL;
             size_t slen = 0;
             if (ex != NULL && mino_to_string(ex, &s, &slen)) {
-                set_error(S, s);
+                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", s);
             } else {
-                set_error(S, "unhandled exception");
+                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
             }
         }
         if (out != NULL) {
@@ -491,7 +491,7 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
         while (new_cap < repl->len + add + 1) { new_cap *= 2; }
         nb = (char *)realloc(repl->buf, new_cap);
         if (nb == NULL) {
-            set_error(S, "repl: out of memory");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "repl: out of memory");
             return MINO_REPL_ERROR;
         }
         repl->buf = nb;

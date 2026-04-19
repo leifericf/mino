@@ -38,7 +38,7 @@ mino_val_t *async_handler_create(mino_state_t *S, mino_val_t *callback,
 {
     mino_async_handler_t *h = calloc(1, sizeof(*h));
     if (h == NULL) {
-        set_error(S, "out of memory creating handler");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating handler");
         return NULL;
     }
 
@@ -47,7 +47,7 @@ mino_val_t *async_handler_create(mino_state_t *S, mino_val_t *callback,
         flag = async_flag_create();
         if (flag == NULL) {
             free(h);
-            set_error(S, "out of memory creating handler flag");
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating handler flag");
             return NULL;
         }
     }
