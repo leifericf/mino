@@ -32,7 +32,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     mino_val_t *v;
     const char *slash;
     if (n >= sizeof(buf)) {
-        set_error_at(S, S->eval_current_form, "symbol name too long");
+        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "symbol name too long");
         return NULL;
     }
     memcpy(buf, form->as.s.data, n);
@@ -70,7 +70,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         {
             char msg[300];
             snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
-            set_error_at(S, S->eval_current_form, msg);
+            set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
             return NULL;
         }
     }
@@ -80,7 +80,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     if (v == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
-        set_error_at(S, S->eval_current_form, msg);
+        set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
         return NULL;
     }
     return v;
@@ -179,17 +179,17 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     }
     if (S->interrupted) {
         S->limit_exceeded = 1;
-        set_error(S, "S->interrupted");
+        set_eval_diag(S, S->eval_current_form, "limit", "MLM001", "S->interrupted");
         return NULL;
     }
     if (S->limit_steps > 0 && ++S->eval_steps > S->limit_steps) {
         S->limit_exceeded = 1;
-        set_error(S, "step limit exceeded");
+        set_eval_diag(S, S->eval_current_form, "limit", "MLM001", "step limit exceeded");
         return NULL;
     }
     if (S->limit_heap > 0 && S->gc_bytes_alloc > S->limit_heap) {
         S->limit_exceeded = 1;
-        set_error(S, "heap limit exceeded");
+        set_eval_diag(S, S->eval_current_form, "limit", "MLM001", "heap limit exceeded");
         return NULL;
     }
     if (form == NULL) {
@@ -248,7 +248,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     mino_val_t *prim;
                     if (!mino_is_cons(args)) {
                         gc_unpin(1);
-                        set_error_at(S, form, ".-field requires a target");
+                        set_eval_diag(S, form, "syntax", "MSY001", ".-field requires a target");
                         return NULL;
                     }
                     target_form = args->as.cons.car;
@@ -258,7 +258,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     prim = mino_env_get(env, "host/get");
                     if (prim == NULL) {
                         gc_unpin(2);
-                        set_error_at(S, form, "host/get not bound");
+                        set_eval_diag(S, form, "name", "MNS001", "host/get not bound");
                         return NULL;
                     }
                     {
@@ -277,7 +277,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     mino_val_t *evaled_rest;
                     if (!mino_is_cons(args)) {
                         gc_unpin(1);
-                        set_error_at(S, form, ".method requires a target");
+                        set_eval_diag(S, form, "syntax", "MSY001", ".method requires a target");
                         return NULL;
                     }
                     target_form = args->as.cons.car;
@@ -293,7 +293,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     prim = mino_env_get(env, "host/call");
                     if (prim == NULL) {
                         gc_unpin(3);
-                        set_error_at(S, form, "host/call not bound");
+                        set_eval_diag(S, form, "name", "MNS001", "host/call not bound");
                         return NULL;
                     }
                     {
@@ -324,7 +324,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     prim = mino_env_get(env, "host/new");
                     if (prim == NULL) {
                         gc_unpin(2);
-                        set_error_at(S, form, "host/new not bound");
+                        set_eval_diag(S, form, "name", "MNS001", "host/new not bound");
                         return NULL;
                     }
                     {
@@ -367,7 +367,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                             prim = mino_env_get(env, "host/static-call");
                             if (prim == NULL) {
                                 gc_unpin(3);
-                                set_error_at(S, form,
+                                set_eval_diag(S, form, "name", "MNS001",
                                              "host/static-call not bound");
                                 return NULL;
                             }
@@ -388,21 +388,21 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         /* Special forms. */
         if (sym_eq(head, "quote")) {
             if (!mino_is_cons(args)) {
-                set_error_at(S, form, "quote requires one argument");
+                set_eval_diag(S, form, "syntax", "MSY001", "quote requires one argument");
                 return NULL;
             }
             return args->as.cons.car;
         }
         if (sym_eq(head, "quasiquote")) {
             if (!mino_is_cons(args)) {
-                set_error_at(S, form, "quasiquote requires one argument");
+                set_eval_diag(S, form, "syntax", "MSY001", "quasiquote requires one argument");
                 return NULL;
             }
             return quasiquote_expand(S, args->as.cons.car, env);
         }
         if (sym_eq(head, "unquote")
             || sym_eq(head, "unquote-splicing")) {
-            set_error_at(S, form, "unquote outside of quasiquote");
+            set_eval_diag(S, form, "syntax", "MSY001", "unquote outside of quasiquote");
             return NULL;
         }
         if (sym_eq(head, "defmacro")) {
@@ -420,17 +420,17 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             char vbuf[256];
             size_t vn;
             if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-                set_error_at(S, form, "var requires exactly one argument");
+                set_eval_diag(S, form, "syntax", "MSY001", "var requires exactly one argument");
                 return NULL;
             }
             sym_arg = args->as.cons.car;
             if (sym_arg->type != MINO_SYMBOL) {
-                set_error_at(S, form, "var requires a symbol argument");
+                set_eval_diag(S, form, "syntax", "MSY001", "var requires a symbol argument");
                 return NULL;
             }
             vn = sym_arg->as.s.len;
             if (vn >= sizeof(vbuf)) {
-                set_error_at(S, form, "var: symbol name too long");
+                set_eval_diag(S, form, "syntax", "MSY001", "var: symbol name too long");
                 return NULL;
             }
             memcpy(vbuf, sym_arg->as.s.data, vn);
@@ -465,7 +465,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             {
                 char msg[300];
                 snprintf(msg, sizeof(msg), "var: unbound symbol: %s", vbuf);
-                set_error_at(S, form, msg);
+                set_eval_diag(S, form, "name", "MNS001", msg);
                 return NULL;
             }
         }
@@ -478,7 +478,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             mino_val_t *else_form = mino_nil(S);
             mino_val_t *cond;
             if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-                set_error_at(S, form, "if requires a condition and a then-branch");
+                set_eval_diag(S, form, "syntax", "MSY001", "if requires a condition and a then-branch");
                 return NULL;
             }
             cond_form = args->as.cons.car;
@@ -565,7 +565,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     nargs++;
                 if (nargs < 1 || nargs > 2) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "eval/arity", "MAR001",
                         "keyword as function takes 1 or 2 arguments");
                     return NULL;
                 }
@@ -599,7 +599,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     nargs++;
                 if (nargs < 1 || nargs > 2) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "eval/arity", "MAR001",
                         "map as function takes 1 or 2 arguments");
                     return NULL;
                 }
@@ -624,7 +624,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     nargs++;
                 if (nargs != 1) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "eval/arity", "MAR001",
                         "vector as function takes 1 argument");
                     return NULL;
                 }
@@ -632,13 +632,13 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     mino_val_t *idx = evaled->as.cons.car;
                     long long i;
                     if (idx == NULL || idx->type != MINO_INT) {
-                        set_error_at(S, form,
+                        set_eval_diag(S, form, "eval/type", "MTY002",
                             "vector index must be an integer");
                         return NULL;
                     }
                     i = idx->as.i;
                     if (i < 0 || (size_t)i >= vec->as.vec.len) {
-                        set_error_at(S, form,
+                        set_eval_diag(S, form, "eval/type", "MTY002",
                             "vector index out of bounds");
                         return NULL;
                     }
@@ -657,7 +657,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     nargs++;
                 if (nargs != 1) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "eval/arity", "MAR001",
                         "set as function takes 1 argument");
                     return NULL;
                 }
@@ -680,7 +680,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     nargs++;
                 if (nargs < 1 || nargs > 2) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "eval/arity", "MAR001",
                         "sorted-map as function takes 1 or 2 arguments");
                     return NULL;
                 }
@@ -706,7 +706,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 for (tmp = evaled; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     nargs++;
                 if (nargs != 1) {
-                    set_error_at(S, form,
+                    set_eval_diag(S, form, "eval/arity", "MAR001",
                         "sorted-set as function takes 1 argument");
                     return NULL;
                 }
@@ -723,7 +723,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                     char msg[128];
                     snprintf(msg, sizeof(msg), "not a function (got %s)",
                              type_tag_str(fn));
-                    set_error_at(S, form, msg);
+                    set_eval_diag(S, form, "eval/type", "MTY002", msg);
                 }
                 return NULL;
             }
@@ -744,7 +744,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         }
     }
     }
-    set_error(S, "eval: unknown value type");
+    set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "eval: unknown value type");
     return NULL;
 }
 
