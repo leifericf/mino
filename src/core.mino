@@ -1668,6 +1668,29 @@
       (sequence (first xfs) coll)
       (sequence (apply comp xfs) coll))))
 
+;; --- Array constructors (vectors are mino's array equivalent) ---
+
+(defn object-array "Creates a vector from a size or collection."
+  ([size-or-coll]
+   (if (number? size-or-coll)
+     (vec (repeat size-or-coll nil))
+     (vec size-or-coll))))
+
+(def to-array    "Converts a collection to a vector." vec)
+(def into-array  "Converts a collection to a vector." (fn [& args] (vec (last args))))
+(def int-array   "Creates a vector from a size or collection." object-array)
+(def long-array  "Creates a vector from a size or collection." object-array)
+(def float-array "Creates a vector from a size or collection." object-array)
+(def double-array "Creates a vector from a size or collection." object-array)
+(def short-array "Creates a vector from a size or collection." object-array)
+(def byte-array  "Creates a vector from a size or collection." object-array)
+(def char-array  "Creates a vector from a size or collection." object-array)
+(def boolean-array "Creates a vector from a size or collection." object-array)
+(def aclone      "Clones a vector (identity, since vectors are immutable)." vec)
+(defn aset       "Sets the value at index i in a vector. Returns a new vector." [arr i val] (assoc arr i val))
+(defn aget       "Gets the value at index i in a vector." [arr i] (nth arr i))
+(defn alength    "Returns the length of a vector." [arr] (count arr))
+
 (defmacro spawn "Creates a new actor that evaluates body in its own runtime." [& body]
   (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]
     `(spawn* ~src)))
