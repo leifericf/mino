@@ -154,6 +154,85 @@
        (let [n (name (first form))]
          (or (= n "<!") (= n ">!")))))
 
+(defn go-contains-park?
+  "Returns true if the form tree contains any <! or >! park point.
+   Does not descend into fn or go forms (those are separate scopes)."
+  [form]
+  (cond
+    (go-park? form) true
+    (and (cons? form)
+         (symbol? (first form))
+         (let [n (name (first form))]
+           (or (= n "fn") (= n "fn*") (= n "go"))))
+    false
+    (cons? form) (boolean (some go-contains-park? form))
+    (vector? form) (boolean (some go-contains-park? (seq form)))
+    :else false))
+
+(defn go-if-park?
+  "Returns true if form is (if test then else?) where a branch contains a park."
+  [form]
+  (and (cons? form)
+       (= 'if (first form))
+       (let [fv (vec form)]
+         (and (>= (count fv) 3)
+              (or (go-contains-park? (nth fv 2))
+                  (and (>= (count fv) 4)
+                       (go-contains-park? (nth fv 3))))))))
+
+(defn go-expand-if
+  "Recursively expand when/cond forms to if within a go body,
+   but only in positions where parks might appear. Does not descend
+   into fn or go forms."
+  [form]
+  (cond
+    (not (cons? form)) form
+    (and (symbol? (first form))
+         (let [n (name (first form))]
+           (or (= n "fn") (= n "fn*") (= n "go"))))
+    form
+    ;; (when test body...) -> (if test body nil) or (if test (do body...) nil)
+    (= 'when (first form))
+    (let [body-forms (vec (rest (rest form)))]
+      (go-expand-if
+        (if (= 1 (count body-forms))
+          (list 'if (second form) (first body-forms) nil)
+          (list 'if (second form) (cons 'do body-forms) nil))))
+    ;; (when-not test body...) -> (if test nil body) or (if test nil (do body...))
+    (= 'when-not (first form))
+    (let [body-forms (vec (rest (rest form)))]
+      (go-expand-if
+        (if (= 1 (count body-forms))
+          (list 'if (second form) nil (first body-forms))
+          (list 'if (second form) nil (cons 'do body-forms)))))
+    ;; (cond pairs...) -> nested if
+    (= 'cond (first form))
+    (let [pairs (vec (rest form))]
+      (if (< (count pairs) 2)
+        nil
+        (let [test-form (nth pairs 0)
+              then-form (nth pairs 1)
+              rest-pairs (subvec pairs 2)]
+          (if (= :else test-form)
+            (go-expand-if then-form)
+            (go-expand-if
+              (list 'if test-form
+                    then-form
+                    (if (empty? rest-pairs)
+                      nil
+                      (go-expand-if (apply list 'cond (seq rest-pairs))))))))))
+    ;; if where test is a park -> lift to let-park
+    (and (= 'if (first form))
+         (go-park? (nth (vec form) 1)))
+    (let [fv   (vec form)
+          tmp  (gensym "if_test_")
+          rest-forms (subvec fv 2)]
+      (go-expand-if
+        `(let [~tmp ~(nth fv 1)]
+           (if ~tmp ~@(seq rest-forms)))))
+    ;; Recurse into other forms
+    :else (apply list (map go-expand-if form))))
+
 (defn go-let-park?
   "Returns true if form is (let [x (<! ch) ...] body) where a binding
    value is a park operation."
@@ -223,6 +302,52 @@
                   rest-subs   (rest sub-states)]
               (vec (concat (conj states new-state first-sub) rest-subs)))
 
+            ;; If with park in branch: (if test (<! ch1) (<! ch2))
+            (go-if-park? stmt)
+            (let [fv          (vec stmt)
+                  test-form   (nth fv 1)
+                  then-form   (nth fv 2)
+                  else-form   (if (>= (count fv) 4) (nth fv 3) nil)
+                  bridge-sym  (gensym "if_bridge_")
+                  cb-val      (gensym "if_v_")
+                  make-park-cb (fn [form]
+                                (let [op (name (first form))]
+                                  (if (= op "<!")
+                                    `(chan-take* ~(second form)
+                                       (fn [~cb-val] (chan-put* ~bridge-sym [~cb-val] nil)))
+                                    `(chan-put* ~(second form) ~(nth form 2)
+                                       (fn [~cb-val] (chan-put* ~bridge-sym [~cb-val] nil))))))
+                  make-branch (fn make-branch [form]
+                                (cond
+                                  (go-park? form)
+                                  (make-park-cb form)
+                                  ;; Nested if with parks -> recurse with same bridge
+                                  (go-if-park? form)
+                                  (let [ifv (vec form)
+                                        t   (nth ifv 1)
+                                        th  (nth ifv 2)
+                                        el  (if (>= (count ifv) 4) (nth ifv 3) nil)]
+                                    `(if ~t ~(make-branch th) ~(make-branch el)))
+                                  ;; (do ... park) -> execute stmts then park
+                                  (and (cons? form) (= 'do (first form)))
+                                  (let [body-forms (vec (rest form))
+                                        last-form  (last body-forms)]
+                                    (if (= 1 (count body-forms))
+                                      (make-branch (first body-forms))
+                                      (let [init (butlast body-forms)]
+                                        `(do ~@(seq init) ~(make-branch last-form)))))
+                                  :else
+                                  `(chan-put* ~bridge-sym [~form] nil)))
+                  if-body     `(if ~test-form
+                                 ~(make-branch then-form)
+                                 ~(make-branch else-form))
+                  park        {:kind :take :ch bridge-sym :unwrap true}
+                  new-state   {:body (conj current if-body)
+                               :park park
+                               :use-val has-park :bind bind-sym}]
+              (recur (inc i) (conj states new-state) []
+                     true nil))
+
             ;; Normal statement
             :else
             (recur (inc i) states (conj current stmt)
@@ -259,8 +384,12 @@
                               'val#
                               '(:val val#))
                             nil)
+              ;; Bridge channel for if-park states (unwrap parks)
+              bridge-lets (if (and park (:unwrap park))
+                            [(:ch park) `(chan* (buf-fixed* 1))]
+                            [])
               ;; Wrap body with restored locals + new bind
-              all-lets    (vec (concat restore-lets
+              all-lets    (vec (concat bridge-lets restore-lets
                                  (when bind [bind cur-val])))
               wrapped     (if (empty? all-lets)
                             body
@@ -280,13 +409,15 @@
           (swap! arms conj i)
           (if park
             (let [next-state (inc i)
+                  unwrap?    (:unwrap park)
+                  pack-arg   (if unwrap? `(first ~val-sym) val-sym)
                   park-expr  (if (= (:kind park) :take)
                                `(chan-take* ~(:ch park)
                                   (fn [~val-sym]
-                                    (~machine-sym ~next-state ~(pack-val val-sym))))
+                                    (~machine-sym ~next-state ~(pack-val pack-arg))))
                                `(chan-put* ~(:ch park) ~(:val park)
                                   (fn [~val-sym]
-                                    (~machine-sym ~next-state ~(pack-val val-sym)))))
+                                    (~machine-sym ~next-state ~(pack-val pack-arg)))))
                   ;; Wrap body + park in let if we have bindings to restore
                   full-expr  (if (empty? all-lets)
                                `(do ~@(seq body) ~park-expr)
@@ -315,7 +446,8 @@
   [& body]
   (let [result-ch-sym (gensym "go_result_")
         machine-sym   (gensym "go_fn_")
-        states        (go-transform (cons 'do body) result-ch-sym)]
+        expanded      (go-expand-if (cons 'do body))
+        states        (go-transform expanded result-ch-sym)]
     `(let [~result-ch-sym (chan* (buf-fixed* 1))
            ~machine-sym   ~(go-emit-machine states result-ch-sym)]
        (~machine-sym 0 nil)

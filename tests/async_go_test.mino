@@ -163,4 +163,158 @@
       (drain!)
       (is (= 30 @result)))))
 
+;; --- go with if/cond across park points (Phase 6b) ---
+
+(deftest go-if-both-branches-park
+  (let [ch1 (chan 1)
+        ch2 (chan 1)
+        result (atom nil)]
+    (put! ch1 :from-ch1)
+    (put! ch2 :from-ch2)
+    (drain!)
+    (let [out (go (if true (<! ch1) (<! ch2)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :from-ch1 @result) "if true takes from ch1"))))
+
+(deftest go-if-else-branch
+  (let [ch1 (chan 1)
+        ch2 (chan 1)
+        result (atom nil)]
+    (put! ch1 :from-ch1)
+    (put! ch2 :from-ch2)
+    (drain!)
+    (let [out (go (if false (<! ch1) (<! ch2)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :from-ch2 @result) "if false takes from ch2"))))
+
+(deftest go-if-one-park-one-value
+  (let [ch (chan 1)
+        result (atom nil)]
+    (put! ch :parked)
+    (drain!)
+    (let [out (go (if true (<! ch) :default))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :parked @result) "true branch parks"))))
+
+(deftest go-if-value-then-park-else
+  (let [ch (chan 1)
+        result (atom nil)]
+    (put! ch :parked)
+    (drain!)
+    (let [out (go (if false :default (<! ch)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :parked @result) "else branch parks"))))
+
+(deftest go-if-nil-branch
+  (let [ch (chan 1)
+        result (atom :sentinel)]
+    (put! ch :val)
+    (drain!)
+    (let [out (go (if true (<! ch) nil))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :val @result) "nil in else branch handled"))))
+
+(deftest go-if-park-as-statement
+  (let [ch1 (chan 1)
+        ch2 (chan 1)
+        result (atom nil)]
+    (put! ch1 :a)
+    (drain!)
+    (let [out (go
+                (if true (<! ch1) (<! ch2))
+                :done)]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :done @result) "if-park as statement, not return value"))))
+
+(deftest go-if-with-put-park
+  (let [ch (chan 1)
+        result (atom nil)]
+    (let [out (go (if true (>! ch :sent) :skip)
+                  :done)]
+      (take! ch (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :sent @result) "if branch with >! park"))))
+
+(deftest go-if-dynamic-condition
+  (let [src (chan 1)
+        ch1 (chan 1)
+        ch2 (chan 1)
+        result (atom nil)]
+    (put! src 10)
+    (put! ch1 :big)
+    (put! ch2 :small)
+    (drain!)
+    (let [out (go (let [x (<! src)]
+                    (if (> x 5) (<! ch1) (<! ch2))))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :big @result) "dynamic condition from earlier park"))))
+
+(deftest go-when-park
+  (let [ch (chan 1)
+        result (atom nil)]
+    (put! ch :val)
+    (drain!)
+    (let [out (go (when true (<! ch)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :val @result) "when with park"))))
+
+(deftest go-when-false-park
+  (let [ch (chan 1)
+        result (atom :sentinel)]
+    (put! ch :val)
+    (drain!)
+    (let [out (go (when false (<! ch)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (nil? @result) "when false returns nil"))))
+
+(deftest go-cond-park
+  (let [ch1 (chan 1)
+        ch2 (chan 1)
+        ch3 (chan 1)
+        result (atom nil)]
+    (put! ch1 :a)
+    (put! ch2 :b)
+    (put! ch3 :c)
+    (drain!)
+    (let [out (go (cond
+                    false (<! ch1)
+                    true  (<! ch2)
+                    :else (<! ch3)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :b @result) "cond selects correct park branch"))))
+
+(deftest go-cond-else-park
+  (let [ch (chan 1)
+        result (atom nil)]
+    (put! ch :fallthrough)
+    (drain!)
+    (let [out (go (cond
+                    false :a
+                    false :b
+                    :else (<! ch)))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :fallthrough @result) "cond :else with park"))))
+
+(deftest go-if-pending-park
+  (let [ch1 (chan)
+        ch2 (chan)
+        result (atom nil)]
+    (let [out (go (if true (<! ch1) (<! ch2)))]
+      (put! ch1 :delayed)
+      (drain!)
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= :delayed @result) "if-park with pending channel"))))
+
 (run-tests)
