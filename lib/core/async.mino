@@ -553,6 +553,19 @@
           locals-map (apply hash-map
                        (mapcat (fn [b a] [`'~b a]) binds args))]
       `(~machine-sym ~target {:val nil :locals ~locals-map}))
+    ;; Direct park (<! or >!) as exit value
+    (go-park? form)
+    (let [op (name (first form))
+          cb-sym (gensym "park_exit_")]
+      (if (= op "<!")
+        `(chan-take* ~(second form)
+           (fn [~cb-sym]
+             (when (not (nil? ~cb-sym))
+               (chan-put* ~result-ch ~cb-sym (fn [~val-sym] nil)))
+             (chan-close* ~result-ch)))
+        `(chan-put* ~(second form) ~(nth form 2)
+           (fn [~cb-sym]
+             (chan-close* ~result-ch)))))
     ;; Don't descend into fn/go/loop
     (and (cons? form) (symbol? (first form))
          (let [n (name (first form))]
