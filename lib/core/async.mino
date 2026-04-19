@@ -1021,9 +1021,10 @@
   (let [modes    (get (:channels state) ch)
         any-solo (some (fn [entry] (:solo (val entry))) (:channels state))]
     (cond
-      (nil? modes) false
-      any-solo     (and (:solo modes) (not (:mute modes)))
-      :else        (not (:mute modes)))))
+      (nil? modes)    false
+      (:pause modes)  false
+      any-solo        (and (:solo modes) (not (:mute modes)))
+      :else           (not (:mute modes)))))
 
 (defn mix-paused?
   "Returns true if ch is paused in the mix."
@@ -1037,7 +1038,9 @@
       :else        (:pause modes))))
 
 (defn admix
-  "Adds ch as an input to the mix. Starts reading from it."
+  "Adds ch as an input to the mix. Starts reading from it.
+   Always reads from the channel while it is in the mix; paused/muted
+   values are consumed but not forwarded."
   [m ch]
   (swap! (:state m) update :channels assoc ch
          {:solo false :mute false :pause false})
@@ -1049,9 +1052,8 @@
                       (do
                         (when (mix-should-pass? s ch)
                           (put! (:out m) v))
-                        ;; Continue reading if still in mix and not paused
-                        (when (and (get (:channels @(:state m)) ch)
-                                   (not (mix-paused? @(:state m) ch)))
+                        ;; Continue reading while still in mix
+                        (when (get (:channels @(:state m)) ch)
                           (take! ch do-read))))))]
     (take! ch do-read))
   nil)

@@ -885,6 +885,42 @@
     (drain!)
     (is (= nil (poll! out)))))
 
+(deftest mix-pause-resume
+  (let [out (chan 10)
+        m   (mix out)
+        ch1 (chan 10)]
+    (admix m ch1)
+    ;; Values flow normally
+    (put! ch1 1)
+    (drain!)
+    (is (= 1 (poll! out)))
+    ;; Pause the channel
+    (toggle m {ch1 {:solo false :mute false :pause true}})
+    (put! ch1 2)
+    (drain!)
+    (is (= nil (poll! out)))
+    ;; Unpause - values should flow again
+    (toggle m {ch1 {:solo false :mute false :pause false}})
+    (put! ch1 3)
+    (drain!)
+    (is (= 3 (poll! out)))))
+
+(deftest mix-solo-mode-mute
+  (let [out (chan 10)
+        m   (mix out)
+        ch1 (chan 10)
+        ch2 (chan 10)]
+    (admix m ch1)
+    (admix m ch2)
+    ;; Solo ch1 with mute mode (default): ch2 values dropped
+    (solo-mode m :mute)
+    (toggle m {ch1 {:solo true :mute false :pause false}})
+    (put! ch1 :a)
+    (put! ch2 :b)
+    (drain!)
+    (is (= :a (poll! out)))
+    (is (= nil (poll! out)))))
+
 ;; ===== Multiple go blocks on same channel =====
 
 (deftest multiple-go-writers
