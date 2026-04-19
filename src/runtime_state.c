@@ -87,6 +87,13 @@ void mino_state_free(mino_state_t *S)
     /* Free structured diagnostic. */
     diag_free(S->last_diag);
     S->last_diag = NULL;
+    /* Free source cache. */
+    {
+        int sci;
+        for (sci = 0; sci < MINO_SOURCE_CACHE_SIZE; sci++) {
+            free(S->source_cache[sci].text);
+        }
+    }
     /* Free async scheduler run queue. */
     {
         struct sched_entry *e = S->async_run_head;
@@ -324,6 +331,7 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
     buf[rd] = '\0';
     saved_file  = S->reader_file;
     S->reader_file = intern_filename(path);
+    source_cache_store(S, S->reader_file, buf, rd);
     result = mino_eval_string(S, buf, env);
     S->reader_file = saved_file;
     free(buf);

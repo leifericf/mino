@@ -304,6 +304,15 @@ const mino_diag_t *mino_last_diag(mino_state_t *S);
  * Returns nil if no error occurred. The value is GC-owned and cached. */
 mino_val_t *mino_last_error_map(mino_state_t *S);
 
+/* Diagnostic rendering modes. */
+#define MINO_DIAG_RENDER_COMPACT 0
+#define MINO_DIAG_RENDER_PRETTY  1
+
+/* Render a diagnostic into buf. Returns bytes written (excl NUL).
+ * mode is one of MINO_DIAG_RENDER_COMPACT or _PRETTY. */
+int mino_render_diag(mino_state_t *S, const mino_diag_t *d,
+                     int mode, char *buf, size_t n);
+
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */

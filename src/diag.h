@@ -121,6 +121,10 @@ void diag_capture_frames(mino_state_t *S, mino_diag_t *d);
  * Output is truncated if it exceeds n-1 bytes. */
 int diag_render_compact(const mino_diag_t *d, char *buf, size_t n);
 
+/* Render a pretty multi-line diagnostic with source snippet and caret. */
+int diag_render_pretty(mino_state_t *S, const mino_diag_t *d,
+                       char *buf, size_t n);
+
 /* ------------------------------------------------------------------------- */
 /* Map conversion                                                            */
 /* ------------------------------------------------------------------------- */

@@ -5,6 +5,69 @@
 #include "mino_internal.h"
 
 /* ------------------------------------------------------------------------- */
+/* Source cache                                                              */
+/* ------------------------------------------------------------------------- */
+
+void source_cache_store(mino_state_t *S, const char *file,
+                        const char *text, size_t len)
+{
+    int slot = -1;
+    int i;
+    /* Find existing slot for this file or pick the first empty one. */
+    for (i = 0; i < MINO_SOURCE_CACHE_SIZE; i++) {
+        if (S->source_cache[i].file == file) {
+            slot = i;
+            break;
+        }
+        if (S->source_cache[i].file == NULL && slot < 0) {
+            slot = i;
+        }
+    }
+    /* Evict slot 0 if full. */
+    if (slot < 0) {
+        free(S->source_cache[0].text);
+        slot = 0;
+    } else {
+        free(S->source_cache[slot].text);
+    }
+    S->source_cache[slot].file = file;
+    S->source_cache[slot].text = (char *)malloc(len + 1);
+    if (S->source_cache[slot].text != NULL) {
+        memcpy(S->source_cache[slot].text, text, len);
+        S->source_cache[slot].text[len] = '\0';
+        S->source_cache[slot].len = len;
+    } else {
+        S->source_cache[slot].file = NULL;
+        S->source_cache[slot].len = 0;
+    }
+}
+
+const char *source_cache_get_line(mino_state_t *S, const char *file,
+                                  int line, size_t *out_len)
+{
+    int i;
+    const char *p, *end, *line_start;
+    int cur;
+    for (i = 0; i < MINO_SOURCE_CACHE_SIZE; i++) {
+        if (S->source_cache[i].file == file && S->source_cache[i].text != NULL) {
+            p = S->source_cache[i].text;
+            end = p + S->source_cache[i].len;
+            cur = 1;
+            while (p < end && cur < line) {
+                if (*p == '\n') cur++;
+                p++;
+            }
+            if (cur != line) return NULL;
+            line_start = p;
+            while (p < end && *p != '\n') p++;
+            *out_len = (size_t)(p - line_start);
+            return line_start;
+        }
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------- */
 
@@ -159,6 +222,97 @@ int diag_render_compact(const mino_diag_t *d, char *buf, size_t n)
                            d->message ? d->message : "error");
     }
     return written < 0 ? 0 : written;
+}
+
+int diag_render_pretty(mino_state_t *S, const mino_diag_t *d,
+                       char *buf, size_t n)
+{
+    size_t pos = 0;
+    size_t i;
+    int w;
+    if (d == NULL || buf == NULL || n == 0) return 0;
+
+    /* Header: error[CODE]: message */
+    w = snprintf(buf + pos, n - pos, "error[%s]: %s\n",
+                 d->code ? d->code : "???",
+                 d->message ? d->message : "error");
+    if (w > 0) pos += (size_t)w;
+
+    /* Location pointer */
+    if (d->has_primary_span && d->primary_span.file != NULL
+        && d->primary_span.line > 0 && pos < n) {
+        const mino_span_t *sp = &d->primary_span;
+        w = snprintf(buf + pos, n - pos, "  --> %s:%d:%d\n",
+                     sp->file, sp->line, sp->column);
+        if (w > 0) pos += (size_t)w;
+
+        /* Source snippet with caret */
+        if (S != NULL && pos < n) {
+            size_t line_len = 0;
+            const char *line_text = source_cache_get_line(
+                S, sp->file, sp->line, &line_len);
+            if (line_text != NULL) {
+                int gutter_w = snprintf(buf + pos, n - pos, "   |\n");
+                if (gutter_w > 0) pos += (size_t)gutter_w;
+
+                /* Source line */
+                w = snprintf(buf + pos, n - pos, "%3d | %.*s\n",
+                             sp->line, (int)line_len, line_text);
+                if (w > 0) pos += (size_t)w;
+
+                /* Caret line */
+                if (sp->column > 0 && pos < n) {
+                    int pad = sp->column - 1;
+                    w = snprintf(buf + pos, n - pos, "    | ");
+                    if (w > 0) pos += (size_t)w;
+                    while (pad > 0 && pos < n - 1) {
+                        buf[pos++] = ' ';
+                        pad--;
+                    }
+                    if (pos < n - 1) buf[pos++] = '^';
+                    if (pos < n - 1) buf[pos++] = '\n';
+                }
+            }
+        }
+    }
+
+    /* Notes */
+    for (i = 0; i < d->notes_len && pos < n; i++) {
+        w = snprintf(buf + pos, n - pos, "note: %s\n",
+                     d->notes[i].message ? d->notes[i].message : "");
+        if (w > 0) pos += (size_t)w;
+    }
+
+    /* Stack trace */
+    if (d->frames_len > 0 && pos < n) {
+        w = snprintf(buf + pos, n - pos, "stack trace:\n");
+        if (w > 0) pos += (size_t)w;
+        for (i = 0; i < d->frames_len && pos < n; i++) {
+            const mino_diag_frame_t *f = &d->frames[i];
+            if (f->file != NULL) {
+                w = snprintf(buf + pos, n - pos, "  at %s (%s:%d)\n",
+                             f->fn_name ? f->fn_name : "<fn>",
+                             f->file, f->line);
+            } else {
+                w = snprintf(buf + pos, n - pos, "  at %s\n",
+                             f->fn_name ? f->fn_name : "<fn>");
+            }
+            if (w > 0) pos += (size_t)w;
+        }
+    }
+
+    if (pos < n) buf[pos] = '\0';
+    else if (n > 0) buf[n - 1] = '\0';
+    return (int)pos;
+}
+
+/* Public rendering dispatcher. */
+int mino_render_diag(mino_state_t *S, const mino_diag_t *d,
+                     int mode, char *buf, size_t n)
+{
+    if (mode == MINO_DIAG_RENDER_PRETTY)
+        return diag_render_pretty(S, d, buf, n);
+    return diag_render_compact(d, buf, n);
 }
 
 /* ------------------------------------------------------------------------- */

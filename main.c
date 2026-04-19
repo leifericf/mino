@@ -7,7 +7,7 @@
  * is written to stderr so piped output on stdout stays clean.
  */
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -97,8 +97,16 @@ int main(int argc, char **argv)
     if (argc > 1) {
         mino_val_t *result = mino_load_file(S, argv[1], env);
         if (result == NULL) {
-            const char *err = mino_last_error(S);
-            fprintf(stderr, "mino: %s\n", err ? err : "unknown error");
+            const mino_diag_t *d = mino_last_diag(S);
+            if (d != NULL) {
+                char dbuf[2048];
+                mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
+                                 dbuf, sizeof(dbuf));
+                fprintf(stderr, "%s", dbuf);
+            } else {
+                const char *err = mino_last_error(S);
+                fprintf(stderr, "mino: %s\n", err ? err : "unknown error");
+            }
             exit_code = 1;
         }
         mino_env_free(S, env);
@@ -147,6 +155,9 @@ int main(int argc, char **argv)
                 break;
             }
 
+            /* Cache REPL input for diagnostic source snippets. */
+            source_cache_store(S, S->reader_file, buf, len);
+
             form = mino_read(S, cursor, &end);
             if (form == NULL) {
                 const char *err = mino_last_error(S);
@@ -154,7 +165,18 @@ int main(int argc, char **argv)
                     awaiting_continuation = 1;
                     break;
                 }
-                fprintf(stderr, "read error: %s\n", err ? err : "unknown");
+                {
+                    const mino_diag_t *d = mino_last_diag(S);
+                    if (d != NULL) {
+                        char dbuf[2048];
+                        mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
+                                         dbuf, sizeof(dbuf));
+                        fprintf(stderr, "%s", dbuf);
+                    } else {
+                        fprintf(stderr, "read error: %s\n",
+                                err ? err : "unknown");
+                    }
+                }
                 len = 0;
                 buf[0] = '\0';
                 awaiting_continuation = 0;
@@ -163,8 +185,17 @@ int main(int argc, char **argv)
 
             result = mino_eval(S, form, env);
             if (result == NULL) {
-                const char *err = mino_last_error(S);
-                fprintf(stderr, "eval error: %s\n", err ? err : "unknown");
+                const mino_diag_t *d = mino_last_diag(S);
+                if (d != NULL) {
+                    char dbuf[2048];
+                    mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
+                                     dbuf, sizeof(dbuf));
+                    fprintf(stderr, "%s", dbuf);
+                } else {
+                    const char *err = mino_last_error(S);
+                    fprintf(stderr, "eval error: %s\n",
+                            err ? err : "unknown");
+                }
             } else {
                 mino_println(S, result);
             }

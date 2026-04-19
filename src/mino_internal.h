@@ -245,6 +245,14 @@ struct mino_state {
     int             reader_col;
     const char     *reader_dialect;   /* "mino" */
 
+    /* Source cache for diagnostic rendering. */
+    #define MINO_SOURCE_CACHE_SIZE 4
+    struct {
+        const char *file;   /* interned filename */
+        char       *text;   /* malloc-owned full source text */
+        size_t      len;    /* length of text */
+    } source_cache[4];
+
     /* Namespace */
     const char     *current_ns;       /* from (ns ...), default "user" */
     ns_alias_t     *ns_aliases;
@@ -391,6 +399,10 @@ void        set_error_at(mino_state_t *S, const mino_val_t *form, /* form: borro
                          const char *msg);                         /* msg: borrowed */
 void        clear_error(mino_state_t *S);
 void        set_diag(mino_state_t *S, mino_diag_t *d);           /* d: consumed */
+void        source_cache_store(mino_state_t *S, const char *file,
+                               const char *text, size_t len);
+const char *source_cache_get_line(mino_state_t *S, const char *file,
+                                  int line, size_t *out_len);
 void        set_eval_diag(mino_state_t *S, const mino_val_t *form,
                           const char *kind, const char *code,
                           const char *msg);
