@@ -86,7 +86,7 @@
 (def map?     "Returns true if x is a map." (fn [x] (let [t (type x)] (or (= t :map) (= t :sorted-map)))))
 (def fn?      "Returns true if x is a function." (fn [x] (= (type x) :fn)))
 (def set?     "Returns true if x is a set." (fn [x] (let [t (type x)] (or (= t :set) (= t :sorted-set)))))
-(def ifn?     "Returns true if x can be called as a function." (fn [x] (or (fn? x) (keyword? x) (map? x) (vector? x) (set? x))))
+(def ifn?     "Returns true if x can be called as a function." (fn [x] (or (fn? x) (keyword? x) (map? x) (vector? x) (set? x) (symbol? x) (var? x))))
 
 ;; --- Qualified symbol/keyword predicates ---
 
@@ -286,11 +286,11 @@
 (def abs        "Returns the absolute value of x." (fn [x] (if (< x 0) (- x) x)))
 (def max        "Returns the greatest of the given values." (fn
                   ([a] a)
-                  ([a b] (if (> a b) a b))
+                  ([a b] (if (NaN? a) a (if (NaN? b) b (if (> a b) a b))))
                   ([a b & more] (reduce max (max a b) more))))
 (def min        "Returns the least of the given values." (fn
                   ([a] a)
-                  ([a b] (if (< a b) a b))
+                  ([a b] (if (NaN? a) a (if (NaN? b) b (if (< a b) a b))))
                   ([a b & more] (reduce min (min a b) more))))
 (def min-key    "Returns the x for which (k x) is least." (fn
                   ([k x] x)
