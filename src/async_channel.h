@@ -53,6 +53,10 @@ typedef struct mino_async_chan {
     int               closed;
     size_t            pending_puts_count;
     size_t            pending_takes_count;
+    mino_val_t       *xform;       /* transducer rf (NULL = no xform) */
+    mino_ref_t       *xform_ref;
+    mino_val_t       *ex_handler;  /* exception handler fn (NULL = none) */
+    mino_ref_t       *ex_ref;
 } mino_async_chan_t;
 
 /* Create a channel. buf may be NULL for unbuffered.
@@ -100,6 +104,17 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch);
 pending_op_t *async_dequeue_put(mino_async_chan_t *ch);
 pending_op_t *async_dequeue_take(mino_async_chan_t *ch);
 void async_op_free(mino_state_t *S, pending_op_t *op);
+
+/* Set the transducer reducing function and exception handler on a channel.
+ * Both may be NULL.  The channel takes ownership of the refs. */
+void async_chan_set_xform(mino_state_t *S, mino_async_chan_t *ch,
+                          mino_val_t *xform, mino_val_t *ex_handler);
+
+/* Add a value directly to the channel's buffer (bypassing the
+ * transducer and pending-op logic).  Used by transducer step
+ * functions as their reducing function. */
+void async_chan_buf_add(mino_state_t *S, mino_async_chan_t *ch,
+                        mino_val_t *val);
 
 /* Register a pending put for alts arbitration.
  * Does not attempt immediate completion -- always enqueues.

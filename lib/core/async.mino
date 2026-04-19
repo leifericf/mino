@@ -26,12 +26,27 @@
 (defn chan
   "Creates a channel. With no args, creates an unbuffered channel.
    With a buffer-or-n argument, creates a buffered channel.
-   If a number is given, creates a fixed buffer of that size."
+   If a number is given, creates a fixed buffer of that size.
+   With a transducer xform, values are transformed on put.
+   With an ex-handler, exceptions in xform are caught and the
+   return value of the handler is used (nil = drop the value)."
   ([] (chan*))
   ([buf-or-n]
    (if (number? buf-or-n)
      (chan* (buf-fixed* buf-or-n))
-     (chan* buf-or-n))))
+     (chan* buf-or-n)))
+  ([buf-or-n xform]
+   (chan buf-or-n xform nil))
+  ([buf-or-n xform ex-handler]
+   (let [ch (chan buf-or-n)
+         add-fn (fn
+                  ([result] result)
+                  ([result input]
+                   (chan-buf-add* ch input)
+                   result))
+         rf (xform add-fn)]
+     (chan-set-xform* ch rf ex-handler)
+     ch)))
 
 (defn promise-chan
   "Creates a promise channel. The first value put will be delivered

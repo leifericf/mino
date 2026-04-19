@@ -189,6 +189,22 @@ static void schedule_op_result(mino_state_t *S, pending_op_t *op,
 /* Core transfer: put                                                 */
 /* ------------------------------------------------------------------ */
 
+/* After an xform step may have added items to the buffer, transfer
+ * buffered values to any waiting takers. */
+static void flush_buf_to_takers(mino_state_t *S, mino_async_chan_t *ch)
+{
+    while (ch->buf && async_buf_count(ch->buf) > 0 && ch->takes_head) {
+        pending_op_t *taker = dequeue_active_take(S, ch);
+        if (taker) {
+            mino_val_t *v = async_buf_remove(S, ch->buf);
+            gc_pin(v);
+            schedule_op_result(S, taker, v);
+            async_op_free(S, taker);
+            gc_unpin(1);
+        }
+    }
+}
+
 int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
                   mino_val_t *val, mino_val_t *put_cb)
 {
@@ -198,6 +214,45 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
     if (ch->closed) {
         if (put_cb)
             async_sched_enqueue(S, put_cb, mino_false(S));
+        return 1;
+    }
+
+    /* Transducer path: call step fn which adds to buffer via side effect.
+     * The step fn internally calls chan-buf-add* for each output value. */
+    if (ch->xform) {
+        mino_val_t *args, *result;
+        gc_pin(val);
+        gc_pin(put_cb);
+        args = mino_cons(S, mino_nil(S), mino_cons(S, val, NULL));
+
+        if (mino_pcall(S, ch->xform, args, NULL, &result) != 0) {
+            /* xform threw. Try ex_handler if available. */
+            if (ch->ex_handler) {
+                const char *err = mino_last_error(S);
+                mino_val_t *err_str = mino_string(S, err ? err : "xform error");
+                mino_val_t *ex_args = mino_cons(S, err_str, NULL);
+                mino_val_t *ex_result;
+                if (mino_pcall(S, ch->ex_handler, ex_args, NULL,
+                               &ex_result) == 0
+                    && ex_result != NULL
+                    && ex_result->type != MINO_NIL) {
+                    async_chan_buf_add(S, ch, ex_result);
+                }
+            }
+            /* If no ex_handler, the value is silently dropped. */
+        } else if (result != NULL && result->type == MINO_REDUCED) {
+            /* Early termination: close the channel after this put. */
+            async_chan_close(S, ch);
+        }
+
+        /* Transfer any buffered values to waiting takers. */
+        flush_buf_to_takers(S, ch);
+
+        if (put_cb && !ch->closed)
+            async_sched_enqueue(S, put_cb, mino_true(S));
+        else if (put_cb)
+            async_sched_enqueue(S, put_cb, mino_false(S));
+        gc_unpin(2);
         return 1;
     }
 
@@ -325,6 +380,20 @@ void async_chan_close(mino_state_t *S, mino_async_chan_t *ch)
     if (ch->closed) return;
     ch->closed = 1;
 
+    /* Call xform completion arity if present (lets stateful xforms flush). */
+    if (ch->xform) {
+        mino_val_t *result;
+        mino_val_t *args = mino_cons(S, mino_nil(S), NULL);
+        (void)mino_pcall(S, ch->xform, args, NULL, &result);
+        /* Transfer any flushed values to waiting takers. */
+        flush_buf_to_takers(S, ch);
+        /* Release xform refs. */
+        if (ch->xform_ref) { mino_unref(S, ch->xform_ref); ch->xform_ref = NULL; }
+        if (ch->ex_ref)    { mino_unref(S, ch->ex_ref);     ch->ex_ref    = NULL; }
+        ch->xform      = NULL;
+        ch->ex_handler = NULL;
+    }
+
     /* Deliver nil to all pending takers (skip committed alts ops). */
     while ((op = async_dequeue_take(ch)) != NULL) {
         if (op->flag && op->flag->committed) {
@@ -448,4 +517,30 @@ void async_chan_enqueue_take_alts(mino_state_t *S, mino_async_chan_t *ch,
     op->ch_ref = ch_handle ? mino_ref(S, ch_handle) : NULL;
     async_flag_ref(flag);
     enqueue_take(ch, op);
+}
+
+/* ------------------------------------------------------------------ */
+/* Transducer support                                                 */
+/* ------------------------------------------------------------------ */
+
+void async_chan_set_xform(mino_state_t *S, mino_async_chan_t *ch,
+                          mino_val_t *xform, mino_val_t *ex_handler)
+{
+    /* Release previous refs if re-setting. */
+    if (ch->xform_ref) mino_unref(S, ch->xform_ref);
+    if (ch->ex_ref)    mino_unref(S, ch->ex_ref);
+
+    ch->xform      = xform;
+    ch->xform_ref  = xform ? mino_ref(S, xform) : NULL;
+    ch->ex_handler = ex_handler;
+    ch->ex_ref     = ex_handler ? mino_ref(S, ex_handler) : NULL;
+}
+
+void async_chan_buf_add(mino_state_t *S, mino_async_chan_t *ch,
+                        mino_val_t *val)
+{
+    if (ch->buf == NULL) return;
+    gc_pin(val);
+    async_buf_add(S, ch->buf, val);
+    gc_unpin(1);
 }

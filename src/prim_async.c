@@ -251,6 +251,75 @@ static mino_val_t *prim_chan_poll(mino_state_t *S, mino_val_t *args,
 }
 
 /* ------------------------------------------------------------------ */
+/* Transducer support primitives                                      */
+/* ------------------------------------------------------------------ */
+
+/* (chan-set-xform* ch rf ex-handler)
+ * Set the transducer reducing function and exception handler on a channel.
+ * Both rf and ex-handler may be nil. */
+static mino_val_t *prim_chan_set_xform(mino_state_t *S, mino_val_t *args,
+                                       mino_env_t *env)
+{
+    mino_val_t *ch_val, *xform, *ex_handler = NULL;
+    mino_async_chan_t *ch;
+    (void)env;
+
+    if (args == NULL || args->type != MINO_CONS ||
+        args->as.cons.cdr == NULL) {
+        set_error(S, "chan-set-xform* requires channel and rf");
+        return NULL;
+    }
+    ch_val = args->as.cons.car;
+    xform  = args->as.cons.cdr->as.cons.car;
+
+    ch = async_chan_get(ch_val);
+    if (ch == NULL) {
+        set_error(S, "chan-set-xform* first argument must be a channel");
+        return NULL;
+    }
+
+    if (xform->type == MINO_NIL) xform = NULL;
+
+    /* Optional ex-handler. */
+    if (args->as.cons.cdr->as.cons.cdr != NULL &&
+        args->as.cons.cdr->as.cons.cdr->type == MINO_CONS) {
+        ex_handler = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        if (ex_handler->type == MINO_NIL) ex_handler = NULL;
+    }
+
+    async_chan_set_xform(S, ch, xform, ex_handler);
+    return mino_nil(S);
+}
+
+/* (chan-buf-add* ch val)
+ * Add a value directly to the channel's buffer, bypassing the
+ * transducer. Used as the reducing function's step operation. */
+static mino_val_t *prim_chan_buf_add(mino_state_t *S, mino_val_t *args,
+                                     mino_env_t *env)
+{
+    mino_val_t *ch_val, *val;
+    mino_async_chan_t *ch;
+    (void)env;
+
+    if (args == NULL || args->type != MINO_CONS ||
+        args->as.cons.cdr == NULL) {
+        set_error(S, "chan-buf-add* requires channel and value");
+        return NULL;
+    }
+    ch_val = args->as.cons.car;
+    val    = args->as.cons.cdr->as.cons.car;
+
+    ch = async_chan_get(ch_val);
+    if (ch == NULL) {
+        set_error(S, "chan-buf-add* first argument must be a channel");
+        return NULL;
+    }
+
+    async_chan_buf_add(S, ch, val);
+    return mino_nil(S);
+}
+
+/* ------------------------------------------------------------------ */
 /* Channel predicate                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -393,6 +462,8 @@ void mino_install_async(mino_state_t *S, mino_env_t *env)
     DEF_PRIM(env, "chan-closed?*", prim_chan_closed_p,  "Check if a channel is closed.");
     DEF_PRIM(env, "offer!*",      prim_chan_offer,     "Non-blocking put on a channel.");
     DEF_PRIM(env, "poll!*",       prim_chan_poll,       "Non-blocking take from a channel.");
+    DEF_PRIM(env, "chan-set-xform*", prim_chan_set_xform, "Set transducer on channel.");
+    DEF_PRIM(env, "chan-buf-add*",   prim_chan_buf_add,   "Raw buffer add (for xform rf).");
     DEF_PRIM(env, "alts*",        prim_alts,           "Alts arbitration primitive.");
     DEF_PRIM(env, "timeout*",     prim_timeout,        "Create a timeout channel.");
 
