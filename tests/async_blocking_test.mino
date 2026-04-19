@@ -1,0 +1,60 @@
+(require "tests/test")
+(require "core/async")
+
+(deftest blocking-take-buffered
+  (let [ch (chan 1)]
+    (put! ch :val)
+    (drain!)
+    (is (= :val (<!! ch)))))
+
+(deftest blocking-take-from-closed
+  (let [ch (chan)]
+    (close! ch)
+    (is (nil? (<!! ch)))))
+
+(deftest blocking-put-buffered
+  (let [ch (chan 1)]
+    (is (true? (>!! ch :x)))
+    (is (= :x (<!! ch)))))
+
+(deftest blocking-put-closed
+  (let [ch (chan)]
+    (close! ch)
+    (is (false? (>!! ch :x)))))
+
+(deftest blocking-take-deadlock-throws
+  (let [ch (chan)]
+    (is (thrown? (<!! ch)))))
+
+(deftest blocking-put-deadlock-throws
+  (let [ch (chan)]
+    (is (thrown? (>!! ch :x)))))
+
+(deftest blocking-round-trip
+  (let [ch (chan 1)]
+    (>!! ch 42)
+    (is (= 42 (<!! ch)))))
+
+(deftest blocking-multiple
+  (let [ch (chan 3)]
+    (>!! ch 1)
+    (>!! ch 2)
+    (>!! ch 3)
+    (is (= 1 (<!! ch)))
+    (is (= 2 (<!! ch)))
+    (is (= 3 (<!! ch)))))
+
+(deftest blocking-alts-take
+  (let [ch (chan 1)]
+    (>!! ch :x)
+    (let [[val port] (alts!! [ch])]
+      (is (= :x val))
+      (is (identical? ch port)))))
+
+(deftest blocking-alts-with-default
+  (let [ch (chan)]
+    (let [[val port] (alts!! [ch] {:default :nope})]
+      (is (= :nope val))
+      (is (= :default port)))))
+
+(run-tests)

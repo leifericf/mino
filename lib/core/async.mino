@@ -249,6 +249,40 @@
   [bindings & body]
   `(go (loop ~bindings ~@(seq body))))
 
+;; --- Blocking bridge ---
+
+(defn <!!
+  "Blocking take from a channel. Drains the scheduler until
+   a value is available. Returns the taken value (nil if closed)."
+  [ch]
+  (let [result (atom ::pending)]
+    (take! ch (fn [v] (reset! result v)))
+    (drain!)
+    (if (= ::pending @result)
+      (throw "<!!: would deadlock -- no producer for this channel")
+      @result)))
+
+(defn >!!
+  "Blocking put onto a channel. Drains the scheduler until
+   the put completes. Returns true if successful, false if closed."
+  [ch val]
+  (let [result (atom ::pending)]
+    (put! ch val (fn [v] (reset! result v)))
+    (drain!)
+    (if (= ::pending @result)
+      (throw ">!!: would deadlock -- no consumer for this channel")
+      @result)))
+
+(defn alts!!
+  "Blocking version of alts!. Drains the scheduler until one
+   operation completes. Returns [val ch]."
+  ([ops] (alts!! ops {}))
+  ([ops opts]
+   (let [result (alts! ops opts)]
+     (if (nil? result)
+       (throw "alts!!: would deadlock -- no operations can complete")
+       result))))
+
 ;; --- Combinators ---
 
 (defn pipe
