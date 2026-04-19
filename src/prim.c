@@ -47,7 +47,9 @@ mino_val_t *prim_throw_error(mino_state_t *S, const char *msg)
         S->try_stack[S->try_depth - 1].exception = ex;
         longjmp(S->try_stack[S->try_depth - 1].buf, 1);
     }
-    return prim_throw_error(S, msg);
+    set_error(S, msg);
+    append_trace(S);
+    return NULL;
 }
 
 int as_double(const mino_val_t *v, double *out)
