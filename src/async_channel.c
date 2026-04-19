@@ -394,24 +394,14 @@ void async_chan_close(mino_state_t *S, mino_async_chan_t *ch)
         ch->ex_handler = NULL;
     }
 
-    /* Deliver nil to all pending takers (skip committed alts ops). */
-    while ((op = async_dequeue_take(ch)) != NULL) {
-        if (op->flag && op->flag->committed) {
-            async_op_free(S, op);
-            continue;
-        }
-        if (op->flag) op->flag->committed = 1;
+    /* Deliver nil to all active pending takers. */
+    while ((op = dequeue_active_take(S, ch)) != NULL) {
         schedule_op_result(S, op, mino_nil(S));
         async_op_free(S, op);
     }
 
-    /* Discard all pending puts (notify committed alts ops). */
-    while ((op = async_dequeue_put(ch)) != NULL) {
-        if (op->flag && op->flag->committed) {
-            async_op_free(S, op);
-            continue;
-        }
-        if (op->flag) op->flag->committed = 1;
+    /* Notify all active pending putters that the channel closed. */
+    while ((op = dequeue_active_put(S, ch)) != NULL) {
         schedule_op_result(S, op, mino_false(S));
         async_op_free(S, op);
     }
@@ -485,6 +475,16 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
 /* Alts pending-op registration                                       */
 /* ------------------------------------------------------------------ */
 
+/* Attach alts arbitration fields to a pending op. */
+static void op_set_alts(mino_state_t *S, pending_op_t *op,
+                        mino_async_flag_t *flag, mino_val_t *ch_handle)
+{
+    op->flag   = flag;
+    op->ch_val = ch_handle;
+    op->ch_ref = ch_handle ? mino_ref(S, ch_handle) : NULL;
+    async_flag_ref(flag);
+}
+
 void async_chan_enqueue_put_alts(mino_state_t *S, mino_async_chan_t *ch,
                                 mino_val_t *val, mino_val_t *callback,
                                 mino_async_flag_t *flag,
@@ -495,10 +495,7 @@ void async_chan_enqueue_put_alts(mino_state_t *S, mino_async_chan_t *ch,
         set_error(S, "out of memory in alts put registration");
         return;
     }
-    op->flag   = flag;
-    op->ch_val = ch_handle;
-    op->ch_ref = ch_handle ? mino_ref(S, ch_handle) : NULL;
-    async_flag_ref(flag);
+    op_set_alts(S, op, flag, ch_handle);
     enqueue_put(ch, op);
 }
 
@@ -512,10 +509,7 @@ void async_chan_enqueue_take_alts(mino_state_t *S, mino_async_chan_t *ch,
         set_error(S, "out of memory in alts take registration");
         return;
     }
-    op->flag   = flag;
-    op->ch_val = ch_handle;
-    op->ch_ref = ch_handle ? mino_ref(S, ch_handle) : NULL;
-    async_flag_ref(flag);
+    op_set_alts(S, op, flag, ch_handle);
     enqueue_take(ch, op);
 }
 

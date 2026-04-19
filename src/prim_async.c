@@ -423,21 +423,23 @@ static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
         return NULL;
     }
     done_thunk = args->as.cons.car;
+    gc_pin(done_thunk);
 
     for (;;) {
         int progress = async_sched_drain(S, env);
 
         /* Check if done. */
-        gc_pin(done_thunk);
         result = mino_call(S, done_thunk, NULL, env);
-        gc_unpin(1);
         if (result != NULL && result->type != MINO_NIL &&
             !(result->type == MINO_BOOL && !result->as.b)) {
+            gc_unpin(1);
             return mino_true(S);
         }
 
-        if (!progress)
+        if (!progress) {
+            gc_unpin(1);
             return mino_false(S);
+        }
     }
 }
 
