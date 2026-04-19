@@ -100,6 +100,7 @@
 (require "../clojure-test-suite/test/clojure/core_test/qualified_symbol_qmark.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/rand.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/rand_int.cljc")
+(require "../clojure-test-suite/test/clojure/core_test/random_sample.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/random_uuid.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/rationalize.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/rest.cljc")
