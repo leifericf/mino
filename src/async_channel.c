@@ -132,8 +132,8 @@ pending_op_t *async_dequeue_take(mino_async_chan_t *ch)
 
 /* Dequeue the next active put, skipping any whose alts flag is
  * already committed.  Commits the flag of the returned op. */
-static pending_op_t *dequeue_active_put(mino_state_t *S,
-                                        mino_async_chan_t *ch)
+pending_op_t *async_dequeue_active_put(mino_state_t *S,
+                                       mino_async_chan_t *ch)
 {
     for (;;) {
         pending_op_t *op = async_dequeue_put(ch);
@@ -149,8 +149,8 @@ static pending_op_t *dequeue_active_put(mino_state_t *S,
 
 /* Dequeue the next active take, skipping committed alts ops.
  * Commits the flag of the returned op. */
-static pending_op_t *dequeue_active_take(mino_state_t *S,
-                                         mino_async_chan_t *ch)
+pending_op_t *async_dequeue_active_take(mino_state_t *S,
+                                        mino_async_chan_t *ch)
 {
     for (;;) {
         pending_op_t *op = async_dequeue_take(ch);
@@ -194,7 +194,7 @@ static void schedule_op_result(mino_state_t *S, pending_op_t *op,
 static void flush_buf_to_takers(mino_state_t *S, mino_async_chan_t *ch)
 {
     while (ch->buf && async_buf_count(ch->buf) > 0 && ch->takes_head) {
-        pending_op_t *taker = dequeue_active_take(S, ch);
+        pending_op_t *taker = async_dequeue_active_take(S, ch);
         if (taker) {
             mino_val_t *v = async_buf_remove(S, ch->buf);
             gc_pin(v);
@@ -257,7 +257,7 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
     }
 
     /* If an active taker is waiting, transfer directly. */
-    taker = dequeue_active_take(S, ch);
+    taker = async_dequeue_active_take(S, ch);
     if (taker != NULL) {
         gc_pin(val);
         gc_pin(put_cb);
@@ -314,7 +314,7 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
 
         /* If an active putter is waiting, move its value into the buffer. */
         {
-            pending_op_t *putter = dequeue_active_put(S, ch);
+            pending_op_t *putter = async_dequeue_active_put(S, ch);
             if (putter != NULL) {
                 async_buf_add(S, ch->buf, putter->val);
                 schedule_op_result(S, putter, mino_true(S));
@@ -330,7 +330,7 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
 
     /* If an active putter is waiting, transfer directly. */
     {
-        pending_op_t *putter = dequeue_active_put(S, ch);
+        pending_op_t *putter = async_dequeue_active_put(S, ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
             gc_pin(val);
@@ -395,13 +395,13 @@ void async_chan_close(mino_state_t *S, mino_async_chan_t *ch)
     }
 
     /* Deliver nil to all active pending takers. */
-    while ((op = dequeue_active_take(S, ch)) != NULL) {
+    while ((op = async_dequeue_active_take(S, ch)) != NULL) {
         schedule_op_result(S, op, mino_nil(S));
         async_op_free(S, op);
     }
 
     /* Notify all active pending putters that the channel closed. */
-    while ((op = dequeue_active_put(S, ch)) != NULL) {
+    while ((op = async_dequeue_active_put(S, ch)) != NULL) {
         schedule_op_result(S, op, mino_false(S));
         async_op_free(S, op);
     }
@@ -422,7 +422,7 @@ int async_chan_offer(mino_state_t *S, mino_async_chan_t *ch, mino_val_t *val)
 
     if (ch->closed) return 0;
 
-    taker = dequeue_active_take(S, ch);
+    taker = async_dequeue_active_take(S, ch);
     if (taker != NULL) {
         gc_pin(val);
         schedule_op_result(S, taker, val);
@@ -445,7 +445,7 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
 {
     if (ch->buf && async_buf_count(ch->buf) > 0) {
         mino_val_t *val = async_buf_remove(S, ch->buf);
-        pending_op_t *putter = dequeue_active_put(S, ch);
+        pending_op_t *putter = async_dequeue_active_put(S, ch);
         gc_pin(val);
         if (putter != NULL) {
             async_buf_add(S, ch->buf, putter->val);
@@ -457,7 +457,7 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
     }
 
     {
-        pending_op_t *putter = dequeue_active_put(S, ch);
+        pending_op_t *putter = async_dequeue_active_put(S, ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
             gc_pin(val);

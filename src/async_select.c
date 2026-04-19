@@ -10,7 +10,9 @@
 #include "async_channel.h"
 #include "async_handler.h"
 #include "async_scheduler.h"
+#include "mino_internal.h"
 #include "prim_internal.h"
+
 
 /* Build a 2-element vector [a, b]. */
 static mino_val_t *vec2(mino_state_t *S, mino_val_t *a, mino_val_t *b)
@@ -114,17 +116,19 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
             }
 
             if (ch->takes_head != NULL) {
-                pending_op_t *taker = async_dequeue_take(ch);
-                mino_val_t *result;
-                if (taker->callback)
-                    async_sched_enqueue(S, taker->callback, put_val);
-                async_op_free(S, taker);
-                gc_pin(callback); gc_pin(ch_val);
-                result = vec2(S, mino_true(S), ch_val);
-                async_sched_enqueue(S, callback, result);
-                gc_unpin(2);
-                free(indices);
-                return 1;
+                pending_op_t *taker = async_dequeue_active_take(S, ch);
+                if (taker != NULL) {
+                    mino_val_t *result;
+                    if (taker->callback)
+                        async_sched_enqueue(S, taker->callback, put_val);
+                    async_op_free(S, taker);
+                    gc_pin(callback); gc_pin(ch_val);
+                    result = vec2(S, mino_true(S), ch_val);
+                    async_sched_enqueue(S, callback, result);
+                    gc_unpin(2);
+                    free(indices);
+                    return 1;
+                }
             }
 
             if (ch->buf != NULL && !async_buf_full(ch->buf)) {
@@ -151,12 +155,14 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
                 mino_val_t *val = async_buf_remove(S, ch->buf);
                 mino_val_t *result;
                 if (ch->puts_head != NULL) {
-                    pending_op_t *putter = async_dequeue_put(ch);
-                    async_buf_add(S, ch->buf, putter->val);
-                    if (putter->callback)
-                        async_sched_enqueue(S, putter->callback,
-                                            mino_true(S));
-                    async_op_free(S, putter);
+                    pending_op_t *putter = async_dequeue_active_put(S, ch);
+                    if (putter != NULL) {
+                        async_buf_add(S, ch->buf, putter->val);
+                        if (putter->callback)
+                            async_sched_enqueue(S, putter->callback,
+                                                mino_true(S));
+                        async_op_free(S, putter);
+                    }
                 }
                 gc_pin(callback); gc_pin(ch_val); gc_pin(val);
                 result = vec2(S, val, ch_val);
@@ -167,18 +173,20 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
             }
 
             if (ch->puts_head != NULL) {
-                pending_op_t *putter = async_dequeue_put(ch);
-                mino_val_t *val = putter->val;
-                mino_val_t *result;
-                if (putter->callback)
-                    async_sched_enqueue(S, putter->callback, mino_true(S));
-                gc_pin(callback); gc_pin(ch_val); gc_pin(val);
-                result = vec2(S, val, ch_val);
-                async_sched_enqueue(S, callback, result);
-                gc_unpin(3);
-                async_op_free(S, putter);
-                free(indices);
-                return 1;
+                pending_op_t *putter = async_dequeue_active_put(S, ch);
+                if (putter != NULL) {
+                    mino_val_t *val = putter->val;
+                    mino_val_t *result;
+                    if (putter->callback)
+                        async_sched_enqueue(S, putter->callback, mino_true(S));
+                    gc_pin(callback); gc_pin(ch_val); gc_pin(val);
+                    result = vec2(S, val, ch_val);
+                    async_sched_enqueue(S, callback, result);
+                    gc_unpin(3);
+                    async_op_free(S, putter);
+                    free(indices);
+                    return 1;
+                }
             }
 
             if (ch->closed) {

@@ -105,6 +105,11 @@ pending_op_t *async_dequeue_put(mino_async_chan_t *ch);
 pending_op_t *async_dequeue_take(mino_async_chan_t *ch);
 void async_op_free(mino_state_t *S, pending_op_t *op);
 
+/* Active-dequeue: skips pending ops whose alts flag is already committed.
+ * Commits the flag of the returned op.  Returns NULL if no active op. */
+pending_op_t *async_dequeue_active_put(mino_state_t *S, mino_async_chan_t *ch);
+pending_op_t *async_dequeue_active_take(mino_state_t *S, mino_async_chan_t *ch);
+
 /* Set the transducer reducing function and exception handler on a channel.
  * Both may be NULL.  The channel takes ownership of the refs. */
 void async_chan_set_xform(mino_state_t *S, mino_async_chan_t *ch,
