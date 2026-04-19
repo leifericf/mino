@@ -31,7 +31,7 @@
              (catch e (throw "rethrown"))
              (finally (reset! a 42)))
         (catch e
-          (is (= "rethrown" e))))
+          (is (= "rethrown" (ex-data e)))))
       (is (= 42 @a))))
   (testing "finally-only re-throws to outer catch"
     (let [a (atom 0)]

@@ -1331,14 +1331,27 @@
   {:message msg :data data})
 
 (defn ex-data
-  "Extract the data map from an exception created with ex-info."
+  "Extract the data map from an exception. Handles diagnostic maps
+  (from catch), ex-info maps, and plain thrown values."
   [ex]
-  (when (map? ex) (:data ex)))
+  (when (map? ex)
+    (if (:mino/kind ex)
+      ;; Diagnostic map: unwrap to the original thrown value.
+      ;; If that value is an ex-info map, extract its :data.
+      (let [orig (:mino/data ex)]
+        (if (and (map? orig) (contains? orig :data))
+          (:data orig)
+          orig))
+      (:data ex))))
 
 (defn ex-message
-  "Extract the message from an exception created with ex-info."
+  "Extract the message from an exception. Handles both diagnostic maps
+  and ex-info maps."
   [ex]
-  (when (map? ex) (:message ex)))
+  (when (map? ex)
+    (if (:mino/kind ex)
+      (:mino/message ex)
+      (:message ex))))
 
 (def agent "Creates an agent wrapping the given initial value." atom)
 

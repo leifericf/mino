@@ -117,6 +117,27 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     if (got_exception && has_catch) {
         mino_val_t *ex_val =
             vol_ex ? (mino_val_t *)vol_ex : mino_nil(S);
+
+        /* Normalize: wrap non-diagnostic values into a diagnostic map
+         * so catch handlers always receive a structured error value. */
+        if (ex_val->type != MINO_MAP
+            || map_get_val(ex_val, mino_keyword(S, "mino/kind")) == NULL) {
+            mino_val_t *keys[5], *vals[5];
+            keys[0] = mino_keyword(S, "mino/kind");
+            vals[0] = mino_keyword(S, "user");
+            keys[1] = mino_keyword(S, "mino/code");
+            vals[1] = mino_string(S, "MUS001");
+            keys[2] = mino_keyword(S, "mino/phase");
+            vals[2] = mino_keyword(S, "eval");
+            keys[3] = mino_keyword(S, "mino/message");
+            vals[3] = (ex_val->type == MINO_STRING)
+                ? ex_val : mino_string(S, "uncaught exception");
+            keys[4] = mino_keyword(S, "mino/data");
+            vals[4] = ex_val;
+            ex_val = mino_map(S, keys, vals, 5);
+        }
+
+        {
         mino_env_t *local  = env_child(S, env);
         env_bind(S, local, var_buf, ex_val);
 
@@ -165,6 +186,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             vol_result    = r;
             got_exception = 0;
         }
+        } /* end normalization block */
     }
 
     /* Phase 3: run finally unconditionally. */

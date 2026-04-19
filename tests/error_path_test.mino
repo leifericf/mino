@@ -5,14 +5,16 @@
 
 (deftest throw-catch-roundtrip
   (testing "thrown string is catchable"
-    (is (= "oops" (try (throw "oops") (catch e e)))))
+    (is (= "oops" (try (throw "oops") (catch e (ex-data e))))))
   (testing "thrown map is catchable"
-    (is (= :err (try (throw {:type :err}) (catch e (:type e))))))
+    (is (= :err (try (throw {:type :err}) (catch e (:type (ex-data e)))))))
   (testing "nested throw propagates"
     (is (= "inner"
            (try (try (throw "inner")
                      (catch e (throw e)))
-                (catch e e))))))
+                (catch e (ex-data e))))))
+  (testing "catch always receives diagnostic map"
+    (is (error? (try (throw "x") (catch e e))))))
 
 (deftest finally-runs-on-error
   (testing "finally runs after catch"
