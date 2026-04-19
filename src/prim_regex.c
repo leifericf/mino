@@ -17,15 +17,15 @@ mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "re-find requires two arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "re-find requires two arguments");
     }
     pat_val  = args->as.cons.car;
     text_val = args->as.cons.cdr->as.cons.car;
     if (pat_val == NULL || pat_val->type != MINO_STRING) {
-        return prim_throw_error(S, "re-find: first argument must be a pattern string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "re-find: first argument must be a pattern string");
     }
     if (text_val == NULL || text_val->type != MINO_STRING) {
-        return prim_throw_error(S, "re-find: second argument must be a string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "re-find: second argument must be a string");
     }
     match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
     if (match_idx == -1) {
@@ -43,15 +43,15 @@ mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "re-matches requires two arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "re-matches requires two arguments");
     }
     pat_val  = args->as.cons.car;
     text_val = args->as.cons.cdr->as.cons.car;
     if (pat_val == NULL || pat_val->type != MINO_STRING) {
-        return prim_throw_error(S, "re-matches: first argument must be a pattern string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: first argument must be a pattern string");
     }
     if (text_val == NULL || text_val->type != MINO_STRING) {
-        return prim_throw_error(S, "re-matches: second argument must be a string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: second argument must be a string");
     }
     match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
     if (match_idx == 0 && (size_t)match_len == text_val->as.s.len) {

@@ -21,7 +21,7 @@ static int atom_validate(mino_state_t *S, mino_val_t *atom,
     result = mino_call(S, vfn, vargs, env);
     if (result == NULL) return -1;  /* validator threw */
     if (result->type == MINO_BOOL && result->as.b == 0) {
-        prim_throw_error(S, "Invalid reference state");
+        prim_throw_classified(S, "eval/contract", "MCT001", "Invalid reference state");
         return -1;
     }
     return 0;
@@ -103,7 +103,7 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "atom requires one argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "atom requires one argument");
     }
     return mino_atom(S, args->as.cons.car);
 }
@@ -113,7 +113,7 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *a;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "deref requires one argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one argument");
     }
     a = args->as.cons.car;
     if (a != NULL && a->type == MINO_ATOM) {
@@ -122,7 +122,7 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a != NULL && a->type == MINO_REDUCED) {
         return a->as.reduced.val;
     }
-    return prim_throw_error(S, "deref: expected an atom or reduced");
+    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom or reduced");
 }
 
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -130,12 +130,12 @@ mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *a, *val, *old;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "reset! requires two arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "reset! requires two arguments");
     }
     a   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "reset!: first argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "reset!: first argument must be an atom");
     }
     old = a->as.atom.val;
     if (atom_set(S, a, old, val, env) != 0) return NULL;
@@ -147,12 +147,12 @@ mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a, *fn, *cur, *call_args, *result;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "swap! requires at least 2 arguments: atom and function");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "swap! requires at least 2 arguments: atom and function");
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "swap!: first argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "swap!: first argument must be an atom");
     }
     cur = a->as.atom.val;
     call_args = swap_build_args(S, cur, args->as.cons.cdr->as.cons.cdr);
@@ -166,7 +166,7 @@ mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "atom? requires one argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "atom? requires one argument");
     }
     return mino_is_atom(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
@@ -185,13 +185,13 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "add-watch requires three arguments: atom key fn");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "add-watch requires three arguments: atom key fn");
     }
     a   = args->as.cons.car;
     key = args->as.cons.cdr->as.cons.car;
     fn  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "add-watch: first argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "add-watch: first argument must be an atom");
     }
     watches = a->as.atom.watches;
     if (watches == NULL || watches->type != MINO_MAP) {
@@ -227,12 +227,12 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "remove-watch requires two arguments: atom key");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "remove-watch requires two arguments: atom key");
     }
     a   = args->as.cons.car;
     key = args->as.cons.cdr->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "remove-watch: first argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "remove-watch: first argument must be an atom");
     }
     watches = a->as.atom.watches;
     if (watches == NULL || watches->type != MINO_MAP) return a;
@@ -270,12 +270,12 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
     mino_val_t *a, *fn;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "set-validator! requires two arguments: atom fn");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "set-validator! requires two arguments: atom fn");
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "set-validator!: first argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "set-validator!: first argument must be an atom");
     }
     /* nil removes the validator. */
     if (fn == NULL || fn->type == MINO_NIL) {
@@ -290,7 +290,7 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
         mino_val_t *result = mino_call(S, fn, vargs, env);
         if (result == NULL) return NULL;  /* validator threw */
         if (result->type == MINO_BOOL && result->as.b == 0) {
-            prim_throw_error(S, "Invalid reference state");
+            prim_throw_classified(S, "eval/contract", "MCT001", "Invalid reference state");
             return NULL;
         }
     }
@@ -305,11 +305,11 @@ mino_val_t *prim_get_validator(mino_state_t *S, mino_val_t *args,
     mino_val_t *a;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "get-validator requires one argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "get-validator requires one argument");
     }
     a = args->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "get-validator: argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "get-validator: argument must be an atom");
     }
     return a->as.atom.validator != NULL ? a->as.atom.validator : mino_nil(S);
 }
@@ -321,12 +321,12 @@ mino_val_t *prim_reset_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *pair[2];
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "reset-vals! requires two arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "reset-vals! requires two arguments");
     }
     a   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "reset-vals!: first argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "reset-vals!: first argument must be an atom");
     }
     old = a->as.atom.val;
     if (atom_set(S, a, old, val, env) != 0) return NULL;
@@ -341,12 +341,12 @@ mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *a, *fn, *cur, *call_args, *result;
     mino_val_t *pair[2];
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "swap-vals! requires at least 2 arguments: atom and function");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "swap-vals! requires at least 2 arguments: atom and function");
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
     if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_error(S, "swap-vals!: first argument must be an atom");
+        return prim_throw_classified(S, "eval/type", "MTY001", "swap-vals!: first argument must be an atom");
     }
     cur = a->as.atom.val;
     call_args = swap_build_args(S, cur, args->as.cons.cdr->as.cons.cdr);

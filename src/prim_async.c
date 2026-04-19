@@ -18,16 +18,16 @@ static mino_val_t *buf_ctor(mino_state_t *S, mino_val_t *args, int kind)
     long long n;
     mino_async_buf_t *buf;
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "buffer requires a capacity argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "buffer requires a capacity argument");
         return NULL;
     }
     if (!as_long(args->as.cons.car, &n) || n <= 0) {
-        set_error(S, "buffer capacity must be a positive integer");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "buffer capacity must be a positive integer");
         return NULL;
     }
     buf = async_buf_create(S, kind, (size_t)n);
     if (buf == NULL) {
-        set_error(S, "out of memory creating buffer");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating buffer");
         return NULL;
     }
     return mino_handle(S, buf, "async/buf");
@@ -62,7 +62,7 @@ static mino_val_t *prim_buf_promise(mino_state_t *S, mino_val_t *args,
     (void)args;
     buf = async_buf_create(S, ASYNC_BUF_PROMISE, 1);
     if (buf == NULL) {
-        set_error(S, "out of memory creating promise buffer");
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating promise buffer");
         return NULL;
     }
     return mino_handle(S, buf, "async/buf");
@@ -86,7 +86,7 @@ static mino_val_t *prim_chan(mino_state_t *S, mino_val_t *args,
             strcmp(mino_handle_tag(bv), "async/buf") == 0) {
             buf = (mino_async_buf_t *)mino_handle_ptr(bv);
         } else if (bv->type != MINO_NIL) {
-            set_error(S, "chan* expects a buffer handle or nil");
+            set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "chan* expects a buffer handle or nil");
             return NULL;
         }
     }
@@ -103,7 +103,7 @@ static mino_val_t *prim_chan_put(mino_state_t *S, mino_val_t *args,
 
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_error(S, "chan-put* requires channel and value");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "chan-put* requires channel and value");
         return NULL;
     }
     ch_val = args->as.cons.car;
@@ -111,11 +111,11 @@ static mino_val_t *prim_chan_put(mino_state_t *S, mino_val_t *args,
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "chan-put* first argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "chan-put* first argument must be a channel");
         return NULL;
     }
     if (val->type == MINO_NIL) {
-        return prim_throw_error(S, "cannot put nil on a channel");
+        return prim_throw_classified(S, "eval/contract", "MCT001", "cannot put nil on a channel");
     }
 
     /* Optional callback. */
@@ -136,14 +136,14 @@ static mino_val_t *prim_chan_take(mino_state_t *S, mino_val_t *args,
     (void)env;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "chan-take* requires a channel argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "chan-take* requires a channel argument");
         return NULL;
     }
     ch_val = args->as.cons.car;
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "chan-take* first argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "chan-take* first argument must be a channel");
         return NULL;
     }
 
@@ -164,14 +164,14 @@ static mino_val_t *prim_chan_close(mino_state_t *S, mino_val_t *args,
     (void)env;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "chan-close* requires a channel argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "chan-close* requires a channel argument");
         return NULL;
     }
     ch_val = args->as.cons.car;
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "chan-close* argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "chan-close* argument must be a channel");
         return NULL;
     }
 
@@ -187,14 +187,14 @@ static mino_val_t *prim_chan_closed_p(mino_state_t *S, mino_val_t *args,
     (void)env;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "chan-closed?* requires a channel argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "chan-closed?* requires a channel argument");
         return NULL;
     }
     ch_val = args->as.cons.car;
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "chan-closed?* argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "chan-closed?* argument must be a channel");
         return NULL;
     }
 
@@ -210,7 +210,7 @@ static mino_val_t *prim_chan_offer(mino_state_t *S, mino_val_t *args,
 
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_error(S, "offer!* requires channel and value");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "offer!* requires channel and value");
         return NULL;
     }
     ch_val = args->as.cons.car;
@@ -218,11 +218,11 @@ static mino_val_t *prim_chan_offer(mino_state_t *S, mino_val_t *args,
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "offer!* first argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "offer!* first argument must be a channel");
         return NULL;
     }
     if (val->type == MINO_NIL) {
-        return prim_throw_error(S, "cannot put nil on a channel");
+        return prim_throw_classified(S, "eval/contract", "MCT001", "cannot put nil on a channel");
     }
 
     return async_chan_offer(S, ch, val) ? mino_true(S) : mino_false(S);
@@ -236,14 +236,14 @@ static mino_val_t *prim_chan_poll(mino_state_t *S, mino_val_t *args,
     (void)env;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "poll!* requires a channel argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "poll!* requires a channel argument");
         return NULL;
     }
     ch_val = args->as.cons.car;
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "poll!* argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "poll!* argument must be a channel");
         return NULL;
     }
 
@@ -266,7 +266,7 @@ static mino_val_t *prim_chan_set_xform(mino_state_t *S, mino_val_t *args,
 
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_error(S, "chan-set-xform* requires channel and rf");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "chan-set-xform* requires channel and rf");
         return NULL;
     }
     ch_val = args->as.cons.car;
@@ -274,7 +274,7 @@ static mino_val_t *prim_chan_set_xform(mino_state_t *S, mino_val_t *args,
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "chan-set-xform* first argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "chan-set-xform* first argument must be a channel");
         return NULL;
     }
 
@@ -303,7 +303,7 @@ static mino_val_t *prim_chan_buf_add(mino_state_t *S, mino_val_t *args,
 
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_error(S, "chan-buf-add* requires channel and value");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "chan-buf-add* requires channel and value");
         return NULL;
     }
     ch_val = args->as.cons.car;
@@ -311,7 +311,7 @@ static mino_val_t *prim_chan_buf_add(mino_state_t *S, mino_val_t *args,
 
     ch = async_chan_get(ch_val);
     if (ch == NULL) {
-        set_error(S, "chan-buf-add* first argument must be a channel");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "chan-buf-add* first argument must be a channel");
         return NULL;
     }
 
@@ -328,7 +328,7 @@ static mino_val_t *prim_chan_p(mino_state_t *S, mino_val_t *args,
 {
     (void)env;
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "chan?* requires one argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "chan?* requires one argument");
         return NULL;
     }
     return async_chan_get(args->as.cons.car) != NULL
@@ -346,20 +346,20 @@ static mino_val_t *prim_alts(mino_state_t *S, mino_val_t *args,
     int result;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "alts* requires ops, opts, and callback");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "alts* requires ops, opts, and callback");
         return NULL;
     }
     ops = args->as.cons.car;
 
     if (args->as.cons.cdr == NULL || args->as.cons.cdr->type != MINO_CONS) {
-        set_error(S, "alts* requires opts argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "alts* requires opts argument");
         return NULL;
     }
     opts = args->as.cons.cdr->as.cons.car;
 
     if (args->as.cons.cdr->as.cons.cdr == NULL ||
         args->as.cons.cdr->as.cons.cdr->type != MINO_CONS) {
-        set_error(S, "alts* requires callback argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "alts* requires callback argument");
         return NULL;
     }
     callback = args->as.cons.cdr->as.cons.cdr->as.cons.car;
@@ -383,11 +383,11 @@ static mino_val_t *prim_timeout(mino_state_t *S, mino_val_t *args,
     (void)env;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "timeout* requires a millisecond argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "timeout* requires a millisecond argument");
         return NULL;
     }
     if (!as_double(args->as.cons.car, &ms)) {
-        set_error(S, "timeout* argument must be a number");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "timeout* argument must be a number");
         return NULL;
     }
     if (ms < 0) ms = 0;
@@ -419,7 +419,7 @@ static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
     mino_val_t *done_thunk, *result;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_error(S, "drain-loop! requires a done-check thunk");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "drain-loop! requires a done-check thunk");
         return NULL;
     }
     done_thunk = args->as.cons.car;

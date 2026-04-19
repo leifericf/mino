@@ -34,7 +34,7 @@ static mino_val_t *interop_error(mino_state_t *S, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
-    return prim_throw_error(S, msg);
+    return prim_throw_classified(S, "host", "MHO001", msg);
 }
 
 /* (host/new :Type arg1 arg2 ...) */
@@ -52,7 +52,7 @@ static mino_val_t *prim_host_new(mino_state_t *S, mino_val_t *args,
     if (!S->interop_enabled)
         return interop_error(S, "interop disabled");
     if (!mino_is_cons(args)) {
-        set_error(S, "host/new requires at least a type argument");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "host/new requires at least a type argument");
         return NULL;
     }
     type_val = args->as.cons.car;
@@ -98,7 +98,7 @@ static mino_val_t *prim_host_call(mino_state_t *S, mino_val_t *args,
     if (!S->interop_enabled)
         return interop_error(S, "interop disabled");
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "host/call requires target and method arguments");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "host/call requires target and method arguments");
         return NULL;
     }
     target = args->as.cons.car;
@@ -152,7 +152,7 @@ static mino_val_t *prim_host_static_call(mino_state_t *S, mino_val_t *args,
     if (!S->interop_enabled)
         return interop_error(S, "interop disabled");
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "host/static-call requires type and method arguments");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "host/static-call requires type and method arguments");
         return NULL;
     }
     type_val = args->as.cons.car;
@@ -201,11 +201,11 @@ static mino_val_t *prim_host_get(mino_state_t *S, mino_val_t *args,
     if (!S->interop_enabled)
         return interop_error(S, "interop disabled");
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error(S, "host/get requires target and field arguments");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "host/get requires target and field arguments");
         return NULL;
     }
     if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        set_error(S, "host/get takes exactly two arguments");
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "host/get takes exactly two arguments");
         return NULL;
     }
     target = args->as.cons.car;

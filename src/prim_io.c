@@ -57,30 +57,30 @@ mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "slurp requires one argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "slurp requires one argument");
     }
     path_val = args->as.cons.car;
     if (path_val == NULL || path_val->type != MINO_STRING) {
-        return prim_throw_error(S, "slurp: argument must be a string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "slurp: argument must be a string");
     }
     path = path_val->as.s.data;
     f = fopen(path, "rb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "slurp: cannot open file: %s", path);
-        return prim_throw_error(S, msg);
+        return prim_throw_classified(S, "host", "MHO001", msg);
     }
     fseek(f, 0, SEEK_END);
     sz = ftell(f);
     if (sz < 0) {
         fclose(f);
-        return prim_throw_error(S, "slurp: cannot determine file size");
+        return prim_throw_classified(S, "host", "MHO001", "slurp: cannot determine file size");
     }
     fseek(f, 0, SEEK_SET);
     buf = (char *)malloc((size_t)sz + 1);
     if (buf == NULL) {
         fclose(f);
-        return prim_throw_error(S, "slurp: out of memory");
+        return prim_throw_classified(S, "host", "MHO001", "slurp: out of memory");
     }
     rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
@@ -99,19 +99,19 @@ mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_error(S, "spit requires two arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "spit requires two arguments");
     }
     path_val = args->as.cons.car;
     content  = args->as.cons.cdr->as.cons.car;
     if (path_val == NULL || path_val->type != MINO_STRING) {
-        return prim_throw_error(S, "spit: first argument must be a string path");
+        return prim_throw_classified(S, "eval/type", "MTY001", "spit: first argument must be a string path");
     }
     path = path_val->as.s.data;
     f = fopen(path, "wb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "spit: cannot open file: %s", path);
-        return prim_throw_error(S, msg);
+        return prim_throw_classified(S, "host", "MHO001", msg);
     }
     if (content != NULL && content->type == MINO_STRING) {
         fwrite(content->as.s.data, 1, content->as.s.len, f);
@@ -147,7 +147,7 @@ mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)args;
     (void)env;
     if (mino_is_cons(args)) {
-        return prim_throw_error(S, "time-ms takes no arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "time-ms takes no arguments");
     }
     return mino_float(S, (double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
 }

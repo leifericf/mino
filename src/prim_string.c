@@ -22,11 +22,11 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t i;
     (void)env;
     if (!mino_is_cons(args)) {
-        return prim_throw_error(S, "format requires at least a format string");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "format requires at least a format string");
     }
     fmt_val = args->as.cons.car;
     if (fmt_val == NULL || fmt_val->type != MINO_STRING) {
-        return prim_throw_error(S, "format: first argument must be a string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "format: first argument must be a string");
     }
     fmt     = fmt_val->as.s.data;
     fmt_len = fmt_val->as.s.len;
@@ -38,7 +38,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             cap = cap == 0 ? 128 : cap; \
             while (cap < _need) cap *= 2; \
             buf = (char *)realloc(buf, cap); \
-            if (buf == NULL) { set_error(S, "out of memory"); return NULL; } \
+            if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; } \
         } \
     } while (0)
 
@@ -87,7 +87,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 mino_val_t *a;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
-                    return prim_throw_error(S, "format: not enough arguments for format string");
+                    return prim_throw_classified(S, "eval/arity", "MAR001", "format: not enough arguments for format string");
                 }
                 a = arg_list->as.cons.car;
                 arg_list = arg_list->as.cons.cdr;
@@ -108,7 +108,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 int  tn;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
-                    return prim_throw_error(S, "format: not enough arguments for format string");
+                    return prim_throw_classified(S, "eval/arity", "MAR001", "format: not enough arguments for format string");
                 }
                 if (!as_long(arg_list->as.cons.car, &n2)) {
                     double d;
@@ -116,7 +116,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         n2 = (long long)d;
                     } else {
                         free(buf);
-                        return prim_throw_error(S, "format: integer directive expects a number");
+                        return prim_throw_classified(S, "eval/type", "MTY001", "format: integer directive expects a number");
                     }
                 }
                 arg_list = arg_list->as.cons.cdr;
@@ -135,11 +135,11 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 int  tn;
                 if (!mino_is_cons(arg_list)) {
                     free(buf);
-                    return prim_throw_error(S, "format: not enough arguments for format string");
+                    return prim_throw_classified(S, "eval/arity", "MAR001", "format: not enough arguments for format string");
                 }
                 if (!as_double(arg_list->as.cons.car, &d)) {
                     free(buf);
-                    return prim_throw_error(S, "format: float directive expects a number");
+                    return prim_throw_classified(S, "eval/type", "MTY001", "format: float directive expects a number");
                 }
                 arg_list = arg_list->as.cons.cdr;
                 directive[di++] = spec;
@@ -174,11 +174,11 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *result;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "read-string requires one string argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "read-string requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        return prim_throw_error(S, "read-string: argument must be a string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "read-string: argument must be a string");
     }
     clear_error(S);
     result = mino_read(S, s->as.s.data, NULL);
@@ -195,7 +195,7 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             char msg[512];
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
-            return prim_throw_error(S, msg);
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
         }
     }
     return result != NULL ? result : mino_nil(S);
@@ -220,7 +220,7 @@ mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             cap = cap == 0 ? 128 : cap;
             while (cap < need) cap *= 2;
             buf = (char *)realloc(buf, cap);
-            if (buf == NULL) { set_error(S, "out of memory"); return NULL; }
+            if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
         }
         if (!first) buf[len++] = ' ';
         memcpy(buf + len, printed->as.s.data, printed->as.s.len);
@@ -241,17 +241,17 @@ mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     long long idx;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "char-at requires two arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "char-at requires two arguments");
     }
     s       = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || idx_val == NULL || idx_val->type != MINO_INT) {
-        return prim_throw_error(S, "char-at: requires a string and integer index");
+        return prim_throw_classified(S, "eval/type", "MTY001", "char-at: requires a string and integer index");
     }
     idx = idx_val->as.i;
     if (idx < 0 || (size_t)idx >= s->as.s.len) {
-        return prim_throw_error(S, "char-at: index out of range");
+        return prim_throw_classified(S, "eval/bounds", "MBD001", "char-at: index out of range");
     }
     return mino_string_n(S, s->as.s.data + idx, 1);
 }
@@ -268,28 +268,28 @@ mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     arg_count(S, args, &n);
     if (n != 2 && n != 3) {
-        return prim_throw_error(S, "subs requires 2 or 3 arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "subs requires 2 or 3 arguments");
     }
     s_val = args->as.cons.car;
     if (s_val == NULL || s_val->type != MINO_STRING) {
-        return prim_throw_error(S, "subs: first argument must be a string");
+        return prim_throw_classified(S, "eval/type", "MTY001", "subs: first argument must be a string");
     }
     if (args->as.cons.cdr->as.cons.car == NULL
         || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
-        return prim_throw_error(S, "subs: start index must be an integer");
+        return prim_throw_classified(S, "eval/type", "MTY001", "subs: start index must be an integer");
     }
     start = args->as.cons.cdr->as.cons.car->as.i;
     if (n == 3) {
         if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
             || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
-            return prim_throw_error(S, "subs: end index must be an integer");
+            return prim_throw_classified(S, "eval/type", "MTY001", "subs: end index must be an integer");
         }
         end_idx = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
     } else {
         end_idx = (long long)s_val->as.s.len;
     }
     if (start < 0 || end_idx < start || (size_t)end_idx > s_val->as.s.len) {
-        return prim_throw_error(S, "subs: index out of range");
+        return prim_throw_classified(S, "eval/bounds", "MBD001", "subs: index out of range");
     }
     return mino_string_n(S, s_val->as.s.data + start, (size_t)(end_idx - start));
 }
@@ -307,13 +307,13 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char  *p;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "split requires a string and a separator");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "split requires a string and a separator");
     }
     s_val   = args->as.cons.car;
     sep_val = args->as.cons.cdr->as.cons.car;
     if (s_val == NULL || s_val->type != MINO_STRING
         || sep_val == NULL || sep_val->type != MINO_STRING) {
-        return prim_throw_error(S, "split: both arguments must be strings");
+        return prim_throw_classified(S, "eval/type", "MTY001", "split: both arguments must be strings");
     }
     s       = s_val->as.s.data;
     slen    = s_val->as.s.len;
@@ -382,10 +382,10 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             sep     = sep_val->as.s.data;
             sep_len = sep_val->as.s.len;
         } else if (sep_val != NULL && sep_val->type != MINO_NIL) {
-            return prim_throw_error(S, "join: separator must be a string or nil");
+            return prim_throw_classified(S, "eval/type", "MTY001", "join: separator must be a string or nil");
         }
     } else {
-        return prim_throw_error(S, "join requires 1 or 2 arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "join requires 1 or 2 arguments");
     }
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_string(S, "");
@@ -416,7 +416,7 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             buf_cap = buf_cap == 0 ? 128 : buf_cap;
             while (buf_cap < need) buf_cap *= 2;
             buf = (char *)realloc(buf, buf_cap);
-            if (buf == NULL) { set_error(S, "out of memory"); return NULL; }
+            if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
         }
         if (!first && sep_len > 0) {
             memcpy(buf + buf_len, sep, sep_len);
@@ -439,13 +439,13 @@ mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *en
     mino_val_t *s, *prefix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "starts-with? requires two string arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "starts-with? requires two string arguments");
     }
     s      = args->as.cons.car;
     prefix = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || prefix == NULL || prefix->type != MINO_STRING) {
-        return prim_throw_error(S, "starts-with? requires two string arguments");
+        return prim_throw_classified(S, "eval/type", "MTY001", "starts-with? requires two string arguments");
     }
     if (prefix->as.s.len > s->as.s.len) return mino_false(S);
     return memcmp(s->as.s.data, prefix->as.s.data, prefix->as.s.len) == 0
@@ -457,13 +457,13 @@ mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *s, *suffix;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "ends-with? requires two string arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "ends-with? requires two string arguments");
     }
     s      = args->as.cons.car;
     suffix = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || suffix == NULL || suffix->type != MINO_STRING) {
-        return prim_throw_error(S, "ends-with? requires two string arguments");
+        return prim_throw_classified(S, "eval/type", "MTY001", "ends-with? requires two string arguments");
     }
     if (suffix->as.s.len > s->as.s.len) return mino_false(S);
     return memcmp(s->as.s.data + s->as.s.len - suffix->as.s.len,
@@ -477,13 +477,13 @@ mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char *p;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "includes? requires two string arguments");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "includes? requires two string arguments");
     }
     s   = args->as.cons.car;
     sub = args->as.cons.cdr->as.cons.car;
     if (s == NULL || s->type != MINO_STRING
         || sub == NULL || sub->type != MINO_STRING) {
-        return prim_throw_error(S, "includes? requires two string arguments");
+        return prim_throw_classified(S, "eval/type", "MTY001", "includes? requires two string arguments");
     }
     if (sub->as.s.len == 0) return mino_true(S);
     if (sub->as.s.len > s->as.s.len) return mino_false(S);
@@ -502,15 +502,15 @@ mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "upper-case requires one string argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "upper-case requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        return prim_throw_error(S, "upper-case requires one string argument");
+        return prim_throw_classified(S, "eval/type", "MTY001", "upper-case requires one string argument");
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
-        set_error(S, "out of memory"); return NULL;
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
     }
     for (i = 0; i < s->as.s.len; i++) {
         buf[i] = (char)toupper((unsigned char)s->as.s.data[i]);
@@ -529,15 +529,15 @@ mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "lower-case requires one string argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "lower-case requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        return prim_throw_error(S, "lower-case requires one string argument");
+        return prim_throw_classified(S, "eval/type", "MTY001", "lower-case requires one string argument");
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
-        set_error(S, "out of memory"); return NULL;
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
     }
     for (i = 0; i < s->as.s.len; i++) {
         buf[i] = (char)tolower((unsigned char)s->as.s.data[i]);
@@ -555,11 +555,11 @@ mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char *start, *end_ptr;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_error(S, "trim requires one string argument");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "trim requires one string argument");
     }
     s = args->as.cons.car;
     if (s == NULL || s->type != MINO_STRING) {
-        return prim_throw_error(S, "trim requires one string argument");
+        return prim_throw_classified(S, "eval/type", "MTY001", "trim requires one string argument");
     }
     start   = s->as.s.data;
     end_ptr = s->as.s.data + s->as.s.len;
@@ -587,7 +587,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 cap = cap == 0 ? 128 : cap;
                 while (cap < need) cap *= 2;
                 buf = (char *)realloc(buf, cap);
-                if (buf == NULL) { set_error(S, "out of memory"); return NULL; }
+                if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
             }
             memcpy(buf + len, a->as.s.data, a->as.s.len);
             len += a->as.s.len;
@@ -653,7 +653,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         cap = cap == 0 ? 128 : cap;
                         while (cap < need2) cap *= 2;
                         buf = (char *)realloc(buf, cap);
-                        if (buf == NULL) { set_error(S, "out of memory"); return NULL; }
+                        if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
                     }
                     memcpy(buf + len, printed->as.s.data, plen);
                     len += plen;
@@ -674,7 +674,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     cap = cap == 0 ? 128 : cap;
                     while (cap < need) cap *= 2;
                     buf = (char *)realloc(buf, cap);
-                    if (buf == NULL) { set_error(S, "out of memory"); return NULL; }
+                    if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
                 }
                 memcpy(buf + len, tmp, (size_t)n);
                 len += (size_t)n;
