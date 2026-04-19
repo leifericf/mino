@@ -416,3 +416,39 @@
   (swap! (:subs p) update topic
     (fn [chs] (disj (or chs #{}) ch)))
   nil)
+
+;; --- pipeline ---
+
+(defn pipeline
+  "Takes items from the from channel, applies xf to each (using n
+   parallel go blocks), and puts results on the to channel.
+   Closes to when from is exhausted (unless close? is false)."
+  ([n to xf from] (pipeline n to xf from true))
+  ([n to xf from close?]
+   (let [jobs     (chan n)
+         results  (chan n)
+         done     (atom 0)]
+     ;; Feed jobs
+     (let [feeder (fn feeder [v]
+                    (if (nil? v)
+                      (close! jobs)
+                      (do (put! jobs v)
+                          (take! from feeder))))]
+       (take! from feeder))
+     ;; Worker: take from jobs, apply xf, put result
+     (dotimes [_ n]
+       (let [worker (fn worker [v]
+                      (if (nil? v)
+                        (when (= n (swap! done inc))
+                          (close! results))
+                        (do (put! results (xf v))
+                            (take! jobs worker))))]
+         (take! jobs worker)))
+     ;; Collector: take from results, put on to
+     (let [collector (fn collector [v]
+                       (if (nil? v)
+                         (when close? (close! to))
+                         (do (put! to v)
+                             (take! results collector))))]
+       (take! results collector))
+     to)))
