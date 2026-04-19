@@ -1,6 +1,20 @@
 /*
  * async_handler.h -- handler protocol for async channel operations.
  *
+ * Design rationale:
+ *   The canonical core.async handler is a protocol object with
+ *   active?/commit/lock-id methods, used for multi-threaded
+ *   contention.  mino is single-threaded: there is no thread
+ *   contention, no lock ordering, and no CAS.  The arbitration
+ *   flag struct serves the handler role directly -- pending ops
+ *   carry a flag pointer, dequeue_active_* checks flag->committed
+ *   to skip stale ops, and committing sets the flag to prevent
+ *   sibling ops from firing.  This gives exactly-once semantics
+ *   for alts without the indirection of full handler objects.
+ *
+ *   The handler_create / handler_commit API below exists for
+ *   completeness but the hot path uses flags on pending_op_t.
+ *
  * A handler wraps a callback with single-commit semantics.
  * Handlers share a flag for alts arbitration: when one handler
  * commits, all siblings become inactive.
