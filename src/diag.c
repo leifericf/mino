@@ -160,3 +160,150 @@ int diag_render_compact(const mino_diag_t *d, char *buf, size_t n)
     }
     return written < 0 ? 0 : written;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Map conversion                                                            */
+/* ------------------------------------------------------------------------- */
+
+/* Build a location map from a span. */
+static mino_val_t *span_to_map(mino_state_t *S, const mino_span_t *sp)
+{
+    mino_val_t *keys[5], *vals[5];
+    size_t n = 0;
+    keys[n] = mino_keyword(S, "file");
+    vals[n] = sp->file ? mino_string(S, sp->file) : mino_nil(S);
+    n++;
+    keys[n] = mino_keyword(S, "line");
+    vals[n] = mino_int(S, sp->line);
+    n++;
+    keys[n] = mino_keyword(S, "column");
+    vals[n] = mino_int(S, sp->column);
+    n++;
+    keys[n] = mino_keyword(S, "end-line");
+    vals[n] = mino_int(S, sp->end_line);
+    n++;
+    keys[n] = mino_keyword(S, "end-column");
+    vals[n] = mino_int(S, sp->end_column);
+    n++;
+    return mino_map(S, keys, vals, n);
+}
+
+/* Build a frame map. */
+static mino_val_t *frame_to_map(mino_state_t *S, const mino_diag_frame_t *f)
+{
+    mino_val_t *keys[4], *vals[4];
+    size_t n = 0;
+    keys[n] = mino_keyword(S, "fn");
+    vals[n] = f->fn_name ? mino_string(S, f->fn_name) : mino_nil(S);
+    n++;
+    keys[n] = mino_keyword(S, "file");
+    vals[n] = f->file ? mino_string(S, f->file) : mino_nil(S);
+    n++;
+    keys[n] = mino_keyword(S, "line");
+    vals[n] = mino_int(S, f->line);
+    n++;
+    keys[n] = mino_keyword(S, "column");
+    vals[n] = mino_int(S, f->column);
+    n++;
+    return mino_map(S, keys, vals, n);
+}
+
+mino_val_t *diag_to_map(mino_state_t *S, mino_diag_t *d)
+{
+    mino_val_t *keys[11], *vals[11];
+    size_t n = 0;
+
+    if (d == NULL) return mino_nil(S);
+
+    /* Return cached map if available. */
+    if (d->cached_map != NULL) return d->cached_map;
+
+    /* :mino/kind */
+    keys[n] = mino_keyword(S, "mino/kind");
+    vals[n] = d->kind ? mino_keyword(S, d->kind) : mino_nil(S);
+    n++;
+
+    /* :mino/code */
+    keys[n] = mino_keyword(S, "mino/code");
+    vals[n] = d->code ? mino_string(S, d->code) : mino_nil(S);
+    n++;
+
+    /* :mino/phase */
+    keys[n] = mino_keyword(S, "mino/phase");
+    vals[n] = d->phase ? mino_keyword(S, d->phase) : mino_nil(S);
+    n++;
+
+    /* :mino/message */
+    keys[n] = mino_keyword(S, "mino/message");
+    vals[n] = d->message ? mino_string(S, d->message) : mino_nil(S);
+    n++;
+
+    /* :mino/summary */
+    keys[n] = mino_keyword(S, "mino/summary");
+    vals[n] = d->summary ? mino_string(S, d->summary) : mino_nil(S);
+    n++;
+
+    /* :mino/expected? */
+    keys[n] = mino_keyword(S, "mino/expected?");
+    vals[n] = d->expected ? mino_true(S) : mino_false(S);
+    n++;
+
+    /* :mino/location */
+    keys[n] = mino_keyword(S, "mino/location");
+    if (d->has_primary_span) {
+        vals[n] = span_to_map(S, &d->primary_span);
+    } else {
+        vals[n] = mino_nil(S);
+    }
+    n++;
+
+    /* :mino/notes */
+    keys[n] = mino_keyword(S, "mino/notes");
+    {
+        mino_val_t **note_items = NULL;
+        size_t i;
+        if (d->notes_len > 0) {
+            note_items = (mino_val_t **)gc_alloc_typed(
+                S, GC_T_VALARR, d->notes_len * sizeof(*note_items));
+            for (i = 0; i < d->notes_len; i++) {
+                note_items[i] = d->notes[i].message
+                    ? mino_string(S, d->notes[i].message) : mino_nil(S);
+            }
+            vals[n] = mino_vector(S, note_items, d->notes_len);
+        } else {
+            vals[n] = mino_vector(S, NULL, 0);
+        }
+    }
+    n++;
+
+    /* :mino/trace */
+    keys[n] = mino_keyword(S, "mino/trace");
+    {
+        mino_val_t **frame_items = NULL;
+        size_t i;
+        if (d->frames_len > 0) {
+            frame_items = (mino_val_t **)gc_alloc_typed(
+                S, GC_T_VALARR, d->frames_len * sizeof(*frame_items));
+            for (i = 0; i < d->frames_len; i++) {
+                frame_items[i] = frame_to_map(S, &d->frames[i]);
+            }
+            vals[n] = mino_vector(S, frame_items, d->frames_len);
+        } else {
+            vals[n] = mino_vector(S, NULL, 0);
+        }
+    }
+    n++;
+
+    /* :mino/data */
+    keys[n] = mino_keyword(S, "mino/data");
+    vals[n] = d->data ? d->data : mino_nil(S);
+    n++;
+
+    /* :mino/cause */
+    keys[n] = mino_keyword(S, "mino/cause");
+    vals[n] = d->cause ? diag_to_map(S, d->cause) : mino_nil(S);
+    n++;
+
+    d->cached_map = mino_map(S, keys, vals, n);
+    return d->cached_map;
+}

@@ -20,6 +20,12 @@ const mino_diag_t *mino_last_diag(mino_state_t *S)
     return S->last_diag;
 }
 
+mino_val_t *mino_last_error_map(mino_state_t *S)
+{
+    if (S->last_diag == NULL) return mino_nil(S);
+    return diag_to_map(S, S->last_diag);
+}
+
 /* Install a fully-built diagnostic as the current error. Takes ownership
  * of d. Renders a compact form into error_buf for backward compat. */
 void set_diag(mino_state_t *S, mino_diag_t *d)

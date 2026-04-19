@@ -121,4 +121,12 @@ void diag_capture_frames(mino_state_t *S, mino_diag_t *d);
  * Output is truncated if it exceeds n-1 bytes. */
 int diag_render_compact(const mino_diag_t *d, char *buf, size_t n);
 
+/* ------------------------------------------------------------------------- */
+/* Map conversion                                                            */
+/* ------------------------------------------------------------------------- */
+
+/* Convert a diagnostic to a mino map with canonical :mino/kind etc. keys.
+ * The result is GC-owned and cached on d->cached_map. */
+mino_val_t *diag_to_map(mino_state_t *S, mino_diag_t *d);
+
 #endif /* MINO_DIAG_H */

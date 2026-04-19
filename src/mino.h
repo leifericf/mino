@@ -300,6 +300,10 @@ typedef struct mino_diag mino_diag_t;
  * The returned pointer is valid until the next error or clear_error. */
 const mino_diag_t *mino_last_diag(mino_state_t *S);
 
+/* Return the last error as a mino map with :mino/kind, :mino/code, etc.
+ * Returns nil if no error occurred. The value is GC-owned and cached. */
+mino_val_t *mino_last_error_map(mino_state_t *S);
+
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */
