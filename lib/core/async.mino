@@ -296,6 +296,36 @@
     ;; Recurse into other forms
     :else (apply list (map go-expand-if form))))
 
+(defn go-try-park?
+  "Returns true if form is (try body... (catch e handler)) where body contains parks."
+  [form]
+  (and (cons? form)
+       (= 'try (first form))
+       (let [args (rest form)
+             body-forms (take-while
+                          (fn [c] (not (and (cons? c)
+                                            (or (= 'catch (first c))
+                                                (= 'finally (first c))))))
+                          args)]
+         (boolean (some go-contains-park? body-forms)))))
+
+(defn go-parse-try
+  "Parse a try form into {:body-forms [...] :catch-sym sym :catch-body [...] :finally-body [...]}."
+  [form]
+  (let [args (vec (rest form))
+        body-forms (vec (take-while
+                          (fn [c] (not (and (cons? c)
+                                            (or (= 'catch (first c))
+                                                (= 'finally (first c))))))
+                          args))
+        rest-clauses (drop (count body-forms) args)
+        catch-clause (first (filter (fn [c] (and (cons? c) (= 'catch (first c)))) rest-clauses))
+        finally-clause (first (filter (fn [c] (and (cons? c) (= 'finally (first c)))) rest-clauses))]
+    {:body-forms body-forms
+     :catch-sym (when catch-clause (second catch-clause))
+     :catch-body (when catch-clause (vec (rest (rest catch-clause))))
+     :finally-body (when finally-clause (vec (rest finally-clause)))}))
+
 (defn go-bindings-have-park?
   "Returns true if a binding vector [name val name val ...] contains
    any park operation in the value positions."
@@ -475,6 +505,23 @@
                 ;; There are stmts after the loop - TODO
                 (vec (concat (conj states pre-state first-body) rest-body))))
 
+            ;; Try with parks in body
+            (go-try-park? stmt)
+            (let [{:keys [body-forms catch-sym catch-body finally-body]}
+                    (go-parse-try stmt)
+                  pre-state   {:body current :park nil
+                               :use-val has-park :bind bind-sym}
+                  inner-body  (if (= 1 (count body-forms))
+                                (first body-forms)
+                                (cons 'do body-forms))
+                  sub-states  (go-transform inner-body result-ch loop-ctx)
+                  try-ctx     {:catch-sym (or catch-sym (gensym "e_"))
+                               :catch-body (or catch-body ['nil])
+                               :finally-body finally-body}
+                  tagged      (mapv (fn [s] (assoc s :try-ctx try-ctx))
+                                    sub-states)]
+              (vec (concat (conj states pre-state) tagged)))
+
             ;; Recur (inside a loop)
             (go-recur? stmt)
             (let [args      (vec (rest stmt))
@@ -568,6 +615,35 @@
          (chan-put* ~result-ch exit-val# (fn [~val-sym] nil)))
        (chan-close* ~result-ch))))
 
+(defn go-wrap-try
+  "If state has :try-ctx, wrap expr in try/catch that puts the caught value
+   on result-ch. Otherwise return expr unchanged.
+   last-try? controls finally placement: only the last try state gets
+   a proper (finally ...) clause. Intermediate states run finally inline
+   in the catch handler (only on exception, not on normal park)."
+  [expr state result-ch last-try?]
+  (if-let [tc (:try-ctx state)]
+    (let [catch-sym    (:catch-sym tc)
+          catch-body   (:catch-body tc)
+          finally-body (:finally-body tc)
+          catch-result (gensym "catch_r_")
+          cb-sym       (gensym "tc_")
+          catch-handler (if (and finally-body (not last-try?))
+                          ;; Intermediate: run finally inline after catch (exception exit only)
+                          `(do (let [~catch-result (do ~@(seq catch-body))]
+                                 (when (not (nil? ~catch-result))
+                                   (chan-put* ~result-ch ~catch-result (fn [~cb-sym] nil)))
+                                 (chan-close* ~result-ch))
+                               ~@(seq finally-body))
+                          `(let [~catch-result (do ~@(seq catch-body))]
+                             (when (not (nil? ~catch-result))
+                               (chan-put* ~result-ch ~catch-result (fn [~cb-sym] nil)))
+                             (chan-close* ~result-ch)))]
+      (if (and finally-body last-try?)
+        `(try ~expr (catch ~catch-sym ~catch-handler) (finally ~@(seq finally-body)))
+        `(try ~expr (catch ~catch-sym ~catch-handler))))
+    expr))
+
 (defn go-emit-machine
   "Emit the state machine function for a go block.
    The machine function takes (state, val) where val is either nil
@@ -587,6 +663,10 @@
               use-val  (:use-val state)
               bind     (:bind state)
               val-sym  (gensym "v_")
+              ;; Is this the last state with :try-ctx? (for finally placement)
+              last-try? (and (:try-ctx state)
+                             (or (= i (dec n))
+                                 (not (:try-ctx (nth states (inc i))))))
               ;; Previous binds: all :bind syms and pre-bind names from states before this one
               prev-binds  (vec (concat (keep :bind (take i states))
                                        (mapcat (fn [s] (take-nth 2 (or (:pre-bind-lets s) [])))
@@ -658,7 +738,7 @@
                                 `(let ~(apply vector (seq all-lets))
                                    ~@(seq body)
                                    ~recur-expr))]
-              (swap! arms conj full-expr))
+              (swap! arms conj (go-wrap-try full-expr state result-ch last-try?)))
 
             ;; Park state
             park
@@ -678,7 +758,7 @@
                                `(let ~(apply vector (seq all-lets))
                                   ~@(seq body)
                                   ~park-expr))]
-              (swap! arms conj full-expr))
+              (swap! arms conj (go-wrap-try full-expr state result-ch last-try?)))
 
             ;; Loop body state with recur: use go-loop-body-exit on last body expr
             (and (:recur-ctx state) (not (empty? body))
@@ -693,7 +773,7 @@
                                `(let ~(apply vector (seq all-lets))
                                   ~@(seq init-body)
                                   ~exit-expr))]
-              (swap! arms conj full-expr))
+              (swap! arms conj (go-wrap-try full-expr state result-ch last-try?)))
 
             ;; Pass-through state (no park, no recur, not the last state)
             (< i (dec n))
@@ -705,7 +785,7 @@
                                `(let ~(apply vector (seq all-lets))
                                   ~@(seq body)
                                   (~machine-sym ~next-state ~'val#)))]
-              (swap! arms conj full-expr))
+              (swap! arms conj (go-wrap-try full-expr state result-ch last-try?)))
 
             ;; Final state (no park, no recur, last state)
             :else
@@ -715,13 +795,13 @@
                                        ~@(seq body))))
                   final-body (if (and use-val (empty? body) (not bind))
                                (if (empty? prev-binds) 'val# '(:val val#))
-                               `(do ~@(seq wrapped)))]
-              (swap! arms conj
-                `(let [final-result# ~final-body]
-                   (when (not (nil? final-result#))
-                     (chan-put* ~result-ch final-result#
-                       (fn [~val-sym] nil)))
-                   (chan-close* ~result-ch))))))))
+                               `(do ~@(seq wrapped)))
+                  full-expr  `(let [final-result# ~final-body]
+                                (when (not (nil? final-result#))
+                                  (chan-put* ~result-ch final-result#
+                                    (fn [~val-sym] nil)))
+                                (chan-close* ~result-ch))]
+              (swap! arms conj (go-wrap-try full-expr state result-ch last-try?)))))))
       `(fn ~machine-sym [state# val#]
          (case state# ~@(seq (deref arms)))))))
 

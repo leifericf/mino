@@ -580,4 +580,111 @@
                           :after))]
       (is (= :after result)))))
 
+;; ===== try/catch across park points =====
+
+(deftest go-try-normal-flow
+  (let [ch (chan 1)]
+    (>!! ch 42)
+    (is (= 42 (<!! (go (try (<! ch) (catch e :error))))))))
+
+(deftest go-try-exception-before-park
+  (let [ch (chan 1)]
+    (>!! ch 42)
+    (is (= "early" (<!! (go (try (do (throw "early") (<! ch))
+                              (catch e e))))))))
+
+(deftest go-try-exception-after-park
+  (let [ch (chan 1)]
+    (>!! ch 42)
+    (is (= "oops" (<!! (go (try (do (<! ch) (throw "oops"))
+                             (catch e e))))))))
+
+(deftest go-try-let-park-normal
+  (let [ch (chan 1)]
+    (>!! ch 10)
+    (is (= 20 (<!! (go (try (let [v (<! ch)] (* v 2))
+                         (catch e :error))))))))
+
+(deftest go-try-let-park-exception
+  (let [ch (chan 1)]
+    (>!! ch 10)
+    (is (= "got:10" (<!! (go (try (let [v (<! ch)] (throw (str "got:" v)))
+                               (catch e e))))))))
+
+(deftest go-try-finally-on-success
+  (let [ch (chan 1)
+        log (atom [])]
+    (>!! ch 42)
+    (<!! (go (try (<! ch)
+              (catch e :error)
+              (finally (swap! log conj :finally)))))
+    (is (= [:finally] @log))))
+
+(deftest go-try-finally-on-exception
+  (let [ch (chan 1)
+        log (atom [])]
+    (>!! ch 42)
+    (let [result (<!! (go (try (do (<! ch) (throw "boom"))
+                            (catch e (do (swap! log conj :caught) e))
+                            (finally (swap! log conj :finally)))))]
+      (is (= "boom" result))
+      (is (= [:caught :finally] @log)))))
+
+(deftest go-try-loop-recur
+  (let [ch (chan 3)
+        out (atom [])]
+    (>!! ch 1) (>!! ch 2) (>!! ch 3) (close! ch)
+    (<!! (go (try
+               (loop []
+                 (let [v (<! ch)]
+                   (when v
+                     (swap! out conj v)
+                     (recur))))
+               (catch e :error))))
+    (is (= [1 2 3] @out))))
+
+(deftest go-try-exception-in-loop
+  (let [ch (chan 3)]
+    (>!! ch 1) (>!! ch 2) (>!! ch 99)
+    (is (= "bad:99"
+           (<!! (go (try
+                      (loop []
+                        (let [v (<! ch)]
+                          (when (= v 99) (throw (str "bad:" v)))
+                          (when v (recur))))
+                      (catch e e))))))))
+
+(deftest go-try-catch-nil-result
+  (let [ch (chan 1)]
+    (>!! ch 42)
+    (is (= nil (<!! (go (try (do (<! ch) (throw "x"))
+                          (catch e nil))))))))
+
+(deftest go-try-multiple-parks
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 10) (>!! ch2 20)
+    (is (= 30 (<!! (go (try (let [a (<! ch1)
+                                   b (<! ch2)]
+                               (+ a b))
+                          (catch e :error))))))))
+
+(deftest go-try-exception-at-second-park
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 10) (>!! ch2 20)
+    (is (= "after-b"
+           (<!! (go (try (let [a (<! ch1)
+                                b (<! ch2)]
+                            (throw "after-b"))
+                      (catch e e))))))))
+
+(deftest go-try-if-park-in-try
+  (let [ch1 (chan 1) ch2 (chan 1)]
+    (>!! ch1 :then) (>!! ch2 :else)
+    (is (= :then (<!! (go (try (if true (<! ch1) (<! ch2))
+                            (catch e :error))))))
+    (let [ch3 (chan 1) ch4 (chan 1)]
+      (>!! ch3 :then) (>!! ch4 :else)
+      (is (= :else (<!! (go (try (if false (<! ch3) (<! ch4))
+                              (catch e :error)))))))))
+
 (run-tests)
