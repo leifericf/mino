@@ -57,7 +57,7 @@
 
 (deftest into-collects
   (let [ch  (to-chan [1 2 3])
-        out (into [] ch)
+        out (async-into [] ch)
         result (atom nil)]
     (take! out (fn [v] (reset! result v)))
     (drain!)
@@ -66,7 +66,7 @@
 (deftest into-empty
   (let [ch  (chan)]
     (close! ch)
-    (let [out (into [] ch)
+    (let [out (async-into [] ch)
           result (atom nil)]
       (take! out (fn [v] (reset! result v)))
       (drain!)

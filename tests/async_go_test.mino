@@ -124,4 +124,43 @@
       (drain!)
       (is (= :transferred @result)))))
 
+;; --- go with let bindings across parks ---
+
+(deftest go-let-take
+  (let [src (chan 1)
+        result (atom nil)]
+    (put! src 10)
+    (drain!)
+    (let [ch (go (let [x (<! src)]
+                   (* x 2)))]
+      (take! ch (fn [v] (reset! result v)))
+      (drain!)
+      (is (= 20 @result)))))
+
+(deftest go-let-multiple-bindings
+  (let [src (chan 1)
+        result (atom nil)]
+    (put! src 5)
+    (drain!)
+    (let [ch (go (let [x (<! src)
+                       y (+ x 3)]
+                   (* y 2)))]
+      (take! ch (fn [v] (reset! result v)))
+      (drain!)
+      (is (= 16 @result)))))
+
+(deftest go-let-nested-takes
+  (let [ch1 (chan 1)
+        ch2 (chan 1)
+        result (atom nil)]
+    (put! ch1 10)
+    (put! ch2 20)
+    (drain!)
+    (let [out (go (let [a (<! ch1)]
+                    (let [b (<! ch2)]
+                      (+ a b))))]
+      (take! out (fn [v] (reset! result v)))
+      (drain!)
+      (is (= 30 @result)))))
+
 (run-tests)

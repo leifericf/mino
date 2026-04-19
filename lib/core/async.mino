@@ -154,79 +154,156 @@
        (let [n (name (first form))]
          (or (= n "<!") (= n ">!")))))
 
+(defn go-let-park?
+  "Returns true if form is (let [x (<! ch) ...] body) where a binding
+   value is a park operation."
+  [form]
+  (and (cons? form)
+       (= 'let (first form))
+       (vector? (second form))
+       (>= (count (second form)) 2)
+       (go-park? (nth (second form) 1))))
+
 (defn go-transform
   "Transform a go body into a vector of states.
-   Each state is {:body [...] :park park-info :use-val bool}.
-   :use-val true means this state should bind val# to a local symbol
-   so it can be used by body expressions.
-   Park info: {:kind :take/:put :ch expr :val expr}."
+   Each state is {:body [...] :park park-info :use-val bool :bind sym}.
+   :bind sym means the next state should bind val# to sym via let.
+   Park info: {:kind :take/:put :ch expr :val expr}.
+   Recursively processes nested let-park forms."
   [body result-ch]
-  (let [stmts    (if (and (cons? body) (= 'do (first body)))
-                   (rest body)
-                   (list body))
-        states   (atom [])
-        current  (atom [])
-        has-park (atom false)
-        add-state (fn [body park]
-                    (swap! states conj {:body body :park park
-                                        :use-val @has-park})
-                    (reset! has-park (not (nil? park))))]
-    ;; Walk statements, splitting at park points
-    (doseq [stmt stmts]
-      (if (go-park? stmt)
-        (let [op   (name (first stmt))
-              kind (if (= op "<!") :take :put)]
-          (if (= kind :take)
-            (do
-              (add-state @current {:kind :take :ch (second stmt)})
-              (reset! current []))
-            (do
-              (add-state @current {:kind :put :ch (second stmt) :val (nth stmt 2)})
-              (reset! current []))))
-        (swap! current conj stmt)))
-    ;; Final state
-    (add-state @current nil)
-    @states))
+  (let [stmts (if (and (cons? body) (= 'do (first body)))
+                (vec (rest body))
+                [body])]
+    (loop [i       0
+           states  []
+           current []
+           has-park false
+           bind-sym nil]
+      (if (>= i (count stmts))
+        ;; Done: add final state
+        (conj states {:body current :park nil
+                      :use-val has-park :bind bind-sym})
+        (let [stmt (nth stmts i)]
+          (cond
+            ;; Direct park: (<! ch) or (>! ch val)
+            (go-park? stmt)
+            (let [op   (name (first stmt))
+                  kind (if (= op "<!") :take :put)
+                  park (if (= kind :take)
+                         {:kind :take :ch (second stmt)}
+                         {:kind :put :ch (second stmt) :val (nth stmt 2)})
+                  new-state {:body current :park park
+                             :use-val has-park :bind bind-sym}]
+              (recur (inc i) (conj states new-state) []
+                     true nil))
+
+            ;; Let with park in first binding: (let [x (<! ch)] body)
+            (go-let-park? stmt)
+            (let [bindings    (second stmt)
+                  sym         (nth bindings 0)
+                  park-form   (nth bindings 1)
+                  op          (name (first park-form))
+                  kind        (if (= op "<!") :take :put)
+                  park        (if (= kind :take)
+                                {:kind :take :ch (second park-form)}
+                                {:kind :put :ch (second park-form) :val (nth park-form 2)})
+                  rest-bindings (subvec bindings 2)
+                  body-forms  (vec (rest (rest stmt)))
+                  new-state   {:body current :park park
+                               :use-val has-park :bind bind-sym}
+                  ;; Build the continuation body
+                  cont-body   (if (empty? rest-bindings)
+                                body-forms
+                                [`(let ~(apply vector (seq rest-bindings))
+                                   ~@(seq body-forms))])
+                  ;; Recursively transform continuation + remaining stmts
+                  remaining   (vec (concat cont-body (subvec stmts (inc i))))
+                  sub-states  (go-transform (cons 'do remaining) result-ch)
+                  first-sub   (assoc (first sub-states) :use-val true :bind sym)
+                  rest-subs   (rest sub-states)]
+              (vec (concat (conj states new-state first-sub) rest-subs)))
+
+            ;; Normal statement
+            :else
+            (recur (inc i) states (conj current stmt)
+                   has-park bind-sym)))))))
 
 (defn go-emit-machine
-  "Emit the state machine function for a go block."
+  "Emit the state machine function for a go block.
+   The machine function takes (state, val) where val is either nil
+   (initial) or the result of the previous park operation.
+   Bindings that cross state boundaries are stored in a locals map
+   threaded through val as {:val v :locals {...}}."
   [states result-ch]
-  (let [n      (count states)
-        machine-sym (gensym "go_machine_")]
-    ;; Build the case arms
+  (let [n           (count states)
+        machine-sym (gensym "go_machine_")
+        ;; Collect all bind syms to know which states need locals
+        all-binds   (vec (keep :bind states))]
     (let [arms (atom [])]
       (dotimes [i n]
         (let [state    (nth states i)
               body     (:body state)
               park     (:park state)
               use-val  (:use-val state)
-              val-sym  (gensym "v_")]
+              bind     (:bind state)
+              val-sym  (gensym "v_")
+              ;; Build local bindings restoration + new binding
+              local-binds (vec (keep :bind (take (inc i) states)))
+              ;; Previous binds: all binds from states before this one
+              prev-binds  (vec (keep :bind (take i states)))
+              ;; Destructure locals from val#
+              restore-lets (mapcat (fn [s] [s `(get (:locals ~'val#) '~s)]) prev-binds)
+              ;; Current value from park
+              cur-val     (if use-val
+                            (if (empty? prev-binds)
+                              'val#
+                              '(:val val#))
+                            nil)
+              ;; Wrap body with restored locals + new bind
+              all-lets    (vec (concat restore-lets
+                                 (when bind [bind cur-val])))
+              wrapped     (if (empty? all-lets)
+                            body
+                            (list `(let ~(apply vector (seq all-lets))
+                                    ~@(seq body))))
+              ;; Build the value to pass to next state (with locals map)
+              pack-val    (fn [v]
+                            (let [cur-binds (vec (concat prev-binds (when bind [bind])))]
+                              (if (empty? cur-binds)
+                                v
+                                `{:val ~v
+                                  :locals (assoc
+                                    ~(if (empty? prev-binds)
+                                       {}
+                                       '(:locals val#))
+                                    '~(last cur-binds) ~(last cur-binds))})))]
           (swap! arms conj i)
           (if park
-            ;; This state has a park operation
-            (let [next-state (inc i)]
-              (if (= (:kind park) :take)
-                (swap! arms conj
-                  `(do ~@(seq body)
-                       (chan-take* ~(:ch park)
-                         (fn [~val-sym]
-                           (~machine-sym ~next-state ~val-sym)))))
-                (swap! arms conj
-                  `(do ~@(seq body)
-                       (chan-put* ~(:ch park) ~(:val park)
-                         (fn [~val-sym]
-                           (~machine-sym ~next-state ~val-sym)))))))
-            ;; Final state: run body or use val#, put result on result-ch
-            (let [final-body (if (and use-val (empty? body))
-                               'val#
-                               `(do ~@(seq body)))]
+            (let [next-state (inc i)
+                  park-expr  (if (= (:kind park) :take)
+                               `(chan-take* ~(:ch park)
+                                  (fn [~val-sym]
+                                    (~machine-sym ~next-state ~(pack-val val-sym))))
+                               `(chan-put* ~(:ch park) ~(:val park)
+                                  (fn [~val-sym]
+                                    (~machine-sym ~next-state ~(pack-val val-sym)))))
+                  ;; Wrap body + park in let if we have bindings to restore
+                  full-expr  (if (empty? all-lets)
+                               `(do ~@(seq body) ~park-expr)
+                               `(let ~(apply vector (seq all-lets))
+                                  ~@(seq body)
+                                  ~park-expr))]
+              (swap! arms conj full-expr))
+            ;; Final state
+            (let [final-body (if (and use-val (empty? body) (not bind))
+                               (if (empty? prev-binds) 'val# '(:val val#))
+                               `(do ~@(seq wrapped)))]
               (swap! arms conj
                 `(let [final-result# ~final-body]
                    (when (not (nil? final-result#))
                      (chan-put* ~result-ch final-result#
                        (fn [~val-sym] nil)))
                    (chan-close* ~result-ch)))))))
-      ;; Emit the letrec-style machine
       `(fn ~machine-sym [state# val#]
          (case state# ~@(seq (deref arms)))))))
 
@@ -316,7 +393,7 @@
   (let [ch (chan (count coll))]
     (onto-chan ch coll)))
 
-(defn into
+(defn async-into
   "Returns a channel containing the single result of reducing
    all values from ch into init using conj."
   [init ch]
