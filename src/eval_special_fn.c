@@ -16,7 +16,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
     mino_val_t *fn_val;
     int         multi_arity = 0;
     if (!mino_is_cons(args)) {
-        set_error_at(S, form, "fn requires a parameter list");
+        set_eval_diag(S, form, "syntax", "MSY002", "fn requires a parameter list");
         return NULL;
     }
     /* Optional name: (fn name (...) body) or (fn name ([x] ...) ([x y] ...)) */
@@ -61,7 +61,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
             mino_val_t *cbody;
             mino_val_t *cell;
             if (!mino_is_cons(clause)) {
-                set_error_at(S, form, "multi-arity clause must be a list");
+                set_eval_diag(S, form, "syntax", "MSY002", "multi-arity clause must be a list");
                 return NULL;
             }
             cparams = clause->as.cons.car;
@@ -70,7 +70,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
                 || (cparams->type != MINO_VECTOR
                     && !mino_is_cons(cparams)
                     && !mino_is_nil(cparams))) {
-                set_error_at(S, form, "multi-arity clause must start with a parameter list");
+                set_eval_diag(S, form, "syntax", "MSY002", "multi-arity clause must start with a parameter list");
                 return NULL;
             }
             cell = mino_cons(S, mino_cons(S, cparams, cbody), mino_nil(S));
@@ -87,7 +87,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
     } else {
         if (!mino_is_cons(params) && !mino_is_nil(params)
             && params->type != MINO_VECTOR) {
-            set_error_at(S, form, "fn parameter list must be a list or vector");
+            set_eval_diag(S, form, "syntax", "MSY002", "fn parameter list must be a list or vector");
             return NULL;
         }
         /* Validate params when given as a cons list. */
@@ -95,7 +95,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
             for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
                 mino_val_t *name = p->as.cons.car;
                 if (name == NULL || name->type != MINO_SYMBOL) {
-                    set_error_at(S, form, "fn parameter must be a symbol");
+                    set_eval_diag(S, form, "syntax", "MSY002", "fn parameter must be a symbol");
                     return NULL;
                 }
             }
@@ -106,7 +106,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
         size_t nlen = fn_name->as.s.len;
         mino_env_t *fn_env;
         if (nlen >= sizeof(nbuf)) {
-            set_error_at(S, form, "fn name too long");
+            set_eval_diag(S, form, "syntax", "MSY002", "fn name too long");
             return NULL;
         }
         memcpy(nbuf, fn_name->as.s.data, nlen);
@@ -199,7 +199,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                            mino_env_t *env)
 {
     if (fn == NULL) {
-        set_error(S, "cannot apply null");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY002", "cannot apply null");
         return NULL;
     }
     if (fn->type == MINO_PRIM) {
@@ -245,7 +245,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             if (clause == NULL) {
                 char msg[96];
                 snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
-                set_error(S, msg);
+                set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR002", msg);
                 return NULL;
             }
             cur_params = clause->as.cons.car;
@@ -269,7 +269,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     if (clause == NULL) {
                         char msg[96];
                         snprintf(msg, sizeof(msg), "no matching arity for %d args in recur", argc);
-                        set_error(S, msg);
+                        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR002", msg);
                         return NULL;
                     }
                     cur_params = clause->as.cons.car;
@@ -291,7 +291,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     if (clause == NULL) {
                         char msg[96];
                         snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
-                        set_error(S, msg);
+                        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR002", msg);
                         return NULL;
                     }
                     cur_params = clause->as.cons.car;
@@ -310,7 +310,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
             nargs++;
         if (nargs < 1 || nargs > 2) {
-            set_error(S, "keyword as function takes 1 or 2 arguments");
+            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "keyword as function takes 1 or 2 arguments");
             return NULL;
         }
         {
@@ -337,7 +337,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
             nargs++;
         if (nargs < 1 || nargs > 2) {
-            set_error(S, "map as function takes 1 or 2 arguments");
+            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "map as function takes 1 or 2 arguments");
             return NULL;
         }
         {
@@ -356,19 +356,19 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
             nargs++;
         if (nargs != 1) {
-            set_error(S, "vector as function takes 1 argument");
+            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "vector as function takes 1 argument");
             return NULL;
         }
         {
             mino_val_t *idx = args->as.cons.car;
             long long i;
             if (idx == NULL || idx->type != MINO_INT) {
-                set_error(S, "vector index must be an integer");
+                set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "vector index must be an integer");
                 return NULL;
             }
             i = idx->as.i;
             if (i < 0 || (size_t)i >= fn->as.vec.len) {
-                set_error(S, "vector index out of bounds");
+                set_eval_diag(S, S->eval_current_form, "eval/bounds", "MBD001", "vector index out of bounds");
                 return NULL;
             }
             return vec_nth(fn, (size_t)i);
@@ -381,7 +381,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
             nargs++;
         if (nargs != 1) {
-            set_error(S, "set as function takes 1 argument");
+            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "set as function takes 1 argument");
             return NULL;
         }
         {
@@ -397,7 +397,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
             nargs++;
         if (nargs < 1 || nargs > 2) {
-            set_error(S, "sorted-map as function takes 1 or 2 arguments");
+            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "sorted-map as function takes 1 or 2 arguments");
             return NULL;
         }
         {
@@ -416,7 +416,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
             nargs++;
         if (nargs != 1) {
-            set_error(S, "sorted-set as function takes 1 argument");
+            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "sorted-set as function takes 1 argument");
             return NULL;
         }
         {
@@ -430,7 +430,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         char msg[128];
         snprintf(msg, sizeof(msg), "not a function (got %s)",
                  type_tag_str(fn));
-        set_error(S, msg);
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY002", msg);
     }
     return NULL;
 }
