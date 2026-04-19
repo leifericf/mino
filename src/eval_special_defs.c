@@ -176,7 +176,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
     mino_val_t *rest;
     (void)form;
     if (!mino_is_cons(args)) {
-        set_error_at(S, form, "ns requires a name");
+        set_eval_diag(S, form, "syntax", "MSY001", "ns requires a name");
         return NULL;
     }
     /* First arg: namespace name symbol. */
@@ -229,12 +229,12 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     char        buf[256];
     size_t      n;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        set_error_at(S, form, "defmacro requires a name, parameters, and body");
+        set_eval_diag(S, form, "eval/arity", "MAR001", "defmacro requires a name, parameters, and body");
         return NULL;
     }
     name_form = args->as.cons.car;
     if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-        set_error_at(S, form, "defmacro name must be a symbol");
+        set_eval_diag(S, form, "syntax", "MSY001", "defmacro name must be a symbol");
         return NULL;
     }
     /* Optional docstring and attr-map:
@@ -264,14 +264,14 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     }
     if (!mino_is_cons(params) && !mino_is_nil(params)
         && params->type != MINO_VECTOR) {
-        set_error_at(S, form, "defmacro parameter list must be a list or vector");
+        set_eval_diag(S, form, "syntax", "MSY001", "defmacro parameter list must be a list or vector");
         return NULL;
     }
     if (mino_is_cons(params) || mino_is_nil(params)) {
         for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
             mino_val_t *pn = p->as.cons.car;
             if (pn == NULL || pn->type != MINO_SYMBOL) {
-                set_error_at(S, form, "defmacro parameter must be a symbol");
+                set_eval_diag(S, form, "syntax", "MSY001", "defmacro parameter must be a symbol");
                 return NULL;
             }
         }
@@ -282,7 +282,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     mac->as.fn.env    = env;
     n = name_form->as.s.len;
     if (n >= sizeof(buf)) {
-        set_error_at(S, form, "defmacro name too long");
+        set_eval_diag(S, form, "syntax", "MSY001", "defmacro name too long");
         return NULL;
     }
     memcpy(buf, name_form->as.s.data, n);
@@ -303,12 +303,12 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
         char buf[256];
         size_t n;
         if (sym == NULL || sym->type != MINO_SYMBOL) {
-            set_error_at(S, form, "declare: arguments must be symbols");
+            set_eval_diag(S, form, "syntax", "MSY001", "declare: arguments must be symbols");
             return NULL;
         }
         n = sym->as.s.len;
         if (n >= sizeof(buf)) {
-            set_error_at(S, form, "declare: name too long");
+            set_eval_diag(S, form, "syntax", "MSY001", "declare: name too long");
             return NULL;
         }
         memcpy(buf, sym->as.s.data, n);
@@ -330,17 +330,17 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
     char buf[256];
     size_t n;
     if (!mino_is_cons(args)) {
-        set_error_at(S, form, "def requires a name");
+        set_eval_diag(S, form, "syntax", "MSY001", "def requires a name");
         return NULL;
     }
     name_form  = args->as.cons.car;
     if (name_form == NULL || name_form->type != MINO_SYMBOL) {
-        set_error_at(S, form, "def name must be a symbol");
+        set_eval_diag(S, form, "syntax", "MSY001", "def name must be a symbol");
         return NULL;
     }
     n = name_form->as.s.len;
     if (n >= sizeof(buf)) {
-        set_error_at(S, form, "def name too long");
+        set_eval_diag(S, form, "syntax", "MSY001", "def name too long");
         return NULL;
     }
     memcpy(buf, name_form->as.s.data, n);
