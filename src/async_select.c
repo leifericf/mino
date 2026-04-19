@@ -1,13 +1,14 @@
 /*
  * async_select.c -- alts arbitration for async channels.
  *
- * The C level handles immediate completions and :default.
- * Returns -1 when no immediate completion is possible, signaling
- * the mino-level alts! to set up pending ops with flag callbacks.
+ * Handles both immediate completions and pending registration.
+ * For pending ops, creates a shared arbitration flag so that
+ * exactly one operation commits.
  */
 
 #include "async_select.h"
 #include "async_channel.h"
+#include "async_handler.h"
 #include "async_scheduler.h"
 #include "prim_internal.h"
 
@@ -206,8 +207,47 @@ int async_do_alts(mino_state_t *S, mino_env_t *env,
         return 1;
     }
 
+    /* No immediate completion and no :default.
+     * Register pending ops on each channel with a shared flag
+     * for exactly-one-wins arbitration. */
+    {
+        mino_async_flag_t *flag = async_flag_create();
+        if (flag == NULL) {
+            free(indices);
+            set_error(S, "alts: out of memory creating flag");
+            return 0;
+        }
+
+        for (i = 0; i < n; i++) {
+            mino_val_t *op = vec_nth(ops, i);
+            mino_async_chan_t *ch;
+            mino_val_t *ch_val;
+
+            if (op->type == MINO_VECTOR && op->as.vec.len == 2) {
+                /* Put operation: [ch val] */
+                mino_val_t *put_val;
+                ch_val  = vec_nth(op, 0);
+                put_val = vec_nth(op, 1);
+                ch = async_chan_get(ch_val);
+                if (ch == NULL || ch->closed) continue;
+                async_chan_enqueue_put_alts(S, ch, put_val, callback,
+                                           flag, ch_val);
+            } else {
+                /* Take operation: channel */
+                ch_val = op;
+                ch = async_chan_get(ch_val);
+                if (ch == NULL || ch->closed) continue;
+                async_chan_enqueue_take_alts(S, ch, callback,
+                                            flag, ch_val);
+            }
+        }
+
+        /* If no ops were registered (all channels closed/invalid),
+         * the flag has refcount 0 and must be freed manually. */
+        if (flag->refcount == 0)
+            free(flag);
+    }
+
     free(indices);
-    /* Return -1: no immediate completion possible.
-     * The mino-level alts! sets up pending ops with flag callbacks. */
-    return -1;
+    return 1;
 }

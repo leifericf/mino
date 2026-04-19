@@ -10,14 +10,19 @@
 
 #include "mino.h"
 #include "async_buffer.h"
+#include "async_handler.h"
 
-/* Pending put or take operation. */
+/* Pending put or take operation.
+ * For alts ops, flag and ch_val are set; for regular ops they are NULL. */
 typedef struct pending_op {
-    mino_val_t      *val;      /* put value (NULL for takes) */
-    mino_val_t      *callback; /* fn(result) to call on completion */
-    mino_ref_t      *val_ref;
-    mino_ref_t      *cb_ref;
-    struct pending_op *next;
+    mino_val_t         *val;      /* put value (NULL for takes) */
+    mino_val_t         *callback; /* fn(result) to call on completion */
+    mino_ref_t         *val_ref;
+    mino_ref_t         *cb_ref;
+    mino_async_flag_t  *flag;     /* shared alts flag (NULL = non-alts) */
+    mino_val_t         *ch_val;   /* channel handle for alts result (NULL = non-alts) */
+    mino_ref_t         *ch_ref;   /* GC ref for ch_val */
+    struct pending_op  *next;
 } pending_op_t;
 
 /* Channel state. */
@@ -77,5 +82,20 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch);
 pending_op_t *async_dequeue_put(mino_async_chan_t *ch);
 pending_op_t *async_dequeue_take(mino_async_chan_t *ch);
 void async_op_free(mino_state_t *S, pending_op_t *op);
+
+/* Register a pending put for alts arbitration.
+ * Does not attempt immediate completion -- always enqueues.
+ * flag is the shared arbitration flag (refcount is incremented).
+ * ch_handle is the channel handle for alts result formatting. */
+void async_chan_enqueue_put_alts(mino_state_t *S, mino_async_chan_t *ch,
+                                mino_val_t *val, mino_val_t *callback,
+                                mino_async_flag_t *flag,
+                                mino_val_t *ch_handle);
+
+/* Register a pending take for alts arbitration. */
+void async_chan_enqueue_take_alts(mino_state_t *S, mino_async_chan_t *ch,
+                                 mino_val_t *callback,
+                                 mino_async_flag_t *flag,
+                                 mino_val_t *ch_handle);
 
 #endif /* ASYNC_CHANNEL_H */

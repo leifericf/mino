@@ -17,7 +17,8 @@
  * opts is a map with optional :priority and :default keys.
  * callback is called with [val ch] on completion.
  *
- * Returns 1 if an operation completed immediately, 0 if pending. */
+ * Returns 1 on success (immediate or pending registered),
+ * 0 on error. */
 int async_do_alts(mino_state_t *S, mino_env_t *env,
                   mino_val_t *ops, mino_val_t *opts,
                   mino_val_t *callback);

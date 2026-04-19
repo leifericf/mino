@@ -102,42 +102,15 @@
    Returns [val ch] for the completed operation.
 
    For immediate completions, the result is delivered via the scheduler.
-   For pending operations, callbacks are registered on each channel
-   with a shared flag atom to ensure exactly one commits."
+   For pending operations, the C kernel registers handlers with a shared
+   arbitration flag to ensure exactly one commits."
   ([ops] (alts! ops {}))
   ([ops opts]
-   (let [result  (atom nil)
-         done    (atom false)
-         cb      (fn [v] (reset! result v) (reset! done true))
-         rc      (alts* ops opts cb)]
+   (let [result (atom nil)
+         cb     (fn [v] (reset! result v))]
+     (alts* ops opts cb)
      (drain!)
-     (if @done
-       @result
-       ;; rc = -1: no immediate completion. Set up pending ops with
-       ;; shared flag for exactly-one-wins arbitration.
-       ;; Single-threaded: simple atom flag suffices.
-       (let [flag (atom false)]
-         (doseq [op ops]
-           (if (and (vector? op) (= 2 (count op)))
-             ;; put operation
-             (let [ch  (nth op 0)
-                   val (nth op 1)]
-               (chan-put* ch val
-                 (fn [v]
-                   (when (not @flag)
-                     (reset! flag true)
-                     (reset! result [v ch])
-                     (reset! done true)))))
-             ;; take operation
-             (let [the-ch op]
-               (chan-take* the-ch
-                 (fn [v]
-                   (when (not @flag)
-                     (reset! flag true)
-                     (reset! result [v the-ch])
-                     (reset! done true)))))))
-         (drain!)
-         @result)))))
+     @result)))
 
 ;; --- go macro ---
 ;;

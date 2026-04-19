@@ -18,7 +18,19 @@ static void handler_finalizer(void *ptr, const char *tag)
 mino_async_flag_t *async_flag_create(void)
 {
     mino_async_flag_t *f = calloc(1, sizeof(*f));
+    /* refcount starts at 0; callers add refs as needed. */
     return f;
+}
+
+void async_flag_ref(mino_async_flag_t *f)
+{
+    f->refcount++;
+}
+
+void async_flag_unref(mino_async_flag_t *f)
+{
+    if (--f->refcount <= 0)
+        free(f);
 }
 
 mino_val_t *async_handler_create(mino_state_t *S, mino_val_t *callback,

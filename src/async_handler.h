@@ -12,9 +12,12 @@
 #include "mino.h"
 #include <stdint.h>
 
-/* Shared arbitration flag. */
+/* Shared arbitration flag for alts pending ops.
+ * Refcounted: each pending op that references the flag holds a ref.
+ * Freed when the last ref is released via async_flag_unref. */
 typedef struct mino_async_flag {
     int committed;   /* 0 = open, 1 = one handler has committed */
+    int refcount;    /* number of pending ops holding a reference */
 } mino_async_flag_t;
 
 /* Handler state. */
@@ -25,8 +28,16 @@ typedef struct mino_async_handler {
     uint32_t           lock_id;   /* for deadlock-free lock ordering */
 } mino_async_handler_t;
 
-/* Create a shared flag (malloc-owned, caller must free). */
+/* Create a shared flag with refcount 0.
+ * Caller must call async_flag_ref for each pending op that uses it. */
 mino_async_flag_t *async_flag_create(void);
+
+/* Increment the flag's reference count. */
+void async_flag_ref(mino_async_flag_t *f);
+
+/* Decrement the flag's reference count.  Frees the flag when it
+ * reaches zero. */
+void async_flag_unref(mino_async_flag_t *f);
 
 /* Create a handler with the given callback and shared flag.
  * If flag is NULL, creates a standalone (non-alts) handler.

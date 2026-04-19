@@ -3,6 +3,7 @@
  */
 
 #include "async_channel.h"
+#include "async_handler.h"
 #include "async_scheduler.h"
 #include "mino_internal.h"
 
@@ -71,6 +72,9 @@ static pending_op_t *op_new(mino_state_t *S, mino_val_t *val,
     op->callback = callback;
     op->val_ref  = val ? mino_ref(S, val) : NULL;
     op->cb_ref   = callback ? mino_ref(S, callback) : NULL;
+    op->flag     = NULL;
+    op->ch_val   = NULL;
+    op->ch_ref   = NULL;
     op->next     = NULL;
     return op;
 }
@@ -79,6 +83,8 @@ void async_op_free(mino_state_t *S, pending_op_t *op)
 {
     if (op->val_ref) mino_unref(S, op->val_ref);
     if (op->cb_ref)  mino_unref(S, op->cb_ref);
+    if (op->ch_ref)  mino_unref(S, op->ch_ref);
+    if (op->flag)    async_flag_unref(op->flag);
     free(op);
 }
 
@@ -121,6 +127,65 @@ pending_op_t *async_dequeue_take(mino_async_chan_t *ch)
 }
 
 /* ------------------------------------------------------------------ */
+/* Active-dequeue helpers (skip committed alts ops)                   */
+/* ------------------------------------------------------------------ */
+
+/* Dequeue the next active put, skipping any whose alts flag is
+ * already committed.  Commits the flag of the returned op. */
+static pending_op_t *dequeue_active_put(mino_state_t *S,
+                                        mino_async_chan_t *ch)
+{
+    for (;;) {
+        pending_op_t *op = async_dequeue_put(ch);
+        if (op == NULL) return NULL;
+        if (op->flag && op->flag->committed) {
+            async_op_free(S, op);
+            continue;
+        }
+        if (op->flag) op->flag->committed = 1;
+        return op;
+    }
+}
+
+/* Dequeue the next active take, skipping committed alts ops.
+ * Commits the flag of the returned op. */
+static pending_op_t *dequeue_active_take(mino_state_t *S,
+                                         mino_async_chan_t *ch)
+{
+    for (;;) {
+        pending_op_t *op = async_dequeue_take(ch);
+        if (op == NULL) return NULL;
+        if (op->flag && op->flag->committed) {
+            async_op_free(S, op);
+            continue;
+        }
+        if (op->flag) op->flag->committed = 1;
+        return op;
+    }
+}
+
+/* Schedule a completion callback, wrapping the result as [val, ch_val]
+ * for alts ops or delivering val directly for regular ops. */
+static void schedule_op_result(mino_state_t *S, pending_op_t *op,
+                               mino_val_t *val)
+{
+    if (op->callback == NULL) return;
+    if (op->ch_val) {
+        /* Alts op: deliver [val, ch_val]. */
+        mino_val_t *items[2];
+        mino_val_t *result;
+        gc_pin(val);
+        items[0] = val;
+        items[1] = op->ch_val;
+        result = mino_vector(S, items, 2);
+        async_sched_enqueue(S, op->callback, result);
+        gc_unpin(1);
+    } else {
+        async_sched_enqueue(S, op->callback, val);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Core transfer: put                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -136,14 +201,12 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
         return 1;
     }
 
-    /* If a taker is waiting, transfer directly. */
-    taker = async_dequeue_take(ch);
+    /* If an active taker is waiting, transfer directly. */
+    taker = dequeue_active_take(S, ch);
     if (taker != NULL) {
-        /* Pin values before enqueue calls which allocate and may trigger GC. */
         gc_pin(val);
         gc_pin(put_cb);
-        if (taker->callback)
-            async_sched_enqueue(S, taker->callback, val);
+        schedule_op_result(S, taker, val);
         async_op_free(S, taker);
         if (put_cb)
             async_sched_enqueue(S, put_cb, mino_true(S));
@@ -185,18 +248,15 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
     if (ch->buf && async_buf_count(ch->buf) > 0) {
         mino_val_t *val = async_buf_remove(S, ch->buf);
 
-        /* Pin values: async_buf_add and async_sched_enqueue allocate,
-         * which may trigger GC while val/take_cb are only in registers. */
         gc_pin(val);
         gc_pin(take_cb);
 
-        /* If a putter is waiting, move its value into the buffer. */
+        /* If an active putter is waiting, move its value into the buffer. */
         {
-            pending_op_t *putter = async_dequeue_put(ch);
+            pending_op_t *putter = dequeue_active_put(S, ch);
             if (putter != NULL) {
                 async_buf_add(S, ch->buf, putter->val);
-                if (putter->callback)
-                    async_sched_enqueue(S, putter->callback, mino_true(S));
+                schedule_op_result(S, putter, mino_true(S));
                 async_op_free(S, putter);
             }
         }
@@ -207,15 +267,14 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
         return 1;
     }
 
-    /* If a putter is waiting, transfer directly. */
+    /* If an active putter is waiting, transfer directly. */
     {
-        pending_op_t *putter = async_dequeue_put(ch);
+        pending_op_t *putter = dequeue_active_put(S, ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
             gc_pin(val);
             gc_pin(take_cb);
-            if (putter->callback)
-                async_sched_enqueue(S, putter->callback, mino_true(S));
+            schedule_op_result(S, putter, mino_true(S));
             if (take_cb)
                 async_sched_enqueue(S, take_cb, val);
             async_op_free(S, putter);
@@ -254,17 +313,25 @@ void async_chan_close(mino_state_t *S, mino_async_chan_t *ch)
     if (ch->closed) return;
     ch->closed = 1;
 
-    /* Deliver nil to all pending takers. */
+    /* Deliver nil to all pending takers (skip committed alts ops). */
     while ((op = async_dequeue_take(ch)) != NULL) {
-        if (op->callback)
-            async_sched_enqueue(S, op->callback, mino_nil(S));
+        if (op->flag && op->flag->committed) {
+            async_op_free(S, op);
+            continue;
+        }
+        if (op->flag) op->flag->committed = 1;
+        schedule_op_result(S, op, mino_nil(S));
         async_op_free(S, op);
     }
 
-    /* Discard all pending puts. */
+    /* Discard all pending puts (notify committed alts ops). */
     while ((op = async_dequeue_put(ch)) != NULL) {
-        if (op->callback)
-            async_sched_enqueue(S, op->callback, mino_false(S));
+        if (op->flag && op->flag->committed) {
+            async_op_free(S, op);
+            continue;
+        }
+        if (op->flag) op->flag->committed = 1;
+        schedule_op_result(S, op, mino_false(S));
         async_op_free(S, op);
     }
 }
@@ -284,11 +351,10 @@ int async_chan_offer(mino_state_t *S, mino_async_chan_t *ch, mino_val_t *val)
 
     if (ch->closed) return 0;
 
-    taker = async_dequeue_take(ch);
+    taker = dequeue_active_take(S, ch);
     if (taker != NULL) {
         gc_pin(val);
-        if (taker->callback)
-            async_sched_enqueue(S, taker->callback, val);
+        schedule_op_result(S, taker, val);
         async_op_free(S, taker);
         gc_unpin(1);
         return 1;
@@ -308,12 +374,11 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
 {
     if (ch->buf && async_buf_count(ch->buf) > 0) {
         mino_val_t *val = async_buf_remove(S, ch->buf);
-        pending_op_t *putter = async_dequeue_put(ch);
+        pending_op_t *putter = dequeue_active_put(S, ch);
         gc_pin(val);
         if (putter != NULL) {
             async_buf_add(S, ch->buf, putter->val);
-            if (putter->callback)
-                async_sched_enqueue(S, putter->callback, mino_true(S));
+            schedule_op_result(S, putter, mino_true(S));
             async_op_free(S, putter);
         }
         gc_unpin(1);
@@ -321,12 +386,11 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
     }
 
     {
-        pending_op_t *putter = async_dequeue_put(ch);
+        pending_op_t *putter = dequeue_active_put(S, ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
             gc_pin(val);
-            if (putter->callback)
-                async_sched_enqueue(S, putter->callback, mino_true(S));
+            schedule_op_result(S, putter, mino_true(S));
             async_op_free(S, putter);
             gc_unpin(1);
             return val;
@@ -334,4 +398,42 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
     }
 
     return mino_nil(S);
+}
+
+/* ------------------------------------------------------------------ */
+/* Alts pending-op registration                                       */
+/* ------------------------------------------------------------------ */
+
+void async_chan_enqueue_put_alts(mino_state_t *S, mino_async_chan_t *ch,
+                                mino_val_t *val, mino_val_t *callback,
+                                mino_async_flag_t *flag,
+                                mino_val_t *ch_handle)
+{
+    pending_op_t *op = op_new(S, val, callback);
+    if (op == NULL) {
+        set_error(S, "out of memory in alts put registration");
+        return;
+    }
+    op->flag   = flag;
+    op->ch_val = ch_handle;
+    op->ch_ref = ch_handle ? mino_ref(S, ch_handle) : NULL;
+    async_flag_ref(flag);
+    enqueue_put(ch, op);
+}
+
+void async_chan_enqueue_take_alts(mino_state_t *S, mino_async_chan_t *ch,
+                                 mino_val_t *callback,
+                                 mino_async_flag_t *flag,
+                                 mino_val_t *ch_handle)
+{
+    pending_op_t *op = op_new(S, NULL, callback);
+    if (op == NULL) {
+        set_error(S, "out of memory in alts take registration");
+        return;
+    }
+    op->flag   = flag;
+    op->ch_val = ch_handle;
+    op->ch_ref = ch_handle ? mino_ref(S, ch_handle) : NULL;
+    async_flag_ref(flag);
+    enqueue_take(ch, op);
 }
