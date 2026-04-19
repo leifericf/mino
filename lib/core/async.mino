@@ -348,3 +348,71 @@
                              (take! ch do-take))))]
          (take! ch do-take)))
      out)))
+
+;; --- mult ---
+
+(defn mult
+  "Creates a mult on source channel ch. Values taken from ch are
+   distributed to all tapped channels. Returns a mult handle (map)."
+  [ch]
+  (let [taps   (atom #{})
+        m      {:ch ch :taps taps}
+        do-take (fn do-take [v]
+                  (if (nil? v)
+                    (doseq [t @taps]
+                      (close! t))
+                    (do (doseq [t @taps]
+                          (put! t v))
+                        (take! ch do-take))))]
+    (take! ch do-take)
+    m))
+
+(defn tap
+  "Registers channel ch as a tap on mult m. Returns ch."
+  ([m ch] (tap m ch true))
+  ([m ch close?]
+   (swap! (:taps m) conj ch)
+   ch))
+
+(defn untap
+  "Unregisters channel ch from mult m."
+  [m ch]
+  (swap! (:taps m) disj ch)
+  nil)
+
+;; --- pub / sub ---
+
+(defn pub
+  "Creates a pub on source channel ch with a topic-fn that extracts
+   the topic from each value. Returns a pub handle (map)."
+  [ch topic-fn]
+  (let [subs    (atom {})
+        p       {:ch ch :topic-fn topic-fn :subs subs}
+        do-take (fn do-take [v]
+                  (if (nil? v)
+                    (doseq [[_ chs] @subs]
+                      (doseq [c chs]
+                        (close! c)))
+                    (let [topic (topic-fn v)
+                          chs   (get @subs topic)]
+                      (when chs
+                        (doseq [c chs]
+                          (put! c v)))
+                      (take! ch do-take))))]
+    (take! ch do-take)
+    p))
+
+(defn sub
+  "Subscribes channel ch to topic on pub p. Returns ch."
+  ([p topic ch] (sub p topic ch true))
+  ([p topic ch close?]
+   (swap! (:subs p) update topic
+     (fn [chs] (conj (or chs #{}) ch)))
+   ch))
+
+(defn unsub
+  "Unsubscribes channel ch from topic on pub p."
+  [p topic ch]
+  (swap! (:subs p) update topic
+    (fn [chs] (disj (or chs #{}) ch)))
+  nil)

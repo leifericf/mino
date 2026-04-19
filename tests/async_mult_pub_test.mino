@@ -1,0 +1,79 @@
+(require "tests/test")
+(require "core/async")
+
+;; --- mult ---
+
+(deftest mult-distributes
+  (let [src (chan 3)
+        t1  (chan 3)
+        t2  (chan 3)
+        m   (mult src)]
+    (tap m t1)
+    (tap m t2)
+    (put! src :a)
+    (put! src :b)
+    (drain!)
+    (is (= :a (<!! t1)))
+    (is (= :a (<!! t2)))
+    (is (= :b (<!! t1)))
+    (is (= :b (<!! t2)))))
+
+(deftest mult-close-propagates
+  (let [src (chan)
+        t1  (chan 1)
+        m   (mult src)]
+    (tap m t1)
+    (close! src)
+    (drain!)
+    (is (true? (closed? t1)))))
+
+(deftest untap-stops-delivery
+  (let [src (chan 3)
+        t1  (chan 3)
+        t2  (chan 3)
+        m   (mult src)]
+    (tap m t1)
+    (tap m t2)
+    (untap m t2)
+    (put! src :x)
+    (drain!)
+    (is (= :x (<!! t1)))
+    (is (nil? (poll! t2)) "untapped channel gets nothing")))
+
+;; --- pub / sub ---
+
+(deftest pub-routes-by-topic
+  (let [src (chan 3)
+        a-ch (chan 3)
+        b-ch (chan 3)
+        p   (pub src :topic)]
+    (sub p :a a-ch)
+    (sub p :b b-ch)
+    (put! src {:topic :a :data 1})
+    (put! src {:topic :b :data 2})
+    (put! src {:topic :a :data 3})
+    (drain!)
+    (is (= {:topic :a :data 1} (<!! a-ch)))
+    (is (= {:topic :b :data 2} (<!! b-ch)))
+    (is (= {:topic :a :data 3} (<!! a-ch)))))
+
+(deftest pub-close-propagates
+  (let [src (chan)
+        a-ch (chan 1)
+        p   (pub src :topic)]
+    (sub p :a a-ch)
+    (close! src)
+    (drain!)
+    (is (true? (closed? a-ch)))))
+
+(deftest unsub-stops-delivery
+  (let [src (chan 3)
+        a-ch (chan 3)
+        p   (pub src :topic)]
+    (sub p :a a-ch)
+    (unsub p :a a-ch)
+    (put! src {:topic :a :data 1})
+    (drain!)
+    (is (nil? (poll! a-ch)) "unsubbed channel gets nothing")))
+
+(run-tests)
