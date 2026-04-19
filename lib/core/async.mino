@@ -1149,14 +1149,15 @@
          results (chan n)
          done    (atom 0)]
      ;; Feed: for each input, create a result channel, send [val res-ch]
-     ;; to workers, and send res-ch to collector (in order)
+     ;; to workers, and send res-ch to collector (in order).
+     ;; Uses callbacks to wait for puts, preventing stalls when channels fill.
      (let [feeder (fn feeder [v]
                     (if (nil? v)
                       (close! jobs)
                       (let [res-ch (chan 1)]
-                        (put! jobs [v res-ch])
-                        (put! results res-ch)
-                        (take! from feeder))))]
+                        (put! jobs [v res-ch]
+                          (fn [_] (put! results res-ch
+                                    (fn [_] (take! from feeder))))))))]
        (take! from feeder))
      ;; Workers: take [val res-ch], apply xf, put result on res-ch
      (dotimes [_ n]
@@ -1193,14 +1194,15 @@
          results (chan n)
          done    (atom 0)]
      ;; Feed: for each input, create a result channel, send [val res-ch]
-     ;; to workers, and send res-ch to collector (in order)
+     ;; to workers, and send res-ch to collector (in order).
+     ;; Uses callbacks to wait for puts, preventing stalls when channels fill.
      (let [feeder (fn feeder [v]
                     (if (nil? v)
                       (close! jobs)
                       (let [res-ch (chan 1)]
-                        (put! jobs [v res-ch])
-                        (put! results res-ch)
-                        (take! from feeder))))]
+                        (put! jobs [v res-ch]
+                          (fn [_] (put! results res-ch
+                                    (fn [_] (take! from feeder))))))))]
        (take! from feeder))
      ;; Workers: take [val res-ch], call af which puts results on res-ch
      (dotimes [_ n]
