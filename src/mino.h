@@ -76,6 +76,7 @@ struct mino_val {
             mino_val_t *cdr;   /* rest of the list */
             const char *file;  /* source file (NULL if unknown) */
             int         line;  /* source line (0 if unknown) */
+            int         column;/* source column (0 if unknown) */
         } cons;
         struct {          /* MINO_VECTOR: persistent 32-way trie with tail */
             mino_vec_node_t *root;     /* trie spine (NULL when len <= 32) */

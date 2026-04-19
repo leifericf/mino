@@ -92,6 +92,7 @@ typedef struct {
     const char *name;
     const char *file;
     int         line;
+    int         column;
 } call_frame_t;
 
 /* GC root-environment registry node (malloc-owned). */
@@ -241,6 +242,7 @@ struct mino_state {
     /* Reader */
     const char     *reader_file;
     int             reader_line;
+    int             reader_col;
     const char     *reader_dialect;   /* "mino" */
 
     /* Namespace */
@@ -391,7 +393,8 @@ void        clear_error(mino_state_t *S);
 void        set_diag(mino_state_t *S, mino_diag_t *d);           /* d: consumed */
 const char *type_tag_str(const mino_val_t *v);                    /* static string */
 void        push_frame(mino_state_t *S, const char *name,     /* name: borrowed */
-                       const char *file, int line);            /* file: borrowed */
+                       const char *file, int line,            /* file: borrowed */
+                       int column);
 void        pop_frame(mino_state_t *S);
 void        append_trace(mino_state_t *S);
 meta_entry_t *meta_find(mino_state_t *S, const char *name);   /* borrowed into meta_table */

@@ -205,13 +205,15 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
     if (fn->type == MINO_PRIM) {
         const char *file = NULL;
         int         line = 0;
+        int         col  = 0;
         mino_val_t *result;
         if (S->eval_current_form != NULL
             && S->eval_current_form->type == MINO_CONS) {
             file = S->eval_current_form->as.cons.file;
             line = S->eval_current_form->as.cons.line;
+            col  = S->eval_current_form->as.cons.column;
         }
-        push_frame(S, fn->as.prim.name, file, line);
+        push_frame(S, fn->as.prim.name, file, line, col);
         result = fn->as.prim.fn(S, args, env);
         if (result == NULL) {
             return NULL; /* leave frame for trace */
@@ -227,13 +229,15 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         mino_val_t *call_args = args;
         const char *file      = NULL;
         int         line      = 0;
+        int         col       = 0;
         mino_val_t *result;
         if (S->eval_current_form != NULL
             && S->eval_current_form->type == MINO_CONS) {
             file = S->eval_current_form->as.cons.file;
             line = S->eval_current_form->as.cons.line;
+            col  = S->eval_current_form->as.cons.column;
         }
-        push_frame(S, tag, file, line);
+        push_frame(S, tag, file, line, col);
         /* Multi-arity dispatch: params == NULL means body is a clause list. */
         if (cur_params == NULL) {
             int argc = list_len(call_args);

@@ -36,6 +36,12 @@ const char *intern_filename(const char *name)
     return name;
 }
 
+/* Advance the cursor by one character and track column position. */
+#define ADVANCE(S, p) do { (*(p))++; (S)->reader_col++; } while (0)
+
+/* Advance by n characters (no embedded newlines expected). */
+#define ADVANCE_N(S, p, n) do { *(p) += (n); (S)->reader_col += (int)(n); } while (0)
+
 static int is_ws(char c)
 {
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',';
@@ -55,12 +61,13 @@ static void skip_ws(mino_state_t *S, const char **p)
         char c = **p;
         if (c == '\n') {
             S->reader_line++;
+            S->reader_col = 1;
             (*p)++;
         } else if (is_ws(c)) {
-            (*p)++;
+            ADVANCE(S, p);
         } else if (c == ';') {
             while (**p && **p != '\n') {
-                (*p)++;
+                ADVANCE(S, p);
             }
         } else {
             return;
@@ -76,7 +83,7 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     char *buf;
     size_t cap = 16;
     size_t len = 0;
-    (*p)++; /* skip opening quote */
+    ADVANCE(S, p); /* skip opening quote */
     buf = (char *)malloc(cap);
     if (buf == NULL) {
         set_error(S, "out of memory reading string");
@@ -86,9 +93,10 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
         char c = **p;
         if (c == '\n') {
             S->reader_line++;
+            S->reader_col = 1;
         }
         if (c == '\\') {
-            (*p)++;
+            ADVANCE(S, p);
             switch (**p) {
             case 'n':  c = '\n'; break;
             case 't':  c = '\t'; break;
@@ -119,14 +127,14 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
             }
         }
         buf[len++] = c;
-        (*p)++;
+        ADVANCE(S, p);
     }
     if (**p != '"') {
         free(buf);
         set_error(S, "unterminated string literal");
         return NULL;
     }
-    (*p)++; /* skip closing quote */
+    ADVANCE(S, p); /* skip closing quote */
     {
         mino_val_t *v = mino_string_n(S, buf, len);
         free(buf);
@@ -153,7 +161,7 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
             return NULL;
         }
         if (**p == ')') {
-            (*p)++;
+            ADVANCE(S, p);
             *found = result;
             return result; /* may be NULL if no branch matched */
         }
@@ -194,10 +202,10 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
 /* Check whether the cursor is at a #?@ splice sequence. If so, consume
  * the prefix (leaving the cursor on the opening '(' of the body) and
  * return 1. Otherwise return 0 without advancing. */
-static int peek_reader_cond_splice(const char **p)
+static int peek_reader_cond_splice(mino_state_t *S, const char **p)
 {
     if ((*p)[0] == '#' && (*p)[1] == '?' && (*p)[2] == '@') {
-        *p += 3;
+        ADVANCE_N(S, p, 3);
         return 1;
     }
     return 0;
@@ -207,9 +215,10 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
     int         list_line = S->reader_line;
+    int         list_col  = S->reader_col;
     mino_val_t *head = mino_nil(S);
     mino_val_t *tail = NULL;
-    (*p)++; /* skip '(' */
+    ADVANCE(S, p); /* skip '(' */
     for (;;) {
         skip_ws(S, p);
         if (**p == '\0') {
@@ -217,10 +226,10 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             return NULL;
         }
         if (**p == ')') {
-            (*p)++;
+            ADVANCE(S, p);
             return head;
         }
-        if (peek_reader_cond_splice(p)) {
+        if (peek_reader_cond_splice(S, p)) {
             /* #?@ splice: read conditional body, splice matching list */
             mino_val_t *found = NULL;
             int         splice_line = S->reader_line;
@@ -229,7 +238,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 set_error(S, "#?@ must be followed by a list");
                 return NULL;
             }
-            (*p)++;
+            ADVANCE(S, p);
             read_cond_body(S, p, &found);
             if (mino_last_error(S) != NULL) return NULL;
             if (found != NULL) {
@@ -239,9 +248,11 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                     for (i = 0; i < found->as.vec.len; i++) {
                         mino_val_t *cell = mino_cons(S,
                             vec_nth(found, i), mino_nil(S));
-                        cell->as.cons.file = S->reader_file;
-                        cell->as.cons.line = (tail == NULL)
+                        cell->as.cons.file   = S->reader_file;
+                        cell->as.cons.line   = (tail == NULL)
                                               ? list_line : splice_line;
+                        cell->as.cons.column = (tail == NULL)
+                                              ? list_col : 0;
                         if (tail == NULL) {
                             head = cell;
                         } else {
@@ -254,9 +265,11 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                     while (mino_is_cons(cur)) {
                         mino_val_t *cell = mino_cons(S,
                             cur->as.cons.car, mino_nil(S));
-                        cell->as.cons.file = S->reader_file;
-                        cell->as.cons.line = (tail == NULL)
+                        cell->as.cons.file   = S->reader_file;
+                        cell->as.cons.line   = (tail == NULL)
                                               ? list_line : splice_line;
+                        cell->as.cons.column = (tail == NULL)
+                                              ? list_col : 0;
                         if (tail == NULL) {
                             head = cell;
                         } else {
@@ -272,6 +285,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
         }
         {
             int         elem_line = S->reader_line;
+            int         elem_col  = S->reader_col;
             mino_val_t *elem = read_form(S, p);
             if (elem == NULL && mino_last_error(S) != NULL) {
                 return NULL;
@@ -281,7 +295,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                  * closing delimiter before declaring unterminated. */
                 skip_ws(S, p);
                 if (**p == ')') {
-                    (*p)++;
+                    ADVANCE(S, p);
                     return head;
                 }
                 if (**p == '\0') {
@@ -292,8 +306,9 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             }
             {
                 mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
-                cell->as.cons.file = S->reader_file;
-                cell->as.cons.line = (tail == NULL) ? list_line : elem_line;
+                cell->as.cons.file   = S->reader_file;
+                cell->as.cons.line   = (tail == NULL) ? list_line : elem_line;
+                cell->as.cons.column = (tail == NULL) ? list_col  : elem_col;
                 if (tail == NULL) {
                     head = cell;
                 } else {
@@ -314,7 +329,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
     mino_val_t **buf = NULL;
     size_t       cap = 0;
     size_t       len = 0;
-    (*p)++; /* skip '[' */
+    ADVANCE(S, p); /* skip '[' */
     for (;;) {
         skip_ws(S, p);
         if (**p == '\0') {
@@ -322,10 +337,10 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
             return NULL;
         }
         if (**p == ']') {
-            (*p)++;
+            ADVANCE(S, p);
             break;
         }
-        if (peek_reader_cond_splice(p)) {
+        if (peek_reader_cond_splice(S, p)) {
             /* #?@ splice in vector */
             mino_val_t *found = NULL;
             skip_ws(S, p);
@@ -333,7 +348,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                 set_error(S, "#?@ must be followed by a list");
                 return NULL;
             }
-            (*p)++;
+            ADVANCE(S, p);
             read_cond_body(S, p, &found);
             if (mino_last_error(S) != NULL) return NULL;
             if (found != NULL) {
@@ -378,7 +393,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                 /* No form produced (e.g. unmatched #?). Check for
                  * closing delimiter before declaring unterminated. */
                 skip_ws(S, p);
-                if (**p == ']') { (*p)++; break; }
+                if (**p == ']') { ADVANCE(S, p); break; }
                 if (**p == '\0') {
                     set_error(S, "unterminated vector");
                     return NULL;
@@ -411,7 +426,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
     mino_val_t **vbuf = NULL;
     size_t       cap  = 0;
     size_t       len  = 0;
-    (*p)++; /* skip '{' */
+    ADVANCE(S, p); /* skip '{' */
     for (;;) {
         mino_val_t *key;
         mino_val_t *val;
@@ -421,7 +436,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             return NULL;
         }
         if (**p == '}') {
-            (*p)++;
+            ADVANCE(S, p);
             break;
         }
         key = read_form(S, p);
@@ -430,7 +445,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             /* No form produced (e.g. unmatched #?). Check for closing
              * delimiter before declaring unterminated. */
             skip_ws(S, p);
-            if (**p == '}') { (*p)++; break; }
+            if (**p == '}') { ADVANCE(S, p); break; }
             continue;
         }
         skip_ws(S, p);
@@ -443,7 +458,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             if (mino_last_error(S) != NULL) return NULL;
             /* Value form produced nothing — skip the key too. */
             skip_ws(S, p);
-            if (**p == '}') { (*p)++; break; }
+            if (**p == '}') { ADVANCE(S, p); break; }
             continue;
         }
         if (len == cap) {
@@ -473,7 +488,7 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
     mino_val_t **buf = NULL;
     size_t       cap = 0;
     size_t       len = 0;
-    (*p)++; /* skip '{' */
+    ADVANCE(S, p); /* skip '{' */
     for (;;) {
         mino_val_t *elem;
         skip_ws(S, p);
@@ -482,7 +497,7 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
             return NULL;
         }
         if (**p == '}') {
-            (*p)++;
+            ADVANCE(S, p);
             break;
         }
         elem = read_form(S, p);
@@ -514,7 +529,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
     while (!is_terminator((*p)[len])) {
         len++;
     }
-    *p += len;
+    ADVANCE_N(S, p, len);
 
     if (len >= 2 && start[0] == ':') {
         return mino_keyword_n(S, start + 1, len - 1);
@@ -758,8 +773,9 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
             return form;
         {
             mino_val_t *c = mino_cons(S, car, cdr);
-            c->as.cons.file = form->as.cons.file;
-            c->as.cons.line = form->as.cons.line;
+            c->as.cons.file   = form->as.cons.file;
+            c->as.cons.line   = form->as.cons.line;
+            c->as.cons.column = form->as.cons.column;
             return c;
         }
     }
@@ -798,12 +814,13 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
 static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
 {
     int fn_line = S->reader_line;
+    int fn_col  = S->reader_col;
     int used[9] = {0};
     int max_arg = 0, has_rest = 0;
     mino_val_t *body;
     mino_val_t *params_vec;
     mino_val_t *fn_form;
-    (*p)++; /* skip '#', read_list_form will handle '(' */
+    ADVANCE(S, p); /* skip '#', read_list_form will handle '(' */
     body = read_list_form(S, p);
     if (body == NULL) return NULL;
     scan_percent_args(body, used, &max_arg, &has_rest);
@@ -828,8 +845,9 @@ static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
     fn_form = mino_cons(S, mino_symbol(S, "fn"),
                   mino_cons(S, params_vec,
                       mino_cons(S, body, mino_nil(S))));
-    fn_form->as.cons.file = S->reader_file;
-    fn_form->as.cons.line = fn_line;
+    fn_form->as.cons.file   = S->reader_file;
+    fn_form->as.cons.line   = fn_line;
+    fn_form->as.cons.column = fn_col;
     return fn_form;
 }
 
@@ -840,7 +858,7 @@ static mino_val_t *read_anon_fn_form(mino_state_t *S, const char **p)
 static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
 {
     mino_val_t *meta_val, *target;
-    (*p)++;
+    ADVANCE(S, p);
     meta_val = read_form(S, p);
     if (meta_val == NULL) {
         if (mino_last_error(S) == NULL) {
@@ -957,12 +975,12 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         return NULL;
     }
     if (**p == '#' && *(*p + 1) == '{') {
-        (*p)++; /* skip '#', read_set_form will skip '{' */
+        ADVANCE(S, p); /* skip '#', read_set_form will skip '{' */
         return read_set_form(S, p);
     }
     if (**p == '#' && *(*p + 1) == '_') {
         /* Discard reader macro: #_ discards the next form. */
-        (*p) += 2;
+        ADVANCE_N(S, p, 2);
         {
             mino_val_t *discarded = read_form(S, p);
             if (discarded == NULL && mino_last_error(S) != NULL)
@@ -975,7 +993,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     }
     if (**p == '#' && *(*p + 1) == '\'') {
         int vq_line = S->reader_line;
-        (*p) += 2;
+        int vq_col  = S->reader_col;
+        ADVANCE_N(S, p, 2);
         {
             mino_val_t *sym = read_form(S, p);
             mino_val_t *outer;
@@ -987,8 +1006,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, "var"),
                               mino_cons(S, sym, mino_nil(S)));
-            outer->as.cons.file = S->reader_file;
-            outer->as.cons.line = vq_line;
+            outer->as.cons.file   = S->reader_file;
+            outer->as.cons.line   = vq_line;
+            outer->as.cons.column = vq_col;
             return outer;
         }
     }
@@ -996,11 +1016,11 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         /* Special float tokens: ##Inf, ##-Inf, ##NaN */
         const char *start;
         size_t tlen;
-        (*p) += 2;
+        ADVANCE_N(S, p, 2);
         start = *p;
         tlen = 0;
         while (!is_terminator((*p)[tlen])) tlen++;
-        *p += tlen;
+        ADVANCE_N(S, p, tlen);
         if (tlen == 3 && memcmp(start, "Inf", 3) == 0)
             return mino_float(S, INFINITY);
         if (tlen == 4 && memcmp(start, "-Inf", 4) == 0)
@@ -1017,11 +1037,11 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         size_t      tag_len;
         mino_val_t *tag_val;
         mino_val_t *body;
-        (*p)++;
+        ADVANCE(S, p);
         tag_start = *p;
         tag_len = 0;
         while (!is_terminator((*p)[tag_len])) tag_len++;
-        *p += tag_len;
+        ADVANCE_N(S, p, tag_len);
         /* Read the body form that follows the tag. */
         skip_ws(S, p);
         body = read_form(S, p);
@@ -1038,13 +1058,13 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     }
     if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) != '@') {
         mino_val_t *found = NULL;
-        (*p) += 2;
+        ADVANCE_N(S, p, 2);
         skip_ws(S, p);
         if (**p != '(') {
             set_error(S, "#? must be followed by a list");
             return NULL;
         }
-        (*p)++;
+        ADVANCE(S, p);
         read_cond_body(S, p, &found);
         if (mino_last_error(S) != NULL) return NULL;
         if (found != NULL) {
@@ -1071,7 +1091,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     }
     if (**p == '\'') {
         int q_line = S->reader_line;
-        (*p)++;
+        int q_col  = S->reader_col;
+        ADVANCE(S, p);
         {
             mino_val_t *quoted = read_form(S, p);
             mino_val_t *outer;
@@ -1083,14 +1104,16 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, "quote"),
                               mino_cons(S, quoted, mino_nil(S)));
-            outer->as.cons.file = S->reader_file;
-            outer->as.cons.line = q_line;
+            outer->as.cons.file   = S->reader_file;
+            outer->as.cons.line   = q_line;
+            outer->as.cons.column = q_col;
             return outer;
         }
     }
     if (**p == '`') {
         int q_line = S->reader_line;
-        (*p)++;
+        int q_col  = S->reader_col;
+        ADVANCE(S, p);
         {
             mino_val_t *qq = read_form(S, p);
             mino_val_t *outer;
@@ -1102,14 +1125,16 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, "quasiquote"),
                               mino_cons(S, qq, mino_nil(S)));
-            outer->as.cons.file = S->reader_file;
-            outer->as.cons.line = q_line;
+            outer->as.cons.file   = S->reader_file;
+            outer->as.cons.line   = q_line;
+            outer->as.cons.column = q_col;
             return outer;
         }
     }
     if (**p == '@') {
         int q_line = S->reader_line;
-        (*p)++;
+        int q_col  = S->reader_col;
+        ADVANCE(S, p);
         {
             mino_val_t *target = read_form(S, p);
             mino_val_t *outer;
@@ -1121,8 +1146,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, "deref"),
                               mino_cons(S, target, mino_nil(S)));
-            outer->as.cons.file = S->reader_file;
-            outer->as.cons.line = q_line;
+            outer->as.cons.file   = S->reader_file;
+            outer->as.cons.line   = q_line;
+            outer->as.cons.column = q_col;
             return outer;
         }
     }
@@ -1131,11 +1157,12 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     }
     if (**p == '~') {
         int         q_line = S->reader_line;
+        int         q_col  = S->reader_col;
         const char *name = "unquote";
-        (*p)++;
+        ADVANCE(S, p);
         if (**p == '@') {
             name = "unquote-splicing";
-            (*p)++;
+            ADVANCE(S, p);
         }
         {
             mino_val_t *uq = read_form(S, p);
@@ -1148,8 +1175,9 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             }
             outer = mino_cons(S, mino_symbol(S, name),
                               mino_cons(S, uq, mino_nil(S)));
-            outer->as.cons.file = S->reader_file;
-            outer->as.cons.line = q_line;
+            outer->as.cons.file   = S->reader_file;
+            outer->as.cons.line   = q_line;
+            outer->as.cons.column = q_col;
             return outer;
         }
     }
@@ -1159,13 +1187,13 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         const char *start = *p + 1;
         size_t tlen = 0;
         char ch;
-        (*p)++;
+        ADVANCE(S, p);
         if (**p == '\0') {
             set_error(S, "unexpected end of input after \\");
             return NULL;
         }
         while (!is_terminator(start[tlen])) tlen++;
-        *p = start + tlen;
+        ADVANCE_N(S, p, tlen);
         if (tlen == 5 && memcmp(start, "space", 5) == 0) {
             ch = ' ';
         } else if (tlen == 7 && memcmp(start, "newline", 7) == 0) {

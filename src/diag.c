@@ -133,7 +133,7 @@ void diag_capture_frames(mino_state_t *S, mino_diag_t *d)
         d->frames[idx].fn_name  = S->call_stack[i].name;
         d->frames[idx].file     = S->call_stack[i].file;
         d->frames[idx].line     = S->call_stack[i].line;
-        d->frames[idx].column   = 0;
+        d->frames[idx].column   = S->call_stack[i].column;
         d->frames[idx].is_macro = 0;
         d->frames[idx].is_host  = 0;
     }

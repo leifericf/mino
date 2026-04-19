@@ -73,8 +73,9 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
         /* Enrich the diagnostic with source span. */
         if (S->last_diag != NULL) {
             memset(&span, 0, sizeof(span));
-            span.file = form->as.cons.file;
-            span.line = form->as.cons.line;
+            span.file   = form->as.cons.file;
+            span.line   = form->as.cons.line;
+            span.column = form->as.cons.column;
             diag_set_span(S->last_diag, span);
         }
     } else {
@@ -118,12 +119,14 @@ const char *type_tag_str(const mino_val_t *v)
 /* Call stack (for stack traces on error)                                     */
 /* ------------------------------------------------------------------------- */
 
-void push_frame(mino_state_t *S, const char *name, const char *file, int line)
+void push_frame(mino_state_t *S, const char *name, const char *file,
+                int line, int column)
 {
     if (S->call_depth < MAX_CALL_DEPTH) {
-        S->call_stack[S->call_depth].name = name;
-        S->call_stack[S->call_depth].file = file;
-        S->call_stack[S->call_depth].line = line;
+        S->call_stack[S->call_depth].name   = name;
+        S->call_stack[S->call_depth].file   = file;
+        S->call_stack[S->call_depth].line   = line;
+        S->call_stack[S->call_depth].column = column;
         S->call_depth++;
     }
 }

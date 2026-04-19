@@ -23,6 +23,7 @@ static void state_init(mino_state_t *S)
     S->true_singleton.as.b = 1;
     S->false_singleton.type = MINO_BOOL;
     S->reader_line         = 1;
+    S->reader_col          = 1;
     S->reader_dialect      = "mino";
     S->current_ns          = "user";
 }
