@@ -186,9 +186,36 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
         S->try_stack[S->try_depth].exception = NULL;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
+            mino_val_t *ex = S->try_stack[saved_try].exception;
             S->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
-                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
+                /* If the exception is a diagnostic map, extract its
+                 * message for the error buffer. */
+                if (ex != NULL && ex->type == MINO_MAP) {
+                    mino_val_t *msg = map_get_val(ex,
+                        mino_keyword(S, "mino/message"));
+                    mino_val_t *kind = map_get_val(ex,
+                        mino_keyword(S, "mino/kind"));
+                    mino_val_t *code = map_get_val(ex,
+                        mino_keyword(S, "mino/code"));
+                    set_eval_diag(S, S->eval_current_form,
+                        (kind && kind->type == MINO_KEYWORD)
+                            ? kind->as.s.data : "internal",
+                        (code && code->type == MINO_STRING)
+                            ? code->as.s.data : "MIN001",
+                        (msg && msg->type == MINO_STRING)
+                            ? msg->as.s.data : "unhandled exception");
+                } else if (ex != NULL && ex->type == MINO_STRING) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
+                             (int)ex->as.s.len, ex->as.s.data);
+                    set_eval_diag(S, S->eval_current_form,
+                                  "user", "MUS001", msg);
+                } else {
+                    set_eval_diag(S, S->eval_current_form,
+                                  "internal", "MIN001",
+                                  "unhandled exception");
+                }
             }
             S->call_depth = 0;
             return NULL;
