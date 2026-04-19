@@ -23,7 +23,7 @@ static int bind_sym(mino_state_t *S, mino_env_t *env, mino_val_t *sym,
     char   buf[256];
     size_t n = sym->as.s.len;
     if (n >= sizeof(buf)) {
-        set_error(S, "parameter name too long");
+        set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "parameter name too long");
         return 0;
     }
     memcpy(buf, sym->as.s.data, n);
@@ -63,7 +63,7 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
         if (sym_eq(p, "&")) {
             /* Rest parameter: next element gets remaining args. */
             if (i + 1 >= plen) {
-                set_error(S, "& must be followed by a binding form");
+                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "& must be followed by a binding form");
                 return 0;
             }
             i++;
@@ -72,19 +72,19 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
             /* Check for :as after rest. */
             if (i + 1 < plen && kw_eq(vec_nth(pattern, i + 1), "as")) {
                 if (i + 2 >= plen) {
-                    set_error(S, ":as must be followed by a symbol");
+                    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                     return 0;
                 }
                 i += 2;
                 p = vec_nth(pattern, i);
                 if (p == NULL || p->type != MINO_SYMBOL) {
-                    set_error(S, ":as must be followed by a symbol");
+                    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                     return 0;
                 }
                 if (!bind_sym(S, env, p, val)) return 0;
             }
             if (i + 1 < plen) {
-                set_error(S, "unexpected forms after & binding");
+                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "unexpected forms after & binding");
                 return 0;
             }
             return 1;
@@ -92,13 +92,13 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
         if (kw_eq(p, "as")) {
             /* Whole-collection binding. */
             if (i + 1 >= plen) {
-                set_error(S, ":as must be followed by a symbol");
+                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                 return 0;
             }
             i++;
             p = vec_nth(pattern, i);
             if (p == NULL || p->type != MINO_SYMBOL) {
-                set_error(S, ":as must be followed by a symbol");
+                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                 return 0;
             }
             if (!bind_sym(S, env, p, val)) return 0;
@@ -168,7 +168,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
             mino_val_t *lookup_key;
             mino_val_t *found;
             if (ksym == NULL || ksym->type != MINO_SYMBOL) {
-                set_error(S, ":keys elements must be symbols");
+                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":keys elements must be symbols");
                 return 0;
             }
             lookup_key = mino_keyword_n(S, ksym->as.s.data, ksym->as.s.len);
@@ -187,7 +187,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
     /* :as sym -- bind whole map. */
     if (as_sym != NULL) {
         if (as_sym->type != MINO_SYMBOL) {
-            set_error(S, ":as must be followed by a symbol");
+            set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
             return 0;
         }
         if (!bind_sym(S, env, as_sym, val)) return 0;
@@ -214,7 +214,7 @@ static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
     if (pattern->type == MINO_MAP) {
         return bind_map_destructure(S, env, pattern, val, ctx);
     }
-    set_error(S, "unsupported binding form (expected symbol, vector, or map)");
+    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "unsupported binding form (expected symbol, vector, or map)");
     return 0;
 }
 
@@ -237,11 +237,11 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
             params = params->as.cons.cdr;
             if (!mino_is_cons(params)
                 || params->as.cons.car == NULL) {
-                set_error(S, "& must be followed by a binding form");
+                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "& must be followed by a binding form");
                 return 0;
             }
             if (mino_is_cons(params->as.cons.cdr)) {
-                set_error(S, "& parameter must be last");
+                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "& parameter must be last");
                 return 0;
             }
             return bind_form(S, env, params->as.cons.car, args, ctx);
@@ -249,7 +249,7 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
         if (!mino_is_cons(args)) {
             char msg[96];
             snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-            set_error(S, msg);
+            set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", msg);
             return 0;
         }
         if (!bind_form(S, env, name, args->as.cons.car, ctx)) return 0;
@@ -259,7 +259,7 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
     if (mino_is_cons(args)) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-        set_error(S, msg);
+        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", msg);
         return 0;
     }
     return 1;
@@ -274,7 +274,7 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
     mino_val_t *body;
     mino_env_t *local;
     if (!mino_is_cons(args)) {
-        set_error_at(S, form, "let requires a binding form and body");
+        set_eval_diag(S, form, "syntax", "MSY001", "let requires a binding form and body");
         return NULL;
     }
     bindings = args->as.cons.car;
@@ -285,7 +285,7 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
         size_t vlen = bindings->as.vec.len;
         size_t vi;
         if (vlen % 2 != 0) {
-            set_error_at(S, form, "let vector bindings must have even number of forms");
+            set_eval_diag(S, form, "syntax", "MSY003", "let vector bindings must have even number of forms");
             return NULL;
         }
         for (vi = 0; vi < vlen; vi += 2) {
@@ -306,7 +306,7 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
             mino_val_t *rest_pair = bindings->as.cons.cdr;
             mino_val_t *val;
             if (!mino_is_cons(rest_pair)) {
-                set_error_at(S, form, "let binding missing value");
+                set_eval_diag(S, form, "syntax", "MSY003", "let binding missing value");
                 return NULL;
             }
             val = eval_value(S, rest_pair->as.cons.car, local);
@@ -320,7 +320,7 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
             bindings = rest_pair->as.cons.cdr;
         }
     } else {
-        set_error_at(S, form, "let bindings must be a list or vector");
+        set_eval_diag(S, form, "syntax", "MSY003", "let bindings must be a list or vector");
         return NULL;
     }
     return eval_implicit_do_impl(S, body, local, tail);
@@ -335,7 +335,7 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
     mino_val_t *params_tail = NULL;
     mino_env_t *local;
     if (!mino_is_cons(args)) {
-        set_error_at(S, form, "loop requires a binding form and body");
+        set_eval_diag(S, form, "syntax", "MSY001", "loop requires a binding form and body");
         return NULL;
     }
     bindings = args->as.cons.car;
@@ -347,7 +347,7 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
         size_t vi;
         mino_val_t **ptmp;
         if (vlen % 2 != 0) {
-            set_error_at(S, form, "loop vector bindings must have even number of forms");
+            set_eval_diag(S, form, "syntax", "MSY003", "loop vector bindings must have even number of forms");
             return NULL;
         }
         /* Build a params vector of just the name symbols for recur. */
@@ -374,7 +374,7 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
             mino_val_t *val;
             mino_val_t *cell;
             if (!mino_is_cons(rest_pair)) {
-                set_error_at(S, form, "loop binding missing value");
+                set_eval_diag(S, form, "syntax", "MSY003", "loop binding missing value");
                 return NULL;
             }
             val = eval_value(S, rest_pair->as.cons.car, local);
@@ -395,7 +395,7 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
             bindings = rest_pair->as.cons.cdr;
         }
     } else {
-        set_error_at(S, form, "loop bindings must be a list or vector");
+        set_eval_diag(S, form, "syntax", "MSY003", "loop bindings must be a list or vector");
         return NULL;
     }
     for (;;) {
@@ -420,7 +420,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
     dyn_frame_t frame;
     dyn_binding_t *bhead = NULL;
     if (!mino_is_cons(args)) {
-        set_error_at(S, form, "binding requires a binding list and body");
+        set_eval_diag(S, form, "syntax", "MSY001", "binding requires a binding list and body");
         return NULL;
     }
     pairs = args->as.cons.car;
@@ -430,7 +430,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
         size_t vlen = pairs->as.vec.len;
         size_t vi;
         if (vlen % 2 != 0) {
-            set_error_at(S, form, "binding: odd number of forms in binding vector");
+            set_eval_diag(S, form, "syntax", "MSY003", "binding: odd number of forms in binding vector");
             return NULL;
         }
         for (vi = 0; vi < vlen; vi += 2) {
@@ -441,13 +441,13 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
             char nbuf[256];
             size_t nlen;
             if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
-                set_error_at(S, form, "binding: names must be symbols");
+                set_eval_diag(S, form, "syntax", "MSY003", "binding: names must be symbols");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
             nlen = sym_v->as.s.len;
             if (nlen >= sizeof(nbuf)) {
-                set_error_at(S, form, "binding: name too long");
+                set_eval_diag(S, form, "syntax", "MSY003", "binding: name too long");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
@@ -460,7 +460,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
             }
             b = (dyn_binding_t *)malloc(sizeof(*b));
             if (b == NULL) {
-                set_error_at(S, form, "binding: out of memory");
+                set_eval_diag(S, form, "syntax", "MSY003", "binding: out of memory");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
@@ -478,13 +478,13 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
             size_t nlen;
             sym_v = pairs->as.cons.car;
             if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
-                set_error_at(S, form, "binding: names must be symbols");
+                set_eval_diag(S, form, "syntax", "MSY003", "binding: names must be symbols");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
             nlen = sym_v->as.s.len;
             if (nlen >= sizeof(nbuf)) {
-                set_error_at(S, form, "binding: name too long");
+                set_eval_diag(S, form, "syntax", "MSY003", "binding: name too long");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
@@ -492,7 +492,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
             nbuf[nlen] = '\0';
             pairs = pairs->as.cons.cdr;
             if (pairs == NULL || pairs->type != MINO_CONS) {
-                set_error_at(S, form, "binding: odd number of forms in binding list");
+                set_eval_diag(S, form, "syntax", "MSY003", "binding: odd number of forms in binding list");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
@@ -505,7 +505,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
             }
             b = (dyn_binding_t *)malloc(sizeof(*b));
             if (b == NULL) {
-                set_error_at(S, form, "binding: out of memory");
+                set_eval_diag(S, form, "syntax", "MSY003", "binding: out of memory");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
@@ -515,7 +515,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
             bhead   = b;
         }
     } else {
-        set_error_at(S, form, "binding requires a binding list and body");
+        set_eval_diag(S, form, "syntax", "MSY001", "binding requires a binding list and body");
         return NULL;
     }
     /* Push frame. */
