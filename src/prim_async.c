@@ -6,6 +6,7 @@
 #include "async_buffer.h"
 #include "async_channel.h"
 #include "async_scheduler.h"
+#include "async_select.h"
 
 /* ------------------------------------------------------------------ */
 /* Buffer constructors                                                */
@@ -274,6 +275,59 @@ static mino_val_t *prim_chan_poll(mino_state_t *S, mino_val_t *args,
 }
 
 /* ------------------------------------------------------------------ */
+/* Channel predicate                                                  */
+/* ------------------------------------------------------------------ */
+
+static mino_val_t *prim_chan_p(mino_state_t *S, mino_val_t *args,
+                              mino_env_t *env)
+{
+    (void)env;
+    if (args == NULL || args->type != MINO_CONS) {
+        set_error(S, "chan?* requires one argument");
+        return NULL;
+    }
+    return async_chan_get(args->as.cons.car) != NULL
+        ? mino_true(S) : mino_false(S);
+}
+
+/* ------------------------------------------------------------------ */
+/* Alts primitive                                                     */
+/* ------------------------------------------------------------------ */
+
+static mino_val_t *prim_alts(mino_state_t *S, mino_val_t *args,
+                             mino_env_t *env)
+{
+    mino_val_t *ops, *opts, *callback;
+    int result;
+
+    if (args == NULL || args->type != MINO_CONS) {
+        set_error(S, "alts* requires ops, opts, and callback");
+        return NULL;
+    }
+    ops = args->as.cons.car;
+
+    if (args->as.cons.cdr == NULL || args->as.cons.cdr->type != MINO_CONS) {
+        set_error(S, "alts* requires opts argument");
+        return NULL;
+    }
+    opts = args->as.cons.cdr->as.cons.car;
+
+    if (args->as.cons.cdr->as.cons.cdr == NULL ||
+        args->as.cons.cdr->as.cons.cdr->type != MINO_CONS) {
+        set_error(S, "alts* requires callback argument");
+        return NULL;
+    }
+    callback = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+
+    result = async_do_alts(S, env, ops, opts, callback);
+    /* Return the result code as an integer:
+     *  1 = completed immediately
+     *  0 = error (already set)
+     * -1 = no immediate completion, needs pending setup */
+    return mino_int(S, result);
+}
+
+/* ------------------------------------------------------------------ */
 /* Scheduler primitives                                               */
 /* ------------------------------------------------------------------ */
 
@@ -299,12 +353,14 @@ void mino_install_async(mino_state_t *S, mino_env_t *env)
 
     /* Channel operations */
     DEF_PRIM(env, "chan*",         prim_chan,           "Create a channel.");
+    DEF_PRIM(env, "chan?*",        prim_chan_p,         "Check if value is a channel.");
     DEF_PRIM(env, "chan-put*",     prim_chan_put,       "Put a value on a channel.");
     DEF_PRIM(env, "chan-take*",    prim_chan_take,      "Take a value from a channel.");
     DEF_PRIM(env, "chan-close*",   prim_chan_close,     "Close a channel.");
     DEF_PRIM(env, "chan-closed?*", prim_chan_closed_p,  "Check if a channel is closed.");
     DEF_PRIM(env, "offer!*",      prim_chan_offer,     "Non-blocking put on a channel.");
     DEF_PRIM(env, "poll!*",       prim_chan_poll,       "Non-blocking take from a channel.");
+    DEF_PRIM(env, "alts*",        prim_alts,           "Alts arbitration primitive.");
 
     /* Scheduler */
     DEF_PRIM(env, "drain!",       prim_drain,          "Drain the async run queue.");

@@ -78,3 +78,58 @@
    Never blocks or enqueues as pending."
   [ch]
   (poll!* ch))
+
+(defn chan?
+  "Returns true if x is a channel."
+  [x]
+  (chan?* x))
+
+;; --- alts! ---
+
+(defn alts!
+  "Completes at most one of several channel operations.
+   ops is a vector of channel operations:
+     - a channel means 'take from this channel'
+     - a vector [ch val] means 'put val on ch'
+   Optional opts map keys:
+     :priority true -- try ops in order instead of random
+     :default val   -- return [val :default] if no op can complete immediately
+   Returns [val ch] for the completed operation.
+
+   For immediate completions, the result is delivered via the scheduler.
+   For pending operations, callbacks are registered on each channel
+   with a shared flag atom to ensure exactly one commits."
+  ([ops] (alts! ops {}))
+  ([ops opts]
+   (let [result  (atom nil)
+         done    (atom false)
+         cb      (fn [v] (reset! result v) (reset! done true))
+         rc      (alts* ops opts cb)]
+     (drain!)
+     (if @done
+       @result
+       ;; rc = -1: no immediate completion. Set up pending ops with
+       ;; shared flag for exactly-one-wins arbitration.
+       ;; Single-threaded: simple atom flag suffices.
+       (let [flag (atom false)]
+         (doseq [op ops]
+           (if (and (vector? op) (= 2 (count op)))
+             ;; put operation
+             (let [ch  (nth op 0)
+                   val (nth op 1)]
+               (chan-put* ch val
+                 (fn [v]
+                   (when (not @flag)
+                     (reset! flag true)
+                     (reset! result [v ch])
+                     (reset! done true)))))
+             ;; take operation
+             (let [the-ch op]
+               (chan-take* the-ch
+                 (fn [v]
+                   (when (not @flag)
+                     (reset! flag true)
+                     (reset! result [v the-ch])
+                     (reset! done true)))))))
+         (drain!)
+         @result)))))
