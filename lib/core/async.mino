@@ -118,6 +118,22 @@
 ;; <! and >! call is a park point. The body is split into states at
 ;; each park point, and each state is a callback that runs when the
 ;; channel operation completes.
+;;
+;; Supported constructs across park points:
+;;   - Sequential parks: (go (<! ch1) (<! ch2))
+;;   - let bindings:     (go (let [a (<! ch1) b (<! ch2)] (+ a b)))
+;;   - Conditionals:     (go (if cond (<! ch1) (<! ch2)))
+;;   - loop/recur:       (go (loop [x (<! ch)] (recur (<! ch))))
+;;   - try/catch/finally: (go (try (<! ch) (catch e (handle e))))
+;;
+;; Known limitations (scope boundaries, not bugs):
+;;   - try with parks must be in tail position of the go body
+;;   - Parks in catch or finally bodies are not supported
+;;   - Nested parks in function call args are not supported;
+;;     use let bindings instead:
+;;       BAD:  (+ (<! ch1) (<! ch2))
+;;       GOOD: (let [a (<! ch1) b (<! ch2)] (+ a b))
+;;   - go does not walk into fn or nested go forms
 
 (defn go-park?
   "Returns true if form is a parking operation (<! or >!)."
