@@ -6,6 +6,37 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Structured diagnostics**: all errors are now represented as
+  structured `mino_diag_t` data with kind, code, phase, message,
+  source span (file, line, column), notes, and stack frames.
+- **Stable error codes**: every error site has a classified code
+  (MRE for reader, MSY for syntax, MNS for name resolution, MAR for
+  arity, MTY for type mismatch, MBD for bounds, MCT for contracts,
+  MHO for host, MLM for limits, MUS for user exceptions, MIN for
+  internal errors).
+- **Column tracking in reader**: all parsed forms carry column
+  position alongside file and line.
+- **Pretty error rendering**: REPL and file mode display errors with
+  `error[CODE]: message`, source location, source snippet with caret
+  pointer, and compact stack trace.
+- **Diagnostic map API**: `mino_last_diag()` and `mino_last_error_map()`
+  provide structured access to the last error from C.
+  `diag_to_map()` converts diagnostics to mino maps with canonical
+  `:mino/kind`, `:mino/code`, `:mino/phase`, `:mino/message`,
+  `:mino/location`, `:mino/notes`, `:mino/trace`, `:mino/data` keys.
+- **REPL helpers**: `(last-error)`, `(error?)` primitives.
+- **Catch normalization**: `catch` handlers always receive a diagnostic
+  map. The original thrown value is accessible via `(ex-data e)`.
+  `ex-data` and `ex-message` handle both diagnostic maps and `ex-info`
+  maps transparently.
+- **Source cache**: 4-entry cache of source text for diagnostic
+  rendering with snippets.
+
+### Fixed
+- `prim_throw_error` no longer infinite-recurses when called outside
+  a try block.
+
 ## [0.35.0] — core.async and conformance
 
 ### Added
