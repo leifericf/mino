@@ -45,8 +45,15 @@ int async_sched_drain(mino_state_t *S, mino_env_t *env)
             S->async_run_tail = NULL;
 
         if (cb != NULL) {
-            mino_val_t *args = mino_cons(S, val ? val : mino_nil(S), NULL);
+            mino_val_t *args;
+            /* Pin cb and val: once dequeued they may only be in registers,
+             * invisible to the conservative stack scanner when mino_cons
+             * or mino_call trigger a GC collection. */
+            gc_pin(cb);
+            gc_pin(val);
+            args = mino_cons(S, val ? val : mino_nil(S), NULL);
             mino_call(S, cb, args, env);
+            gc_unpin(2);
         }
 
         if (e->cb_ref)  mino_unref(S, e->cb_ref);

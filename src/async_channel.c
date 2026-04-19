@@ -139,19 +139,26 @@ int async_chan_put(mino_state_t *S, mino_async_chan_t *ch,
     /* If a taker is waiting, transfer directly. */
     taker = async_dequeue_take(ch);
     if (taker != NULL) {
+        /* Pin values before enqueue calls which allocate and may trigger GC. */
+        gc_pin(val);
+        gc_pin(put_cb);
         if (taker->callback)
             async_sched_enqueue(S, taker->callback, val);
         async_op_free(S, taker);
         if (put_cb)
             async_sched_enqueue(S, put_cb, mino_true(S));
+        gc_unpin(2);
         return 1;
     }
 
     /* If buffer has room, add to buffer. */
     if (ch->buf && !async_buf_full(ch->buf)) {
+        gc_pin(val);
+        gc_pin(put_cb);
         async_buf_add(S, ch->buf, val);
         if (put_cb)
             async_sched_enqueue(S, put_cb, mino_true(S));
+        gc_unpin(2);
         return 1;
     }
 
@@ -178,6 +185,11 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
     if (ch->buf && async_buf_count(ch->buf) > 0) {
         mino_val_t *val = async_buf_remove(S, ch->buf);
 
+        /* Pin values: async_buf_add and async_sched_enqueue allocate,
+         * which may trigger GC while val/take_cb are only in registers. */
+        gc_pin(val);
+        gc_pin(take_cb);
+
         /* If a putter is waiting, move its value into the buffer. */
         {
             pending_op_t *putter = async_dequeue_put(ch);
@@ -191,6 +203,7 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
 
         if (take_cb)
             async_sched_enqueue(S, take_cb, val);
+        gc_unpin(2);
         return 1;
     }
 
@@ -199,11 +212,14 @@ int async_chan_take(mino_state_t *S, mino_async_chan_t *ch,
         pending_op_t *putter = async_dequeue_put(ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
+            gc_pin(val);
+            gc_pin(take_cb);
             if (putter->callback)
                 async_sched_enqueue(S, putter->callback, mino_true(S));
             if (take_cb)
                 async_sched_enqueue(S, take_cb, val);
             async_op_free(S, putter);
+            gc_unpin(2);
             return 1;
         }
     }
@@ -270,14 +286,18 @@ int async_chan_offer(mino_state_t *S, mino_async_chan_t *ch, mino_val_t *val)
 
     taker = async_dequeue_take(ch);
     if (taker != NULL) {
+        gc_pin(val);
         if (taker->callback)
             async_sched_enqueue(S, taker->callback, val);
         async_op_free(S, taker);
+        gc_unpin(1);
         return 1;
     }
 
     if (ch->buf && !async_buf_full(ch->buf)) {
+        gc_pin(val);
         async_buf_add(S, ch->buf, val);
+        gc_unpin(1);
         return 1;
     }
 
@@ -289,12 +309,14 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
     if (ch->buf && async_buf_count(ch->buf) > 0) {
         mino_val_t *val = async_buf_remove(S, ch->buf);
         pending_op_t *putter = async_dequeue_put(ch);
+        gc_pin(val);
         if (putter != NULL) {
             async_buf_add(S, ch->buf, putter->val);
             if (putter->callback)
                 async_sched_enqueue(S, putter->callback, mino_true(S));
             async_op_free(S, putter);
         }
+        gc_unpin(1);
         return val;
     }
 
@@ -302,9 +324,11 @@ mino_val_t *async_chan_poll(mino_state_t *S, mino_async_chan_t *ch)
         pending_op_t *putter = async_dequeue_put(ch);
         if (putter != NULL) {
             mino_val_t *val = putter->val;
+            gc_pin(val);
             if (putter->callback)
                 async_sched_enqueue(S, putter->callback, mino_true(S));
             async_op_free(S, putter);
+            gc_unpin(1);
             return val;
         }
     }
