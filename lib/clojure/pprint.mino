@@ -1,0 +1,17 @@
+(ns clojure.pprint)
+
+(defn pprint
+  ([x] (println (pr-str x))))
+
+(defn cl-format [writer fmt & args]
+  (let [s (apply format fmt args)]
+    (if writer (do (print s) nil) s)))
+
+(defn print-table
+  ([rows] (print-table (keys (first rows)) rows))
+  ([ks rows]
+    (doseq [k ks] (print (str k "\t")))
+    (println)
+    (doseq [row rows]
+      (doseq [k ks] (print (str (get row k) "\t")))
+      (println))))
