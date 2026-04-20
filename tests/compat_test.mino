@@ -259,3 +259,19 @@
 
   (testing "unique on each call"
     (is (not= (random-uuid) (random-uuid)))))
+
+;; --- JVM stubs ---
+
+(deftest jvm-stubs-informative-errors
+  (testing "defrecord throws informative error"
+    (is (thrown? (defrecord Foo [x y])))
+    (is (= "defrecord is not available in mino; use maps and protocols instead"
+           (try (defrecord Foo [x y]) (catch e (ex-message e))))))
+
+  (testing "reify throws informative error"
+    (is (thrown? (reify Object (toString [this] "hi"))))
+    (is (= "reify is not available in mino; use maps, protocols, and fn instead"
+           (try (reify Object (toString [this] "hi")) (catch e (ex-message e))))))
+
+  (testing "import is a silent no-op"
+    (is (nil? (import java.util.Date)))))

@@ -1811,6 +1811,28 @@
 (def char-array  "Creates a vector from a size or collection." object-array)
 (def boolean-array "Creates a vector from a size or collection." object-array)
 
+;; --- JVM stubs ---
+
+(defmacro defrecord [& _]
+  (throw (ex-info "defrecord is not available in mino; use maps and protocols instead" {})))
+
+(defmacro deftype [& _]
+  (throw (ex-info "deftype is not available in mino; use maps and protocols instead" {})))
+
+(defmacro reify [& _]
+  (throw (ex-info "reify is not available in mino; use maps, protocols, and fn instead" {})))
+
+(defmacro proxy [& _]
+  (throw (ex-info "proxy is not available in mino; use host/* interop instead" {})))
+
+(defmacro gen-class [& _]
+  (throw (ex-info "gen-class is not available in mino; use host/* interop instead" {})))
+
+(defmacro definterface [& _]
+  (throw (ex-info "definterface is not available in mino; use defprotocol instead" {})))
+
+(defmacro import [& _] nil)
+
 (defmacro spawn "Creates a new actor that evaluates body in its own runtime." [& body]
   (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]
     `(spawn* ~src)))
