@@ -1,0 +1,70 @@
+(require "tests/test")
+(require '[mino.deps :as deps])
+
+;; Dependency management: manifest loading, validation, path resolution.
+
+(def test-dir "/tmp/mino-deps-test")
+
+(deftest load-manifest-basic
+  (let [path (str test-dir "/test-mino.edn")]
+    (mkdir-p test-dir)
+    (spit path "{:paths [\"src\"] :deps {:foo {:path \"../foo\"}}}")
+    (let [m (deps/load-manifest path)]
+      (is (= ["src"] (:paths m)))
+      (is (= {:foo {:path "../foo"}} (:deps m))))
+    (rm-rf test-dir)))
+
+(deftest load-manifest-unknown-keys-ignored
+  (let [path (str test-dir "/test-mino.edn")]
+    (mkdir-p test-dir)
+    (spit path "{:paths [\"src\"] :deps {} :tasks {} :main \"app\"}")
+    (let [m (deps/load-manifest path)]
+      (is (= ["src"] (:paths m)))
+      (is (map? (:deps m)))
+      (is (= "app" (:main m))))
+    (rm-rf test-dir)))
+
+(deftest load-manifest-validation
+  (let [path (str test-dir "/bad.edn")]
+    (mkdir-p test-dir)
+    ;; :paths must be a vector
+    (spit path "{:paths \"src\"}")
+    (is (thrown? (deps/load-manifest path)))
+    ;; :deps must be a map
+    (spit path "{:deps [1 2 3]}")
+    (is (thrown? (deps/load-manifest path)))
+    ;; root must be a map
+    (spit path "[1 2 3]")
+    (is (thrown? (deps/load-manifest path)))
+    (rm-rf test-dir)))
+
+(deftest validate-dep-spec-errors
+  ;; Missing :rev for git dep
+  (is (thrown? (deps/validate-dep-spec :foo {:git "https://example.com"})))
+  ;; Not a map
+  (is (thrown? (deps/validate-dep-spec :foo "not a map")))
+  ;; No recognized source type
+  (is (thrown? (deps/validate-dep-spec :foo {:unknown true}))))
+
+(deftest validate-dep-spec-ok
+  (is (nil? (deps/validate-dep-spec :foo {:path "../foo"})))
+  (is (nil? (deps/validate-dep-spec :bar {:git "https://example.com" :rev "abc"}))))
+
+(deftest resolve-paths-with-deps
+  (let [m {:paths ["src" "lib"]
+           :deps {:foo {:path "../foo"}
+                  :bar {:git "https://example.com" :rev "abc"}}}]
+    (is (= ["src" "lib" "../foo" ".mino/deps/bar"]
+           (deps/resolve-paths m)))))
+
+(deftest resolve-paths-defaults
+  ;; When :paths is absent, defaults to ["src" "lib"]
+  (let [m {:deps {:foo {:path "../x"}}}]
+    (is (= ["src" "lib" "../x"]
+           (deps/resolve-paths m)))))
+
+(deftest resolve-paths-no-deps
+  (let [m {:paths ["mylib"]}]
+    (is (= ["mylib"] (deps/resolve-paths m)))))
+
+(run-tests)

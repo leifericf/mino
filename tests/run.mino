@@ -71,5 +71,6 @@
 (require "tests/async_conformance_test")
 (require "tests/fs_test")
 (require "tests/proc_test")
+(require "tests/deps_test")
 
 (run-tests)
