@@ -1374,8 +1374,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             ch = '\f';
         } else if (tlen == 1) {
             ch = start[0];
-        } else if (tlen == 0 && start[0] != '\0' && !is_ws(start[0])) {
-            /* Single terminator character used as literal: \{ \; \^ etc. */
+        } else if (tlen == 0 && start[0] != '\0') {
+            /* Single terminator/whitespace character as literal: \{ \; \, etc. */
             ch = start[0];
             ADVANCE(S, p);
         } else if (tlen >= 5 && start[0] == 'u') {

@@ -25,7 +25,10 @@
   (testing "unicode escapes"
     (is (= "A" \u0041))
     (is (= "a" \u0061))
-    (is (= "0" \u0030))))
+    (is (= "0" \u0030)))
+
+  (testing "whitespace characters as literals"
+    (is (= "," \,))))
 
 ;; --- Map literal reader conditional key elimination ---
 
