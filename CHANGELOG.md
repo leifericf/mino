@@ -29,7 +29,6 @@ adheres to [Semantic Versioning](https://semver.org/).
   `clojure.edn` (read-string), `clojure.pprint` (pprint, print-table).
 - **Protocols**: multi-protocol `extend-type`, keyword option stripping
   in `defprotocol`, docstring handling.
-- **Binding**: `_` as throwaway (discarded, not bound).
 - **Compat vars**: `*clojure-version*`, `clojure-version`, `assert`.
 - **JVM stubs**: `defrecord`, `deftype`, `reify`, `proxy`,
   `gen-class`, `definterface`, `import` all throw with clear messages.
