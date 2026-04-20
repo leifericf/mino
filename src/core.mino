@@ -112,6 +112,9 @@
       `(def ~name ~doc ~form)
       `(def ~name ~form))))
 
+(defmacro defn- "Same as defn, yielding a non-public def." [name & body]
+  (apply list 'defn (vary-meta name assoc :private true) body))
+
 ;; --- Lazy sequence operations ---
 
 (def map1_ (fn map1_ [f coll]
