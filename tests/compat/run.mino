@@ -60,9 +60,7 @@
    "riddley"         {:url "https://github.com/ztellman/riddley.git" :src "src"}
    "data.xml"        {:url "https://github.com/clojure/data.xml.git" :src "src"}})
 
-(def shim-code
-  "(defmacro instance? [t x] `(= (type ~x) ~t))
-   (defn char [x] x)")
+(def shim-code "")
 
 (defn source-file? [path]
   (or (ends-with? path ".clj")

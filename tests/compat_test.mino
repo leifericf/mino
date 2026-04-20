@@ -276,8 +276,10 @@
     (is (= "reify is not available in mino; use maps, protocols, and fn instead"
            (try (reify Object (toString [this] "hi")) (catch e (ex-message e))))))
 
-  (testing "import is a silent no-op"
-    (is (nil? (import java.util.Date)))))
+  (testing "import throws informative error"
+    (is (thrown? (import java.util.Date)))
+    (is (= "import is not available in mino; Java classes cannot be imported"
+           (try (import java.util.Date) (catch e (ex-message e)))))))
 
 ;; --- #?@ splice in maps ---
 

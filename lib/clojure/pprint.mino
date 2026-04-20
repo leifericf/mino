@@ -4,8 +4,7 @@
   ([x] (println (pr-str x))))
 
 (defn cl-format [writer fmt & args]
-  (let [s (apply format fmt args)]
-    (if writer (do (print s) nil) s)))
+  (throw (str "cl-format is not implemented in mino")))
 
 (defn print-table
   ([rows] (print-table (keys (first rows)) rows))
