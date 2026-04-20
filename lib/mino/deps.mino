@@ -1,0 +1,82 @@
+(ns mino.deps)
+
+;; Dependency management for mino projects.
+;;
+;; Reads mino.edn, fetches :git dependencies into .mino/deps/,
+;; and returns resolved paths for the module resolver.
+
+(def ^:private deps-dir ".mino/deps")
+
+(defn load-manifest
+  "Read and validate mino.edn. Returns the manifest map.
+   Unknown keys are ignored for forward compatibility."
+  [path]
+  (let [raw (read-string (slurp path))]
+    (when-not (map? raw)
+      (throw (ex-info (str "mino.edn must be a map, got: " (type raw))
+                      {:path path})))
+    (when (contains? raw :paths)
+      (when-not (vector? (:paths raw))
+        (throw (ex-info ":paths must be a vector of strings"
+                        {:paths (:paths raw)})))
+      (doseq [p (:paths raw)]
+        (when-not (string? p)
+          (throw (ex-info (str ":paths entry must be a string, got: " (type p))
+                          {:entry p})))))
+    (when (contains? raw :deps)
+      (when-not (map? (:deps raw))
+        (throw (ex-info ":deps must be a map"
+                        {:deps (:deps raw)}))))
+    raw))
+
+(defn- fetch-git
+  "Clone a git repo and checkout the pinned rev."
+  [dep-name spec]
+  (let [dest (str deps-dir "/" (name dep-name))]
+    (when-not (directory? dest)
+      (println (str "Fetching " (name dep-name) " from " (:git spec) "..."))
+      (sh! "git" "clone" "--quiet" (:git spec) dest))
+    (sh! "git" "-C" dest "checkout" "--quiet" (:rev spec))
+    dest))
+
+(defn- validate-dep-spec
+  "Validate a single dependency spec."
+  [dep-name spec]
+  (when-not (map? spec)
+    (throw (ex-info (str "dep spec for " dep-name " must be a map")
+                    {:dep dep-name :spec spec})))
+  (when-not (or (:path spec) (:git spec))
+    (throw (ex-info (str "dep " dep-name " must have :path or :git")
+                    {:dep dep-name :spec spec})))
+  (when (and (:git spec) (not (:rev spec)))
+    (throw (ex-info (str "git dep " dep-name " must have :rev")
+                    {:dep dep-name :spec spec}))))
+
+(defn fetch-dep
+  "Fetch a single dependency. Returns the resolved directory path."
+  [dep-name spec]
+  (validate-dep-spec dep-name spec)
+  (cond
+    (:path spec) (:path spec)
+    (:git spec)  (fetch-git dep-name spec)))
+
+(defn fetch-all!
+  "Fetch all dependencies from a manifest. Creates .mino/deps/ as needed."
+  [manifest]
+  (when-let [deps (:deps manifest)]
+    (mkdir-p deps-dir)
+    (doseq [[dep-name spec] deps]
+      (fetch-dep dep-name spec)))
+  (println "Dependencies up to date."))
+
+(defn resolve-paths
+  "Return a vector of all source directories: :paths + dep directories."
+  [manifest]
+  (let [paths (or (:paths manifest) ["src" "lib"])
+        dep-dirs (when-let [deps (:deps manifest)]
+                   (mapv (fn [[dep-name spec]]
+                           (cond
+                             (:path spec) (:path spec)
+                             (:git spec)  (str deps-dir "/" (name dep-name))))
+                         deps))]
+    (into paths dep-dirs)))

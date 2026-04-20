@@ -7,7 +7,7 @@
 *.exe
 build/
 bin/
-mino
+/mino
 src/core_mino.h
 
 # Test artifacts
