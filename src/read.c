@@ -491,8 +491,15 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
         key = read_form(S, p);
         if (key == NULL) {
             if (mino_last_error(S) != NULL) return NULL;
-            /* No form produced (e.g. unmatched #?). Check for closing
-             * delimiter before declaring unterminated. */
+            /* Key eliminated by reader conditional — consume and discard
+             * the paired value before continuing. */
+            skip_ws(S, p);
+            if (**p == '}') { ADVANCE(S, p); break; }
+            {
+                mino_val_t *discard = read_form(S, p);
+                if (discard == NULL && mino_last_error(S) != NULL)
+                    return NULL;
+            }
             skip_ws(S, p);
             if (**p == '}') { ADVANCE(S, p); break; }
             continue;
@@ -1140,20 +1147,12 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             gc_unpin(1);
             return found;
         }
-        /* No branch matched: skip whitespace and check if we're at a
-         * closing delimiter. If so, return NULL without error to signal
-         * "no form produced" to the enclosing list/vector reader.
-         * Otherwise, read the next form transparently. */
-        skip_ws(S, p);
-        if (**p == '\0' || **p == ')' || **p == ']' || **p == '}') {
-            return NULL;
-        }
-        /* If the next token is #?@, return NULL so the enclosing
-         * list/vector reader handles the splice via its own peek. */
-        if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) == '@') {
-            return NULL;
-        }
-        return read_form(S, p);
+        /* No branch matched: return NULL without error to signal
+         * "no form produced" to the enclosing reader (list, vector,
+         * or map). The enclosing reader will continue to the next
+         * form. For maps this is critical — the map reader must
+         * consume and discard the paired value. */
+        return NULL;
     }
     if (**p == '"') {
         return read_string_form(S, p);
