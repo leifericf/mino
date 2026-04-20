@@ -125,3 +125,65 @@
     (is (= "hello" (my-str-macro "hello"))))
   (testing "multiple args"
     (is (= "abc" (my-str-macro "a" "b" "c")))))
+
+;; --- Multimethods ---
+
+(defmulti area-mm :shape)
+(defmethod area-mm :circle [{:keys [r]}] (* 3.14159 r r))
+(defmethod area-mm :rect [{:keys [w h]}] (* w h))
+(defmethod area-mm :default [s] :unknown)
+
+(deftest multimethod-basic
+  (testing "dispatch on keyword"
+    (is (= 12 (area-mm {:shape :rect :w 3 :h 4}))))
+  (testing "default method"
+    (is (= :unknown (area-mm {:shape :hexagon})))))
+
+(defmulti greet-mm (fn [x] (:lang x)))
+(defmethod greet-mm :en [_] "Hello!")
+(defmethod greet-mm :fr [_] "Bonjour!")
+
+(deftest multimethod-custom-dispatch
+  (testing "custom dispatch function"
+    (is (= "Hello!" (greet-mm {:lang :en})))
+    (is (= "Bonjour!" (greet-mm {:lang :fr})))))
+
+(deftest multimethod-methods-api
+  (testing "methods returns method table"
+    (is (= 3 (count (methods area-mm)))))
+  (testing "get-method returns specific method"
+    (is (fn? (get-method area-mm :circle)))
+    (is (nil? (get-method area-mm :nonexistent)))))
+
+(deftest multimethod-remove
+  (let [mm-test (do
+                  (defmulti temp-mm identity)
+                  (defmethod temp-mm :a [_] 1)
+                  (defmethod temp-mm :b [_] 2)
+                  temp-mm)]
+    (is (= 2 (count (methods mm-test))))
+    (remove-method mm-test :b)
+    (is (= 1 (count (methods mm-test))))))
+
+(derive :compat-circle :compat-shape)
+(derive :compat-rect :compat-shape)
+(derive :compat-square :compat-rect)
+
+(defmulti draw-mm identity)
+(defmethod draw-mm :compat-shape [s] :generic)
+(defmethod draw-mm :compat-circle [s] :circle)
+
+(deftest multimethod-hierarchy
+  (testing "exact match takes priority"
+    (is (= :circle (draw-mm :compat-circle))))
+  (testing "hierarchy-aware fallback"
+    (is (= :generic (draw-mm :compat-rect))))
+  (testing "transitive hierarchy"
+    (is (= :generic (draw-mm :compat-square)))))
+
+(defmulti process-mm "Processes items by type." :type)
+(defmethod process-mm :text [{:keys [content]}] (str "text: " content))
+
+(deftest multimethod-with-docstring
+  (testing "defmulti with docstring"
+    (is (= "text: hello" (process-mm {:type :text :content "hello"})))))
