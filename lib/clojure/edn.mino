@@ -1,0 +1,5 @@
+(ns clojure.edn)
+
+(defn read-string
+  ([s] (clojure.core/read-string s))
+  ([opts s] (clojure.core/read-string s)))
