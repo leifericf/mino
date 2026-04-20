@@ -35,27 +35,41 @@ static const char *cwd_resolve(const char *name, void *ctx)
     if (nlen + 10 >= sizeof(path_buf)) return NULL;
 
     /* If name already has an extension, use as-is. */
-    if (nlen >= 5 && (strcmp(name + nlen - 5, ".mino") == 0
-                   || strcmp(name + nlen - 5, ".cljc") == 0)) {
+    if ((nlen >= 5 && (strcmp(name + nlen - 5, ".mino") == 0
+                    || strcmp(name + nlen - 5, ".cljc") == 0
+                    || strcmp(name + nlen - 5, ".cljs") == 0))
+     || (nlen >= 4 && strcmp(name + nlen - 4, ".clj") == 0)) {
         memcpy(path_buf, name, nlen + 1);
         if (file_exists(path_buf)) return path_buf;
-        /* Try lib/ prefix. */
         snprintf(path_buf, sizeof(path_buf), "lib/%s", name);
         if (file_exists(path_buf)) return path_buf;
         return NULL;
     }
 
-    /* Try: name.mino, lib/name.mino, name.cljc, lib/name.cljc */
+    /* Try extensions in priority order: .mino, .cljc, .clj, .cljs */
     snprintf(path_buf, sizeof(path_buf), "%s.mino", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    snprintf(path_buf, sizeof(path_buf), "lib/%s.mino", name);
     if (file_exists(path_buf)) return path_buf;
 
     snprintf(path_buf, sizeof(path_buf), "%s.cljc", name);
     if (file_exists(path_buf)) return path_buf;
 
+    snprintf(path_buf, sizeof(path_buf), "%s.clj", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    snprintf(path_buf, sizeof(path_buf), "%s.cljs", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    /* Try lib/ prefix variants. */
+    snprintf(path_buf, sizeof(path_buf), "lib/%s.mino", name);
+    if (file_exists(path_buf)) return path_buf;
+
     snprintf(path_buf, sizeof(path_buf), "lib/%s.cljc", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    snprintf(path_buf, sizeof(path_buf), "lib/%s.clj", name);
+    if (file_exists(path_buf)) return path_buf;
+
+    snprintf(path_buf, sizeof(path_buf), "lib/%s.cljs", name);
     if (file_exists(path_buf)) return path_buf;
 
     return NULL;

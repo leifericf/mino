@@ -51,7 +51,9 @@ static int dotted_to_path(const char *name, size_t nlen,
     if (nlen == 0 || nlen >= bufsize) return -1;
     if (name[0] == '.' || name[nlen - 1] == '.') return -1;
     for (i = 0; i < nlen; i++) {
-        buf[i] = (name[i] == '.') ? '/' : name[i];
+        if (name[i] == '.')       buf[i] = '/';
+        else if (name[i] == '-')  buf[i] = '_';
+        else                      buf[i] = name[i];
     }
     buf[nlen] = '\0';
     return 0;

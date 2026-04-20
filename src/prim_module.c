@@ -22,8 +22,11 @@ static int dots_to_slashes(const char *src, size_t srclen,
     size_t i;
     if (srclen == 0 || srclen >= bufsize) return -1;
     if (src[0] == '.' || src[srclen - 1] == '.') return -1;
-    for (i = 0; i < srclen; i++)
-        buf[i] = (src[i] == '.') ? '/' : src[i];
+    for (i = 0; i < srclen; i++) {
+        if (src[i] == '.')       buf[i] = '/';
+        else if (src[i] == '-')  buf[i] = '_';
+        else                     buf[i] = src[i];
+    }
     buf[srclen] = '\0';
     return 0;
 }
