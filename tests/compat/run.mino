@@ -124,6 +124,22 @@
   (def take saved-take)
   (def subs saved-subs))
 
+(defn root-cause
+  "Extract root cause from chained error messages like
+   'in foo.clj: unhandled exception: in bar.clj: ... actual error'
+   Returns the last segment after all 'unhandled exception:' prefixes."
+  [err]
+  (if (nil? err) err
+    (let [parts (split err "unhandled exception: ")
+          last-part (last parts)]
+      ;; Strip leading 'in file.clj: ' if present
+      (if (starts-with? last-part "in ")
+        (let [segs (split last-part ": ")]
+          (if (> (count segs) 1)
+            (join ": " (rest segs))
+            last-part))
+        last-part))))
+
 (defn try-load-file [path]
   (try
     (let [code (slurp path)]
@@ -189,39 +205,40 @@
           (chdir original-dir)
           (println (str "  [crash] " repo-name ": " (if (string? e) e (str e)))))))
 
-    ;; Classify errors
+    ;; Classify errors by root cause
     (let [failures (filter #(= (:status %) :fail) @all-results)
           classify (fn [err]
-                     (cond
-                       (nil? err) :unknown
-                       (or (includes? err "is not available in mino")
-                           (includes? err "interop disabled")
-                           (includes? err "clojure/java/")
-                           (includes? err "cljs/")
-                           (includes? err "goog/")
-                           (includes? err "System/")
-                           (includes? err "clojure.lang.")
-                           (includes? err "Runtime")
-                           (includes? err "TimeUnit/"))
-                       :platform
+                     (let [rc (root-cause err)]
+                       (cond
+                         (nil? rc) :unknown
+                         (or (includes? rc "is not available in mino")
+                             (includes? rc "interop disabled")
+                             (includes? rc "clojure/java/")
+                             (includes? rc "cljs/")
+                             (includes? rc "goog/")
+                             (includes? rc "System/")
+                             (includes? rc "clojure.lang.")
+                             (includes? rc "Runtime")
+                             (includes? rc "TimeUnit/"))
+                         :platform
 
-                       (or (includes? err "taoensso/")
-                           (includes? err "schema/")
-                           (includes? err "riddley/")
-                           (includes? err "arrangement/")
-                           (includes? err "bencode/")
-                           (includes? err "cheshire/")
-                           (includes? err "manifold/")
-                           (includes? err "promesa/")
-                           (includes? err "weavejester/")
-                           (includes? err "meta_merge/")
-                           (includes? err "borkdude/")
-                           (includes? err "cherry/")
-                           (includes? err "somnium/")
-                           (includes? err "franzy/"))
-                       :missing-dep
+                         (or (includes? rc "taoensso/")
+                             (includes? rc "schema/")
+                             (includes? rc "riddley/")
+                             (includes? rc "arrangement/")
+                             (includes? rc "bencode/")
+                             (includes? rc "cheshire/")
+                             (includes? rc "manifold/")
+                             (includes? rc "promesa/")
+                             (includes? rc "weavejester/")
+                             (includes? rc "meta_merge/")
+                             (includes? rc "borkdude/")
+                             (includes? rc "cherry/")
+                             (includes? rc "somnium/")
+                             (includes? rc "franzy/"))
+                         :missing-dep
 
-                       :else :fixable))
+                         :else :fixable)))
           grouped (group-by #(classify (:error %)) failures)
           n-platform (count (get grouped :platform []))
           n-dep      (count (get grouped :missing-dep []))
@@ -241,8 +258,8 @@
       (println (str "Effective pass rate (excl. platform+deps): " eff-pct
                     "% (" @pass-count "/" effective ")"))
 
-      ;; Top fixable failure reasons
-      (let [fixable-errors (map :error (get grouped :fixable []))
+      ;; Top fixable failure reasons (deduplicated by root cause)
+      (let [fixable-errors (map (comp root-cause :error) (get grouped :fixable []))
             reasons (->> fixable-errors
                          (frequencies)
                          (sort-by (fn [[_ c]] (- c)))

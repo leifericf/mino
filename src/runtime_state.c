@@ -273,15 +273,23 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
             S->reader_file = saved_file;
             S->reader_line = saved_line;
             if (mino_last_error(S) == NULL) {
-                /* Preserve the original exception message if available.
-                 * Write directly to error_buf to avoid re-throwing via
-                 * set_eval_diag when inside an outer try frame. */
+                /* Preserve the original exception message if available,
+                 * and include the file being loaded for context. */
+                const char *file = S->reader_file;
                 if (ex != NULL && ex->type == MINO_STRING
                     && ex->as.s.len > 0) {
-                    snprintf(S->error_buf, sizeof(S->error_buf), "%.*s",
-                             (int)ex->as.s.len, ex->as.s.data);
+                    if (file != NULL && strcmp(file, "<string>") != 0
+                        && strcmp(file, "<input>") != 0) {
+                        char msg[512];
+                        snprintf(msg, sizeof(msg), "in %s: %.*s",
+                                 file, (int)ex->as.s.len, ex->as.s.data);
+                        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", msg);
+                    } else {
+                        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001",
+                                      ex->as.s.data);
+                    }
                 } else {
-                    snprintf(S->error_buf, sizeof(S->error_buf), "unhandled exception");
+                    set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
                 }
             }
             S->call_depth = 0;
