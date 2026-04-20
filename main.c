@@ -30,6 +30,10 @@ static int file_exists(const char *path)
  * for resolving lib/ modules even after chdir. */
 static char initial_dir[4096] = "";
 
+/* Directory containing the mino binary itself. Used to find bundled
+ * lib/ modules when running from a different working directory. */
+static char binary_dir[4096] = "";
+
 static int try_resolve(const char *name, size_t nlen, char *buf, size_t bufsz)
 {
     static const char *exts[] = {".mino", ".cljc", ".clj", ".cljs"};
@@ -47,6 +51,13 @@ static int try_resolve(const char *name, size_t nlen, char *buf, size_t bufsz)
     if (initial_dir[0] != '\0') {
         for (i = 0; i < 4; i++) {
             snprintf(buf, bufsz, "%s/lib/%s%s", initial_dir, name, exts[i]);
+            if (file_exists(buf)) return 1;
+        }
+    }
+    /* Try binary dir's lib/ as fallback. */
+    if (binary_dir[0] != '\0') {
+        for (i = 0; i < 4; i++) {
+            snprintf(buf, bufsz, "%s/lib/%s%s", binary_dir, name, exts[i]);
             if (file_exists(buf)) return 1;
         }
     }
@@ -76,6 +87,10 @@ static const char *cwd_resolve(const char *name, void *ctx)
             snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", initial_dir, name);
             if (file_exists(path_buf)) return path_buf;
         }
+        if (binary_dir[0] != '\0') {
+            snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", binary_dir, name);
+            if (file_exists(path_buf)) return path_buf;
+        }
         return NULL;
     }
 
@@ -83,6 +98,113 @@ static const char *cwd_resolve(const char *name, void *ctx)
         return path_buf;
 
     return NULL;
+}
+
+/* ---- project-aware module resolver ---- */
+
+#define MAX_PROJECT_PATHS 64
+
+static char *project_paths[MAX_PROJECT_PATHS];
+static size_t project_path_count = 0;
+
+/* Try resolving a module name within a specific directory prefix. */
+static int try_resolve_in(const char *dir, const char *name, size_t nlen,
+                          char *buf, size_t bufsz)
+{
+    static const char *exts[] = {".mino", ".cljc", ".clj", ".cljs"};
+    size_t i;
+    (void)nlen;
+    for (i = 0; i < 4; i++) {
+        snprintf(buf, bufsz, "%s/%s%s", dir, name, exts[i]);
+        if (file_exists(buf)) return 1;
+    }
+    return 0;
+}
+
+/* Resolver that checks project paths first, then falls through to cwd. */
+static const char *project_resolve(const char *name, void *ctx)
+{
+    static char pbuf[4096];
+    size_t i, nlen;
+    (void)ctx;
+    if (name == NULL) return NULL;
+    nlen = strlen(name);
+    if (nlen + 10 >= sizeof(pbuf)) return NULL;
+
+    for (i = 0; i < project_path_count; i++) {
+        if (try_resolve_in(project_paths[i], name, nlen,
+                           pbuf, sizeof(pbuf)))
+            return pbuf;
+    }
+    return cwd_resolve(name, NULL);
+}
+
+/* Read mino.edn and configure project paths + deps.
+ * Called before any script execution if mino.edn exists. */
+static void setup_project(mino_state_t *S, mino_env_t *env)
+{
+    mino_val_t *paths;
+    mino_val_t *result;
+
+    if (!file_exists("mino.edn")) return;
+
+    /* Load the deps module and resolve paths. */
+    result = mino_eval_string(S,
+        "(require '[mino.deps :as deps])"
+        "(deps/resolve-paths (deps/load-manifest \"mino.edn\"))",
+        env);
+
+    if (result == NULL || result->type != MINO_VECTOR) return;
+
+    /* Extract paths from the vector into our static array. */
+    paths = result;
+    {
+        size_t i;
+        size_t count = paths->as.vec.len;
+        if (count > MAX_PROJECT_PATHS) count = MAX_PROJECT_PATHS;
+        for (i = 0; i < count; i++) {
+            mino_val_t *p = vec_nth(paths, i);
+            if (p != NULL && p->type == MINO_STRING) {
+                project_paths[project_path_count] = strdup(p->as.s.data);
+                if (project_paths[project_path_count] != NULL)
+                    project_path_count++;
+            }
+        }
+    }
+
+    if (project_path_count > 0)
+        mino_set_resolver(S, project_resolve, NULL);
+}
+
+/* Run `mino deps` subcommand: fetch all dependencies. */
+static int run_deps(mino_state_t *S, mino_env_t *env)
+{
+    mino_val_t *result;
+
+    if (!file_exists("mino.edn")) {
+        fprintf(stderr, "mino: no mino.edn found in current directory\n");
+        return 1;
+    }
+
+    result = mino_eval_string(S,
+        "(require '[mino.deps :as deps])"
+        "(deps/fetch-all! (deps/load-manifest \"mino.edn\"))",
+        env);
+
+    if (result == NULL) {
+        const mino_diag_t *d = mino_last_diag(S);
+        if (d != NULL) {
+            char dbuf[2048];
+            mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
+                             dbuf, sizeof(dbuf));
+            fprintf(stderr, "%s", dbuf);
+        } else {
+            const char *err = mino_last_error(S);
+            fprintf(stderr, "mino: %s\n", err ? err : "unknown error");
+        }
+        return 1;
+    }
+    return 0;
 }
 
 /* ---- helpers ---- */
@@ -107,6 +229,23 @@ int main(int argc, char **argv)
 {
     mino_state_t *S;
     getcwd(initial_dir, sizeof(initial_dir));
+
+    /* Compute binary_dir from argv[0] for finding bundled lib/. */
+    {
+        char resolved[4096];
+        const char *slash;
+        if (realpath(argv[0], resolved) != NULL) {
+            slash = strrchr(resolved, '/');
+            if (slash != NULL) {
+                size_t dlen = (size_t)(slash - resolved);
+                if (dlen < sizeof(binary_dir)) {
+                    memcpy(binary_dir, resolved, dlen);
+                    binary_dir[dlen] = '\0';
+                }
+            }
+        }
+    }
+
     S = mino_state_new();
     mino_env_t   *env = mino_env_new(S);
     char *buf  = NULL;
@@ -120,6 +259,17 @@ int main(int argc, char **argv)
     mino_install_fs(S, env);
     mino_install_proc(S, env);
     mino_set_resolver(S, cwd_resolve, NULL);
+
+    /* Subcommand: mino deps */
+    if (argc > 1 && strcmp(argv[1], "deps") == 0) {
+        exit_code = run_deps(S, env);
+        mino_env_free(S, env);
+        mino_state_free(S);
+        return exit_code;
+    }
+
+    /* Auto-wire project paths from mino.edn if present. */
+    setup_project(S, env);
 
     /* File mode: evaluate a script and exit. */
     if (argc > 1) {
