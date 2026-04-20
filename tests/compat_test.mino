@@ -1,0 +1,127 @@
+(require "tests/test")
+
+;; --- Character literals for terminator characters ---
+
+(deftest char-literal-terminators
+  (testing "single terminator characters as literals"
+    (is (= "{" \{))
+    (is (= "}" \}))
+    (is (= ";" \;))
+    (is (= "\"" \"))
+    (is (= "^" \^))
+    (is (= "~" \~))
+    (is (= "@" \@))
+    (is (= "`" \`))
+    (is (= "(" \())
+    (is (= ")" \)))
+    (is (= "[" \[))
+    (is (= "]" \])))
+
+  (testing "named character literals still work"
+    (is (= " " \space))
+    (is (= "\n" \newline))
+    (is (= "\t" \tab)))
+
+  (testing "unicode escapes"
+    (is (= "A" \u0041))
+    (is (= "a" \u0061))
+    (is (= "0" \u0030))))
+
+;; --- Map literal reader conditional key elimination ---
+
+(deftest map-reader-conditional-key-elim
+  (testing "eliminated key skips paired value"
+    (is (= {:c 2} {#?(:clj :a :cljs :b) 1 :c 2})))
+
+  (testing "both branches eliminated"
+    (is (= {:ok 42} {#?(:clj :x :cljs :y) #?(:clj 1 :cljs 2) :ok 42})))
+
+  (testing "empty map after elimination"
+    (is (= {} {#?(:clj :a :cljs :b) 1})))
+
+  (testing "mino branch matches"
+    (is (= {:a 1} {#?(:mino :a :clj :b) 1}))))
+
+;; --- Unquote-splicing in vectors ---
+
+(deftest vector-unquote-splicing
+  (testing "basic splice"
+    (let [xs [2 3]]
+      (is (= [1 2 3 4] `[1 ~@xs 4]))))
+
+  (testing "splice from list"
+    (let [xs (list 1 2)]
+      (is (= [1 2] `[~@xs]))))
+
+  (testing "empty splice"
+    (let [xs []]
+      (is (= [] `[~@xs]))))
+
+  (testing "multiple splices"
+    (let [a [1 2] b [3 4]]
+      (is (= [1 2 3 4] `[~@a ~@b]))))
+
+  (testing "mix of unquote and splice"
+    (let [x 42 xs [1 2]]
+      (is (= [42 1 2] `[~x ~@xs]))))
+
+  (testing "nested vector splice"
+    (let [xs [2 3]]
+      (is (= [1 [2 3] 4] `[1 [~@xs] 4])))))
+
+;; --- defn- ---
+
+(defn- private-fn [x] (* x x))
+
+(deftest defn-private
+  (testing "defn- defines a working function"
+    (is (= 25 (private-fn 5)))
+    (is (= 0 (private-fn 0)))))
+
+;; --- defprotocol with docstring ---
+
+(defprotocol Describable
+  "A protocol for things that describe themselves."
+  (describe [this]))
+
+(extend-type :string
+  Describable
+  (describe [this] (str "string: " this)))
+
+(extend-type :int
+  Describable
+  (describe [this] (str "number: " this)))
+
+(deftest defprotocol-docstring
+  (testing "protocol with docstring works"
+    (is (= "string: hello" (describe "hello")))
+    (is (= "number: 42" (describe 42)))))
+
+;; --- Multi-arity defmacro ---
+
+(defmacro my-add
+  ([x] x)
+  ([x y] (list '+ x y))
+  ([x y & more] (list '+ x (apply list 'my-add y more))))
+
+(deftest multi-arity-defmacro
+  (testing "single arity"
+    (is (= 5 (my-add 5))))
+  (testing "two arities"
+    (is (= 7 (my-add 3 4))))
+  (testing "variadic arity"
+    (is (= 10 (my-add 1 2 3 4)))))
+
+(defmacro my-str-macro
+  "A multi-arity macro with docstring."
+  ([] "")
+  ([x] (list 'str x))
+  ([x & more] (list 'str x (apply list 'my-str-macro more))))
+
+(deftest multi-arity-defmacro-with-doc
+  (testing "zero arity"
+    (is (= "" (my-str-macro))))
+  (testing "one arg"
+    (is (= "hello" (my-str-macro "hello"))))
+  (testing "multiple args"
+    (is (= "abc" (my-str-macro "a" "b" "c")))))
