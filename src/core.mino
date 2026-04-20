@@ -1828,6 +1828,15 @@
 (def char-array  "Creates a vector from a size or collection." object-array)
 (def boolean-array "Creates a vector from a size or collection." object-array)
 
+;; --- Compatibility vars ---
+
+(def *clojure-version* {:major 1 :minor 11 :incremental 0 :qualifier nil})
+(defn clojure-version [] (str (:major *clojure-version*) "." (:minor *clojure-version*) "." (:incremental *clojure-version*)))
+
+(defmacro assert
+  ([x] (list 'when-not x (list 'throw "Assert failed")))
+  ([x msg] (list 'when-not x (list 'throw msg))))
+
 ;; --- JVM stubs ---
 
 (defmacro defrecord [& _]
