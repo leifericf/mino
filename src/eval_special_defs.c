@@ -223,7 +223,6 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     mino_val_t *params;
     mino_val_t *body;
     mino_val_t *mac;
-    mino_val_t *p;
     const char *doc     = NULL;
     size_t      doc_len = 0;
     char        buf[256];
@@ -242,6 +241,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
      *   (defmacro name "doc" [params] body)
      *   (defmacro name {:added "1.0"} [params] body)
      *   (defmacro name [params] body)
+     *   (defmacro name ([p1] b1) ([p2] b2))     -- multi-arity
      */
     {
         mino_val_t *rest = args->as.cons.cdr;
@@ -261,19 +261,52 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
         }
         params = rest->as.cons.car;
         body   = rest->as.cons.cdr;
-    }
-    if (!mino_is_cons(params) && !mino_is_nil(params)
-        && params->type != MINO_VECTOR) {
-        set_eval_diag(S, form, "syntax", "MSY001", "defmacro parameter list must be a list or vector");
-        return NULL;
-    }
-    if (mino_is_cons(params) || mino_is_nil(params)) {
-        for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
-            mino_val_t *pn = p->as.cons.car;
-            if (pn == NULL || pn->type != MINO_SYMBOL) {
-                set_eval_diag(S, form, "syntax", "MSY001", "defmacro parameter must be a symbol");
-                return NULL;
+
+        /* Detect multi-arity: params is a list whose car is a vector. */
+        if (mino_is_cons(params) && params->as.cons.car != NULL
+            && params->as.cons.car->type == MINO_VECTOR) {
+            /* Multi-arity: rest is (([p1] body1...) ([p2] body2...) ...).
+             * Build clause list as (params . body) pairs, matching eval_fn. */
+            mino_val_t *clauses = mino_nil(S);
+            mino_val_t *clause_tail = NULL;
+            mino_val_t *mr = rest;
+            while (mino_is_cons(mr)) {
+                mino_val_t *clause = mr->as.cons.car;
+                mino_val_t *cparams;
+                mino_val_t *cbody;
+                mino_val_t *cell;
+                if (!mino_is_cons(clause)) {
+                    set_eval_diag(S, form, "syntax", "MSY001",
+                                  "multi-arity defmacro clause must be a list");
+                    return NULL;
+                }
+                cparams = clause->as.cons.car;
+                cbody   = clause->as.cons.cdr;
+                if (cparams == NULL
+                    || (cparams->type != MINO_VECTOR
+                        && !mino_is_cons(cparams)
+                        && !mino_is_nil(cparams))) {
+                    set_eval_diag(S, form, "syntax", "MSY001",
+                                  "multi-arity defmacro clause must start with a parameter list");
+                    return NULL;
+                }
+                cell = mino_cons(S, mino_cons(S, cparams, cbody),
+                                 mino_nil(S));
+                if (clause_tail == NULL) {
+                    clauses = cell;
+                } else {
+                    clause_tail->as.cons.cdr = cell;
+                }
+                clause_tail = cell;
+                mr = mr->as.cons.cdr;
             }
+            params = NULL; /* sentinel for multi-arity */
+            body   = clauses;
+        } else if (!mino_is_cons(params) && !mino_is_nil(params)
+                   && params->type != MINO_VECTOR) {
+            set_eval_diag(S, form, "syntax", "MSY001",
+                          "defmacro parameter list must be a list or vector");
+            return NULL;
         }
     }
     mac = alloc_val(S, MINO_MACRO);
