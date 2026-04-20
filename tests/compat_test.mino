@@ -275,3 +275,15 @@
 
   (testing "import is a silent no-op"
     (is (nil? (import java.util.Date)))))
+
+;; --- &env in macros ---
+
+(defmacro env-nil? [] (list 'quote (nil? &env)))
+(defmacro env-contains? [sym] (list 'quote (and &env (contains? &env sym))))
+
+(deftest ampersand-env-in-macros
+  (testing "&env is nil in macro bodies"
+    (is (true? (env-nil?))))
+
+  (testing "contains? on nil &env returns falsy"
+    (is (not (env-contains? x)))))

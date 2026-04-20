@@ -248,6 +248,9 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         int         line      = 0;
         int         col       = 0;
         mino_val_t *result;
+        if (fn->type == MINO_MACRO) {
+            env_bind(S, local, "&env", mino_nil(S));
+        }
         if (S->eval_current_form != NULL
             && S->eval_current_form->type == MINO_CONS) {
             file = S->eval_current_form->as.cons.file;
