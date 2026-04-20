@@ -1127,8 +1127,12 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         ADVANCE_N(S, p, 2);
         {
             mino_val_t *discarded = read_form(S, p);
-            if (discarded == NULL && mino_last_error(S) != NULL)
+            (void)discarded;
+            if (mino_last_error(S) != NULL)
                 return NULL;
+            skip_ws(S, p);
+            if (**p == ')' || **p == ']' || **p == '}' || **p == '\0')
+                return NULL; /* let parent handle closing delimiter */
             return read_form(S, p);
         }
     }
@@ -1378,6 +1382,26 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             /* Single terminator/whitespace character as literal: \{ \; \, etc. */
             ch = start[0];
             ADVANCE(S, p);
+        } else if (tlen >= 2 && start[0] == 'o') {
+            /* Octal escape: \oNNN */
+            unsigned oval = 0;
+            size_t j;
+            for (j = 1; j < tlen; j++) {
+                if (start[j] < '0' || start[j] > '7') {
+                    set_reader_diag(S, MRE008,
+                                    "invalid octal character literal",
+                                    S->reader_line, S->reader_col);
+                    return NULL;
+                }
+                oval = (oval << 3) | (unsigned)(start[j] - '0');
+            }
+            if (oval > 0377) {
+                set_reader_diag(S, MRE008,
+                                "octal character literal out of range",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            ch = (char)oval;
         } else if (tlen >= 5 && start[0] == 'u') {
             /* Unicode escape: \uXXXX */
             unsigned cp = 0;
