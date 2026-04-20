@@ -77,18 +77,68 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
 {
     if (form != NULL && form->type == MINO_VECTOR) {
         size_t       nn  = form->as.vec.len;
-        mino_val_t **tmp;
         size_t       i;
+        mino_val_t  *out  = mino_nil(S);
+        mino_val_t  *tail = NULL;
+        size_t       count = 0;
         if (nn == 0) { return form; }
-        /* GC_T_VALARR: scratch buffer whose slots the collector traces as
-         * mino_val_t*, so partial fills survive allocation mid-loop. */
-        tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*tmp));
         for (i = 0; i < nn; i++) {
-            mino_val_t *e = quasiquote_expand(S, vec_nth(form, i), env);
-            if (e == NULL) { return NULL; }
-            tmp[i] = e;
+            mino_val_t *elem = vec_nth(form, i);
+            if (mino_is_cons(elem)
+                && sym_eq(elem->as.cons.car, "unquote-splicing")) {
+                mino_val_t *arg = elem->as.cons.cdr;
+                mino_val_t *spliced;
+                if (!mino_is_cons(arg)) {
+                    set_eval_diag(S, S->eval_current_form, "syntax",
+                        "MSY001", "unquote-splicing requires one argument");
+                    return NULL;
+                }
+                spliced = eval_value(S, arg->as.cons.car, env);
+                if (spliced == NULL) { return NULL; }
+                if (spliced->type == MINO_VECTOR) {
+                    size_t j;
+                    for (j = 0; j < spliced->as.vec.len; j++) {
+                        mino_val_t *cell = mino_cons(S,
+                            vec_nth(spliced, j), mino_nil(S));
+                        if (tail == NULL) { out = cell; }
+                        else { tail->as.cons.cdr = cell; }
+                        tail = cell;
+                        count++;
+                    }
+                } else {
+                    mino_val_t *sp = spliced;
+                    while (mino_is_cons(sp)) {
+                        mino_val_t *cell = mino_cons(S,
+                            sp->as.cons.car, mino_nil(S));
+                        if (tail == NULL) { out = cell; }
+                        else { tail->as.cons.cdr = cell; }
+                        tail = cell;
+                        count++;
+                        sp = sp->as.cons.cdr;
+                    }
+                }
+            } else {
+                mino_val_t *expanded = quasiquote_expand(S, elem, env);
+                mino_val_t *cell;
+                if (expanded == NULL) { return NULL; }
+                cell = mino_cons(S, expanded, mino_nil(S));
+                if (tail == NULL) { out = cell; }
+                else { tail->as.cons.cdr = cell; }
+                tail = cell;
+                count++;
+            }
         }
-        return mino_vector(S, tmp, nn);
+        {
+            mino_val_t **tmp = (mino_val_t **)gc_alloc_typed(S,
+                GC_T_VALARR, count * sizeof(*tmp));
+            mino_val_t  *p   = out;
+            size_t       idx = 0;
+            while (mino_is_cons(p)) {
+                tmp[idx++] = p->as.cons.car;
+                p = p->as.cons.cdr;
+            }
+            return mino_vector(S, tmp, count);
+        }
     }
     if (form != NULL && form->type == MINO_MAP) {
         size_t        nn = form->as.map.len;
