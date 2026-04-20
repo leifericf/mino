@@ -1613,29 +1613,36 @@
                         :matches (mapv first matches)})))))))))
 
 (defn- create-multimethod_ [dispatch-fn default-val]
-  (let [method-table (atom {})
-        prefer-table (atom {})
+  (let [method-table   (atom {})
+        prefer-table   (atom {})
+        dispatch-cache (atom {})
         mm (fn [& args]
              (let [dval    (apply dispatch-fn args)
-                   methods @method-table
-                   impl    (or (get methods dval)
-                               (find-best-method_ methods dval default-val
-                                                   @prefer-table
-                                                   @global-hierarchy_)
-                               (get methods default-val))]
-               (if impl
-                 (apply impl args)
-                 (throw (ex-info
-                          (str "No method in multimethod for dispatch value: "
-                               (pr-str dval))
-                          {:dispatch-val dval})))))]
-    (with-meta mm {:type         :multimethod
-                   :method-table method-table
-                   :prefer-table prefer-table
-                   :default      default-val})))
+                   cached  (get @dispatch-cache dval)]
+               (if cached
+                 (apply cached args)
+                 (let [methods @method-table
+                       impl    (or (get methods dval)
+                                   (find-best-method_ methods dval default-val
+                                                      @prefer-table
+                                                      @global-hierarchy_)
+                                   (get methods default-val))]
+                   (if impl
+                     (do (swap! dispatch-cache assoc dval impl)
+                         (apply impl args))
+                     (throw (ex-info
+                              (str "No method in multimethod for dispatch value: "
+                                   (pr-str dval))
+                              {:dispatch-val dval})))))))]
+    (with-meta mm {:type           :multimethod
+                   :method-table   method-table
+                   :prefer-table   prefer-table
+                   :dispatch-cache dispatch-cache
+                   :default        default-val})))
 
 (defn- register-method_ [mm dispatch-val f]
   (swap! (:method-table (meta mm)) assoc dispatch-val f)
+  (reset! (:dispatch-cache (meta mm)) {})
   mm)
 
 (defmacro defmulti "Defines a multimethod with the given dispatch function." [mm-name & options]
@@ -1653,10 +1660,12 @@
 
 (defn prefer-method "Prefers dispatch-val x over y in multimethod mm." [mm x y]
   (swap! (:prefer-table (meta mm)) update x (fn [s] (conj (or s #{}) y)))
+  (reset! (:dispatch-cache (meta mm)) {})
   mm)
 
 (defn remove-method "Removes the method for dispatch-val from multimethod mm." [mm dispatch-val]
   (swap! (:method-table (meta mm)) dissoc dispatch-val)
+  (reset! (:dispatch-cache (meta mm)) {})
   mm)
 
 (defn methods "Returns the method table of multimethod mm." [mm]
