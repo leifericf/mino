@@ -1408,7 +1408,8 @@
                           {:method mname :type t})))))))
 
 (defmacro defprotocol "Defines a protocol with the given method signatures." [proto-name & methods]
-  (let [pname (name proto-name)
+  (let [methods (remove string? methods)
+        pname (name proto-name)
         method-info (into [] (map (fn [m]
                            (let [mname (first m)
                                  params (second m)]
