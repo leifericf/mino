@@ -61,9 +61,10 @@ static int dotted_to_path(const char *name, size_t nlen,
 
 /* Process a single require spec from within an ns form.
  * spec is either a symbol (bare require) or a vector [mod.name :as alias ...].
- * Attempts to load the module via the resolver and stores aliases. */
-static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
-                                    mino_env_t *env)
+ * Attempts to load the module via the resolver and stores aliases.
+ * When use_mode is true, default to refer-all (:use semantics). */
+static void ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
+                                       mino_env_t *env, int use_mode)
 {
     char pathbuf[256];
     const char *modname;
@@ -71,7 +72,7 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
     const char *alias_name = NULL;
     size_t      alias_len  = 0;
     mino_val_t *refer_vec  = NULL;
-    int         refer_all  = 0;
+    int         refer_all  = use_mode; /* :use defaults to refer-all */
 
     if (spec->type == MINO_SYMBOL) {
         modname = spec->as.s.data;
@@ -82,7 +83,7 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
         if (first == NULL || first->type != MINO_SYMBOL) return;
         modname = first->as.s.data;
         modlen  = first->as.s.len;
-        /* Parse keyword args: :as, :refer */
+        /* Parse keyword args: :as, :refer, :only */
         for (i = 1; i + 1 < spec->as.vec.len; i += 2) {
             mino_val_t *k = vec_nth(spec, i);
             mino_val_t *v = vec_nth(spec, i + 1);
@@ -92,10 +93,24 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
             }
             if (kw_eq(k, "refer") && v->type == MINO_VECTOR) {
                 refer_vec = v;
+                refer_all = 0;
             }
             if (kw_eq(k, "refer") && v->type == MINO_KEYWORD
                 && kw_eq(v, "all")) {
                 refer_all = 1;
+            }
+            /* :only is the :use equivalent of :refer */
+            if (kw_eq(k, "only") && v->type == MINO_VECTOR) {
+                refer_vec = v;
+                refer_all = 0;
+            }
+            /* :only with a list form — build a vector from it */
+            if (kw_eq(k, "only") && mino_is_cons(v)) {
+                mino_val_t *tmp;
+                refer_vec = mino_vector(S, NULL, 0);
+                for (tmp = v; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+                    refer_vec = vec_conj1(S, refer_vec, tmp->as.cons.car);
+                refer_all = 0;
             }
         }
     } else {
@@ -172,6 +187,18 @@ static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
     }
 }
 
+static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
+                                    mino_env_t *env)
+{
+    ns_process_require_spec_ex(S, spec, env, 0);
+}
+
+static void ns_process_use_spec(mino_state_t *S, mino_val_t *spec,
+                                mino_env_t *env)
+{
+    ns_process_require_spec_ex(S, spec, env, 1);
+}
+
 mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                     mino_val_t *args, mino_env_t *env)
 {
@@ -206,6 +233,14 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                 mino_val_t *specs = clause->as.cons.cdr;
                 while (mino_is_cons(specs)) {
                     ns_process_require_spec(S, specs->as.cons.car, env);
+                    specs = specs->as.cons.cdr;
+                }
+            }
+            if (kw_eq(head, "use")) {
+                /* :use is like :require but with implicit :refer :all. */
+                mino_val_t *specs = clause->as.cons.cdr;
+                while (mino_is_cons(specs)) {
+                    ns_process_use_spec(S, specs->as.cons.car, env);
                     specs = specs->as.cons.cdr;
                 }
             }
