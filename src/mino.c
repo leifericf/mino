@@ -78,10 +78,31 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
     if (form != NULL && form->type == MINO_VECTOR) {
         size_t       nn  = form->as.vec.len;
         size_t       i;
+        int          has_splice = 0;
+        if (nn == 0) { return form; }
+        /* Fast path: no ~@ means fixed-size output. */
+        for (i = 0; i < nn; i++) {
+            mino_val_t *e = vec_nth(form, i);
+            if (mino_is_cons(e)
+                && sym_eq(e->as.cons.car, "unquote-splicing")) {
+                has_splice = 1; break;
+            }
+        }
+        if (!has_splice) {
+            mino_val_t **tmp = (mino_val_t **)gc_alloc_typed(S,
+                GC_T_VALARR, nn * sizeof(*tmp));
+            for (i = 0; i < nn; i++) {
+                mino_val_t *e = quasiquote_expand(S, vec_nth(form, i), env);
+                if (e == NULL) { return NULL; }
+                tmp[i] = e;
+            }
+            return mino_vector(S, tmp, nn);
+        }
+        /* Slow path: ~@ present, build cons list then convert. */
+        {
         mino_val_t  *out  = mino_nil(S);
         mino_val_t  *tail = NULL;
         size_t       count = 0;
-        if (nn == 0) { return form; }
         for (i = 0; i < nn; i++) {
             mino_val_t *elem = vec_nth(form, i);
             if (mino_is_cons(elem)
@@ -139,6 +160,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
             }
             return mino_vector(S, tmp, count);
         }
+        } /* end slow path */
     }
     if (form != NULL && form->type == MINO_MAP) {
         size_t        nn = form->as.map.len;
