@@ -1420,6 +1420,11 @@
 
 (defmacro defprotocol "Defines a protocol with the given method signatures." [proto-name & methods]
   (let [methods (remove string? methods)
+        methods (loop [ms methods result []]
+                  (if (or (nil? ms) (empty? ms)) result
+                    (if (keyword? (first ms))
+                      (recur (drop 2 ms) result)
+                      (recur (rest ms) (conj result (first ms))))))
         pname (name proto-name)
         method-info (into [] (map (fn [m]
                            (let [mname (first m)
@@ -1447,20 +1452,32 @@
         all-forms (concat atom-defs fn-defs (list proto-def))]
     (apply list 'do all-forms)))
 
-(defmacro extend-type "Extends a protocol with method implementations for the given type." [type-kw proto & methods]
-  (let [pname (name proto)
-        swaps (into [] (map (fn [m]
-             (let [mname (first m)
-                   params (second m)
-                   body (drop 2 m)
-                   dsym (symbol (str pname "--" (name mname)))]
-               (list 'swap! dsym 'assoc type-kw
-                     (apply list 'fn params body))))
-           methods))]
-    (apply list 'do swaps)))
+(defmacro extend-type "Extends a protocol with method implementations for the given type." [type-kw & specs]
+  (let [groups (loop [remaining specs result [] cur-proto nil cur-methods []]
+                 (if (empty? remaining)
+                   (if cur-proto (conj result [cur-proto cur-methods]) result)
+                   (let [item (first remaining)]
+                     (if (and (symbol? item) (not (list? item)))
+                       (recur (rest remaining)
+                              (if cur-proto (conj result [cur-proto cur-methods]) result)
+                              item [])
+                       (recur (rest remaining) result cur-proto
+                              (conj cur-methods item))))))
+        swaps (mapcat (fn [[proto methods]]
+                (let [pname (name proto)]
+                  (map (fn [m]
+                    (let [mname (first m)
+                          params (second m)
+                          body (drop 2 m)
+                          dsym (symbol (str pname "--" (name mname)))]
+                      (list 'swap! dsym 'assoc type-kw
+                            (apply list 'fn params body))))
+                   methods)))
+              groups)]
+    (apply list 'do (vec swaps))))
 
 (defn partition-protocol-specs_ [specs]
-  (loop [remaining specs groups [] current nil]
+  (loop [remaining (remove nil? specs) groups [] current nil]
     (if (empty? remaining)
       (if current (conj groups current) groups)
       (let [item (first remaining)]
