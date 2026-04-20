@@ -205,3 +205,27 @@
 
   (testing "regex literal with quantifiers"
     (is (= "hell" (re-find #"hel+" "hello")))))
+
+;; --- letfn ---
+
+(deftest letfn-basic
+  (testing "basic local function binding"
+    (is (= 10 (letfn [(double [x] (* 2 x))]
+                (double 5)))))
+
+  (testing "multiple bindings"
+    (is (= 11 (letfn [(double [x] (* 2 x))
+                       (add1 [x] (+ x 1))]
+                (add1 (double 5))))))
+
+  (testing "self-recursive function"
+    (is (= 120 (letfn [(factorial [n]
+                          (if (<= n 1) 1 (* n (factorial (dec n)))))]
+                 (factorial 5)))))
+
+  (testing "multi-arity local function"
+    (is (= 6 (letfn [(add
+                        ([x] x)
+                        ([x y] (+ x y))
+                        ([x y z] (+ x y z)))]
+               (add 1 2 3))))))
