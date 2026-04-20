@@ -488,6 +488,78 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             ADVANCE(S, p);
             break;
         }
+        if (peek_reader_cond_splice(S, p)) {
+            mino_val_t *found = NULL;
+            skip_ws(S, p);
+            if (**p != '(') {
+                set_reader_diag(S, MRE007,
+                                "#?@ must be followed by a list",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            ADVANCE(S, p);
+            read_cond_body(S, p, &found);
+            if (mino_last_error(S) != NULL) return NULL;
+            if (found != NULL) {
+                /* Splice alternating key-value pairs. */
+                if (found->type == MINO_VECTOR) {
+                    size_t i;
+                    if (found->as.vec.len % 2 != 0) {
+                        set_reader_diag(S, MRE008,
+                            "#?@ splice into map requires even number of forms",
+                            S->reader_line, S->reader_col);
+                        gc_unpin(1);
+                        return NULL;
+                    }
+                    for (i = 0; i < found->as.vec.len; i += 2) {
+                        if (len == cap) {
+                            size_t new_cap = cap == 0 ? 8 : cap * 2;
+                            mino_val_t **nk = (mino_val_t **)gc_alloc_typed(S,
+                                GC_T_VALARR, new_cap * sizeof(*nk));
+                            mino_val_t **nv = (mino_val_t **)gc_alloc_typed(S,
+                                GC_T_VALARR, new_cap * sizeof(*nv));
+                            if (kbuf != NULL && len > 0) {
+                                memcpy(nk, kbuf, len * sizeof(*nk));
+                                memcpy(nv, vbuf, len * sizeof(*nv));
+                            }
+                            kbuf = nk; vbuf = nv; cap = new_cap;
+                        }
+                        kbuf[len] = vec_nth(found, i);
+                        vbuf[len] = vec_nth(found, i + 1);
+                        len++;
+                    }
+                } else {
+                    mino_val_t *cur = found;
+                    while (mino_is_cons(cur) && mino_is_cons(cur->as.cons.cdr)) {
+                        if (len == cap) {
+                            size_t new_cap = cap == 0 ? 8 : cap * 2;
+                            mino_val_t **nk = (mino_val_t **)gc_alloc_typed(S,
+                                GC_T_VALARR, new_cap * sizeof(*nk));
+                            mino_val_t **nv = (mino_val_t **)gc_alloc_typed(S,
+                                GC_T_VALARR, new_cap * sizeof(*nv));
+                            if (kbuf != NULL && len > 0) {
+                                memcpy(nk, kbuf, len * sizeof(*nk));
+                                memcpy(nv, vbuf, len * sizeof(*nv));
+                            }
+                            kbuf = nk; vbuf = nv; cap = new_cap;
+                        }
+                        kbuf[len] = cur->as.cons.car;
+                        vbuf[len] = cur->as.cons.cdr->as.cons.car;
+                        len++;
+                        cur = cur->as.cons.cdr->as.cons.cdr;
+                    }
+                    if (mino_is_cons(cur)) {
+                        set_reader_diag(S, MRE008,
+                            "#?@ splice into map requires even number of forms",
+                            S->reader_line, S->reader_col);
+                        gc_unpin(1);
+                        return NULL;
+                    }
+                }
+                gc_unpin(1);
+            }
+            continue;
+        }
         key = read_form(S, p);
         if (key == NULL) {
             if (mino_last_error(S) != NULL) return NULL;

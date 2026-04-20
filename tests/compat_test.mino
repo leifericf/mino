@@ -276,6 +276,21 @@
   (testing "import is a silent no-op"
     (is (nil? (import java.util.Date)))))
 
+;; --- #?@ splice in maps ---
+
+(deftest reader-cond-splice-in-map
+  (testing "unmatched splice is silently skipped"
+    (is (= {:a 1} {:a 1 #?@(:clj [:b 2])})))
+
+  (testing "matched :mino splice adds pairs"
+    (is (= {:a 1 :b 2 :c 3} {:a 1 #?@(:mino [:b 2 :c 3])})))
+
+  (testing "matched :default splice"
+    (is (= {:x 10 :y 20} {:x 10 #?@(:default [:y 20])})))
+
+  (testing "multiple splices"
+    (is (= {:a 1 :b 2} {#?@(:mino [:a 1]) #?@(:mino [:b 2])}))))
+
 ;; --- &env in macros ---
 
 (defmacro env-nil? [] (list 'quote (nil? &env)))
