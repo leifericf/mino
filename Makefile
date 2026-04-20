@@ -15,6 +15,7 @@ LIB_SRCS := src/mino.c src/diag.c src/eval_special.c \
             src/prim_sequences.c src/prim_string.c src/prim_io.c \
             src/prim_reflection.c src/prim_meta.c src/prim_regex.c \
             src/prim_stateful.c src/prim_module.c \
+            src/prim_fs.c \
             src/prim_host.c src/host_interop.c \
             src/clone.c src/re.c \
             src/async_buffer.c src/async_channel.c \
@@ -55,6 +56,7 @@ src/prim_meta.o: src/prim_meta.c src/prim_internal.h src/mino_internal.h
 src/prim_regex.o: src/prim_regex.c src/prim_internal.h src/mino_internal.h src/re.h
 src/prim_stateful.o: src/prim_stateful.c src/prim_internal.h src/mino_internal.h
 src/prim_module.o: src/prim_module.c src/prim_internal.h src/mino_internal.h
+src/prim_fs.o: src/prim_fs.c src/prim_internal.h src/mino_internal.h
 src/prim_host.o: src/prim_host.c src/prim_internal.h src/mino_internal.h
 src/host_interop.o: src/host_interop.c src/mino_internal.h
 src/async_buffer.o: src/async_buffer.c src/async_buffer.h src/mino_internal.h

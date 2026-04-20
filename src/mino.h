@@ -388,6 +388,14 @@ void        mino_install_core(mino_state_t *S, mino_env_t *env);
 void        mino_install_io(mino_state_t *S, mino_env_t *env);
 
 /*
+ * Install filesystem primitives: file-exists?, directory?, mkdir-p, rm-rf.
+ *
+ * Separate from I/O because these grant directory creation and deletion
+ * capabilities.  The host opts in by calling this function.
+ */
+void        mino_install_fs(mino_state_t *S, mino_env_t *env);
+
+/*
  * Evaluate one form. Returns NULL on error and writes a message via
  * mino_last_error(). Returns mino_nil() for an explicit nil result.
  *

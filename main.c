@@ -117,6 +117,7 @@ int main(int argc, char **argv)
 
     mino_install_core(S, env);
     mino_install_io(S, env);
+    mino_install_fs(S, env);
     mino_set_resolver(S, cwd_resolve, NULL);
 
     /* File mode: evaluate a script and exit. */
