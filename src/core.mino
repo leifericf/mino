@@ -115,6 +115,10 @@
 (defmacro defn- "Same as defn, yielding a non-public def." [name & body]
   (apply list 'defn (vary-meta name assoc :private true) body))
 
+(defmacro defonce "Defines name only if it has no root binding." [name expr]
+  `(when-not (resolve '~name)
+     (def ~name ~expr)))
+
 ;; --- Lazy sequence operations ---
 
 (def map1_ (fn map1_ [f coll]

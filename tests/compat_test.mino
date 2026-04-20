@@ -229,3 +229,15 @@
                         ([x y] (+ x y))
                         ([x y z] (+ x y z)))]
                (add 1 2 3))))))
+
+;; --- defonce ---
+
+(defonce compat-defonce-val 42)
+(defonce compat-defonce-val 99)
+
+(deftest defonce-basic
+  (testing "first defonce binds the value"
+    (is (= 42 compat-defonce-val)))
+
+  (testing "second defonce does not overwrite"
+    (is (= 42 compat-defonce-val))))
