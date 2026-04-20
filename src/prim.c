@@ -469,6 +469,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns the string with leading and trailing whitespace removed.");
     DEF_PRIM(env, "char-at",  prim_char_at,
              "Returns the character at the given index as a string.");
+    DEF_PRIM(env, "random-uuid", prim_random_uuid,
+             "Returns a random UUID v4 string.");
     /* sequences */
     DEF_PRIM(env, "seq",       prim_seq,
              "Returns a seq on the collection, or nil if empty.");

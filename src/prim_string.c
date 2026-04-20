@@ -688,3 +688,34 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return result;
     }
 }
+
+/* (random-uuid) — generate a UUID v4 string. */
+mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
+                             mino_env_t *env)
+{
+    static int seeded = 0;
+    unsigned char bytes[16];
+    char buf[37];
+    int i;
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "random-uuid takes no arguments");
+    }
+    if (!seeded) {
+        srand((unsigned)time(NULL));
+        seeded = 1;
+    }
+    for (i = 0; i < 16; i++) {
+        bytes[i] = (unsigned char)(rand() & 0xFF);
+    }
+    bytes[6] = (unsigned char)((bytes[6] & 0x0F) | 0x40); /* version 4 */
+    bytes[8] = (unsigned char)((bytes[8] & 0x3F) | 0x80); /* variant 1 */
+    sprintf(buf,
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        bytes[0], bytes[1], bytes[2],  bytes[3],
+        bytes[4], bytes[5], bytes[6],  bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11],
+        bytes[12], bytes[13], bytes[14], bytes[15]);
+    return mino_string_n(S, buf, 36);
+}

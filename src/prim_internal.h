@@ -161,6 +161,7 @@ mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_io.c */
 mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env);

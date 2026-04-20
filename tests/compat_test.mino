@@ -247,3 +247,15 @@
 (deftest set-bang-noop
   (testing "set! is a no-op that returns nil"
     (is (nil? (set! *warn-on-reflection* true)))))
+
+;; --- random-uuid ---
+
+(deftest random-uuid-basic
+  (testing "returns a 36-character string"
+    (is (= 36 (count (random-uuid)))))
+
+  (testing "version 4 nibble"
+    (is (= "4" (subs (random-uuid) 14 15))))
+
+  (testing "unique on each call"
+    (is (not= (random-uuid) (random-uuid)))))
