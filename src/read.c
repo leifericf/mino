@@ -1104,6 +1104,22 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
                         S->reader_line, S->reader_col);
         return NULL;
     }
+    /* Regex literal: #"pattern" — wrap as (re-pattern "pattern"). */
+    if (**p == '#' && *(*p + 1) == '"') {
+        int         rx_line = S->reader_line;
+        int         rx_col  = S->reader_col;
+        mino_val_t *str;
+        mino_val_t *outer;
+        ADVANCE(S, p); /* skip '#', now *p points at '"' */
+        str = read_string_form(S, p);
+        if (str == NULL) return NULL;
+        outer = mino_cons(S, mino_symbol(S, "re-pattern"),
+                          mino_cons(S, str, mino_nil(S)));
+        outer->as.cons.file   = S->reader_file;
+        outer->as.cons.line   = rx_line;
+        outer->as.cons.column = rx_col;
+        return outer;
+    }
     /* Tagged literals: #tag form — read and wrap as (tagged-literal tag form).
      * Handles unknown tags like #js, #inst, #uuid gracefully. */
     if (**p == '#' && isalpha((unsigned char)*(*p + 1))) {

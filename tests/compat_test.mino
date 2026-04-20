@@ -187,3 +187,21 @@
 (deftest multimethod-with-docstring
   (testing "defmulti with docstring"
     (is (= "text: hello" (process-mm {:type :text :content "hello"})))))
+
+;; --- Regex literals ---
+
+(deftest regex-literal-reader
+  (testing "basic regex literal produces a string"
+    (is (= "hello" #"hello")))
+
+  (testing "regex literal works with re-find"
+    (is (= "123" (re-find #"[0-9]+" "abc123def"))))
+
+  (testing "regex literal in a vector"
+    (is (= ["a" "b"] [#"a" #"b"])))
+
+  (testing "regex literal in a map"
+    (is (= {:pat "foo"} {:pat #"foo"})))
+
+  (testing "regex literal with quantifiers"
+    (is (= "hell" (re-find #"hel+" "hello")))))
