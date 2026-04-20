@@ -527,4 +527,8 @@ void mino_install_io(mino_state_t *S, mino_env_t *env)
              "Exits the process with the given status code.");
     DEF_PRIM(env, "time-ms",  prim_time_ms,
              "Returns the current time in milliseconds.");
+    DEF_PRIM(env, "file-seq", prim_file_seq,
+             "Returns a vector of all file paths under a directory, recursively.");
+    DEF_PRIM(env, "getenv",   prim_getenv,
+             "Returns the value of an environment variable, or nil.");
 }
