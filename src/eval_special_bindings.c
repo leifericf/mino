@@ -16,12 +16,14 @@ int kw_eq(const mino_val_t *v, const char *s)
     return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
 }
 
-/* Helper: bind a single symbol name to a value. */
+/* Helper: bind a single symbol name to a value.
+ * Underscore (_) is a throwaway binding — the value is discarded. */
 static int bind_sym(mino_state_t *S, mino_env_t *env, mino_val_t *sym,
                     mino_val_t *val)
 {
     char   buf[256];
     size_t n = sym->as.s.len;
+    if (n == 1 && sym->as.s.data[0] == '_') return 1; /* discard */
     if (n >= sizeof(buf)) {
         set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "parameter name too long");
         return 0;
