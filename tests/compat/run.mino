@@ -69,12 +69,69 @@
       (ends-with? path ".cljc")
       (ends-with? path ".cljs")))
 
+;; Save core functions that loaded files might redefine.
+;; We restore them after each file to prevent namespace pollution.
+(def saved-filter filter)
+(def saved-map map)
+(def saved-reduce reduce)
+(def saved-concat concat)
+(def saved-sort sort)
+(def saved-get get)
+(def saved-assoc assoc)
+(def saved-merge merge)
+(def saved-apply apply)
+(def saved-str str)
+(def saved-count count)
+(def saved-first first)
+(def saved-rest rest)
+(def saved-cons cons)
+(def saved-seq seq)
+(def saved-conj conj)
+(def saved-into into)
+(def saved-swap! swap!)
+(def saved-deref deref)
+(def saved-println println)
+(def saved-pr-str pr-str)
+(def saved-frequencies frequencies)
+(def saved-sort-by sort-by)
+(def saved-take take)
+(def saved-subs subs)
+
+(defn restore-core-fns! []
+  (def filter saved-filter)
+  (def map saved-map)
+  (def reduce saved-reduce)
+  (def concat saved-concat)
+  (def sort saved-sort)
+  (def get saved-get)
+  (def assoc saved-assoc)
+  (def merge saved-merge)
+  (def apply saved-apply)
+  (def str saved-str)
+  (def count saved-count)
+  (def first saved-first)
+  (def rest saved-rest)
+  (def cons saved-cons)
+  (def seq saved-seq)
+  (def conj saved-conj)
+  (def into saved-into)
+  (def swap! saved-swap!)
+  (def deref saved-deref)
+  (def println saved-println)
+  (def pr-str saved-pr-str)
+  (def frequencies saved-frequencies)
+  (def sort-by saved-sort-by)
+  (def take saved-take)
+  (def subs saved-subs))
+
 (defn try-load-file [path]
   (try
     (let [code (slurp path)]
       (eval (read-string (str "(do " shim-code "\n" code "\n)")))
+      (restore-core-fns!)
       :pass)
     (catch e
+      (restore-core-fns!)
       (cond
         (string? e) e
         (map? e) (or (:mino/message e) (str e))
@@ -87,12 +144,17 @@
       (println (str "  [skip] " repo-name " (not cloned — run: git clone <url> " cache-dir "/" repo-name ")")))
     (let [source-files (sort (filter source-file? files))
           results (mapv (fn [f]
-                          (let [relpath (subs f (+ (count src-dir) 1))
-                                _ (chdir src-dir)
-                                result (try-load-file f)]
-                            {:file relpath
-                             :status (if (= result :pass) :pass :fail)
-                             :error (when (not= result :pass) result)}))
+                          (try
+                            (let [relpath (subs f (+ (count src-dir) 1))
+                                  _ (chdir src-dir)
+                                  result (try-load-file f)]
+                              {:file relpath
+                               :status (if (= result :pass) :pass :fail)
+                               :error (when (not= result :pass) result)})
+                            (catch e
+                              {:file (subs f (+ (count src-dir) 1))
+                               :status :fail
+                               :error (str "unhandled exception: " (if (string? e) e (str e)))})))
                         source-files)]
       (chdir original-dir)
       results)))
@@ -111,17 +173,21 @@
 
     (doseq [[repo-name config] (sort repos-to-run)]
       (println (str "\n=== " repo-name " ==="))
-      (let [results (test-repo repo-name config original-dir)]
-        (doseq [r results]
-          (swap! all-results conj r)
-          (if (= (:status r) :pass)
-            (do (swap! pass-count inc)
-                (when verbose?
-                  (println (str "  PASS " (:file r)))))
-            (do (swap! fail-count inc)
-                (println (str "  FAIL " (:file r)))
-                (when (:error r)
-                  (println (str "       " (:error r)))))))))
+      (try
+        (let [results (test-repo repo-name config original-dir)]
+          (doseq [r results]
+            (swap! all-results conj r)
+            (if (= (:status r) :pass)
+              (do (swap! pass-count inc)
+                  (when verbose?
+                    (println (str "  PASS " (:file r)))))
+              (do (swap! fail-count inc)
+                  (println (str "  FAIL " (:file r)))
+                  (when (:error r)
+                    (println (str "       " (:error r))))))))
+        (catch e
+          (chdir original-dir)
+          (println (str "  [crash] " repo-name ": " (if (string? e) e (str e)))))))
 
     ;; Summary
     (let [total (+ @pass-count @fail-count)
