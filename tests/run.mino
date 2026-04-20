@@ -69,5 +69,7 @@
 (require "tests/async_blocking_test")
 (require "tests/async_mult_pub_test")
 (require "tests/async_conformance_test")
+(require "tests/fs_test")
+(require "tests/proc_test")
 
 (run-tests)
