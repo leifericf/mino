@@ -268,11 +268,21 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     if (S->try_depth < MAX_TRY_DEPTH) {
         S->try_stack[S->try_depth].exception = NULL;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
+            mino_val_t *ex = S->try_stack[saved_try].exception;
             S->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;
             if (mino_last_error(S) == NULL) {
-                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
+                /* Preserve the original exception message if available.
+                 * Write directly to error_buf to avoid re-throwing via
+                 * set_eval_diag when inside an outer try frame. */
+                if (ex != NULL && ex->type == MINO_STRING
+                    && ex->as.s.len > 0) {
+                    snprintf(S->error_buf, sizeof(S->error_buf), "%.*s",
+                             (int)ex->as.s.len, ex->as.s.data);
+                } else {
+                    snprintf(S->error_buf, sizeof(S->error_buf), "unhandled exception");
+                }
             }
             S->call_depth = 0;
             return NULL;

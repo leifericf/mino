@@ -436,6 +436,10 @@ mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_INT) return v;
     if (v != NULL && v->type == MINO_FLOAT) return mino_int(S, (long long)v->as.f);
+    /* (int \a) -> 97: single-char string to char code */
+    if (v != NULL && v->type == MINO_STRING && v->as.s.len == 1) {
+        return mino_int(S, (long long)(unsigned char)v->as.s.data[0]);
+    }
     return prim_throw_classified(S, "eval/type", "MTY001", "int: expected a number");
 }
 
