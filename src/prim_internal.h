@@ -218,6 +218,11 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
+/* prim_proc.c */
+mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+void mino_install_proc(mino_state_t *S, mino_env_t *env);
+
 /* prim_fs.c */
 mino_val_t *prim_file_exists_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_directory_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);

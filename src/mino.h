@@ -396,6 +396,15 @@ void        mino_install_io(mino_state_t *S, mino_env_t *env);
 void        mino_install_fs(mino_state_t *S, mino_env_t *env);
 
 /*
+ * Install process execution primitives: sh, sh!.
+ *
+ * These allow spawning external processes via popen.  Separate from
+ * core/io because process execution is a powerful capability that
+ * sandboxed environments may wish to withhold.
+ */
+void        mino_install_proc(mino_state_t *S, mino_env_t *env);
+
+/*
  * Evaluate one form. Returns NULL on error and writes a message via
  * mino_last_error(). Returns mino_nil() for an explicit nil result.
  *
