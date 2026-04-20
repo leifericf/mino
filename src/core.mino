@@ -1578,6 +1578,93 @@
             (= (count child) (count parent))
             (every? identity (map (fn [c p] (isa? h c p)) child parent))))))
 
+;; ---------------------------------------------------------------------------
+;; Multimethods: value-dispatched polymorphism.
+;; ---------------------------------------------------------------------------
+
+(defn- find-best-method_ [methods dval default-val prefer-table hierarchy]
+  (let [exact (get methods dval)]
+    (if exact
+      exact
+      (let [matches (reduce-kv
+                      (fn [acc k v]
+                        (if (and (not= k default-val) (isa? hierarchy dval k))
+                          (conj acc [k v])
+                          acc))
+                      [] methods)]
+        (cond
+          (= 0 (count matches)) nil
+          (= 1 (count matches)) (second (first matches))
+          :else
+          (let [preferred (filter
+                            (fn [[k _]]
+                              (every?
+                                (fn [[k2 _]]
+                                  (or (= k k2)
+                                      (contains? (get prefer-table k #{}) k2)))
+                                matches))
+                            matches)]
+            (if (= 1 (count preferred))
+              (second (first preferred))
+              (throw (ex-info
+                       (str "Multiple methods match dispatch value: " dval
+                            ", none preferred")
+                       {:dispatch-val dval
+                        :matches (mapv first matches)})))))))))
+
+(defn- create-multimethod_ [dispatch-fn default-val]
+  (let [method-table (atom {})
+        prefer-table (atom {})
+        mm (fn [& args]
+             (let [dval    (apply dispatch-fn args)
+                   methods @method-table
+                   impl    (or (get methods dval)
+                               (find-best-method_ methods dval default-val
+                                                   @prefer-table
+                                                   @global-hierarchy_)
+                               (get methods default-val))]
+               (if impl
+                 (apply impl args)
+                 (throw (ex-info
+                          (str "No method in multimethod for dispatch value: "
+                               (pr-str dval))
+                          {:dispatch-val dval})))))]
+    (with-meta mm {:type         :multimethod
+                   :method-table method-table
+                   :prefer-table prefer-table
+                   :default      default-val})))
+
+(defn- register-method_ [mm dispatch-val f]
+  (swap! (:method-table (meta mm)) assoc dispatch-val f)
+  mm)
+
+(defmacro defmulti "Defines a multimethod with the given dispatch function." [mm-name & options]
+  (let [options  (if (string? (first options)) (rest options) options)
+        options  (if (map? (first options)) (rest options) options)
+        dispatch-fn-form (first options)
+        kw-opts  (apply hash-map (rest options))
+        default-val (get kw-opts :default :default)]
+    (list 'def mm-name
+          (list 'create-multimethod_ dispatch-fn-form default-val))))
+
+(defmacro defmethod "Defines a method for a multimethod." [mm-name dispatch-val & fn-tail]
+  (list 'register-method_ mm-name dispatch-val
+        (apply list 'fn fn-tail)))
+
+(defn prefer-method "Prefers dispatch-val x over y in multimethod mm." [mm x y]
+  (swap! (:prefer-table (meta mm)) update x (fn [s] (conj (or s #{}) y)))
+  mm)
+
+(defn remove-method "Removes the method for dispatch-val from multimethod mm." [mm dispatch-val]
+  (swap! (:method-table (meta mm)) dissoc dispatch-val)
+  mm)
+
+(defn methods "Returns the method table of multimethod mm." [mm]
+  @(:method-table (meta mm)))
+
+(defn get-method "Returns the method for dispatch-val, or nil." [mm dispatch-val]
+  (get @(:method-table (meta mm)) dispatch-val))
+
 (defmacro with-open "Binds resources, evaluates body, then closes each resource." [bindings & body]
   (if (empty? bindings)
     `(do ~@body)
