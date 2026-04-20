@@ -44,5 +44,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
 /* eval_special_fn.c */
 mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
                     mino_val_t *args, mino_env_t *env);
+mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
+                                      mino_val_t *arity_list,
+                                      const char *diag_code,
+                                      const char *label);
 
 #endif /* EVAL_SPECIAL_INTERNAL_H */

@@ -265,41 +265,9 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
         /* Detect multi-arity: params is a list whose car is a vector. */
         if (mino_is_cons(params) && params->as.cons.car != NULL
             && params->as.cons.car->type == MINO_VECTOR) {
-            /* Multi-arity: rest is (([p1] body1...) ([p2] body2...) ...).
-             * Build clause list as (params . body) pairs, matching eval_fn. */
-            mino_val_t *clauses = mino_nil(S);
-            mino_val_t *clause_tail = NULL;
-            mino_val_t *mr = rest;
-            while (mino_is_cons(mr)) {
-                mino_val_t *clause = mr->as.cons.car;
-                mino_val_t *cparams;
-                mino_val_t *cbody;
-                mino_val_t *cell;
-                if (!mino_is_cons(clause)) {
-                    set_eval_diag(S, form, "syntax", "MSY001",
-                                  "multi-arity defmacro clause must be a list");
-                    return NULL;
-                }
-                cparams = clause->as.cons.car;
-                cbody   = clause->as.cons.cdr;
-                if (cparams == NULL
-                    || (cparams->type != MINO_VECTOR
-                        && !mino_is_cons(cparams)
-                        && !mino_is_nil(cparams))) {
-                    set_eval_diag(S, form, "syntax", "MSY001",
-                                  "multi-arity defmacro clause must start with a parameter list");
-                    return NULL;
-                }
-                cell = mino_cons(S, mino_cons(S, cparams, cbody),
-                                 mino_nil(S));
-                if (clause_tail == NULL) {
-                    clauses = cell;
-                } else {
-                    clause_tail->as.cons.cdr = cell;
-                }
-                clause_tail = cell;
-                mr = mr->as.cons.cdr;
-            }
+            mino_val_t *clauses = build_multi_arity_clauses(
+                S, form, rest, "MSY001", "defmacro");
+            if (clauses == NULL) { return NULL; }
             params = NULL; /* sentinel for multi-arity */
             body   = clauses;
         } else if (!mino_is_cons(params) && !mino_is_nil(params)

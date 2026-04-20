@@ -6,6 +6,53 @@
 
 #include "eval_special_internal.h"
 
+/* Build the clause list for a multi-arity fn or defmacro.
+ * `arity_list` is the cons list of arity clauses: (([p] b...) ([p q] b...) ...).
+ * Returns the clause list on success, NULL on error. */
+mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
+                                      mino_val_t *arity_list,
+                                      const char *diag_code,
+                                      const char *label)
+{
+    mino_val_t *clauses     = mino_nil(S);
+    mino_val_t *clause_tail = NULL;
+    mino_val_t *rest        = arity_list;
+    while (mino_is_cons(rest)) {
+        mino_val_t *clause = rest->as.cons.car;
+        mino_val_t *cparams;
+        mino_val_t *cbody;
+        mino_val_t *cell;
+        char        msg[128];
+        if (!mino_is_cons(clause)) {
+            snprintf(msg, sizeof(msg),
+                     "multi-arity %s clause must be a list", label);
+            set_eval_diag(S, form, "syntax", diag_code, msg);
+            return NULL;
+        }
+        cparams = clause->as.cons.car;
+        cbody   = clause->as.cons.cdr;
+        if (cparams == NULL
+            || (cparams->type != MINO_VECTOR
+                && !mino_is_cons(cparams)
+                && !mino_is_nil(cparams))) {
+            snprintf(msg, sizeof(msg),
+                     "multi-arity %s clause must start with a parameter list",
+                     label);
+            set_eval_diag(S, form, "syntax", diag_code, msg);
+            return NULL;
+        }
+        cell = mino_cons(S, mino_cons(S, cparams, cbody), mino_nil(S));
+        if (clause_tail == NULL) {
+            clauses = cell;
+        } else {
+            clause_tail->as.cons.cdr = cell;
+        }
+        clause_tail = cell;
+        rest = rest->as.cons.cdr;
+    }
+    return clauses;
+}
+
 mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
                     mino_val_t *args, mino_env_t *env)
 {
@@ -49,39 +96,9 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
         }
     }
     if (multi_arity) {
-        /* Multi-arity: args is (([p1] body1...) ([p2] body2...) ...).
-         * Store as: params = NULL (sentinel), body = list of
-         * (params-vec . body-forms) clauses. */
-        mino_val_t *clauses = mino_nil(S);
-        mino_val_t *clause_tail = NULL;
-        mino_val_t *rest = args;
-        while (mino_is_cons(rest)) {
-            mino_val_t *clause = rest->as.cons.car;
-            mino_val_t *cparams;
-            mino_val_t *cbody;
-            mino_val_t *cell;
-            if (!mino_is_cons(clause)) {
-                set_eval_diag(S, form, "syntax", "MSY002", "multi-arity clause must be a list");
-                return NULL;
-            }
-            cparams = clause->as.cons.car;
-            cbody   = clause->as.cons.cdr;
-            if (cparams == NULL
-                || (cparams->type != MINO_VECTOR
-                    && !mino_is_cons(cparams)
-                    && !mino_is_nil(cparams))) {
-                set_eval_diag(S, form, "syntax", "MSY002", "multi-arity clause must start with a parameter list");
-                return NULL;
-            }
-            cell = mino_cons(S, mino_cons(S, cparams, cbody), mino_nil(S));
-            if (clause_tail == NULL) {
-                clauses = cell;
-            } else {
-                clause_tail->as.cons.cdr = cell;
-            }
-            clause_tail = cell;
-            rest = rest->as.cons.cdr;
-        }
+        mino_val_t *clauses = build_multi_arity_clauses(
+            S, form, args, "MSY002", "fn");
+        if (clauses == NULL) { return NULL; }
         params = NULL;
         body   = clauses;
     } else {
