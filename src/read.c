@@ -1287,6 +1287,51 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
             ch = '\f';
         } else if (tlen == 1) {
             ch = start[0];
+        } else if (tlen == 0 && start[0] != '\0' && !is_ws(start[0])) {
+            /* Single terminator character used as literal: \{ \; \^ etc. */
+            ch = start[0];
+            ADVANCE(S, p);
+        } else if (tlen >= 5 && start[0] == 'u') {
+            /* Unicode escape: \uXXXX */
+            unsigned cp = 0;
+            size_t j;
+            if (tlen != 5) {
+                set_reader_diag(S, MRE008, "invalid unicode character literal",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            for (j = 1; j < 5; j++) {
+                unsigned d;
+                char c = start[j];
+                if (c >= '0' && c <= '9')      d = (unsigned)(c - '0');
+                else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a' + 10);
+                else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A' + 10);
+                else {
+                    set_reader_diag(S, MRE008,
+                                    "invalid unicode character literal",
+                                    S->reader_line, S->reader_col);
+                    return NULL;
+                }
+                cp = (cp << 4) | d;
+            }
+            {
+                char buf[4];
+                size_t nbytes;
+                if (cp <= 0x7F) {
+                    buf[0] = (char)cp;
+                    nbytes = 1;
+                } else if (cp <= 0x7FF) {
+                    buf[0] = (char)(0xC0 | (cp >> 6));
+                    buf[1] = (char)(0x80 | (cp & 0x3F));
+                    nbytes = 2;
+                } else {
+                    buf[0] = (char)(0xE0 | (cp >> 12));
+                    buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    buf[2] = (char)(0x80 | (cp & 0x3F));
+                    nbytes = 3;
+                }
+                return mino_string_n(S, buf, nbytes);
+            }
         } else {
             set_reader_diag(S, MRE008, "unknown character literal",
                             S->reader_line, S->reader_col);
