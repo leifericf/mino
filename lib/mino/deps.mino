@@ -69,14 +69,25 @@
       (fetch-dep dep-name spec)))
   (println "Dependencies up to date."))
 
+(defn- dep-source-paths
+  "Return the source directories for a single dependency.
+   Git deps default to [\"src\"] if :deps/root is not specified."
+  [dep-name spec]
+  (cond
+    (:path spec)
+    [(:path spec)]
+
+    (:git spec)
+    (let [base (str deps-dir "/" (name dep-name))
+          roots (or (:deps/root spec) ["src"])]
+      (mapv #(str base "/" %) roots))))
+
 (defn resolve-paths
   "Return a vector of all source directories: :paths + dep directories."
   [manifest]
   (let [paths (or (:paths manifest) ["src" "lib"])
         dep-dirs (when-let [deps (:deps manifest)]
-                   (mapv (fn [[dep-name spec]]
-                           (cond
-                             (:path spec) (:path spec)
-                             (:git spec)  (str deps-dir "/" (name dep-name))))
-                         deps))]
+                   (into [] (mapcat (fn [[dep-name spec]]
+                                      (dep-source-paths dep-name spec))
+                                    deps)))]
     (into paths dep-dirs)))

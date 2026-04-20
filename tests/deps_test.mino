@@ -54,13 +54,24 @@
   (let [m {:paths ["src" "lib"]
            :deps {:foo {:path "../foo"}
                   :bar {:git "https://example.com" :rev "abc"}}}]
-    (is (= ["src" "lib" "../foo" ".mino/deps/bar"]
+    (is (= ["src" "lib" "../foo" ".mino/deps/bar/src"]
+           (deps/resolve-paths m)))))
+
+(deftest resolve-paths-custom-root
+  (let [m {:deps {:mylib {:git "https://example.com" :rev "abc"
+                          :deps/root ["lib" "src"]}}}]
+    (is (= ["src" "lib" ".mino/deps/mylib/lib" ".mino/deps/mylib/src"]
            (deps/resolve-paths m)))))
 
 (deftest resolve-paths-defaults
   ;; When :paths is absent, defaults to ["src" "lib"]
   (let [m {:deps {:foo {:path "../x"}}}]
     (is (= ["src" "lib" "../x"]
+           (deps/resolve-paths m))))
+
+  ;; Git deps default to src/ subdirectory
+  (let [m {:deps {:bar {:git "https://x.com" :rev "abc"}}}]
+    (is (= ["src" "lib" ".mino/deps/bar/src"]
            (deps/resolve-paths m)))))
 
 (deftest resolve-paths-no-deps
