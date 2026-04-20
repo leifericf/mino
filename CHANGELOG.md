@@ -6,6 +6,50 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.37.0] — compatibility and stdlib
+
+### Added
+- **Multimethods**: `defmulti`, `defmethod` with value dispatch,
+  default methods, and dispatch caching.
+- **Macros**: `letfn`, `defonce`, `defn-`, multi-arity `defmacro`.
+- **Reader**: `#"..."` regex literals, `#?@` splice in maps,
+  character literals for whitespace/unicode/octal, `#_` discard
+  fix before closing delimiters.
+- **Syntax-quote**: unquote-splicing in vectors, fast path for
+  vectors without splicing.
+- **Primitives**: `random-uuid`, `file-seq`, `getenv`, `getcwd`,
+  `chdir`, `int` with single-char string argument.
+- **Module resolver**: .clj/.cljs file resolution, hyphen-to-underscore
+  conversion in module paths, `lib/` fallback from initial directory.
+- **ns forms**: `:use` clause with `:only` support, `:refer-clojure`
+  `:exclude` is silently accepted.
+- **Stdlib modules**: `clojure.core`, `clojure.data` (diff),
+  `clojure.zip` (Huet zippers), `clojure.test` (deftest/is/are),
+  `clojure.walk` (keywordize-keys, stringify-keys, macroexpand-all),
+  `clojure.edn` (read-string), `clojure.pprint` (pprint, print-table).
+- **Protocols**: multi-protocol `extend-type`, keyword option stripping
+  in `defprotocol`, docstring handling.
+- **Binding**: `_` as throwaway (discarded, not bound).
+- **Compat vars**: `*clojure-version*`, `clojure-version`, `assert`.
+- **JVM stubs**: `defrecord`, `deftype`, `reify`, `proxy`,
+  `gen-class`, `definterface`, `import` all throw with clear messages.
+  `set!` is a no-op for JVM compiler directives.
+- **Compatibility test suite**: 50-repo runner in pure mino with
+  categorized failure reporting and root-cause deduplication.
+
+### Changed
+- Eval diagnostics inside `try` blocks now longjmp to the catch
+  handler instead of producing uncatchable diagnostics.
+- Exception messages in `mino_eval_string` now preserve the original
+  error instead of reporting generic "unhandled exception".
+- Cascading require errors include the file path at each level
+  (e.g. "in foo.clj: unbound symbol: x").
+- `&env` is bound to nil during macro expansion.
+- Test framework moved from `tests/test.mino` to `lib/clojure/test.mino`.
+
+### Removed
+- All shell/bash scripts from the repository.
+
 ## [0.36.0] — error diagnostics
 
 ### Added
