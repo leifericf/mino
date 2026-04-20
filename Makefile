@@ -77,6 +77,6 @@ test: $(TARGET)
 test-external: $(TARGET)
 	./mino tests/external_runner.mino
 
-# Architecture quality gates: TU size, function span, abort inventory.
+# Architecture quality gates (placeholder — rewrite in mino).
 qa-arch:
-	@sh scripts/qa-arch.sh
+	@echo "qa-arch: not yet reimplemented in mino"
