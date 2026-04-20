@@ -93,17 +93,27 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
 void set_eval_diag(mino_state_t *S, const mino_val_t *form,
                    const char *kind, const char *code, const char *msg)
 {
-    mino_diag_t *d = diag_new(kind, code, "eval", msg);
-    if (d != NULL && form != NULL && form->type == MINO_CONS
-        && form->as.cons.file != NULL && form->as.cons.line > 0) {
-        mino_span_t span;
-        memset(&span, 0, sizeof(span));
-        span.file   = form->as.cons.file;
-        span.line   = form->as.cons.line;
-        span.column = form->as.cons.column;
-        diag_set_span(d, span);
+    /* Inside a try block, convert diagnostics to thrown exceptions so they
+     * are catchable by the surrounding catch clause. */
+    if (S->try_depth > 0) {
+        mino_val_t *ex = mino_string((mino_state_t *)S, msg);
+        S->try_stack[S->try_depth - 1].exception = ex;
+        longjmp(S->try_stack[S->try_depth - 1].buf, 1);
     }
-    set_diag(S, d);
+
+    {
+        mino_diag_t *d = diag_new(kind, code, "eval", msg);
+        if (d != NULL && form != NULL && form->type == MINO_CONS
+            && form->as.cons.file != NULL && form->as.cons.line > 0) {
+            mino_span_t span;
+            memset(&span, 0, sizeof(span));
+            span.file   = form->as.cons.file;
+            span.line   = form->as.cons.line;
+            span.column = form->as.cons.column;
+            diag_set_span(d, span);
+        }
+        set_diag(S, d);
+    }
 }
 
 /* Return a short human-readable label for a value's type. */
