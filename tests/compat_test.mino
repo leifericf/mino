@@ -241,3 +241,9 @@
 
   (testing "second defonce does not overwrite"
     (is (= 42 compat-defonce-val))))
+
+;; --- set! no-op ---
+
+(deftest set-bang-noop
+  (testing "set! is a no-op that returns nil"
+    (is (nil? (set! *warn-on-reflection* true)))))

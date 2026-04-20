@@ -715,6 +715,8 @@
   (let [pairs (vec (mapcat (fn [b] [(first b) (apply list 'fn (first b) (rest b))]) bindings))]
     `(let [~@pairs] ~@body)))
 
+(defmacro set! "No-op. JVM compiler directive, not applicable to mino." [& _] nil)
+
 (defmacro comment "Ignores body, returns nil." [& body] nil)
 
 (defmacro if-some "Binds the result of expr, evaluates then if non-nil, else otherwise." [bindings then & else]
