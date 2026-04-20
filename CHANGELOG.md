@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.36.0] — error diagnostics
+
 ### Added
 - **Structured diagnostics**: all errors are now represented as
   structured `mino_diag_t` data with kind, code, phase, message,
