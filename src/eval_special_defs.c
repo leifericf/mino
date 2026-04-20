@@ -117,17 +117,34 @@ static void ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
         return; /* skip unrecognized spec form */
     }
 
-    /* Convert dotted name to path and try to load. */
+    /* Convert dotted name to path and try to load.
+     * Wrap in a local try frame so that load errors (which may longjmp
+     * due to error propagation in mino_eval_string) are caught here
+     * instead of escaping the ns form. */
     if (dotted_to_path(modname, modlen, pathbuf, sizeof(pathbuf)) == 0) {
-        /* Build require arg as a string and call through existing loader. */
         mino_val_t *path_str = mino_string(S, pathbuf);
         mino_val_t *req_args = mino_cons(S, path_str, mino_nil(S));
+        int ns_saved_try = S->try_depth;
         gc_pin(req_args);
-        /* Silently ignore load failures for modules we don't have. */
+        if (S->try_depth < MAX_TRY_DEPTH) {
+            S->try_stack[S->try_depth].exception = NULL;
+            if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
+                /* Load failed — silently ignore (missing module is OK). */
+                S->try_depth = ns_saved_try;
+                S->error_buf[0] = '\0';
+                if (S->last_diag != NULL) {
+                    S->last_diag = NULL;
+                }
+                gc_unpin(1);
+                goto ns_require_done;
+            }
+            S->try_depth++;
+        }
         prim_require(S, req_args, env);
-        /* Clear any error from failed require (missing module is OK). */
+        S->try_depth = ns_saved_try;
         S->error_buf[0] = '\0';
         gc_unpin(1);
+    ns_require_done: ;
     }
 
     /* Store alias if provided. */
