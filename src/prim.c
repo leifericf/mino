@@ -183,6 +183,10 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
                             mino_last_error(S));
                     abort();
                 }
+                if (end != NULL && end > src) {
+                    src = end; /* reader conditional produced nothing; skip */
+                    continue;
+                }
                 break;
             }
             if (S->core_forms_len >= cap) {

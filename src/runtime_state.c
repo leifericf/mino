@@ -290,6 +290,10 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
                 S->reader_line = saved_line;
                 return NULL;
             }
+            if (end != NULL && end > src) {
+                src = end; /* reader conditional produced nothing; skip */
+                continue;
+            }
             break; /* EOF */
         }
         last = mino_eval(S, form, env);
