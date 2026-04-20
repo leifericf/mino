@@ -75,25 +75,31 @@
       (eval (read-string (str "(do " shim-code "\n" code "\n)")))
       :pass)
     (catch e
-      (ex-message e))))
+      (cond
+        (string? e) e
+        (map? e) (or (:mino/message e) (str e))
+        :else (str e)))))
 
-(defn test-repo [repo-name {:keys [src]}]
+(defn test-repo [repo-name {:keys [src]} original-dir]
   (let [src-dir (str cache-dir "/" repo-name "/" src)
-        files (try (file-seq src-dir) (catch _ []))]
+        files (try (do (chdir src-dir) (file-seq src-dir)) (catch _ []))]
     (when (empty? files)
-      (println (str "  [skip] " repo-name " (no src dir or not cloned)")))
+      (println (str "  [skip] " repo-name " (not cloned — run: git clone <url> " cache-dir "/" repo-name ")")))
     (let [source-files (sort (filter source-file? files))
           results (mapv (fn [f]
                           (let [relpath (subs f (+ (count src-dir) 1))
+                                _ (chdir src-dir)
                                 result (try-load-file f)]
                             {:file relpath
                              :status (if (= result :pass) :pass :fail)
                              :error (when (not= result :pass) result)}))
                         source-files)]
+      (chdir original-dir)
       results)))
 
 (defn run []
-  (let [repo-filter (when-let [env-repos (getenv "REPOS")]
+  (let [original-dir (getcwd)
+        repo-filter (when-let [env-repos (getenv "REPOS")]
                       (into #{} (split env-repos ",")))
         verbose? (getenv "VERBOSE")
         repos-to-run (if repo-filter
@@ -105,7 +111,7 @@
 
     (doseq [[repo-name config] (sort repos-to-run)]
       (println (str "\n=== " repo-name " ==="))
-      (let [results (test-repo repo-name config)]
+      (let [results (test-repo repo-name config original-dir)]
         (doseq [r results]
           (swap! all-results conj r)
           (if (= (:status r) :pass)

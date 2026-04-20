@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MINO_LINE_MAX 4096
 
@@ -23,6 +24,34 @@ static int file_exists(const char *path)
     if (f == NULL) return 0;
     fclose(f);
     return 1;
+}
+
+/* Directory where the mino binary was invoked from. Used as fallback
+ * for resolving lib/ modules even after chdir. */
+static char initial_dir[4096] = "";
+
+static int try_resolve(const char *name, size_t nlen, char *buf, size_t bufsz)
+{
+    static const char *exts[] = {".mino", ".cljc", ".clj", ".cljs"};
+    size_t i;
+    for (i = 0; i < 4; i++) {
+        snprintf(buf, bufsz, "%s%s", name, exts[i]);
+        if (file_exists(buf)) return 1;
+    }
+    /* Try lib/ prefix. */
+    for (i = 0; i < 4; i++) {
+        snprintf(buf, bufsz, "lib/%s%s", name, exts[i]);
+        if (file_exists(buf)) return 1;
+    }
+    /* Try initial dir's lib/ as fallback. */
+    if (initial_dir[0] != '\0') {
+        for (i = 0; i < 4; i++) {
+            snprintf(buf, bufsz, "%s/lib/%s%s", initial_dir, name, exts[i]);
+            if (file_exists(buf)) return 1;
+        }
+    }
+    (void)nlen;
+    return 0;
 }
 
 static const char *cwd_resolve(const char *name, void *ctx)
@@ -43,34 +72,15 @@ static const char *cwd_resolve(const char *name, void *ctx)
         if (file_exists(path_buf)) return path_buf;
         snprintf(path_buf, sizeof(path_buf), "lib/%s", name);
         if (file_exists(path_buf)) return path_buf;
+        if (initial_dir[0] != '\0') {
+            snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", initial_dir, name);
+            if (file_exists(path_buf)) return path_buf;
+        }
         return NULL;
     }
 
-    /* Try extensions in priority order: .mino, .cljc, .clj, .cljs */
-    snprintf(path_buf, sizeof(path_buf), "%s.mino", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    snprintf(path_buf, sizeof(path_buf), "%s.cljc", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    snprintf(path_buf, sizeof(path_buf), "%s.clj", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    snprintf(path_buf, sizeof(path_buf), "%s.cljs", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    /* Try lib/ prefix variants. */
-    snprintf(path_buf, sizeof(path_buf), "lib/%s.mino", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    snprintf(path_buf, sizeof(path_buf), "lib/%s.cljc", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    snprintf(path_buf, sizeof(path_buf), "lib/%s.clj", name);
-    if (file_exists(path_buf)) return path_buf;
-
-    snprintf(path_buf, sizeof(path_buf), "lib/%s.cljs", name);
-    if (file_exists(path_buf)) return path_buf;
+    if (try_resolve(name, nlen, path_buf, sizeof(path_buf)))
+        return path_buf;
 
     return NULL;
 }
@@ -95,7 +105,9 @@ static int has_only_whitespace(const char *s)
 
 int main(int argc, char **argv)
 {
-    mino_state_t *S   = mino_state_new();
+    mino_state_t *S;
+    getcwd(initial_dir, sizeof(initial_dir));
+    S = mino_state_new();
     mino_env_t   *env = mino_env_new(S);
     char *buf  = NULL;
     size_t cap = 0;

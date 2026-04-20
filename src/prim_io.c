@@ -6,6 +6,7 @@
 #include "prim_internal.h"
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
@@ -152,6 +153,43 @@ mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "time-ms takes no arguments");
     }
     return mino_float(S, (double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
+}
+
+/* (getcwd) -- return the current working directory as a string. */
+mino_val_t *prim_getcwd(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    char buf[4096];
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "getcwd takes no arguments");
+    }
+    if (getcwd(buf, sizeof(buf)) == NULL) {
+        return prim_throw_classified(S, "io", "MIO001",
+                                     "getcwd: failed to get working directory");
+    }
+    return mino_string(S, buf);
+}
+
+/* (chdir path) -- change current working directory. Returns nil. */
+mino_val_t *prim_chdir(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *path_val;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "chdir requires one argument");
+    }
+    path_val = args->as.cons.car;
+    if (path_val == NULL || path_val->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "chdir: argument must be a string");
+    }
+    if (chdir(path_val->as.s.data) != 0) {
+        return prim_throw_classified(S, "io", "MIO001",
+                                     "chdir: directory not found");
+    }
+    return mino_nil(S);
 }
 
 /* (getenv name) -- return environment variable value or nil. */

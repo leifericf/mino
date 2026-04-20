@@ -531,4 +531,8 @@ void mino_install_io(mino_state_t *S, mino_env_t *env)
              "Returns a vector of all file paths under a directory, recursively.");
     DEF_PRIM(env, "getenv",   prim_getenv,
              "Returns the value of an environment variable, or nil.");
+    DEF_PRIM(env, "getcwd",   prim_getcwd,
+             "Returns the current working directory.");
+    DEF_PRIM(env, "chdir",    prim_chdir,
+             "Changes the current working directory.");
 }

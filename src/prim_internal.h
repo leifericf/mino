@@ -172,6 +172,8 @@ mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_file_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_getenv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_getcwd(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_chdir(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_reflection.c */
 mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env);
