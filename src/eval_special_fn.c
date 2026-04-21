@@ -300,8 +300,15 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             }
             if (result->type == MINO_TAIL_CALL) {
                 /* Proper tail call: switch to the target function. */
-                fn        = result->as.tail_call.fn;
+                mino_val_t *new_fn = result->as.tail_call.fn;
                 call_args = result->as.tail_call.args;
+                if (new_fn == fn && fn->as.fn.params != NULL) {
+                    /* Self tail call, single-arity: reuse local env; the
+                     * loop's bind_params will update the existing param
+                     * slots in place without allocating a fresh frame. */
+                    continue;
+                }
+                fn        = new_fn;
                 cur_params = fn->as.fn.params;
                 cur_body   = fn->as.fn.body;
                 local     = env_child(S, fn->as.fn.env);
