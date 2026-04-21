@@ -5,6 +5,8 @@
  * POSIX; Windows provides _popen with the same interface.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "prim_internal.h"
 #include <stdio.h>
 #include <stdlib.h>

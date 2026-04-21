@@ -132,6 +132,8 @@ static const char *project_resolve(const char *name, void *ctx)
     if (nlen + 10 >= sizeof(pbuf)) return NULL;
 
     for (i = 0; i < project_path_count; i++) {
+        fprintf(stderr, "  resolve: project_paths[%zu] = %p\n",
+                i, (void *)project_paths[i]);
         if (try_resolve_in(project_paths[i], name, nlen,
                            pbuf, sizeof(pbuf)))
             return pbuf;
@@ -172,8 +174,13 @@ static void setup_project(mino_state_t *S, mino_env_t *env)
         }
     }
 
-    if (project_path_count > 0)
+    if (project_path_count > 0) {
+        size_t j;
+        for (j = 0; j < project_path_count; j++)
+            fprintf(stderr, "  project_path[%zu] = %p \"%s\"\n",
+                    j, (void *)project_paths[j], project_paths[j]);
         mino_set_resolver(S, project_resolve, NULL);
+    }
 }
 
 /* Report an evaluation error to stderr. */
@@ -299,8 +306,15 @@ int main(int argc, char **argv)
     {
         char resolved[4096];
         const char *slash;
+#ifdef _WIN32
+        if (_fullpath(resolved, argv[0], sizeof(resolved)) != NULL) {
+#else
         if (realpath(argv[0], resolved) != NULL) {
+#endif
             slash = strrchr(resolved, '/');
+#ifdef _WIN32
+            if (slash == NULL) slash = strrchr(resolved, '\\');
+#endif
             if (slash != NULL) {
                 size_t dlen = (size_t)(slash - resolved);
                 if (dlen < sizeof(binary_dir)) {

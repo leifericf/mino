@@ -69,10 +69,10 @@ static void ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     char pathbuf[256];
     const char *modname;
     size_t      modlen;
-    const char *alias_name = NULL;
-    size_t      alias_len  = 0;
-    mino_val_t *refer_vec  = NULL;
-    int         refer_all  = use_mode; /* :use defaults to refer-all */
+    const char * volatile alias_name = NULL;
+    volatile size_t       alias_len  = 0;
+    mino_val_t * volatile refer_vec  = NULL;
+    volatile int          refer_all  = use_mode; /* :use defaults to refer-all */
 
     if (spec->type == MINO_SYMBOL) {
         modname = spec->as.s.data;

@@ -6,7 +6,9 @@
 #include "async_channel.h"
 #include "mino_internal.h"
 
-#if defined(__APPLE__) || defined(__unix__) || defined(__linux__)
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__APPLE__) || defined(__unix__) || defined(__linux__)
 #include <sys/time.h>
 #endif
 
