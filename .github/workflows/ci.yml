@@ -19,8 +19,15 @@ jobs:
       - name: Compiler version
         run: cc --version
 
-      - name: Bootstrap
-        run: make
+      - name: Bootstrap mino
+        run: |
+          printf 'static const char *core_mino_src =\n' > src/core_mino.h
+          sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
+          printf '    ;\n' >> src/core_mino.h
+          cc -std=c99 -O2 -Isrc -o mino src/*.c main.c -lm
+
+      - name: Build
+        run: ./mino task build
 
       - name: Test
         run: ./mino task test

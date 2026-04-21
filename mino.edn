@@ -1,3 +1,7 @@
+;; Bootstrap (first time only):
+;;   cc -std=c99 -O2 -Isrc -o mino src/*.c main.c -lm
+;; Then: ./mino task build, ./mino task test, etc.
+
 {:paths ["src" "lib"]
  :tasks
  {gen-core-header {:doc  "Escape src/core.mino into src/core_mino.h"
