@@ -17,12 +17,36 @@
 
 /* ---- shell-escape and command-string building ---- */
 
-/* Append a shell-escaped token to buf. Returns new length, or 0 on overflow. */
+/* Append a shell-escaped token to buf. Returns new length, or 0 on overflow.
+ * POSIX: wraps in single quotes, escaping embedded single quotes.
+ * Windows: wraps in double quotes, escaping embedded double quotes. */
 static size_t append_escaped(char *buf, size_t pos, size_t cap,
                              const char *s, size_t slen)
 {
     size_t i;
     if (pos + slen * 2 + 4 >= cap) return 0; /* conservative overflow check */
+#ifdef _WIN32
+    buf[pos++] = '"';
+    for (i = 0; i < slen; i++) {
+        if (s[i] == '"') {
+            if (pos + 2 >= cap) return 0;
+            buf[pos++] = '\\';
+            buf[pos++] = '"';
+        } else if (s[i] == '\\') {
+            /* Backslash only needs escaping before a quote or at end. */
+            if (i + 1 < slen && s[i + 1] == '"') {
+                if (pos + 2 >= cap) return 0;
+                buf[pos++] = '\\';
+                buf[pos++] = '\\';
+            } else {
+                buf[pos++] = s[i];
+            }
+        } else {
+            buf[pos++] = s[i];
+        }
+    }
+    buf[pos++] = '"';
+#else
     buf[pos++] = '\'';
     for (i = 0; i < slen; i++) {
         if (s[i] == '\'') {
@@ -37,6 +61,7 @@ static size_t append_escaped(char *buf, size_t pos, size_t cap,
         }
     }
     buf[pos++] = '\'';
+#endif
     buf[pos] = '\0';
     return pos;
 }
@@ -143,7 +168,11 @@ mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         memcpy(cmd + clen, " 2>&1", 6);
     }
 
+#ifdef _WIN32
+    fp = _popen(cmd, "r");
+#else
     fp = popen(cmd, "r");
+#endif
     free(cmd);
     if (fp == NULL) {
         return prim_throw_classified(S, "io", "MIO001",
@@ -151,7 +180,11 @@ mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 
     out = read_all(fp, &out_len);
+#ifdef _WIN32
+    status = _pclose(fp);
+#else
     status = pclose(fp);
+#endif
 #ifndef _WIN32
     /* POSIX: extract exit code from wait status. */
     if (WIFEXITED(status)) status = WEXITSTATUS(status);
