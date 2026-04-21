@@ -73,12 +73,53 @@ void mino_env_free(mino_state_t *S, mino_env_t *env)
     }
 }
 
+static uint32_t env_hash_name(const char *name, size_t len)
+{
+    return fnv_bytes(2166136261u, (const unsigned char *)name, len);
+}
+
+static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
+{
+    size_t new_cap = env->ht_cap == 0 ? 64 : env->ht_cap * 2;
+    size_t *buckets;
+    size_t i, mask;
+    while (new_cap < env->len * 2) new_cap *= 2;
+    buckets = (size_t *)gc_alloc_typed(S, GC_T_RAW, new_cap * sizeof(*buckets));
+    mask = new_cap - 1;
+    for (i = 0; i < new_cap; i++) buckets[i] = SIZE_MAX;
+    for (i = 0; i < env->len; i++) {
+        size_t nlen = strlen(env->bindings[i].name);
+        uint32_t h = env_hash_name(env->bindings[i].name, nlen);
+        size_t idx = h & mask;
+        while (buckets[idx] != SIZE_MAX) idx = (idx + 1) & mask;
+        buckets[idx] = i;
+    }
+    env->ht_buckets = buckets;
+    env->ht_cap = new_cap;
+}
+
 env_binding_t *env_find_here(mino_env_t *env, const char *name)
 {
-    size_t i;
-    for (i = 0; i < env->len; i++) {
-        if (strcmp(env->bindings[i].name, name) == 0) {
-            return &env->bindings[i];
+    /* Hash-indexed lookup for large frames. */
+    if (env->ht_buckets != NULL) {
+        size_t nlen = strlen(name);
+        uint32_t h = env_hash_name(name, nlen);
+        size_t mask = env->ht_cap - 1;
+        size_t idx = h & mask;
+        while (env->ht_buckets[idx] != SIZE_MAX) {
+            env_binding_t *b = &env->bindings[env->ht_buckets[idx]];
+            if (strcmp(b->name, name) == 0) return b;
+            idx = (idx + 1) & mask;
+        }
+        return NULL;
+    }
+    /* Linear scan for small frames. */
+    {
+        size_t i;
+        for (i = 0; i < env->len; i++) {
+            if (strcmp(env->bindings[i].name, name) == 0) {
+                return &env->bindings[i];
+            }
         }
     }
     return NULL;
@@ -105,6 +146,23 @@ void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
     env->bindings[env->len].name = dup_n(S, name, strlen(name));
     env->bindings[env->len].val  = val;
     env->len++;
+
+    /* Build hash index when frame crosses threshold. */
+    if (env->len == ENV_HASH_THRESHOLD) {
+        env_ht_rebuild(S, env);
+    } else if (env->ht_buckets != NULL) {
+        /* Already has index — insert into it. */
+        size_t nlen = strlen(name);
+        uint32_t h = env_hash_name(name, nlen);
+        size_t mask = env->ht_cap - 1;
+        size_t idx = h & mask;
+        while (env->ht_buckets[idx] != SIZE_MAX) idx = (idx + 1) & mask;
+        env->ht_buckets[idx] = env->len - 1;
+        /* Rehash if load > 75%. */
+        if (env->len * 4 > env->ht_cap * 3) {
+            env_ht_rebuild(S, env);
+        }
+    }
 }
 
 mino_env_t *env_root(mino_state_t *S, mino_env_t *env)

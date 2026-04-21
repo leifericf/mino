@@ -171,12 +171,18 @@ typedef struct {
     size_t         members_cap;
 } host_type_t;
 
-/* Full environment definition. */
+/* Full environment definition.
+ * Large frames (>= ENV_HASH_THRESHOLD bindings) get a hash index for O(1)
+ * lookup; small frames use linear scan (faster for typical let/fn sizes). */
+#define ENV_HASH_THRESHOLD 32
+
 struct mino_env {
     env_binding_t *bindings;
     size_t         len;
     size_t         cap;
     mino_env_t    *parent;
+    size_t        *ht_buckets;  /* hash index: maps hash -> binding slot */
+    size_t         ht_cap;      /* power of 2; SIZE_MAX = empty slot */
 };
 
 /* ------------------------------------------------------------------------- */

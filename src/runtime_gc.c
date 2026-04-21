@@ -404,6 +404,7 @@ static void gc_process_header(mino_state_t *S, gc_hdr_t *h)
                 gc_mark_interior_push(S, env->bindings[i].val);
             }
         }
+        gc_mark_interior_push(S, env->ht_buckets);
         break;
     }
     case GC_T_VEC_NODE: {
