@@ -134,7 +134,7 @@ void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
         return;
     }
     if (env->len == env->cap) {
-        size_t         new_cap = env->cap == 0 ? 16 : env->cap * 2;
+        size_t         new_cap = env->cap == 0 ? 4 : env->cap * 2;
         env_binding_t *nb      = (env_binding_t *)gc_alloc_typed(
             S, GC_T_RAW, new_cap * sizeof(*nb));
         if (env->bindings != NULL && env->len > 0) {
