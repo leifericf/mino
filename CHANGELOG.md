@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.39.0] — task runner and self-hosting build
+
 ### Added
 - **Task runner**: `mino task <name>` executes named tasks from
   `mino.edn` with dependency resolution. `mino task` lists available
@@ -18,6 +20,12 @@ adheres to [Semantic Versioning](https://semver.org/).
   milliseconds via `stat(2)`. Enables incremental compilation.
 - **C `str-replace` primitive**: single-pass O(n) string replacement,
   replacing the mino-level split+join implementation.
+- **Windows CI**: build and test on `windows-latest` alongside Linux
+  and macOS.
+
+### Removed
+- **Makefile**: replaced entirely by `mino task` commands. Bootstrap
+  from source with a single `cc` invocation, then use `mino task build`.
 
 ## [0.38.0] — project manifest and dependency management
 
