@@ -1,12 +1,19 @@
 /*
  * prim_io.c -- I/O primitives: println, prn, slurp, spit, exit, time-ms,
- *              file-seq, print_str_to helper.
+ *              nano-time, file-seq, print_str_to helper.
  */
 
 #include "prim_internal.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#elif defined(CLOCK_MONOTONIC)
+#  include <time.h>
+#endif
 
 void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
@@ -153,6 +160,36 @@ mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "time-ms takes no arguments");
     }
     return mino_float(S, (double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
+}
+
+/* (nano-time) — return monotonic wall-clock time in nanoseconds as an integer.
+ * Uses CLOCK_MONOTONIC on POSIX, QueryPerformanceCounter on Windows,
+ * clock() as a coarse fallback. */
+mino_val_t *prim_nano_time(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long ns;
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "nano-time takes no arguments");
+    }
+#if defined(_WIN32)
+    {
+        LARGE_INTEGER freq, count;
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&count);
+        ns = (long long)(count.QuadPart * 1000000000LL / freq.QuadPart);
+    }
+#elif defined(CLOCK_MONOTONIC)
+    {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        ns = (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
+    }
+#else
+    ns = (long long)((double)clock() / (double)CLOCKS_PER_SEC * 1e9);
+#endif
+    return mino_int(S, ns);
 }
 
 /* (getcwd) -- return the current working directory as a string. */
