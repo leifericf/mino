@@ -1,0 +1,17 @@
+{:paths ["src" "lib"]
+ :tasks
+ {gen-core-header {:doc  "Escape src/core.mino into src/core_mino.h"
+                   :task mino.tasks.builtin/gen-core-header}
+  build           {:doc  "Compile and link the mino binary"
+                   :deps [gen-core-header]
+                   :task mino.tasks.builtin/build}
+  clean           {:doc  "Remove build artifacts"
+                   :task mino.tasks.builtin/clean}
+  test            {:doc  "Build and run the test suite"
+                   :deps [build]
+                   :task mino.tasks.builtin/test-suite}
+  test-external   {:doc  "Build and run external tests"
+                   :deps [build]
+                   :task mino.tasks.builtin/test-external}
+  qa-arch         {:doc  "Architecture quality gates"
+                   :task mino.tasks.builtin/qa-arch}}}
