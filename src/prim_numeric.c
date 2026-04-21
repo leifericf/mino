@@ -15,103 +15,119 @@
 
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    long long iacc = 0;
     (void)env;
-    if (args_have_float(args)) {
-        double acc = 0.0;
-        while (mino_is_cons(args)) {
-            double x;
-            if (!as_double(args->as.cons.car, &x)) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "+ expects numbers");
-            }
-            acc += x;
+    while (mino_is_cons(args)) {
+        mino_val_t *a = args->as.cons.car;
+        if (a != NULL && a->type == MINO_INT) {
+            iacc += a->as.i;
             args = args->as.cons.cdr;
+            continue;
         }
-        return mino_float(S, acc);
-    } else {
-        long long acc = 0;
-        while (mino_is_cons(args)) {
-            long long x;
-            if (!as_long(args->as.cons.car, &x)) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "+ expects numbers");
-            }
-            acc += x;
+        if (a != NULL && a->type == MINO_FLOAT) {
+            /* Promote to float and finish the tail in float mode. */
+            double dacc = (double)iacc + a->as.f;
             args = args->as.cons.cdr;
+            while (mino_is_cons(args)) {
+                double x;
+                if (!as_double(args->as.cons.car, &x)) {
+                    return prim_throw_classified(S, "eval/type", "MTY001", "+ expects numbers");
+                }
+                dacc += x;
+                args = args->as.cons.cdr;
+            }
+            return mino_float(S, dacc);
         }
-        return mino_int(S, acc);
+        return prim_throw_classified(S, "eval/type", "MTY001", "+ expects numbers");
     }
+    return mino_int(S, iacc);
 }
 
 mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    mino_val_t *first;
+    long long iacc;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "- requires at least one argument");
     }
-    if (args_have_float(args)) {
-        double acc;
-        if (!as_double(args->as.cons.car, &acc)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "- expects numbers");
-        }
+    first = args->as.cons.car;
+    if (first != NULL && first->type == MINO_INT) {
+        iacc = first->as.i;
         args = args->as.cons.cdr;
         if (!mino_is_cons(args)) {
-            return mino_float(S, -acc);
+            return mino_int(S, -iacc);
+        }
+        while (mino_is_cons(args)) {
+            mino_val_t *a = args->as.cons.car;
+            if (a != NULL && a->type == MINO_INT) {
+                iacc -= a->as.i;
+                args = args->as.cons.cdr;
+                continue;
+            }
+            if (a != NULL && a->type == MINO_FLOAT) {
+                double dacc = (double)iacc - a->as.f;
+                args = args->as.cons.cdr;
+                while (mino_is_cons(args)) {
+                    double x;
+                    if (!as_double(args->as.cons.car, &x)) {
+                        return prim_throw_classified(S, "eval/type", "MTY001", "- expects numbers");
+                    }
+                    dacc -= x;
+                    args = args->as.cons.cdr;
+                }
+                return mino_float(S, dacc);
+            }
+            return prim_throw_classified(S, "eval/type", "MTY001", "- expects numbers");
+        }
+        return mino_int(S, iacc);
+    }
+    if (first != NULL && first->type == MINO_FLOAT) {
+        double dacc = first->as.f;
+        args = args->as.cons.cdr;
+        if (!mino_is_cons(args)) {
+            return mino_float(S, -dacc);
         }
         while (mino_is_cons(args)) {
             double x;
             if (!as_double(args->as.cons.car, &x)) {
                 return prim_throw_classified(S, "eval/type", "MTY001", "- expects numbers");
             }
-            acc -= x;
+            dacc -= x;
             args = args->as.cons.cdr;
         }
-        return mino_float(S, acc);
-    } else {
-        long long acc;
-        if (!as_long(args->as.cons.car, &acc)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "- expects numbers");
-        }
-        args = args->as.cons.cdr;
-        if (!mino_is_cons(args)) {
-            return mino_int(S, -acc);
-        }
-        while (mino_is_cons(args)) {
-            long long x;
-            if (!as_long(args->as.cons.car, &x)) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "- expects numbers");
-            }
-            acc -= x;
-            args = args->as.cons.cdr;
-        }
-        return mino_int(S, acc);
+        return mino_float(S, dacc);
     }
+    return prim_throw_classified(S, "eval/type", "MTY001", "- expects numbers");
 }
 
 mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    long long iacc = 1;
     (void)env;
-    if (args_have_float(args)) {
-        double acc = 1.0;
-        while (mino_is_cons(args)) {
-            double x;
-            if (!as_double(args->as.cons.car, &x)) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "* expects numbers");
-            }
-            acc *= x;
+    while (mino_is_cons(args)) {
+        mino_val_t *a = args->as.cons.car;
+        if (a != NULL && a->type == MINO_INT) {
+            iacc *= a->as.i;
             args = args->as.cons.cdr;
+            continue;
         }
-        return mino_float(S, acc);
-    } else {
-        long long acc = 1;
-        while (mino_is_cons(args)) {
-            long long x;
-            if (!as_long(args->as.cons.car, &x)) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "* expects numbers");
-            }
-            acc *= x;
+        if (a != NULL && a->type == MINO_FLOAT) {
+            double dacc = (double)iacc * a->as.f;
             args = args->as.cons.cdr;
+            while (mino_is_cons(args)) {
+                double x;
+                if (!as_double(args->as.cons.car, &x)) {
+                    return prim_throw_classified(S, "eval/type", "MTY001", "* expects numbers");
+                }
+                dacc *= x;
+                args = args->as.cons.cdr;
+            }
+            return mino_float(S, dacc);
         }
-        return mino_int(S, acc);
+        return prim_throw_classified(S, "eval/type", "MTY001", "* expects numbers");
     }
+    return mino_int(S, iacc);
 }
 
 mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
