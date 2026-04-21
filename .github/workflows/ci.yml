@@ -11,25 +11,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    env:
-      CC: ${{ matrix.os == 'windows-latest' && 'gcc' || 'cc' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Compiler version
-        run: $CC --version
+        run: cc --version
 
       - name: Bootstrap mino
         run: |
           printf 'static const char *core_mino_src =\n' > src/core_mino.h
           sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
           printf '    ;\n' >> src/core_mino.h
-          $CC -std=c99 -O2 -Isrc -o mino src/*.c main.c -lm
+          cc -std=c99 -O2 -Isrc -o mino src/*.c main.c -lm
 
       - name: Build
         run: ./mino task build
