@@ -626,6 +626,22 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             /* Pin fn: eval_args allocates, and the conservative stack
              * scanner may miss fn if the compiler keeps it in a register. */
             gc_pin(fn);
+            /* Fast path for the dominant PRIM/FN case, checked first so
+             * non-function callables (keyword/map/vector/etc.) don't delay
+             * typical calls. */
+            if (fn->type == MINO_PRIM || fn->type == MINO_FN) {
+                evaled = eval_args(S, args, env);
+                gc_unpin(1);
+                if (evaled == NULL && mino_last_error(S) != NULL) {
+                    return NULL;
+                }
+                if (tail && fn->type == MINO_FN) {
+                    S->tail_call_sentinel.as.tail_call.fn   = fn;
+                    S->tail_call_sentinel.as.tail_call.args = evaled;
+                    return &S->tail_call_sentinel;
+                }
+                return apply_callable(S, fn, evaled, env);
+            }
             if (fn->type == MINO_MACRO) {
                 /* Expand with unevaluated args; re-eval the resulting form
                  * in the caller's environment. */
@@ -801,29 +817,14 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                         ? key : mino_nil(S);
                 }
             }
-            if (fn->type != MINO_PRIM && fn->type != MINO_FN) {
-                gc_unpin(1);
-                {
-                    char msg[128];
-                    snprintf(msg, sizeof(msg), "not a function (got %s)",
-                             type_tag_str(fn));
-                    set_eval_diag(S, form, "eval/type", "MTY002", msg);
-                }
-                return NULL;
-            }
-            evaled = eval_args(S, args, env);
             gc_unpin(1);
-            if (evaled == NULL && mino_last_error(S) != NULL) {
-                return NULL;
+            {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "not a function (got %s)",
+                         type_tag_str(fn));
+                set_eval_diag(S, form, "eval/type", "MTY002", msg);
             }
-            /* Proper tail calls: in tail position, return a trampoline
-             * sentinel instead of growing the C stack. */
-            if (tail && fn->type == MINO_FN) {
-                S->tail_call_sentinel.as.tail_call.fn   = fn;
-                S->tail_call_sentinel.as.tail_call.args = evaled;
-                return &S->tail_call_sentinel;
-            }
-            return apply_callable(S, fn, evaled, env);
+            return NULL;
         }
     }
     }
