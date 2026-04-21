@@ -221,7 +221,7 @@ static int run_task(mino_state_t *S, mino_env_t *env, const char *task_name)
 
     snprintf(eval_buf, sizeof(eval_buf),
         "(require '[mino.tasks :as tasks])"
-        "(tasks/run! :%s (tasks/load-tasks \"mino.edn\"))",
+        "(tasks/run! '%s (tasks/load-tasks \"mino.edn\"))",
         task_name);
 
     if (mino_eval_string(S, eval_buf, env) == NULL) {

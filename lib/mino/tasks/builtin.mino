@@ -4,10 +4,11 @@
 
 ;; Build configuration -- matches Makefile defaults.
 
-(def ^:private cc     (or (getenv "CC") "cc"))
-(def ^:private cflags (or (getenv "CFLAGS") "-std=c99 -Wall -Wpedantic -Wextra -O2 -Isrc"))
-(def ^:private ldflags (or (getenv "LDFLAGS") ""))
-(def ^:private libs   (or (getenv "LIBS") "-lm"))
+(def ^:private cc      (or (getenv "CC") "cc"))
+(def ^:private cflags  (split (or (getenv "CFLAGS") "-std=c99 -Wall -Wpedantic -Wextra -O2 -Isrc") " "))
+(def ^:private ldflags (let [v (or (getenv "LDFLAGS") "")]
+                         (if (= v "") [] (split v " "))))
+(def ^:private libs    (split (or (getenv "LIBS") "-lm") " "))
 
 (def ^:private lib-srcs
   ["src/mino.c" "src/diag.c" "src/eval_special.c"
@@ -30,7 +31,7 @@
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 
 (defn- src->obj [src]
-  (str/replace src #"\.c$" ".o"))
+  (str (subs src 0 (- (count src) 2)) ".o"))
 
 (defn- stale?
   "True if output does not exist or any input is newer."
@@ -49,7 +50,10 @@
   []
   (when (stale? ["src/core.mino"] "src/core_mino.h")
     (let [src   (slurp "src/core.mino")
-          lines (split src "\n")
+          lines (let [parts (split src "\n")]
+                  (if (and (seq parts) (= "" (last parts)))
+                    (vec (butlast parts))
+                    parts))
           escaped (map (fn [line]
                          (-> line
                              (str/replace "\\" "\\\\")
@@ -71,16 +75,16 @@
     (doseq [src all-srcs]
       (let [obj (src->obj src)]
         (when (stale? [src] obj)
-          (println (str "  " cc " -c " src))
-          (sh! cc cflags "-c" "-o" obj src)
-          (swap! compiled inc))))
+          (let [args (into [cc] (concat cflags ["-c" "-o" obj src]))]
+            (println (str "  " (str/join " " args)))
+            (apply sh! args)
+            (swap! compiled inc)))))
     ;; Link
-    (let [objs (mapv src->obj all-srcs)
-          cmd  (str cc " " cflags " " ldflags " -o mino "
-                    (str/join " " objs) " " libs)]
+    (let [objs   (mapv src->obj all-srcs)
+          args   (into [cc] (concat cflags ldflags ["-o" "mino"] objs libs))]
       (when (> @compiled 0)
-        (println (str "  " cmd))
-        (sh! cmd)))
+        (println (str "  " (str/join " " args)))
+        (apply sh! args)))
     (when (= @compiled 0)
       (println "  nothing to compile"))))
 
@@ -100,12 +104,12 @@
 (defn test-suite
   "Run the test suite."
   []
-  (sh! "./mino" "tests/run.mino"))
+  (println (sh! "./mino" "tests/run.mino")))
 
 (defn test-external
   "Run the external test runner."
   []
-  (sh! "./mino" "tests/external_runner.mino"))
+  (println (sh! "./mino" "tests/external_runner.mino")))
 
 (defn qa-arch
   "Architecture quality gates (placeholder)."
