@@ -191,11 +191,12 @@ static void report_eval_error(mino_state_t *S)
     }
 }
 
-/* Return 1 if name contains only [a-zA-Z0-9_-], 0 otherwise. */
+/* Return 1 if name contains only [a-zA-Z0-9_-] and fits in eval_buf. */
 static int is_valid_task_name(const char *name)
 {
     const char *p;
     if (name[0] == '\0') return 0;
+    if (strlen(name) > 400) return 0;
     for (p = name; *p; p++) {
         char c = *p;
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
