@@ -1,0 +1,60 @@
+(require '[clojure.test :refer [deftest is testing]])
+(require '[mino.tasks :as tasks])
+
+;; ---- resolve-order tests ----
+
+(deftest resolve-order-single-no-deps
+  (let [t '{a {:task some/fn}}]
+    (is (= '[a] (tasks/resolve-order 'a t)))))
+
+(deftest resolve-order-linear-chain
+  (let [t '{a {:task some/a :deps [b]}
+            b {:task some/b :deps [c]}
+            c {:task some/c}}]
+    (is (= '[c b a] (tasks/resolve-order 'a t)))))
+
+(deftest resolve-order-diamond
+  (let [t '{a {:task some/a :deps [b c]}
+            b {:task some/b :deps [d]}
+            c {:task some/c :deps [d]}
+            d {:task some/d}}]
+    (let [order (tasks/resolve-order 'a t)]
+      (is (= 'd (first order)) "d must come first")
+      (is (= 'a (last order)) "a must come last")
+      (is (= 4 (count order)) "all four tasks present"))))
+
+(deftest resolve-order-no-duplicates
+  (let [t '{a {:task some/a :deps [b c]}
+            b {:task some/b :deps [d]}
+            c {:task some/c :deps [d]}
+            d {:task some/d}}]
+    (let [order (tasks/resolve-order 'a t)]
+      (is (= (count order) (count (set order))) "no duplicates"))))
+
+(deftest resolve-order-cycle-detection
+  (let [t '{a {:task some/a :deps [b]}
+            b {:task some/b :deps [a]}}]
+    (is (thrown? Exception (tasks/resolve-order 'a t)))))
+
+(deftest resolve-order-missing-dep
+  (let [t '{a {:task some/a :deps [missing]}}]
+    (is (thrown? Exception (tasks/resolve-order 'a t)))))
+
+(deftest resolve-order-self-cycle
+  (let [t '{a {:task some/a :deps [a]}}]
+    (is (thrown? Exception (tasks/resolve-order 'a t)))))
+
+;; ---- load-tasks tests ----
+
+(deftest load-tasks-returns-map
+  (let [t (tasks/load-tasks "mino.edn")]
+    (is (map? t))
+    (is (contains? t 'build))
+    (is (contains? t 'clean))))
+
+(deftest load-tasks-each-has-task-key
+  (let [t (tasks/load-tasks "mino.edn")]
+    (doseq [[k v] t]
+      (is (contains? v :task) (str "task " k " missing :task")))))
+
+(run-tests)
