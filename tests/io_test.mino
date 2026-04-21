@@ -2,13 +2,18 @@
 
 ;; I/O operations: spit, slurp, println, prn.
 
+(def ^:private tmpdir
+  (or (getenv "TMPDIR") (getenv "TEMP") (getenv "TMP") "/tmp"))
+
 (deftest spit-and-slurp
-  (spit "/tmp/mino_test_spit.txt" "hello")
-  (is (= "hello" (slurp "/tmp/mino_test_spit.txt"))))
+  (let [f (str tmpdir "/mino_test_spit.txt")]
+    (spit f "hello")
+    (is (= "hello" (slurp f)))))
 
 (deftest spit-non-string
-  (spit "/tmp/mino_test_spit2.txt" 42)
-  (is (= "42" (slurp "/tmp/mino_test_spit2.txt"))))
+  (let [f (str tmpdir "/mino_test_spit2.txt")]
+    (spit f 42)
+    (is (= "42" (slurp f)))))
 
 (deftest println-returns-nil
   (is (= nil (println "io-test-println"))))
