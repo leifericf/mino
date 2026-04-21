@@ -108,7 +108,10 @@ env_binding_t *env_find_here(mino_env_t *env, const char *name)
         size_t idx = h & mask;
         while (env->ht_buckets[idx] != SIZE_MAX) {
             env_binding_t *b = &env->bindings[env->ht_buckets[idx]];
-            if (strcmp(b->name, name) == 0) return b;
+            /* Pointer-eq fast path: names are stored by their interned
+             * symbol data pointer, so if the caller passes the same
+             * pointer (common from eval_symbol) we skip strcmp. */
+            if (b->name == name || strcmp(b->name, name) == 0) return b;
             idx = (idx + 1) & mask;
         }
         return NULL;
@@ -117,7 +120,8 @@ env_binding_t *env_find_here(mino_env_t *env, const char *name)
     {
         size_t i;
         for (i = 0; i < env->len; i++) {
-            if (strcmp(env->bindings[i].name, name) == 0) {
+            const char *bn = env->bindings[i].name;
+            if (bn == name || strcmp(bn, name) == 0) {
                 return &env->bindings[i];
             }
         }
@@ -143,7 +147,16 @@ void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
         env->bindings = nb;
         env->cap      = new_cap;
     }
-    env->bindings[env->len].name = dup_n(S, name, strlen(name));
+    /* Store the interned symbol's data pointer so env_find_here can
+     * compare names by pointer equality on the hot path. mino_symbol_n
+     * returns the shared intern entry; different bindings with the same
+     * name end up sharing a name pointer. */
+    {
+        size_t nlen = strlen(name);
+        mino_val_t *sym = mino_symbol_n(S, name, nlen);
+        env->bindings[env->len].name =
+            (sym != NULL) ? sym->as.s.data : dup_n(S, name, nlen);
+    }
     env->bindings[env->len].val  = val;
     env->len++;
 
