@@ -27,32 +27,31 @@ static const char *alias_resolve(mino_state_t *S, const char *alias)
 
 static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
-    char buf[256];
     size_t n = form->as.s.len;
+    const char *data = form->as.s.data;  /* null-terminated (dup_n adds \0) */
     mino_val_t *v;
     const char *slash;
-    if (n >= sizeof(buf)) {
-        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "symbol name too long");
-        return NULL;
-    }
-    memcpy(buf, form->as.s.data, n);
-    buf[n] = '\0';
 
     /* Check for namespace-qualified symbol (e.g. t/is, clojure.core/+).
      * Single-char "/" is the division function, not a qualified symbol. */
-    slash = (n > 1) ? strchr(buf, '/') : NULL;
+    slash = (n > 1) ? memchr(data, '/', n) : NULL;
     if (slash != NULL) {
         char ns_buf[256];
         const char *sym_name = slash + 1;
-        size_t ns_len = (size_t)(slash - buf);
+        size_t ns_len = (size_t)(slash - data);
         const char *resolved_ns;
         mino_val_t *var;
 
         /* Try full name as a literal env binding first (e.g. "host/new"). */
-        v = mino_env_get(env, buf);
+        v = mino_env_get(env, data);
         if (v != NULL) return v;
 
-        memcpy(ns_buf, buf, ns_len);
+        if (ns_len >= sizeof(ns_buf)) {
+            set_eval_diag(S, S->eval_current_form, "syntax", "MSY001",
+                "symbol name too long");
+            return NULL;
+        }
+        memcpy(ns_buf, data, ns_len);
         ns_buf[ns_len] = '\0';
 
         /* Resolve alias to full module name. */
@@ -69,17 +68,17 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
 
         {
             char msg[300];
-            snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
+            snprintf(msg, sizeof(msg), "unbound symbol: %s", data);
             set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
             return NULL;
         }
     }
 
-    v = (S->dyn_stack != NULL) ? dyn_lookup(S, buf) : NULL;
-    if (v == NULL) v = mino_env_get(env, buf);
+    v = (S->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
+    if (v == NULL) v = mino_env_get(env, data);
     if (v == NULL) {
         char msg[300];
-        snprintf(msg, sizeof(msg), "unbound symbol: %s", buf);
+        snprintf(msg, sizeof(msg), "unbound symbol: %s", data);
         set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
         return NULL;
     }
