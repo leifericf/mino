@@ -16,19 +16,13 @@ int kw_eq(const mino_val_t *v, const char *s)
     return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
 }
 
-/* Helper: bind a single symbol name to a value. */
+/* Helper: bind a single symbol name to a value. The symbol is already
+ * interned (came from the reader), so env_bind_sym can reuse its data
+ * pointer and length directly instead of copying into a stack buffer. */
 static int bind_sym(mino_state_t *S, mino_env_t *env, mino_val_t *sym,
                     mino_val_t *val)
 {
-    char   buf[256];
-    size_t n = sym->as.s.len;
-    if (n >= sizeof(buf)) {
-        set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "parameter name too long");
-        return 0;
-    }
-    memcpy(buf, sym->as.s.data, n);
-    buf[n] = '\0';
-    env_bind(S, env, buf, val);
+    env_bind_sym(S, env, sym, val);
     return 1;
 }
 

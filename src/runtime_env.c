@@ -129,8 +129,12 @@ env_binding_t *env_find_here(mino_env_t *env, const char *name)
     return NULL;
 }
 
-void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
-              mino_val_t *val)
+/* Shared implementation: interned_name is a stable pointer (e.g. from
+ * an intern entry) when known, otherwise NULL. */
+static void env_bind_impl(mino_state_t *S, mino_env_t *env,
+                          const char *name, size_t nlen,
+                          const char *interned_name,
+                          mino_val_t *val)
 {
     env_binding_t *b = env_find_here(env, name);
     if (b != NULL) {
@@ -147,12 +151,13 @@ void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
         env->bindings = nb;
         env->cap      = new_cap;
     }
-    /* Store the interned symbol's data pointer so env_find_here can
-     * compare names by pointer equality on the hot path. mino_symbol_n
-     * returns the shared intern entry; different bindings with the same
-     * name end up sharing a name pointer. */
-    {
-        size_t nlen = strlen(name);
+    /* Store a stable name pointer so env_find_here can use pointer
+     * equality on the hot path. If the caller supplied an already-
+     * interned pointer, reuse it; otherwise intern now so future
+     * bindings with the same name share a pointer. */
+    if (interned_name != NULL) {
+        env->bindings[env->len].name = (char *)interned_name;
+    } else {
         mino_val_t *sym = mino_symbol_n(S, name, nlen);
         env->bindings[env->len].name =
             (sym != NULL) ? sym->as.s.data : dup_n(S, name, nlen);
@@ -165,7 +170,6 @@ void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
         env_ht_rebuild(S, env);
     } else if (env->ht_buckets != NULL) {
         /* Already has index — insert into it. */
-        size_t nlen = strlen(name);
         uint32_t h = env_hash_name(name, nlen);
         size_t mask = env->ht_cap - 1;
         size_t idx = h & mask;
@@ -176,6 +180,22 @@ void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
             env_ht_rebuild(S, env);
         }
     }
+}
+
+void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
+              mino_val_t *val)
+{
+    env_bind_impl(S, env, name, strlen(name), NULL, val);
+}
+
+/* Hot-path variant: caller supplies an already-interned symbol, so the
+ * binding name pointer and length come free and we skip strlen plus the
+ * intern hash-table probe. */
+void env_bind_sym(mino_state_t *S, mino_env_t *env, mino_val_t *sym,
+                  mino_val_t *val)
+{
+    env_bind_impl(S, env, sym->as.s.data, sym->as.s.len,
+                  sym->as.s.data, val);
 }
 
 mino_env_t *env_root(mino_state_t *S, mino_env_t *env)
