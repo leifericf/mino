@@ -134,7 +134,144 @@
   []
   (println (sh! mino-bin "tests/external_runner.mino")))
 
+;; ---- Architecture quality gates ----
+
+(def ^:private tu-limit 1100)
+(def ^:private fn-limit 250)
+
+;; Files allowed to exceed the TU size limit, with rationale.
+(def ^:private tu-allowlist
+  {"src/read.c"              "lexer/parser -- inherently sequential, not decomposable"
+   "src/prim_collections.c"  "14 domain primitives in one module, barely over limit"})
+
+;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
+(def ^:private fn-allowlist
+  #{"src/eval_special.c:eval_impl"      ;; main evaluator dispatch -- inherently large
+    "src/prim.c:mino_install_core"       ;; primitive registration table
+    "src/read.c:read_form"})
+
+(defn- count-lines
+  "Return the number of lines in a file."
+  [path]
+  (count (split (slurp path) "\n")))
+
+(defn- find-large-functions
+  "Find functions exceeding fn-limit lines.
+   Uses column-0 brace tracking: { at col 0 opens a function body,
+   } at col 0 closes it. Returns a vector of {:file :name :lines} maps."
+  [path]
+  (let [lines  (split (slurp path) "\n")
+        nlines (count lines)]
+    (loop [i 0 depth 0 fn-start nil fn-name nil results []]
+      (if (>= i nlines)
+        results
+        (let [line (nth lines i)]
+          (if (and (= depth 0) (starts-with? line "{"))
+            ;; Opening brace at col 0: entering function body.
+            ;; The function signature is on the preceding non-blank line.
+            (let [sig (loop [j (- i 1)]
+                        (if (< j 0)
+                          "<unknown>"
+                          (let [prev (trim (nth lines j))]
+                            (if (= prev "")
+                              (recur (- j 1))
+                              prev))))]
+              (recur (+ i 1) 1 i sig results))
+            (if (and (> depth 0) (starts-with? line "}"))
+              ;; Closing brace at col 0: leaving function body.
+              (let [body-lines (+ (- i fn-start) 1)
+                    new-results (if (> body-lines fn-limit)
+                                  (conj results {:file path
+                                                 :name fn-name
+                                                 :lines body-lines})
+                                  results)]
+                (recur (+ i 1) 0 nil nil new-results))
+              ;; Inside a function body, track nested braces.
+              (recur (+ i 1) depth fn-start fn-name results))))))))
+
+(defn- find-abort-sites
+  "Find abort() call sites. Returns a vector of {:file :line :text :has-rationale} maps."
+  [path]
+  (let [lines  (split (slurp path) "\n")
+        nlines (count lines)]
+    (loop [i 0 results []]
+      (if (>= i nlines)
+        results
+        (let [line (nth lines i)]
+          (if (re-find #"abort\(\)" line)
+            (let [;; Check if current line or preceding line has a comment.
+                  has-comment (or (some? (re-find #"/\*" line))
+                                  (some? (re-find #"//" line))
+                                  (and (> i 0)
+                                       (let [prev (nth lines (- i 1))]
+                                         (or (some? (re-find #"/\*" prev))
+                                             (some? (re-find #"//" prev))))))]
+              (recur (+ i 1) (conj results {:file path
+                                            :line (+ i 1)
+                                            :text (trim line)
+                                            :has-rationale has-comment})))
+            (recur (+ i 1) results)))))))
+
 (defn qa-arch
-  "Architecture quality gates (placeholder)."
+  "Architecture quality gates: TU size, function size, abort inventory."
   []
-  (println "qa-arch: not yet reimplemented in mino"))
+  (let [src-files (sort (filterv #(ends-with? % ".c") (file-seq "src")))
+        failures  (atom 0)]
+
+    ;; --- TU size check ---
+    (println "== Translation unit size (limit:" tu-limit "LOC) ==")
+    (doseq [f src-files]
+      (let [n      (count-lines f)
+            allowed (get tu-allowlist f)
+            over    (> n tu-limit)]
+        (when over
+          (if allowed
+            (println (str "  ALLOW  " f ": " n " LOC (" allowed ")"))
+            (do
+              (println (str "  FAIL   " f ": " n " LOC"))
+              (swap! failures inc))))
+        (when (not over)
+          (println (str "  ok     " f ": " n " LOC")))))
+
+    ;; --- Function size check ---
+    (println)
+    (println "== Function size (limit:" fn-limit "LOC) ==")
+    (let [large (into [] (mapcat find-large-functions) src-files)]
+      (if (empty? large)
+        (println "  ok     no functions exceed limit")
+        (doseq [m large]
+          (let [file  (:file m)
+                sig   (:name m)
+                allowed (some (fn [entry]
+                          (let [parts (split entry ":")
+                                af    (first parts)
+                                afn   (first (rest parts))]
+                            (and (= file af) (includes? sig afn))))
+                        fn-allowlist)]
+            (if allowed
+              (println (str "  ALLOW  " (:file m) ": " (:name m) " (" (:lines m) " LOC)"))
+              (do
+                (println (str "  FAIL   " (:file m) ": " (:name m) " (" (:lines m) " LOC)"))
+                (swap! failures inc)))))))
+
+    ;; --- Abort inventory ---
+    (println)
+    (println "== Abort inventory ==")
+    (let [sites (into [] (mapcat find-abort-sites) src-files)
+          missing-rationale (filterv #(not (:has-rationale %)) sites)]
+      (println (str "  " (count sites) " abort() sites across "
+                    (count (into #{} (map :file) sites)) " files"))
+      (doseq [s sites]
+        (println (str "  " (if (:has-rationale s) "ok   " "FAIL ")
+                      (:file s) ":" (:line s) " " (:text s))))
+      (when (not (empty? missing-rationale))
+        (println (str "  FAIL   " (count missing-rationale) " sites missing rationale"))
+        (swap! failures (fn [n] (+ n (count missing-rationale))))))
+
+    ;; --- Summary ---
+    (println)
+    (if (= @failures 0)
+      (println "qa-arch: PASS")
+      (do
+        (println (str "qa-arch: FAIL (" @failures " issue(s))"))
+        (throw (str "qa-arch failed with " @failures " issue(s)"))))))
