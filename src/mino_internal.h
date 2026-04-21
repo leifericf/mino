@@ -215,6 +215,11 @@ struct mino_state {
     size_t          gc_mark_stack_len;
     size_t          gc_mark_stack_cap;
     gc_hdr_t       *gc_freelists[4];   /* per-size-class recycling */
+    /* Cached [min, max) bounds of all managed allocations. Lets the
+     * conservative stack scan reject non-pointer words before doing a
+     * binary search through the range index. */
+    uintptr_t       gc_heap_min;
+    uintptr_t       gc_heap_max;
 
     /* Singletons */
     mino_val_t      nil_singleton;

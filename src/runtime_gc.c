@@ -175,6 +175,13 @@ static void gc_build_range_index(mino_state_t *S)
     qsort(S->gc_ranges, S->gc_ranges_len, sizeof(*S->gc_ranges), gc_range_cmp);
     S->gc_ranges_valid = 1;
     S->gc_ranges_pending_len = 0;
+    if (S->gc_ranges_len > 0) {
+        S->gc_heap_min = S->gc_ranges[0].start;
+        S->gc_heap_max = S->gc_ranges[S->gc_ranges_len - 1].end;
+    } else {
+        S->gc_heap_min = 0;
+        S->gc_heap_max = 0;
+    }
 }
 
 /*
@@ -269,6 +276,13 @@ static gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
     size_t    lo = 0;
     size_t    hi = S->gc_ranges_len;
     size_t    i;
+    /* Fast reject for stack words outside the heap — the conservative
+     * scan examines every aligned machine word, and most of them are
+     * not pointers into the managed heap. */
+    if ((u < S->gc_heap_min || u >= S->gc_heap_max)
+        && S->gc_ranges_pending_len == 0) {
+        return NULL;
+    }
     while (lo < hi) {
         size_t mid = lo + (hi - lo) / 2;
         if (u < S->gc_ranges[mid].start) {
