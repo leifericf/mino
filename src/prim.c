@@ -374,6 +374,20 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns true if x is the value true.");
     DEF_PRIM(env, "false?",   prim_false_p,
              "Returns true if x is the value false.");
+    DEF_PRIM(env, "some?",    prim_some_p,
+             "Returns true if x is not nil.");
+    DEF_PRIM(env, "empty?",   prim_empty_p,
+             "Returns true if coll has no items.");
+    DEF_PRIM(env, "zero?",    prim_zero_p,
+             "Returns true if x is zero.");
+    DEF_PRIM(env, "pos?",     prim_pos_p,
+             "Returns true if x is greater than zero.");
+    DEF_PRIM(env, "neg?",     prim_neg_p,
+             "Returns true if x is less than zero.");
+    DEF_PRIM(env, "odd?",     prim_odd_p,
+             "Returns true if x is an odd integer.");
+    DEF_PRIM(env, "even?",    prim_even_p,
+             "Returns true if x is an even integer.");
     DEF_PRIM(env, "name",      prim_name,
              "Returns the name string of a symbol, keyword, or string.");
     DEF_PRIM(env, "namespace", prim_namespace,

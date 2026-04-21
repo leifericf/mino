@@ -232,6 +232,122 @@ DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b =
 
 #undef DEFINE_TYPE_PRED
 
+mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "some? requires one argument");
+    }
+    v = args->as.cons.car;
+    return (v != NULL && v->type != MINO_NIL) ? mino_true(S) : mino_false(S);
+}
+
+mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "empty? requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type == MINO_NIL) return mino_true(S);
+    switch (v->type) {
+    case MINO_CONS:       return mino_false(S);
+    case MINO_VECTOR:     return v->as.vec.len == 0 ? mino_true(S) : mino_false(S);
+    case MINO_MAP:        return v->as.map.len == 0 ? mino_true(S) : mino_false(S);
+    case MINO_SET:        return v->as.set.len == 0 ? mino_true(S) : mino_false(S);
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET: return v->as.sorted.len == 0 ? mino_true(S) : mino_false(S);
+    case MINO_STRING:     return v->as.s.len == 0 ? mino_true(S) : mino_false(S);
+    case MINO_LAZY: {
+        mino_val_t *forced = lazy_force(S, v);
+        if (forced == NULL) return NULL;
+        return (forced == NULL || forced->type == MINO_NIL)
+                ? mino_true(S) : mino_false(S);
+    }
+    default:
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "empty? expects a collection or nil");
+    }
+}
+
+/* Numeric predicates. The mino-level versions invoke number? then compare,
+ * doing two prim dispatches per call; inlining the check here is a direct
+ * tag read plus a comparison. */
+static mino_val_t *num_pred(mino_state_t *S, mino_val_t *args,
+                            const char *name, int (*cmp_int)(long long),
+                            int (*cmp_float)(double))
+{
+    mino_val_t *v;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s requires one argument", name);
+        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+    }
+    v = args->as.cons.car;
+    if (v == NULL) goto type_err;
+    if (v->type == MINO_INT)   return cmp_int(v->as.i) ? mino_true(S) : mino_false(S);
+    if (v->type == MINO_FLOAT) return cmp_float(v->as.f) ? mino_true(S) : mino_false(S);
+type_err:
+    {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s requires a number", name);
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+}
+
+static int is_zero_i(long long n) { return n == 0; }
+static int is_zero_f(double   x) { return x == 0.0; }
+static int is_pos_i(long long n)  { return n > 0; }
+static int is_pos_f(double   x)  { return x > 0.0; }
+static int is_neg_i(long long n)  { return n < 0; }
+static int is_neg_f(double   x)  { return x < 0.0; }
+
+mino_val_t *prim_zero_p(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
+    (void)env; return num_pred(S, args, "zero?", is_zero_i, is_zero_f);
+}
+mino_val_t *prim_pos_p(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
+    (void)env; return num_pred(S, args, "pos?", is_pos_i, is_pos_f);
+}
+mino_val_t *prim_neg_p(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
+    (void)env; return num_pred(S, args, "neg?", is_neg_i, is_neg_f);
+}
+
+mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "odd? requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_INT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "odd? requires an integer");
+    }
+    return (v->as.i & 1LL) != 0 ? mino_true(S) : mino_false(S);
+}
+
+mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "even? requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_INT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "even? requires an integer");
+    }
+    return (v->as.i & 1LL) == 0 ? mino_true(S) : mino_false(S);
+}
+
 mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int expanded;

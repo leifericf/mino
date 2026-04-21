@@ -70,7 +70,7 @@
                 ([x y & more] (not (apply = x y more)))))
 (def identity "Returns its argument." (fn [x] x))
 (def list     "Creates a list of the given arguments." (fn [& args] args))
-(def empty?   "Returns true if coll has no items." (fn [coll] (= (count coll) 0)))
+;; empty? is a C primitive.
 
 ;; >, <=, >= are C primitives (compare_chain) — see prim_numeric.c
 
@@ -271,7 +271,7 @@
 (def ffirst     "Returns the first item of the first item in coll." (fn [coll] (first (first coll))))
 (def inc        "Returns x plus 1." (fn [x] (+ x 1)))
 (def dec        "Returns x minus 1." (fn [x] (- x 1)))
-(def zero?      "Returns true if x is zero." (fn [x] (when (not (number? x)) (throw "zero? requires a number")) (= x 0)))
+;; zero? is a C primitive.
 (def ==         "Returns true if nums are numerically equal, treating ints and floats uniformly." (fn
                   ([x] true)
                   ([x y] (= (+ 0.0 x) (+ 0.0 y)))
@@ -279,10 +279,7 @@
                     (if (== x y)
                       (apply == y more)
                       false))))
-(def pos?       "Returns true if x is greater than zero." (fn [x] (> x 0)))
-(def neg?       "Returns true if x is less than zero." (fn [x] (< x 0)))
-(def even?      "Returns true if x is even." (fn [x] (when (not (int? x)) (throw "even? requires an integer")) (= (mod x 2) 0)))
-(def odd?       "Returns true if x is odd." (fn [x] (when (not (int? x)) (throw "odd? requires an integer")) (not (= (mod x 2) 0))))
+;; pos?, neg?, even?, odd? are C primitives.
 (def abs        "Returns the absolute value of x." (fn [x] (if (< x 0) (- x) x)))
 (def max        "Returns the greatest of the given values." (fn
                   ([a] a)
@@ -570,7 +567,7 @@
 (def double    "Coerces x to a float." float)
 (def num       "Returns x if it is a number, otherwise throws." (fn [x] (if (number? x) x (throw "num expects a number"))))
 (def coll?     "Returns true if x is a collection." (fn [x] (or (seq? x) (vector? x) (map? x) (set? x))))
-(def some?     "Returns true if x is not nil." (fn [x] (not (nil? x))))
+;; some? is a C primitive.
 (def list?     "Returns true if x is a list." cons?)
 ;; atom? is defined as a C primitive; no mino-level fallback needed.
 (def not-any?  "Returns true if (pred x) is falsy for every x in coll." (fn [pred coll] (not (some pred coll))))
