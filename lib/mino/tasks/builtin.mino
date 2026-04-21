@@ -134,6 +134,11 @@
   []
   (println (sh! mino-bin "tests/external_runner.mino")))
 
+(defn test-gc-stress
+  "Run GC stability tests under MINO_GC_STRESS=1 (collect on every allocation)."
+  []
+  (println (sh! "env" "MINO_GC_STRESS=1" mino-bin "tests/gc_stress_runner.mino")))
+
 ;; ---- Architecture quality gates ----
 
 (def ^:private tu-limit 1100)

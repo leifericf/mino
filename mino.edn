@@ -17,5 +17,8 @@
   test-external   {:doc  "Build and run external tests"
                    :deps [build]
                    :task mino.tasks.builtin/test-external}
+  test-gc-stress  {:doc  "GC stability under stress collection"
+                   :deps [build]
+                   :task mino.tasks.builtin/test-gc-stress}
   qa-arch         {:doc  "Architecture quality gates"
                    :task mino.tasks.builtin/qa-arch}}}
