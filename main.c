@@ -176,6 +176,79 @@ static void setup_project(mino_state_t *S, mino_env_t *env)
         mino_set_resolver(S, project_resolve, NULL);
 }
 
+/* Report an evaluation error to stderr. */
+static void report_eval_error(mino_state_t *S)
+{
+    const mino_diag_t *d = mino_last_diag(S);
+    if (d != NULL) {
+        char dbuf[2048];
+        mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
+                         dbuf, sizeof(dbuf));
+        fprintf(stderr, "%s", dbuf);
+    } else {
+        const char *err = mino_last_error(S);
+        fprintf(stderr, "mino: %s\n", err ? err : "unknown error");
+    }
+}
+
+/* Return 1 if name contains only [a-zA-Z0-9_-], 0 otherwise. */
+static int is_valid_task_name(const char *name)
+{
+    const char *p;
+    if (name[0] == '\0') return 0;
+    for (p = name; *p; p++) {
+        char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '-' || c == '_'))
+            return 0;
+    }
+    return 1;
+}
+
+/* Run `mino task <name>` subcommand. */
+static int run_task(mino_state_t *S, mino_env_t *env, const char *task_name)
+{
+    char eval_buf[512];
+
+    if (!file_exists("mino.edn")) {
+        fprintf(stderr, "mino: no mino.edn found in current directory\n");
+        return 1;
+    }
+    if (!is_valid_task_name(task_name)) {
+        fprintf(stderr, "mino: invalid task name: %s\n", task_name);
+        return 2;
+    }
+
+    snprintf(eval_buf, sizeof(eval_buf),
+        "(require '[mino.tasks :as tasks])"
+        "(tasks/run! :%s (tasks/load-tasks \"mino.edn\"))",
+        task_name);
+
+    if (mino_eval_string(S, eval_buf, env) == NULL) {
+        report_eval_error(S);
+        return 1;
+    }
+    return 0;
+}
+
+/* Run `mino task` with no args: list available tasks. */
+static int run_task_list(mino_state_t *S, mino_env_t *env)
+{
+    if (!file_exists("mino.edn")) {
+        fprintf(stderr, "mino: no mino.edn found in current directory\n");
+        return 1;
+    }
+
+    if (mino_eval_string(S,
+            "(require '[mino.tasks :as tasks])"
+            "(tasks/list-tasks (tasks/load-tasks \"mino.edn\"))",
+            env) == NULL) {
+        report_eval_error(S);
+        return 1;
+    }
+    return 0;
+}
+
 /* Run `mino deps` subcommand: fetch all dependencies. */
 static int run_deps(mino_state_t *S, mino_env_t *env)
 {
@@ -192,16 +265,7 @@ static int run_deps(mino_state_t *S, mino_env_t *env)
         env);
 
     if (result == NULL) {
-        const mino_diag_t *d = mino_last_diag(S);
-        if (d != NULL) {
-            char dbuf[2048];
-            mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
-                             dbuf, sizeof(dbuf));
-            fprintf(stderr, "%s", dbuf);
-        } else {
-            const char *err = mino_last_error(S);
-            fprintf(stderr, "mino: %s\n", err ? err : "unknown error");
-        }
+        report_eval_error(S);
         return 1;
     }
     return 0;
@@ -270,6 +334,17 @@ int main(int argc, char **argv)
 
     /* Auto-wire project paths from mino.edn if present. */
     setup_project(S, env);
+
+    /* Subcommand: mino task [<name>] */
+    if (argc >= 2 && strcmp(argv[1], "task") == 0) {
+        if (argc >= 3)
+            exit_code = run_task(S, env, argv[2]);
+        else
+            exit_code = run_task_list(S, env);
+        mino_env_free(S, env);
+        mino_state_free(S);
+        return exit_code;
+    }
 
     /* File mode: evaluate a script and exit. */
     if (argc > 1) {
