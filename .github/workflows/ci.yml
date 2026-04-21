@@ -19,8 +19,8 @@ jobs:
       - name: Compiler version
         run: cc --version
 
-      - name: Build
+      - name: Bootstrap
         run: make
 
-      - name: Smoke test
-        run: make test
+      - name: Test
+        run: ./mino task test
