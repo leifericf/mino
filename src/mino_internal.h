@@ -201,6 +201,9 @@ struct mino_state {
     size_t          gc_ranges_pending_len;
     size_t          gc_collections;
     size_t          gc_total_freed;
+    gc_hdr_t      **gc_mark_stack;
+    size_t          gc_mark_stack_len;
+    size_t          gc_mark_stack_cap;
 
     /* Singletons */
     mino_val_t      nil_singleton;

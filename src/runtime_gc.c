@@ -265,198 +265,182 @@ static gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
     return NULL;
 }
 
-static void gc_mark_header(mino_state_t *S, gc_hdr_t *h);
+/* ---- Iterative mark phase using explicit mark stack ---- */
 
-void gc_mark_interior(mino_state_t *S, const void *p)
+#define GC_MARK_STACK_INIT 256
+
+static void gc_mark_push(mino_state_t *S, gc_hdr_t *h)
+{
+    if (h == NULL || h->mark) return;
+    h->mark = 1;
+    if (S->gc_mark_stack_len == S->gc_mark_stack_cap) {
+        size_t new_cap = S->gc_mark_stack_cap == 0
+            ? GC_MARK_STACK_INIT : S->gc_mark_stack_cap * 2;
+        gc_hdr_t **ns = (gc_hdr_t **)realloc(
+            S->gc_mark_stack, new_cap * sizeof(*ns));
+        if (ns == NULL) return;  /* OOM: best effort */
+        S->gc_mark_stack = ns;
+        S->gc_mark_stack_cap = new_cap;
+    }
+    S->gc_mark_stack[S->gc_mark_stack_len++] = h;
+}
+
+/* Resolve an interior pointer and push its header onto the mark stack. */
+static void gc_mark_interior_push(mino_state_t *S, const void *p)
 {
     gc_hdr_t *h;
-    if (p == NULL) {
-        return;
-    }
+    if (p == NULL) return;
     h = gc_find_header_for_ptr(S, p);
-    if (h != NULL) {
-        gc_mark_header(S, h);
-    }
+    if (h != NULL) gc_mark_push(S, h);
 }
 
-static void gc_mark_val(mino_state_t *S, mino_val_t *v)
+/* Public entry point for conservative scanning and root marking. */
+void gc_mark_interior(mino_state_t *S, const void *p)
 {
-    if (v == NULL) {
-        return;
-    }
-    /* Metadata can be attached to any value type. */
-    gc_mark_interior(S, v->meta);
-    switch (v->type) {
-    case MINO_STRING:
-    case MINO_SYMBOL:
-    case MINO_KEYWORD:
-        gc_mark_interior(S, v->as.s.data);
-        break;
-    case MINO_CONS:
-        gc_mark_interior(S, v->as.cons.car);
-        gc_mark_interior(S, v->as.cons.cdr);
-        break;
-    case MINO_VECTOR:
-        gc_mark_interior(S, v->as.vec.root);
-        gc_mark_interior(S, v->as.vec.tail);
-        break;
-    case MINO_MAP:
-        gc_mark_interior(S, v->as.map.root);
-        gc_mark_interior(S, v->as.map.key_order);
-        break;
-    case MINO_SET:
-        gc_mark_interior(S, v->as.set.root);
-        gc_mark_interior(S, v->as.set.key_order);
-        break;
-    case MINO_SORTED_MAP:
-    case MINO_SORTED_SET:
-        gc_mark_interior(S, v->as.sorted.root);
-        gc_mark_interior(S, v->as.sorted.comparator);
-        break;
-    case MINO_FN:
-    case MINO_MACRO:
-        gc_mark_interior(S, v->as.fn.params);
-        gc_mark_interior(S, v->as.fn.body);
-        gc_mark_interior(S, v->as.fn.env);
-        break;
-    case MINO_ATOM:
-        gc_mark_interior(S, v->as.atom.val);
-        gc_mark_interior(S, v->as.atom.watches);
-        gc_mark_interior(S, v->as.atom.validator);
-        break;
-    case MINO_LAZY:
-        if (v->as.lazy.realized) {
-            gc_mark_interior(S, v->as.lazy.cached);
-        } else {
-            gc_mark_interior(S, v->as.lazy.body);
-            gc_mark_interior(S, v->as.lazy.env);
-        }
-        break;
-    case MINO_RECUR:
-        gc_mark_interior(S, v->as.recur.args);
-        break;
-    case MINO_TAIL_CALL:
-        gc_mark_interior(S, v->as.tail_call.fn);
-        gc_mark_interior(S, v->as.tail_call.args);
-        break;
-    case MINO_REDUCED:
-        gc_mark_interior(S, v->as.reduced.val);
-        break;
-    case MINO_VAR:
-        gc_mark_interior(S, v->as.var.root);
-        break;
-    default:
-        /* NIL, BOOL, INT, FLOAT, PRIM, HANDLE: no owned children. prim.name
-         * and handle.tag are static/host-owned C strings. */
-        break;
-    }
+    gc_mark_interior_push(S, p);
 }
 
-static void gc_mark_env(mino_state_t *S, mino_env_t *env)
+/* Process one header from the mark stack: trace its children. */
+static void gc_process_header(mino_state_t *S, gc_hdr_t *h)
 {
-    size_t i;
-    if (env == NULL) {
-        return;
-    }
-    gc_mark_interior(S, env->parent);
-    if (env->bindings != NULL) {
-        gc_mark_interior(S, env->bindings);
-        for (i = 0; i < env->len; i++) {
-            gc_mark_interior(S, env->bindings[i].name);
-            gc_mark_interior(S, env->bindings[i].val);
-        }
-    }
-}
-
-static void gc_mark_vec_node(mino_state_t *S, mino_vec_node_t *n)
-{
-    unsigned i;
-    if (n == NULL) {
-        return;
-    }
-    /* Leaf slots hold mino_val_t*; branch slots hold mino_vec_node_t*.
-     * gc_mark_interior dispatches on the header's type tag either way. */
-    for (i = 0; i < n->count; i++) {
-        gc_mark_interior(S, n->slots[i]);
-    }
-}
-
-static void gc_mark_hamt_node(mino_state_t *S, mino_hamt_node_t *n)
-{
-    unsigned count;
-    unsigned i;
-    if (n == NULL) {
-        return;
-    }
-    gc_mark_interior(S, n->slots);
-    count = (n->collision_count > 0) ? n->collision_count
-                                     : popcount32(n->bitmap);
-    if (n->slots != NULL) {
-        for (i = 0; i < count; i++) {
-            gc_mark_interior(S, n->slots[i]);
-        }
-    }
-}
-
-static void gc_mark_hamt_entry(mino_state_t *S, hamt_entry_t *e)
-{
-    if (e == NULL) {
-        return;
-    }
-    gc_mark_interior(S, e->key);
-    gc_mark_interior(S, e->val);
-}
-
-static void gc_mark_ptr_array(mino_state_t *S, void **arr, size_t bytes)
-{
-    size_t n = bytes / sizeof(*arr);
-    size_t i;
-    if (arr == NULL) {
-        return;
-    }
-    for (i = 0; i < n; i++) {
-        gc_mark_interior(S, arr[i]);
-    }
-}
-
-static void gc_mark_header(mino_state_t *S, gc_hdr_t *h)
-{
-    if (h == NULL || h->mark) {
-        return;
-    }
-    h->mark = 1;
     switch (h->type_tag) {
-    case GC_T_VAL:
-        gc_mark_val(S, (mino_val_t *)(h + 1));
+    case GC_T_VAL: {
+        mino_val_t *v = (mino_val_t *)(h + 1);
+        gc_mark_interior_push(S, v->meta);
+        switch (v->type) {
+        case MINO_STRING:
+        case MINO_SYMBOL:
+        case MINO_KEYWORD:
+            gc_mark_interior_push(S, v->as.s.data);
+            break;
+        case MINO_CONS:
+            gc_mark_interior_push(S, v->as.cons.car);
+            gc_mark_interior_push(S, v->as.cons.cdr);
+            break;
+        case MINO_VECTOR:
+            gc_mark_interior_push(S, v->as.vec.root);
+            gc_mark_interior_push(S, v->as.vec.tail);
+            break;
+        case MINO_MAP:
+            gc_mark_interior_push(S, v->as.map.root);
+            gc_mark_interior_push(S, v->as.map.key_order);
+            break;
+        case MINO_SET:
+            gc_mark_interior_push(S, v->as.set.root);
+            gc_mark_interior_push(S, v->as.set.key_order);
+            break;
+        case MINO_SORTED_MAP:
+        case MINO_SORTED_SET:
+            gc_mark_interior_push(S, v->as.sorted.root);
+            gc_mark_interior_push(S, v->as.sorted.comparator);
+            break;
+        case MINO_FN:
+        case MINO_MACRO:
+            gc_mark_interior_push(S, v->as.fn.params);
+            gc_mark_interior_push(S, v->as.fn.body);
+            gc_mark_interior_push(S, v->as.fn.env);
+            break;
+        case MINO_ATOM:
+            gc_mark_interior_push(S, v->as.atom.val);
+            gc_mark_interior_push(S, v->as.atom.watches);
+            gc_mark_interior_push(S, v->as.atom.validator);
+            break;
+        case MINO_LAZY:
+            if (v->as.lazy.realized) {
+                gc_mark_interior_push(S, v->as.lazy.cached);
+            } else {
+                gc_mark_interior_push(S, v->as.lazy.body);
+                gc_mark_interior_push(S, v->as.lazy.env);
+            }
+            break;
+        case MINO_RECUR:
+            gc_mark_interior_push(S, v->as.recur.args);
+            break;
+        case MINO_TAIL_CALL:
+            gc_mark_interior_push(S, v->as.tail_call.fn);
+            gc_mark_interior_push(S, v->as.tail_call.args);
+            break;
+        case MINO_REDUCED:
+            gc_mark_interior_push(S, v->as.reduced.val);
+            break;
+        case MINO_VAR:
+            gc_mark_interior_push(S, v->as.var.root);
+            break;
+        default:
+            break;
+        }
         break;
-    case GC_T_ENV:
-        gc_mark_env(S, (mino_env_t *)(h + 1));
+    }
+    case GC_T_ENV: {
+        mino_env_t *env = (mino_env_t *)(h + 1);
+        size_t i;
+        gc_mark_interior_push(S, env->parent);
+        if (env->bindings != NULL) {
+            gc_mark_interior_push(S, env->bindings);
+            for (i = 0; i < env->len; i++) {
+                gc_mark_interior_push(S, env->bindings[i].name);
+                gc_mark_interior_push(S, env->bindings[i].val);
+            }
+        }
         break;
-    case GC_T_VEC_NODE:
-        gc_mark_vec_node(S, (mino_vec_node_t *)(h + 1));
+    }
+    case GC_T_VEC_NODE: {
+        mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
+        unsigned i;
+        for (i = 0; i < n->count; i++) {
+            gc_mark_interior_push(S, n->slots[i]);
+        }
         break;
-    case GC_T_HAMT_NODE:
-        gc_mark_hamt_node(S, (mino_hamt_node_t *)(h + 1));
+    }
+    case GC_T_HAMT_NODE: {
+        mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
+        unsigned count, i;
+        gc_mark_interior_push(S, n->slots);
+        count = (n->collision_count > 0) ? n->collision_count
+                                         : popcount32(n->bitmap);
+        if (n->slots != NULL) {
+            for (i = 0; i < count; i++) {
+                gc_mark_interior_push(S, n->slots[i]);
+            }
+        }
         break;
-    case GC_T_HAMT_ENTRY:
-        gc_mark_hamt_entry(S, (hamt_entry_t *)(h + 1));
+    }
+    case GC_T_HAMT_ENTRY: {
+        hamt_entry_t *e = (hamt_entry_t *)(h + 1);
+        gc_mark_interior_push(S, e->key);
+        gc_mark_interior_push(S, e->val);
         break;
+    }
     case GC_T_VALARR:
-    case GC_T_PTRARR:
-        gc_mark_ptr_array(S, (void **)(h + 1), h->size);
+    case GC_T_PTRARR: {
+        void **arr = (void **)(h + 1);
+        size_t n = h->size / sizeof(*arr);
+        size_t i;
+        for (i = 0; i < n; i++) {
+            gc_mark_interior_push(S, arr[i]);
+        }
         break;
+    }
     case GC_T_RB_NODE: {
         mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
-        gc_mark_interior(S, rb->key);
-        gc_mark_interior(S, rb->val);
-        gc_mark_interior(S, rb->left);
-        gc_mark_interior(S, rb->right);
+        gc_mark_interior_push(S, rb->key);
+        gc_mark_interior_push(S, rb->val);
+        gc_mark_interior_push(S, rb->left);
+        gc_mark_interior_push(S, rb->right);
         break;
     }
     case GC_T_RAW:
     default:
-        /* Leaf allocation: no children. */
         break;
+    }
+}
+
+/* Drain the mark stack: pop headers and trace their children until empty. */
+static void gc_drain_mark_stack(mino_state_t *S)
+{
+    while (S->gc_mark_stack_len > 0) {
+        gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
+        gc_process_header(S, h);
     }
 }
 
@@ -632,7 +616,9 @@ void gc_collect(mino_state_t *S)
         gc_build_range_index(S);
     }
     gc_mark_roots(S);
+    gc_drain_mark_stack(S);
     gc_scan_stack(S);
+    gc_drain_mark_stack(S);
     gc_range_compact(S);
     gc_sweep(S);
     S->gc_collections++;
