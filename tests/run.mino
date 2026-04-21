@@ -60,6 +60,7 @@
 (require "tests/stateful_test")
 (require "tests/hierarchy_test")
 (require "tests/clojure_string_test")
+(require "tests/tasks_test")
 (require "tests/async_buffer_test")
 (require "tests/async_api_test")
 (require "tests/async_alts_test")

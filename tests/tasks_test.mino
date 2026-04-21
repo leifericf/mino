@@ -1,4 +1,4 @@
-(require '[clojure.test :refer [deftest is testing]])
+(require "tests/test")
 (require '[mino.tasks :as tasks])
 
 ;; ---- resolve-order tests ----
@@ -56,5 +56,3 @@
   (let [t (tasks/load-tasks "mino.edn")]
     (doseq [[k v] t]
       (is (contains? v :task) (str "task " k " missing :task")))))
-
-(run-tests)
