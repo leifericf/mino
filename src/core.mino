@@ -97,7 +97,7 @@
 
 ;; --- Atoms ---
 
-(def swap! "Atomically applies f to the current value of atom a and any args." (fn [a f & args] (reset! a (apply f (deref a) args))))
+;; swap! is defined as a C primitive; no mino-level fallback needed.
 
 ;; --- Definitions ---
 
@@ -584,7 +584,7 @@
 (def coll?     "Returns true if x is a collection." (fn [x] (or (seq? x) (vector? x) (map? x) (set? x))))
 (def some?     "Returns true if x is not nil." (fn [x] (not (nil? x))))
 (def list?     "Returns true if x is a list." cons?)
-(def atom?     "Returns true if x is an atom." (fn [x] (= (type x) :atom)))
+;; atom? is defined as a C primitive; no mino-level fallback needed.
 (def not-any?  "Returns true if (pred x) is falsy for every x in coll." (fn [pred coll] (not (some pred coll))))
 (def not-every? "Returns true if (pred x) is falsy for at least one x in coll." (fn [pred coll] (not (every? pred coll))))
 (def distinct? "Returns true if no two of the arguments are equal." (fn [& xs]
