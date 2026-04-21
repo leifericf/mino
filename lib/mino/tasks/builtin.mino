@@ -10,6 +10,9 @@
                          (if (= v "") [] (split v " "))))
 (def ^:private libs    (split (or (getenv "LIBS") "-lm") " "))
 
+(def ^:private windows? (some? (getenv "OS")))
+(def ^:private mino-bin (if windows? "mino.exe" "./mino"))
+
 (def ^:private lib-srcs
   ["src/mino.c" "src/diag.c" "src/eval_special.c"
    "src/eval_special_defs.c" "src/eval_special_bindings.c"
@@ -124,12 +127,12 @@
 (defn test-suite
   "Run the test suite."
   []
-  (println (sh! "./mino" "tests/run.mino")))
+  (println (sh! mino-bin "tests/run.mino")))
 
 (defn test-external
   "Run the external test runner."
   []
-  (println (sh! "./mino" "tests/external_runner.mino")))
+  (println (sh! mino-bin "tests/external_runner.mino")))
 
 (defn qa-arch
   "Architecture quality gates (placeholder)."
