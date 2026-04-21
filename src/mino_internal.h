@@ -252,6 +252,9 @@ struct mino_state {
     mino_val_t     *sf_binding;
     mino_val_t     *sf_lazy_seq;
     mino_val_t     *sf_new;
+    mino_val_t     *sf_when;
+    mino_val_t     *sf_and;
+    mino_val_t     *sf_or;
 
     /* Execution limits */
     size_t          limit_steps;

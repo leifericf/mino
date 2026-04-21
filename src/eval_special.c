@@ -194,6 +194,9 @@ static void sf_init(mino_state_t *S)
     S->sf_binding          = mino_symbol(S, "binding");
     S->sf_lazy_seq         = mino_symbol(S, "lazy-seq");
     S->sf_new              = mino_symbol(S, "new");
+    S->sf_when             = mino_symbol(S, "when");
+    S->sf_and              = mino_symbol(S, "and");
+    S->sf_or               = mino_symbol(S, "or");
     S->sf_initialized      = 1;
 }
 
@@ -567,6 +570,51 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             lz->as.lazy.cached   = NULL;
             lz->as.lazy.realized = 0;
             return lz;
+        }
+
+        /* when, and, or inlined from their core.mino macro definitions to
+         * avoid per-invocation macro-expansion overhead. The macros remain
+         * defined so macroexpand still returns the expected expansion. */
+        if (HEAD_IS(S->sf_when, "when")) {
+            mino_val_t *cond;
+            if (!mino_is_cons(args)) {
+                set_eval_diag(S, form, "syntax", "MSY001",
+                    "when requires a condition");
+                return NULL;
+            }
+            cond = eval_value(S, args->as.cons.car, env);
+            if (cond == NULL) return NULL;
+            if (!mino_is_truthy(cond)) return mino_nil(S);
+            return eval_implicit_do_impl(S, args->as.cons.cdr, env, tail);
+        }
+        if (HEAD_IS(S->sf_and, "and")) {
+            mino_val_t *result = &S->true_singleton;
+            while (mino_is_cons(args)) {
+                mino_val_t *rest = args->as.cons.cdr;
+                /* Last clause is tail position. */
+                if (!mino_is_cons(rest)) {
+                    return eval_impl(S, args->as.cons.car, env, tail);
+                }
+                result = eval_value(S, args->as.cons.car, env);
+                if (result == NULL) return NULL;
+                if (!mino_is_truthy(result)) return result;
+                args = rest;
+            }
+            return result;
+        }
+        if (HEAD_IS(S->sf_or, "or")) {
+            mino_val_t *result = mino_nil(S);
+            while (mino_is_cons(args)) {
+                mino_val_t *rest = args->as.cons.cdr;
+                if (!mino_is_cons(rest)) {
+                    return eval_impl(S, args->as.cons.car, env, tail);
+                }
+                result = eval_value(S, args->as.cons.car, env);
+                if (result == NULL) return NULL;
+                if (mino_is_truthy(result)) return result;
+                args = rest;
+            }
+            return result;
         }
 
         /* Function or macro application. */
