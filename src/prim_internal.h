@@ -155,6 +155,7 @@ mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);

@@ -837,8 +837,7 @@
       (with-meta (mapv f coll) (meta coll))
       (map f coll)))))
 
-(def str-replace "Replaces all occurrences of match in s with replacement." (fn [s match replacement]
-  (join replacement (split s match))))
+;; str-replace is now a C primitive in prim_string.c
 
 ;; --- Bitwise compositions ---
 

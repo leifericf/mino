@@ -455,6 +455,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Splits a string on a regex pattern.");
     DEF_PRIM(env, "join",     prim_join,
              "Returns a string of the items in coll joined by separator.");
+    DEF_PRIM(env, "str-replace", prim_str_replace,
+             "Replaces all occurrences of match in s with replacement.");
     DEF_PRIM(env, "starts-with?", prim_starts_with_p,
              "Returns true if the string starts with the given prefix.");
     DEF_PRIM(env, "ends-with?", prim_ends_with_p,

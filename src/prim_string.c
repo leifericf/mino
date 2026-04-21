@@ -434,6 +434,88 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
+/* (str-replace s match replacement) -- single-pass string replacement. */
+mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
+                             mino_env_t *env)
+{
+    mino_val_t *s_val, *match_val, *repl_val;
+    const char *s, *match, *repl, *p;
+    size_t slen, mlen, rlen;
+    char  *buf = NULL;
+    size_t buf_len = 0, buf_cap = 0;
+    (void)env;
+
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "str-replace requires three string arguments");
+    }
+    s_val     = args->as.cons.car;
+    match_val = args->as.cons.cdr->as.cons.car;
+    repl_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    if (s_val == NULL || s_val->type != MINO_STRING
+        || match_val == NULL || match_val->type != MINO_STRING
+        || repl_val == NULL || repl_val->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "str-replace: all arguments must be strings");
+    }
+    s    = s_val->as.s.data;     slen = s_val->as.s.len;
+    match = match_val->as.s.data; mlen = match_val->as.s.len;
+    repl  = repl_val->as.s.data;  rlen = repl_val->as.s.len;
+
+    if (mlen == 0) return s_val; /* empty match: return original */
+
+    buf_cap = slen + 256;
+    buf = (char *)malloc(buf_cap);
+    if (buf == NULL) {
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+                      "out of memory");
+        return NULL;
+    }
+
+    p = s;
+    while (p < s + slen) {
+        const char *found = NULL;
+        const char *q;
+        for (q = p; q + mlen <= s + slen; q++) {
+            if (memcmp(q, match, mlen) == 0) {
+                found = q;
+                break;
+            }
+        }
+        if (found != NULL) {
+            size_t prefix_len = (size_t)(found - p);
+            size_t need = buf_len + prefix_len + rlen;
+            if (need > buf_cap) {
+                while (buf_cap < need) buf_cap = buf_cap * 2;
+                buf = (char *)realloc(buf, buf_cap);
+                if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+            }
+            memcpy(buf + buf_len, p, prefix_len);
+            buf_len += prefix_len;
+            memcpy(buf + buf_len, repl, rlen);
+            buf_len += rlen;
+            p = found + mlen;
+        } else {
+            size_t tail_len = (size_t)(s + slen - p);
+            size_t need = buf_len + tail_len;
+            if (need > buf_cap) {
+                while (buf_cap < need) buf_cap = buf_cap * 2;
+                buf = (char *)realloc(buf, buf_cap);
+                if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+            }
+            memcpy(buf + buf_len, p, tail_len);
+            buf_len += tail_len;
+            break;
+        }
+    }
+    {
+        mino_val_t *result = mino_string_n(S, buf, buf_len);
+        free(buf);
+        return result;
+    }
+}
+
 mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s, *prefix;
