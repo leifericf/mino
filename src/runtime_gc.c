@@ -28,9 +28,23 @@ void gc_note_host_frame(mino_state_t *S, void *addr)
 
 static void gc_range_insert(mino_state_t *S, gc_hdr_t *h);
 
+/* Free list size classes: indices into gc_freelists[]. Returns -1 for
+ * variable-size allocations that cannot be recycled. */
+static int gc_freelist_class(size_t size)
+{
+    switch (size) {
+    case sizeof(hamt_entry_t):    return 0;  /* 16 bytes */
+    case sizeof(mino_hamt_node_t): return 1; /* 24 bytes */
+    case sizeof(mino_env_t):      return 2;  /* 32 bytes */
+    case sizeof(mino_val_t):      return 3;  /* 64 bytes */
+    default:                      return -1;
+    }
+}
+
 void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
 {
     gc_hdr_t *h;
+    int fc;
     if (S->gc_stress == -1) {
         const char *e = getenv("MINO_GC_STRESS");
         S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
@@ -51,15 +65,23 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
             abort(); /* Class I: no error frame to recover through */
         }
     }
-    h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
-    if (h == NULL) {
-        /* Recoverable when an eval try-frame exists; fatal otherwise. */
-        if (S->try_depth > 0) {
-            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory");
-            S->try_stack[S->try_depth - 1].exception = NULL;
-            longjmp(S->try_stack[S->try_depth - 1].buf, 1);
+    /* Try free list first for fixed-size allocations. */
+    fc = gc_freelist_class(size);
+    if (fc >= 0 && S->gc_freelists[fc] != NULL) {
+        h = S->gc_freelists[fc];
+        S->gc_freelists[fc] = h->next;
+        memset(h, 0, sizeof(*h) + size);
+    } else {
+        h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
+        if (h == NULL) {
+            /* Recoverable when an eval try-frame exists; fatal otherwise. */
+            if (S->try_depth > 0) {
+                set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory");
+                S->try_stack[S->try_depth - 1].exception = NULL;
+                longjmp(S->try_stack[S->try_depth - 1].buf, 1);
+            }
+            abort(); /* Class I: no error frame to recover through */
         }
-        abort(); /* Class I: no error frame to recover through */
     }
     h->type_tag      = tag;
     h->mark          = 0;
@@ -583,7 +605,15 @@ static void gc_sweep(mino_state_t *S)
                 }
             }
             *pp = h->next;
-            free(h);
+            {
+                int fc = gc_freelist_class(h->size);
+                if (fc >= 0) {
+                    h->next = S->gc_freelists[fc];
+                    S->gc_freelists[fc] = h;
+                } else {
+                    free(h);
+                }
+            }
         }
     }
     S->gc_total_freed += S->gc_bytes_alloc - live;

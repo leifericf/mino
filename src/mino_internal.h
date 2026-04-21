@@ -204,6 +204,7 @@ struct mino_state {
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
     size_t          gc_mark_stack_cap;
+    gc_hdr_t       *gc_freelists[4];   /* per-size-class recycling */
 
     /* Singletons */
     mino_val_t      nil_singleton;

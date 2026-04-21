@@ -86,6 +86,17 @@ void mino_state_free(mino_state_t *S)
     free(S->kw_intern.ht_buckets);
     free(S->gc_ranges);
     free(S->gc_mark_stack);
+    {
+        int i;
+        for (i = 0; i < 4; i++) {
+            gc_hdr_t *h = S->gc_freelists[i];
+            while (h != NULL) {
+                gc_hdr_t *next = h->next;
+                free(h);
+                h = next;
+            }
+        }
+    }
     free(S->core_forms);
     /* Free structured diagnostic. */
     diag_free(S->last_diag);
