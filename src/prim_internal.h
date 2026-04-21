@@ -205,6 +205,7 @@ mino_val_t *prim_seq_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_boolean_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_true_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_false_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_not(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_zero_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);

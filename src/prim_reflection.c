@@ -232,6 +232,16 @@ DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b =
 
 #undef DEFINE_TYPE_PRED
 
+mino_val_t *prim_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "not requires one argument");
+    }
+    return mino_is_truthy(args->as.cons.car) ? mino_false(S) : mino_true(S);
+}
+
 mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;

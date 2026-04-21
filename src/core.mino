@@ -63,7 +63,7 @@
 
 ;; --- Logic and utilities ---
 
-(def not      "Returns true if x is logical false, false otherwise." (fn [x] (if x false true)))
+;; not is a C primitive.
 (def not=     "Returns true if the arguments are not equal." (fn
                 ([x] false)
                 ([x y] (not (= x y)))

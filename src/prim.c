@@ -374,6 +374,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns true if x is the value true.");
     DEF_PRIM(env, "false?",   prim_false_p,
              "Returns true if x is the value false.");
+    DEF_PRIM(env, "not",      prim_not,
+             "Returns true if x is logical false, false otherwise.");
     DEF_PRIM(env, "some?",    prim_some_p,
              "Returns true if x is not nil.");
     DEF_PRIM(env, "empty?",   prim_empty_p,
