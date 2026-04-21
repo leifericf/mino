@@ -1,0 +1,96 @@
+(ns mino.tasks)
+
+;; Task runner: load tasks from mino.edn, resolve dependencies,
+;; and execute task functions in topological order.
+
+(defn load-tasks
+  "Read mino.edn and return the :tasks map.
+   Throws if the file is missing or :tasks is not a map."
+  [path]
+  (let [raw (read-string (slurp path))]
+    (when-not (map? raw)
+      (throw (ex-info (str "mino.edn must be a map, got: " (type raw))
+                      {:path path})))
+    (let [tasks (:tasks raw)]
+      (when (nil? tasks)
+        (throw (ex-info "mino.edn has no :tasks key" {:path path})))
+      (when-not (map? tasks)
+        (throw (ex-info (str ":tasks must be a map, got: " (type tasks))
+                        {:path path})))
+      tasks)))
+
+(defn- resolve-order*
+  "DFS helper. Returns [order visited] or throws on cycle."
+  [task-key tasks visiting visited order]
+  (cond
+    (contains? visited task-key)
+    [order visited]
+
+    (contains? visiting task-key)
+    (throw (ex-info (str "circular dependency: " (name task-key))
+                    {:task task-key}))
+
+    :else
+    (let [spec (get tasks task-key)]
+      (when (nil? spec)
+        (throw (ex-info (str "unknown task: " (name task-key))
+                        {:task task-key})))
+      (let [visiting (conj visiting task-key)
+            deps     (if (map? spec) (:deps spec) nil)
+            result   (reduce (fn [[ord vis] dep]
+                               (resolve-order* dep tasks visiting vis ord))
+                             [order visited]
+                             (or deps []))
+            ord      (first result)
+            vis      (second result)]
+        [(conj ord task-key) (conj vis task-key)]))))
+
+(defn resolve-order
+  "Return a vector of task keys in dependency order, ending with target.
+   Throws on cycles or missing tasks."
+  [target tasks]
+  (first (resolve-order* target tasks #{} #{} [])))
+
+(defn- require-ns
+  "Dynamically require a namespace by name string."
+  [ns-name]
+  (eval (list 'require (list 'quote [(symbol ns-name)]))))
+
+(defn- resolve-task-fn
+  "Resolve a task's :task symbol to a callable function.
+   Requires the namespace if needed."
+  [task-sym]
+  (let [ns-name (namespace task-sym)]
+    (when ns-name
+      (require-ns ns-name))
+    (let [f (resolve task-sym)]
+      (when (nil? f)
+        (throw (ex-info (str "cannot resolve task function: " task-sym)
+                        {:symbol task-sym})))
+      f)))
+
+(defn run!
+  "Run a task and all its dependencies in topological order."
+  [target tasks]
+  (let [order (resolve-order target tasks)]
+    (doseq [task-key order]
+      (let [spec  (get tasks task-key)
+            sym   (if (map? spec) (:task spec) spec)
+            _     (when (nil? sym)
+                    (throw (ex-info (str "task " (name task-key) " has no :task")
+                                   {:task task-key})))
+            f     (resolve-task-fn sym)
+            start (time-ms)]
+        (println (str "--- " (name task-key) " ---"))
+        (f)
+        (println (str "--- " (name task-key) " ("
+                      (- (time-ms) start) "ms) ---"))))))
+
+(defn list-tasks
+  "Print available tasks with their :doc strings."
+  [tasks]
+  (println "Available tasks:")
+  (doseq [[k v] tasks]
+    (let [doc (if (map? v) (:doc v) nil)]
+      (println (str "  " (name k)
+                    (when doc (str "  " doc)))))))
