@@ -24,6 +24,13 @@ static void state_init(mino_state_t *S)
     S->false_singleton.type = MINO_BOOL;
     S->recur_sentinel.type     = MINO_RECUR;
     S->tail_call_sentinel.type = MINO_TAIL_CALL;
+    {
+        int si;
+        for (si = 0; si < 256; si++) {
+            S->small_ints[si].type = MINO_INT;
+            S->small_ints[si].as.i = (long long)(si + MINO_SMALL_INT_LO);
+        }
+    }
     S->reader_line         = 1;
     S->reader_col          = 1;
     S->reader_dialect      = "mino";

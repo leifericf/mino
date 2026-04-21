@@ -176,6 +176,10 @@ typedef struct {
  * lookup; small frames use linear scan (faster for typical let/fn sizes). */
 #define ENV_HASH_THRESHOLD 32
 
+/* Small-integer cache range. Must fit in the small_ints[] array (256 slots). */
+#define MINO_SMALL_INT_LO (-128)
+#define MINO_SMALL_INT_HI  127
+
 struct mino_env {
     env_binding_t *bindings;
     size_t         len;
@@ -222,6 +226,12 @@ struct mino_state {
      * runs, so sharing one cell per kind is safe. */
     mino_val_t      recur_sentinel;
     mino_val_t      tail_call_sentinel;
+
+    /* Small-integer cache: mino_int(S, n) returns the shared cell for
+     * n in [MINO_SMALL_INT_LO, MINO_SMALL_INT_HI]. Arithmetic-heavy code
+     * (fib, loops, reductions) produces many small-int results and
+     * re-boxing them dominates allocation without this cache. */
+    mino_val_t      small_ints[256];
 
     /* Intern tables */
     intern_table_t  sym_intern;

@@ -29,7 +29,11 @@ mino_val_t *mino_false(mino_state_t *S)
 
 mino_val_t *mino_int(mino_state_t *S, long long n)
 {
-    mino_val_t *v = alloc_val(S, MINO_INT);
+    mino_val_t *v;
+    if (n >= MINO_SMALL_INT_LO && n <= MINO_SMALL_INT_HI) {
+        return &S->small_ints[n - MINO_SMALL_INT_LO];
+    }
+    v = alloc_val(S, MINO_INT);
     v->as.i = n;
     return v;
 }
