@@ -7,6 +7,8 @@
  * is written to stderr so piped output on stdout stays clean.
  */
 
+#define _POSIX_C_SOURCE 200809L
+
 #include "mino_internal.h"
 
 #include <stdio.h>
@@ -132,8 +134,6 @@ static const char *project_resolve(const char *name, void *ctx)
     if (nlen + 10 >= sizeof(pbuf)) return NULL;
 
     for (i = 0; i < project_path_count; i++) {
-        fprintf(stderr, "  resolve: project_paths[%zu] = %p\n",
-                i, (void *)project_paths[i]);
         if (try_resolve_in(project_paths[i], name, nlen,
                            pbuf, sizeof(pbuf)))
             return pbuf;
@@ -145,8 +145,8 @@ static const char *project_resolve(const char *name, void *ctx)
  * Called before any script execution if mino.edn exists. */
 static void setup_project(mino_state_t *S, mino_env_t *env)
 {
-    mino_val_t *paths;
     mino_val_t *result;
+    mino_ref_t *ref;
 
     if (!file_exists("mino.edn")) return;
 
@@ -158,14 +158,14 @@ static void setup_project(mino_state_t *S, mino_env_t *env)
 
     if (result == NULL || result->type != MINO_VECTOR) return;
 
-    /* Extract paths from the vector into our static array. */
-    paths = result;
+    /* Root the result so GC cannot collect it while we extract paths. */
+    ref = mino_ref(S, result);
     {
         size_t i;
-        size_t count = paths->as.vec.len;
+        size_t count = result->as.vec.len;
         if (count > MAX_PROJECT_PATHS) count = MAX_PROJECT_PATHS;
         for (i = 0; i < count; i++) {
-            mino_val_t *p = vec_nth(paths, i);
+            mino_val_t *p = vec_nth(result, i);
             if (p != NULL && p->type == MINO_STRING) {
                 project_paths[project_path_count] = strdup(p->as.s.data);
                 if (project_paths[project_path_count] != NULL)
@@ -173,14 +173,10 @@ static void setup_project(mino_state_t *S, mino_env_t *env)
             }
         }
     }
+    mino_unref(S, ref);
 
-    if (project_path_count > 0) {
-        size_t j;
-        for (j = 0; j < project_path_count; j++)
-            fprintf(stderr, "  project_path[%zu] = %p \"%s\"\n",
-                    j, (void *)project_paths[j], project_paths[j]);
+    if (project_path_count > 0)
         mino_set_resolver(S, project_resolve, NULL);
-    }
 }
 
 /* Report an evaluation error to stderr. */
