@@ -428,3 +428,27 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     result = map_get_val(v, msg_key);
     return result != NULL ? result : mino_nil(S);
 }
+
+/* (gc-stats) — return a map of GC statistics:
+ *   {:collections N :bytes-live N :bytes-alloc N :bytes-freed N :threshold N} */
+mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ks[5];
+    mino_val_t *vs[5];
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "gc-stats takes no arguments");
+    }
+    ks[0] = mino_keyword(S, "collections");
+    vs[0] = mino_int(S, (long long)S->gc_collections);
+    ks[1] = mino_keyword(S, "bytes-live");
+    vs[1] = mino_int(S, (long long)S->gc_bytes_live);
+    ks[2] = mino_keyword(S, "bytes-alloc");
+    vs[2] = mino_int(S, (long long)S->gc_bytes_alloc);
+    ks[3] = mino_keyword(S, "bytes-freed");
+    vs[3] = mino_int(S, (long long)S->gc_total_freed);
+    ks[4] = mino_keyword(S, "threshold");
+    vs[4] = mino_int(S, (long long)S->gc_threshold);
+    return mino_map(S, ks, vs, 5);
+}

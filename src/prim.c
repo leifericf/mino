@@ -542,4 +542,6 @@ void mino_install_io(mino_state_t *S, mino_env_t *env)
              "Returns the current working directory.");
     DEF_PRIM(env, "chdir",    prim_chdir,
              "Changes the current working directory.");
+    DEF_PRIM(env, "gc-stats", prim_gc_stats,
+             "Returns a map of GC statistics.");
 }

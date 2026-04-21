@@ -602,6 +602,7 @@ static void gc_sweep(mino_state_t *S)
             free(h);
         }
     }
+    S->gc_total_freed += S->gc_bytes_alloc - live;
     S->gc_bytes_live  = live;
     S->gc_bytes_alloc = live;
     /* Next cycle triggers after another threshold's worth of growth above
@@ -634,5 +635,6 @@ void gc_collect(mino_state_t *S)
     gc_scan_stack(S);
     gc_range_compact(S);
     gc_sweep(S);
+    S->gc_collections++;
     S->gc_depth--;
 }
