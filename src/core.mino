@@ -773,8 +773,8 @@
 (def split-with "Returns a vector of [(take-while pred coll) (drop-while pred coll)]." (fn [pred coll]
   (vector (take-while pred coll) (drop-while pred coll))))
 
-(def mapv    "Returns a vector of applying f to each item in coll." (fn [f coll] (into [] (map f coll))))
-(def filterv "Returns a vector of items in coll for which pred returns truthy." (fn [pred coll] (into [] (filter pred coll))))
+;; mapv is defined as a C primitive; no mino-level fallback needed.
+;; filterv is defined as a C primitive; no mino-level fallback needed.
 
 (def sort-by "Returns a sorted sequence of the items in coll, ordered by (keyfn item)." (fn [keyfn & args]
   (let [cmp  (if (= (count args) 2) (first args) compare)
