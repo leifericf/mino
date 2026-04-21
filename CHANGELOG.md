@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Task runner**: `mino task <name>` executes named tasks from
+  `mino.edn` with dependency resolution. `mino task` lists available
+  tasks. Tasks are ordinary mino functions referenced by qualified
+  symbols.
+- **Makefile parity tasks**: `build`, `clean`, `test`, `test-external`,
+  `gen-core-header`, `qa-arch` defined in `mino.edn` as the native
+  replacement for the Makefile build.
+- **`file-mtime` primitive**: returns file modification time in
+  milliseconds via `stat(2)`. Enables incremental compilation.
+- **C `str-replace` primitive**: single-pass O(n) string replacement,
+  replacing the mino-level split+join implementation.
+
 ## [0.38.0] — project manifest and dependency management
 
 ### Added
