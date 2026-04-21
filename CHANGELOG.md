@@ -1,12 +1,8 @@
 # Changelog
 
-All notable changes to mino are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
-adheres to [Semantic Versioning](https://semver.org/).
-
 ## Unreleased
 
-## 0.39.1 — cross-platform portability fixes
+## v0.39.1 — Cross-Platform Portability Fixes
 
 ### Fixed
 - **Linux segfault**: `strdup` was implicitly declared under `-std=c99`,
@@ -22,7 +18,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **`longjmp` clobbering**: mark variables crossed by `setjmp`/`longjmp`
   as `volatile` in require spec processing (GCC `-Wclobbered`).
 
-## 0.39.0 — task runner and self-hosting build
+## v0.39.0 — Task Runner and Self-Hosting Build
 
 ### Added
 - **Task runner**: `mino task <name>` executes named tasks from
@@ -43,7 +39,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **Makefile**: replaced entirely by `mino task` commands. Bootstrap
   from source with a single `cc` invocation, then use `mino task build`.
 
-## 0.38.0 — project manifest and dependency management
+## v0.38.0 — Project Manifest and Dependency Management
 
 ### Added
 - **Project manifest**: `mino.edn` with `:paths` (source directories)
@@ -69,7 +65,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **Deps logic in mino**: `lib/mino/deps.mino` provides manifest
   loading, validation, git fetching, and path resolution.
 
-## 0.37.0 — compatibility and stdlib
+## v0.37.0 — Compatibility and Stdlib
 
 ### Added
 - **Multimethods**: `defmulti`, `defmethod` with value dispatch,
@@ -112,7 +108,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 - All shell/bash scripts from the repository.
 
-## 0.36.0 — error diagnostics
+## v0.36.0 — Error Diagnostics
 
 ### Added
 - **Structured diagnostics**: all errors are now represented as
@@ -145,7 +141,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `prim_throw_error` no longer infinite-recurses when called outside
   a try block.
 
-## 0.35.0 — core.async and conformance
+## v0.35.0 — core.async and Conformance
 
 ### Added
 - **core.async**: full CSP channel implementation with go macro.
@@ -208,7 +204,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   consumed but not forwarded).
 - Merge with zero channels closes output immediately.
 
-## 0.34.0 — conformance hardening phase 2
+## v0.34.0 — Conformance Hardening Phase 2
 
 ### Added
 - Radix integer literals (`2r1010`, `8r77`, `16rFF`, bases 2-36).
@@ -244,7 +240,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   construction loop.
 - Benchmarks updated for the explicit `mino_state_t` API.
 
-## 0.33.0 — conformance hardening
+## v0.33.0 — Conformance Hardening
 
 ### Added
 - `double?` and `char?` type predicates.
@@ -274,7 +270,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Reader conditional `#?@` splice now handles vector values in
   list context (was silently dropping elements).
 
-## 0.32.0 — host interop
+## v0.32.0 — Host Interop
 
 ### Added
 - **Capability registry**: type-oriented registry for host interop.
@@ -294,7 +290,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Symbol resolver now checks literal env bindings before qualified
   name resolution, allowing slash-containing names like `host/new`.
 
-## 0.31.0 — clojure.string namespace
+## v0.31.0 — clojure.string Namespace
 
 ### Added
 - **`clojure.string` namespace** (`lib/clojure/string.mino`): provides
@@ -312,7 +308,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - `require` now saves and restores the current namespace, preventing
   `ns` forms in loaded files from leaking into the caller's context.
 
-## 0.30.0 — hierarchies and dispatch essentials
+## v0.30.0 — Hierarchies and Dispatch Essentials
 
 ### Added
 - **`make-hierarchy`**: create an empty hierarchy map.
@@ -328,7 +324,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   hierarchy lookup, and element-wise vector comparison.
 - Global hierarchy atom for convenient 1-arg/2-arg function variants.
 
-## 0.29.0 — stateful operations and watches
+## v0.29.0 — Stateful Operations and Watches
 
 ### Added
 - **`add-watch`**: register a callback on an atom that fires on every
@@ -344,7 +340,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **`reset!`** and **`swap!`**: now invoke validators before committing
   and notify watches after committing.
 
-## 0.28.0 — core collections semantics
+## v0.28.0 — Core Collections Semantics
 
 ### Added
 - **`subvec`**: O(1) vector slice sharing the backing trie via offset.
@@ -358,7 +354,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **`empty`**: preserves metadata from input collection on the empty
   result for vectors, maps, sets, and sorted variants.
 
-## 0.27.0 — numeric tower behavior
+## v0.27.0 — Numeric Tower Behavior
 
 ### Added
 - **`unsigned-bit-shift-right`**: C primitive for unsigned (logical)
@@ -375,7 +371,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **`long`**, **`double`**: coercion aliases for `int` and `float`.
 - **`num`**: validates that its argument is numeric, returns it as-is.
 
-## 0.26.0 — reader literal parity
+## v0.26.0 — Reader Literal Parity
 
 ### Added
 - **Special float tokens**: `##Inf`, `##-Inf`, `##NaN` reader tokens
@@ -390,7 +386,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **Float division by zero**: float operands produce IEEE infinity/NaN
   instead of throwing.
 
-## 0.25.0 — test framework compatibility
+## v0.25.0 — Test Framework Compatibility
 
 ### Added
 - **`are` macro**: parameterized assertion macro for the test framework.
@@ -412,7 +408,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   environment for C primitives and auto-interns a var, so
   `when-var-exists` works for all built-in functions.
 
-## 0.24.0 — namespace and var semantics
+## v0.24.0 — Namespace and Var Semantics
 
 ### Added
 - **`MINO_VAR` value type**: first-class vars with namespace, name,
@@ -433,7 +429,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **`qualified-keyword?`**, **`qualified-symbol?`**,
   **`simple-keyword?`**, **`simple-symbol?`**: qualification predicates.
 
-## 0.23.0 — reader and loadability baseline
+## v0.23.0 — Reader and Loadability Baseline
 
 ### Added
 - **`ns` special form**: establishes the current namespace and processes
@@ -447,7 +443,7 @@ adheres to [Semantic Versioning](https://semver.org/).
 - **Namespace and reader dialect state**: `mino_state_t` tracks
   `current_ns` and `reader_dialect` fields.
 
-## 0.22.0 — collection and sequence conformance
+## v0.22.0 — Collection and Sequence Conformance
 
 ### Added
 - **Collections as callable functions**: maps, vectors, and sets can be
@@ -489,7 +485,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   `MINO_LAZY` with an optional C thunk function pointer for efficient
   deferred iteration without eval overhead.
 
-## 0.21.0 — architecture hardening
+## v0.21.0 — Architecture Hardening
 
 ### Changed
 - **Module extraction**: evaluator, runtime, and primitive code further
@@ -522,7 +518,7 @@ adheres to [Semantic Versioning](https://semver.org/).
   when the inner eval returns NULL without throwing.
 - Regex thread test joins thread 1 if thread 2 creation fails.
 
-## 0.20.0 — dialect alignment
+## v0.20.0 — Dialect Alignment
 
 Brings mino's surface language into close alignment with standard
 conventions. Multi-arity functions, destructuring, protocols,
@@ -627,7 +623,7 @@ from 664).
 - `transduce` unwraps nested reduced values.
 - `:or` destructuring uses symbol keys correctly.
 
-## 0.19.0 — explicit runtime state
+## v0.19.0 — Explicit Runtime State
 
 ### Breaking changes
 
@@ -662,7 +658,7 @@ from 664).
 - Fixed `mino_env_clone` changelog description: it clones within the
   same state (values are shared), not across states.
 
-## 0.18.0 — runtime state, GC hardening, and repo reorganization
+## v0.18.0 — Runtime State, GC Hardening, and Repo Reorganization
 
 Multi-instance runtime support, GC correctness under stress, and a
 cleaner project layout for embedding and development.
@@ -741,7 +737,7 @@ cleaner project layout for embedding and development.
   actors dropped from 6 seconds to 156 ms.
 
 
-## 0.17.0 — proper tail calls and core library
+## v0.17.0 — Proper Tail Calls and Core Library
 
 Proper tail call optimization in the evaluator. All function calls in
 tail position run in constant stack space, including mutual recursion.
@@ -783,7 +779,7 @@ to feature parity with core language functions.
   `:when`).
 - **Test suite**: 300 tests, 664 assertions (up from 228/511).
 
-## 0.16.0 — complete C primitive layer
+## v0.16.0 — Complete C Primitive Layer
 
 Adds every C primitive needed to implement the non-JVM parts of
 clojure.core. The pure mino compositions come in a later version;
@@ -816,7 +812,7 @@ this version focuses on the C foundation.
   marked for eventual migration.
 - Makefile builds `re.o` from vendored `re.c`.
 
-## 0.15.0 — test framework and dogfooding
+## v0.15.0 — Test Framework and Dogfooding
 
 Replaces all shell test scripts with mino-based tests. The language
 now tests itself.
@@ -844,7 +840,7 @@ now tests itself.
 - **Shell scripts removed**: `tests/smoke.sh` and
   `fuzz/crash_test.sh` deleted. No `.sh` files in test infra.
 
-## 0.14.0 — lazy sequences, complete C core, core.mino expansion
+## v0.14.0 — Lazy Sequences, Complete C Core, core.mino Expansion
 
 Lazy sequences land as a first-class type, enabling infinite data
 structures and demand-driven evaluation. The C core gains its final
@@ -898,7 +894,7 @@ implementations. core.mino nearly doubles in size.
 - Cons printer forces lazy tails for correct output.
 - `list_length` forces lazy tails for correct `count`.
 
-## 0.13.0 — atoms, spit, stdlib architecture
+## v0.13.0 — Atoms, Spit, Stdlib Architecture
 
 Establishes the three-tier architecture: C runtime (irreducible
 primitives), bundled stdlib.mino (macros and compositions), and
@@ -925,7 +921,7 @@ future mino-std package. Delivers atoms and spit.
   `fn?`, `set?`) moved from C to mino. C primitive count reduced
   from 72 to 57.
 
-## 0.12.0 — release candidate (alpha)
+## v0.12.0 — Release Candidate (Alpha)
 
 Quality, polish, and documentation pass. No new language features.
 
@@ -960,7 +956,7 @@ Quality, polish, and documentation pass. No new language features.
   declarations, UNSTABLE marker retained (alpha).
 - LOC: mino.c ~6,672, mino.h ~352 (within 15k–25k budget).
 
-## 0.11.0 — sequences and remainder of stdlib
+## v0.11.0 — Sequences and Remainder of Stdlib
 
 Sets, sequence transformations, string operations, and utility functions
 round out the core standard library. Strict (non-lazy) semantics
@@ -1004,7 +1000,7 @@ collection.
   simpler, more predictable, and a better fit for the embeddable
   runtime identity. The deviation from the host language is documented.
 
-## 0.10.0 — interactive development
+## v0.10.0 — Interactive Development
 
 The printer is now cycle-safe, `def`/`defmacro` record metadata for
 introspection, and a new in-process REPL handle lets a host drive
@@ -1048,7 +1044,7 @@ read-eval-print one line at a time with no thread required.
 - 170 smoke tests, all passing under normal and `MINO_GC_STRESS=1`
   modes at both `-O0` and `-O2`.
 
-## 0.9.0 — sandbox, modules, diagnostics
+## v0.9.0 — Sandbox, Modules, Diagnostics
 
 Runtime errors now carry source locations and call-stack traces. Script
 code gains `try`/`catch`/`throw` for recoverable exceptions. The core
@@ -1103,7 +1099,7 @@ enables `require` for file-based modules.
 - The module cache and resolver are global (not per-env). Thread
   safety is not a goal pre-v1.0.
 
-## 0.8.0 — host C API
+## v0.8.0 — Host C API
 
 First draft of the embedding API. An external C program can now create a
 runtime, register host functions, evaluate source, call mino functions,
@@ -1165,7 +1161,7 @@ configuration. The `mino_load_file` function is the first place the
 runtime performs host I/O on behalf of the caller; v0.9 will gate this
 behind the capability model.
 
-## 0.7.0 — tracing garbage collection
+## v0.7.0 — Tracing Garbage Collection
 
 Replaces the per-allocation `malloc`/`free` discipline with a stop-the-world
 mark-and-sweep collector. Every heap object the runtime produces — values,
@@ -1237,7 +1233,7 @@ live-bytes threshold keeps mean pause time bounded. The v0.12 release
 candidate will profile realistic workloads and decide whether to layer
 on an incremental pass.
 
-## 0.6.0 — macros
+## v0.6.0 — Macros
 
 Lifts the surface language above its primitives. `defmacro`, quasiquote,
 and a small set of in-language threading and short-circuit forms mean
@@ -1285,7 +1281,7 @@ for `gensym` when they need an identifier that can't capture anything
 the caller introduced. The decision whether to keep gensym-only or
 add full hygiene lands in v1.0 triage.
 
-## 0.5.0 — persistent maps
+## v0.5.0 — Persistent Maps
 
 Replaces the map layout with a 32-wide hash array mapped trie. `get`,
 `assoc`, and `update` are now sub-linear; maps can be used as map keys,
@@ -1328,7 +1324,7 @@ The v0.5 HAMT is the last structural replacement before the GC work
 in v0.7; from here the layout stays but the allocator underneath
 changes. Semantics remain the contract.
 
-## 0.4.0 — persistent vectors
+## v0.4.0 — Persistent Vectors
 
 Replaces the vector layout with a persistent 32-way trie without
 changing the surface language. Every vector primitive from v0.3 behaves
@@ -1372,7 +1368,7 @@ The naïve map layout from v0.3 is still in place. v0.5 replaces it
 with a HAMT, again without changing the surface API. The semantics
 are the contract, not the layout.
 
-## 0.3.0 — literal vectors, maps, and keywords
+## v0.3.0 — Literal Vectors, Maps, and Keywords
 
 Brings the value-oriented data model to the surface language. Programs
 can now express structured data literally and manipulate it through
@@ -1416,7 +1412,7 @@ the primitive signatures and semantics; v0.4 replaces the vector
 layout with a persistent 32-way trie and v0.5 replaces the map with a
 HAMT, both without changes to the surface API.
 
-## 0.2.0 — core special forms and closures
+## v0.2.0 — Core Special Forms and Closures
 
 Locks in lexical scope, first-class functions, and bounded-stack tail
 recursion. The evaluator is now expressive enough to define factorial
@@ -1451,7 +1447,7 @@ and fib iteratively and to build and apply higher-order functions.
 - 25 additional smoke-test cases covering the new forms, closures,
   factorial, fib, and deep tail recursion (48 cases total).
 
-## 0.1.0 — walking skeleton
+## v0.1.0 — Walking Skeleton
 
 The first published milestone. Establishes the single-file build, the
 public C header, and an end-to-end read-eval-print pipeline.
