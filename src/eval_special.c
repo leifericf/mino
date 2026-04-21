@@ -75,7 +75,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         }
     }
 
-    v = dyn_lookup(S, buf);
+    v = (S->dyn_stack != NULL) ? dyn_lookup(S, buf) : NULL;
     if (v == NULL) v = mino_env_get(env, buf);
     if (v == NULL) {
         char msg[300];
