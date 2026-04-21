@@ -33,6 +33,9 @@
 (defn- src->obj [src]
   (str (subs src 0 (- (count src) 2)) ".o"))
 
+(defn- src->dep [src]
+  (str (subs src 0 (- (count src) 2)) ".d"))
+
 (defn- stale?
   "True if output does not exist or any input is newer."
   [inputs output]
@@ -42,6 +45,22 @@
       (some #(let [in-mtime (file-mtime %)]
                (and in-mtime (> in-mtime out-mtime)))
             inputs))))
+
+(defn- read-depfile
+  "Parse a .d file into a vector of dependency paths.
+   Format: target: dep1 dep2 \\ dep3 dep4"
+  [path]
+  (when (file-exists? path)
+    (let [content (slurp path)
+          ;; Remove backslash-newline continuations and trailing whitespace
+          flat    (-> content
+                      (str-replace "\\\n" " ")
+                      (str-replace "\n" " ")
+                      trim)
+          ;; Split on whitespace, skip target (first token ending in :)
+          tokens  (filter #(not (= "" %)) (split flat " "))
+          deps    (rest tokens)]
+      (vec (filter #(not (= "\\" %)) deps)))))
 
 ;; ---- Tasks ----
 
@@ -66,11 +85,13 @@
   "Compile all .c sources and link the mino binary."
   []
   (let [compiled (atom 0)]
-    ;; Compile stale .c -> .o
+    ;; Compile stale .c -> .o (uses .d depfiles for header tracking)
     (doseq [src all-srcs]
-      (let [obj (src->obj src)]
-        (when (stale? [src] obj)
-          (let [args (into [cc] (concat cflags ["-c" "-o" obj src]))]
+      (let [obj  (src->obj src)
+            dep  (src->dep src)
+            deps (or (read-depfile dep) [src])]
+        (when (stale? deps obj)
+          (let [args (into [cc] (concat cflags ["-MMD" "-c" "-o" obj src]))]
             (println (str "  " (str/join " " args)))
             (apply sh! args)
             (swap! compiled inc)))))
@@ -85,12 +106,13 @@
         (println "  nothing to compile")))))
 
 (defn clean
-  "Remove object files, binary, and generated header."
+  "Remove object files, dep files, binary, and generated header."
   []
   (doseq [src all-srcs]
-    (let [obj (src->obj src)]
-      (when (file-exists? obj)
-        (rm-rf obj))))
+    (let [obj (src->obj src)
+          dep (src->dep src)]
+      (when (file-exists? obj) (rm-rf obj))
+      (when (file-exists? dep) (rm-rf dep))))
   (when (file-exists? "mino")
     (rm-rf "mino"))
   (when (file-exists? "src/core_mino.h")
