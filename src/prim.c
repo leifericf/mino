@@ -340,6 +340,40 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns a new symbol with a unique name.");
     DEF_PRIM(env, "type",     prim_type,
              "Returns a keyword indicating the type of the value.");
+    DEF_PRIM(env, "nil?",     prim_nil_p,
+             "Returns true if x is nil.");
+    DEF_PRIM(env, "cons?",    prim_cons_p,
+             "Returns true if x is a list (cons cell).");
+    DEF_PRIM(env, "vector?",  prim_vector_p,
+             "Returns true if x is a vector.");
+    DEF_PRIM(env, "int?",     prim_int_p,
+             "Returns true if x is an integer.");
+    DEF_PRIM(env, "float?",   prim_float_p,
+             "Returns true if x is a float.");
+    DEF_PRIM(env, "string?",  prim_string_p,
+             "Returns true if x is a string.");
+    DEF_PRIM(env, "keyword?", prim_keyword_p,
+             "Returns true if x is a keyword.");
+    DEF_PRIM(env, "symbol?",  prim_symbol_p,
+             "Returns true if x is a symbol.");
+    DEF_PRIM(env, "fn?",      prim_fn_p,
+             "Returns true if x is callable as a function (fn or prim).");
+    DEF_PRIM(env, "char?",    prim_char_p,
+             "Returns true if x is a one-character string.");
+    DEF_PRIM(env, "number?",  prim_number_p,
+             "Returns true if x is a number (int or float).");
+    DEF_PRIM(env, "map?",     prim_map_p,
+             "Returns true if x is a map (including sorted-map).");
+    DEF_PRIM(env, "set?",     prim_set_p,
+             "Returns true if x is a set (including sorted-set).");
+    DEF_PRIM(env, "seq?",     prim_seq_p,
+             "Returns true if x is a cons cell or lazy-seq.");
+    DEF_PRIM(env, "boolean?", prim_boolean_p,
+             "Returns true if x is true or false.");
+    DEF_PRIM(env, "true?",    prim_true_p,
+             "Returns true if x is the value true.");
+    DEF_PRIM(env, "false?",   prim_false_p,
+             "Returns true if x is the value false.");
     DEF_PRIM(env, "name",      prim_name,
              "Returns the name string of a symbol, keyword, or string.");
     DEF_PRIM(env, "namespace", prim_namespace,

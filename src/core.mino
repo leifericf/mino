@@ -74,18 +74,11 @@
 
 ;; >, <=, >= are C primitives (compare_chain) — see prim_numeric.c
 
-;; --- Type predicates (built on type) ---
+;; --- Type predicates ---
+;; Most primitive type predicates (nil?, cons?, string?, number?, keyword?,
+;; symbol?, vector?, map?, fn?, set?, seq?) are defined as C primitives
+;; for speed. ifn? is kept here since it combines multiple predicates.
 
-(def nil?     "Returns true if x is nil." (fn [x] (= (type x) :nil)))
-(def cons?    "Returns true if x is a list." (fn [x] (= (type x) :list)))
-(def string?  "Returns true if x is a string." (fn [x] (= (type x) :string)))
-(def number?  "Returns true if x is a number (int or float)." (fn [x] (let [t (type x)] (or (= t :int) (= t :float)))))
-(def keyword? "Returns true if x is a keyword." (fn [x] (= (type x) :keyword)))
-(def symbol?  "Returns true if x is a symbol." (fn [x] (= (type x) :symbol)))
-(def vector?  "Returns true if x is a vector." (fn [x] (= (type x) :vector)))
-(def map?     "Returns true if x is a map." (fn [x] (let [t (type x)] (or (= t :map) (= t :sorted-map)))))
-(def fn?      "Returns true if x is a function." (fn [x] (= (type x) :fn)))
-(def set?     "Returns true if x is a set." (fn [x] (let [t (type x)] (or (= t :set) (= t :sorted-set)))))
 (def ifn?     "Returns true if x can be called as a function." (fn [x] (or (fn? x) (keyword? x) (map? x) (vector? x) (set? x) (symbol? x) (var? x))))
 
 ;; --- Qualified symbol/keyword predicates ---
@@ -314,7 +307,7 @@
 (def not-empty  "Returns coll if it has items, nil otherwise." (fn [coll] (if (seq coll) coll nil)))
 (def constantly "Returns a function that always returns x." (fn [x] (fn [& _] x)))
 (def boolean    "Coerces x to a boolean value." (fn [x] (if x true false)))
-(def seq?       "Returns true if x is a seq (list or lazy-seq)." (fn [x] (or (cons? x) (= (type x) :lazy-seq))))
+;; seq? is defined as a C primitive; no mino-level fallback needed.
 
 ;; --- Collection utilities ---
 
@@ -563,18 +556,13 @@
     nil)))
 
 ;; --- Type predicates and trivial compositions ---
+;; true?, false?, boolean?, int?, float?, char? are C primitives.
 
-(def true?     "Returns true if x is the value true." (fn [x] (= x true)))
-(def false?    "Returns true if x is the value false." (fn [x] (= x false)))
-(def boolean?  "Returns true if x is true or false." (fn [x] (or (= x true) (= x false))))
-(def int?      "Returns true if x is an integer." (fn [x] (= (type x) :int)))
 (def integer?  "Returns true if x is an integer." int?)
-(def float?    "Returns true if x is a float." (fn [x] (= (type x) :float)))
 (def pos-int?  "Returns true if x is a positive integer." (fn [x] (and (int? x) (pos? x))))
 (def neg-int?  "Returns true if x is a negative integer." (fn [x] (and (int? x) (neg? x))))
 (def nat-int?  "Returns true if x is a non-negative integer." (fn [x] (and (int? x) (not (neg? x)))))
 (def double?   "Returns true if x is a float." float?)
-(def char?     "Returns true if x is a character." (fn [x] (= (type x) :char)))
 (def ratio?    "Returns false. Ratios are not supported." (fn [x] false))
 (def decimal?  "Returns false. Decimals are not supported." (fn [x] false))
 (def rational? "Returns true if x is rational (integer)." (fn [x] (int? x)))

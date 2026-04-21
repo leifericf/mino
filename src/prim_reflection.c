@@ -195,6 +195,43 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_keyword(S, "unknown");
 }
 
+/* Type-predicate primitives. Each mirrors the mino-level
+ * `(fn [x] (= (type x) :foo))` form but skips the keyword allocation
+ * and equality comparison by checking the tag directly. */
+
+#define DEFINE_TYPE_PRED(fn_name, pred_expr, label) \
+    mino_val_t *fn_name(mino_state_t *S, mino_val_t *args, mino_env_t *env) \
+    { \
+        mino_val_t *v; \
+        (void)env; \
+        if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) { \
+            return prim_throw_classified(S, "eval/arity", "MAR001", \
+                label " requires one argument"); \
+        } \
+        v = args->as.cons.car; \
+        return (pred_expr) ? mino_true(S) : mino_false(S); \
+    }
+
+DEFINE_TYPE_PRED(prim_nil_p,     (v == NULL || v->type == MINO_NIL),           "nil?")
+DEFINE_TYPE_PRED(prim_cons_p,    (v != NULL && v->type == MINO_CONS),          "cons?")
+DEFINE_TYPE_PRED(prim_vector_p,  (v != NULL && v->type == MINO_VECTOR),        "vector?")
+DEFINE_TYPE_PRED(prim_int_p,     (v != NULL && v->type == MINO_INT),           "int?")
+DEFINE_TYPE_PRED(prim_float_p,   (v != NULL && v->type == MINO_FLOAT),         "float?")
+DEFINE_TYPE_PRED(prim_string_p,  (v != NULL && v->type == MINO_STRING),        "string?")
+DEFINE_TYPE_PRED(prim_keyword_p, (v != NULL && v->type == MINO_KEYWORD),       "keyword?")
+DEFINE_TYPE_PRED(prim_symbol_p,  (v != NULL && v->type == MINO_SYMBOL),        "symbol?")
+DEFINE_TYPE_PRED(prim_fn_p,      (v != NULL && (v->type == MINO_FN || v->type == MINO_PRIM)), "fn?")
+DEFINE_TYPE_PRED(prim_char_p,    0, "char?") /* mino has no separate char type */
+DEFINE_TYPE_PRED(prim_number_p,  (v != NULL && (v->type == MINO_INT || v->type == MINO_FLOAT)), "number?")
+DEFINE_TYPE_PRED(prim_map_p,     (v != NULL && (v->type == MINO_MAP || v->type == MINO_SORTED_MAP)), "map?")
+DEFINE_TYPE_PRED(prim_set_p,     (v != NULL && (v->type == MINO_SET || v->type == MINO_SORTED_SET)), "set?")
+DEFINE_TYPE_PRED(prim_seq_p,     (v != NULL && (v->type == MINO_CONS || v->type == MINO_LAZY)), "seq?")
+DEFINE_TYPE_PRED(prim_boolean_p, (v != NULL && v->type == MINO_BOOL),          "boolean?")
+DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && v->type == MINO_BOOL && v->as.b != 0),  "true?")
+DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b == 0),  "false?")
+
+#undef DEFINE_TYPE_PRED
+
 mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int expanded;
