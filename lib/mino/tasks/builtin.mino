@@ -95,9 +95,11 @@
             (println (str "  " (str/join " " args)))
             (apply sh! args)
             (swap! compiled inc)))))
-    ;; Link if anything was compiled or the binary is missing
-    (let [objs   (mapv src->obj all-srcs)
-          need-link (or (> @compiled 0) (not (file-exists? "mino")))]
+    ;; Link if anything was compiled or the binary is missing.
+    ;; On Windows, gcc -o mino produces mino.exe, so check both names.
+    (let [objs      (mapv src->obj all-srcs)
+          bin-exists (or (file-exists? "mino") (file-exists? "mino.exe"))
+          need-link  (or (> @compiled 0) (not bin-exists))]
       (when need-link
         (let [args (into [cc] (concat cflags ldflags ["-o" "mino"] objs libs))]
           (println (str "  " (str/join " " args)))
@@ -113,8 +115,8 @@
           dep (src->dep src)]
       (when (file-exists? obj) (rm-rf obj))
       (when (file-exists? dep) (rm-rf dep))))
-  (when (file-exists? "mino")
-    (rm-rf "mino"))
+  (when (file-exists? "mino") (rm-rf "mino"))
+  (when (file-exists? "mino.exe") (rm-rf "mino.exe"))
   (when (file-exists? "src/core_mino.h")
     (rm-rf "src/core_mino.h"))
   (println "  cleaned"))
