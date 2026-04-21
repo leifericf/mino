@@ -6,6 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.38.0] — project manifest and dependency management
+
+### Added
+- **Project manifest**: `mino.edn` with `:paths` (source directories)
+  and `:deps` (external dependencies). The manifest is pure EDN data;
+  unknown keys are ignored for forward compatibility.
+- **Dependency fetching**: `mino deps` subcommand clones git repos at
+  pinned revisions into `.mino/deps/`. Supports `:path` (local) and
+  `:git` (remote) coordinate types.
+- **Auto-wiring**: when `mino.edn` exists, the module resolver
+  automatically searches `:paths` and dependency directories. Works
+  in both file mode and the REPL.
+- **`:deps/root`**: override the source subdirectory within a git dep.
+  Defaults to `["src"]` to match standard project layouts.
+- **Filesystem primitives**: `file-exists?`, `directory?`, `mkdir-p`,
+  `rm-rf`. Installed via `mino_install_fs`. Uses POSIX APIs for
+  cross-platform portability.
+- **Process execution primitives**: `sh` (returns `{:exit n :out "..."}`),
+  `sh!` (returns stdout, throws on non-zero exit). Installed via
+  `mino_install_proc`.
+- **Binary-dir resolver fallback**: bundled `lib/` modules are found
+  via the binary's location, enabling mino to run from any working
+  directory.
+- **Deps logic in mino**: `lib/mino/deps.mino` provides manifest
+  loading, validation, git fetching, and path resolution.
+
 ## [0.37.0] — compatibility and stdlib
 
 ### Added
