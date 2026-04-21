@@ -505,13 +505,11 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         }
         if (sym_eq(head, "recur")) {
             mino_val_t *evaled = eval_args(S, args, env);
-            mino_val_t *r;
             if (evaled == NULL && mino_last_error(S) != NULL) {
                 return NULL;
             }
-            r = alloc_val(S, MINO_RECUR);
-            r->as.recur.args = evaled;
-            return r;
+            S->recur_sentinel.as.recur.args = evaled;
+            return &S->recur_sentinel;
         }
         if (sym_eq(head, "loop") || sym_eq(head, "loop*")) {
             return eval_loop(S, form, args, env, tail);
@@ -735,10 +733,9 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             /* Proper tail calls: in tail position, return a trampoline
              * sentinel instead of growing the C stack. */
             if (tail && fn->type == MINO_FN) {
-                mino_val_t *tc = alloc_val(S, MINO_TAIL_CALL);
-                tc->as.tail_call.fn   = fn;
-                tc->as.tail_call.args = evaled;
-                return tc;
+                S->tail_call_sentinel.as.tail_call.fn   = fn;
+                S->tail_call_sentinel.as.tail_call.args = evaled;
+                return &S->tail_call_sentinel;
             }
             return apply_callable(S, fn, evaled, env);
         }

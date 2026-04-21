@@ -582,6 +582,10 @@ static void gc_mark_roots(mino_state_t *S)
             gc_mark_interior(S, e->value);
         }
     }
+    /* Pin current trampoline sentinel payloads (args/fn pointers). */
+    gc_mark_interior(S, S->recur_sentinel.as.recur.args);
+    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.fn);
+    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.args);
     /* Pin async timer channel values. */
     async_timers_mark(S);
 }

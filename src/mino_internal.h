@@ -216,6 +216,12 @@ struct mino_state {
     mino_val_t      nil_singleton;
     mino_val_t      true_singleton;
     mino_val_t      false_singleton;
+    /* Trampoline sentinels reused across recur/tail-call to avoid
+     * per-iteration allocation. Their args/fn fields are replaced in-place
+     * and the containing eval loop consumes them before any other code
+     * runs, so sharing one cell per kind is safe. */
+    mino_val_t      recur_sentinel;
+    mino_val_t      tail_call_sentinel;
 
     /* Intern tables */
     intern_table_t  sym_intern;
