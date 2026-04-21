@@ -162,6 +162,27 @@ mino_val_t *prim_rm_rf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_nil(S);
 }
 
+/* (file-mtime path) -- return modification time as milliseconds, or nil. */
+mino_val_t *prim_file_mtime(mino_state_t *S, mino_val_t *args,
+                            mino_env_t *env)
+{
+    mino_val_t *path_val;
+    struct stat st;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "file-mtime requires one argument");
+    }
+    path_val = args->as.cons.car;
+    if (path_val == NULL || path_val->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "file-mtime: argument must be a string");
+    }
+    if (stat(path_val->as.s.data, &st) != 0)
+        return mino_nil(S);
+    return mino_int(S, (long long)st.st_mtime * 1000LL);
+}
+
 /* ---- install ---- */
 
 void mino_install_fs(mino_state_t *S, mino_env_t *env)
@@ -174,4 +195,6 @@ void mino_install_fs(mino_state_t *S, mino_env_t *env)
              "Creates a directory and any missing parent directories.");
     DEF_PRIM(env, "rm-rf",        prim_rm_rf,
              "Recursively removes a file or directory.");
+    DEF_PRIM(env, "file-mtime",   prim_file_mtime,
+             "Returns the file modification time in milliseconds, or nil.");
 }
