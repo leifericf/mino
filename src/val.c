@@ -55,24 +55,68 @@ mino_val_t *mino_string(mino_state_t *S, const char *s)
 }
 
 /*
- * Symbols and keywords are interned through small process-wide tables so
- * that identity comparison is pointer-equal after lookup. The tables are
- * flat arrays with linear scan — adequate until the v0.5 HAMT arrives and
- * the collector reclaims names. Entries live for the life of the process.
+ * Symbols and keywords are interned through tables with an open-addressing
+ * hash index for O(1) lookup. The flat entries[] array is kept for GC marking.
+ * Entries live for the life of the process.
  */
+
+#define INTERN_HT_EMPTY SIZE_MAX
+#define INTERN_HT_INIT  64
+#define INTERN_HT_LOAD  75  /* percent */
+
+static uint32_t intern_hash(const char *s, size_t len)
+{
+    return fnv_bytes(2166136261u, (const unsigned char *)s, len);
+}
+
+static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
+{
+    size_t i;
+    size_t mask = new_ht_cap - 1;
+    size_t *buckets = (size_t *)malloc(new_ht_cap * sizeof(*buckets));
+    if (buckets == NULL) return;  /* caller handles gracefully */
+    for (i = 0; i < new_ht_cap; i++) buckets[i] = INTERN_HT_EMPTY;
+    for (i = 0; i < tbl->len; i++) {
+        mino_val_t *e = tbl->entries[i];
+        uint32_t h = intern_hash(e->as.s.data, e->as.s.len);
+        size_t idx = h & mask;
+        while (buckets[idx] != INTERN_HT_EMPTY) idx = (idx + 1) & mask;
+        buckets[idx] = i;
+    }
+    free(tbl->ht_buckets);
+    tbl->ht_buckets = buckets;
+    tbl->ht_cap = new_ht_cap;
+}
 
 mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
                                            mino_type_t type,
                                            const char *s, size_t len)
 {
-    size_t i;
+    uint32_t h;
+    size_t mask, idx;
     mino_val_t *v;
-    for (i = 0; i < tbl->len; i++) {
-        mino_val_t *e = tbl->entries[i];
+
+    /* Bootstrap: build hash table on first call. */
+    if (tbl->ht_buckets == NULL) {
+        size_t init_cap = INTERN_HT_INIT;
+        while (init_cap < tbl->len * 2) init_cap *= 2;
+        intern_ht_rebuild(tbl, init_cap);
+    }
+
+    h = intern_hash(s, len);
+    mask = tbl->ht_cap - 1;
+    idx = h & mask;
+
+    /* Probe for existing entry. */
+    while (tbl->ht_buckets[idx] != INTERN_HT_EMPTY) {
+        mino_val_t *e = tbl->entries[tbl->ht_buckets[idx]];
         if (e->as.s.len == len && memcmp(e->as.s.data, s, len) == 0) {
             return e;
         }
+        idx = (idx + 1) & mask;
     }
+
+    /* Not found — grow entries array if needed. */
     if (tbl->len == tbl->cap) {
         size_t new_cap = tbl->cap == 0 ? 64 : tbl->cap * 2;
         mino_val_t **ne = (mino_val_t **)realloc(
@@ -84,10 +128,22 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
         tbl->entries = ne;
         tbl->cap = new_cap;
     }
+
+    /* Create and insert. */
     v = alloc_val(S, type);
     v->as.s.data = dup_n(S, s, len);
     v->as.s.len  = len;
-    tbl->entries[tbl->len++] = v;
+    tbl->entries[tbl->len] = v;
+
+    /* Insert index into hash table. */
+    tbl->ht_buckets[idx] = tbl->len;
+    tbl->len++;
+
+    /* Rehash if load exceeds threshold. */
+    if (tbl->len * 100 > tbl->ht_cap * INTERN_HT_LOAD) {
+        intern_ht_rebuild(tbl, tbl->ht_cap * 2);
+    }
+
     return v;
 }
 

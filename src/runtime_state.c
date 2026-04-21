@@ -81,7 +81,9 @@ void mino_state_free(mino_state_t *S)
     }
     free(S->meta_table);
     free(S->sym_intern.entries);
+    free(S->sym_intern.ht_buckets);
     free(S->kw_intern.entries);
+    free(S->kw_intern.ht_buckets);
     free(S->gc_ranges);
     free(S->core_forms);
     /* Free structured diagnostic. */

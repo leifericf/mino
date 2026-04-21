@@ -78,11 +78,13 @@ typedef struct {
     mino_val_t *source;
 } meta_entry_t;
 
-/* Intern table. */
+/* Intern table with hash index for O(1) lookup. */
 typedef struct {
     mino_val_t **entries;
     size_t       len;
     size_t       cap;
+    size_t      *ht_buckets;  /* open-addressing hash table: index into entries[] */
+    size_t       ht_cap;      /* power of 2; SIZE_MAX marks empty slots */
 } intern_table_t;
 
 /* Call-stack frame for stack traces. */
