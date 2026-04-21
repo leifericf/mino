@@ -227,6 +227,32 @@ struct mino_state {
     intern_table_t  sym_intern;
     intern_table_t  kw_intern;
 
+    /* Cached interned special-form symbols for O(1) pointer-eq dispatch.
+     * Populated lazily on first eval_impl call. */
+    int             sf_initialized;
+    mino_val_t     *sf_quote;
+    mino_val_t     *sf_quasiquote;
+    mino_val_t     *sf_unquote;
+    mino_val_t     *sf_unquote_splicing;
+    mino_val_t     *sf_defmacro;
+    mino_val_t     *sf_declare;
+    mino_val_t     *sf_ns;
+    mino_val_t     *sf_var;
+    mino_val_t     *sf_def;
+    mino_val_t     *sf_if;
+    mino_val_t     *sf_do;
+    mino_val_t     *sf_let;
+    mino_val_t     *sf_let_star;
+    mino_val_t     *sf_fn;
+    mino_val_t     *sf_fn_star;
+    mino_val_t     *sf_recur;
+    mino_val_t     *sf_loop;
+    mino_val_t     *sf_loop_star;
+    mino_val_t     *sf_try;
+    mino_val_t     *sf_binding;
+    mino_val_t     *sf_lazy_seq;
+    mino_val_t     *sf_new;
+
     /* Execution limits */
     size_t          limit_steps;
     size_t          limit_heap;

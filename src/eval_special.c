@@ -170,10 +170,49 @@ static mino_val_t *eval_set_literal(mino_state_t *S, mino_val_t *form,
     }
 }
 
+static void sf_init(mino_state_t *S)
+{
+    S->sf_quote            = mino_symbol(S, "quote");
+    S->sf_quasiquote       = mino_symbol(S, "quasiquote");
+    S->sf_unquote          = mino_symbol(S, "unquote");
+    S->sf_unquote_splicing = mino_symbol(S, "unquote-splicing");
+    S->sf_defmacro         = mino_symbol(S, "defmacro");
+    S->sf_declare          = mino_symbol(S, "declare");
+    S->sf_ns               = mino_symbol(S, "ns");
+    S->sf_var              = mino_symbol(S, "var");
+    S->sf_def              = mino_symbol(S, "def");
+    S->sf_if               = mino_symbol(S, "if");
+    S->sf_do               = mino_symbol(S, "do");
+    S->sf_let              = mino_symbol(S, "let");
+    S->sf_let_star         = mino_symbol(S, "let*");
+    S->sf_fn               = mino_symbol(S, "fn");
+    S->sf_fn_star          = mino_symbol(S, "fn*");
+    S->sf_recur            = mino_symbol(S, "recur");
+    S->sf_loop             = mino_symbol(S, "loop");
+    S->sf_loop_star        = mino_symbol(S, "loop*");
+    S->sf_try              = mino_symbol(S, "try");
+    S->sf_binding          = mino_symbol(S, "binding");
+    S->sf_lazy_seq         = mino_symbol(S, "lazy-seq");
+    S->sf_new              = mino_symbol(S, "new");
+    S->sf_initialized      = 1;
+}
+
 /* --- Main eval dispatch -------------------------------------------------- */
+
+/* Special-form match: pointer-eq against the interned cached symbol is the
+ * fast path. Symbols that carry metadata are fresh copies (reader clones them
+ * before attaching meta) and need a content-based fallback. */
+#define HEAD_IS(cached, lit) \
+    (head == (cached) || \
+     (head != NULL && head->meta != NULL && head->type == MINO_SYMBOL && \
+      head->as.s.len == sizeof(lit) - 1 && \
+      memcmp(head->as.s.data, (lit), sizeof(lit) - 1) == 0))
 
 mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int tail)
 {
+    if (!S->sf_initialized) {
+        sf_init(S);
+    }
     if (S->limit_exceeded) {
         return NULL;
     }
@@ -386,35 +425,35 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         }
 
         /* Special forms. */
-        if (sym_eq(head, "quote")) {
+        if (HEAD_IS(S->sf_quote, "quote")) {
             if (!mino_is_cons(args)) {
                 set_eval_diag(S, form, "syntax", "MSY001", "quote requires one argument");
                 return NULL;
             }
             return args->as.cons.car;
         }
-        if (sym_eq(head, "quasiquote")) {
+        if (HEAD_IS(S->sf_quasiquote, "quasiquote")) {
             if (!mino_is_cons(args)) {
                 set_eval_diag(S, form, "syntax", "MSY001", "quasiquote requires one argument");
                 return NULL;
             }
             return quasiquote_expand(S, args->as.cons.car, env);
         }
-        if (sym_eq(head, "unquote")
-            || sym_eq(head, "unquote-splicing")) {
+        if (HEAD_IS(S->sf_unquote, "unquote")
+            || HEAD_IS(S->sf_unquote_splicing, "unquote-splicing")) {
             set_eval_diag(S, form, "syntax", "MSY001", "unquote outside of quasiquote");
             return NULL;
         }
-        if (sym_eq(head, "defmacro")) {
+        if (HEAD_IS(S->sf_defmacro, "defmacro")) {
             return eval_defmacro(S, form, args, env);
         }
-        if (sym_eq(head, "declare")) {
+        if (HEAD_IS(S->sf_declare, "declare")) {
             return eval_declare(S, form, args, env);
         }
-        if (sym_eq(head, "ns")) {
+        if (HEAD_IS(S->sf_ns, "ns")) {
             return eval_ns(S, form, args, env);
         }
-        if (sym_eq(head, "var")) {
+        if (HEAD_IS(S->sf_var, "var")) {
             mino_val_t *sym_arg;
             mino_val_t *var;
             char vbuf[256];
@@ -469,10 +508,10 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 return NULL;
             }
         }
-        if (sym_eq(head, "def")) {
+        if (HEAD_IS(S->sf_def, "def")) {
             return eval_def(S, form, args, env);
         }
-        if (sym_eq(head, "if")) {
+        if (HEAD_IS(S->sf_if, "if")) {
             mino_val_t *cond_form;
             mino_val_t *then_form;
             mino_val_t *else_form = mino_nil(S);
@@ -494,16 +533,16 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             return eval_impl(S, mino_is_truthy(cond) ? then_form : else_form,
                              env, tail);
         }
-        if (sym_eq(head, "do")) {
+        if (HEAD_IS(S->sf_do, "do")) {
             return eval_implicit_do_impl(S, args, env, tail);
         }
-        if (sym_eq(head, "let") || sym_eq(head, "let*")) {
+        if (HEAD_IS(S->sf_let, "let") || HEAD_IS(S->sf_let_star, "let*")) {
             return eval_let(S, form, args, env, tail);
         }
-        if (sym_eq(head, "fn") || sym_eq(head, "fn*")) {
+        if (HEAD_IS(S->sf_fn, "fn") || HEAD_IS(S->sf_fn_star, "fn*")) {
             return eval_fn(S, form, args, env);
         }
-        if (sym_eq(head, "recur")) {
+        if (HEAD_IS(S->sf_recur, "recur")) {
             mino_val_t *evaled = eval_args(S, args, env);
             if (evaled == NULL && mino_last_error(S) != NULL) {
                 return NULL;
@@ -511,17 +550,17 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             S->recur_sentinel.as.recur.args = evaled;
             return &S->recur_sentinel;
         }
-        if (sym_eq(head, "loop") || sym_eq(head, "loop*")) {
+        if (HEAD_IS(S->sf_loop, "loop") || HEAD_IS(S->sf_loop_star, "loop*")) {
             return eval_loop(S, form, args, env, tail);
         }
-        if (sym_eq(head, "try")) {
+        if (HEAD_IS(S->sf_try, "try")) {
             return eval_try(S, form, args, env);
         }
-        if (sym_eq(head, "binding")) {
+        if (HEAD_IS(S->sf_binding, "binding")) {
             return eval_binding(S, form, args, env);
         }
 
-        if (sym_eq(head, "lazy-seq")) {
+        if (HEAD_IS(S->sf_lazy_seq, "lazy-seq")) {
             mino_val_t *lz = alloc_val(S, MINO_LAZY);
             lz->as.lazy.body     = args;
             lz->as.lazy.env      = env;
