@@ -19,33 +19,36 @@
 
 /* Append a shell-escaped token to buf. Returns new length, or 0 on overflow.
  * POSIX: wraps in single quotes, escaping embedded single quotes.
- * Windows: wraps in double quotes, escaping embedded double quotes. */
+ * Windows: only quotes arguments containing spaces or cmd.exe metacharacters. */
 static size_t append_escaped(char *buf, size_t pos, size_t cap,
                              const char *s, size_t slen)
 {
     size_t i;
     if (pos + slen * 2 + 4 >= cap) return 0; /* conservative overflow check */
 #ifdef _WIN32
-    buf[pos++] = '"';
-    for (i = 0; i < slen; i++) {
-        if (s[i] == '"') {
-            if (pos + 2 >= cap) return 0;
-            buf[pos++] = '\\';
-            buf[pos++] = '"';
-        } else if (s[i] == '\\') {
-            /* Backslash only needs escaping before a quote or at end. */
-            if (i + 1 < slen && s[i + 1] == '"') {
+    {
+        /* Check if quoting is needed (spaces or cmd.exe special chars). */
+        int needs_quote = 0;
+        for (i = 0; i < slen; i++) {
+            if (s[i] == ' ' || s[i] == '"' || s[i] == '&' ||
+                s[i] == '|' || s[i] == '<' || s[i] == '>' ||
+                s[i] == '^' || s[i] == '%') {
+                needs_quote = 1;
+                break;
+            }
+        }
+        if (needs_quote) buf[pos++] = '"';
+        for (i = 0; i < slen; i++) {
+            if (s[i] == '"') {
                 if (pos + 2 >= cap) return 0;
                 buf[pos++] = '\\';
-                buf[pos++] = '\\';
+                buf[pos++] = '"';
             } else {
                 buf[pos++] = s[i];
             }
-        } else {
-            buf[pos++] = s[i];
         }
+        if (needs_quote) buf[pos++] = '"';
     }
-    buf[pos++] = '"';
 #else
     buf[pos++] = '\'';
     for (i = 0; i < slen; i++) {
