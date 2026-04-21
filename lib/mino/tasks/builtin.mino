@@ -74,14 +74,15 @@
             (println (str "  " (str/join " " args)))
             (apply sh! args)
             (swap! compiled inc)))))
-    ;; Link
+    ;; Link if anything was compiled or the binary is missing
     (let [objs   (mapv src->obj all-srcs)
-          args   (into [cc] (concat cflags ldflags ["-o" "mino"] objs libs))]
-      (when (> @compiled 0)
-        (println (str "  " (str/join " " args)))
-        (apply sh! args)))
-    (when (= @compiled 0)
-      (println "  nothing to compile"))))
+          need-link (or (> @compiled 0) (not (file-exists? "mino")))]
+      (when need-link
+        (let [args (into [cc] (concat cflags ldflags ["-o" "mino"] objs libs))]
+          (println (str "  " (str/join " " args)))
+          (apply sh! args)))
+      (when (and (= @compiled 0) (not need-link))
+        (println "  nothing to compile")))))
 
 (defn clean
   "Remove object files, binary, and generated header."
