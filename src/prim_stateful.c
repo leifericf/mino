@@ -357,3 +357,23 @@ mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     pair[1] = result;
     return mino_vector(S, pair, 2);
 }
+
+/* Fault injection: make the n-th GC allocation fail (simulated OOM).
+ * Testing only. Pass 0 to disable. */
+mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env)
+{
+    mino_val_t *n;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "set-fail-alloc-at! requires 1 argument");
+    }
+    n = args->as.cons.car;
+    if (n == NULL || n->type != MINO_INT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "set-fail-alloc-at!: argument must be an integer");
+    }
+    mino_set_fail_alloc_at(S, (long)n->as.i);
+    return mino_nil(S);
+}

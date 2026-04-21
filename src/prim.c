@@ -501,6 +501,9 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Sets the value of an atom and returns [old new].");
     DEF_PRIM(env, "swap-vals!",     prim_swap_vals,
              "Atomically applies f to the atom and returns [old new].");
+    /* fault injection (testing only) */
+    DEF_PRIM(env, "set-fail-alloc-at!",  prim_set_fail_alloc_at,
+             "Make the n-th GC allocation fail (simulated OOM). Pass 0 to disable.");
     /* actors */
     DEF_PRIM(env, "spawn*",   prim_spawn,
              "Creates a new actor with the given handler function.");
