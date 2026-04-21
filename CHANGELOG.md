@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.39.1] — cross-platform portability fixes
+
+### Fixed
+- **Linux segfault**: `strdup` was implicitly declared under `-std=c99`,
+  causing GCC to truncate the 64-bit return value to `int`. Add
+  `_POSIX_C_SOURCE 200809L` to main.c and prim_proc.c.
+- **Windows `sh!` escaping**: use `cmd.exe`-compatible quoting (only
+  quote arguments containing spaces or metacharacters) instead of POSIX
+  single quotes.
+- **Windows executable locking**: check for both `mino` and `mino.exe`
+  in the build task's relink check. Use `mino.exe` for test invocation.
+- **Windows temp paths**: I/O tests use `TMPDIR`/`TEMP`/`TMP` instead
+  of hardcoded `/tmp/`.
+- **`longjmp` clobbering**: mark variables crossed by `setjmp`/`longjmp`
+  as `volatile` in require spec processing (GCC `-Wclobbered`).
+
 ## [0.39.0] — task runner and self-hosting build
 
 ### Added
