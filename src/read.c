@@ -8,7 +8,7 @@
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
 
-#define MAX_INTERNED_FILES 64
+#define MAX_INTERNED_FILES 512
 
 const char *intern_filename(const char *name)
 {
@@ -23,17 +23,18 @@ const char *intern_filename(const char *name)
             return files[i];
         }
     }
-    if (file_count < MAX_INTERNED_FILES) {
+    {
         size_t len = strlen(name);
         char  *dup = (char *)malloc(len + 1);
         if (dup == NULL) {
             return name;
         }
         memcpy(dup, name, len + 1);
-        files[file_count++] = dup;
+        if (file_count < MAX_INTERNED_FILES) {
+            files[file_count++] = dup;
+        }
         return dup;
     }
-    return name;
 }
 
 /* Reader error codes. */
