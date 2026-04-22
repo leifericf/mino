@@ -469,6 +469,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns true if x is a reduced value.");
     DEF_PRIM(env, "into",     prim_into,
              "Returns a new collection with all items from the source conj'd in.");
+    DEF_PRIM(env, "range",    prim_range,
+             "Returns a lazy sequence of nums from start (inclusive) to end (exclusive), by step. With no args, returns an infinite sequence from 0.");
     /* eager collection builders */
     DEF_PRIM(env, "rangev",   prim_rangev,
              "Returns a vector of integers from start (inclusive) to end (exclusive).");

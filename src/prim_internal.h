@@ -134,6 +134,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
