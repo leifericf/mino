@@ -43,6 +43,46 @@ mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int(S, iacc);
 }
 
+/* (inc x) -- x + 1. Fast path for the dominant integer case; falls back
+ * to the generic + primitive for non-ints so semantics stay identical. */
+mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "inc requires exactly 1 argument");
+    }
+    x = args->as.cons.car;
+    if (x != NULL && x->type == MINO_INT) {
+        return mino_int(S, x->as.i + 1);
+    }
+    if (x != NULL && x->type == MINO_FLOAT) {
+        return mino_float(S, x->as.f + 1.0);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001",
+        "inc expects a number");
+}
+
+mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "dec requires exactly 1 argument");
+    }
+    x = args->as.cons.car;
+    if (x != NULL && x->type == MINO_INT) {
+        return mino_int(S, x->as.i - 1);
+    }
+    if (x != NULL && x->type == MINO_FLOAT) {
+        return mino_float(S, x->as.f - 1.0);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001",
+        "dec expects a number");
+}
+
 mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *first;

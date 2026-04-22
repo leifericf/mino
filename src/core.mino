@@ -245,8 +245,7 @@
 
 (def second     "Returns the second item in coll." (fn [coll] (first (rest coll))))
 (def ffirst     "Returns the first item of the first item in coll." (fn [coll] (first (first coll))))
-(def inc        "Returns x plus 1." (fn [x] (+ x 1)))
-(def dec        "Returns x minus 1." (fn [x] (- x 1)))
+;; inc and dec are C primitives.
 ;; zero? is a C primitive.
 (def ==         "Returns true if nums are numerically equal, treating ints and floats uniformly." (fn
                   ([x] true)

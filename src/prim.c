@@ -234,6 +234,10 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     (void)probe;
     DEF_PRIM(env, "+",        prim_add,
              "Returns the sum of the arguments.");
+    DEF_PRIM(env, "inc",      prim_inc,
+             "Returns x plus 1.");
+    DEF_PRIM(env, "dec",      prim_dec,
+             "Returns x minus 1.");
     DEF_PRIM(env, "-",        prim_sub,
              "Returns the difference of the arguments. With one arg, returns the negation.");
     DEF_PRIM(env, "*",        prim_mul,

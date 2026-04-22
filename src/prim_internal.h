@@ -59,6 +59,8 @@ void         print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 
 /* prim_numeric.c */
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env);

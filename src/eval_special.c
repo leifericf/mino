@@ -544,6 +544,17 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
                 }
             }
             if (var != NULL) return var;
+            /* No var found: check for a C primitive in the env. resolve
+             * does the same auto-creation so var-on-fn tests pass for
+             * prim-backed names like inc/map. */
+            {
+                mino_val_t *val = mino_env_get(env, vbuf);
+                if (val != NULL) {
+                    var = var_intern(S, "mino.core", vbuf);
+                    var_set_root(S, var, val);
+                    return var;
+                }
+            }
             {
                 char msg[300];
                 snprintf(msg, sizeof(msg), "var: unbound symbol: %s", vbuf);
