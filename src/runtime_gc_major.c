@@ -40,10 +40,10 @@ void gc_major_begin(mino_state_t *S)
 }
 
 /* Pop up to budget_words headers from the mark stack and trace each
- * one. Callers that want a full drain pass (size_t)-1. The range
- * index is rebuilt on entry when the mutator invalidated it between
- * slices; gc_trace_children resolves interior pointers through the
- * index, so each slice needs to see a fresh view. */
+ * one. gc_trace_children uses direct payload-pointer arithmetic and
+ * does not need the range index, so step skips a rebuild here even
+ * though the mutator may have invalidated the index between slices.
+ * Callers that want a full drain pass (size_t)-1. */
 void gc_major_step(mino_state_t *S, size_t budget_words)
 {
     size_t popped = 0;
@@ -51,9 +51,6 @@ void gc_major_step(mino_state_t *S, size_t budget_words)
         return;
     }
     S->gc_depth++;
-    if (!S->gc_ranges_valid) {
-        gc_build_range_index(S);
-    }
     while (S->gc_mark_stack_len > 0 && popped < budget_words) {
         gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
         gc_trace_children(S, h);

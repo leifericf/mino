@@ -290,7 +290,9 @@ void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h)
     gc_mark_stack_push_raw(S, h);
 }
 
-/* Resolve an interior pointer and push its header onto the mark stack. */
+/* Resolve an interior pointer and push its header onto the mark stack.
+ * Used by the conservative stack scan and by root enumeration, where
+ * the pointer may be misaligned or not the payload start. */
 static void gc_mark_interior_push(mino_state_t *S, const void *p)
 {
     gc_hdr_t *h;
@@ -305,6 +307,25 @@ void gc_mark_interior(mino_state_t *S, const void *p)
     gc_mark_interior_push(S, p);
 }
 
+/* Push a child pointer held in a traced container. Pointers stored
+ * inside GC containers are always exact payload starts or sentinels
+ * (NULL / state-embedded singleton), so the range-index resolve of
+ * gc_mark_interior_push is unnecessary here. Skipping it lets
+ * gc_major_step avoid rebuilding the range index between slices,
+ * which dominates the tracing cost at small heap sizes. */
+static void gc_mark_child_push(mino_state_t *S, const void *p)
+{
+    gc_hdr_t *h;
+    uintptr_t u, lo, hi;
+    if (p == NULL) return;
+    u  = (uintptr_t)p;
+    lo = (uintptr_t)S;
+    hi = lo + sizeof(*S);
+    if (u >= lo && u < hi) return;  /* singleton inside state struct */
+    h = ((gc_hdr_t *)p) - 1;
+    gc_mark_push(S, h);
+}
+
 /* Trace every GC-managed pointer held by h, pushing each target into
  * the mark stack. Used from gc_drain_mark_stack on any header popped
  * for tracing, and directly from the minor collector when seeding the
@@ -314,65 +335,65 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
     switch (h->type_tag) {
     case GC_T_VAL: {
         mino_val_t *v = (mino_val_t *)(h + 1);
-        gc_mark_interior_push(S, v->meta);
+        gc_mark_child_push(S, v->meta);
         switch (v->type) {
         case MINO_STRING:
         case MINO_SYMBOL:
         case MINO_KEYWORD:
-            gc_mark_interior_push(S, v->as.s.data);
+            gc_mark_child_push(S, v->as.s.data);
             break;
         case MINO_CONS:
-            gc_mark_interior_push(S, v->as.cons.car);
-            gc_mark_interior_push(S, v->as.cons.cdr);
+            gc_mark_child_push(S, v->as.cons.car);
+            gc_mark_child_push(S, v->as.cons.cdr);
             break;
         case MINO_VECTOR:
-            gc_mark_interior_push(S, v->as.vec.root);
-            gc_mark_interior_push(S, v->as.vec.tail);
+            gc_mark_child_push(S, v->as.vec.root);
+            gc_mark_child_push(S, v->as.vec.tail);
             break;
         case MINO_MAP:
-            gc_mark_interior_push(S, v->as.map.root);
-            gc_mark_interior_push(S, v->as.map.key_order);
+            gc_mark_child_push(S, v->as.map.root);
+            gc_mark_child_push(S, v->as.map.key_order);
             break;
         case MINO_SET:
-            gc_mark_interior_push(S, v->as.set.root);
-            gc_mark_interior_push(S, v->as.set.key_order);
+            gc_mark_child_push(S, v->as.set.root);
+            gc_mark_child_push(S, v->as.set.key_order);
             break;
         case MINO_SORTED_MAP:
         case MINO_SORTED_SET:
-            gc_mark_interior_push(S, v->as.sorted.root);
-            gc_mark_interior_push(S, v->as.sorted.comparator);
+            gc_mark_child_push(S, v->as.sorted.root);
+            gc_mark_child_push(S, v->as.sorted.comparator);
             break;
         case MINO_FN:
         case MINO_MACRO:
-            gc_mark_interior_push(S, v->as.fn.params);
-            gc_mark_interior_push(S, v->as.fn.body);
-            gc_mark_interior_push(S, v->as.fn.env);
+            gc_mark_child_push(S, v->as.fn.params);
+            gc_mark_child_push(S, v->as.fn.body);
+            gc_mark_child_push(S, v->as.fn.env);
             break;
         case MINO_ATOM:
-            gc_mark_interior_push(S, v->as.atom.val);
-            gc_mark_interior_push(S, v->as.atom.watches);
-            gc_mark_interior_push(S, v->as.atom.validator);
+            gc_mark_child_push(S, v->as.atom.val);
+            gc_mark_child_push(S, v->as.atom.watches);
+            gc_mark_child_push(S, v->as.atom.validator);
             break;
         case MINO_LAZY:
             if (v->as.lazy.realized) {
-                gc_mark_interior_push(S, v->as.lazy.cached);
+                gc_mark_child_push(S, v->as.lazy.cached);
             } else {
-                gc_mark_interior_push(S, v->as.lazy.body);
-                gc_mark_interior_push(S, v->as.lazy.env);
+                gc_mark_child_push(S, v->as.lazy.body);
+                gc_mark_child_push(S, v->as.lazy.env);
             }
             break;
         case MINO_RECUR:
-            gc_mark_interior_push(S, v->as.recur.args);
+            gc_mark_child_push(S, v->as.recur.args);
             break;
         case MINO_TAIL_CALL:
-            gc_mark_interior_push(S, v->as.tail_call.fn);
-            gc_mark_interior_push(S, v->as.tail_call.args);
+            gc_mark_child_push(S, v->as.tail_call.fn);
+            gc_mark_child_push(S, v->as.tail_call.args);
             break;
         case MINO_REDUCED:
-            gc_mark_interior_push(S, v->as.reduced.val);
+            gc_mark_child_push(S, v->as.reduced.val);
             break;
         case MINO_VAR:
-            gc_mark_interior_push(S, v->as.var.root);
+            gc_mark_child_push(S, v->as.var.root);
             break;
         default:
             break;
@@ -382,42 +403,42 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
     case GC_T_ENV: {
         mino_env_t *env = (mino_env_t *)(h + 1);
         size_t i;
-        gc_mark_interior_push(S, env->parent);
+        gc_mark_child_push(S, env->parent);
         if (env->bindings != NULL) {
-            gc_mark_interior_push(S, env->bindings);
+            gc_mark_child_push(S, env->bindings);
             for (i = 0; i < env->len; i++) {
-                gc_mark_interior_push(S, env->bindings[i].name);
-                gc_mark_interior_push(S, env->bindings[i].val);
+                gc_mark_child_push(S, env->bindings[i].name);
+                gc_mark_child_push(S, env->bindings[i].val);
             }
         }
-        gc_mark_interior_push(S, env->ht_buckets);
+        gc_mark_child_push(S, env->ht_buckets);
         break;
     }
     case GC_T_VEC_NODE: {
         mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
         unsigned i;
         for (i = 0; i < n->count; i++) {
-            gc_mark_interior_push(S, n->slots[i]);
+            gc_mark_child_push(S, n->slots[i]);
         }
         break;
     }
     case GC_T_HAMT_NODE: {
         mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
         unsigned count, i;
-        gc_mark_interior_push(S, n->slots);
+        gc_mark_child_push(S, n->slots);
         count = (n->collision_count > 0) ? n->collision_count
                                          : popcount32(n->bitmap);
         if (n->slots != NULL) {
             for (i = 0; i < count; i++) {
-                gc_mark_interior_push(S, n->slots[i]);
+                gc_mark_child_push(S, n->slots[i]);
             }
         }
         break;
     }
     case GC_T_HAMT_ENTRY: {
         hamt_entry_t *e = (hamt_entry_t *)(h + 1);
-        gc_mark_interior_push(S, e->key);
-        gc_mark_interior_push(S, e->val);
+        gc_mark_child_push(S, e->key);
+        gc_mark_child_push(S, e->val);
         break;
     }
     case GC_T_VALARR:
@@ -426,16 +447,16 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         size_t n = h->size / sizeof(*arr);
         size_t i;
         for (i = 0; i < n; i++) {
-            gc_mark_interior_push(S, arr[i]);
+            gc_mark_child_push(S, arr[i]);
         }
         break;
     }
     case GC_T_RB_NODE: {
         mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
-        gc_mark_interior_push(S, rb->key);
-        gc_mark_interior_push(S, rb->val);
-        gc_mark_interior_push(S, rb->left);
-        gc_mark_interior_push(S, rb->right);
+        gc_mark_child_push(S, rb->key);
+        gc_mark_child_push(S, rb->val);
+        gc_mark_child_push(S, rb->left);
+        gc_mark_child_push(S, rb->right);
         break;
     }
     case GC_T_RAW:
