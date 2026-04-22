@@ -445,6 +445,29 @@ static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
     }
 }
 
+/* (async-sched-enqueue* callback value)
+ * Enqueue a callback onto the scheduler run queue. The callback will be
+ * invoked as (callback value) on the next drain!. This is the bridge that
+ * lets pure-mino channel implementations participate in the scheduler. */
+static mino_val_t *prim_sched_enqueue(mino_state_t *S, mino_val_t *args,
+                                      mino_env_t *env)
+{
+    mino_val_t *cb, *val;
+    (void)env;
+
+    if (args == NULL || args->type != MINO_CONS ||
+        args->as.cons.cdr == NULL) {
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "async-sched-enqueue* requires callback and value");
+        return NULL;
+    }
+    cb  = args->as.cons.car;
+    val = args->as.cons.cdr->as.cons.car;
+
+    if (cb != NULL && cb->type == MINO_NIL) cb = NULL;
+    if (cb != NULL) async_sched_enqueue(S, cb, val);
+    return mino_nil(S);
+}
+
 /* ------------------------------------------------------------------ */
 /* Registration                                                       */
 /* ------------------------------------------------------------------ */
@@ -474,4 +497,5 @@ void mino_install_async(mino_state_t *S, mino_env_t *env)
     /* Scheduler */
     DEF_PRIM(env, "drain!",       prim_drain,          "Drain the async run queue.");
     DEF_PRIM(env, "drain-loop!",  prim_drain_loop,     "Drain until done or no progress.");
+    DEF_PRIM(env, "async-sched-enqueue*", prim_sched_enqueue, "Enqueue callback on the async run queue.");
 }
