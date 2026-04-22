@@ -29,8 +29,6 @@
    "src/prim_fs.c" "src/prim_proc.c"
    "src/prim_host.c" "src/host_interop.c"
    "src/clone.c" "src/re.c"
-   "src/async_buffer.c" "src/async_channel.c"
-   "src/async_handler.c" "src/async_select.c"
    "src/async_scheduler.c" "src/async_timer.c" "src/prim_async.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))

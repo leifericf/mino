@@ -2,6 +2,84 @@
 
 ## Unreleased
 
+Demotes the entire channel/buffer/handler/select layer from C to pure
+mino. The async runtime in C shrinks to four primitives plus two
+helper modules (scheduler run queue, deadline timers). All 261 async
+tests pass on the new implementation; the public mino API is unchanged
+but the C embedding surface breaks for any host that called channel
+primitives directly.
+
+### Breaking changes
+
+- **Removed C primitives** (channels, buffers, alts, transducer hooks):
+  `chan*`, `chan?*`, `chan-put*`, `chan-take*`, `chan-close*`,
+  `chan-closed?*`, `offer!*`, `poll!*`, `chan-set-xform*`,
+  `chan-buf-add*`, `alts*`, `buf-fixed*`, `buf-dropping*`,
+  `buf-sliding*`, `buf-promise*`. Each is now a mino function (or a
+  `(def x ...)` alias) in `lib/core/channel.mino`.
+
+  Mino callers see no difference: the public surface (`chan`, `put!`,
+  `take!`, `offer!`, `poll!`, `close!`, `closed?`, `chan?`, `alts!`,
+  `buffer`, `dropping-buffer`, `sliding-buffer`, `promise-chan`,
+  `timeout`, `go`) is unchanged. The starred names still resolve
+  through compatibility aliases in `lib/core/channel.mino`.
+
+  Host embedders that called these primitives directly from C via
+  `mino_eval` must either (a) invoke the mino-level equivalents
+  through `mino_eval` on the corresponding public name, or (b) pin
+  to v0.42.0.
+
+- **Channel value identity changed.** Channels used to be opaque
+  `MINO_HANDLE` values; they are now mino atoms wrapping a state
+  map. `(type ch)` returns `:atom`, not `:handle`. Use `(chan? ch)`
+  for identity-independent tests. Two test files (`async_api_test`,
+  `async_buffer_test`) updated from `(= :handle (type ch))` to
+  `(chan? ch)`.
+
+- **`timeout*` primitive removed, replaced by `async-schedule-timer*`.**
+  The old primitive returned a buffered C channel that the timer
+  subsystem would close on expiry. The new primitive takes `(ms cb)`
+  and schedules `cb` on the run queue after `ms` milliseconds; the
+  public `(timeout ms)` helper now creates a mino channel and arms
+  `close!` via the callback.
+
+- **async/merge renamed to async/merge-chans.** The old `merge`
+  shadowed `clojure.core/merge` for maps — so `(merge m1 m2 m3)` on
+  plain maps failed with 'no matching arity' whenever `core/async`
+  was loaded. Latent bug that surfaced once the nil-callback regression
+  stopped eating the test suite. Use `merge-chans` for channel-merging.
+
+### Added
+
+- **`async-sched-enqueue*`** — bridge primitive that lets mino-level
+  code enqueue callbacks onto the C scheduler run queue. The channel
+  mino implementation uses it to schedule taker/putter callbacks.
+- **`async-schedule-timer*`** — schedules a callback to fire after N
+  milliseconds (replaces the old `timeout*`).
+
+### Fixed
+
+- **Nil-callback regression** on the 2-arg `put!` / 1-arg `take!` path.
+  Both mino wrappers passed an explicit mino `nil` to `chan-put*` /
+  `chan-take*`; the primitive forwarded that nil as a callback into
+  the scheduler, whose drain then tried to invoke it. Caused 139 test
+  errors across the async suite in v0.42.0 HEAD. Normalize
+  `MINO_NIL` to C `NULL` at the primitive boundary (same pattern
+  already used for `xform`/`ex-handler` in `chan-set-xform*`). With
+  the nil-cb fix applied and the pure-mino migration complete, all
+  async suites report clean except six pre-existing go+try exception
+  tests unrelated to the channel layer.
+
+### Removed
+
+- `src/async_buffer.c/h`  (203 LOC)
+- `src/async_channel.c/h` (679 LOC)
+- `src/async_handler.c/h` (162 LOC)
+- `src/async_select.c/h`  (287 LOC)
+
+`prim_async.c` drops from 475 to 127 LOC. Total C async surface shrinks
+~1,600 LOC; the built binary drops ~20 KB on darwin arm64 at -O2.
+
 ## v0.42.0 — Generational + Incremental Garbage Collector
 
 Replaces the single-generation mark-and-sweep collector with a

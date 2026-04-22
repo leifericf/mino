@@ -66,17 +66,17 @@ has a single responsibility. State access is explicit (`S->field`).
 |------|-----|----------------|
 | `src/clone.c` | 660 | Value cloning, serialization, mailbox (mutex-protected FIFO), actors |
 
-## Async / core.async
+## Async
+
+Channels, buffers, and alts arbitration live in `lib/core/channel.mino`.
+The C surface is limited to the scheduler run queue, deadline timers,
+and a four-primitive bridge.
 
 | File | Responsibility |
 |------|----------------|
-| `src/async_scheduler.c` | Deterministic round-robin scheduler for parked channel operations |
-| `src/async_channel.c` | Unbuffered/buffered channel implementation |
-| `src/async_buffer.c` | Fixed, dropping, and sliding channel buffers |
-| `src/async_handler.c` | Channel put/take handler lifecycle |
-| `src/async_select.c` | `alts!` / `alt!` selection across multiple channels |
-| `src/async_timer.c` | `timeout` and timer wheel |
-| `src/prim_async.c` | Mino-facing primitives: `chan`, `>!!`, `<!!`, `go`, `thread`, `alts!`, `close!` |
+| `src/async_scheduler.c` | Scheduler run queue and drain loop |
+| `src/async_timer.c` | Deadline priority queue; enqueues callbacks on expiry |
+| `src/prim_async.c` | Bridge primitives: `async-sched-enqueue*`, `async-schedule-timer*`, `drain!`, `drain-loop!` |
 
 ## Headers
 
@@ -105,7 +105,7 @@ eval_special_*.c -> eval_special_internal.h -> mino_internal.h -> mino.h
 prim_*.c         -> prim_internal.h         -> mino_internal.h -> mino.h
 prim_regex.c     -> prim_internal.h + re.h
 
-runtime_*.c, public_gc.c, async_*.c, prim_async.c,
+runtime_*.c, public_gc.c, async_scheduler.c, async_timer.c, prim_async.c,
 mino.c, val.c, vec.c, map.c, rbtree.c,
 read.c, print.c, clone.c, host_interop.c -> mino_internal.h -> mino.h
 
