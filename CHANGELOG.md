@@ -2,6 +2,77 @@
 
 ## Unreleased
 
+## v0.40.0 — Interpreter Performance Pass
+
+30 benchmark-driven optimizations. The eval floor (per-operation cost
+in a tree-walking step) dropped from ~6 us to ~1 us — roughly a 5x
+speedup on realistic programs. Every change ships with a before/after
+measurement in the mino-bench suite.
+
+### Added
+- **Timing and GC introspection primitives**: `nano-time` (monotonic
+  wall-clock nanoseconds) and `gc-stats` (cumulative collector state)
+  enable benchmark harnesses in pure mino.
+- **Lazy sequence primitives**: `range`, `lazy-map-1`, `lazy-filter`,
+  and `lazy-take` run as C c_thunks, skipping the per-element fn frame
+  that a mino-level implementation pays. `drop-seq` walks eagerly in
+  C. `doall` and `dorun` realize in a C loop.
+- **Numeric and type predicates as C primitives**: `inc`, `dec`, `not`,
+  `empty?`, `some?`, `zero?`, `pos?`, `neg?`, `odd?`, `even?`, and the
+  full type-predicate family (`nil?`, `cons?`, `string?`, `number?`,
+  `keyword?`, `symbol?`, `vector?`, `map?`, `fn?`, `set?`, `seq?`,
+  `true?`, `false?`, `boolean?`, `int?`, `float?`, `char?`).
+- `prim_lazy.c` module houses the c_thunk-based lazy primitives so
+  `prim_sequences.c` stays under the architectural LOC cap.
+
+### Changed
+- **Intern tables**: symbol/keyword interning uses open-addressing
+  hash lookup instead of a linear scan of ~300 names.
+- **GC mark phase**: iterative with an explicit stack instead of
+  recursive (no stack overflow on deep structures, better cache
+  locality).
+- **GC sweep**: freed blocks of common sizes (16, 24, 48, 64 bytes)
+  return to per-class free lists, cutting malloc round-trips.
+- **Environment lookup**: frames above a size threshold build a hash
+  index for O(1) name resolution; the root env uses it from the
+  first large bind.
+- **Special-form dispatch**: `eval_impl` caches interned symbol
+  pointers (`quote`, `if`, `let`, etc.) and matches by pointer
+  equality; the `when`, `and`, `or` macros are inlined to skip
+  per-invocation macro expansion.
+- **Trampoline sentinels**: `MINO_RECUR` and `MINO_TAIL_CALL` reuse
+  singleton cells in `mino_state_t`.
+- **Self-tail-call**: single-arity self-calls reuse the local env
+  frame and rebind params in place.
+- **Small integer cache**: values in −128..127 share singleton boxes,
+  like the cached booleans and nil.
+- **fn frame size**: initial binding capacity is 4 (down from 16), so
+  fresh frames allocate the 64-byte block that the free-list recycles.
+- **Literal collections**: vector/map/set literals whose children are
+  all self-evaluating (int, string, keyword, bool, nil, float) return
+  the AST form directly instead of rebuilding. Safe because data is
+  immutable.
+- **Arithmetic primitives**: `+`, `-`, `*` evaluate in a single pass
+  over the argument list instead of pre-scanning for float promotion.
+- **`eval_symbol`**: skips the per-lookup stack-buffer copy by using
+  the interned symbol data pointer directly.
+- **Parameter binding**: `bind_sym` takes an interned symbol directly
+  and reuses its data pointer and length.
+- **Dynamic binding lookup**: short-circuits when `dyn_stack` is
+  empty (the overwhelmingly common case).
+- **GC stack scan**: rejects pointers outside the tracked heap range
+  in O(1) before the sorted range-index binary search.
+- **Call dispatch**: `PRIM`/`FN` are checked before keyword/map/vector
+  callable fallbacks so the dominant path stays short.
+- **`var` special form**: auto-creates a var for any unbound name that
+  resolves to a C primitive in the environment, matching `resolve`'s
+  behavior so `#'inc`, `#'map`, etc. continue to return vars despite
+  being prim-backed.
+
+### Fixed
+- `core.mino` no longer shadows the C primitives `mapv`, `filterv`,
+  `atom?`, `swap!` with slower mino-level reimplementations.
+
 ## v0.39.1 — Cross-Platform Portability Fixes
 
 ### Fixed
