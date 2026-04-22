@@ -85,6 +85,23 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     return v;
 }
 
+/* A form evaluates to itself when all of its children would also evaluate
+ * to themselves — leaf primitives (int, string, etc.) always, and nested
+ * vectors/maps/sets/lazies only when they contain no symbols or calls. For
+ * these, collection literals can return the AST form directly instead of
+ * rebuilding it, since mino's data structures are immutable. */
+static int is_eval_constant(mino_val_t *v)
+{
+    if (v == NULL) return 1;
+    switch (v->type) {
+    case MINO_NIL: case MINO_BOOL: case MINO_INT: case MINO_FLOAT:
+    case MINO_STRING: case MINO_KEYWORD:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static mino_val_t *eval_vector_literal(mino_state_t *S, mino_val_t *form,
                                        mino_env_t *env)
 {
@@ -92,6 +109,14 @@ static mino_val_t *eval_vector_literal(mino_state_t *S, mino_val_t *form,
     size_t n = form->as.vec.len;
     mino_val_t **tmp;
     if (n == 0) {
+        return form;
+    }
+    /* Fast path: all elements are self-evaluating, so the literal already
+     * equals its own result. Skip per-element eval and collection rebuild. */
+    for (i = 0; i < n; i++) {
+        if (!is_eval_constant(vec_nth(form, i))) break;
+    }
+    if (i == n) {
         return form;
     }
     tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
@@ -119,6 +144,15 @@ static mino_val_t *eval_map_literal(mino_state_t *S, mino_val_t *form,
     mino_val_t **ks;
     mino_val_t **vs;
     if (n == 0) {
+        return form;
+    }
+    /* Fast path: every key and value is self-evaluating. */
+    for (i = 0; i < n; i++) {
+        mino_val_t *form_key = vec_nth(form->as.map.key_order, i);
+        if (!is_eval_constant(form_key)) break;
+        if (!is_eval_constant(map_get_val(form, form_key))) break;
+    }
+    if (i == n) {
         return form;
     }
     ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
@@ -150,6 +184,13 @@ static mino_val_t *eval_set_literal(mino_state_t *S, mino_val_t *form,
     size_t n = form->as.set.len;
     mino_val_t **tmp;
     if (n == 0) {
+        return form;
+    }
+    /* Fast path: every element is self-evaluating. */
+    for (i = 0; i < n; i++) {
+        if (!is_eval_constant(vec_nth(form->as.set.key_order, i))) break;
+    }
+    if (i == n) {
         return form;
     }
     tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*tmp));
