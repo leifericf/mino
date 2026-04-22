@@ -94,7 +94,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
             for (i = 0; i < nn; i++) {
                 mino_val_t *e = quasiquote_expand(S, vec_nth(form, i), env);
                 if (e == NULL) { return NULL; }
-                tmp[i] = e;
+                gc_valarr_set(S, tmp, i, e);
             }
             return mino_vector(S, tmp, nn);
         }
@@ -178,7 +178,8 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
             if (kk == NULL) { return NULL; }
             vv = quasiquote_expand(S, val, env);
             if (vv == NULL) { return NULL; }
-            ks[i] = kk; vs[i] = vv;
+            gc_valarr_set(S, ks, i, kk);
+            gc_valarr_set(S, vs, i, vv);
         }
         return mino_map(S, ks, vs, nn);
     }

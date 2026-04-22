@@ -125,7 +125,7 @@ static mino_val_t *eval_vector_literal(mino_state_t *S, mino_val_t *form,
         if (ev == NULL) {
             return NULL;
         }
-        tmp[i] = ev;
+        gc_valarr_set(S, tmp, i, ev);
     }
     {
         mino_val_t *result = mino_vector(S, tmp, n);
@@ -165,8 +165,8 @@ static mino_val_t *eval_map_literal(mino_state_t *S, mino_val_t *form,
         if (k == NULL) { return NULL; }
         v = eval_value(S, form_val, env);
         if (v == NULL) { return NULL; }
-        ks[i] = k;
-        vs[i] = v;
+        gc_valarr_set(S, ks, i, k);
+        gc_valarr_set(S, vs, i, v);
     }
     {
         mino_val_t *result = mino_map(S, ks, vs, n);
@@ -199,7 +199,7 @@ static mino_val_t *eval_set_literal(mino_state_t *S, mino_val_t *form,
         if (ev == NULL) {
             return NULL;
         }
-        tmp[i] = ev;
+        gc_valarr_set(S, tmp, i, ev);
     }
     {
         mino_val_t *result = mino_set(S, tmp, n);

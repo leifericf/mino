@@ -130,3 +130,17 @@ void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell)
     gc_write_barrier(S, tail, tail->as.cons.cdr, cell);
     tail->as.cons.cdr = cell;
 }
+
+/* Scratch-array slot store. Routes the write through the barrier so a
+ * VALARR that was freshly allocated by the caller and then promoted by
+ * a mid-loop minor still has every subsequent YOUNG slot store
+ * observed by the remset. The one-cycle safety net on promotion covers
+ * only the cycle after promotion; a loop that spans two minors needs
+ * the barrier on every slot. Payload-start is the array pointer
+ * itself, which matches gc_write_barrier's container convention. */
+void gc_valarr_set(mino_state_t *S, mino_val_t **arr, size_t i,
+                   mino_val_t *v)
+{
+    gc_write_barrier(S, arr, arr[i], v);
+    arr[i] = v;
+}

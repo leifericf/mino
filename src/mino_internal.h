@@ -615,6 +615,15 @@ void gc_write_barrier(mino_state_t *S, void *container,
  * guarantee tail is non-NULL. */
 void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell);
 
+/* VALARR slot store: barriers the write, then updates arr[i]. Use at
+ * every site that fills a GC_T_VALARR scratch buffer in a loop whose
+ * body can allocate (user eval, recursive readers, quasiquote expand)
+ * -- the scratch array may be promoted mid-loop and later stores of
+ * fresh YOUNG values need remset coverage. Inline-friendly; a single
+ * call replaces the raw `arr[i] = v;` assignment. */
+void gc_valarr_set(mino_state_t *S, mino_val_t **arr, size_t i,
+                   mino_val_t *v);
+
 /* Clear every dirty bit and empty the remembered set. Called at the
  * end of every full cycle -- after a complete trace, the old-to-young
  * reference set is rebuilt by future barriers, not inherited. */

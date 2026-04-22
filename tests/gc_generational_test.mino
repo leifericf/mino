@@ -92,3 +92,18 @@
   (dotimes [_ 200]
     (doall (take 1000 (range 10000))))
   (is (< (young-bytes) (* 4 1024 1024))))
+
+;; Literal-builder barrier: vector/map/set literals whose elements are
+;; non-constant calls allocate a VALARR scratch buffer and fill it slot
+;; by slot. Each eval_value in the loop can trigger a minor that
+;; promotes the scratch buffer to OLD; subsequent slot writes of fresh
+;; YOUNG values must go through the write barrier or the next minor
+;; loses those values. The loop length and per-iteration allocation are
+;; sized to force many minors and promotion of the scratch array.
+(deftest literal-builder-barrier
+  (dotimes [i 2500]
+    (let [v [(conj (vec (range 200)) i)
+             (conj (vec (range 200)) (+ i 1))
+             (conj (vec (range 200)) (+ i 2))]]
+      (is (= (+ i 2) (last (nth v 2))))))
+  (is true))
