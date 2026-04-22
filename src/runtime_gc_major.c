@@ -40,7 +40,10 @@ void gc_major_begin(mino_state_t *S)
 }
 
 /* Pop up to budget_words headers from the mark stack and trace each
- * one. Callers that want a full drain pass (size_t)-1. */
+ * one. Callers that want a full drain pass (size_t)-1. The range
+ * index is rebuilt on entry when the mutator invalidated it between
+ * slices; gc_trace_children resolves interior pointers through the
+ * index, so each slice needs to see a fresh view. */
 void gc_major_step(mino_state_t *S, size_t budget_words)
 {
     size_t popped = 0;
@@ -48,6 +51,9 @@ void gc_major_step(mino_state_t *S, size_t budget_words)
         return;
     }
     S->gc_depth++;
+    if (!S->gc_ranges_valid) {
+        gc_build_range_index(S);
+    }
     while (S->gc_mark_stack_len > 0 && popped < budget_words) {
         gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
         gc_trace_children(S, h);
@@ -88,6 +94,43 @@ void gc_major_remark(mino_state_t *S)
  * Major has traced everything reachable, so the remset is redundant
  * this cycle; the barrier will repopulate it as mutator stores
  * reintroduce old->young edges. */
+/* Pre-sweep diagnostic (opt-in via MINO_GC_VERIFY=1): every OLD intern
+ * entry must have its mark bit set, otherwise sweep would free a
+ * root-reachable header. Surfaces root-enumeration bugs at the exact
+ * point they matter. YOUNG entries are not swept by major, so they
+ * are exempt from this check. */
+static void gc_verify_roots_marked(mino_state_t *S)
+{
+    const char *env;
+    size_t      i;
+    env = getenv("MINO_GC_VERIFY");
+    if (env == NULL || env[0] == '\0' || env[0] == '0') {
+        return;
+    }
+    for (i = 0; i < S->sym_intern.len; i++) {
+        mino_val_t *e = S->sym_intern.entries[i];
+        gc_hdr_t   *h;
+        if (e == NULL) continue;
+        h = ((gc_hdr_t *)e) - 1;
+        if (h->gen == GC_GEN_OLD && !h->mark) {
+            fprintf(stderr, "[gc-verify] sym_intern[%zu] OLD unmarked at sweep "
+                "(e=%p h=%p)\n", i, (void *)e, (void *)h);
+            abort();
+        }
+    }
+    for (i = 0; i < S->kw_intern.len; i++) {
+        mino_val_t *e = S->kw_intern.entries[i];
+        gc_hdr_t   *h;
+        if (e == NULL) continue;
+        h = ((gc_hdr_t *)e) - 1;
+        if (h->gen == GC_GEN_OLD && !h->mark) {
+            fprintf(stderr, "[gc-verify] kw_intern[%zu] OLD unmarked at sweep "
+                "(e=%p h=%p)\n", i, (void *)e, (void *)h);
+            abort();
+        }
+    }
+}
+
 void gc_major_sweep_phase(mino_state_t *S)
 {
     if (S->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
@@ -95,65 +138,82 @@ void gc_major_sweep_phase(mino_state_t *S)
     }
     S->gc_depth++;
     S->gc_phase = GC_PHASE_MAJOR_SWEEP;
-    gc_range_compact(S);
-    gc_remset_reset(S);
+    gc_verify_roots_marked(S);
+    /* Purge remset entries whose container is about to be freed, but
+     * keep the rest with their dirty bits intact. OLD->YOUNG edges
+     * installed by the mutator during MAJOR_MARK must survive so the
+     * next minor can trace the YOUNG targets. */
+    gc_remset_purge_dead(S);
     gc_sweep(S);
+    /* Invalidate the range index. gc_range_compact would filter by
+     * mark bit, but gc_sweep leaves YOUNG alive regardless of mark,
+     * so compact would wrongly drop unmarked YOUNG survivors from the
+     * index and the next collector could not resolve their headers.
+     * The next collector touchpoint rebuilds from gc_all. */
+    S->gc_ranges_valid = 0;
     S->gc_collections_major++;
     S->gc_phase = GC_PHASE_IDLE;
     S->gc_depth--;
 }
 
-/* Full-heap sweep. Called from gc_major_sweep_phase; frees every
- * allocation whose mark bit is clear, resets the mark bit on
- * survivors, grows the next cycle's threshold so amortised collection
- * cost stays bounded. */
+/* Major sweep. Called from gc_major_sweep_phase. Frees dead OLD
+ * headers; leaves YOUNG alone -- minor owns YOUNG lifecycle, and new
+ * YOUNG allocations that land after gc_major_begin seeded the mark
+ * stack will not be marked in this cycle but still need to survive
+ * until the next minor evaluates them against its own roots. Clears
+ * the mark bit on every survivor (OLD live and all YOUNG) so the
+ * next cycle starts from a clean slate. */
 void gc_sweep(mino_state_t *S)
 {
     gc_hdr_t **pp         = &S->gc_all;
     size_t     live_young = 0;
     size_t     live_old   = 0;
-    size_t     live;
+    size_t     freed_old  = 0;
     while (*pp != NULL) {
         gc_hdr_t *h = *pp;
+        if (h->gen == GC_GEN_YOUNG) {
+            /* Major leaves YOUNG alone; clear any mark bit the major
+             * frontier set so the next minor sees a clean slate. */
+            h->mark = 0;
+            live_young += h->size;
+            pp = &h->next;
+            continue;
+        }
         if (h->mark) {
             h->mark = 0;
-            if (h->gen == GC_GEN_OLD) {
-                live_old += h->size;
-            } else {
-                live_young += h->size;
-            }
+            live_old += h->size;
             pp = &h->next;
-        } else {
-            /* Call finalizer for handles being collected. */
-            if (h->type_tag == GC_T_VAL) {
-                mino_val_t *v = (mino_val_t *)(h + 1);
-                if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
-                    v->as.handle.finalizer(v->as.handle.ptr,
-                                           v->as.handle.tag);
-                }
+            continue;
+        }
+        /* Dead OLD: call finalizer, unlink, recycle. */
+        if (h->type_tag == GC_T_VAL) {
+            mino_val_t *v = (mino_val_t *)(h + 1);
+            if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+                v->as.handle.finalizer(v->as.handle.ptr,
+                                       v->as.handle.tag);
             }
-            *pp = h->next;
-            {
-                int fc = gc_freelist_class(h->size);
-                if (fc >= 0) {
-                    h->next = S->gc_freelists[fc];
-                    S->gc_freelists[fc] = h;
-                } else {
-                    free(h);
-                }
+        }
+        freed_old += h->size;
+        *pp = h->next;
+        {
+            int fc = gc_freelist_class(h->size);
+            if (fc >= 0) {
+                h->next = S->gc_freelists[fc];
+                S->gc_freelists[fc] = h;
+            } else {
+                free(h);
             }
         }
     }
-    live = live_young + live_old;
-    S->gc_total_freed   += S->gc_bytes_alloc - live;
+    S->gc_total_freed   += freed_old;
     S->gc_bytes_young    = live_young;
     S->gc_bytes_old      = live_old;
-    S->gc_bytes_live     = live;
-    S->gc_bytes_alloc    = live;
+    S->gc_bytes_live     = live_young + live_old;
+    S->gc_bytes_alloc    = S->gc_bytes_live;
     S->gc_old_baseline   = live_old;
-    /* Next cycle triggers after another threshold's worth of growth above
-     * the live set; threshold grows to keep collection amortized. */
-    if (live * 2 > S->gc_threshold) {
-        S->gc_threshold = live * 2;
+    /* Next major triggers after another threshold's worth of growth
+     * above the live set so collection cost stays amortised. */
+    if (S->gc_bytes_live * 2 > S->gc_threshold) {
+        S->gc_threshold = S->gc_bytes_live * 2;
     }
 }

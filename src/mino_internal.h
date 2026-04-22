@@ -613,6 +613,12 @@ void gc_remset_reset(mino_state_t *S);
  * promoted it. */
 void gc_remset_add(mino_state_t *S, gc_hdr_t *container);
 
+/* Used by major sweep to remove entries whose container is about to
+ * be freed, while leaving remset entries for containers that survive
+ * (their dirty bit intact) so the next minor still finds the YOUNG
+ * edges the mutator installed during this major cycle. */
+void gc_remset_purge_dead(mino_state_t *S);
+
 /* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,
  * QueryPerformanceCounter on Windows, clock() as coarse fallback.
  * Shared between prim_nano_time and gc_major_collect timing. */

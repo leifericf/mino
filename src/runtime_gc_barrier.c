@@ -102,6 +102,24 @@ void gc_remset_reset(mino_state_t *S)
     S->gc_remset_len = 0;
 }
 
+/* Drop remset entries whose container is about to be freed by sweep,
+ * keep the rest. Used by major sweep instead of a full reset so that
+ * OLD->YOUNG edges installed during MAJOR_MARK survive the cycle and
+ * the next minor can reach the YOUNG targets. Containers are removed
+ * from the remset purely to avoid dangling pointers after sweep;
+ * their dirty bits would get zeroed on freelist reuse anyway. */
+void gc_remset_purge_dead(mino_state_t *S)
+{
+    size_t i, dst = 0;
+    for (i = 0; i < S->gc_remset_len; i++) {
+        gc_hdr_t *h = S->gc_remset[i];
+        if (h->mark) {
+            S->gc_remset[dst++] = h;
+        }
+    }
+    S->gc_remset_len = dst;
+}
+
 /* List-building helper: tail-append a cons cell onto tail. Routes the
  * store through the write barrier so SATB sees the previous cdr and
  * the remset sees any old->young edge the append creates. Used by

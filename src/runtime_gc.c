@@ -43,6 +43,121 @@ int gc_freelist_class(size_t size)
     }
 }
 
+/* True when bytes_old has grown enough past the post-last-major
+ * baseline to warrant starting a new major cycle. The tenths math
+ * lets the default 1.5x multiplier be expressed without float. The
+ * gc_threshold floor keeps the very first major from firing the
+ * instant the first byte is promoted. */
+static int gc_should_start_major(const mino_state_t *S)
+{
+    size_t trigger = S->gc_old_baseline * S->gc_major_growth_tenths / 10u;
+    if (trigger < S->gc_threshold) {
+        trigger = S->gc_threshold;
+    }
+    return S->gc_bytes_old > trigger;
+}
+
+/* Drive one incremental slice of an in-flight major: drain up to
+ * gc_major_work_budget headers, and if the mark stack is empty after
+ * that, close the cycle with remark + sweep. Times itself so the
+ * mutator sees one pause per slice. */
+static void gc_major_slice(mino_state_t *S)
+{
+    long long start_ns;
+    size_t    elapsed_ns;
+    if (S->gc_phase != GC_PHASE_MAJOR_MARK || S->gc_depth > 0) {
+        return;
+    }
+    start_ns = mino_monotonic_ns();
+    gc_major_step(S, S->gc_major_work_budget);
+    S->gc_major_step_alloc = 0;
+    if (S->gc_mark_stack_len == 0) {
+        gc_major_remark(S);
+        gc_major_sweep_phase(S);
+    }
+    elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
+    S->gc_total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc_max_ns) {
+        S->gc_max_ns = elapsed_ns;
+    }
+}
+
+/* Force any in-flight major to completion, with the mutator paused.
+ * Used on OOM fallback so the fallback STW major can start from a
+ * clean IDLE state, and at points where the caller cannot afford to
+ * leave marking partway done. */
+static void gc_force_finish_major(mino_state_t *S)
+{
+    long long start_ns;
+    size_t    elapsed_ns;
+    if (S->gc_phase != GC_PHASE_MAJOR_MARK || S->gc_depth > 0) {
+        return;
+    }
+    start_ns = mino_monotonic_ns();
+    gc_major_step(S, (size_t)-1);
+    gc_major_remark(S);
+    gc_major_sweep_phase(S);
+    elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
+    S->gc_total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc_max_ns) {
+        S->gc_max_ns = elapsed_ns;
+    }
+}
+
+/* Driver: called from gc_alloc_typed before each allocation. Picks
+ * between starting a minor, starting a major (incrementally), or
+ * advancing an in-flight major by one slice. The checks are ordered
+ * so that: (1) stress mode still forces a full STW major on every
+ * allocation, preserving the legacy test coverage; (2) while a major
+ * is in flight, a nursery overflow has to force the major to finish
+ * before the minor runs -- the minor-during-major interaction
+ * requires a mark-stack floor and promotion hook that land in the
+ * next step; (3) otherwise the normal IDLE-phase flow runs. */
+static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
+{
+    if (S->gc_depth > 0 || S->gc_stack_bottom == NULL) {
+        return;
+    }
+    if (S->gc_stress) {
+        if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+            gc_force_finish_major(S);
+        }
+        if (S->gc_phase == GC_PHASE_IDLE) {
+            gc_major_collect(S);
+        }
+        return;
+    }
+    if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+        S->gc_major_step_alloc += alloc_size;
+        if (S->gc_bytes_young > S->gc_nursery_bytes) {
+            /* Minor-during-major support is staged behind the next
+             * step. Until then, force the cycle to complete so the
+             * minor runs from a clean IDLE. */
+            gc_force_finish_major(S);
+            if (S->gc_bytes_young > S->gc_nursery_bytes) {
+                gc_minor_collect(S);
+            }
+            if (S->gc_phase == GC_PHASE_IDLE && gc_should_start_major(S)) {
+                gc_major_begin(S);
+                gc_major_slice(S);
+            }
+            return;
+        }
+        if (S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
+            gc_major_slice(S);
+        }
+        return;
+    }
+    /* phase == IDLE */
+    if (S->gc_bytes_young > S->gc_nursery_bytes) {
+        gc_minor_collect(S);
+    }
+    if (S->gc_phase == GC_PHASE_IDLE && gc_should_start_major(S)) {
+        gc_major_begin(S);
+        gc_major_slice(S);
+    }
+}
+
 void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
 {
     gc_hdr_t *h;
@@ -51,41 +166,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         const char *e = getenv("MINO_GC_STRESS");
         S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
     }
-    /* Collection trigger. Honour gc_stress (major on every alloc) and
-     * otherwise pick minor or major by generation pressure:
-     *   - minor fires when young exceeds the nursery budget;
-     *   - major fires when old has grown past its post-last-major
-     *     baseline by the configured growth factor, floored at
-     *     gc_threshold so the very first major waits for a meaningful
-     *     heap size. The floor is what keeps us from running a major
-     *     the moment the first byte is promoted. */
-    if (S->gc_depth == 0 && S->gc_stack_bottom != NULL
-        && S->gc_phase == GC_PHASE_IDLE) {
-        if (S->gc_stress) {
-            gc_major_collect(S);
-        } else if (S->gc_bytes_young > S->gc_nursery_bytes) {
-            gc_minor_collect(S);
-            {
-                size_t trigger =
-                    S->gc_old_baseline * S->gc_major_growth_tenths / 10u;
-                if (trigger < S->gc_threshold) {
-                    trigger = S->gc_threshold;
-                }
-                if (S->gc_bytes_old > trigger) {
-                    gc_major_collect(S);
-                }
-            }
-        } else {
-            size_t trigger =
-                S->gc_old_baseline * S->gc_major_growth_tenths / 10u;
-            if (trigger < S->gc_threshold) {
-                trigger = S->gc_threshold;
-            }
-            if (S->gc_bytes_old > trigger) {
-                gc_major_collect(S);
-            }
-        }
-    }
+    gc_driver_tick(S, size);
     /* Fault injection: simulate OOM when the countdown reaches zero. */
     if (S->fi_alloc_countdown > 0) {
         S->fi_alloc_countdown--;
@@ -107,11 +188,15 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     } else {
         h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
         if (h == NULL && S->gc_depth == 0 && S->gc_stack_bottom != NULL) {
-            /* OOM fallback: if we got here via a minor or no prior
-             * collection, run a full STW major before giving up. That
-             * frees anything kept alive only by old-gen references the
-             * minor skipped. */
-            gc_major_collect(S);
+            /* OOM fallback: close any in-flight major and run one
+             * full STW major before giving up. That frees anything
+             * kept alive only by old-gen references the minor
+             * skipped and releases the snapshot overhead of the
+             * interrupted cycle. */
+            gc_force_finish_major(S);
+            if (S->gc_phase == GC_PHASE_IDLE) {
+                gc_major_collect(S);
+            }
             h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
         }
         if (h == NULL) {
