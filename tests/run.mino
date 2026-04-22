@@ -19,6 +19,7 @@
 (require "tests/io_test")
 (require "tests/reflection_test")
 (require "tests/gc_test")
+(require "tests/regression_hamt_str_churn")
 (require "tests/math_test")
 (require "tests/hash_compare_test")
 (require "tests/regex_test")
