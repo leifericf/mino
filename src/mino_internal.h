@@ -554,7 +554,17 @@ int    gc_freelist_class(size_t size);
  * entries even though their header is OLD. */
 void gc_mark_push(mino_state_t *S, gc_hdr_t *h);
 void gc_drain_mark_stack(mino_state_t *S);
+/* Drain the mark stack until its length drops to floor_len. Minor
+ * uses this with the saved major-in-flight length so its drain only
+ * processes entries it added on top; major's pending OLD entries
+ * beneath the floor are preserved for the next gc_major_step. */
+void gc_drain_mark_stack_to(mino_state_t *S, size_t floor_len);
 void gc_trace_children(mino_state_t *S, gc_hdr_t *h);
+/* Enqueue a header onto the mark stack with mark=1, bypassing the
+ * minor-phase OLD filter. Used by minor's promotion hook to hand
+ * newly-promoted OLD objects to major's mark frontier when a minor
+ * runs nested inside MAJOR_MARK. */
+void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h);
 
 /* runtime_gc_roots.c: range index over live headers plus root enumeration.
  * The range index backs gc_find_header_for_ptr, which resolves a raw

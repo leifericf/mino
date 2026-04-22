@@ -41,8 +41,10 @@ static void gc_mark_remset(mino_state_t *S)
 /* Sweep the YOUNG generation in one walk of gc_all. Dead (unmarked)
  * YOUNG headers go to the free list or free(); live YOUNG clear their
  * mark, age up, and promote to OLD when the age threshold is reached.
- * OLD headers are untouched in both reachability and accounting. */
-static void gc_minor_sweep(mino_state_t *S)
+ * OLD headers are untouched in both reachability and accounting.
+ * When saved_phase is MAJOR_MARK, every promoted header is also
+ * enqueued on major's mark stack so major traces it before sweep. */
+static void gc_minor_sweep(mino_state_t *S, int saved_phase)
 {
     gc_hdr_t **pp          = &S->gc_all;
     size_t     freed_bytes = 0;
@@ -71,6 +73,13 @@ static void gc_minor_sweep(mino_state_t *S)
                  * allocate-then-populate pattern where the container
                  * is promoted mid-fill. */
                 gc_remset_add(S, h);
+                /* Promotion hook: if a major mark was in flight, the
+                 * just-promoted header was not in major's snapshot
+                 * but is live now; enqueue it onto major's mark stack
+                 * so the next gc_major_step traces its children. */
+                if (saved_phase == GC_PHASE_MAJOR_MARK) {
+                    gc_major_enqueue_promoted(S, h);
+                }
             }
             pp = &h->next;
             continue;
@@ -241,10 +250,20 @@ void gc_minor_collect(mino_state_t *S)
     jmp_buf   jb;
     long long start_ns;
     size_t    elapsed_ns;
+    int       saved_phase;
+    size_t    mark_floor;
     if (S->gc_depth > 0) {
         return;
     }
     S->gc_depth++;
+    /* Save the caller's phase and the current mark-stack length.
+     * When a minor runs nested inside MAJOR_MARK, the saved length
+     * is the floor below which major's pending entries live; minor
+     * drains only above the floor so major's work is preserved. The
+     * saved phase is restored on exit so the outer major cycle
+     * continues uninterrupted. */
+    saved_phase = S->gc_phase;
+    mark_floor  = S->gc_mark_stack_len;
     S->gc_phase = GC_PHASE_MINOR;
     if (!S->gc_ranges_valid) {
         gc_build_range_index(S);
@@ -262,25 +281,25 @@ void gc_minor_collect(mino_state_t *S)
         gc_build_range_index(S);
     }
     gc_mark_roots(S);
-    gc_drain_mark_stack(S);
+    gc_drain_mark_stack_to(S, mark_floor);
     gc_mark_remset(S);
-    gc_drain_mark_stack(S);
+    gc_drain_mark_stack_to(S, mark_floor);
     gc_scan_stack(S);
-    gc_drain_mark_stack(S);
+    gc_drain_mark_stack_to(S, mark_floor);
     /* Reset the remset before sweep so sweep can immediately re-enqueue
      * every newly-promoted header; the remset ends the cycle
      * containing exactly those promotions, giving the next cycle a
      * safety net for any alloc-then-populate pattern that omitted a
      * barrier on a container promoted mid-fill. */
     gc_remset_reset(S);
-    gc_minor_sweep(S);
+    gc_minor_sweep(S, saved_phase);
     /* Dead YOUNG entries are still in the range index. Rather than
      * compact it we invalidate and rebuild at the next collection -- a
      * cheap O(n) walk that fits naturally into the quiescent state
      * between cycles. */
     S->gc_ranges_valid = 0;
     S->gc_collections_minor++;
-    S->gc_phase = GC_PHASE_IDLE;
+    S->gc_phase = saved_phase;
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
     S->gc_total_ns += elapsed_ns;
     if (elapsed_ns > S->gc_max_ns) {

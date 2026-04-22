@@ -130,20 +130,15 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
     if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
         S->gc_major_step_alloc += alloc_size;
         if (S->gc_bytes_young > S->gc_nursery_bytes) {
-            /* Minor-during-major support is staged behind the next
-             * step. Until then, force the cycle to complete so the
-             * minor runs from a clean IDLE. */
-            gc_force_finish_major(S);
-            if (S->gc_bytes_young > S->gc_nursery_bytes) {
-                gc_minor_collect(S);
-            }
-            if (S->gc_phase == GC_PHASE_IDLE && gc_should_start_major(S)) {
-                gc_major_begin(S);
-                gc_major_slice(S);
-            }
-            return;
+            /* Minor nests inside the active major: it saves phase,
+             * drains to a floor that preserves major's pending
+             * entries, and enqueues any newly-promoted OLD onto
+             * major's mark stack. Phase MAJOR_MARK is restored on
+             * return. */
+            gc_minor_collect(S);
         }
-        if (S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
+        if (S->gc_phase == GC_PHASE_MAJOR_MARK
+            && S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
             gc_major_slice(S);
         }
         return;
@@ -254,6 +249,24 @@ char *dup_n(mino_state_t *S, const char *s, size_t len)
 
 #define GC_MARK_STACK_INIT 256
 
+/* Push h onto the mark stack if it is not already marked. Growth of
+ * the stack on overflow is best-effort: if realloc fails, the push
+ * silently drops and the collector is forced to rely on conservative
+ * scan as a backstop. */
+static void gc_mark_stack_push_raw(mino_state_t *S, gc_hdr_t *h)
+{
+    if (S->gc_mark_stack_len == S->gc_mark_stack_cap) {
+        size_t new_cap = S->gc_mark_stack_cap == 0
+            ? GC_MARK_STACK_INIT : S->gc_mark_stack_cap * 2;
+        gc_hdr_t **ns = (gc_hdr_t **)realloc(
+            S->gc_mark_stack, new_cap * sizeof(*ns));
+        if (ns == NULL) return;
+        S->gc_mark_stack = ns;
+        S->gc_mark_stack_cap = new_cap;
+    }
+    S->gc_mark_stack[S->gc_mark_stack_len++] = h;
+}
+
 void gc_mark_push(mino_state_t *S, gc_hdr_t *h)
 {
     if (h == NULL || h->mark) return;
@@ -263,16 +276,18 @@ void gc_mark_push(mino_state_t *S, gc_hdr_t *h)
      * objects live by definition across minor cycles. */
     if (S->gc_phase == GC_PHASE_MINOR && h->gen == GC_GEN_OLD) return;
     h->mark = 1;
-    if (S->gc_mark_stack_len == S->gc_mark_stack_cap) {
-        size_t new_cap = S->gc_mark_stack_cap == 0
-            ? GC_MARK_STACK_INIT : S->gc_mark_stack_cap * 2;
-        gc_hdr_t **ns = (gc_hdr_t **)realloc(
-            S->gc_mark_stack, new_cap * sizeof(*ns));
-        if (ns == NULL) return;  /* OOM: best effort */
-        S->gc_mark_stack = ns;
-        S->gc_mark_stack_cap = new_cap;
-    }
-    S->gc_mark_stack[S->gc_mark_stack_len++] = h;
+    gc_mark_stack_push_raw(S, h);
+}
+
+/* Enqueue a header onto the mark stack, bypassing the minor-phase
+ * OLD filter. Used by the minor collector when it promotes YOUNG to
+ * OLD during a MAJOR_MARK cycle: the newly-OLD object needs to be
+ * traced by major even though the current phase is MINOR. */
+void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h)
+{
+    if (h == NULL || h->mark) return;
+    h->mark = 1;
+    gc_mark_stack_push_raw(S, h);
 }
 
 /* Resolve an interior pointer and push its header onto the mark stack. */
@@ -429,13 +444,21 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
     }
 }
 
-/* Drain the mark stack: pop headers and trace their children until empty. */
-void gc_drain_mark_stack(mino_state_t *S)
+/* Drain the mark stack until its length drops to floor_len. The floor
+ * lets a minor nested inside a MAJOR_MARK cycle process only the
+ * entries it added on top, leaving major's pending OLD entries
+ * untouched beneath. Callers that want a full drain pass 0. */
+void gc_drain_mark_stack_to(mino_state_t *S, size_t floor_len)
 {
-    while (S->gc_mark_stack_len > 0) {
+    while (S->gc_mark_stack_len > floor_len) {
         gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
         gc_trace_children(S, h);
     }
+}
+
+void gc_drain_mark_stack(mino_state_t *S)
+{
+    gc_drain_mark_stack_to(S, 0);
 }
 
 /* ------------------------------------------------------------------------- */
