@@ -479,6 +479,10 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Internal fast path for single-collection lazy map.");
     DEF_PRIM(env, "lazy-filter", prim_lazy_filter,
              "Internal fast path for lazy filter.");
+    DEF_PRIM(env, "doall",    prim_doall,
+             "Forces realization of a lazy sequence. Returns coll.");
+    DEF_PRIM(env, "dorun",    prim_dorun,
+             "Forces realization of a lazy sequence. Returns nil.");
     /* eager collection builders */
     DEF_PRIM(env, "rangev",   prim_rangev,
              "Returns a vector of integers from start (inclusive) to end (exclusive).");

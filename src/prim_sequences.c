@@ -272,6 +272,54 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* Lazy primitives (range, lazy-map-1, lazy-filter) live in prim_lazy.c. */
 
+/* (doall coll) -- walks coll forcing every lazy cell, returns coll.
+ * (dorun coll) -- same but returns nil. Both iterate in C so each step
+ * avoids the fn-call + env frame that a mino-level walk would pay. */
+static mino_val_t *realize_seq(mino_state_t *S, mino_val_t *coll)
+{
+    while (coll != NULL) {
+        if (coll->type == MINO_LAZY) {
+            coll = lazy_force(S, coll);
+            if (coll == NULL) return NULL;
+            continue;
+        }
+        if (coll->type == MINO_NIL) return coll;
+        if (coll->type == MINO_CONS) {
+            coll = coll->as.cons.cdr;
+            continue;
+        }
+        /* Non-lazy, non-cons collections are already fully realized. */
+        return coll;
+    }
+    return mino_nil(S);
+}
+
+mino_val_t *prim_doall(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "doall requires 1 argument");
+    }
+    coll = args->as.cons.car;
+    if (realize_seq(S, coll) == NULL) return NULL;
+    return coll;
+}
+
+mino_val_t *prim_dorun(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "dorun requires 1 argument");
+    }
+    coll = args->as.cons.car;
+    if (realize_seq(S, coll) == NULL) return NULL;
+    return mino_nil(S);
+}
+
 /* Eager range returning a vector. Avoids lazy thunk overhead for tight loops.
  * (rangev end) or (rangev start end) or (rangev start end step). */
 mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)

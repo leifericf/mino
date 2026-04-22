@@ -517,15 +517,7 @@
 
 ;; --- Forcing ---
 
-(def doall "Forces realization of a lazy sequence. Returns coll." (fn [coll]
-  (let [walk (fn [s] (when (seq s) (walk (rest s))))]
-    (walk coll)
-    coll)))
-
-(def dorun "Forces realization of a lazy sequence. Returns nil." (fn [coll]
-  (let [walk (fn [s] (when (seq s) (walk (rest s))))]
-    (walk coll)
-    nil)))
+;; doall and dorun are C primitives.
 
 ;; --- Type predicates and trivial compositions ---
 ;; true?, false?, boolean?, int?, float?, char? are C primitives.
