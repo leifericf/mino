@@ -167,12 +167,7 @@
                     (reduced ret)
                     ret))
                 result)))))))
-  ([n coll]
-   (lazy-seq
-     (when (> n 0)
-       (let [s (seq coll)]
-         (when s
-           (cons (first s) (take (- n 1) (rest s))))))))))
+  ([n coll] (lazy-take n coll))))
 
 (def drop "Returns a lazy sequence of all but the first n items in coll. When called with no collection, returns a transducer." (fn
   ([n]
@@ -184,13 +179,7 @@
             (if (> @remaining 0)
               (do (swap! remaining dec) result)
               (rf result input)))))))
-  ([n coll]
-   (if (<= n 0)
-     coll
-     (let [s (seq coll)]
-       (if s
-         (drop (- n 1) (rest s))
-         nil))))))
+  ([n coll] (drop-seq n coll))))
 
 (def concat "Returns a lazy sequence of the concatenation of the given collections." (fn [& colls]
   (lazy-seq

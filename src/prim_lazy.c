@@ -211,6 +211,114 @@ static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
         range_make_lazy(S, start + step, end, step, infinite));
 }
 
+/* Lazy take: ctx = cons(n, coll_state). Each force decrements n and
+ * yields (first coll) until n reaches zero or coll is exhausted. */
+static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
+{
+    long long n   = ctx->as.cons.car->as.i;
+    mino_val_t *coll = ctx->as.cons.cdr->as.cons.car;
+    mino_val_t *head;
+    mino_val_t *rest;
+    mino_val_t *next_ctx;
+    mino_val_t *next_lz;
+    if (n <= 0) return mino_nil(S);
+    if (coll != NULL && coll->type == MINO_LAZY) {
+        coll = lazy_force(S, coll);
+        if (coll == NULL) return NULL;
+    }
+    if (coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil(S);
+    }
+    if (coll->type != MINO_CONS) {
+        coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
+        if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+        if (coll->type != MINO_CONS) return mino_nil(S);
+    }
+    head = coll->as.cons.car;
+    rest = coll->as.cons.cdr;
+    if (n == 1) {
+        return mino_cons(S, head, mino_nil(S));
+    }
+    next_ctx = mino_cons(S, mino_int(S, n - 1),
+                mino_cons(S, rest, mino_nil(S)));
+    next_lz = alloc_val(S, MINO_LAZY);
+    next_lz->as.lazy.body    = next_ctx;
+    next_lz->as.lazy.c_thunk = lazy_take_thunk;
+    return mino_cons(S, head, next_lz);
+}
+
+/* (lazy-take n coll) -- lazy take for n items; see lazy-map-1 comment. */
+mino_val_t *prim_lazy_take(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long n;
+    mino_val_t *coll;
+    mino_val_t *ctx;
+    mino_val_t *lz;
+    size_t na;
+    (void)env;
+    arg_count(S, args, &na);
+    if (na != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "lazy-take requires 2 arguments");
+    }
+    if (!mino_to_int(args->as.cons.car, &n)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "lazy-take: n must be an integer");
+    }
+    coll = args->as.cons.cdr->as.cons.car;
+    if (n <= 0 || coll == NULL || coll->type == MINO_NIL) {
+        return mino_nil(S);
+    }
+    if (coll->type != MINO_CONS && coll->type != MINO_LAZY) {
+        coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
+        if (coll == NULL) return NULL;
+        if (coll->type == MINO_NIL) return mino_nil(S);
+    }
+    ctx = mino_cons(S, mino_int(S, n), mino_cons(S, coll, mino_nil(S)));
+    lz = alloc_val(S, MINO_LAZY);
+    lz->as.lazy.body    = ctx;
+    lz->as.lazy.c_thunk = lazy_take_thunk;
+    return lz;
+}
+
+/* (drop-seq n coll) -- eagerly walk past n items, returning the tail
+ * seq. Mirrors Clojure's eager-drop; the public `drop` dispatches here
+ * for the 2-arg form and keeps the transducer path in core.mino. */
+mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long n;
+    mino_val_t *coll;
+    size_t na;
+    (void)env;
+    arg_count(S, args, &na);
+    if (na != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "drop-seq requires 2 arguments");
+    }
+    if (!mino_to_int(args->as.cons.car, &n)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "drop-seq: n must be an integer");
+    }
+    coll = args->as.cons.cdr->as.cons.car;
+    if (n <= 0) return coll;
+    while (n > 0) {
+        if (coll != NULL && coll->type == MINO_LAZY) {
+            coll = lazy_force(S, coll);
+            if (coll == NULL) return NULL;
+        }
+        if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+        if (coll->type != MINO_CONS) {
+            coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
+            if (coll == NULL) return NULL;
+            if (coll->type == MINO_NIL) return mino_nil(S);
+            if (coll->type != MINO_CONS) return mino_nil(S);
+        }
+        coll = coll->as.cons.cdr;
+        n--;
+    }
+    return coll;
+}
+
 /* (range), (range end), (range start end), (range start end step). */
 mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
