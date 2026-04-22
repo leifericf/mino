@@ -14,7 +14,12 @@ has a single responsibility. State access is explicit (`S->field`).
 | `src/eval_special_control.c` | 195 | `try`/`catch`/`finally` |
 | `src/eval_special_fn.c` | 432 | `fn`, `apply_callable`, multi-arity dispatch |
 | `src/runtime_state.c` | 528 | State lifecycle (`mino_state_new`, `mino_state_free`), limits, interrupt, env public API (`mino_env_new`, `mino_env_free`, `mino_env_clone`, `mino_new`), refs, fault injection setup |
-| `src/runtime_gc.c` | 621 | GC allocation (`gc_alloc_typed`, `alloc_val`, `dup_n`), mark-and-sweep collector, conservative stack scan, range index |
+| `src/runtime_gc.c` | 515 | Allocation driver (`gc_alloc_typed`, `alloc_val`, `dup_n`), shared mark-stack primitives, driver tick that picks minor vs. major vs. incremental-major-slice, STW orchestrator (`gc_major_collect`), force-finish helper |
+| `src/runtime_gc_roots.c` | 340 | Root enumeration, conservative stack scan (`gc_scan_stack`, `gc_mark_roots`), range index over live headers for interior-pointer resolution |
+| `src/runtime_gc_minor.c` | 309 | Minor (nursery) collector: marks YOUNG-reachable via roots+remset, sweeps dead YOUNG, promotes surviving YOUNG to OLD, nests safely inside an active major |
+| `src/runtime_gc_major.c` | 216 | Major collector state machine: `gc_major_begin`, `gc_major_step`, `gc_major_remark`, `gc_major_sweep_phase`; OLD sweep that preserves YOUNG survivors |
+| `src/runtime_gc_barrier.c` | 132 | Write barrier fast/slow path, SATB old-value push during MAJOR_MARK, remembered set (add + purge dead), singleton pointer filter |
+| `src/public_gc.c` | 146 | Host-facing GC API: `mino_gc_collect` (MINOR/MAJOR/FULL), `mino_gc_set_param` (range-validated tuning knobs), `mino_gc_stats` (out-struct populate) |
 | `src/runtime_env.c` | 171 | Internal environment ops (`env_alloc`, `env_child`, `env_root`, `env_bind`, `env_find_here`), root-env registry, dynamic binding lookup |
 | `src/runtime_error.c` | 178 | Error reporting (`set_error`, `set_error_at`, `clear_error`), call stack (`push_frame`, `pop_frame`, `append_trace`), `type_tag_str`, metadata table |
 | `src/runtime_var.c` | 88 | Var registry (`var_intern`, `var_find`, `var_set_root`) |
@@ -28,8 +33,9 @@ has a single responsibility. State access is explicit (`S->field`).
 | `src/prim_collections.c` | 1082 | List/vector/map/set primitives (`car`, `cdr`, `cons`, `count`, `nth`, `first`, `rest`, `assoc`, `get`, `conj`, `keys`, `vals`, `hash-set`, `contains?`, `disj`, `dissoc`, `seq`, `realized?`) |
 | `src/prim_sequences.c` | 887 | Sequence operations (`reduce`, `into`, `apply`, `reverse`, `sort`, `rangev`, `mapv`, `filterv`, `reduced`, `reduced?`) |
 | `src/prim_string.c` | 690 | String primitives (`str`, `pr-str`, `format`, `read-string`, `subs`, `split`, `join`, `starts-with?`, `ends-with?`, `includes?`, `upper-case`, `lower-case`, `trim`, `char-at`) |
-| `src/prim_io.c` | 153 | I/O primitives (`println`, `prn`, `slurp`, `spit`, `exit`, `time-ms`) |
-| `src/prim_reflection.c` | 351 | Reflection/utility (`type`, `name`, `eval`, `symbol`, `keyword`, `hash`, `gensym`, `macroexpand`, `throw`, `rand`, `resolve`, `namespace`, `var?`) |
+| `src/prim_io.c` | 153 | I/O primitives (`println`, `prn`, `slurp`, `spit`, `exit`, `time-ms`, `getenv`) |
+| `src/prim_lazy.c` | 359 | Lazy sequence primitives implemented as C thunks (`range`, `lazy-map-1`, `lazy-filter`, `lazy-take`, `drop-seq`, `doall`, `dorun`) |
+| `src/prim_reflection.c` | 644 | Reflection/utility (`type`, `name`, `eval`, `symbol`, `keyword`, `hash`, `gensym`, `macroexpand`, `throw`, `rand`, `resolve`, `namespace`, `var?`), `gc-stats`, `nano-time` |
 | `src/prim_meta.c` | 108 | Metadata (`meta`, `with-meta`, `vary-meta`, `alter-meta!`) |
 | `src/prim_regex.c` | 61 | Regex (`re-find`, `re-matches`) |
 | `src/prim_stateful.c` | 359 | Atoms (`atom`, `deref`, `reset!`, `swap!`, `atom?`, `add-watch`, `remove-watch`, `set-validator!`, `get-validator`, `swap-vals!`, `reset-vals!`) |
@@ -60,6 +66,18 @@ has a single responsibility. State access is explicit (`S->field`).
 |------|-----|----------------|
 | `src/clone.c` | 660 | Value cloning, serialization, mailbox (mutex-protected FIFO), actors |
 
+## Async / core.async
+
+| File | Responsibility |
+|------|----------------|
+| `src/async_scheduler.c` | Deterministic round-robin scheduler for parked channel operations |
+| `src/async_channel.c` | Unbuffered/buffered channel implementation |
+| `src/async_buffer.c` | Fixed, dropping, and sliding channel buffers |
+| `src/async_handler.c` | Channel put/take handler lifecycle |
+| `src/async_select.c` | `alts!` / `alt!` selection across multiple channels |
+| `src/async_timer.c` | `timeout` and timer wheel |
+| `src/prim_async.c` | Mino-facing primitives: `chan`, `>!!`, `<!!`, `go`, `thread`, `alts!`, `close!` |
+
 ## Headers
 
 | File | Contents |
@@ -87,7 +105,8 @@ eval_special_*.c -> eval_special_internal.h -> mino_internal.h -> mino.h
 prim_*.c         -> prim_internal.h         -> mino_internal.h -> mino.h
 prim_regex.c     -> prim_internal.h + re.h
 
-runtime_*.c, mino.c, val.c, vec.c, map.c, rbtree.c,
+runtime_*.c, public_gc.c, async_*.c, prim_async.c,
+mino.c, val.c, vec.c, map.c, rbtree.c,
 read.c, print.c, clone.c, host_interop.c -> mino_internal.h -> mino.h
 
 re.c -> re.h (standalone, no mino headers)
