@@ -190,7 +190,8 @@
            (buffer? buf-or-n)                    [(:buf-kind buf-or-n)
                                                   (:capacity buf-or-n)]
            :else
-           (throw "chan: buffer-or-n must be nil, a non-negative integer, or a buffer"))
+           (throw (str "chan: buffer-or-n must be nil, a non-negative "
+                       "integer, or a buffer")))
          ch (atom (new-chan-state kind cap nil nil))]
      (when xform
        (install-xform! ch xform ex-handler))
