@@ -105,6 +105,137 @@ static void gc_minor_sweep(mino_state_t *S)
     S->gc_total_freed += freed_bytes;
 }
 
+/* Diagnostic helper (opt-in via MINO_GC_VERIFY=1): walks every OLD
+ * header and asserts that its outgoing GC pointers reference OLD
+ * targets, unless the header is in the remembered set (dirty=1). A
+ * YOUNG target on an OLD container that is not in the remset means a
+ * mutation bypassed the barrier; the helper aborts so the offending
+ * store surfaces loudly instead of corrupting the heap cycles later.
+ * Paid only when the env var is set; returns immediately otherwise. */
+static void gc_verify_remset_complete(mino_state_t *S)
+{
+    gc_hdr_t   *h;
+    const char *env = getenv("MINO_GC_VERIFY");
+    if (env == NULL || env[0] == '\0' || env[0] == '0') return;
+
+#define MINO_GC_VERIFY_CHECK(p) do { \
+    if ((p) != NULL) { \
+        gc_hdr_t *__child = gc_find_header_for_ptr(S, (p)); \
+        if (__child != NULL && __child->gen == GC_GEN_YOUNG) { \
+            int __vt = (h->type_tag == GC_T_VAL) \
+                ? (int)((mino_val_t *)(h + 1))->type : -1; \
+            fprintf(stderr, \
+                "[gc-verify] OLD %p tag=%d vtype=%d -> YOUNG %p tag=%d\n", \
+                (void *)h, (int)h->type_tag, __vt, \
+                (void *)__child, (int)__child->type_tag); \
+            abort(); \
+        } \
+    } \
+} while (0)
+
+    for (h = S->gc_all; h != NULL; h = h->next) {
+        if (h->gen != GC_GEN_OLD || h->dirty) continue;
+        switch (h->type_tag) {
+        case GC_T_VAL: {
+            mino_val_t *v = (mino_val_t *)(h + 1);
+            MINO_GC_VERIFY_CHECK(v->meta);
+            switch (v->type) {
+            case MINO_STRING: case MINO_SYMBOL: case MINO_KEYWORD:
+                MINO_GC_VERIFY_CHECK(v->as.s.data); break;
+            case MINO_CONS:
+                MINO_GC_VERIFY_CHECK(v->as.cons.car);
+                MINO_GC_VERIFY_CHECK(v->as.cons.cdr); break;
+            case MINO_VECTOR:
+                MINO_GC_VERIFY_CHECK(v->as.vec.root);
+                MINO_GC_VERIFY_CHECK(v->as.vec.tail); break;
+            case MINO_MAP:
+                MINO_GC_VERIFY_CHECK(v->as.map.root);
+                MINO_GC_VERIFY_CHECK(v->as.map.key_order); break;
+            case MINO_SET:
+                MINO_GC_VERIFY_CHECK(v->as.set.root);
+                MINO_GC_VERIFY_CHECK(v->as.set.key_order); break;
+            case MINO_SORTED_MAP: case MINO_SORTED_SET:
+                MINO_GC_VERIFY_CHECK(v->as.sorted.root);
+                MINO_GC_VERIFY_CHECK(v->as.sorted.comparator); break;
+            case MINO_FN: case MINO_MACRO:
+                MINO_GC_VERIFY_CHECK(v->as.fn.params);
+                MINO_GC_VERIFY_CHECK(v->as.fn.body);
+                MINO_GC_VERIFY_CHECK(v->as.fn.env); break;
+            case MINO_ATOM:
+                MINO_GC_VERIFY_CHECK(v->as.atom.val);
+                MINO_GC_VERIFY_CHECK(v->as.atom.watches);
+                MINO_GC_VERIFY_CHECK(v->as.atom.validator); break;
+            case MINO_LAZY:
+                if (v->as.lazy.realized) MINO_GC_VERIFY_CHECK(v->as.lazy.cached);
+                else {
+                    MINO_GC_VERIFY_CHECK(v->as.lazy.body);
+                    MINO_GC_VERIFY_CHECK(v->as.lazy.env);
+                }
+                break;
+            case MINO_VAR:
+                MINO_GC_VERIFY_CHECK(v->as.var.root); break;
+            default: break;
+            }
+            break;
+        }
+        case GC_T_ENV: {
+            mino_env_t *e = (mino_env_t *)(h + 1);
+            MINO_GC_VERIFY_CHECK(e->parent);
+            if (e->bindings != NULL) {
+                size_t k;
+                MINO_GC_VERIFY_CHECK(e->bindings);
+                for (k = 0; k < e->len; k++) {
+                    MINO_GC_VERIFY_CHECK(e->bindings[k].name);
+                    MINO_GC_VERIFY_CHECK(e->bindings[k].val);
+                }
+            }
+            MINO_GC_VERIFY_CHECK(e->ht_buckets);
+            break;
+        }
+        case GC_T_HAMT_NODE: {
+            mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
+            unsigned count, k;
+            MINO_GC_VERIFY_CHECK(n->slots);
+            count = (n->collision_count > 0)
+                ? n->collision_count : popcount32(n->bitmap);
+            if (n->slots != NULL) {
+                for (k = 0; k < count; k++) MINO_GC_VERIFY_CHECK(n->slots[k]);
+            }
+            break;
+        }
+        case GC_T_HAMT_ENTRY: {
+            hamt_entry_t *e = (hamt_entry_t *)(h + 1);
+            MINO_GC_VERIFY_CHECK(e->key);
+            MINO_GC_VERIFY_CHECK(e->val);
+            break;
+        }
+        case GC_T_VEC_NODE: {
+            mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
+            unsigned k;
+            for (k = 0; k < n->count; k++) MINO_GC_VERIFY_CHECK(n->slots[k]);
+            break;
+        }
+        case GC_T_VALARR: case GC_T_PTRARR: {
+            void **arr = (void **)(h + 1);
+            size_t n = h->size / sizeof(*arr);
+            size_t k;
+            for (k = 0; k < n; k++) MINO_GC_VERIFY_CHECK(arr[k]);
+            break;
+        }
+        case GC_T_RB_NODE: {
+            mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
+            MINO_GC_VERIFY_CHECK(rb->key);
+            MINO_GC_VERIFY_CHECK(rb->val);
+            MINO_GC_VERIFY_CHECK(rb->left);
+            MINO_GC_VERIFY_CHECK(rb->right);
+            break;
+        }
+        default: break;
+        }
+    }
+#undef MINO_GC_VERIFY_CHECK
+}
+
 void gc_minor_collect(mino_state_t *S)
 {
     jmp_buf   jb;
@@ -115,6 +246,10 @@ void gc_minor_collect(mino_state_t *S)
     }
     S->gc_depth++;
     S->gc_phase = GC_PHASE_MINOR;
+    if (!S->gc_ranges_valid) {
+        gc_build_range_index(S);
+    }
+    gc_verify_remset_complete(S);
     start_ns = mino_monotonic_ns();
     /* setjmp spills callee-saved registers into jb so the conservative
      * stack scan below covers any pointer that was register-resident

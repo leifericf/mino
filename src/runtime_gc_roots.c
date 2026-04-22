@@ -302,7 +302,16 @@ void gc_mark_roots(mino_state_t *S)
  * frame on a downward-growing stack) and the collector's own frame.
  * Every aligned machine word is treated as a candidate pointer and
  * resolved through the range index; non-pointer words fast-reject.
+ *
+ * ASan inserts red zones between locals; a conservative scan that
+ * walks through them looks like stack-buffer-overflow to the
+ * sanitizer. The scan is the entire point, so suppress the check.
  */
+#if defined(__has_feature)
+# if __has_feature(address_sanitizer)
+__attribute__((no_sanitize("address")))
+# endif
+#endif
 void gc_scan_stack(mino_state_t *S)
 {
     volatile char probe = 0;
