@@ -648,10 +648,13 @@ static void gc_sweep(mino_state_t *S)
 void gc_collect(mino_state_t *S)
 {
     jmp_buf jb;
+    long long start_ns;
+    size_t    elapsed_ns;
     if (S->gc_depth > 0) {
         return;
     }
     S->gc_depth++;
+    start_ns = mino_monotonic_ns();
     /* setjmp spills callee-saved registers into jb, which lives in this
      * stack frame. gc_scan_stack scans from a deeper frame up through ours,
      * so any pointer that was register-resident at entry is visible. */
@@ -671,5 +674,10 @@ void gc_collect(mino_state_t *S)
     gc_range_compact(S);
     gc_sweep(S);
     S->gc_collections++;
+    elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
+    S->gc_total_ns += elapsed_ns;
+    if (elapsed_ns > S->gc_max_ns) {
+        S->gc_max_ns = elapsed_ns;
+    }
     S->gc_depth--;
 }
