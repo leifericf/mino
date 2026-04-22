@@ -593,11 +593,12 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (gc-stats) — return a map of GC statistics:
- *   {:collections N :bytes-live N :bytes-alloc N :bytes-freed N :threshold N} */
+ *   {:collections N :bytes-live N :bytes-alloc N :bytes-freed N :threshold N
+ *    :total-gc-ns N :max-gc-ns N} */
 mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *ks[5];
-    mino_val_t *vs[5];
+    mino_val_t *ks[7];
+    mino_val_t *vs[7];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -613,5 +614,9 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[3] = mino_int(S, (long long)S->gc_total_freed);
     ks[4] = mino_keyword(S, "threshold");
     vs[4] = mino_int(S, (long long)S->gc_threshold);
-    return mino_map(S, ks, vs, 5);
+    ks[5] = mino_keyword(S, "total-gc-ns");
+    vs[5] = mino_int(S, (long long)S->gc_total_ns);
+    ks[6] = mino_keyword(S, "max-gc-ns");
+    vs[6] = mino_int(S, (long long)S->gc_max_ns);
+    return mino_map(S, ks, vs, 7);
 }
