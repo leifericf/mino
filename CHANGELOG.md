@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v0.41.0 — GC Timing Instrumentation
+
+Adds wall-clock measurement of garbage-collection pauses so the
+mino-bench harness can report GC share of wall time per benchmark.
+Purely instrumentation — no behavior change, no optimization.
+
+### Added
+- **`:total-gc-ns` and `:max-gc-ns`** keys on the `gc-stats` map,
+  covering cumulative nanoseconds spent in `gc_collect` and the
+  longest single collection pause.
+
+### Changed
+- **`prim_nano_time` and `gc_collect`** share a single
+  `mino_monotonic_ns` helper; the POSIX/Windows/fallback clock read
+  is no longer duplicated.
+
 ## v0.40.0 — Interpreter Performance Pass
 
 30 benchmark-driven optimizations. The eval floor (per-operation cost
