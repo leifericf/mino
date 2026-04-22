@@ -378,23 +378,32 @@ static mino_val_t *prim_alts(mino_state_t *S, mino_val_t *args,
 /* Timer primitive                                                    */
 /* ------------------------------------------------------------------ */
 
-static mino_val_t *prim_timeout(mino_state_t *S, mino_val_t *args,
-                                mino_env_t *env)
+/* (async-schedule-timer* ms cb)
+ * Schedule cb to run after ms milliseconds. Returns nil. */
+static mino_val_t *prim_timer_schedule(mino_state_t *S, mino_val_t *args,
+                                       mino_env_t *env)
 {
     double ms;
+    mino_val_t *cb;
     (void)env;
 
-    if (args == NULL || args->type != MINO_CONS) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "timeout* requires a millisecond argument");
+    if (args == NULL || args->type != MINO_CONS ||
+        args->as.cons.cdr == NULL) {
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001",
+                      "async-schedule-timer* requires ms and callback");
         return NULL;
     }
     if (!as_double(args->as.cons.car, &ms)) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "timeout* argument must be a number");
+        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001",
+                      "async-schedule-timer* first argument must be a number");
         return NULL;
     }
     if (ms < 0) ms = 0;
+    cb = args->as.cons.cdr->as.cons.car;
+    if (cb != NULL && cb->type == MINO_NIL) cb = NULL;
 
-    return async_timeout(S, ms);
+    if (async_timer_schedule(S, ms, cb) != 0) return NULL;
+    return mino_nil(S);
 }
 
 /* ------------------------------------------------------------------ */
@@ -492,7 +501,7 @@ void mino_install_async(mino_state_t *S, mino_env_t *env)
     DEF_PRIM(env, "chan-set-xform*", prim_chan_set_xform, "Set transducer on channel.");
     DEF_PRIM(env, "chan-buf-add*",   prim_chan_buf_add,   "Raw buffer add (for xform rf).");
     DEF_PRIM(env, "alts*",        prim_alts,           "Alts arbitration primitive.");
-    DEF_PRIM(env, "timeout*",     prim_timeout,        "Create a timeout channel.");
+    DEF_PRIM(env, "async-schedule-timer*", prim_timer_schedule, "Schedule a callback to fire after ms milliseconds.");
 
     /* Scheduler */
     DEF_PRIM(env, "drain!",       prim_drain,          "Drain the async run queue.");

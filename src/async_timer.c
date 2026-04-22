@@ -1,9 +1,15 @@
 /*
- * async_timer.c -- timeout channels for async operations.
+ * async_timer.c -- deadline-scheduled callbacks.
+ *
+ * The timer queue is a singly-linked list sorted by deadline; insertion
+ * is O(n) in the current queue size. When a deadline passes the
+ * callback is handed to the async scheduler, which invokes it on the
+ * next drain. This keeps all fire-ordering and GC pinning concerns
+ * inside the scheduler, not the timer subsystem.
  */
 
 #include "async_timer.h"
-#include "async_channel.h"
+#include "async_scheduler.h"
 #include "mino_internal.h"
 
 #if defined(_WIN32)
@@ -30,36 +36,31 @@ static double now_ms(void)
 #endif
 }
 
-mino_val_t *async_timeout(mino_state_t *S, double ms)
+int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback)
 {
-    mino_val_t *ch;
     timer_entry_t *entry;
-    mino_async_buf_t *buf;
 
-    /* Create a buffered channel (1) for the timeout. */
-    buf = async_buf_create(S, ASYNC_BUF_FIXED, 1);
-    if (buf == NULL) {
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating timeout buffer");
-        return NULL;
+    if (callback == NULL || callback->type == MINO_NIL) {
+        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001",
+                      "async-schedule-timer* requires a non-nil callback");
+        return -1;
     }
-    ch = async_chan_create(S, buf);
-    if (ch == NULL) return NULL;
 
     entry = calloc(1, sizeof(*entry));
     if (entry == NULL) {
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory creating timer entry");
-        return NULL;
+        set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+                      "out of memory creating timer entry");
+        return -1;
     }
     entry->deadline_ms = now_ms() + ms;
-    entry->chan_handle  = ch;
-    entry->chan_ref     = mino_ref(S, ch);
-    entry->next         = NULL;
+    entry->callback    = callback;
+    entry->cb_ref      = mino_ref(S, callback);
+    entry->next        = NULL;
 
     /* Insert sorted by deadline (earliest first). */
     if (S->async_timers == NULL ||
-        entry->deadline_ms <=
-            S->async_timers->deadline_ms) {
-        entry->next = S->async_timers;
+        entry->deadline_ms <= S->async_timers->deadline_ms) {
+        entry->next     = S->async_timers;
         S->async_timers = entry;
     } else {
         timer_entry_t *cur = S->async_timers;
@@ -71,7 +72,7 @@ mino_val_t *async_timeout(mino_state_t *S, double ms)
         cur->next   = entry;
     }
 
-    return ch;
+    return 0;
 }
 
 void async_timers_check(mino_state_t *S)
@@ -85,14 +86,11 @@ void async_timers_check(mino_state_t *S)
 
         S->async_timers = entry->next;
 
-        /* Close the timeout channel. */
-        {
-            mino_async_chan_t *ch = async_chan_get(entry->chan_handle);
-            if (ch != NULL && !async_chan_closed(ch))
-                async_chan_close(S, ch);
-        }
+        /* Hand the callback to the scheduler; it runs on the next drain
+         * pass and receives nil as its argument. */
+        async_sched_enqueue(S, entry->callback, mino_nil(S));
 
-        if (entry->chan_ref) mino_unref(S, entry->chan_ref);
+        if (entry->cb_ref) mino_unref(S, entry->cb_ref);
         free(entry);
     }
 }
@@ -102,7 +100,7 @@ void async_timers_free(mino_state_t *S)
     timer_entry_t *entry = S->async_timers;
     while (entry != NULL) {
         timer_entry_t *next = entry->next;
-        if (entry->chan_ref) mino_unref(S, entry->chan_ref);
+        if (entry->cb_ref) mino_unref(S, entry->cb_ref);
         free(entry);
         entry = next;
     }
@@ -112,8 +110,7 @@ void async_timers_free(mino_state_t *S)
 void async_timers_mark(mino_state_t *S)
 {
     timer_entry_t *entry;
-    for (entry = S->async_timers; entry != NULL;
-         entry = entry->next) {
-        gc_mark_interior(S, entry->chan_handle);
+    for (entry = S->async_timers; entry != NULL; entry = entry->next) {
+        if (entry->callback) gc_mark_interior(S, entry->callback);
     }
 }

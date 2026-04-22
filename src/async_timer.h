@@ -1,8 +1,10 @@
 /*
- * async_timer.h -- timeout channels for async operations.
+ * async_timer.h -- deadline-scheduled callbacks.
  *
- * (timeout ms) returns a channel that closes after ms milliseconds.
- * Cooperative: timers are checked during scheduler drain.
+ * (async-schedule-timer* ms cb) registers cb to run after ms milliseconds.
+ * The scheduler drain checks timers cooperatively and enqueues any
+ * expired callback on the run queue. This is the one C-side hook the
+ * pure-mino (timeout ms) helper uses to arm a close! on a mino channel.
  */
 
 #ifndef ASYNC_TIMER_H
@@ -13,14 +15,13 @@
 /* Timer queue entry. */
 typedef struct timer_entry {
     double               deadline_ms;
-    mino_val_t          *chan_handle;  /* the timeout channel */
-    mino_ref_t          *chan_ref;
+    mino_val_t          *callback;
+    mino_ref_t          *cb_ref;
     struct timer_entry  *next;
 } timer_entry_t;
 
-/* Create a timeout channel that closes after ms milliseconds.
- * Returns a MINO_HANDLE channel value. */
-mino_val_t *async_timeout(mino_state_t *S, double ms);
+/* Schedule callback to fire after ms milliseconds. Returns 0 on success. */
+int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback);
 
 /* Check and fire any expired timers.
  * Called from the scheduler drain loop. */
