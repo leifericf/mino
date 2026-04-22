@@ -545,6 +545,82 @@ void mino_set_fail_raw_at(mino_state_t *S, long n);
 int mino_fi_should_fail_raw(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
+/* Garbage collector control                                                 */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Kinds of collection the host can request. Use at quiescent points such
+ * as between REPL turns, after bulk import, or before long-idle periods.
+ *
+ *   MINO_GC_MINOR -- nursery collection only; cheapest, bounded by young set
+ *                   size. Safe at any time including mid-major.
+ *   MINO_GC_MAJOR -- drain any in-flight incremental major cycle and sweep,
+ *                   then start a fresh STW major if no cycle is active.
+ *                   Reclaims old-gen dead; leaves young-gen alone.
+ *   MINO_GC_FULL  -- minor, then finish or run a fresh STW major.
+ *                   Strongest reclamation; highest pause.
+ */
+typedef enum {
+    MINO_GC_MINOR = 1,
+    MINO_GC_MAJOR = 2,
+    MINO_GC_FULL  = 3
+} mino_gc_kind_t;
+
+void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind);
+
+/*
+ * Tunable parameters. Values out of range are rejected; mino_gc_set_param
+ * returns 0 on success and -1 on a bad parameter or out-of-range value.
+ *
+ *   NURSERY_BYTES       young-gen trigger; minor fires when young exceeds.
+ *                       Default 1 MiB. Range 64 KiB .. 256 MiB.
+ *   MAJOR_GROWTH_TENTHS old-gen growth multiplier in tenths (15 = 1.5x).
+ *                       Default 15. Range 11 .. 40.
+ *   PROMOTION_AGE       minor-survival count before YOUNG->OLD promotion.
+ *                       Default 1. Range 1 .. 8.
+ *   INCREMENTAL_BUDGET  headers popped per incremental major slice.
+ *                       Default 1024. Range 64 .. 65536.
+ *   STEP_ALLOC_BYTES    bytes allocated between automatic slices.
+ *                       Default 16 KiB. Range 1 KiB .. 16 MiB.
+ */
+typedef enum {
+    MINO_GC_NURSERY_BYTES       = 1,
+    MINO_GC_MAJOR_GROWTH_TENTHS = 2,
+    MINO_GC_PROMOTION_AGE       = 3,
+    MINO_GC_INCREMENTAL_BUDGET  = 4,
+    MINO_GC_STEP_ALLOC_BYTES    = 5
+} mino_gc_param_t;
+
+int mino_gc_set_param(mino_state_t *S, mino_gc_param_t p, size_t value);
+
+/* Phase tag returned in mino_gc_stats_t.phase. */
+#define MINO_GC_PHASE_IDLE        0
+#define MINO_GC_PHASE_MINOR       1
+#define MINO_GC_PHASE_MAJOR_MARK  2
+#define MINO_GC_PHASE_MAJOR_SWEEP 3
+
+/*
+ * Collector statistics. Populated by mino_gc_stats. No allocation is
+ * performed; the host owns the out struct. All counters are cumulative
+ * since state creation except bytes_* which reflect current heap state.
+ */
+typedef struct {
+    size_t collections_minor;
+    size_t collections_major;
+    size_t bytes_live;         /* young + old */
+    size_t bytes_young;
+    size_t bytes_old;
+    size_t bytes_alloc;        /* total ever allocated */
+    size_t bytes_freed;        /* total ever swept */
+    size_t total_gc_ns;
+    size_t max_gc_ns;
+    size_t remset_entries;     /* current remembered-set size */
+    int    phase;              /* MINO_GC_PHASE_* */
+} mino_gc_stats_t;
+
+void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out);
+
+/* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */
 /* ------------------------------------------------------------------------- */
 

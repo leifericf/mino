@@ -592,41 +592,53 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result != NULL ? result : mino_nil(S);
 }
 
-/* (gc-stats) — return a map of GC statistics:
- *   {:collections-minor N :collections-major N
- *    :bytes-live N :bytes-young N :bytes-old N
- *    :bytes-alloc N :bytes-freed N :threshold N
- *    :total-gc-ns N :max-gc-ns N :remset-entries N} */
+/* (gc-stats) -- return a map of GC statistics built from the public
+ * mino_gc_stats_t struct. The :phase key exposes the collector's
+ * state machine position (one of :idle, :minor, :major-mark,
+ * :major-sweep). The :threshold key is preserved alongside the public
+ * struct fields; it is a private heuristic tracked by the major
+ * collector and not part of mino_gc_stats_t. */
 mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *ks[11];
-    mino_val_t *vs[11];
+    mino_gc_stats_t st;
+    const char *phase_name;
+    mino_val_t *ks[12];
+    mino_val_t *vs[12];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
                                      "gc-stats takes no arguments");
     }
-    ks[0] = mino_keyword(S, "collections-minor");
-    vs[0] = mino_int(S, (long long)S->gc_collections_minor);
-    ks[1] = mino_keyword(S, "collections-major");
-    vs[1] = mino_int(S, (long long)S->gc_collections_major);
-    ks[2] = mino_keyword(S, "bytes-live");
-    vs[2] = mino_int(S, (long long)S->gc_bytes_live);
-    ks[3] = mino_keyword(S, "bytes-young");
-    vs[3] = mino_int(S, (long long)S->gc_bytes_young);
-    ks[4] = mino_keyword(S, "bytes-old");
-    vs[4] = mino_int(S, (long long)S->gc_bytes_old);
-    ks[5] = mino_keyword(S, "bytes-alloc");
-    vs[5] = mino_int(S, (long long)S->gc_bytes_alloc);
-    ks[6] = mino_keyword(S, "bytes-freed");
-    vs[6] = mino_int(S, (long long)S->gc_total_freed);
-    ks[7] = mino_keyword(S, "threshold");
-    vs[7] = mino_int(S, (long long)S->gc_threshold);
-    ks[8] = mino_keyword(S, "total-gc-ns");
-    vs[8] = mino_int(S, (long long)S->gc_total_ns);
-    ks[9] = mino_keyword(S, "max-gc-ns");
-    vs[9] = mino_int(S, (long long)S->gc_max_ns);
+    mino_gc_stats(S, &st);
+    switch (st.phase) {
+    case MINO_GC_PHASE_MINOR:       phase_name = "minor";       break;
+    case MINO_GC_PHASE_MAJOR_MARK:  phase_name = "major-mark";  break;
+    case MINO_GC_PHASE_MAJOR_SWEEP: phase_name = "major-sweep"; break;
+    default:                        phase_name = "idle";        break;
+    }
+    ks[0]  = mino_keyword(S, "collections-minor");
+    vs[0]  = mino_int(S, (long long)st.collections_minor);
+    ks[1]  = mino_keyword(S, "collections-major");
+    vs[1]  = mino_int(S, (long long)st.collections_major);
+    ks[2]  = mino_keyword(S, "bytes-live");
+    vs[2]  = mino_int(S, (long long)st.bytes_live);
+    ks[3]  = mino_keyword(S, "bytes-young");
+    vs[3]  = mino_int(S, (long long)st.bytes_young);
+    ks[4]  = mino_keyword(S, "bytes-old");
+    vs[4]  = mino_int(S, (long long)st.bytes_old);
+    ks[5]  = mino_keyword(S, "bytes-alloc");
+    vs[5]  = mino_int(S, (long long)st.bytes_alloc);
+    ks[6]  = mino_keyword(S, "bytes-freed");
+    vs[6]  = mino_int(S, (long long)st.bytes_freed);
+    ks[7]  = mino_keyword(S, "threshold");
+    vs[7]  = mino_int(S, (long long)S->gc_threshold);
+    ks[8]  = mino_keyword(S, "total-gc-ns");
+    vs[8]  = mino_int(S, (long long)st.total_gc_ns);
+    ks[9]  = mino_keyword(S, "max-gc-ns");
+    vs[9]  = mino_int(S, (long long)st.max_gc_ns);
     ks[10] = mino_keyword(S, "remset-entries");
-    vs[10] = mino_int(S, (long long)S->gc_remset_len);
-    return mino_map(S, ks, vs, 11);
+    vs[10] = mino_int(S, (long long)st.remset_entries);
+    ks[11] = mino_keyword(S, "phase");
+    vs[11] = mino_keyword(S, phase_name);
+    return mino_map(S, ks, vs, 12);
 }

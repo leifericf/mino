@@ -86,7 +86,7 @@ static void gc_major_slice(mino_state_t *S)
  * Used on OOM fallback so the fallback STW major can start from a
  * clean IDLE state, and at points where the caller cannot afford to
  * leave marking partway done. */
-static void gc_force_finish_major(mino_state_t *S)
+void gc_force_finish_major(mino_state_t *S)
 {
     long long start_ns;
     size_t    elapsed_ns;

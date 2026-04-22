@@ -536,6 +536,10 @@ void   gc_major_begin(mino_state_t *S);
 void   gc_major_step(mino_state_t *S, size_t budget_words);
 void   gc_major_remark(mino_state_t *S);
 void   gc_major_sweep_phase(mino_state_t *S);
+/* Drive any in-flight major to IDLE with the mutator paused. No-op
+ * when the phase is not MAJOR_MARK. Used by the OOM fallback and by
+ * the public mino_gc_collect(MAJOR|FULL) entry point. */
+void   gc_force_finish_major(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
 
 /* Free-list size class lookup. Returns -1 for variable-size allocations

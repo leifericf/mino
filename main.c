@@ -329,6 +329,23 @@ int main(int argc, char **argv)
     int    awaiting_continuation = 0;
     int    exit_code = 0;
 
+    /* Development knobs. These override the collector defaults before
+     * any allocation happens. Range errors silently fall back to the
+     * default because a CLI user fat-fingering an env var should not
+     * block the interpreter from starting. */
+    {
+        const char *nursery = getenv("MINO_NURSERY");
+        const char *growth  = getenv("MINO_GC_MAJOR_GROWTH");
+        if (nursery != NULL && nursery[0] != '\0') {
+            long long v = atoll(nursery);
+            if (v > 0) mino_gc_set_param(S, MINO_GC_NURSERY_BYTES, (size_t)v);
+        }
+        if (growth != NULL && growth[0] != '\0') {
+            long long v = atoll(growth);
+            if (v > 0) mino_gc_set_param(S, MINO_GC_MAJOR_GROWTH_TENTHS, (size_t)v);
+        }
+    }
+
     mino_install_core(S, env);
     mino_install_io(S, env);
     mino_install_fs(S, env);
