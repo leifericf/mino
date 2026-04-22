@@ -881,11 +881,13 @@
     (take! ch do-take)
     result-ch))
 
-(defn merge
+(defn merge-chans
   "Takes a collection of source channels and returns a channel that
    contains all values from all source channels. Closes when all
-   source channels are closed."
-  ([chs] (merge chs nil))
+   source channels are closed.
+
+   Named merge-chans (not merge) to avoid shadowing clojure.core/merge."
+  ([chs] (merge-chans chs nil))
   ([chs buf-or-n]
    (let [out       (if buf-or-n (chan buf-or-n) (chan))
          remaining (atom (count chs))]
