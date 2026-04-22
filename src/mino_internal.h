@@ -450,13 +450,42 @@ struct mino_hamt_node {
 /* Parameters marked "consumed" transfer ownership to the callee.            */
 /* ------------------------------------------------------------------------- */
 
-/* runtime_gc.c: allocation and collection.
+/* runtime_gc.c: allocation and collection driver.
  * All gc_alloc/alloc_val returns are GC-owned. */
 void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);
 mino_val_t *alloc_val(mino_state_t *S, mino_type_t type);     /* GC-owned */
 char  *dup_n(mino_state_t *S, const char *s, size_t len);     /* GC-owned copy */
 void   gc_collect(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
+
+/* Free-list size class lookup. Returns -1 for variable-size allocations
+ * that cannot be recycled. Shared between alloc (runtime_gc.c) and sweep
+ * (runtime_gc_major.c). */
+int    gc_freelist_class(size_t size);
+
+/* Mark-stack primitives (runtime_gc.c). Mark the header live and push it
+ * for tracing; interior-pointer variant resolves a heap pointer to its
+ * header first and is safe on stale/stack words. gc_drain_mark_stack pops
+ * until empty, tracing each header's outgoing references. */
+void gc_mark_push(mino_state_t *S, gc_hdr_t *h);
+void gc_drain_mark_stack(mino_state_t *S);
+
+/* runtime_gc_roots.c: range index over live headers plus root enumeration.
+ * The range index backs gc_find_header_for_ptr, which resolves a raw
+ * machine word to its owning header during conservative stack scans and
+ * interior-pointer mark. gc_range_insert buffers new allocations; the
+ * index is rebuilt once per collection. */
+void      gc_build_range_index(mino_state_t *S);
+void      gc_range_insert(mino_state_t *S, gc_hdr_t *h);
+void      gc_range_compact(mino_state_t *S);
+gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p);
+void      gc_mark_roots(mino_state_t *S);
+void      gc_scan_stack(mino_state_t *S);
+
+/* runtime_gc_major.c: full-heap sweep driven by gc_collect. Frees every
+ * allocation whose mark bit is clear and resets the mark bit on
+ * survivors; updates gc_bytes_live and gc_threshold. */
+void gc_sweep(mino_state_t *S);
 
 /* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,
  * QueryPerformanceCounter on Windows, clock() as coarse fallback.
@@ -626,7 +655,7 @@ mino_val_t *prim_spawn(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_send_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_receive(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* GC marking (used by gc_collect) */
+/* GC marking (used by gc_collect and by root enumeration). */
 void gc_mark_interior(mino_state_t *S, const void *p);
 
 /* host_interop.c: capability registry lookup. */

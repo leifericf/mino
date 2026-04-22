@@ -1,0 +1,331 @@
+/*
+ * runtime_gc_roots.c -- root enumeration, conservative stack scan, and
+ * the sorted range index used to resolve raw machine words to their
+ * owning headers.
+ *
+ * Split out of runtime_gc.c as a pure refactor; call graph unchanged.
+ * The range index is rebuilt at the start of every collection; new
+ * allocations append to a small pending buffer so the sorted array
+ * avoids an O(n) memmove per alloc.
+ */
+
+#include "mino_internal.h"
+#include "async_scheduler.h"
+#include "async_timer.h"
+
+/* Helpers with file-local linkage. */
+static int  gc_range_cmp(const void *a, const void *b);
+static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl);
+
+static int gc_range_cmp(const void *a, const void *b)
+{
+    const gc_range_t *ra = (const gc_range_t *)a;
+    const gc_range_t *rb = (const gc_range_t *)b;
+    if (ra->start < rb->start) return -1;
+    if (ra->start > rb->start) return 1;
+    return 0;
+}
+
+/*
+ * Rebuild the sorted range index from scratch by walking gc_all.
+ * Called once per collection before any mark work that may resolve
+ * interior pointers. After this returns, gc_ranges holds one entry per
+ * live header in ascending payload-start order.
+ */
+void gc_build_range_index(mino_state_t *S)
+{
+    gc_hdr_t *h;
+    size_t    n = 0;
+    for (h = S->gc_all; h != NULL; h = h->next) {
+        n++;
+    }
+    if (n > S->gc_ranges_cap) {
+        size_t      new_cap = n * 2 + 16;
+        gc_range_t *nr      = (gc_range_t *)realloc(
+            S->gc_ranges, new_cap * sizeof(*nr));
+        if (nr == NULL) {
+            abort(); /* Class I: inside GC; no safe recovery path */
+        }
+        S->gc_ranges     = nr;
+        S->gc_ranges_cap = new_cap;
+    }
+    S->gc_ranges_len = 0;
+    for (h = S->gc_all; h != NULL; h = h->next) {
+        S->gc_ranges[S->gc_ranges_len].start = (uintptr_t)(h + 1);
+        S->gc_ranges[S->gc_ranges_len].end   = (uintptr_t)(h + 1) + h->size;
+        S->gc_ranges[S->gc_ranges_len].h     = h;
+        S->gc_ranges_len++;
+    }
+    qsort(S->gc_ranges, S->gc_ranges_len, sizeof(*S->gc_ranges), gc_range_cmp);
+    S->gc_ranges_valid = 1;
+    S->gc_ranges_pending_len = 0;
+    if (S->gc_ranges_len > 0) {
+        S->gc_heap_min = S->gc_ranges[0].start;
+        S->gc_heap_max = S->gc_ranges[S->gc_ranges_len - 1].end;
+    } else {
+        S->gc_heap_min = 0;
+        S->gc_heap_max = 0;
+    }
+}
+
+/*
+ * Buffer a newly allocated header for the next collection's range index.
+ * Instead of doing an O(n) memmove into the sorted main array on every
+ * allocation, we append to a small pending buffer.  gc_find_header_for_ptr
+ * checks the pending buffer with a linear scan, which is fast for the
+ * 1-2 entries that accumulate between stress-mode collections.
+ * If the pending buffer fills (normal mode with many allocations between
+ * collections), the range index is invalidated and rebuilt from scratch
+ * at the next collection.
+ */
+void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
+{
+    gc_range_t entry;
+
+    if (!S->gc_ranges_valid) {
+        return;
+    }
+
+    if (S->gc_ranges_pending_len >= sizeof(S->gc_ranges_pending) / sizeof(S->gc_ranges_pending[0])) {
+        S->gc_ranges_valid = 0;
+        return;
+    }
+
+    entry.start = (uintptr_t)(h + 1);
+    entry.end   = (uintptr_t)(h + 1) + h->size;
+    entry.h     = h;
+    S->gc_ranges_pending[S->gc_ranges_pending_len] = entry;
+    S->gc_ranges_pending_len++;
+}
+
+/*
+ * Remove entries for unmarked (dead) objects from the range index,
+ * then merge in any pending entries from recent allocations.
+ * Called after marking but before sweep, while mark bits still indicate
+ * liveness.  Preserves sort order.  O(n) in the size of the index.
+ */
+void gc_range_compact(mino_state_t *S)
+{
+    size_t dst = 0;
+    size_t src;
+    size_t i;
+    size_t need;
+    if (!S->gc_ranges_valid) {
+        return;
+    }
+    for (src = 0; src < S->gc_ranges_len; src++) {
+        if (S->gc_ranges[src].h->mark) {
+            S->gc_ranges[dst] = S->gc_ranges[src];
+            dst++;
+        }
+    }
+    S->gc_ranges_len = dst;
+
+    /* Merge pending entries (new allocations since last collection). */
+    need = S->gc_ranges_len + S->gc_ranges_pending_len;
+    if (need > S->gc_ranges_cap) {
+        size_t      new_cap = need * 2 + 16;
+        gc_range_t *nr      = (gc_range_t *)realloc(
+            S->gc_ranges, new_cap * sizeof(*nr));
+        if (nr == NULL) {
+            abort(); /* Class I: inside GC; no safe recovery path */
+        }
+        S->gc_ranges     = nr;
+        S->gc_ranges_cap = new_cap;
+    }
+    for (i = 0; i < S->gc_ranges_pending_len; i++) {
+        size_t lo = 0;
+        size_t hi = S->gc_ranges_len;
+        while (lo < hi) {
+            size_t mid = lo + (hi - lo) / 2;
+            if (S->gc_ranges_pending[i].start < S->gc_ranges[mid].start) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        if (lo < S->gc_ranges_len) {
+            memmove(&S->gc_ranges[lo + 1], &S->gc_ranges[lo],
+                    (S->gc_ranges_len - lo) * sizeof(*S->gc_ranges));
+        }
+        S->gc_ranges[lo] = S->gc_ranges_pending[i];
+        S->gc_ranges_len++;
+    }
+    S->gc_ranges_pending_len = 0;
+}
+
+/*
+ * Resolve p to its owning header, or NULL if p is not within any live
+ * payload. Handles interior pointers (word lands in the middle of an
+ * allocation). Fast-rejects words outside [heap_min, heap_max) when no
+ * pending inserts are in flight.
+ */
+gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
+{
+    uintptr_t u  = (uintptr_t)p;
+    size_t    lo = 0;
+    size_t    hi = S->gc_ranges_len;
+    size_t    i;
+    /* Fast reject for stack words outside the heap — the conservative
+     * scan examines every aligned machine word, and most of them are
+     * not pointers into the managed heap. */
+    if ((u < S->gc_heap_min || u >= S->gc_heap_max)
+        && S->gc_ranges_pending_len == 0) {
+        return NULL;
+    }
+    while (lo < hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        if (u < S->gc_ranges[mid].start) {
+            hi = mid;
+        } else if (u >= S->gc_ranges[mid].end) {
+            lo = mid + 1;
+        } else {
+            return S->gc_ranges[mid].h;
+        }
+    }
+    for (i = 0; i < S->gc_ranges_pending_len; i++) {
+        if (u >= S->gc_ranges_pending[i].start && u < S->gc_ranges_pending[i].end) {
+            return S->gc_ranges_pending[i].h;
+        }
+    }
+    return NULL;
+}
+
+/* Mark every interned symbol or keyword value. The intern table holds
+ * strong references into the managed heap. */
+static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
+{
+    size_t i;
+    for (i = 0; i < tbl->len; i++) {
+        gc_mark_interior(S, tbl->entries[i]);
+    }
+}
+
+/*
+ * Seed the mark stack from every source of pinned state: user-registered
+ * root envs, symbol/keyword intern tables, try-catch exceptions, module
+ * cache, metadata table, var registry, host-retained refs, dynamic
+ * binding values, diagnostic cache, sort comparator, GC save stack,
+ * cached core forms, async scheduler queue, trampoline sentinels, and
+ * async timer channels.
+ */
+void gc_mark_roots(mino_state_t *S)
+{
+    root_env_t *r;
+    int i;
+    for (r = S->gc_root_envs; r != NULL; r = r->next) {
+        gc_mark_interior(S, r->env);
+    }
+    gc_mark_intern_table(S, &S->sym_intern);
+    gc_mark_intern_table(S, &S->kw_intern);
+    /* Pin try/catch exception values and module cache results. */
+    for (i = 0; i < S->try_depth; i++) {
+        gc_mark_interior(S, S->try_stack[i].exception);
+    }
+    {
+        size_t mi;
+        for (mi = 0; mi < S->module_cache_len; mi++) {
+            gc_mark_interior(S, S->module_cache[mi].value);
+        }
+    }
+    /* Pin metadata source forms. */
+    {
+        size_t mi;
+        for (mi = 0; mi < S->meta_table_len; mi++) {
+            gc_mark_interior(S, S->meta_table[mi].source);
+        }
+    }
+    /* Pin var registry entries. */
+    {
+        size_t vi;
+        for (vi = 0; vi < S->var_registry_len; vi++) {
+            gc_mark_interior(S, S->var_registry[vi].var);
+        }
+    }
+    /* Pin host-retained refs. */
+    {
+        mino_ref_t *ref;
+        for (ref = S->ref_roots; ref != NULL; ref = ref->next) {
+            gc_mark_interior(S, ref->val);
+        }
+    }
+    /* Pin dynamic binding values. */
+    {
+        dyn_frame_t *f;
+        dyn_binding_t *b;
+        for (f = S->dyn_stack; f != NULL; f = f->prev) {
+            for (b = f->bindings; b != NULL; b = b->next) {
+                gc_mark_interior(S, b->val);
+            }
+        }
+    }
+    /* Pin diagnostic data and cached map. */
+    if (S->last_diag != NULL) {
+        gc_mark_interior(S, S->last_diag->data);
+        gc_mark_interior(S, S->last_diag->cached_map);
+    }
+    /* Pin sort comparator if active. */
+    gc_mark_interior(S, S->sort_comp_fn);
+    /* Pin values on the GC save stack. */
+    {
+        int si;
+        int limit = S->gc_save_len < GC_SAVE_MAX ? S->gc_save_len : GC_SAVE_MAX;
+        for (si = 0; si < limit; si++) {
+            gc_mark_interior(S, S->gc_save[si]);
+        }
+    }
+    /* Pin cached core.mino parsed forms. */
+    if (S->core_forms != NULL) {
+        size_t ci;
+        for (ci = 0; ci < S->core_forms_len; ci++) {
+            gc_mark_interior(S, S->core_forms[ci]);
+        }
+    }
+    /* Pin async scheduler run queue values. */
+    {
+        struct sched_entry *e;
+        for (e = S->async_run_head; e != NULL; e = e->next) {
+            gc_mark_interior(S, e->callback);
+            gc_mark_interior(S, e->value);
+        }
+    }
+    /* Pin current trampoline sentinel payloads (args/fn pointers). */
+    gc_mark_interior(S, S->recur_sentinel.as.recur.args);
+    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.fn);
+    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.args);
+    /* Pin async timer channel values. */
+    async_timers_mark(S);
+}
+
+/*
+ * Conservative stack scan between gc_stack_bottom (the shallowest host
+ * frame on a downward-growing stack) and the collector's own frame.
+ * Every aligned machine word is treated as a candidate pointer and
+ * resolved through the range index; non-pointer words fast-reject.
+ */
+void gc_scan_stack(mino_state_t *S)
+{
+    volatile char probe = 0;
+    char         *lo;
+    char         *hi;
+    char         *cur;
+    if (S->gc_stack_bottom == NULL) {
+        return;
+    }
+    if ((char *)&probe < (char *)S->gc_stack_bottom) {
+        lo = (char *)&probe;
+        hi = (char *)S->gc_stack_bottom;
+    } else {
+        lo = (char *)S->gc_stack_bottom;
+        hi = (char *)&probe;
+    }
+    while (((uintptr_t)lo % sizeof(void *)) != 0 && lo < hi) {
+        lo++;
+    }
+    for (cur = lo; cur + sizeof(void *) <= hi; cur += sizeof(void *)) {
+        void *word;
+        memcpy(&word, cur, sizeof(word));
+        gc_mark_interior(S, word);
+    }
+    (void)probe;
+}
