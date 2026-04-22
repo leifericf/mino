@@ -133,6 +133,11 @@ char *dup_n(mino_state_t *S, const char *s, size_t len)
 void gc_mark_push(mino_state_t *S, gc_hdr_t *h)
 {
     if (h == NULL || h->mark) return;
+    /* Generational filter: during minor marking we never trace into or
+     * mark OLD headers. The write barrier guarantees every OLD-to-YOUNG
+     * reference is reachable through the remembered set; other OLD
+     * objects live by definition across minor cycles. */
+    if (S->gc_phase == GC_PHASE_MINOR && h->gen == GC_GEN_OLD) return;
     h->mark = 1;
     if (S->gc_mark_stack_len == S->gc_mark_stack_cap) {
         size_t new_cap = S->gc_mark_stack_cap == 0
@@ -161,8 +166,11 @@ void gc_mark_interior(mino_state_t *S, const void *p)
     gc_mark_interior_push(S, p);
 }
 
-/* Process one header from the mark stack: trace its children. */
-static void gc_process_header(mino_state_t *S, gc_hdr_t *h)
+/* Trace every GC-managed pointer held by h, pushing each target into
+ * the mark stack. Used from gc_drain_mark_stack on any header popped
+ * for tracing, and directly from the minor collector when seeding the
+ * mark stack from remembered-set entries. */
+void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
 {
     switch (h->type_tag) {
     case GC_T_VAL: {
@@ -302,7 +310,7 @@ void gc_drain_mark_stack(mino_state_t *S)
 {
     while (S->gc_mark_stack_len > 0) {
         gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
-        gc_process_header(S, h);
+        gc_trace_children(S, h);
     }
 }
 
@@ -333,6 +341,7 @@ void gc_major_collect(mino_state_t *S)
         return;
     }
     S->gc_depth++;
+    S->gc_phase = GC_PHASE_MAJOR;
     start_ns = mino_monotonic_ns();
     /* setjmp spills callee-saved registers into jb, which lives in this
      * stack frame. gc_scan_stack scans from a deeper frame up through ours,
@@ -354,6 +363,7 @@ void gc_major_collect(mino_state_t *S)
     gc_sweep(S);
     gc_remset_reset(S);
     S->gc_collections_major++;
+    S->gc_phase = GC_PHASE_IDLE;
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
     S->gc_total_ns += elapsed_ns;
     if (elapsed_ns > S->gc_max_ns) {

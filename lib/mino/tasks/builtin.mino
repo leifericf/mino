@@ -20,7 +20,7 @@
    "src/runtime_state.c" "src/runtime_var.c"
    "src/runtime_error.c" "src/runtime_env.c"
    "src/runtime_gc.c" "src/runtime_gc_roots.c" "src/runtime_gc_major.c"
-   "src/runtime_gc_barrier.c"
+   "src/runtime_gc_barrier.c" "src/runtime_gc_minor.c"
    "src/val.c" "src/vec.c" "src/map.c" "src/rbtree.c" "src/read.c" "src/print.c"
    "src/prim.c" "src/prim_numeric.c" "src/prim_collections.c"
    "src/prim_sequences.c" "src/prim_lazy.c" "src/prim_string.c" "src/prim_io.c"

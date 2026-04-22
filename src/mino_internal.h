@@ -49,6 +49,18 @@ enum {
     GC_GEN_OLD   = 1
 };
 
+/* Collector phase -- currently three values. IDLE means no cycle is in
+ * progress. MINOR is the young-only mark-and-sweep; it filters OLD
+ * headers out of the mark frontier so tracing stays proportional to
+ * young reachability. MAJOR covers the full-heap STW cycle; it is a
+ * placeholder for the eventual MAJOR_MARK/MAJOR_SWEEP split of the
+ * incremental collector. */
+enum {
+    GC_PHASE_IDLE  = 0,
+    GC_PHASE_MINOR = 1,
+    GC_PHASE_MAJOR = 2
+};
+
 /* Header layout on a 64-bit target: 1+1+1+1 bytes followed by 4 bytes
  * of padding, then 8-byte size and 8-byte next. Four single-byte fields
  * fit into the padding slot that existed for type_tag/mark alone; the
@@ -251,6 +263,7 @@ struct mino_state {
      * host override them. */
     size_t          gc_nursery_bytes;
     unsigned        gc_promotion_age;
+    int             gc_phase;
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
     size_t          gc_mark_stack_cap;
@@ -505,9 +518,15 @@ int    gc_freelist_class(size_t size);
 /* Mark-stack primitives (runtime_gc.c). Mark the header live and push it
  * for tracing; interior-pointer variant resolves a heap pointer to its
  * header first and is safe on stale/stack words. gc_drain_mark_stack pops
- * until empty, tracing each header's outgoing references. */
+ * until empty, tracing each header's outgoing references.
+ * gc_mark_push filters OLD headers out when gc_phase == GC_PHASE_MINOR
+ * so minor marking stays proportional to young reachability.
+ * gc_trace_children unconditionally pushes every child pointer held in
+ * h into the mark stack; minor uses it to trace remembered-set
+ * entries even though their header is OLD. */
 void gc_mark_push(mino_state_t *S, gc_hdr_t *h);
 void gc_drain_mark_stack(mino_state_t *S);
+void gc_trace_children(mino_state_t *S, gc_hdr_t *h);
 
 /* runtime_gc_roots.c: range index over live headers plus root enumeration.
  * The range index backs gc_find_header_for_ptr, which resolves a raw
