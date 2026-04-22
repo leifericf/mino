@@ -122,6 +122,7 @@ static mino_val_t *prim_chan_put(mino_state_t *S, mino_val_t *args,
     if (args->as.cons.cdr->as.cons.cdr != NULL &&
         args->as.cons.cdr->as.cons.cdr->type == MINO_CONS) {
         cb = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        if (cb != NULL && cb->type == MINO_NIL) cb = NULL;
     }
 
     async_chan_put(S, ch, val, cb);
@@ -150,6 +151,7 @@ static mino_val_t *prim_chan_take(mino_state_t *S, mino_val_t *args,
     /* Optional callback. */
     if (args->as.cons.cdr != NULL && args->as.cons.cdr->type == MINO_CONS) {
         cb = args->as.cons.cdr->as.cons.car;
+        if (cb != NULL && cb->type == MINO_NIL) cb = NULL;
     }
 
     async_chan_take(S, ch, cb);
