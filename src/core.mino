@@ -114,11 +114,7 @@
 
 ;; --- Lazy sequence operations ---
 
-(def map1_ (fn map1_ [f coll]
-  (lazy-seq
-    (let [s (seq coll)]
-      (when s
-        (cons (f (first s)) (map1_ f (rest s))))))))
+(def map1_ lazy-map-1)
 
 (def all-some?_ (fn all-some?_ [coll]
   (if (empty? coll)
@@ -154,13 +150,7 @@
           (if (pred input)
             (rf result input)
             result)))))
-  ([pred coll]
-   (lazy-seq
-     (let [s (seq coll)]
-       (when s
-         (if (pred (first s))
-           (cons (first s) (filter pred (rest s)))
-           (filter pred (rest s)))))))))
+  ([pred coll] (lazy-filter pred coll))))
 
 (def take "Returns a lazy sequence of the first n items in coll. When called with no collection, returns a transducer." (fn
   ([n]
