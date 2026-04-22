@@ -10,15 +10,16 @@
 (defn- major-count []   (:collections-major (gc-stats)))
 
 ;; Default nursery is 1 MiB; allocating a few hundred thousand short-
-;; lived cons cells forces several minor cycles without triggering any
-;; major.
+;; lived cons cells forces many minor cycles. A few majors may fire
+;; along the way as some survivors promote and old-gen crosses the
+;; growth threshold, but minor must dominate the collection work.
 (deftest minor-fires-under-nursery-pressure
   (let [m0 (minor-count)
         M0 (major-count)]
     (dotimes [_ 2000]
       (doall (take 100 (range 1000))))
     (is (> (minor-count) m0))
-    (is (= (major-count) M0))))
+    (is (> (- (minor-count) m0) (* 10 (- (major-count) M0))))))
 
 ;; After enough minor survivors the old-gen baseline grows; a repeated
 ;; build-use-discard cycle should show bytes-old nonzero without

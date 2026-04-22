@@ -334,15 +334,22 @@ int main(int argc, char **argv)
      * default because a CLI user fat-fingering an env var should not
      * block the interpreter from starting. */
     {
-        const char *nursery = getenv("MINO_NURSERY");
-        const char *growth  = getenv("MINO_GC_MAJOR_GROWTH");
-        if (nursery != NULL && nursery[0] != '\0') {
-            long long v = atoll(nursery);
-            if (v > 0) mino_gc_set_param(S, MINO_GC_NURSERY_BYTES, (size_t)v);
-        }
-        if (growth != NULL && growth[0] != '\0') {
-            long long v = atoll(growth);
-            if (v > 0) mino_gc_set_param(S, MINO_GC_MAJOR_GROWTH_TENTHS, (size_t)v);
+        struct { const char *name; mino_gc_param_t p; } knobs[] = {
+            { "MINO_NURSERY",          MINO_GC_NURSERY_BYTES       },
+            { "MINO_GC_MAJOR_GROWTH",  MINO_GC_MAJOR_GROWTH_TENTHS },
+            { "MINO_GC_PROMOTION_AGE", MINO_GC_PROMOTION_AGE       },
+            { "MINO_GC_BUDGET",        MINO_GC_INCREMENTAL_BUDGET  },
+            { "MINO_GC_QUANTUM",       MINO_GC_STEP_ALLOC_BYTES    }
+        };
+        size_t ki;
+        for (ki = 0; ki < sizeof(knobs) / sizeof(knobs[0]); ki++) {
+            const char *raw = getenv(knobs[ki].name);
+            if (raw != NULL && raw[0] != '\0') {
+                long long v = atoll(raw);
+                if (v > 0) {
+                    mino_gc_set_param(S, knobs[ki].p, (size_t)v);
+                }
+            }
         }
     }
 
