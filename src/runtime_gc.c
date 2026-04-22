@@ -93,6 +93,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     h->next          = S->gc_all;
     S->gc_all           = h;
     S->gc_bytes_alloc  += size;
+    S->gc_bytes_young  += size;
     if (S->gc_stress > 0) {
         gc_range_insert(S, h);
     } else {
@@ -351,7 +352,7 @@ void gc_major_collect(mino_state_t *S)
     gc_drain_mark_stack(S);
     gc_range_compact(S);
     gc_sweep(S);
-    S->gc_collections++;
+    S->gc_collections_major++;
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
     S->gc_total_ns += elapsed_ns;
     if (elapsed_ns > S->gc_max_ns) {

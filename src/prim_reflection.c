@@ -593,30 +593,38 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (gc-stats) — return a map of GC statistics:
- *   {:collections N :bytes-live N :bytes-alloc N :bytes-freed N :threshold N
+ *   {:collections-minor N :collections-major N
+ *    :bytes-live N :bytes-young N :bytes-old N
+ *    :bytes-alloc N :bytes-freed N :threshold N
  *    :total-gc-ns N :max-gc-ns N} */
 mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *ks[7];
-    mino_val_t *vs[7];
+    mino_val_t *ks[10];
+    mino_val_t *vs[10];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
                                      "gc-stats takes no arguments");
     }
-    ks[0] = mino_keyword(S, "collections");
-    vs[0] = mino_int(S, (long long)S->gc_collections);
-    ks[1] = mino_keyword(S, "bytes-live");
-    vs[1] = mino_int(S, (long long)S->gc_bytes_live);
-    ks[2] = mino_keyword(S, "bytes-alloc");
-    vs[2] = mino_int(S, (long long)S->gc_bytes_alloc);
-    ks[3] = mino_keyword(S, "bytes-freed");
-    vs[3] = mino_int(S, (long long)S->gc_total_freed);
-    ks[4] = mino_keyword(S, "threshold");
-    vs[4] = mino_int(S, (long long)S->gc_threshold);
-    ks[5] = mino_keyword(S, "total-gc-ns");
-    vs[5] = mino_int(S, (long long)S->gc_total_ns);
-    ks[6] = mino_keyword(S, "max-gc-ns");
-    vs[6] = mino_int(S, (long long)S->gc_max_ns);
-    return mino_map(S, ks, vs, 7);
+    ks[0] = mino_keyword(S, "collections-minor");
+    vs[0] = mino_int(S, (long long)S->gc_collections_minor);
+    ks[1] = mino_keyword(S, "collections-major");
+    vs[1] = mino_int(S, (long long)S->gc_collections_major);
+    ks[2] = mino_keyword(S, "bytes-live");
+    vs[2] = mino_int(S, (long long)S->gc_bytes_live);
+    ks[3] = mino_keyword(S, "bytes-young");
+    vs[3] = mino_int(S, (long long)S->gc_bytes_young);
+    ks[4] = mino_keyword(S, "bytes-old");
+    vs[4] = mino_int(S, (long long)S->gc_bytes_old);
+    ks[5] = mino_keyword(S, "bytes-alloc");
+    vs[5] = mino_int(S, (long long)S->gc_bytes_alloc);
+    ks[6] = mino_keyword(S, "bytes-freed");
+    vs[6] = mino_int(S, (long long)S->gc_total_freed);
+    ks[7] = mino_keyword(S, "threshold");
+    vs[7] = mino_int(S, (long long)S->gc_threshold);
+    ks[8] = mino_keyword(S, "total-gc-ns");
+    vs[8] = mino_int(S, (long long)S->gc_total_ns);
+    ks[9] = mino_keyword(S, "max-gc-ns");
+    vs[9] = mino_int(S, (long long)S->gc_max_ns);
+    return mino_map(S, ks, vs, 10);
 }

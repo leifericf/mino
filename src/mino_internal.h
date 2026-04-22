@@ -223,10 +223,19 @@ struct mino_state {
     size_t          gc_ranges_valid;
     gc_range_t      gc_ranges_pending[8];
     size_t          gc_ranges_pending_len;
-    size_t          gc_collections;
+    size_t          gc_collections_minor;
+    size_t          gc_collections_major;
     size_t          gc_total_freed;
     size_t          gc_total_ns;       /* cumulative ns spent in gc_major_collect */
     size_t          gc_max_ns;         /* largest single-collection ns */
+    /* Generational bookkeeping. Maintained continuously on every
+     * allocation, sweep, and promotion: gc_bytes_young + gc_bytes_old
+     * equals gc_bytes_alloc. gc_old_baseline captures gc_bytes_old
+     * right after the last major sweep; future major cycles trigger
+     * when gc_bytes_old exceeds baseline by the growth tenths factor. */
+    size_t          gc_bytes_young;
+    size_t          gc_bytes_old;
+    size_t          gc_old_baseline;
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
     size_t          gc_mark_stack_cap;

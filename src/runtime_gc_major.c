@@ -11,13 +11,19 @@
 
 void gc_sweep(mino_state_t *S)
 {
-    gc_hdr_t **pp   = &S->gc_all;
-    size_t     live = 0;
+    gc_hdr_t **pp         = &S->gc_all;
+    size_t     live_young = 0;
+    size_t     live_old   = 0;
+    size_t     live;
     while (*pp != NULL) {
         gc_hdr_t *h = *pp;
         if (h->mark) {
             h->mark = 0;
-            live += h->size;
+            if (h->gen == GC_GEN_OLD) {
+                live_old += h->size;
+            } else {
+                live_young += h->size;
+            }
             pp = &h->next;
         } else {
             /* Call finalizer for handles being collected. */
@@ -40,9 +46,13 @@ void gc_sweep(mino_state_t *S)
             }
         }
     }
-    S->gc_total_freed += S->gc_bytes_alloc - live;
-    S->gc_bytes_live  = live;
-    S->gc_bytes_alloc = live;
+    live = live_young + live_old;
+    S->gc_total_freed   += S->gc_bytes_alloc - live;
+    S->gc_bytes_young    = live_young;
+    S->gc_bytes_old      = live_old;
+    S->gc_bytes_live     = live;
+    S->gc_bytes_alloc    = live;
+    S->gc_old_baseline   = live_old;
     /* Next cycle triggers after another threshold's worth of growth above
      * the live set; threshold grows to keep collection amortized. */
     if (live * 2 > S->gc_threshold) {
