@@ -1,28 +1,37 @@
 /*
- * runtime_gc_barrier.c -- write barrier and remembered-set storage.
+ * runtime_gc_barrier.c -- write barrier, remembered set, and SATB push.
  *
- * The barrier is called at every source-level mutation site that can
- * install a new pointer into a GC-managed container. Only five such
- * sites exist in mino today: atom.val, atom.watches, atom.validator,
- * and lazy.cached (twice in lazy_force). Every structural
- * collection is built up-then-frozen, so the written-after path that
- * the barrier has to cover is small and enumerable.
+ * The barrier handles two tasks at every mutation of a GC-managed slot:
  *
- * Policy: when an OLD-gen container observes a pointer to a YOUNG-gen
- * value, record the container in the remembered set so the next minor
- * collection can pick up the referenced young object. Stores from
- * YOUNG or to NULL/OLD are free -- they cannot create a new old->young
- * reference. Duplicates are deduped via gc_hdr_t::dirty so the remset
- * never grows past one entry per live old-gen container in each epoch.
+ *  1. Remembered set. When the store creates an OLD -> YOUNG edge, the
+ *     OLD container is appended to the remembered set so the next minor
+ *     cycle can reach the YOUNG target. Duplicates are deduped via
+ *     gc_hdr_t::dirty; the remset never grows past one entry per live
+ *     OLD container per epoch. This runs in every phase.
  *
- * While no minor collector exists yet, the barrier still installs the
- * bookkeeping. With every allocation starting YOUNG and no promotion
- * path, gc_write_barrier_val short-circuits at the container-is-young
- * fast path and never appends; the remset stays empty and the full-
- * heap major collector remains correct.
+ *  2. SATB push. While the major collector is in MAJOR_MARK, the
+ *     value being overwritten (old_value) must survive this cycle
+ *     even if the mutator breaks its only surviving link. The barrier
+ *     pushes old_value onto the mark stack; gc_major_step will trace
+ *     it on the next slice.
+ *
+ * Singletons -- nil, true, false, small-int cache, recur/tail-call
+ * sentinels -- live inside mino_state_t and are not GC-managed. The
+ * state-embedded check drops them on both paths so header arithmetic
+ * on a singleton cannot corrupt neighbouring state fields.
  */
 
 #include "mino_internal.h"
+
+/* True iff p lies inside the mino_state_t struct, i.e. p is a
+ * singleton or small-int cache entry rather than a GC allocation. */
+static int gc_ptr_is_state_embedded(const mino_state_t *S, const void *p)
+{
+    uintptr_t u  = (uintptr_t)p;
+    uintptr_t lo = (uintptr_t)S;
+    uintptr_t hi = lo + sizeof(*S);
+    return (u >= lo && u < hi);
+}
 
 /* Ownership: caller retains container. The remset array is owned by S
  * (allocated with realloc, freed from state teardown). */
@@ -42,10 +51,20 @@ void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
     container->dirty = 1;
 }
 
-void gc_write_barrier(mino_state_t *S, void *container, const void *new_value)
+void gc_write_barrier(mino_state_t *S, void *container,
+                      const void *old_value, const void *new_value)
 {
     gc_hdr_t *h_container;
     gc_hdr_t *h_new;
+    /* SATB: during active major marking, enqueue the previous slot
+     * value so it is visited before sweep. Skip singletons (not
+     * GC-managed) and NULL (empty slot). */
+    if (S->gc_phase == GC_PHASE_MAJOR_MARK
+        && old_value != NULL
+        && !gc_ptr_is_state_embedded(S, old_value)) {
+        gc_hdr_t *h_old = ((gc_hdr_t *)old_value) - 1;
+        gc_mark_push(S, h_old);
+    }
     if (container == NULL) {
         return;
     }
@@ -58,9 +77,13 @@ void gc_write_barrier(mino_state_t *S, void *container, const void *new_value)
     if (h_container->dirty) {
         return;
     }
-    /* No value (field cleared) or an old-gen target: no new
-     * old->young edge to remember. */
+    /* Slot cleared: no new old->young edge. */
     if (new_value == NULL) {
+        return;
+    }
+    /* Singleton target: not GC-managed, so there is nothing the minor
+     * could ever do with a remset hit on this edge. */
+    if (gc_ptr_is_state_embedded(S, new_value)) {
         return;
     }
     h_new = ((gc_hdr_t *)new_value) - 1;
@@ -79,13 +102,13 @@ void gc_remset_reset(mino_state_t *S)
     S->gc_remset_len = 0;
 }
 
-/* List-building helper: used by every tail-append loop that extends
- * a cons list in place. Equivalent to `tail->as.cons.cdr = cell` but
- * routes through the write barrier, which is mandatory here because
- * tail can transition YOUNG->OLD mid-loop via a minor GC while cell
- * is a fresh YOUNG allocation. */
+/* List-building helper: tail-append a cons cell onto tail. Routes the
+ * store through the write barrier so SATB sees the previous cdr and
+ * the remset sees any old->young edge the append creates. Used by
+ * every in-place list extension loop; caller must guarantee tail is
+ * non-NULL and a cons cell. */
 void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell)
 {
-    gc_write_barrier(S, tail, cell);
+    gc_write_barrier(S, tail, tail->as.cons.cdr, cell);
     tail->as.cons.cdr = cell;
 }

@@ -309,19 +309,30 @@ mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
                     ? result->as.lazy.c_thunk(S, result->as.lazy.body)
                     : eval_implicit_do(S,
                         result->as.lazy.body, result->as.lazy.env);
-                gc_write_barrier(S, result, inner);
+                /* Pre-realized lazy: cached is NULL, body/env hold the
+                 * thunk. Realisation overwrites three slots. The
+                 * cached-store needs no SATB (cached was NULL); the
+                 * body and env stores do, because the thunk they
+                 * pointed to may otherwise be reachable only through
+                 * this lazy and must survive the in-flight major
+                 * cycle. */
+                gc_write_barrier(S, result, result->as.lazy.cached, inner);
                 result->as.lazy.cached  = inner;
                 result->as.lazy.realized = 1;
+                gc_write_barrier(S, result, result->as.lazy.body, NULL);
                 result->as.lazy.body    = NULL;
+                gc_write_barrier(S, result, result->as.lazy.env, NULL);
                 result->as.lazy.env     = NULL;
                 result = inner;
                 if (result == NULL) return NULL;
             }
         }
-        gc_write_barrier(S, v, result);
+        gc_write_barrier(S, v, v->as.lazy.cached, result);
         v->as.lazy.cached   = result;
         v->as.lazy.realized = 1;
+        gc_write_barrier(S, v, v->as.lazy.body, NULL);
         v->as.lazy.body     = NULL;
+        gc_write_barrier(S, v, v->as.lazy.env, NULL);
         v->as.lazy.env      = NULL;
         return result;
     }

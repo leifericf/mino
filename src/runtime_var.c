@@ -72,7 +72,7 @@ mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
 
 void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
 {
-    gc_write_barrier(S, var, val);
+    gc_write_barrier(S, var, var->as.var.root, val);
     var->as.var.root = val;
 }
 

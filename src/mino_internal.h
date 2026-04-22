@@ -574,20 +574,31 @@ void      gc_scan_stack(mino_state_t *S);
 void gc_sweep(mino_state_t *S);
 
 /* runtime_gc_barrier.c: write barrier and remembered-set machinery.
- * Call BEFORE storing new_value into a field owned by container; the
- * barrier inspects the generation of each and, when the store creates
- * an old->young reference, appends container to the remembered set
- * (deduped via container->dirty). Both pointers are the PAYLOAD start
- * of a GC-allocated object (e.g. mino_val_t*, mino_env_t*, or a raw
- * buffer from gc_alloc_typed). Pass NULL for new_value when the field
- * is being cleared. */
-void gc_write_barrier(mino_state_t *S, void *container, const void *new_value);
+ * Call BEFORE storing new_value into a field owned by container. The
+ * barrier handles two concerns:
+ *   Remset (all phases): when the store creates an old->young edge,
+ *     container is appended to the remembered set (deduped via
+ *     container->dirty) so the next minor traces it.
+ *   SATB (MAJOR_MARK only): old_value -- the previous slot contents
+ *     overwritten by this store -- is pushed onto the mark stack so
+ *     anything reachable at snapshot time survives the cycle, even if
+ *     the mutator unlinks it before mark reaches container. Pass NULL
+ *     for old_value when the slot was empty.
+ * Pointer arguments are the PAYLOAD start of a GC-allocated object
+ * (mino_val_t*, mino_env_t*, raw buffer from gc_alloc_typed) or a
+ * singleton inside mino_state_t (nil, true, false, small-int cache,
+ * sentinels). Singletons are recognised by their address being
+ * embedded in the state struct and are treated as no-ops. NULL is
+ * always a no-op. */
+void gc_write_barrier(mino_state_t *S, void *container,
+                      const void *old_value, const void *new_value);
 
 /* Tail-append helper used by every list-building loop. Barriers the
  * store first -- critical because mid-loop minor GC can promote tail
  * to OLD while the cell being appended is a fresh YOUNG allocation,
  * and an unbarriered OLD-to-YOUNG edge loses the cell at the next
- * minor. Caller must guarantee tail is non-NULL. */
+ * minor. Also drives SATB when a major mark is in flight. Caller must
+ * guarantee tail is non-NULL. */
 void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell);
 
 /* Clear every dirty bit and empty the remembered set. Called at the

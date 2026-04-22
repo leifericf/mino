@@ -72,7 +72,7 @@ static int atom_set(mino_state_t *S, mino_val_t *atom,
                     mino_env_t *env)
 {
     if (atom_validate(S, atom, new_val, env) != 0) return -1;
-    gc_write_barrier(S, atom, new_val);
+    gc_write_barrier(S, atom, atom->as.atom.val, new_val);
     atom->as.atom.val = new_val;
     atom_notify_watches(S, atom, old_val, new_val, env);
     return 0;
@@ -215,7 +215,7 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     new_map->as.map.root      = root;
     new_map->as.map.key_order = order;
     new_map->as.map.len       = len;
-    gc_write_barrier(S, a, new_map);
+    gc_write_barrier(S, a, a->as.atom.watches, new_map);
     a->as.atom.watches = new_map;
     return a;
 }
@@ -260,7 +260,7 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
         new_map->as.map.root      = root;
         new_map->as.map.key_order = order;
         new_map->as.map.len       = new_len;
-        gc_write_barrier(S, a, new_map);
+        gc_write_barrier(S, a, a->as.atom.watches, new_map);
         a->as.atom.watches = new_map;
     }
     return a;
@@ -282,7 +282,7 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
     }
     /* nil removes the validator. */
     if (fn == NULL || fn->type == MINO_NIL) {
-        gc_write_barrier(S, a, NULL);
+        gc_write_barrier(S, a, a->as.atom.validator, NULL);
         a->as.atom.validator = NULL;
         return mino_nil(S);
     }
@@ -298,7 +298,7 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
             return NULL;
         }
     }
-    gc_write_barrier(S, a, fn);
+    gc_write_barrier(S, a, a->as.atom.validator, fn);
     a->as.atom.validator = fn;
     return mino_nil(S);
 }

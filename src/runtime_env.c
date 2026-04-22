@@ -94,7 +94,7 @@ static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
         while (buckets[idx] != SIZE_MAX) idx = (idx + 1) & mask;
         buckets[idx] = i;
     }
-    gc_write_barrier(S, env, buckets);
+    gc_write_barrier(S, env, env->ht_buckets, buckets);
     env->ht_buckets = buckets;
     env->ht_cap = new_cap;
 }
@@ -144,7 +144,7 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
          * name/val when env is in the remembered set. Pointing at
          * the bindings buffer directly would hit a GC_T_RAW trace
          * stub and miss the new young target. */
-        gc_write_barrier(S, env, val);
+        gc_write_barrier(S, env, b->val, val);
         b->val = val;
         return;
     }
@@ -155,7 +155,7 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
         if (env->bindings != NULL && env->len > 0) {
             memcpy(nb, env->bindings, env->len * sizeof(*nb));
         }
-        gc_write_barrier(S, env, nb);
+        gc_write_barrier(S, env, env->bindings, nb);
         env->bindings = nb;
         env->cap      = new_cap;
     }
@@ -164,16 +164,19 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
      * interned pointer, reuse it; otherwise intern now so future
      * bindings with the same name share a pointer. */
     if (interned_name != NULL) {
-        gc_write_barrier(S, env, interned_name);
+        /* New slot: the name/val fields are zero-initialised by
+         * gc_alloc_typed on the bindings buffer, so old_value is NULL
+         * on each of the three stores below. */
+        gc_write_barrier(S, env, NULL, interned_name);
         env->bindings[env->len].name = (char *)interned_name;
     } else {
         mino_val_t *sym  = mino_symbol_n(S, name, nlen);
         char       *nm   = (sym != NULL) ? sym->as.s.data
                                          : dup_n(S, name, nlen);
-        gc_write_barrier(S, env, nm);
+        gc_write_barrier(S, env, NULL, nm);
         env->bindings[env->len].name = nm;
     }
-    gc_write_barrier(S, env, val);
+    gc_write_barrier(S, env, NULL, val);
     env->bindings[env->len].val  = val;
     env->len++;
 
