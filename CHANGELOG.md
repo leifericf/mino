@@ -2,6 +2,64 @@
 
 ## Unreleased
 
+## v0.42.0 — Generational + Incremental Garbage Collector
+
+Replaces the single-generation mark-and-sweep collector with a
+two-generation non-moving tracing collector whose old-gen mark
+phase runs incrementally, paced by mutator allocation. Max pause
+on tail-heavy realistic workloads drops from 100-110 ms to under
+60 ms; GC share drops from 65-95% to 15-30% on the same workloads.
+No API-breaking changes to value semantics or evaluation, but the
+public C embedding surface gains three new entry points for host-
+driven collection, tuning, and stats.
+
+### Added
+- **Public GC control API** in `mino.h`:
+  - `mino_gc_collect(S, kind)` with `MINO_GC_MINOR`, `MINO_GC_MAJOR`,
+    and `MINO_GC_FULL` for host-driven collection at quiescent
+    points.
+  - `mino_gc_set_param(S, param, value)` exposes five tuning knobs:
+    `MINO_GC_NURSERY_BYTES`, `MINO_GC_MAJOR_GROWTH_TENTHS`,
+    `MINO_GC_PROMOTION_AGE`, `MINO_GC_INCREMENTAL_BUDGET`,
+    `MINO_GC_STEP_ALLOC_BYTES`.
+  - `mino_gc_stats(S, out)` fills an `mino_gc_stats_t` out-struct
+    without allocating.
+- **`:phase` key** on the `gc-stats` primitive's returned map,
+  exposing `:idle`, `:minor`, `:major-mark`, or `:major-sweep`.
+- **New env vars** handled in the standalone CLI: `MINO_NURSERY`,
+  `MINO_GC_MAJOR_GROWTH`, `MINO_GC_PROMOTION_AGE`, `MINO_GC_BUDGET`,
+  `MINO_GC_QUANTUM`. All values below the documented lower bound
+  silently fall back to the default.
+- **`examples/embed_gc.c`** smoke-tests the public API end-to-end.
+
+### Changed
+- **GC architecture**: two generations (YOUNG nursery, OLD
+  promoted-tenured) with age-based promotion, a remembered set of
+  old-to-young pointers (maintained by the write barrier), and a
+  four-phase state machine (`IDLE` -> `MAJOR_MARK` -> `MAJOR_SWEEP`
+  -> `IDLE`). Minor collection is confined to young-gen; major mark
+  is paced in 4096-header slices between mutator allocations, with
+  an SATB barrier capturing overwritten pointers during the cycle.
+- **Major collection is incremental by default.** The STW major
+  path remains available via `mino_gc_collect(S, MINO_GC_FULL)` and
+  as an OOM fallback.
+- **`runtime_gc.c`** is split into five TUs for readability and
+  testability: `runtime_gc.c` (driver), `runtime_gc_roots.c`,
+  `runtime_gc_minor.c`, `runtime_gc_major.c`, `runtime_gc_barrier.c`.
+  The public API implementation lives in `src/public_gc.c`.
+- **Default slice budget** raised from 1024 to 4096 headers per
+  incremental step after the Phase C tuning sweep showed that
+  larger slices recover Phase B's small-heap allocation-heavy
+  share regression without regressing tail-heavy max pause.
+
+### Performance
+- Max pause on realistic tail-heavy benches
+  (`fibonacci(25)`, `map/filter/map/reduce 50k`, `nested vectors
+  500x100`, `realize 10k lazy range`): 100-110 ms -> under 60 ms.
+- GC share on the same benches: 65-95% -> 15-30%.
+- 939 mino tests pass; `MINO_GC_VERIFY=1` clean on the full
+  suite; `qa-arch` PASS.
+
 ## v0.41.0 — GC Timing Instrumentation
 
 Adds wall-clock measurement of garbage-collection pauses so the
