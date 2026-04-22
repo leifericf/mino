@@ -352,6 +352,7 @@ void gc_major_collect(mino_state_t *S)
     gc_drain_mark_stack(S);
     gc_range_compact(S);
     gc_sweep(S);
+    gc_remset_reset(S);
     S->gc_collections_major++;
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
     S->gc_total_ns += elapsed_ns;

@@ -309,6 +309,7 @@ mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
                     ? result->as.lazy.c_thunk(S, result->as.lazy.body)
                     : eval_implicit_do(S,
                         result->as.lazy.body, result->as.lazy.env);
+                gc_write_barrier_val(S, result, inner);
                 result->as.lazy.cached  = inner;
                 result->as.lazy.realized = 1;
                 result->as.lazy.body    = NULL;
@@ -317,6 +318,7 @@ mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
                 if (result == NULL) return NULL;
             }
         }
+        gc_write_barrier_val(S, v, result);
         v->as.lazy.cached   = result;
         v->as.lazy.realized = 1;
         v->as.lazy.body     = NULL;

@@ -596,11 +596,11 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  *   {:collections-minor N :collections-major N
  *    :bytes-live N :bytes-young N :bytes-old N
  *    :bytes-alloc N :bytes-freed N :threshold N
- *    :total-gc-ns N :max-gc-ns N} */
+ *    :total-gc-ns N :max-gc-ns N :remset-entries N} */
 mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *ks[10];
-    mino_val_t *vs[10];
+    mino_val_t *ks[11];
+    mino_val_t *vs[11];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -626,5 +626,7 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[8] = mino_int(S, (long long)S->gc_total_ns);
     ks[9] = mino_keyword(S, "max-gc-ns");
     vs[9] = mino_int(S, (long long)S->gc_max_ns);
-    return mino_map(S, ks, vs, 10);
+    ks[10] = mino_keyword(S, "remset-entries");
+    vs[10] = mino_int(S, (long long)S->gc_remset_len);
+    return mino_map(S, ks, vs, 11);
 }

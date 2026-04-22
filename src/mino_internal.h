@@ -58,6 +58,7 @@ typedef struct gc_hdr {
     unsigned char  mark;
     unsigned char  gen;
     unsigned char  age;
+    unsigned char  dirty;  /* remset membership bit; see gc_write_barrier */
     size_t         size;
     struct gc_hdr *next;
 } gc_hdr_t;
@@ -236,6 +237,13 @@ struct mino_state {
     size_t          gc_bytes_young;
     size_t          gc_bytes_old;
     size_t          gc_old_baseline;
+    /* Remembered set: every old-gen header that observed a store of a
+     * young-gen pointer since the last minor or major cycle. The array
+     * doubles as needed. Each member has gc_hdr_t::dirty = 1 while
+     * present, so repeated stores to the same container are deduped. */
+    gc_hdr_t      **gc_remset;
+    size_t          gc_remset_len;
+    size_t          gc_remset_cap;
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
     size_t          gc_mark_stack_cap;
@@ -509,6 +517,21 @@ void      gc_scan_stack(mino_state_t *S);
  * allocation whose mark bit is clear and resets the mark bit on
  * survivors; updates gc_bytes_live and gc_threshold. */
 void gc_sweep(mino_state_t *S);
+
+/* runtime_gc_barrier.c: write barrier and remembered-set machinery.
+ * Call BEFORE storing new_value into a field owned by container; the
+ * barrier inspects container->gen and new_value->gen and, when the
+ * store creates an old->young reference, appends container to the
+ * remembered set (deduped via container->dirty). container and
+ * new_value must both be GC-managed mino_val_t pointers; pass NULL for
+ * new_value when the field is being cleared. */
+void gc_write_barrier_val(mino_state_t *S, mino_val_t *container,
+                          const mino_val_t *new_value);
+
+/* Clear every dirty bit and empty the remembered set. Called at the
+ * end of every full cycle -- after a complete trace, the old-to-young
+ * reference set is rebuilt by future barriers, not inherited. */
+void gc_remset_reset(mino_state_t *S);
 
 /* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,
  * QueryPerformanceCounter on Windows, clock() as coarse fallback.
