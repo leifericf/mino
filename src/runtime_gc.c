@@ -53,7 +53,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     }
     if (S->gc_depth == 0 && S->gc_stack_bottom != NULL
         && (S->gc_stress || S->gc_bytes_alloc - S->gc_bytes_live > S->gc_threshold)) {
-        gc_collect(S);
+        gc_major_collect(S);
     }
     /* Fault injection: simulate OOM when the countdown reaches zero. */
     if (S->fi_alloc_countdown > 0) {
@@ -87,6 +87,8 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     }
     h->type_tag      = tag;
     h->mark          = 0;
+    h->gen           = GC_GEN_YOUNG;
+    h->age           = 0;
     h->size          = size;
     h->next          = S->gc_all;
     S->gc_all           = h;
@@ -121,7 +123,7 @@ char *dup_n(mino_state_t *S, const char *s, size_t len)
 /* ------------------------------------------------------------------------- */
 /* Shared trace machinery: mark-stack push, interior-pointer resolve, and    */
 /* per-header trace. Reused by any collector (currently just the full-heap   */
-/* major in gc_collect; the minor collector added in a later step will use   */
+/* major in gc_major_collect; the minor collector added in a later step will use   */
 /* the same primitives).                                                     */
 /* ------------------------------------------------------------------------- */
 
@@ -321,7 +323,7 @@ void gc_drain_mark_stack(mino_state_t *S)
  * steady-state programs.
  */
 
-void gc_collect(mino_state_t *S)
+void gc_major_collect(mino_state_t *S)
 {
     jmp_buf jb;
     long long start_ns;

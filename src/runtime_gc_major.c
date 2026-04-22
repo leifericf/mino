@@ -2,7 +2,7 @@
  * runtime_gc_major.c -- full-heap sweep for the mark-and-sweep collector.
  *
  * Split out of runtime_gc.c as a pure refactor; call graph unchanged.
- * Called from gc_collect after mark has finished. Frees every allocation
+ * Called from gc_major_collect after mark has finished. Frees every allocation
  * whose mark bit is clear, resets the mark bit on survivors, and grows
  * the next cycle's threshold so amortized collection cost stays bounded.
  */

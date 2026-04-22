@@ -41,9 +41,23 @@ enum {
 /* Internal type definitions                                                 */
 /* ------------------------------------------------------------------------- */
 
+/* Generation tags for the two-generation collector. The OLD value is
+ * set when a nursery survivor outlives the promotion age. gc_alloc_typed
+ * stamps every new allocation GC_GEN_YOUNG. */
+enum {
+    GC_GEN_YOUNG = 0,
+    GC_GEN_OLD   = 1
+};
+
+/* Header layout on a 64-bit target: 1+1+1+1 bytes followed by 4 bytes
+ * of padding, then 8-byte size and 8-byte next. Four single-byte fields
+ * fit into the padding slot that existed for type_tag/mark alone; the
+ * struct size is unchanged. */
 typedef struct gc_hdr {
     unsigned char  type_tag;
     unsigned char  mark;
+    unsigned char  gen;
+    unsigned char  age;
     size_t         size;
     struct gc_hdr *next;
 } gc_hdr_t;
@@ -211,7 +225,7 @@ struct mino_state {
     size_t          gc_ranges_pending_len;
     size_t          gc_collections;
     size_t          gc_total_freed;
-    size_t          gc_total_ns;       /* cumulative ns spent in gc_collect */
+    size_t          gc_total_ns;       /* cumulative ns spent in gc_major_collect */
     size_t          gc_max_ns;         /* largest single-collection ns */
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
@@ -455,7 +469,7 @@ struct mino_hamt_node {
 void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);
 mino_val_t *alloc_val(mino_state_t *S, mino_type_t type);     /* GC-owned */
 char  *dup_n(mino_state_t *S, const char *s, size_t len);     /* GC-owned copy */
-void   gc_collect(mino_state_t *S);
+void   gc_major_collect(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
 
 /* Free-list size class lookup. Returns -1 for variable-size allocations
@@ -482,14 +496,14 @@ gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p);
 void      gc_mark_roots(mino_state_t *S);
 void      gc_scan_stack(mino_state_t *S);
 
-/* runtime_gc_major.c: full-heap sweep driven by gc_collect. Frees every
+/* runtime_gc_major.c: full-heap sweep driven by gc_major_collect. Frees every
  * allocation whose mark bit is clear and resets the mark bit on
  * survivors; updates gc_bytes_live and gc_threshold. */
 void gc_sweep(mino_state_t *S);
 
 /* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,
  * QueryPerformanceCounter on Windows, clock() as coarse fallback.
- * Shared between prim_nano_time and gc_collect timing. */
+ * Shared between prim_nano_time and gc_major_collect timing. */
 long long mino_monotonic_ns(void);
 
 /* runtime_error.c: error reporting, call stack, metadata.
@@ -655,7 +669,7 @@ mino_val_t *prim_spawn(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_send_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_receive(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* GC marking (used by gc_collect and by root enumeration). */
+/* GC marking (used by gc_major_collect and by root enumeration). */
 void gc_mark_interior(mino_state_t *S, const void *p);
 
 /* host_interop.c: capability registry lookup. */
