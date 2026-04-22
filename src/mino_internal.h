@@ -244,6 +244,13 @@ struct mino_state {
     gc_hdr_t      **gc_remset;
     size_t          gc_remset_len;
     size_t          gc_remset_cap;
+    /* Collector tuning parameters. gc_nursery_bytes triggers a minor
+     * collection when exceeded. gc_promotion_age is the number of
+     * minor survivals before a young object flips to old. Both have
+     * defaults from state_init; a future mino_gc_set_param lets a
+     * host override them. */
+    size_t          gc_nursery_bytes;
+    unsigned        gc_promotion_age;
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
     size_t          gc_mark_stack_cap;
@@ -487,6 +494,7 @@ void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);
 mino_val_t *alloc_val(mino_state_t *S, mino_type_t type);     /* GC-owned */
 char  *dup_n(mino_state_t *S, const char *s, size_t len);     /* GC-owned copy */
 void   gc_major_collect(mino_state_t *S);
+void   gc_minor_collect(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
 
 /* Free-list size class lookup. Returns -1 for variable-size allocations
@@ -520,13 +528,13 @@ void gc_sweep(mino_state_t *S);
 
 /* runtime_gc_barrier.c: write barrier and remembered-set machinery.
  * Call BEFORE storing new_value into a field owned by container; the
- * barrier inspects container->gen and new_value->gen and, when the
- * store creates an old->young reference, appends container to the
- * remembered set (deduped via container->dirty). container and
- * new_value must both be GC-managed mino_val_t pointers; pass NULL for
- * new_value when the field is being cleared. */
-void gc_write_barrier_val(mino_state_t *S, mino_val_t *container,
-                          const mino_val_t *new_value);
+ * barrier inspects the generation of each and, when the store creates
+ * an old->young reference, appends container to the remembered set
+ * (deduped via container->dirty). Both pointers are the PAYLOAD start
+ * of a GC-allocated object (e.g. mino_val_t*, mino_env_t*, or a raw
+ * buffer from gc_alloc_typed). Pass NULL for new_value when the field
+ * is being cleared. */
+void gc_write_barrier(mino_state_t *S, void *container, const void *new_value);
 
 /* Clear every dirty bit and empty the remembered set. Called at the
  * end of every full cycle -- after a complete trace, the old-to-young

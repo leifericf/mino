@@ -94,6 +94,7 @@ static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
         while (buckets[idx] != SIZE_MAX) idx = (idx + 1) & mask;
         buckets[idx] = i;
     }
+    gc_write_barrier(S, env, buckets);
     env->ht_buckets = buckets;
     env->ht_cap = new_cap;
 }
@@ -138,6 +139,7 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
 {
     env_binding_t *b = env_find_here(env, name);
     if (b != NULL) {
+        gc_write_barrier(S, env->bindings, val);
         b->val = val;
         return;
     }
@@ -148,6 +150,7 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
         if (env->bindings != NULL && env->len > 0) {
             memcpy(nb, env->bindings, env->len * sizeof(*nb));
         }
+        gc_write_barrier(S, env, nb);
         env->bindings = nb;
         env->cap      = new_cap;
     }
@@ -156,12 +159,16 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
      * interned pointer, reuse it; otherwise intern now so future
      * bindings with the same name share a pointer. */
     if (interned_name != NULL) {
+        gc_write_barrier(S, env->bindings, interned_name);
         env->bindings[env->len].name = (char *)interned_name;
     } else {
-        mino_val_t *sym = mino_symbol_n(S, name, nlen);
-        env->bindings[env->len].name =
-            (sym != NULL) ? sym->as.s.data : dup_n(S, name, nlen);
+        mino_val_t *sym  = mino_symbol_n(S, name, nlen);
+        char       *nm   = (sym != NULL) ? sym->as.s.data
+                                         : dup_n(S, name, nlen);
+        gc_write_barrier(S, env->bindings, nm);
+        env->bindings[env->len].name = nm;
     }
+    gc_write_barrier(S, env->bindings, val);
     env->bindings[env->len].val  = val;
     env->len++;
 

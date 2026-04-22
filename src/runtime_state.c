@@ -24,6 +24,8 @@ static void state_init(mino_state_t *S)
 {
     memset(S, 0, sizeof(*S));
     S->gc_threshold        = 1u << 20;
+    S->gc_nursery_bytes    = 1u << 20;  /* 1 MiB default */
+    S->gc_promotion_age    = 1;
     S->gc_stress           = -1;
     S->nil_singleton.type  = MINO_NIL;
     S->true_singleton.type = MINO_BOOL;

@@ -42,8 +42,7 @@ static void gc_remset_append(mino_state_t *S, gc_hdr_t *container)
     container->dirty = 1;
 }
 
-void gc_write_barrier_val(mino_state_t *S, mino_val_t *container,
-                          const mino_val_t *new_value)
+void gc_write_barrier(mino_state_t *S, void *container, const void *new_value)
 {
     gc_hdr_t *h_container;
     gc_hdr_t *h_new;
