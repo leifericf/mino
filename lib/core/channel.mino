@@ -240,13 +240,15 @@
 
 (defn- run-xform-step!
   "Invoke the channel's xform step with val, then flush newly buffered
-   values to waiting takers. Handles the exception path via ex-handler."
+   values to waiting takers. Handles the exception path via ex-handler
+   and closes the channel if the step returned (reduced ...)."
   [ch val]
   (let [state-before @ch
         rf           (:xform state-before)
-        ex-handler   (:ex-handler state-before)]
+        ex-handler   (:ex-handler state-before)
+        result       (atom nil)]
     (try
-      (rf nil val)
+      (reset! result (rf nil val))
       (catch e
         (when ex-handler
           (let [recovery (try (ex-handler (str e))
@@ -255,7 +257,9 @@
               (swap! ch (fn [s] (buf-add s recovery))))))))
     (let [[s1 pairs] (flush-buf-to-takers @ch)]
       (reset! ch s1)
-      (commit-and-schedule-pairs! pairs))))
+      (commit-and-schedule-pairs! pairs))
+    (when (and @result (reduced? @result))
+      (close! ch))))
 
 ;; ---------------------------------------------------------------------
 ;; offer! / poll!

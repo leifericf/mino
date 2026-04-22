@@ -5,28 +5,28 @@
 
 (deftest chan-no-args
   (let [ch (chan)]
-    (is (= :handle (type ch)))
+    (is (chan? ch))
     (is (false? (closed? ch)))))
 
 (deftest chan-with-number
   (let [ch (chan 5)]
-    (is (= :handle (type ch)))))
+    (is (chan? ch))))
 
 (deftest chan-with-buffer
   (let [ch (chan (buffer 3))]
-    (is (= :handle (type ch)))))
+    (is (chan? ch))))
 
 (deftest chan-with-dropping
   (let [ch (chan (dropping-buffer 3))]
-    (is (= :handle (type ch)))))
+    (is (chan? ch))))
 
 (deftest chan-with-sliding
   (let [ch (chan (sliding-buffer 3))]
-    (is (= :handle (type ch)))))
+    (is (chan? ch))))
 
 (deftest promise-chan-test
   (let [ch (promise-chan)]
-    (is (= :handle (type ch)))))
+    (is (chan? ch))))
 
 ;; --- put! / take! ---
 

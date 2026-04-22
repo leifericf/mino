@@ -1,21 +1,22 @@
 (require "tests/test")
+(require "core/async")
 
 ;; --- Fixed buffer ---
 
 (deftest fixed-buffer-basics
   (let [b (buf-fixed* 3)]
-    (is (= :handle (type b)) "buffer is a handle")))
+    (is (map? b) "buffer is a descriptor map")))
 
 ;; --- Channel + buffer integration ---
 
 (deftest chan-unbuffered-create
   (let [ch (chan*)]
-    (is (= :handle (type ch)) "channel is a handle")
+    (is (chan? ch) "is a channel")
     (is (false? (chan-closed?* ch)))))
 
 (deftest chan-buffered-create
   (let [ch (chan* (buf-fixed* 2))]
-    (is (= :handle (type ch)) "buffered channel is a handle")
+    (is (chan? ch) "is a channel")
     (is (false? (chan-closed?* ch)))))
 
 (deftest chan-close
