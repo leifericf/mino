@@ -49,16 +49,18 @@ enum {
     GC_GEN_OLD   = 1
 };
 
-/* Collector phase -- currently three values. IDLE means no cycle is in
- * progress. MINOR is the young-only mark-and-sweep; it filters OLD
- * headers out of the mark frontier so tracing stays proportional to
- * young reachability. MAJOR covers the full-heap STW cycle; it is a
- * placeholder for the eventual MAJOR_MARK/MAJOR_SWEEP split of the
- * incremental collector. */
+/* Collector phase. IDLE: no cycle in flight. MINOR: young-only
+ * mark-and-sweep; gc_mark_push filters OLD out of the frontier so
+ * tracing stays proportional to young reachability. MAJOR_MARK: major
+ * tracing, possibly sliced across many gc_major_step calls interleaved
+ * with mutator progress; the SATB write barrier is armed. MAJOR_SWEEP:
+ * one-shot STW sweep of dead OLD objects, always runs directly after
+ * the final remark drain. */
 enum {
-    GC_PHASE_IDLE  = 0,
-    GC_PHASE_MINOR = 1,
-    GC_PHASE_MAJOR = 2
+    GC_PHASE_IDLE        = 0,
+    GC_PHASE_MINOR       = 1,
+    GC_PHASE_MAJOR_MARK  = 2,
+    GC_PHASE_MAJOR_SWEEP = 3
 };
 
 /* Header layout on a 64-bit target: 1+1+1+1 bytes followed by 4 bytes
@@ -268,6 +270,15 @@ struct mino_state {
      * gc_threshold) before a major cycle is started. Tenths precision
      * keeps the setter integer-only while covering 1.1x through 4.0x. */
     unsigned        gc_major_growth_tenths;
+    /* Incremental major parameters. gc_major_work_budget bounds the
+     * headers popped per gc_major_step slice; gc_major_alloc_quantum is
+     * the allocation volume that has to accumulate between steps before
+     * the alloc path fires another slice. gc_major_step_alloc holds
+     * the running count since the previous step. All three are shared
+     * between the driver (runtime_gc.c) and gc_major_step itself. */
+    size_t          gc_major_work_budget;
+    size_t          gc_major_alloc_quantum;
+    size_t          gc_major_step_alloc;
     int             gc_phase;
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
@@ -513,6 +524,18 @@ mino_val_t *alloc_val(mino_state_t *S, mino_type_t type);     /* GC-owned */
 char  *dup_n(mino_state_t *S, const char *s, size_t len);     /* GC-owned copy */
 void   gc_major_collect(mino_state_t *S);
 void   gc_minor_collect(mino_state_t *S);
+/* Incremental major state machine. gc_major_begin seeds the mark stack
+ * from roots and transitions IDLE -> MAJOR_MARK. gc_major_step drains
+ * up to budget_words headers (pass SIZE_MAX for an unbounded drain).
+ * gc_major_remark performs the final conservative stack rescan and
+ * drains any pending SATB-pushed previous values. gc_major_sweep
+ * transitions MAJOR_MARK -> MAJOR_SWEEP, sweeps dead OLD, and returns
+ * to IDLE. gc_major_collect chains all four back-to-back for a fully
+ * STW major cycle. */
+void   gc_major_begin(mino_state_t *S);
+void   gc_major_step(mino_state_t *S, size_t budget_words);
+void   gc_major_remark(mino_state_t *S);
+void   gc_major_sweep_phase(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
 
 /* Free-list size class lookup. Returns -1 for variable-size allocations

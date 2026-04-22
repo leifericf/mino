@@ -27,6 +27,9 @@ static void state_init(mino_state_t *S)
     S->gc_nursery_bytes        = 1u << 20;  /* 1 MiB default */
     S->gc_promotion_age        = 1;
     S->gc_major_growth_tenths  = 15;        /* 1.5x old-gen growth */
+    S->gc_major_work_budget    = 1024;      /* headers popped per slice */
+    S->gc_major_alloc_quantum  = 16u * 1024u;  /* bytes between auto steps */
+    S->gc_major_step_alloc     = 0;
     S->gc_stress               = -1;
     S->nil_singleton.type  = MINO_NIL;
     S->true_singleton.type = MINO_BOOL;

@@ -357,61 +357,30 @@ void gc_drain_mark_stack(mino_state_t *S)
 /* Collection driver.                                                        */
 /* ------------------------------------------------------------------------- */
 /*
- * Three root sources are consulted every cycle: the registered user envs
- * and other pinned state enumerated in gc_mark_roots, plus a conservative
- * scan of the C stack between gc_stack_bottom (saved on the first
- * mino_eval call) and the collector's own frame. A sorted range index
- * over the live allocation list lets the conservative scan resolve each
- * aligned machine word to its owning header in O(log n).
- *
- * Sweep walks the registry in place, frees every allocation whose mark
- * bit is clear, and resets the mark bit on survivors. The live-byte
- * tally becomes the next cycle's baseline; the threshold grows to 2x
- * live so the collector's amortized cost stays bounded under
- * steady-state programs.
+ * The major collector is structured as a four-step state machine
+ * (begin / step / remark / sweep; see runtime_gc_major.c). For a fully
+ * stop-the-world cycle the orchestrator below chains the four
+ * back-to-back, keeping the mutator paused for the duration and
+ * charging the combined time to a single gc_max_ns event. The
+ * incremental allocator pacing (in gc_alloc_typed) calls the same
+ * pieces individually, which charges each slice to its own event.
  */
 
 void gc_major_collect(mino_state_t *S)
 {
-    jmp_buf jb;
     long long start_ns;
     size_t    elapsed_ns;
-    if (S->gc_depth > 0) {
+    if (S->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
         return;
     }
-    S->gc_depth++;
-    S->gc_phase = GC_PHASE_MAJOR;
     start_ns = mino_monotonic_ns();
-    /* setjmp spills callee-saved registers into jb, which lives in this
-     * stack frame. gc_scan_stack scans from a deeper frame up through ours,
-     * so any pointer that was register-resident at entry is visible. */
-    if (setjmp(jb) != 0) {
-        /* Class I: we never longjmp here; a nonzero return indicates
-         * corruption or an unexpected jump. */
-        abort();
-    }
-    (void)jb;
-    if (!S->gc_ranges_valid) {
-        gc_build_range_index(S);
-    }
-    gc_mark_roots(S);
-    gc_drain_mark_stack(S);
-    gc_scan_stack(S);
-    gc_drain_mark_stack(S);
-    gc_range_compact(S);
-    /* Reset the remembered set before sweep: sweep may free old-gen
-     * objects that were in the remset, and the reset walk would
-     * otherwise write dirty=0 through dangling pointers. Major
-     * traces everything reachable, so the remset is fully redundant
-     * for this cycle anyway. */
-    gc_remset_reset(S);
-    gc_sweep(S);
-    S->gc_collections_major++;
-    S->gc_phase = GC_PHASE_IDLE;
+    gc_major_begin(S);
+    gc_major_step(S, (size_t)-1);
+    gc_major_remark(S);
+    gc_major_sweep_phase(S);
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
     S->gc_total_ns += elapsed_ns;
     if (elapsed_ns > S->gc_max_ns) {
         S->gc_max_ns = elapsed_ns;
     }
-    S->gc_depth--;
 }
