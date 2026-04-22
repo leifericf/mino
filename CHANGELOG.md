@@ -31,6 +31,24 @@ driven collection, tuning, and stats.
   `MINO_GC_QUANTUM`. All values below the documented lower bound
   silently fall back to the default.
 - **`examples/embed_gc.c`** smoke-tests the public API end-to-end.
+- **`examples/embed_gc_stress.c`** exercises every `mino_gc_set_param`
+  key at its documented low/high valid and invalid edges, drives each
+  `mino_gc_collect` kind, and asserts that `mino_gc_stats` counters
+  are monotone across repeated snapshots.
+
+### Fixed
+- **Write barrier missing on literal-builder scratch buffers.**
+  `eval_vector_literal`, `eval_map_literal`, `eval_set_literal`, and
+  both `quasiquote_expand` branches allocated a `GC_T_VALARR` scratch
+  array and then filled it slot-by-slot while each per-slot
+  `eval_value` could trigger a mid-loop minor. When the scratch was
+  promoted mid-fill, subsequent `tmp[i] = ev` writes bypassed the
+  remembered set (the one-cycle safety net covers only the next
+  minor), so YOUNG values in later slots were swept and the literal
+  builder emitted collections with stale pointers. Fix routes every
+  such slot store through a new `gc_valarr_set` helper. Matches the
+  pre-existing `benchmarks/vec_bench.mino` and `benchmarks/map_bench.mino`
+  mid-run failures seen during Phase C.
 
 ### Changed
 - **GC architecture**: two generations (YOUNG nursery, OLD
@@ -57,7 +75,7 @@ driven collection, tuning, and stats.
   (`fibonacci(25)`, `map/filter/map/reduce 50k`, `nested vectors
   500x100`, `realize 10k lazy range`): 100-110 ms -> under 60 ms.
 - GC share on the same benches: 65-95% -> 15-30%.
-- 939 mino tests pass; `MINO_GC_VERIFY=1` clean on the full
+- 940 mino tests pass; `MINO_GC_VERIFY=1` clean on the full
   suite; `qa-arch` PASS.
 
 ## v0.41.0 — GC Timing Instrumentation
