@@ -9,6 +9,13 @@
 #include "async_scheduler.h"
 #include "async_timer.h"
 
+#ifdef _WIN32
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#elif defined(CLOCK_MONOTONIC)
+#  include <time.h>
+#endif
+
 /* ------------------------------------------------------------------------- */
 /* State lifecycle                                                           */
 /* ------------------------------------------------------------------------- */
@@ -625,4 +632,20 @@ void mino_repl_free(mino_repl_t *repl)
     if (repl == NULL) { return; }
     free(repl->buf);
     free(repl);
+}
+
+long long mino_monotonic_ns(void)
+{
+#if defined(_WIN32)
+    LARGE_INTEGER freq, count;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&count);
+    return (long long)(count.QuadPart * 1000000000LL / freq.QuadPart);
+#elif defined(CLOCK_MONOTONIC)
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000000000LL + (long long)ts.tv_nsec;
+#else
+    return (long long)((double)clock() / (double)CLOCKS_PER_SEC * 1e9);
+#endif
 }

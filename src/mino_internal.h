@@ -456,6 +456,11 @@ char  *dup_n(mino_state_t *S, const char *s, size_t len);     /* GC-owned copy *
 void   gc_collect(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
 
+/* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,
+ * QueryPerformanceCounter on Windows, clock() as coarse fallback.
+ * Shared between prim_nano_time and gc_collect timing. */
+long long mino_monotonic_ns(void);
+
 /* runtime_error.c: error reporting, call stack, metadata.
  * set_error/set_error_at copy msg into S->error_buf; msg is borrowed. */
 void        set_error(mino_state_t *S, const char *msg);          /* msg: borrowed */
