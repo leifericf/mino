@@ -308,7 +308,7 @@ void rb_to_list(mino_state_t *S, const mino_rb_node_t *n,
     {
         mino_val_t *cell = mino_cons(S, n->key, mino_nil(S));
         if (*tail == NULL) *head = cell;
-        else (*tail)->as.cons.cdr = cell;
+        else mino_cons_cdr_set(S, *tail, cell);
         *tail = cell;
     }
     rb_to_list(S, n->right, head, tail);
@@ -437,7 +437,7 @@ mino_val_t *sorted_seq(mino_state_t *S, const mino_val_t *coll)
             kv[1] = rb_get(S, coll->as.sorted.root, kv[0],
                            coll->as.sorted.comparator);
             cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
-            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
             keys = keys->as.cons.cdr;
         }

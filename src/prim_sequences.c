@@ -34,7 +34,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll->as.vec.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.vec.len; i++) {
             mino_val_t *cell = mino_cons(S, vec_nth(coll, i), mino_nil(S));
-            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
         }
         return head;
@@ -49,7 +49,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             mino_val_t *kv[2], *cell;
             kv[0] = key; kv[1] = val;
             cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
-            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
         }
         return head;
@@ -60,7 +60,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll->as.set.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.set.len; i++) {
             mino_val_t *cell = mino_cons(S, vec_nth(coll->as.set.key_order, i), mino_nil(S));
-            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
         }
         return head;
@@ -74,7 +74,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll->as.s.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.s.len; i++) {
             mino_val_t *cell = mino_cons(S, mino_string_n(S, coll->as.s.data + i, 1), mino_nil(S));
-            if (tail == NULL) head = cell; else tail->as.cons.cdr = cell;
+            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
         }
         return head;
@@ -571,7 +571,7 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Collect all but the last arg as individual args. */
         while (mino_is_cons(p) && mino_is_cons(p->as.cons.cdr)) {
             mino_val_t *cell = mino_cons(S, p->as.cons.car, mino_nil(S));
-            if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
+            if (tail2 == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail2, cell); }
             tail2 = cell;
             p = p->as.cons.cdr;
         }
@@ -582,7 +582,7 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             seq_iter_init(S, &it, last);
             while (!seq_iter_done(&it)) {
                 mino_val_t *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
-                if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
+                if (tail2 == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail2, cell); }
                 tail2 = cell;
                 seq_iter_next(S, &it);
             }
@@ -604,7 +604,7 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         seq_iter_init(S, &it, last);
         while (!seq_iter_done(&it)) {
             mino_val_t *cell = mino_cons(S, seq_iter_val(S, &it), mino_nil(S));
-            if (tail2 == NULL) { head = cell; } else { tail2->as.cons.cdr = cell; }
+            if (tail2 == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail2, cell); }
             tail2 = cell;
             seq_iter_next(S, &it);
         }
@@ -723,7 +723,7 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     S->sort_comp_env = NULL;
     for (i = 0; i < n_items; i++) {
         mino_val_t *cell = mino_cons(S, arr[i], mino_nil(S));
-        if (tail == NULL) { head = cell; } else { tail->as.cons.cdr = cell; }
+        if (tail == NULL) { head = cell; } else { mino_cons_cdr_set(S, tail, cell); }
         tail = cell;
     }
     return head;

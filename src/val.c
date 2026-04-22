@@ -47,8 +47,12 @@ mino_val_t *mino_float(mino_state_t *S, double f)
 
 mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len)
 {
-    mino_val_t *v = alloc_val(S, MINO_STRING);
-    v->as.s.data = dup_n(S, s, len);
+    /* Allocate the data buffer first so alloc_val runs last; if a
+     * minor collection fires between the two allocations, v is the
+     * younger of the two and the store is a safe YOUNG->anything. */
+    char       *data = dup_n(S, s, len);
+    mino_val_t *v    = alloc_val(S, MINO_STRING);
+    v->as.s.data = data;
     v->as.s.len  = len;
     return v;
 }

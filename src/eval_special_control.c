@@ -71,7 +71,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
                 if (body_tail == NULL) {
                     body_head = cell;
                 } else {
-                    body_tail->as.cons.cdr = cell;
+                    mino_cons_cdr_set(S, body_tail, cell);
                 }
                 body_tail = cell;
             }

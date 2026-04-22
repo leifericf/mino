@@ -26,7 +26,7 @@
 
 /* Ownership: caller retains container. The remset array is owned by S
  * (allocated with realloc, freed from state teardown). */
-static void gc_remset_append(mino_state_t *S, gc_hdr_t *container)
+void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
 {
     if (S->gc_remset_len == S->gc_remset_cap) {
         size_t      new_cap = S->gc_remset_cap == 0 ? 256 : S->gc_remset_cap * 2;
@@ -67,7 +67,7 @@ void gc_write_barrier(mino_state_t *S, void *container, const void *new_value)
     if (h_new->gen == GC_GEN_OLD) {
         return;
     }
-    gc_remset_append(S, h_container);
+    gc_remset_add(S, h_container);
 }
 
 void gc_remset_reset(mino_state_t *S)
@@ -77,4 +77,15 @@ void gc_remset_reset(mino_state_t *S)
         S->gc_remset[i]->dirty = 0;
     }
     S->gc_remset_len = 0;
+}
+
+/* List-building helper: used by every tail-append loop that extends
+ * a cons list in place. Equivalent to `tail->as.cons.cdr = cell` but
+ * routes through the write barrier, which is mandatory here because
+ * tail can transition YOUNG->OLD mid-loop via a minor GC while cell
+ * is a fresh YOUNG allocation. */
+void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell)
+{
+    gc_write_barrier(S, tail, cell);
+    tail->as.cons.cdr = cell;
 }

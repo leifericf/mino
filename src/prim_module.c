@@ -268,7 +268,7 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 if (tail == NULL) {
                     head = cell;
                 } else {
-                    tail->as.cons.cdr = cell;
+                    mino_cons_cdr_set(S, tail, cell);
                 }
                 tail = cell;
             }

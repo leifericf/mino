@@ -122,7 +122,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                         mino_val_t *cell = mino_cons(S,
                             vec_nth(spliced, j), mino_nil(S));
                         if (tail == NULL) { out = cell; }
-                        else { tail->as.cons.cdr = cell; }
+                        else { mino_cons_cdr_set(S, tail, cell); }
                         tail = cell;
                         count++;
                     }
@@ -132,7 +132,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                         mino_val_t *cell = mino_cons(S,
                             sp->as.cons.car, mino_nil(S));
                         if (tail == NULL) { out = cell; }
-                        else { tail->as.cons.cdr = cell; }
+                        else { mino_cons_cdr_set(S, tail, cell); }
                         tail = cell;
                         count++;
                         sp = sp->as.cons.cdr;
@@ -144,7 +144,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                 if (expanded == NULL) { return NULL; }
                 cell = mino_cons(S, expanded, mino_nil(S));
                 if (tail == NULL) { out = cell; }
-                else { tail->as.cons.cdr = cell; }
+                else { mino_cons_cdr_set(S, tail, cell); }
                 tail = cell;
                 count++;
             }
@@ -220,7 +220,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                 sp = spliced;
                 while (mino_is_cons(sp)) {
                     mino_val_t *cell = mino_cons(S, sp->as.cons.car, mino_nil(S));
-                    if (tail == NULL) { out = cell; } else { tail->as.cons.cdr = cell; }
+                    if (tail == NULL) { out = cell; } else { mino_cons_cdr_set(S, tail, cell); }
                     tail = cell;
                     sp = sp->as.cons.cdr;
                 }
@@ -229,7 +229,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                 mino_val_t *cell;
                 if (expanded == NULL) { return NULL; }
                 cell = mino_cons(S, expanded, mino_nil(S));
-                if (tail == NULL) { out = cell; } else { tail->as.cons.cdr = cell; }
+                if (tail == NULL) { out = cell; } else { mino_cons_cdr_set(S, tail, cell); }
                 tail = cell;
             }
             p = p->as.cons.cdr;
@@ -343,7 +343,7 @@ mino_val_t *eval_args(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (tail == NULL) {
             head = cell;
         } else {
-            tail->as.cons.cdr = cell;
+            mino_cons_cdr_set(S, tail, cell);
         }
         tail = cell;
         args = args->as.cons.cdr;

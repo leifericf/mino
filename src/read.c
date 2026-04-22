@@ -300,7 +300,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                         if (tail == NULL) {
                             head = cell;
                         } else {
-                            tail->as.cons.cdr = cell;
+                            mino_cons_cdr_set(S, tail, cell);
                         }
                         tail = cell;
                     }
@@ -317,7 +317,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                         if (tail == NULL) {
                             head = cell;
                         } else {
-                            tail->as.cons.cdr = cell;
+                            mino_cons_cdr_set(S, tail, cell);
                         }
                         tail = cell;
                         cur = cur->as.cons.cdr;
@@ -357,7 +357,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 if (tail == NULL) {
                     head = cell;
                 } else {
-                    tail->as.cons.cdr = cell;
+                    mino_cons_cdr_set(S, tail, cell);
                 }
                 tail = cell;
             }

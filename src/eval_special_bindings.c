@@ -383,7 +383,7 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
             if (params_tail == NULL) {
                 params = cell;
             } else {
-                params_tail->as.cons.cdr = cell;
+                mino_cons_cdr_set(S, params_tail, cell);
             }
             params_tail = cell;
             bindings = rest_pair->as.cons.cdr;

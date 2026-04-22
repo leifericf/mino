@@ -45,7 +45,7 @@ mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
         if (clause_tail == NULL) {
             clauses = cell;
         } else {
-            clause_tail->as.cons.cdr = cell;
+            mino_cons_cdr_set(S, clause_tail, cell);
         }
         clause_tail = cell;
         rest = rest->as.cons.cdr;

@@ -263,6 +263,11 @@ struct mino_state {
      * host override them. */
     size_t          gc_nursery_bytes;
     unsigned        gc_promotion_age;
+    /* Major trigger threshold: gc_bytes_old must exceed
+     * gc_old_baseline * gc_major_growth_tenths / 10 (floored at
+     * gc_threshold) before a major cycle is started. Tenths precision
+     * keeps the setter integer-only while covering 1.1x through 4.0x. */
+    unsigned        gc_major_growth_tenths;
     int             gc_phase;
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
@@ -555,10 +560,24 @@ void gc_sweep(mino_state_t *S);
  * is being cleared. */
 void gc_write_barrier(mino_state_t *S, void *container, const void *new_value);
 
+/* Tail-append helper used by every list-building loop. Barriers the
+ * store first -- critical because mid-loop minor GC can promote tail
+ * to OLD while the cell being appended is a fresh YOUNG allocation,
+ * and an unbarriered OLD-to-YOUNG edge loses the cell at the next
+ * minor. Caller must guarantee tail is non-NULL. */
+void mino_cons_cdr_set(mino_state_t *S, mino_val_t *tail, mino_val_t *cell);
+
 /* Clear every dirty bit and empty the remembered set. Called at the
  * end of every full cycle -- after a complete trace, the old-to-young
  * reference set is rebuilt by future barriers, not inherited. */
 void gc_remset_reset(mino_state_t *S);
+
+/* Append container to the remembered set if not already dirty. Used by
+ * the minor collector to enqueue every just-promoted header -- a
+ * one-cycle safety net that covers alloc-then-populate patterns where
+ * the mutator sets pointers on a container after the minor that
+ * promoted it. */
+void gc_remset_add(mino_state_t *S, gc_hdr_t *container);
 
 /* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,
  * QueryPerformanceCounter on Windows, clock() as coarse fallback.

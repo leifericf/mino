@@ -63,6 +63,14 @@ static void gc_minor_sweep(mino_state_t *S)
             if (h->age >= S->gc_promotion_age) {
                 h->gen           = GC_GEN_OLD;
                 promoted_bytes  += h->size;
+                /* One-cycle safety net: every newly-promoted header
+                 * enters the remembered set so stores performed on it
+                 * in the cycle immediately following promotion are
+                 * observed by the next minor, even if the mutating
+                 * site itself omitted the barrier. Covers the common
+                 * allocate-then-populate pattern where the container
+                 * is promoted mid-fill. */
+                gc_remset_add(S, h);
             }
             pp = &h->next;
             continue;
@@ -124,13 +132,18 @@ void gc_minor_collect(mino_state_t *S)
     gc_drain_mark_stack(S);
     gc_scan_stack(S);
     gc_drain_mark_stack(S);
+    /* Reset the remset before sweep so sweep can immediately re-enqueue
+     * every newly-promoted header; the remset ends the cycle
+     * containing exactly those promotions, giving the next cycle a
+     * safety net for any alloc-then-populate pattern that omitted a
+     * barrier on a container promoted mid-fill. */
+    gc_remset_reset(S);
     gc_minor_sweep(S);
     /* Dead YOUNG entries are still in the range index. Rather than
      * compact it we invalidate and rebuild at the next collection -- a
      * cheap O(n) walk that fits naturally into the quiescent state
      * between cycles. */
     S->gc_ranges_valid = 0;
-    gc_remset_reset(S);
     S->gc_collections_minor++;
     S->gc_phase = GC_PHASE_IDLE;
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);

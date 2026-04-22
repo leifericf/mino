@@ -51,9 +51,40 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         const char *e = getenv("MINO_GC_STRESS");
         S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
     }
+    /* Collection trigger. Honour gc_stress (major on every alloc) and
+     * otherwise pick minor or major by generation pressure:
+     *   - minor fires when young exceeds the nursery budget;
+     *   - major fires when old has grown past its post-last-major
+     *     baseline by the configured growth factor, floored at
+     *     gc_threshold so the very first major waits for a meaningful
+     *     heap size. The floor is what keeps us from running a major
+     *     the moment the first byte is promoted. */
     if (S->gc_depth == 0 && S->gc_stack_bottom != NULL
-        && (S->gc_stress || S->gc_bytes_alloc - S->gc_bytes_live > S->gc_threshold)) {
-        gc_major_collect(S);
+        && S->gc_phase == GC_PHASE_IDLE) {
+        if (S->gc_stress) {
+            gc_major_collect(S);
+        } else if (S->gc_bytes_young > S->gc_nursery_bytes) {
+            gc_minor_collect(S);
+            {
+                size_t trigger =
+                    S->gc_old_baseline * S->gc_major_growth_tenths / 10u;
+                if (trigger < S->gc_threshold) {
+                    trigger = S->gc_threshold;
+                }
+                if (S->gc_bytes_old > trigger) {
+                    gc_major_collect(S);
+                }
+            }
+        } else {
+            size_t trigger =
+                S->gc_old_baseline * S->gc_major_growth_tenths / 10u;
+            if (trigger < S->gc_threshold) {
+                trigger = S->gc_threshold;
+            }
+            if (S->gc_bytes_old > trigger) {
+                gc_major_collect(S);
+            }
+        }
     }
     /* Fault injection: simulate OOM when the countdown reaches zero. */
     if (S->fi_alloc_countdown > 0) {
@@ -75,6 +106,14 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         memset(h, 0, sizeof(*h) + size);
     } else {
         h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
+        if (h == NULL && S->gc_depth == 0 && S->gc_stack_bottom != NULL) {
+            /* OOM fallback: if we got here via a minor or no prior
+             * collection, run a full STW major before giving up. That
+             * frees anything kept alive only by old-gen references the
+             * minor skipped. */
+            gc_major_collect(S);
+            h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
+        }
         if (h == NULL) {
             /* Recoverable when an eval try-frame exists; fatal otherwise. */
             if (S->try_depth > 0) {
@@ -360,8 +399,13 @@ void gc_major_collect(mino_state_t *S)
     gc_scan_stack(S);
     gc_drain_mark_stack(S);
     gc_range_compact(S);
-    gc_sweep(S);
+    /* Reset the remembered set before sweep: sweep may free old-gen
+     * objects that were in the remset, and the reset walk would
+     * otherwise write dirty=0 through dangling pointers. Major
+     * traces everything reachable, so the remset is fully redundant
+     * for this cycle anyway. */
     gc_remset_reset(S);
+    gc_sweep(S);
     S->gc_collections_major++;
     S->gc_phase = GC_PHASE_IDLE;
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
