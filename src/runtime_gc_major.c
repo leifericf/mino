@@ -31,6 +31,7 @@ void gc_major_begin(mino_state_t *S)
     }
     S->gc_depth++;
     S->gc_phase = GC_PHASE_MAJOR_MARK;
+    gc_evt_record(S, GC_EVT_MAJOR_BEGIN, NULL, NULL, NULL, 0, 0);
     if (!S->gc_ranges_valid) {
         gc_build_range_index(S);
     }
@@ -135,6 +136,7 @@ void gc_major_sweep_phase(mino_state_t *S)
     }
     S->gc_depth++;
     S->gc_phase = GC_PHASE_MAJOR_SWEEP;
+    gc_evt_record(S, GC_EVT_MAJOR_SWEEP, NULL, NULL, NULL, 0, 0);
     gc_verify_roots_marked(S);
     /* Purge remset entries whose container is about to be freed, but
      * keep the rest with their dirty bits intact. OLD->YOUNG edges

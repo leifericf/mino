@@ -65,6 +65,8 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
                 h->next         = S->gc_all_old;
                 S->gc_all_old   = h;
                 promoted_bytes += h->size;
+                gc_evt_record(S, GC_EVT_PROMOTE, h, NULL, NULL,
+                              (uintptr_t)h->size, (uint16_t)h->type_tag);
                 /* One-cycle safety net: every newly-promoted header
                  * enters the remembered set so stores performed on it
                  * in the cycle immediately following promotion are
@@ -95,6 +97,8 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
         }
         freed_bytes += h->size;
         *pp = h->next;
+        gc_evt_record(S, GC_EVT_FREE_YOUNG, h, NULL, NULL,
+                      (uintptr_t)h->size, (uint16_t)h->type_tag);
         {
             int fc = gc_freelist_class(h->size);
             if (fc >= 0) {
@@ -266,6 +270,8 @@ void gc_minor_collect(mino_state_t *S)
     saved_phase = S->gc_phase;
     mark_floor  = S->gc_mark_stack_len;
     S->gc_phase = GC_PHASE_MINOR;
+    gc_evt_record(S, GC_EVT_MINOR_BEGIN, NULL, NULL, NULL,
+                  (uintptr_t)saved_phase, 0);
     if (!S->gc_ranges_valid) {
         gc_build_range_index(S);
     } else {
@@ -305,6 +311,7 @@ void gc_minor_collect(mino_state_t *S)
     gc_minor_sweep(S, saved_phase);
     S->gc_collections_minor++;
     S->gc_phase = saved_phase;
+    gc_evt_record(S, GC_EVT_MINOR_END, NULL, NULL, NULL, 0, 0);
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
     S->gc_total_ns += elapsed_ns;
     if (elapsed_ns > S->gc_max_ns) {

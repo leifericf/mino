@@ -49,6 +49,8 @@ void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
     }
     S->gc_remset[S->gc_remset_len++] = container;
     container->dirty = 1;
+    gc_evt_record(S, GC_EVT_REMSET_ADD, container, NULL, NULL,
+                  (uintptr_t)container->gen, 0);
 }
 
 void gc_write_barrier(mino_state_t *S, void *container,
@@ -56,6 +58,7 @@ void gc_write_barrier(mino_state_t *S, void *container,
 {
     gc_hdr_t *h_container;
     gc_hdr_t *h_new;
+    gc_evt_record(S, GC_EVT_WB, container, old_value, new_value, 0, 0);
     /* SATB: during active major marking, enqueue the previous slot
      * value so it is visited before sweep. Skip singletons (not
      * GC-managed) and NULL (empty slot). */
@@ -96,6 +99,8 @@ void gc_write_barrier(mino_state_t *S, void *container,
 void gc_remset_reset(mino_state_t *S)
 {
     size_t i;
+    gc_evt_record(S, GC_EVT_REMSET_RESET, NULL, NULL, NULL,
+                  (uintptr_t)S->gc_remset_len, 0);
     for (i = 0; i < S->gc_remset_len; i++) {
         S->gc_remset[i]->dirty = 0;
     }
@@ -111,6 +116,7 @@ void gc_remset_reset(mino_state_t *S)
 void gc_remset_purge_dead(mino_state_t *S)
 {
     size_t i, dst = 0;
+    size_t before = S->gc_remset_len;
     for (i = 0; i < S->gc_remset_len; i++) {
         gc_hdr_t *h = S->gc_remset[i];
         if (h->mark) {
@@ -118,6 +124,8 @@ void gc_remset_purge_dead(mino_state_t *S)
         }
     }
     S->gc_remset_len = dst;
+    gc_evt_record(S, GC_EVT_REMSET_PURGE, NULL, NULL, NULL,
+                  (uintptr_t)before, (uint16_t)dst);
 }
 
 /* List-building helper: tail-append a cons cell onto tail. Routes the

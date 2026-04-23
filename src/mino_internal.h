@@ -63,6 +63,49 @@ enum {
     GC_PHASE_MAJOR_SWEEP = 3
 };
 
+/* GC event ring buffer (diagnostic; opt-in via MINO_GC_EVT=1).
+ *
+ * Records a low-perturbation trace of barrier/remset/sweep/promote
+ * activity into a fixed-size, per-state ring. Only writes -- no I/O,
+ * no locks, no allocation on the hot path. Dumped by
+ * gc_evt_dump_around to stderr from the verify abort site so the
+ * window around the failure can be reconstructed without a 20-million
+ * line trace file (which itself hides the timing-sensitive bug).
+ *
+ * Record layout: payload fields are written first, seq last as a
+ * commit marker. Readers treat an entry with seq < floor as empty.
+ * Ring size is a power of two; slot = seq & (cap - 1). */
+enum {
+    GC_EVT_NONE      = 0,
+    GC_EVT_WB        = 1,  /* a=container, b=old_value, c=new_value */
+    GC_EVT_REMSET_ADD= 2,  /* a=container */
+    GC_EVT_REMSET_RESET = 3,
+    GC_EVT_REMSET_PURGE = 4,
+    GC_EVT_PROMOTE   = 5,  /* a=hdr (young->old), aux=size */
+    GC_EVT_FREE_YOUNG= 6,  /* a=hdr, aux=size */
+    GC_EVT_MINOR_BEGIN = 7,
+    GC_EVT_MINOR_END   = 8,
+    GC_EVT_MAJOR_BEGIN = 9,
+    GC_EVT_MAJOR_SWEEP = 10,
+    GC_EVT_ALLOC     = 11  /* a=hdr, aux=(type_tag<<8)|gen, extra=size */
+};
+
+typedef struct {
+    uint64_t  seq;     /* written last; 0 means empty slot */
+    uint32_t  cycle;   /* minor cycle number at event time */
+    uint8_t   kind;
+    uint8_t   phase;
+    uint16_t  extra;
+    void     *a;
+    void     *b;
+    void     *c;
+    uintptr_t aux;
+} gc_evt_t;
+
+#define GC_EVT_CAP_LOG2 16u
+#define GC_EVT_CAP      (1u << GC_EVT_CAP_LOG2)
+#define GC_EVT_CAP_MASK (GC_EVT_CAP - 1u)
+
 /* Header layout on a 64-bit target: 1+1+1+1 bytes followed by 4 bytes
  * of padding, then 8-byte size and 8-byte next. Four single-byte fields
  * fit into the padding slot that existed for type_tag/mark alone; the
@@ -304,6 +347,12 @@ struct mino_state {
      * binary search through the range index. */
     uintptr_t       gc_heap_min;
     uintptr_t       gc_heap_max;
+
+    /* GC event ring buffer (diagnostic only). Allocated lazily when
+     * MINO_GC_EVT=1 is set at state init; NULL otherwise and every
+     * recording site is a no-op. See gc_evt_t. */
+    gc_evt_t       *gc_evt_ring;
+    uint64_t        gc_evt_seq;
 
     /* Singletons */
     mino_val_t      nil_singleton;
@@ -643,6 +692,40 @@ void gc_sweep(mino_state_t *S);
  * always a no-op. */
 void gc_write_barrier(mino_state_t *S, void *container,
                       const void *old_value, const void *new_value);
+
+/* runtime_gc_trace.c: GC event ring buffer + classifier (both opt-in
+ * via MINO_GC_EVT=1 at state init). Recording sites call
+ * gc_evt_record; when the ring is unallocated the call is a single
+ * nullptr-check-and-return. gc_evt_dump_around walks the ring in
+ * sequence order and prints only events that reference any of the
+ * supplied pointers (or, if all three are NULL, the tail N events).
+ * gc_classify_offender runs two reachability passes (precise-only,
+ * then precise+conservative) to answer whether an offender header is
+ * really reachable or only kept alive by conservative stack scan. */
+void gc_evt_init(mino_state_t *S);
+void gc_evt_free(mino_state_t *S);
+void gc_evt_record_impl(mino_state_t *S, uint8_t kind, const void *a,
+                        const void *b, const void *c, uintptr_t aux,
+                        uint16_t extra);
+void gc_evt_dump_around(mino_state_t *S, const void *p1, const void *p2,
+                        const void *p3);
+
+/* Macro wrapper: when MINO_GC_EVT=0 (the default), gc_evt_ring is
+ * NULL and this expands to a single predictable pointer check with
+ * no function call, keeping the hot path identical to the
+ * uninstrumented binary modulo that one branch. When the ring is
+ * enabled, we pay a real call through gc_evt_record_impl. */
+#define gc_evt_record(S, kind, a, b, c, aux, extra) \
+    do { \
+        if ((S)->gc_evt_ring != NULL) { \
+            gc_evt_record_impl((S), (kind), (a), (b), (c), (aux), (extra)); \
+        } \
+    } while (0)
+/* Reachability classifier. Returns 1 if offender reachable without
+ * conservative stack, 2 if reachable only via conservative stack, 0
+ * if not reachable at all (bookkeeping corruption). Non-destructive:
+ * saves and restores h->mark on every tracked header. */
+int  gc_classify_offender(mino_state_t *S, gc_hdr_t *offender);
 
 /* Tail-append helper used by every list-building loop. Barriers the
  * store first -- critical because mid-loop minor GC can promote tail

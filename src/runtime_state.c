@@ -54,6 +54,7 @@ static void state_init(mino_state_t *S)
     S->reader_col          = 1;
     S->reader_dialect      = "mino";
     S->current_ns          = "user";
+    gc_evt_init(S);
 }
 
 mino_state_t *mino_state_new(void)
@@ -116,6 +117,7 @@ void mino_state_free(mino_state_t *S)
     free(S->gc_ranges_pending);
     free(S->gc_mark_stack);
     free(S->gc_remset);
+    gc_evt_free(S);
     {
         int i;
         for (i = 0; i < 4; i++) {

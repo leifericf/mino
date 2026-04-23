@@ -214,6 +214,8 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     S->gc_bytes_alloc  += size;
     S->gc_bytes_young  += size;
     gc_range_insert(S, h);
+    gc_evt_record(S, GC_EVT_ALLOC, h, NULL, NULL,
+                  (uintptr_t)tag, (uint16_t)(size & 0xffffu));
     return (void *)(h + 1);
 }
 
