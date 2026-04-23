@@ -372,15 +372,32 @@ mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
+/* Grow a PTRARR in place by reallocating into a larger GC block.
+ * The new block replaces the old on the pin slot and becomes the
+ * returned buffer; the old is left for the sweep. Returns NULL on
+ * OOM (diag already set by gc_alloc_typed). */
+static mino_val_t **ptrarr_grow(mino_state_t *S, mino_val_t **old,
+                                size_t old_len, size_t new_cap, int pin_slot)
+{
+    mino_val_t **nb = (mino_val_t **)gc_alloc_typed(
+        S, GC_T_PTRARR, new_cap * sizeof(mino_val_t *));
+    size_t i;
+    if (nb == NULL) return NULL;
+    for (i = 0; i < old_len; i++) {
+        nb[i] = old[i];
+    }
+    S->gc_save[pin_slot] = (mino_val_t *)nb;
+    return nb;
+}
+
 /* Eager map returning a vector. (mapv f coll)
  *
- * The accumulating `items` buffer lives on the C heap (malloc, not GC),
- * so values stored in it are invisible to the precise collector. If a
- * minor GC runs between iterations while accumulated YOUNG values are
- * only reachable through `items`, those values are reclaimed and the
- * final mino_vector reads freed memory. Suppress GC across the whole
- * accumulation so each produced value stays reachable via the live
- * allocation pipeline until items is handed off to vec_from_array. */
+ * Accumulate into a GC-tracked PTRARR pinned on the save stack so the
+ * buffer and its contents stay marked across the apply_callable call.
+ * A malloc'd items[] would be invisible to the precise collector, and a
+ * blanket gc_depth++ would pin every user-code allocation for the
+ * duration of the mapv. Pinning the accumulator lets GC continue normally
+ * inside the fn while still preserving what we've produced so far. */
 mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn, *coll;
@@ -388,6 +405,7 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      cap = 64, len = 0;
     mino_val_t **items;
     mino_val_t *result;
+    int         pin_slot;
     size_t n;
     arg_count(S, args, &n);
     if (n != 2) {
@@ -398,32 +416,33 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || mino_is_nil(coll)) {
         return mino_vector(S, NULL, 0);
     }
-    items = malloc(cap * sizeof(mino_val_t *));
-    if (!items) { return prim_throw_classified(S, "eval/bounds", "MBD001", "mapv: out of memory"); }
-    S->gc_depth++;
+    items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
+                                          cap * sizeof(mino_val_t *));
+    if (items == NULL) return NULL;
+    pin_slot = S->gc_save_len;
+    gc_pin((mino_val_t *)items);
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
         mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
         mino_val_t *val = apply_callable(S, fn, call_args, env);
-        if (val == NULL) { S->gc_depth--; free(items); return NULL; }
+        if (val == NULL) { gc_unpin(1); return NULL; }
         if (len >= cap) {
             cap *= 2;
-            items = realloc(items, cap * sizeof(mino_val_t *));
-            if (!items) { S->gc_depth--; return prim_throw_classified(S, "eval/bounds", "MBD001", "mapv: out of memory"); }
+            items = ptrarr_grow(S, items, len, cap, pin_slot);
+            if (items == NULL) { gc_unpin(1); return NULL; }
         }
-        items[len++] = val;
+        gc_valarr_set(S, items, len, val);
+        len++;
         seq_iter_next(S, &it);
     }
     result = mino_vector(S, items, len);
-    S->gc_depth--;
-    free(items);
+    gc_unpin(1);
     return result;
 }
 
 /* Eager filter returning a vector. (filterv pred coll). Same precise-GC
- * caveat as prim_mapv: the accumulating C-heap items[] is invisible to
- * the collector, so suppress GC across the accumulation loop. */
+ * caveat as prim_mapv: pin a GC-tracked accumulator on the save stack. */
 mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pred, *coll;
@@ -431,6 +450,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      cap = 64, len = 0;
     mino_val_t **items;
     mino_val_t *result;
+    int         pin_slot;
     size_t n;
     arg_count(S, args, &n);
     if (n != 2) {
@@ -441,28 +461,30 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || mino_is_nil(coll)) {
         return mino_vector(S, NULL, 0);
     }
-    items = malloc(cap * sizeof(mino_val_t *));
-    if (!items) { return prim_throw_classified(S, "eval/bounds", "MBD001", "filterv: out of memory"); }
-    S->gc_depth++;
+    items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
+                                          cap * sizeof(mino_val_t *));
+    if (items == NULL) return NULL;
+    pin_slot = S->gc_save_len;
+    gc_pin((mino_val_t *)items);
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
         mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
         mino_val_t *test = apply_callable(S, pred, call_args, env);
-        if (test == NULL) { S->gc_depth--; free(items); return NULL; }
+        if (test == NULL) { gc_unpin(1); return NULL; }
         if (mino_is_truthy(test)) {
             if (len >= cap) {
                 cap *= 2;
-                items = realloc(items, cap * sizeof(mino_val_t *));
-                if (!items) { S->gc_depth--; return prim_throw_classified(S, "eval/bounds", "MBD001", "filterv: out of memory"); }
+                items = ptrarr_grow(S, items, len, cap, pin_slot);
+                if (items == NULL) { gc_unpin(1); return NULL; }
             }
-            items[len++] = elem;
+            gc_valarr_set(S, items, len, elem);
+            len++;
         }
         seq_iter_next(S, &it);
     }
     result = mino_vector(S, items, len);
-    S->gc_depth--;
-    free(items);
+    gc_unpin(1);
     return result;
 }
 
