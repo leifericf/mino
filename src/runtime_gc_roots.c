@@ -69,14 +69,13 @@ void gc_build_range_index(mino_state_t *S)
 }
 
 /*
- * Buffer a newly allocated header for the next collection's range index.
- * Instead of doing an O(n) memmove into the sorted main array on every
- * allocation, we append to a small pending buffer.  gc_find_header_for_ptr
- * checks the pending buffer with a linear scan, which is fast for the
- * 1-2 entries that accumulate between stress-mode collections.
- * If the pending buffer fills (normal mode with many allocations between
- * collections), the range index is invalidated and rebuilt from scratch
- * at the next collection.
+ * Buffer a newly allocated header for the next collection. Appends to a
+ * growable pending array; gc_range_merge_pending folds pending into the
+ * sorted main array at the next GC in O(K log K + n + K), avoiding the
+ * O(n log n) qsort that gc_build_range_index pays when it rebuilds from
+ * scratch. gc_find_header_for_ptr handles the transient state (sorted
+ * main + unsorted pending) via a binary search followed by a linear
+ * pending scan.
  */
 void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
 {
@@ -86,9 +85,20 @@ void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
         return;
     }
 
-    if (S->gc_ranges_pending_len >= sizeof(S->gc_ranges_pending) / sizeof(S->gc_ranges_pending[0])) {
-        S->gc_ranges_valid = 0;
-        return;
+    if (S->gc_ranges_pending_len == S->gc_ranges_pending_cap) {
+        size_t      new_cap = S->gc_ranges_pending_cap == 0
+            ? 64 : S->gc_ranges_pending_cap * 2;
+        gc_range_t *nr      = (gc_range_t *)realloc(
+            S->gc_ranges_pending, new_cap * sizeof(*nr));
+        if (nr == NULL) {
+            /* Fallback to the invalidate path so mutation can continue
+             * even under memory pressure. Next collection rebuilds from
+             * gc_all. */
+            S->gc_ranges_valid = 0;
+            return;
+        }
+        S->gc_ranges_pending     = nr;
+        S->gc_ranges_pending_cap = new_cap;
     }
 
     entry.start = (uintptr_t)(h + 1);
@@ -99,30 +109,32 @@ void gc_range_insert(mino_state_t *S, gc_hdr_t *h)
 }
 
 /*
- * Remove entries for unmarked (dead) objects from the range index,
- * then merge in any pending entries from recent allocations.
- * Called after marking but before sweep, while mark bits still indicate
- * liveness.  Preserves sort order.  O(n) in the size of the index.
+ * Sort pending and merge into the sorted main array. Called at the top
+ * of a collection, before any code that does ptr->header lookups on the
+ * index. After this returns, gc_ranges_pending is empty and gc_ranges
+ * holds one sorted entry per allocation.
+ *
+ * Cost: O(K log K) sort of pending plus O(n + K) merge into main, where
+ * K is the number of allocations since the last collection. Replaces
+ * the previous "invalidate + rebuild from gc_all + qsort" path, which
+ * paid O(n log n) every collection.
  */
-void gc_range_compact(mino_state_t *S)
+void gc_range_merge_pending(mino_state_t *S)
 {
-    size_t dst = 0;
-    size_t src;
-    size_t i;
-    size_t need;
+    size_t K, N, need, i, j, k;
+    gc_range_t *merged;
+
     if (!S->gc_ranges_valid) {
         return;
     }
-    for (src = 0; src < S->gc_ranges_len; src++) {
-        if (S->gc_ranges[src].h->mark) {
-            S->gc_ranges[dst] = S->gc_ranges[src];
-            dst++;
-        }
+    K = S->gc_ranges_pending_len;
+    if (K == 0) {
+        return;
     }
-    S->gc_ranges_len = dst;
+    qsort(S->gc_ranges_pending, K, sizeof(*S->gc_ranges_pending), gc_range_cmp);
 
-    /* Merge pending entries (new allocations since last collection). */
-    need = S->gc_ranges_len + S->gc_ranges_pending_len;
+    N = S->gc_ranges_len;
+    need = N + K;
     if (need > S->gc_ranges_cap) {
         size_t      new_cap = need * 2 + 16;
         gc_range_t *nr      = (gc_range_t *)realloc(
@@ -133,25 +145,61 @@ void gc_range_compact(mino_state_t *S)
         S->gc_ranges     = nr;
         S->gc_ranges_cap = new_cap;
     }
-    for (i = 0; i < S->gc_ranges_pending_len; i++) {
-        size_t lo = 0;
-        size_t hi = S->gc_ranges_len;
-        while (lo < hi) {
-            size_t mid = lo + (hi - lo) / 2;
-            if (S->gc_ranges_pending[i].start < S->gc_ranges[mid].start) {
-                hi = mid;
-            } else {
-                lo = mid + 1;
-            }
+    /* In-place merge from the back to avoid a scratch buffer. Walk both
+     * inputs from high to low and fill gc_ranges from index need-1
+     * downward; N and K cursors track remaining unmerged entries. */
+    merged = S->gc_ranges;
+    i = N;
+    j = K;
+    k = need;
+    while (j > 0) {
+        if (i > 0 && merged[i - 1].start > S->gc_ranges_pending[j - 1].start) {
+            merged[k - 1] = merged[i - 1];
+            i--;
+        } else {
+            merged[k - 1] = S->gc_ranges_pending[j - 1];
+            j--;
         }
-        if (lo < S->gc_ranges_len) {
-            memmove(&S->gc_ranges[lo + 1], &S->gc_ranges[lo],
-                    (S->gc_ranges_len - lo) * sizeof(*S->gc_ranges));
-        }
-        S->gc_ranges[lo] = S->gc_ranges_pending[i];
-        S->gc_ranges_len++;
+        k--;
     }
+    S->gc_ranges_len = need;
     S->gc_ranges_pending_len = 0;
+    if (S->gc_ranges_len > 0) {
+        S->gc_heap_min = S->gc_ranges[0].start;
+        S->gc_heap_max = S->gc_ranges[S->gc_ranges_len - 1].end;
+    }
+}
+
+/*
+ * Compact the range index after a minor mark. Keeps every OLD entry
+ * (minor does not touch OLD, so their mark bits are zero even though
+ * they are live) and every YOUNG entry that the mark phase reached.
+ * Dropped YOUNG entries point at headers gc_minor_sweep is about to
+ * free. Preserves sort order in one pass.
+ *
+ * Call site: gc_minor_collect, after the drain loops and before
+ * gc_minor_sweep, while mark bits still indicate YOUNG liveness.
+ */
+void gc_range_compact_after_minor_mark(mino_state_t *S)
+{
+    size_t dst = 0, src;
+    if (!S->gc_ranges_valid) {
+        return;
+    }
+    for (src = 0; src < S->gc_ranges_len; src++) {
+        gc_hdr_t *h = S->gc_ranges[src].h;
+        if (h->gen == GC_GEN_OLD || h->mark) {
+            S->gc_ranges[dst++] = S->gc_ranges[src];
+        }
+    }
+    S->gc_ranges_len = dst;
+    if (S->gc_ranges_len > 0) {
+        S->gc_heap_min = S->gc_ranges[0].start;
+        S->gc_heap_max = S->gc_ranges[S->gc_ranges_len - 1].end;
+    } else {
+        S->gc_heap_min = 0;
+        S->gc_heap_max = 0;
+    }
 }
 
 /*

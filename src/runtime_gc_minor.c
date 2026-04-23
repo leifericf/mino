@@ -267,6 +267,11 @@ void gc_minor_collect(mino_state_t *S)
     S->gc_phase = GC_PHASE_MINOR;
     if (!S->gc_ranges_valid) {
         gc_build_range_index(S);
+    } else {
+        /* Incremental path: main array stayed sorted across the last
+         * minor cycle; fold in the allocations the mutator buffered
+         * since. Cheaper than re-sorting everything from gc_all. */
+        gc_range_merge_pending(S);
     }
     gc_verify_remset_complete(S);
     start_ns = mino_monotonic_ns();
@@ -286,6 +291,10 @@ void gc_minor_collect(mino_state_t *S)
     gc_drain_mark_stack_to(S, mark_floor);
     gc_scan_stack(S);
     gc_drain_mark_stack_to(S, mark_floor);
+    /* Drop entries for YOUNG headers that sweep is about to free. OLD
+     * entries and marked YOUNG survivors stay; the main array remains
+     * sorted, so no rebuild at the top of the next cycle. */
+    gc_range_compact_after_minor_mark(S);
     /* Reset the remset before sweep so sweep can immediately re-enqueue
      * every newly-promoted header; the remset ends the cycle
      * containing exactly those promotions, giving the next cycle a
@@ -293,11 +302,6 @@ void gc_minor_collect(mino_state_t *S)
      * barrier on a container promoted mid-fill. */
     gc_remset_reset(S);
     gc_minor_sweep(S, saved_phase);
-    /* Dead YOUNG entries are still in the range index. Rather than
-     * compact it we invalidate and rebuild at the next collection -- a
-     * cheap O(n) walk that fits naturally into the quiescent state
-     * between cycles. */
-    S->gc_ranges_valid = 0;
     S->gc_collections_minor++;
     S->gc_phase = saved_phase;
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);

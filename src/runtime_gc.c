@@ -213,11 +213,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     S->gc_all           = h;
     S->gc_bytes_alloc  += size;
     S->gc_bytes_young  += size;
-    if (S->gc_stress > 0) {
-        gc_range_insert(S, h);
-    } else {
-        S->gc_ranges_valid = 0;
-    }
+    gc_range_insert(S, h);
     return (void *)(h + 1);
 }
 

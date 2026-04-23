@@ -236,8 +236,14 @@ struct mino_state {
     size_t          gc_ranges_len;
     size_t          gc_ranges_cap;
     size_t          gc_ranges_valid;
-    gc_range_t      gc_ranges_pending[8];
+    /* Allocations between collections land here instead of memmove-ing
+     * into the sorted main array on every alloc. Merged at the next
+     * collection via sort-then-merge (cheaper than re-qsorting n+K
+     * entries from scratch). Grows dynamically; sized by
+     * gc_ranges_pending_cap. */
+    gc_range_t     *gc_ranges_pending;
     size_t          gc_ranges_pending_len;
+    size_t          gc_ranges_pending_cap;
     size_t          gc_collections_minor;
     size_t          gc_collections_major;
     size_t          gc_total_freed;
@@ -589,11 +595,17 @@ void gc_major_enqueue_promoted(mino_state_t *S, gc_hdr_t *h);
 /* runtime_gc_roots.c: range index over live headers plus root enumeration.
  * The range index backs gc_find_header_for_ptr, which resolves a raw
  * machine word to its owning header during conservative stack scans and
- * interior-pointer mark. gc_range_insert buffers new allocations; the
- * index is rebuilt once per collection. */
+ * interior-pointer mark. gc_range_insert buffers new allocations in a
+ * growable pending array; gc_range_merge_pending folds them into the
+ * sorted main array at the top of each collection;
+ * gc_range_compact_after_minor_mark drops freed YOUNG entries before
+ * minor sweep so the index stays valid across cycles without a
+ * rebuild-from-gc_all. gc_build_range_index is the fallback used when
+ * the mutator hits OOM on pending growth. */
 void      gc_build_range_index(mino_state_t *S);
 void      gc_range_insert(mino_state_t *S, gc_hdr_t *h);
-void      gc_range_compact(mino_state_t *S);
+void      gc_range_merge_pending(mino_state_t *S);
+void      gc_range_compact_after_minor_mark(mino_state_t *S);
 gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p);
 void      gc_mark_roots(mino_state_t *S);
 void      gc_scan_stack(mino_state_t *S);
