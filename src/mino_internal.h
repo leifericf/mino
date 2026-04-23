@@ -438,8 +438,8 @@ struct mino_state {
      * gc_alloc_typed call; when it reaches zero, simulate OOM. */
     long            fi_alloc_countdown;
 
-    /* Fault injection for raw (non-GC) allocation paths such as clone
-     * serialization and mailbox buffers. Same semantics as above. */
+    /* Fault injection for raw (non-GC) allocation paths such as the
+     * clone serialization buffer. Same semantics as above. */
     long            fi_raw_countdown;
 
     /* Async scheduler run queue (sched_entry_t defined in async_scheduler.h). */
@@ -803,12 +803,6 @@ void print_val(mino_state_t *S, FILE *out, const mino_val_t *v, int readably);
 
 /* read.c */
 const char *intern_filename(const char *name);                    /* static/interned */
-
-/* clone.c: actor primitives (registered by prim.c install).
- * Standard primitive signature: args borrowed, return GC-owned. */
-mino_val_t *prim_spawn(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_send_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-mino_val_t *prim_receive(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* GC marking (used by gc_major_collect and by root enumeration). */
 void gc_mark_interior(mino_state_t *S, const void *p);

@@ -572,13 +572,6 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     /* fault injection (testing only) */
     DEF_PRIM(env, "set-fail-alloc-at!",  prim_set_fail_alloc_at,
              "Make the n-th GC allocation fail (simulated OOM). Pass 0 to disable.");
-    /* actors */
-    DEF_PRIM(env, "spawn*",   prim_spawn,
-             "Creates a new actor with the given handler function.");
-    DEF_PRIM(env, "send!",    prim_send_bang,
-             "Sends a message to an actor.");
-    DEF_PRIM(env, "receive",  prim_receive,
-             "Receives the next message from the actor's mailbox.");
     /* host interop */
     mino_install_host(S, env);
     /* async channels */
