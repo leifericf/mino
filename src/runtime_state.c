@@ -25,6 +25,13 @@ static void state_init(mino_state_t *S)
     memset(S, 0, sizeof(*S));
     S->gc_threshold            = 1u << 20;
     S->gc_nursery_bytes        = 1u << 20;  /* 1 MiB default */
+    {
+        const char *nb = getenv("MINO_GC_NURSERY_BYTES");
+        if (nb != NULL && nb[0] != '\0') {
+            unsigned long v = strtoul(nb, NULL, 10);
+            if (v >= 64u * 1024u) S->gc_nursery_bytes = (size_t)v;
+        }
+    }
     S->gc_promotion_age        = 1;
     S->gc_major_growth_tenths  = 15;        /* 1.5x old-gen growth */
     /* Slice budget was 1024 during Phase B. The tuning sweep (see
