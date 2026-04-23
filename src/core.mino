@@ -1315,13 +1315,10 @@
 (defn agent-error "Returns the error of the agent, or nil if none." [ag] nil)
 
 ;; ---------------------------------------------------------------------------
-;; Actors: isolated runtimes with mailbox communication.
+;; Actors: see lib/core/actor.mino.
 ;;
-;; (spawn & body) creates a new actor, evaluates the body forms in its
-;; own state, and returns an opaque handle.  The body forms are
-;; serialized to source text at macro-expansion time so they can be
-;; evaluated in a separate runtime.  spawn* is the underlying C
-;; primitive that takes a source string.
+;; (spawn ...), (send!), and (receive) are no longer auto-loaded.
+;; Users who want the actor API must do (require "core/actor") first.
 ;; ---------------------------------------------------------------------------
 
 ;; ---------------------------------------------------------------------------
@@ -1799,7 +1796,3 @@
 
 (defmacro import [& _]
   (throw (ex-info "import is not available in mino; Java classes cannot be imported" {})))
-
-(defmacro spawn "Creates a new actor that evaluates body in its own runtime." [& body]
-  (let [src (apply str (interpose " " (map (fn [f] (pr-str f)) body)))]
-    `(spawn* ~src)))
