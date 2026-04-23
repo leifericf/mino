@@ -378,6 +378,13 @@ struct mino_state {
     int             reader_col;
     const char     *reader_dialect;   /* "mino" */
 
+    /* Filename intern table. Strings are malloc-owned, freed at state
+     * teardown. Held here (not process-global) so two runtimes on two
+     * threads don't race on a shared table. */
+    const char    **interned_files;
+    size_t          interned_files_len;
+    size_t          interned_files_cap;
+
     /* Source cache for diagnostic rendering. */
     #define MINO_SOURCE_CACHE_SIZE 4
     struct {
@@ -802,7 +809,7 @@ mino_val_t *sorted_rest(mino_state_t *S, const mino_val_t *coll);
 void print_val(mino_state_t *S, FILE *out, const mino_val_t *v, int readably);
 
 /* read.c */
-const char *intern_filename(const char *name);                    /* static/interned */
+const char *intern_filename(mino_state_t *S, const char *name);  /* interned for state's lifetime */
 
 /* GC marking (used by gc_major_collect and by root enumeration). */
 void gc_mark_interior(mino_state_t *S, const void *p);

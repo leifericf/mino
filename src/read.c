@@ -8,33 +8,39 @@
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
 
-#define MAX_INTERNED_FILES 512
-
-const char *intern_filename(const char *name)
+const char *intern_filename(mino_state_t *S, const char *name)
 {
-    static const char *files[MAX_INTERNED_FILES];
-    static size_t      file_count = 0;
     size_t i;
+    char  *dup;
+    size_t len;
     if (name == NULL) {
         return NULL;
     }
-    for (i = 0; i < file_count; i++) {
-        if (strcmp(files[i], name) == 0) {
-            return files[i];
+    for (i = 0; i < S->interned_files_len; i++) {
+        if (strcmp(S->interned_files[i], name) == 0) {
+            return S->interned_files[i];
         }
     }
-    {
-        size_t len = strlen(name);
-        char  *dup = (char *)malloc(len + 1);
-        if (dup == NULL) {
+    len = strlen(name);
+    dup = (char *)malloc(len + 1);
+    if (dup == NULL) {
+        return name;
+    }
+    memcpy(dup, name, len + 1);
+    if (S->interned_files_len == S->interned_files_cap) {
+        size_t new_cap = S->interned_files_cap == 0 ? 64
+                                                    : S->interned_files_cap * 2;
+        const char **nb = (const char **)realloc(
+            S->interned_files, new_cap * sizeof(*nb));
+        if (nb == NULL) {
+            free(dup);
             return name;
         }
-        memcpy(dup, name, len + 1);
-        if (file_count < MAX_INTERNED_FILES) {
-            files[file_count++] = dup;
-        }
-        return dup;
+        S->interned_files     = nb;
+        S->interned_files_cap = new_cap;
     }
+    S->interned_files[S->interned_files_len++] = dup;
+    return dup;
 }
 
 /* Reader error codes. */
@@ -1464,7 +1470,7 @@ mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     if (S->reader_file == NULL) {
-        S->reader_file = intern_filename("<input>");
+        S->reader_file = intern_filename(S, "<input>");
     }
     clear_error(S);
     v = read_form(S, &p);

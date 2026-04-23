@@ -235,7 +235,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
             if (n < sizeof(buf)) {
                 memcpy(buf, name_form->as.s.data, n);
                 buf[n] = '\0';
-                S->current_ns = intern_filename(buf);
+                S->current_ns = intern_filename(S, buf);
             }
         }
     }

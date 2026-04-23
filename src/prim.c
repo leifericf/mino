@@ -171,7 +171,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             fprintf(stderr, "core.mino: out of memory\n"); abort();
         }
 
-        S->reader_file = intern_filename("<core>");
+        S->reader_file = intern_filename(S, "<core>");
         S->reader_line = 1;
         while (*src != '\0') {
             const char *end  = NULL;
