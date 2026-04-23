@@ -420,8 +420,10 @@ struct mino_state {
     /* Eval */
     const mino_val_t *eval_current_form;
 
-    /* Random */
-    int             rand_seeded;
+    /* Per-state PRNG (xorshift64*). Seeded lazily on first draw so two
+     * runtimes initialised at the same instant get distinct sequences.
+     * Per-state so cross-thread use doesn't race on libc rand(). */
+    uint64_t        rand_state;
 
     /* Sort comparator */
     mino_val_t     *sort_comp_fn;
@@ -817,6 +819,9 @@ void print_val(mino_state_t *S, FILE *out, const mino_val_t *v, int readably);
 
 /* read.c */
 const char *intern_filename(mino_state_t *S, const char *name);  /* interned for state's lifetime */
+
+/* runtime_state.c: per-state PRNG. Seeds lazily on first call. */
+uint64_t state_rand64(mino_state_t *S);
 
 /* GC marking (used by gc_major_collect and by root enumeration). */
 void gc_mark_interior(mino_state_t *S, const void *p);

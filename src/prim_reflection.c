@@ -40,7 +40,8 @@ mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_is_cons(args) && mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "rand takes zero or one argument");
     }
-    r = (double)rand() / ((double)RAND_MAX + 1.0);
+    /* 53-bit mantissa out of our 64-bit xorshift result. */
+    r = (double)(state_rand64(S) >> 11) * (1.0 / 9007199254740992.0);
     if (mino_is_cons(args)) {
         double n;
         if (!as_double(args->as.cons.car, &n)) {

@@ -775,7 +775,6 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
                              mino_env_t *env)
 {
-    static int seeded = 0;
     unsigned char bytes[16];
     char buf[37];
     int i;
@@ -784,12 +783,16 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "random-uuid takes no arguments");
     }
-    if (!seeded) {
-        srand((unsigned)time(NULL));
-        seeded = 1;
-    }
-    for (i = 0; i < 16; i++) {
-        bytes[i] = (unsigned char)(rand() & 0xFF);
+    for (i = 0; i < 16; i += 8) {
+        uint64_t r = state_rand64(S);
+        bytes[i    ] = (unsigned char)(r      );
+        bytes[i + 1] = (unsigned char)(r >>  8);
+        bytes[i + 2] = (unsigned char)(r >> 16);
+        bytes[i + 3] = (unsigned char)(r >> 24);
+        bytes[i + 4] = (unsigned char)(r >> 32);
+        bytes[i + 5] = (unsigned char)(r >> 40);
+        bytes[i + 6] = (unsigned char)(r >> 48);
+        bytes[i + 7] = (unsigned char)(r >> 56);
     }
     bytes[6] = (unsigned char)((bytes[6] & 0x0F) | 0x40); /* version 4 */
     bytes[8] = (unsigned char)((bytes[8] & 0x3F) | 0x80); /* variant 1 */

@@ -179,6 +179,27 @@ void mino_state_free(mino_state_t *S)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Per-state PRNG (xorshift64*)                                              */
+/* ------------------------------------------------------------------------- */
+
+uint64_t state_rand64(mino_state_t *S)
+{
+    uint64_t x = S->rand_state;
+    if (x == 0) {
+        /* Seed from wall clock mixed with the state's address so two
+         * states initialised in the same second get distinct streams. */
+        x = (uint64_t)time(NULL);
+        x ^= (uint64_t)(uintptr_t)S * 0x9E3779B97F4A7C15ULL;
+        if (x == 0) x = 0x243F6A8885A308D3ULL; /* avoid degenerate zero */
+    }
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    S->rand_state = x;
+    return x * 0x2545F4914F6CDD1DULL;
+}
+
+/* ------------------------------------------------------------------------- */
 /* Value retention (refs)                                                    */
 /* ------------------------------------------------------------------------- */
 
