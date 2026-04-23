@@ -385,6 +385,13 @@ struct mino_state {
     size_t          interned_files_len;
     size_t          interned_files_cap;
 
+    /* Var-name intern table (ns + name for MINO_VAR). Same rationale
+     * as interned_files: strings outlive the state's vars but not the
+     * state itself. */
+    const char    **interned_var_strs;
+    size_t          interned_var_strs_len;
+    size_t          interned_var_strs_cap;
+
     /* Source cache for diagnostic rendering. */
     #define MINO_SOURCE_CACHE_SIZE 4
     struct {

@@ -4,24 +4,33 @@
 
 #include "mino_internal.h"
 
-/* Intern a string into a persistent table (separate from the filename table). */
-static const char *intern_var_str(const char *s)
+/* Intern a string into the state's var-string table.
+ * Strings are malloc-owned and freed at state teardown. */
+static const char *intern_var_str(mino_state_t *S, const char *s)
 {
-    static const char *tbl[4096];
-    static size_t      tbl_len = 0;
     size_t i, n;
     char *d;
-    for (i = 0; i < tbl_len; i++) {
-        if (strcmp(tbl[i], s) == 0) return tbl[i];
+    for (i = 0; i < S->interned_var_strs_len; i++) {
+        if (strcmp(S->interned_var_strs[i], s) == 0) return S->interned_var_strs[i];
     }
     /* Always allocate a copy — the input may be a stack-local buffer. */
     n = strlen(s);
     d = (char *)malloc(n + 1);
     if (d == NULL) return s;
     memcpy(d, s, n + 1);
-    if (tbl_len < sizeof(tbl) / sizeof(tbl[0])) {
-        tbl[tbl_len++] = d;
+    if (S->interned_var_strs_len == S->interned_var_strs_cap) {
+        size_t new_cap = S->interned_var_strs_cap == 0
+                         ? 64 : S->interned_var_strs_cap * 2;
+        const char **nb = (const char **)realloc(
+            S->interned_var_strs, new_cap * sizeof(*nb));
+        if (nb == NULL) {
+            free(d);
+            return s;
+        }
+        S->interned_var_strs     = nb;
+        S->interned_var_strs_cap = new_cap;
     }
+    S->interned_var_strs[S->interned_var_strs_len++] = d;
     return d;
 }
 
@@ -40,8 +49,8 @@ mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
     }
 
     /* Intern the strings so they outlive any stack-local buffers. */
-    i_ns   = intern_var_str(ns);
-    i_name = intern_var_str(name);
+    i_ns   = intern_var_str(S, ns);
+    i_name = intern_var_str(S, name);
 
     /* Create new var. */
     v = mino_mk_var(S, i_ns, i_name, mino_nil(S));

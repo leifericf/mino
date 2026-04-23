@@ -145,6 +145,14 @@ void mino_state_free(mino_state_t *S)
         }
         free(S->interned_files);
     }
+    /* Free var-string intern table. */
+    {
+        size_t vi;
+        for (vi = 0; vi < S->interned_var_strs_len; vi++) {
+            free((void *)S->interned_var_strs[vi]);
+        }
+        free(S->interned_var_strs);
+    }
     /* Free async scheduler run queue. */
     {
         struct sched_entry *e = S->async_run_head;
