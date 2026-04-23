@@ -130,15 +130,22 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
     if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
         S->gc_major_step_alloc += alloc_size;
         if (S->gc_bytes_young > S->gc_nursery_bytes) {
-            /* Minor nests inside the active major: it saves phase,
-             * drains to a floor that preserves major's pending
-             * entries, and enqueues any newly-promoted OLD onto
-             * major's mark stack. Phase MAJOR_MARK is restored on
-             * return. */
+            /* Finish the in-flight major before running the nursery
+             * overflow minor. Running a nested minor while major's
+             * mark stack holds pending entries is unsafe: minor's
+             * sweep frees YOUNG objects reachable only through an
+             * OLD entry still on major's stack, and major's next
+             * gc_trace_children then chases the freed pointer. The
+             * cost of force-finishing is bounded by whatever major
+             * work is left; the alternative would require tracing
+             * transitively through every mark-stack entry on every
+             * nested minor, which is strictly more work in the
+             * common case. */
+            gc_force_finish_major(S);
             gc_minor_collect(S);
+            return;
         }
-        if (S->gc_phase == GC_PHASE_MAJOR_MARK
-            && S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
+        if (S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
             gc_major_slice(S);
         }
         return;
