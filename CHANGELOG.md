@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Breaking changes
+
+- **Removed `lib/core/actor.mino`.** The pure-mino actor shim added in
+  v0.43.0 is gone; `(require "core/actor")` now fails. Channels in
+  `lib/core/channel.mino` cover every use case the shim did. A bot /
+  stateful-worker pattern is a `(go-loop [] (let [msg (<! in-ch)] ...))`
+  reading a request channel; pair with reply channels for call-style
+  interaction, fire-and-forget for cast-style. Carrying two
+  queue-with-identity abstractions in core invited confusion.
+
 ## v0.43.0 — Pure-mino channels and actors
 
 Two successive demotions move the channel layer and the actor system

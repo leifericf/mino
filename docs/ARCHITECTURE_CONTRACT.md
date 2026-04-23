@@ -55,9 +55,6 @@ mino is an embeddable runtime. The host drives everything.
   threads but each state is independent.
 - `mino_interrupt` is the only function safe to call from a thread other
   than the one running eval.
-- The `spawn` / `send!` / `receive` actor API lives entirely in
-  `lib/core/actor.mino` over an atom-wrapped mailbox and the `binding`
-  special form. No isolated `mino_state_t` per actor.
 
 ## 4. Ownership Model
 

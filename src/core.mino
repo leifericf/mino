@@ -1315,13 +1315,6 @@
 (defn agent-error "Returns the error of the agent, or nil if none." [ag] nil)
 
 ;; ---------------------------------------------------------------------------
-;; Actors: see lib/core/actor.mino.
-;;
-;; (spawn ...), (send!), and (receive) are no longer auto-loaded.
-;; Users who want the actor API must do (require "core/actor") first.
-;; ---------------------------------------------------------------------------
-
-;; ---------------------------------------------------------------------------
 ;; Protocols: polymorphic dispatch on the type of the first argument.
 ;;
 ;; (defprotocol Name

@@ -66,15 +66,6 @@ has a single responsibility. State access is explicit (`S->field`).
 |------|-----|----------------|
 | `src/clone.c` | 213 | Value cloning across mino_state_t instances (nil/bool/int/float/string/symbol/keyword/cons/vector/map/set). Host-facing `mino_clone` only. |
 
-## Actors
-
-Actors live in `lib/core/actor.mino`. `spawn`, `send!`, `receive`,
-`actor?`, and `mailbox-count` are mino-level defs over an atom-wrapped
-mailbox (`:mb-items` vector + `:mb-head` index). `*self*` is a dynamic
-binding scoped by the `spawn` macro. No C surface.
-
-Load with `(require "core/actor")`.
-
 ## Async
 
 Channels, buffers, and alts arbitration live in `lib/core/channel.mino`.
