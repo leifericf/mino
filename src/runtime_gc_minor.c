@@ -38,33 +38,33 @@ static void gc_mark_remset(mino_state_t *S)
     }
 }
 
-/* Sweep the YOUNG generation in one walk of gc_all. Dead (unmarked)
- * YOUNG headers go to the free list or free(); live YOUNG clear their
- * mark, age up, and promote to OLD when the age threshold is reached.
- * OLD headers are untouched in both reachability and accounting.
- * When saved_phase is MAJOR_MARK, every promoted header is also
- * enqueued on major's mark stack so major traces it before sweep. */
+/* Sweep the YOUNG generation by walking gc_all_young. Dead (unmarked)
+ * headers go to the free list or free(); live ones clear their mark,
+ * age up, and on reaching the promotion threshold migrate from the
+ * young list into gc_all_old. OLD headers live on a different list
+ * entirely so minor never touches them. When saved_phase is
+ * MAJOR_MARK, every promoted header is also enqueued on major's mark
+ * stack so major traces it before sweep. */
 static void gc_minor_sweep(mino_state_t *S, int saved_phase)
 {
-    gc_hdr_t **pp          = &S->gc_all;
+    gc_hdr_t **pp          = &S->gc_all_young;
     size_t     freed_bytes = 0;
     size_t     promoted_bytes = 0;
     while (*pp != NULL) {
         gc_hdr_t *h = *pp;
-        if (h->gen == GC_GEN_OLD) {
-            /* Major owns the OLD generation; minor leaves mark and
-             * linkage alone. */
-            pp = &h->next;
-            continue;
-        }
         if (h->mark) {
             h->mark = 0;
             if (h->age < 0xffu) {
                 h->age++;
             }
             if (h->age >= S->gc_promotion_age) {
-                h->gen           = GC_GEN_OLD;
-                promoted_bytes  += h->size;
+                /* Promote: unlink from young list, prepend to old list,
+                 * flip the gen tag, and keep accounting consistent. */
+                *pp             = h->next;
+                h->gen          = GC_GEN_OLD;
+                h->next         = S->gc_all_old;
+                S->gc_all_old   = h;
+                promoted_bytes += h->size;
                 /* One-cycle safety net: every newly-promoted header
                  * enters the remembered set so stores performed on it
                  * in the cycle immediately following promotion are
@@ -80,6 +80,7 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
                 if (saved_phase == GC_PHASE_MAJOR_MARK) {
                     gc_major_enqueue_promoted(S, h);
                 }
+                continue; /* pp already advanced via the unlink. */
             }
             pp = &h->next;
             continue;
@@ -142,8 +143,8 @@ static void gc_verify_remset_complete(mino_state_t *S)
     } \
 } while (0)
 
-    for (h = S->gc_all; h != NULL; h = h->next) {
-        if (h->gen != GC_GEN_OLD || h->dirty) continue;
+    for (h = S->gc_all_old; h != NULL; h = h->next) {
+        if (h->dirty) continue;
         switch (h->type_tag) {
         case GC_T_VAL: {
             mino_val_t *v = (mino_val_t *)(h + 1);

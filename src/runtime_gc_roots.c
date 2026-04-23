@@ -36,9 +36,8 @@ void gc_build_range_index(mino_state_t *S)
 {
     gc_hdr_t *h;
     size_t    n = 0;
-    for (h = S->gc_all; h != NULL; h = h->next) {
-        n++;
-    }
+    for (h = S->gc_all_young; h != NULL; h = h->next) n++;
+    for (h = S->gc_all_old;   h != NULL; h = h->next) n++;
     if (n > S->gc_ranges_cap) {
         size_t      new_cap = n * 2 + 16;
         gc_range_t *nr      = (gc_range_t *)realloc(
@@ -50,7 +49,13 @@ void gc_build_range_index(mino_state_t *S)
         S->gc_ranges_cap = new_cap;
     }
     S->gc_ranges_len = 0;
-    for (h = S->gc_all; h != NULL; h = h->next) {
+    for (h = S->gc_all_young; h != NULL; h = h->next) {
+        S->gc_ranges[S->gc_ranges_len].start = (uintptr_t)(h + 1);
+        S->gc_ranges[S->gc_ranges_len].end   = (uintptr_t)(h + 1) + h->size;
+        S->gc_ranges[S->gc_ranges_len].h     = h;
+        S->gc_ranges_len++;
+    }
+    for (h = S->gc_all_old; h != NULL; h = h->next) {
         S->gc_ranges[S->gc_ranges_len].start = (uintptr_t)(h + 1);
         S->gc_ranges[S->gc_ranges_len].end   = (uintptr_t)(h + 1) + h->size;
         S->gc_ranges[S->gc_ranges_len].h     = h;

@@ -209,8 +209,8 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     h->gen           = GC_GEN_YOUNG;
     h->age           = 0;
     h->size          = size;
-    h->next          = S->gc_all;
-    S->gc_all           = h;
+    h->next          = S->gc_all_young;
+    S->gc_all_young  = h;
     S->gc_bytes_alloc  += size;
     S->gc_bytes_young  += size;
     gc_range_insert(S, h);

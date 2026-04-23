@@ -223,8 +223,17 @@ struct mino_env {
 /* ------------------------------------------------------------------------- */
 
 struct mino_state {
-    /* Garbage collection */
-    gc_hdr_t       *gc_all;
+    /* Garbage collection.
+     *
+     * gc_all_young and gc_all_old are singly-linked lists partitioning
+     * every live header by generation. Alloc prepends to the young
+     * list; minor sweep walks only young (promotion moves a header
+     * between lists); major sweep walks old to free dead, and young
+     * only to clear mark bits major set during cross-gen tracing.
+     * Keeping the two separated caps minor-sweep cost at O(young-live)
+     * instead of O(total-heap). */
+    gc_hdr_t       *gc_all_young;
+    gc_hdr_t       *gc_all_old;
     size_t          gc_bytes_alloc;
     size_t          gc_bytes_live;
     size_t          gc_threshold;

@@ -154,28 +154,29 @@ void gc_major_sweep_phase(mino_state_t *S)
 }
 
 /* Major sweep. Called from gc_major_sweep_phase. Frees dead OLD
- * headers; leaves YOUNG alone -- minor owns YOUNG lifecycle, and new
- * YOUNG allocations that land after gc_major_begin seeded the mark
- * stack will not be marked in this cycle but still need to survive
- * until the next minor evaluates them against its own roots. Clears
- * the mark bit on every survivor (OLD live and all YOUNG) so the
- * next cycle starts from a clean slate. */
+ * headers by walking gc_all_old; leaves the young list alone -- minor
+ * owns YOUNG lifecycle, and new YOUNG allocations that land after
+ * gc_major_begin seeded the mark stack will not be marked in this
+ * cycle but still need to survive until the next minor evaluates them
+ * against its own roots. A separate pass clears any mark bit the
+ * major frontier set on YOUNG via cross-gen tracing so the next minor
+ * starts from a clean slate. */
 void gc_sweep(mino_state_t *S)
 {
-    gc_hdr_t **pp         = &S->gc_all;
+    gc_hdr_t **pp         = &S->gc_all_old;
     size_t     live_young = 0;
     size_t     live_old   = 0;
     size_t     freed_old  = 0;
+    /* Clear mark bits on YOUNG survivors and tally live young bytes. */
+    {
+        gc_hdr_t *yh;
+        for (yh = S->gc_all_young; yh != NULL; yh = yh->next) {
+            yh->mark = 0;
+            live_young += yh->size;
+        }
+    }
     while (*pp != NULL) {
         gc_hdr_t *h = *pp;
-        if (h->gen == GC_GEN_YOUNG) {
-            /* Major leaves YOUNG alone; clear any mark bit the major
-             * frontier set so the next minor sees a clean slate. */
-            h->mark = 0;
-            live_young += h->size;
-            pp = &h->next;
-            continue;
-        }
         if (h->mark) {
             h->mark = 0;
             live_old += h->size;

@@ -166,7 +166,17 @@ void mino_state_free(mino_state_t *S)
     }
     /* Free async timer queue. */
     async_timers_free(S);
-    for (h = S->gc_all; h != NULL; h = hnext) {
+    for (h = S->gc_all_young; h != NULL; h = hnext) {
+        hnext = h->next;
+        if (h->type_tag == GC_T_VAL) {
+            mino_val_t *v = (mino_val_t *)(h + 1);
+            if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+                v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
+            }
+        }
+        free(h);
+    }
+    for (h = S->gc_all_old; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
