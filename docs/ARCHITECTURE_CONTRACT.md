@@ -48,14 +48,16 @@ mino is an embeddable runtime. The host drives everything.
 
 - Each `mino_state_t` is fully isolated. No mutable data is shared between
   states. States may coexist in the same process without synchronization.
-- Cross-state value transfer uses serialization (`mino_clone`,
-  `mino_mailbox_send`/`recv`). No pointers cross state boundaries.
-- The mailbox is the only concurrency primitive that uses a mutex. It is
-  safe to call `send` and `recv` from different threads simultaneously.
-- Actors bundle state + env + mailbox. The host drives actors; the runtime
-  does not manage threads.
+- Cross-state value transfer uses serialization (`mino_clone`). No
+  pointers cross state boundaries.
+- There are no C-side concurrency primitives. Mino is single-threaded
+  per `mino_state_t`; the host may run multiple states from different
+  threads but each state is independent.
 - `mino_interrupt` is the only function safe to call from a thread other
   than the one running eval.
+- The `spawn` / `send!` / `receive` actor API lives entirely in
+  `lib/core/actor.mino` over an atom-wrapped mailbox and the `binding`
+  special form. No isolated `mino_state_t` per actor.
 
 ## 4. Ownership Model
 
@@ -81,7 +83,6 @@ These structures use direct `malloc`/`calloc`/`realloc`:
 - `root_env_t` registry nodes
 - `mino_ref_t` retention nodes
 - `dyn_binding_t` dynamic binding frames
-- `mino_mailbox_t` and its message queue
 - `mino_repl_t` and its line buffer
 - Module cache and metadata table arrays
 - Intern table arrays

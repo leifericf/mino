@@ -1,15 +1,15 @@
 # Changelog
 
-## Unreleased
+## v0.43.0 — Pure-mino channels and actors
 
-Demotes the entire channel/buffer/handler/select layer from C to pure
-mino. The async runtime in C shrinks to four primitives plus two
-helper modules (scheduler run queue, deadline timers). All 261 async
-tests pass on the new implementation; the public mino API is unchanged
-but the C embedding surface breaks for any host that called channel
-primitives directly.
+Two successive demotions move the channel layer and the actor system
+out of C into `lib/core/`. The C runtime keeps only what must be C:
+the scheduler run queue, the deadline-timer priority queue, the GC,
+and the evaluator. Total C surface shrinks by roughly 2,100 LOC; the
+built binary drops ~20 KB on darwin arm64 at -O2. The public mino
+API is unchanged except where flagged below.
 
-### Breaking changes
+### Breaking changes (channel demotion)
 
 - **Removed C primitives** (channels, buffers, alts, transducer hooks):
   `chan*`, `chan?*`, `chan-put*`, `chan-take*`, `chan-close*`,
@@ -49,6 +49,34 @@ primitives directly.
   was loaded. Latent bug that surfaced once the nil-callback regression
   stopped eating the test suite. Use `merge-chans` for channel-merging.
 
+### Breaking changes (actor demotion)
+
+- **Removed C primitives** `spawn*`, `send!`, `receive`. The actor API
+  (`spawn`, `send!`, `receive`, plus new `actor?` and `mailbox-count`)
+  now lives in `lib/core/actor.mino`. Users call
+  `(require "core/actor")` to load it, the same pattern channels
+  already use via `core/async`.
+
+- **`spawn` is no longer auto-loaded from core.mino.** The `spawn`
+  macro is gone from the compiled-in core; source that spawned an
+  actor without an explicit require now fails with 'unbound symbol:
+  spawn'. Add `(require "core/actor")` at the top of the file.
+
+- **`spawn` body runs in the caller's env.** The old C implementation
+  created a fresh `mino_state_t` per actor and evaluated the body in
+  isolation, so `(def x ...)` inside a spawn body affected only the
+  actor. The pure-mino implementation evaluates the body in the caller
+  context with `*self*` dynamically bound. In a single-threaded
+  runtime the old isolation bought nothing measurable; the new scheme
+  makes spawn about 100x faster.
+
+- **Removed C host API**: `mino_mailbox_t`, `mino_mailbox_new/send/
+  recv/free`, `mino_actor_t`, `mino_actor_new/state/env/mailbox/send/
+  recv/free`. Embedders that used these must either (a) drive the mino
+  API through `mino_eval`, or (b) pin to v0.42.0. `mino_clone` is
+  retained for cross-state value transfer (still useful for multi-
+  runtime hosts).
+
 ### Added
 
 - **`async-sched-enqueue*`** — bridge primitive that lets mino-level
@@ -56,6 +84,10 @@ primitives directly.
   mino implementation uses it to schedule taker/putter callbacks.
 - **`async-schedule-timer*`** — schedules a callback to fire after N
   milliseconds (replaces the old `timeout*`).
+- **`lib/core/actor.mino`** — pure-mino actor implementation using an
+  atom-wrapped mailbox and `binding` to scope `*self*`. Exports
+  `spawn`, `send!`, `receive`, `actor?`, `mailbox-count`, and `spawn*`
+  (the function wrapper the macro expands to).
 
 ### Fixed
 
@@ -72,13 +104,20 @@ primitives directly.
 
 ### Removed
 
+Channel demotion:
 - `src/async_buffer.c/h`  (203 LOC)
 - `src/async_channel.c/h` (679 LOC)
 - `src/async_handler.c/h` (162 LOC)
 - `src/async_select.c/h`  (287 LOC)
 
-`prim_async.c` drops from 475 to 127 LOC. Total C async surface shrinks
-~1,600 LOC; the built binary drops ~20 KB on darwin arm64 at -O2.
+Actor demotion:
+- Mailbox + actor machinery inside `src/clone.c` (~445 LOC of 661)
+- `mino_mailbox_t` / `mino_actor_t` public API from `src/mino.h`
+- `spawn*` / `send!` / `receive` DEF_PRIM entries from `src/prim.c`
+
+`prim_async.c` drops from 475 to 127 LOC. `clone.c` drops from 661 to
+213 LOC and keeps only cross-state `mino_clone`. All 940 conformance
+tests pass (5701 assertions).
 
 ## v0.42.0 — Generational + Incremental Garbage Collector
 
