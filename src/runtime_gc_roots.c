@@ -245,12 +245,26 @@ gc_hdr_t *gc_find_header_for_ptr(mino_state_t *S, const void *p)
 }
 
 /* Mark every interned symbol or keyword value. The intern table holds
- * strong references into the managed heap. */
+ * strong references into the managed heap.
+ *
+ * Fast path: intern entries are always exact payload starts produced by
+ * mino_symbol_n / mino_keyword_n (never NULL, never singletons inside
+ * the state struct, never interior pointers). The header always sits
+ * immediately before the payload, so we can bypass the interior-pointer
+ * resolve (binary search over gc_ranges) that gc_mark_interior pays and
+ * push the header directly. During MINOR, gc_mark_push filters OLD
+ * entries in O(1) -- symbols outlive nurseries so after the first
+ * major almost every entry is OLD and minor does essentially no work
+ * proportional to intern table size. Replaces an O(N log M) hot spot
+ * that dominated gc_mark_roots at 190k+ interned symbols (one per
+ * gensym call) in spawn-heavy workloads. */
 static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
 {
     size_t i;
     for (i = 0; i < tbl->len; i++) {
-        gc_mark_interior(S, tbl->entries[i]);
+        mino_val_t *v = tbl->entries[i];
+        gc_hdr_t   *h = ((gc_hdr_t *)v) - 1;
+        gc_mark_push(S, h);
     }
 }
 
