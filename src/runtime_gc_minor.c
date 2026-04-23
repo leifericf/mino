@@ -119,18 +119,72 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
     S->gc_total_freed += freed_bytes;
 }
 
-/* Diagnostic helper (opt-in via MINO_GC_VERIFY=1): walks every OLD
- * header and asserts that its outgoing GC pointers reference OLD
- * targets, unless the header is in the remembered set (dirty=1). A
- * YOUNG target on an OLD container that is not in the remset means a
+/* Diagnostic helper (opt-in via MINO_GC_VERIFY=1): asserts that every
+ * LIVE OLD header's outgoing GC pointers reference OLD targets,
+ * unless the header is in the remembered set (dirty=1). A YOUNG
+ * target on a live OLD container that is not in the remset means a
  * mutation bypassed the barrier; the helper aborts so the offending
  * store surfaces loudly instead of corrupting the heap cycles later.
+ *
+ * "Live OLD" is the subset of OLD reachable via precise roots plus
+ * conservative stack scan. The filter matters: gc_all_old contains
+ * dead OLD zombies between major cycles, and those can hold stale
+ * cdr values that happen to alias a reused YOUNG freelist slot.
+ * Checking them would raise spurious Class C aborts (see
+ * gc_classify_offender) that have no bearing on runtime correctness
+ * because dead OLD cannot be observed by the mutator.
+ *
+ * Implementation: save every mark bit, do a precise + conservative
+ * mark pass (GC_PHASE_MAJOR_MARK to bypass the minor OLD filter),
+ * walk only marked OLD, then restore the original mark bits so the
+ * subsequent real mark pass starts from the expected zero state.
  * Paid only when the env var is set; returns immediately otherwise. */
 static void gc_verify_remset_complete(mino_state_t *S)
 {
-    gc_hdr_t   *h;
-    const char *env = getenv("MINO_GC_VERIFY");
+    gc_hdr_t      *h;
+    gc_hdr_t     **saved_hdrs;
+    unsigned char *saved_marks;
+    size_t         n_hdrs, idx;
+    int            saved_phase;
+    size_t         saved_floor;
+    const char    *env = getenv("MINO_GC_VERIFY");
     if (env == NULL || env[0] == '\0' || env[0] == '0') return;
+
+    /* Count + save + zero every mark bit before our classifying pass. */
+    n_hdrs = 0;
+    for (h = S->gc_all_young; h != NULL; h = h->next) n_hdrs++;
+    for (h = S->gc_all_old;   h != NULL; h = h->next) n_hdrs++;
+    saved_hdrs  = (gc_hdr_t **)calloc(n_hdrs, sizeof(*saved_hdrs));
+    saved_marks = (unsigned char *)calloc(n_hdrs, sizeof(*saved_marks));
+    if (saved_hdrs == NULL || saved_marks == NULL) {
+        free(saved_hdrs); free(saved_marks);
+        fprintf(stderr, "[gc-verify] oom allocating mark-save buffer\n");
+        return;
+    }
+    idx = 0;
+    for (h = S->gc_all_young; h != NULL; h = h->next) {
+        saved_hdrs[idx]  = h;
+        saved_marks[idx] = h->mark;
+        h->mark          = 0;
+        idx++;
+    }
+    for (h = S->gc_all_old; h != NULL; h = h->next) {
+        saved_hdrs[idx]  = h;
+        saved_marks[idx] = h->mark;
+        h->mark          = 0;
+        idx++;
+    }
+
+    /* Precise + conservative mark pass under MAJOR_MARK so OLD is not
+     * filtered from the frontier. */
+    saved_phase = S->gc_phase;
+    saved_floor = S->gc_mark_stack_len;
+    S->gc_phase = GC_PHASE_MAJOR_MARK;
+    gc_mark_roots(S);
+    gc_drain_mark_stack_to(S, saved_floor);
+    gc_scan_stack(S);
+    gc_drain_mark_stack_to(S, saved_floor);
+    S->gc_phase = saved_phase;
 
 #define MINO_GC_VERIFY_CHECK(p) do { \
     if ((p) != NULL) { \
@@ -138,10 +192,18 @@ static void gc_verify_remset_complete(mino_state_t *S)
         if (__child != NULL && __child->gen == GC_GEN_YOUNG) { \
             int __vt = (h->type_tag == GC_T_VAL) \
                 ? (int)((mino_val_t *)(h + 1))->type : -1; \
+            int __cvt = (__child->type_tag == GC_T_VAL) \
+                ? (int)((mino_val_t *)(__child + 1))->type : -1; \
             fprintf(stderr, \
-                "[gc-verify] OLD %p tag=%d vtype=%d -> YOUNG %p tag=%d\n", \
+                "[gc-verify] OLD %p tag=%d vtype=%d -> YOUNG %p tag=%d vtype=%d\n", \
                 (void *)h, (int)h->type_tag, __vt, \
-                (void *)__child, (int)__child->type_tag); \
+                (void *)__child, (int)__child->type_tag, __cvt); \
+            fprintf(stderr, \
+                "  h: dirty=%u mark=%u age=%u  child: mark=%u age=%u\n", \
+                (unsigned)h->dirty, (unsigned)h->mark, (unsigned)h->age, \
+                (unsigned)__child->mark, (unsigned)__child->age); \
+            gc_classify_offender(S, h); \
+            gc_evt_dump_around(S, (void *)h, (void *)__child, (void *)(p)); \
             abort(); \
         } \
     } \
@@ -149,6 +211,7 @@ static void gc_verify_remset_complete(mino_state_t *S)
 
     for (h = S->gc_all_old; h != NULL; h = h->next) {
         if (h->dirty) continue;
+        if (!h->mark) continue; /* dead OLD zombie; skip (see comment above) */
         switch (h->type_tag) {
         case GC_T_VAL: {
             mino_val_t *v = (mino_val_t *)(h + 1);
@@ -248,6 +311,17 @@ static void gc_verify_remset_complete(mino_state_t *S)
         }
     }
 #undef MINO_GC_VERIFY_CHECK
+
+    /* Restore every saved mark so the caller's real mark pass starts
+     * from the zero state it expects. */
+    {
+        size_t k;
+        for (k = 0; k < idx; k++) {
+            saved_hdrs[k]->mark = saved_marks[k];
+        }
+    }
+    free(saved_hdrs);
+    free(saved_marks);
 }
 
 void gc_minor_collect(mino_state_t *S)
