@@ -359,15 +359,28 @@ mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     items = malloc(len * sizeof(mino_val_t *));
     if (!items && len > 0) { return prim_throw_classified(S, "eval/bounds", "MBD001", "rangev: out of memory"); }
+    /* C-heap items[] is invisible to the precise GC; suppress collection
+     * so freshly minted ints cannot be swept before mino_vector rehomes
+     * them into GC-visible storage. */
+    S->gc_depth++;
     for (i = start, n = 0; n < len; i += step, n++) {
         items[n] = mino_int(S, i);
     }
     result = mino_vector(S, items, len);
+    S->gc_depth--;
     free(items);
     return result;
 }
 
-/* Eager map returning a vector. (mapv f coll) */
+/* Eager map returning a vector. (mapv f coll)
+ *
+ * The accumulating `items` buffer lives on the C heap (malloc, not GC),
+ * so values stored in it are invisible to the precise collector. If a
+ * minor GC runs between iterations while accumulated YOUNG values are
+ * only reachable through `items`, those values are reclaimed and the
+ * final mino_vector reads freed memory. Suppress GC across the whole
+ * accumulation so each produced value stays reachable via the live
+ * allocation pipeline until items is handed off to vec_from_array. */
 mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn, *coll;
@@ -387,26 +400,30 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     items = malloc(cap * sizeof(mino_val_t *));
     if (!items) { return prim_throw_classified(S, "eval/bounds", "MBD001", "mapv: out of memory"); }
+    S->gc_depth++;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
         mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
         mino_val_t *val = apply_callable(S, fn, call_args, env);
-        if (val == NULL) { free(items); return NULL; }
+        if (val == NULL) { S->gc_depth--; free(items); return NULL; }
         if (len >= cap) {
             cap *= 2;
             items = realloc(items, cap * sizeof(mino_val_t *));
-            if (!items) { return prim_throw_classified(S, "eval/bounds", "MBD001", "mapv: out of memory"); }
+            if (!items) { S->gc_depth--; return prim_throw_classified(S, "eval/bounds", "MBD001", "mapv: out of memory"); }
         }
         items[len++] = val;
         seq_iter_next(S, &it);
     }
     result = mino_vector(S, items, len);
+    S->gc_depth--;
     free(items);
     return result;
 }
 
-/* Eager filter returning a vector. (filterv pred coll) */
+/* Eager filter returning a vector. (filterv pred coll). Same precise-GC
+ * caveat as prim_mapv: the accumulating C-heap items[] is invisible to
+ * the collector, so suppress GC across the accumulation loop. */
 mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *pred, *coll;
@@ -426,23 +443,25 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     items = malloc(cap * sizeof(mino_val_t *));
     if (!items) { return prim_throw_classified(S, "eval/bounds", "MBD001", "filterv: out of memory"); }
+    S->gc_depth++;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
         mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
         mino_val_t *test = apply_callable(S, pred, call_args, env);
-        if (test == NULL) { free(items); return NULL; }
+        if (test == NULL) { S->gc_depth--; free(items); return NULL; }
         if (mino_is_truthy(test)) {
             if (len >= cap) {
                 cap *= 2;
                 items = realloc(items, cap * sizeof(mino_val_t *));
-                if (!items) { return prim_throw_classified(S, "eval/bounds", "MBD001", "filterv: out of memory"); }
+                if (!items) { S->gc_depth--; return prim_throw_classified(S, "eval/bounds", "MBD001", "filterv: out of memory"); }
             }
             items[len++] = elem;
         }
         seq_iter_next(S, &it);
     }
     result = mino_vector(S, items, len);
+    S->gc_depth--;
     free(items);
     return result;
 }

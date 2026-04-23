@@ -497,14 +497,21 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* Layer n k/v pairs onto an existing map, returning a new map value that
- * shares structure with `coll`. Nil is treated as an empty map. */
+ * shares structure with `coll`. Nil is treated as an empty map.
+ *
+ * Suppress GC during the rebuild: intermediate `root`/`order`/entry/slot
+ * allocations live only on the C stack between iterations, and mino's GC
+ * is precise over its own roots -- a minor or incremental-major step
+ * mid-loop would reclaim them. Same pattern as mino_map. */
 static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
                                     mino_val_t *p, size_t extra_pairs)
 {
     mino_hamt_node_t *root;
     mino_val_t       *order;
+    mino_val_t       *out;
     size_t            len_out;
     size_t            i;
+    S->gc_depth++;
     if (coll == NULL || coll->type == MINO_NIL) {
         root    = NULL;
         order   = mino_vector(S, NULL, 0);
@@ -527,16 +534,15 @@ static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
         }
         p = p->as.cons.cdr->as.cons.cdr;
     }
-    {
-        mino_val_t *out = alloc_val(S, MINO_MAP);
-        out->as.map.root      = root;
-        out->as.map.key_order = order;
-        out->as.map.len       = len_out;
-        if (coll != NULL && coll->type == MINO_MAP) {
-            out->meta = coll->meta;
-        }
-        return out;
+    out = alloc_val(S, MINO_MAP);
+    out->as.map.root      = root;
+    out->as.map.key_order = order;
+    out->as.map.len       = len_out;
+    if (coll != NULL && coll->type == MINO_MAP) {
+        out->meta = coll->meta;
     }
+    S->gc_depth--;
+    return out;
 }
 
 mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
