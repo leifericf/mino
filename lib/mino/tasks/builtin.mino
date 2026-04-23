@@ -20,7 +20,8 @@
    "src/runtime_state.c" "src/runtime_var.c"
    "src/runtime_error.c" "src/runtime_env.c"
    "src/runtime_gc.c" "src/runtime_gc_roots.c" "src/runtime_gc_major.c"
-   "src/runtime_gc_barrier.c" "src/runtime_gc_minor.c" "src/public_gc.c"
+   "src/runtime_gc_barrier.c" "src/runtime_gc_minor.c"
+   "src/runtime_gc_trace.c" "src/public_gc.c"
    "src/val.c" "src/vec.c" "src/map.c" "src/rbtree.c" "src/read.c" "src/print.c"
    "src/prim.c" "src/prim_numeric.c" "src/prim_collections.c"
    "src/prim_sequences.c" "src/prim_lazy.c" "src/prim_string.c" "src/prim_io.c"
@@ -143,6 +144,22 @@
   "Run GC stability tests under MINO_GC_STRESS=1 (collect on every allocation)."
   []
   (println (sh! "env" "MINO_GC_STRESS=1" mino-bin "tests/gc_stress_runner.mino")))
+
+(defn test-embed
+  "Compile and run the C embedding stress tests (embed_multi_state).
+   Exercises 16 mino_state_t * 16 pthreads to assert the embedding API
+   is safe under the documented one-state-per-thread contract."
+  []
+  (let [src     "tests/embed_multi_state.c"
+        bin     "embed_multi_state"
+        objs    (mapv src->obj lib-srcs)
+        pthread (if windows? [] ["-pthread"])
+        args    (into [cc] (concat cflags pthread ldflags
+                                   ["-o" bin src]
+                                   objs libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (sh! (str "./" bin)))))
 
 ;; ---- Architecture quality gates ----
 

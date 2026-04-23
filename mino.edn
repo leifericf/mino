@@ -23,5 +23,8 @@
   test-gc-stress  {:doc  "GC stability under stress collection"
                    :deps [build]
                    :task mino.tasks.builtin/test-gc-stress}
+  test-embed      {:doc  "C embedding stress test (16 states, 16 pthreads)"
+                   :deps [build]
+                   :task mino.tasks.builtin/test-embed}
   qa-arch         {:doc  "Architecture quality gates"
                    :task mino.tasks.builtin/qa-arch}}}

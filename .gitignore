@@ -42,3 +42,4 @@ docs/*.md
 !CHANGELOG.md
 /design-notes/
 .clj-kondo/
+embed_multi_state
