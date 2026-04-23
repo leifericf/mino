@@ -12,6 +12,15 @@
   interaction, fire-and-forget for cast-style. Carrying two
   queue-with-identity abstractions in core invited confusion.
 
+### Changed
+
+- **Concurrency story stays channels-only.** An OTP-style
+  `GenServer`/`Supervisor` layer in `lib/core/` was explored and
+  declined: host owns lifecycle, I/O, and parallelism; mino is the
+  glue. Supervision-quality guarantees (preemption, isolated heaps,
+  atomic link/monitor bookkeeping) belong to the host runtime, not to
+  a single-threaded tree-walking interpreter.
+
 ## v0.43.0 — Pure-mino channels and actors
 
 Two successive demotions move the channel layer and the actor system
