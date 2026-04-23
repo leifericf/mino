@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## v0.43.1 — Nested-minor UAF fix, GC event ring, multi-state stress
+
+Bug-fix and hardening release on top of v0.43.0. Closes a nursery-overflow
+use-after-free under `MAJOR_MARK` surfaced at N=10000 concurrent
+`go-loop` spawns, adds a GC event ring + reachability classifier for
+future debugging, and moves three pieces of mutable process state
+(filename intern, var-string intern, PRNG) into `mino_state_t` so
+multiple embedded states no longer race.
+
 ### Breaking changes
 
 - **Removed `lib/core/actor.mino`.** The pure-mino actor shim added in
@@ -20,6 +29,64 @@
   glue. Supervision-quality guarantees (preemption, isolated heaps,
   atomic link/monitor bookkeeping) belong to the host runtime, not to
   a single-threaded tree-walking interpreter.
+
+### Fixed
+
+- **Use-after-free on nested minor under `MAJOR_MARK`.** A nursery
+  overflow that fired while a major cycle was in the MARK phase drove
+  `gc_mark_push` over a header freed on the same tick. Root cause: the
+  in-flight major's mark stack still held references to YOUNG objects
+  that the overflow-minor then promoted and (in one path) freed. Fix
+  is to force the in-flight major to completion before running the
+  overflow-minor so the mark stack is empty when the minor touches
+  YOUNG. Surfaced deterministically under ASAN with
+  `/tmp/repro46.mino` at FLEET_N ≥ 5000.
+- **`MINO_GC_VERIFY=1` false positive on dead OLD zombies.** The verify
+  pass scanned every OLD container's outgoing pointers, including
+  containers that were themselves unreachable from roots but not yet
+  swept. Now filtered to reachable-OLD via a classifier pass so
+  verify reports genuine barrier misses only.
+
+### Added
+
+- **`MINO_GC_EVT=1` event ring + reachability classifier.** Records a
+  fixed-size ring of GC phase transitions, promotions, remset ops, and
+  allocation-path events. On assertion fire or classifier disagreement,
+  the last N events are dumped with a four-class reachability label
+  (`LIVE`/`ZOMBIE`/`DEAD`/`UNKNOWN`) per touched container. Opt-in via
+  env var so there's no cost when unused.
+- **`tests/embed_multi_state.c` + `mino task test-embed`.** Drives
+  16 `mino_state_t` instances on 16 pthreads doing concurrent alloc/
+  GC/intern work. Caught two of the three mutable-statics issues
+  folded into this release.
+- **`MINO_GC_NURSERY_BYTES` env var at state init.** Override the
+  default nursery size from the environment without calling
+  `mino_gc_set_param`. Lower bound matches the public-param minimum
+  (64 KiB).
+- **`(gc!)` primitive.** Explicit GC trigger from mino code, mainly
+  for tests and benchmarks that want to measure post-sweep state.
+
+### Internal
+
+- **Per-state intern tables** for filenames and var-strings. Each
+  `mino_state_t` carries its own FNV-hashed intern table; no more
+  cross-state sharing through process-global statics.
+- **Per-state xorshift64\* PRNG.** `random-uuid` and `rand` pull from
+  a seed stored in `mino_state_t`; two simultaneously-running embedded
+  states no longer interleave on a shared seed.
+- **`gc_all_young` / `gc_all_old` list split.** Minor collection walks
+  only the YOUNG list; the OLD list is untouched outside major. Cuts
+  minor-cycle cost proportionally to OLD-gen size.
+- **`mapv` / `filterv` accumulator pinning.** Accumulator values are
+  pinned on the GC save stack across each iteration; fixes a latent
+  UAF if the mapping function triggered a minor that promoted the
+  accumulator.
+- **GC suppression around malloc'd C-heap accumulators** in
+  `prim_collections.c` and `prim_sequences.c`. Prevents a collection
+  mid-conversion from observing an inconsistent half-populated array.
+- **Regression tests.** `tests/spawn_stress_regression.mino` pins
+  three go-loop spawn patterns that surfaced at N=1000–10000 during
+  Phase 3 hardening.
 
 ## v0.43.0 — Pure-mino channels and actors
 
