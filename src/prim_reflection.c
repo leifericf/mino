@@ -643,3 +643,18 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[11] = mino_keyword(S, phase_name);
     return mino_map(S, ks, vs, 12);
 }
+
+/* (gc!) -- force a full (minor + major) collection. Useful for tests
+ * and memory-accounting scripts that need deterministic state before
+ * reading gc-stats. The public mino_gc_collect honours gc_depth, so a
+ * nested call during construction is a no-op. */
+mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "gc! takes no arguments");
+    }
+    mino_gc_collect(S, MINO_GC_FULL);
+    return mino_nil(S);
+}

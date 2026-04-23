@@ -231,6 +231,7 @@ mino_val_t *prim_error_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ex_data(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_regex.c */
 mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
