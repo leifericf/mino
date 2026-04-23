@@ -31,6 +31,14 @@
 
 (def ^:private ACTOR-MARKER :actor)
 
+;; Mailbox layout: :mb-items is a vector, :mb-head is the index of the
+;; next message to receive. Append on send, advance head on receive.
+;; When (- (count items) head) * 2 < count items we compact by slicing.
+;; This keeps both send! and receive O(1) amortized; naive (vec (rest
+;; ...)) is O(n), which makes sequential drain O(n^2).
+
+(def ^:private COMPACT-THRESHOLD 4)
+
 (def *self* nil)
 
 (defn actor?
@@ -46,8 +54,16 @@
   (when-not (actor? a)
     (throw (ex-info "send!: first argument must be an actor"
                     {:got (type a)})))
-  (swap! a update :mailbox conj v)
+  (swap! a update :mb-items conj v)
   nil)
+
+(defn- mb-compact [s]
+  (let [items (:mb-items s)
+        head  (:mb-head s)
+        len   (- (count items) head)]
+    (if (and (> head COMPACT-THRESHOLD) (< len head))
+      (assoc s :mb-items (vec (subvec items head)) :mb-head 0)
+      s)))
 
 (defn receive
   "Pop and return the next message from *self*'s mailbox, or nil if
@@ -55,12 +71,12 @@
   []
   (when-not (actor? *self*)
     (throw (ex-info "receive: no actor context (*self* not bound)" {})))
-  (let [s   @*self*
-        mb  (:mailbox s)
-        n   (count mb)]
-    (when (pos? n)
-      (let [v (first mb)]
-        (swap! *self* assoc :mailbox (vec (rest mb)))
+  (let [s     @*self*
+        items (:mb-items s)
+        head  (:mb-head s)]
+    (when (< head (count items))
+      (let [v (nth items head)]
+        (swap! *self* (fn [s] (mb-compact (assoc s :mb-head (inc head)))))
         v))))
 
 (defn mailbox-count
@@ -69,14 +85,15 @@
   (when-not (actor? a)
     (throw (ex-info "mailbox-count: argument must be an actor"
                     {:got (type a)})))
-  (count (:mailbox @a)))
+  (let [s @a]
+    (- (count (:mb-items s)) (:mb-head s))))
 
 (defn spawn*
   "Create a new actor, evaluate body-fn with *self* bound to it, and
    return the actor. body-fn is a 0-arg function; spawn (the macro)
    wraps unquoted forms in such a function."
   [body-fn]
-  (let [a (atom {:kind ACTOR-MARKER :mailbox []})]
+  (let [a (atom {:kind ACTOR-MARKER :mb-items [] :mb-head 0})]
     (binding [*self* a]
       (body-fn))
     a))
