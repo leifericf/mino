@@ -85,13 +85,14 @@
                 (recur (+ i 1) (+ acc i))))]
     (is (= 12497500 acc))))
 
-;; Age-based promotion sanity: with promotion_age=1 and a 1 MiB nursery,
-;; bytes-young should never climb far past the nursery -- the minor
-;; trigger fires first and drains the nursery every cycle.
+;; Age-based promotion sanity: with promotion_age=1, bytes-young should
+;; never climb far past the configured nursery size -- the minor trigger
+;; fires on overflow and drains the nursery every cycle.
 (deftest nursery-bounded
   (dotimes [_ 200]
     (doall (take 1000 (range 10000))))
-  (is (< (young-bytes) (* 4 1024 1024))))
+  (is (< (young-bytes)
+         (* 4 (:nursery-bytes (gc-stats))))))
 
 ;; Literal-builder barrier: vector/map/set literals whose elements are
 ;; non-constant calls allocate a VALARR scratch buffer and fill it slot

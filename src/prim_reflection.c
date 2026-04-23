@@ -603,8 +603,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[12];
-    mino_val_t *vs[12];
+    mino_val_t *ks[13];
+    mino_val_t *vs[13];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -641,7 +641,9 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[10] = mino_int(S, (long long)st.remset_entries);
     ks[11] = mino_keyword(S, "phase");
     vs[11] = mino_keyword(S, phase_name);
-    return mino_map(S, ks, vs, 12);
+    ks[12] = mino_keyword(S, "nursery-bytes");
+    vs[12] = mino_int(S, (long long)S->gc_nursery_bytes);
+    return mino_map(S, ks, vs, 13);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests
