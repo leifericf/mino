@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Changed
+
+- **`gc-stats` now reports `:nursery-bytes`.** The configured nursery
+  size (from `MINO_GC_NURSERY_BYTES` or the 1 MiB default) is exposed
+  in the map returned by `(gc-stats)` so tests and tuning scripts
+  can read it back without parsing env vars.
+
+### Performance
+
+- **Intern-table marking now bypasses the interior-pointer resolver.**
+  `gc_mark_intern_table` computes the header directly from each
+  known-payload entry instead of paying the `O(log n)` `gc_ranges`
+  binary search that `gc_mark_interior` does per pointer. During
+  minor GC the OLD filter in `gc_mark_push` short-circuits each
+  entry in O(1). On a spawn-heavy workload with 190 k interned
+  symbols, per-minor intern-marking cost drops from 24.7 ms to
+  1.8 ms, cutting total bot-fleet time at N=10 000 / 16 MiB
+  nursery from 23.4 s to 19.1 s (-18%).
+- **Gensym output no longer goes through the intern table.** Gensyms
+  are unique by construction of the counter, so interning never
+  dedups — each call produces a name that no other call ever sees.
+  The previous behavior accumulated a permanent sym_intern entry
+  per gensym call, which in spawn-heavy macro-heavy workloads
+  (~15 gensyms per `go`/`go-loop` expansion) climbed into the
+  hundreds of thousands. Resident heap at N=10 000 bot-fleet drops
+  from 119 MiB to 108 MiB.
+
 ## v0.43.1 — Nested-minor UAF fix, GC event ring, multi-state stress
 
 Bug-fix and hardening release on top of v0.43.0. Closes a nursery-overflow
