@@ -6,9 +6,12 @@
 *.dylib
 *.dll
 *.exe
+*.dSYM/
 build/
 bin/
 /mino
+/mino_asan
+/mino_tsan
 src/core_mino.h
 
 # Test artifacts
@@ -43,3 +46,7 @@ docs/*.md
 /design-notes/
 .clj-kondo/
 embed_multi_state
+embed_multi_state_asan
+embed_multi_state_tsan
+examples/embed_gc_stress
+examples/embed_gc_stress_asan
