@@ -400,13 +400,30 @@ mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     {
         int used;
+        size_t total_len;
         memcpy(buf, prefix_src, prefix_len);
         used = snprintf(buf + prefix_len, sizeof(buf) - prefix_len,
                         "%ld", ++S->gensym_counter);
         if (used < 0) {
             return prim_throw_classified(S, "eval/type", "MTY001", "gensym formatting failed");
         }
-        return mino_symbol_n(S, buf, prefix_len + (size_t)used);
+        total_len = prefix_len + (size_t)used;
+        /* Gensyms are unique by construction of the counter, so interning
+         * adds zero dedup value -- every call produces a name no other
+         * call ever sees. Interning would accumulate one permanent entry
+         * in sym_intern per gensym call, which in spawn-heavy workloads
+         * (one go/go-loop expansion per bot, ~15 gensyms per expansion)
+         * climbs into the hundreds of thousands and inflates major-mark
+         * cost. Allocate the symbol directly, bypassing sym_intern.
+         * Equality on symbols is by string content (see mino_eq), so
+         * downstream comparisons still behave correctly. */
+        {
+            char       *data = dup_n(S, buf, total_len);
+            mino_val_t *v    = alloc_val(S, MINO_SYMBOL);
+            v->as.s.data = data;
+            v->as.s.len  = total_len;
+            return v;
+        }
     }
 }
 
