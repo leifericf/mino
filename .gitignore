@@ -39,7 +39,7 @@ Thumbs.db
 # Local working files
 .local/
 /*.md
-docs/*.md
+docs/**/*.md
 !docs/ARCHITECTURE_CONTRACT.md
 !docs/INTERNAL_MODULE_MAP.md
 !README.md
