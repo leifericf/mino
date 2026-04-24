@@ -346,3 +346,160 @@ mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             ? mino_true(S) : mino_false(S);
     }
 }
+
+/* ------------------------------------------------------------------------- */
+/* Arithmetic helpers used by the promoting tower primitives (+' -' *')      */
+/*                                                                           */
+/* Each helper takes values that are either MINO_INT or MINO_BIGINT (the     */
+/* caller is expected to classify operands before calling). Results are      */
+/* always GC-owned MINO_BIGINT cells — callers that want the "fits-in-long"  */
+/* narrowing are responsible for it (Clojure doesn't narrow +' output back   */
+/* to long either, so returning a bigint is the expected shape).             */
+/*                                                                           */
+/* On allocation or imath failure these return NULL after raising an         */
+/* out-of-memory error through prim_throw_classified.                        */
+/* ------------------------------------------------------------------------- */
+
+/* Borrowed view into a value as a bigint. If the value is already a bigint
+ * the existing mp_int is returned. If it's a long, a scratch mp_int is
+ * initialised in *scratch and returned. Caller tracks ownership via
+ * `owns_scratch` and must mp_int_clear / nothing based on it. */
+static int bigint_view(const mino_val_t *v, mpz_t *scratch, mp_int *out,
+                       int *owns_scratch)
+{
+    if (v == NULL) return 0;
+    if (v->type == MINO_BIGINT && v->as.bigint.mpz != NULL) {
+        *out = (mp_int)v->as.bigint.mpz;
+        *owns_scratch = 0;
+        return 1;
+    }
+    if (v->type == MINO_INT) {
+        if (mp_int_init(scratch) != MP_OK) return 0;
+        if (v->as.i >= LONG_MIN && v->as.i <= LONG_MAX) {
+            if (mp_int_set_value(scratch, (mp_small)v->as.i) != MP_OK) {
+                mp_int_clear(scratch);
+                return 0;
+            }
+        } else {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%lld", v->as.i);
+            if (mp_int_read_string(scratch, 10, buf) != MP_OK) {
+                mp_int_clear(scratch);
+                return 0;
+            }
+        }
+        *out = scratch;
+        *owns_scratch = 1;
+        return 1;
+    }
+    return 0;
+}
+
+typedef mp_result (*bigint_binop_fn)(mp_int, mp_int, mp_int);
+
+static mino_val_t *bigint_binop(mino_state_t *S, const mino_val_t *a,
+                                const mino_val_t *b, bigint_binop_fn op,
+                                const char *opname)
+{
+    mpz_t  as_buf, bs_buf;
+    mp_int av = NULL, bv = NULL;
+    int    owns_a = 0, owns_b = 0;
+    mp_int rz;
+    mino_val_t *out;
+    (void)opname;
+    if (!bigint_view(a, &as_buf, &av, &owns_a) ||
+        !bigint_view(b, &bs_buf, &bv, &owns_b)) {
+        if (owns_a) mp_int_clear(&as_buf);
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigint arithmetic");
+    }
+    rz = bigint_alloc_zeroed();
+    if (rz == NULL) {
+        if (owns_a) mp_int_clear(&as_buf);
+        if (owns_b) mp_int_clear(&bs_buf);
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigint arithmetic");
+    }
+    if (op(av, bv, rz) != MP_OK) {
+        if (owns_a) mp_int_clear(&as_buf);
+        if (owns_b) mp_int_clear(&bs_buf);
+        mp_int_clear(rz); free(rz);
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigint arithmetic");
+    }
+    if (owns_a) mp_int_clear(&as_buf);
+    if (owns_b) mp_int_clear(&bs_buf);
+    out = bigint_wrap(S, rz);
+    return out;
+}
+
+mino_val_t *mino_bigint_add(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    return bigint_binop(S, a, b, mp_int_add, "+'");
+}
+
+mino_val_t *mino_bigint_sub(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    return bigint_binop(S, a, b, mp_int_sub, "-'");
+}
+
+mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    return bigint_binop(S, a, b, mp_int_mul, "*'");
+}
+
+mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a)
+{
+    mpz_t  as_buf;
+    mp_int av = NULL;
+    int    owns_a = 0;
+    mp_int rz;
+    if (!bigint_view(a, &as_buf, &av, &owns_a)) {
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigint arithmetic");
+    }
+    rz = bigint_alloc_zeroed();
+    if (rz == NULL) {
+        if (owns_a) mp_int_clear(&as_buf);
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigint arithmetic");
+    }
+    if (mp_int_neg(av, rz) != MP_OK) {
+        if (owns_a) mp_int_clear(&as_buf);
+        mp_int_clear(rz); free(rz);
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigint arithmetic");
+    }
+    if (owns_a) mp_int_clear(&as_buf);
+    return bigint_wrap(S, rz);
+}
+
+/* Convert a bigint to the closest representable double. Used when an
+ * arithmetic operand sequence mixes bigints with floats; the bigint tier
+ * then collapses to the double tier for the remainder of the computation
+ * (matching Clojure's tower fallback). */
+double mino_bigint_to_double(const mino_val_t *v)
+{
+    mp_result lenr;
+    int  len;
+    char *buf;
+    double d;
+    if (v == NULL || v->type != MINO_BIGINT || v->as.bigint.mpz == NULL) {
+        return 0.0;
+    }
+    lenr = mp_int_string_len((mp_int)v->as.bigint.mpz, 10);
+    if (lenr < 1) return 0.0;
+    len = (int)lenr;
+    buf = (char *)malloc((size_t)len + 1);
+    if (buf == NULL) return 0.0;
+    if (mp_int_to_string((mp_int)v->as.bigint.mpz, 10, buf, len) != MP_OK) {
+        free(buf);
+        return 0.0;
+    }
+    d = strtod(buf, NULL);
+    free(buf);
+    return d;
+}

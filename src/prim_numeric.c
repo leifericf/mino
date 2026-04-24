@@ -277,6 +277,332 @@ mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_int(S, iacc);
 }
 
+/* ------------------------------------------------------------------------- */
+/* Auto-promoting arithmetic (+' -' *' inc' dec')                            */
+/*                                                                           */
+/* Like +, -, * but overflow on a long result promotes the running           */
+/* accumulator to a bigint rather than throwing. A float operand anywhere    */
+/* collapses the tower to doubles (matching Clojure's +' behaviour).         */
+/*                                                                           */
+/* The accumulator is tracked in one of three tiers; tier transitions are    */
+/* one-way: int -> bigint -> double (and int -> double direct).              */
+/* ------------------------------------------------------------------------- */
+
+typedef enum { TIER_INT = 0, TIER_BIGINT, TIER_FLOAT } tier_t;
+
+/* Convert any int/bigint/float into a double. Used when collapsing to
+ * TIER_FLOAT. bigint conversion may lose precision (cold path, matches
+ * Clojure double coercion). */
+static int numeric_as_double(const mino_val_t *v, double *out)
+{
+    if (v == NULL) return 0;
+    if (v->type == MINO_INT)    { *out = (double)v->as.i; return 1; }
+    if (v->type == MINO_FLOAT)  { *out = v->as.f;         return 1; }
+    if (v->type == MINO_BIGINT) { *out = mino_bigint_to_double(v); return 1; }
+    return 0;
+}
+
+/* (+' & args) */
+mino_val_t *prim_addq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long iacc = 0;
+    mino_val_t *bacc = NULL;
+    double     dacc = 0.0;
+    tier_t     tier = TIER_INT;
+    (void)env;
+    while (mino_is_cons(args)) {
+        mino_val_t *a = args->as.cons.car;
+        if (a == NULL)
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "+' expects numbers");
+        switch (tier) {
+        case TIER_INT:
+            if (a->type == MINO_INT) {
+                long long prev = iacc;
+                if (iadd_overflow(iacc, a->as.i, &iacc)) {
+                    mino_val_t *la = mino_bigint_from_ll(S, prev);
+                    if (la == NULL) return NULL;
+                    bacc = mino_bigint_add(S, la, a);
+                    if (bacc == NULL) return NULL;
+                    tier = TIER_BIGINT;
+                }
+            } else if (a->type == MINO_BIGINT) {
+                mino_val_t *la = mino_bigint_from_ll(S, iacc);
+                if (la == NULL) return NULL;
+                bacc = mino_bigint_add(S, la, a);
+                if (bacc == NULL) return NULL;
+                tier = TIER_BIGINT;
+            } else if (a->type == MINO_FLOAT) {
+                dacc = (double)iacc + a->as.f;
+                tier = TIER_FLOAT;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "+' expects numbers");
+            }
+            break;
+        case TIER_BIGINT:
+            if (a->type == MINO_INT || a->type == MINO_BIGINT) {
+                bacc = mino_bigint_add(S, bacc, a);
+                if (bacc == NULL) return NULL;
+            } else if (a->type == MINO_FLOAT) {
+                dacc = mino_bigint_to_double(bacc) + a->as.f;
+                tier = TIER_FLOAT;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "+' expects numbers");
+            }
+            break;
+        case TIER_FLOAT: {
+            double x;
+            if (!numeric_as_double(a, &x))
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "+' expects numbers");
+            dacc += x;
+            break;
+        }
+        }
+        args = args->as.cons.cdr;
+    }
+    if (tier == TIER_FLOAT)  return mino_float(S, dacc);
+    if (tier == TIER_BIGINT) return bacc;
+    return mino_int(S, iacc);
+}
+
+/* (-' x) -> negation; (-' x y ...) -> successive subtraction. */
+mino_val_t *prim_subq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *first;
+    long long iacc = 0;
+    mino_val_t *bacc = NULL;
+    double     dacc = 0.0;
+    tier_t     tier = TIER_INT;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "-' requires at least one argument");
+    }
+    first = args->as.cons.car;
+    if (first == NULL)
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "-' expects numbers");
+    if (first->type == MINO_INT) {
+        iacc = first->as.i;
+    } else if (first->type == MINO_BIGINT) {
+        /* bigint_binop always writes into a fresh result cell, so seeding
+         * bacc with first directly is safe — the first subsequent sub
+         * produces a new bigint and rebinds bacc. */
+        bacc = (mino_val_t *)first;
+        tier = TIER_BIGINT;
+    } else if (first->type == MINO_FLOAT) {
+        dacc = first->as.f;
+        tier = TIER_FLOAT;
+    } else {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "-' expects numbers");
+    }
+    args = args->as.cons.cdr;
+    /* Unary negation. */
+    if (!mino_is_cons(args)) {
+        if (tier == TIER_INT) {
+            long long neg;
+            if (ineg_overflow(iacc, &neg)) {
+                mino_val_t *first_bi = mino_bigint_from_ll(S, iacc);
+                if (first_bi == NULL) return NULL;
+                return mino_bigint_neg(S, first_bi);
+            }
+            return mino_int(S, neg);
+        }
+        if (tier == TIER_BIGINT) return mino_bigint_neg(S, bacc);
+        return mino_float(S, -dacc);
+    }
+    while (mino_is_cons(args)) {
+        mino_val_t *a = args->as.cons.car;
+        if (a == NULL)
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "-' expects numbers");
+        switch (tier) {
+        case TIER_INT:
+            if (a->type == MINO_INT) {
+                long long prev = iacc;
+                if (isub_overflow(iacc, a->as.i, &iacc)) {
+                    mino_val_t *la = mino_bigint_from_ll(S, prev);
+                    if (la == NULL) return NULL;
+                    bacc = mino_bigint_sub(S, la, a);
+                    if (bacc == NULL) return NULL;
+                    tier = TIER_BIGINT;
+                }
+            } else if (a->type == MINO_BIGINT) {
+                mino_val_t *la = mino_bigint_from_ll(S, iacc);
+                if (la == NULL) return NULL;
+                bacc = mino_bigint_sub(S, la, a);
+                if (bacc == NULL) return NULL;
+                tier = TIER_BIGINT;
+            } else if (a->type == MINO_FLOAT) {
+                dacc = (double)iacc - a->as.f;
+                tier = TIER_FLOAT;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "-' expects numbers");
+            }
+            break;
+        case TIER_BIGINT:
+            if (a->type == MINO_INT || a->type == MINO_BIGINT) {
+                bacc = mino_bigint_sub(S, bacc, a);
+                if (bacc == NULL) return NULL;
+            } else if (a->type == MINO_FLOAT) {
+                dacc = mino_bigint_to_double(bacc) - a->as.f;
+                tier = TIER_FLOAT;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "-' expects numbers");
+            }
+            break;
+        case TIER_FLOAT: {
+            double x;
+            if (!numeric_as_double(a, &x))
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "-' expects numbers");
+            dacc -= x;
+            break;
+        }
+        }
+        args = args->as.cons.cdr;
+    }
+    if (tier == TIER_FLOAT)  return mino_float(S, dacc);
+    if (tier == TIER_BIGINT) return bacc;
+    return mino_int(S, iacc);
+}
+
+/* (*' & args) */
+mino_val_t *prim_mulq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long iacc = 1;
+    mino_val_t *bacc = NULL;
+    double     dacc = 0.0;
+    tier_t     tier = TIER_INT;
+    (void)env;
+    while (mino_is_cons(args)) {
+        mino_val_t *a = args->as.cons.car;
+        if (a == NULL)
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "*' expects numbers");
+        switch (tier) {
+        case TIER_INT:
+            if (a->type == MINO_INT) {
+                long long prev = iacc;
+                if (imul_overflow(iacc, a->as.i, &iacc)) {
+                    mino_val_t *la = mino_bigint_from_ll(S, prev);
+                    if (la == NULL) return NULL;
+                    bacc = mino_bigint_mul(S, la, a);
+                    if (bacc == NULL) return NULL;
+                    tier = TIER_BIGINT;
+                }
+            } else if (a->type == MINO_BIGINT) {
+                mino_val_t *la = mino_bigint_from_ll(S, iacc);
+                if (la == NULL) return NULL;
+                bacc = mino_bigint_mul(S, la, a);
+                if (bacc == NULL) return NULL;
+                tier = TIER_BIGINT;
+            } else if (a->type == MINO_FLOAT) {
+                dacc = (double)iacc * a->as.f;
+                tier = TIER_FLOAT;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "*' expects numbers");
+            }
+            break;
+        case TIER_BIGINT:
+            if (a->type == MINO_INT || a->type == MINO_BIGINT) {
+                bacc = mino_bigint_mul(S, bacc, a);
+                if (bacc == NULL) return NULL;
+            } else if (a->type == MINO_FLOAT) {
+                dacc = mino_bigint_to_double(bacc) * a->as.f;
+                tier = TIER_FLOAT;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "*' expects numbers");
+            }
+            break;
+        case TIER_FLOAT: {
+            double x;
+            if (!numeric_as_double(a, &x))
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                                             "*' expects numbers");
+            dacc *= x;
+            break;
+        }
+        }
+        args = args->as.cons.cdr;
+    }
+    if (tier == TIER_FLOAT)  return mino_float(S, dacc);
+    if (tier == TIER_BIGINT) return bacc;
+    return mino_int(S, iacc);
+}
+
+/* (inc' x) */
+mino_val_t *prim_incq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "inc' requires exactly 1 argument");
+    }
+    x = args->as.cons.car;
+    if (x == NULL)
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "inc' expects a number");
+    if (x->type == MINO_INT) {
+        if (x->as.i == LLONG_MAX) {
+            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+            mino_val_t *one;
+            if (lhs == NULL) return NULL;
+            one = mino_int(S, 1);
+            return mino_bigint_add(S, lhs, one);
+        }
+        return mino_int(S, x->as.i + 1);
+    }
+    if (x->type == MINO_BIGINT) {
+        mino_val_t *one = mino_int(S, 1);
+        return mino_bigint_add(S, x, one);
+    }
+    if (x->type == MINO_FLOAT) return mino_float(S, x->as.f + 1.0);
+    return prim_throw_classified(S, "eval/type", "MTY001",
+                                 "inc' expects a number");
+}
+
+/* (dec' x) */
+mino_val_t *prim_decq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "dec' requires exactly 1 argument");
+    }
+    x = args->as.cons.car;
+    if (x == NULL)
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "dec' expects a number");
+    if (x->type == MINO_INT) {
+        if (x->as.i == LLONG_MIN) {
+            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+            mino_val_t *one;
+            if (lhs == NULL) return NULL;
+            one = mino_int(S, 1);
+            return mino_bigint_sub(S, lhs, one);
+        }
+        return mino_int(S, x->as.i - 1);
+    }
+    if (x->type == MINO_BIGINT) {
+        mino_val_t *one = mino_int(S, 1);
+        return mino_bigint_sub(S, x, one);
+    }
+    if (x->type == MINO_FLOAT) return mino_float(S, x->as.f - 1.0);
+    return prim_throw_classified(S, "eval/type", "MTY001",
+                                 "dec' expects a number");
+}
+
 mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     /* Division returns an integer when all operands are integers and the

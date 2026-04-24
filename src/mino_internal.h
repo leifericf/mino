@@ -625,6 +625,19 @@ mino_val_t *mino_bigint_from_string_n(mino_state_t *S, const char *s, size_t len
 char    *mino_bigint_to_cstr(const mino_val_t *v);   /* malloc; caller frees */
 int      mino_as_ll(const mino_val_t *v, long long *out);
 
+/* Bigint arithmetic helpers for the promoting tower primitives. Each
+ * accepts MINO_INT or MINO_BIGINT operands (callers classify first) and
+ * returns a GC-owned MINO_BIGINT, or NULL on allocation failure (error
+ * raised via prim_throw_classified). */
+mino_val_t *mino_bigint_add(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigint_sub(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a);
+double   mino_bigint_to_double(const mino_val_t *v);
+
 /* runtime_gc.c: allocation and collection driver.
  * All gc_alloc/alloc_val returns are GC-owned. */
 void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);

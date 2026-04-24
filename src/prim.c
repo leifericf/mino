@@ -618,6 +618,16 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Alias of bigint. Coerces a value to an arbitrary-precision integer.");
     DEF_PRIM(env, "bigint?",    prim_bigint_p,
              "Returns true if x is an arbitrary-precision integer.");
+    DEF_PRIM(env, "+'",         prim_addq,
+             "Like +, but promotes to bigint on overflow rather than throwing.");
+    DEF_PRIM(env, "-'",         prim_subq,
+             "Like -, but promotes to bigint on overflow rather than throwing.");
+    DEF_PRIM(env, "*'",         prim_mulq,
+             "Like *, but promotes to bigint on overflow rather than throwing.");
+    DEF_PRIM(env, "inc'",       prim_incq,
+             "Like inc, but promotes to bigint on overflow rather than throwing.");
+    DEF_PRIM(env, "dec'",       prim_decq,
+             "Like dec, but promotes to bigint on overflow rather than throwing.");
     install_core_mino(S, env);
 }
 

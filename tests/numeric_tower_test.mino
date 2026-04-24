@@ -1,12 +1,15 @@
 (require "tests/test")
 
-;; Numeric tower — Phase C.1 (v0.53.0):
-;;   MINO_BIGINT type, `1N` literal reader, `bigint` / `biginteger` /
-;;   `bigint?` constructors, cross-tier `=` and `hash` for int/bigint,
-;;   readable printer via `print-method` default (pr-builtin).
+;; Numeric tower — Phase C.1 (v0.53.0) + C.2 (v0.54.0):
+;;   Phase C.1 — MINO_BIGINT type, `1N` literal reader, `bigint` /
+;;   `biginteger` / `bigint?` constructors, cross-tier `=` and `hash`
+;;   for int/bigint, readable printer via `print-method` default.
 ;;
-;; Auto-promoting `+'` / `-'` / `*'` etc. and ratio / bigdec / full
-;; tower dispatch arrive in Phases C.2 and C.3.
+;;   Phase C.2 — Auto-promoting `+'` / `-'` / `*'` / `inc'` / `dec'`.
+;;   Plain `+` / `-` / `*` / `inc` / `dec` keep throwing on overflow.
+;;
+;; Ratio / bigdec / full tower dispatch across comparison primitives
+;; arrive in Phase C.3.
 
 ;; --- reader: 1N literals produce real bigints ---
 
@@ -101,14 +104,114 @@
   (is (= :bigint (type 1N)))
   (is (= :bigint (type (bigint "12345678901234567890")))))
 
-;; --- errors: arithmetic primitives still reject bigints (Phase C.2) ---
+;; --- errors: plain arithmetic primitives keep throw-on-overflow semantics ---
 
-(deftest nt-arithmetic-still-throws
-  ;; Plain +/-/* stay throwing on bigint until Phase C.2 lands the tower.
-  ;; This asserts the current behavior so we notice if it changes.
+(deftest nt-arithmetic-plain-throws
+  ;; Plain +/-/* throw on bigint operands and on Long overflow. Use the
+  ;; `'` variants (below) to opt into auto-promotion.
   (is (thrown? (+ 1 1N)))
   (is (thrown? (* 2N 3N)))
-  (is (thrown? (- 0 1N))))
+  (is (thrown? (- 0 1N)))
+  (is (thrown? (+ 9223372036854775807 1)))
+  (is (thrown? (* 1000000000 1000000000 1000000000)))
+  (is (thrown? (inc 9223372036854775807)))
+  (is (thrown? (dec -9223372036854775808))))
+
+;; --- auto-promoting +' ---
+
+(deftest nt-addq-basics
+  (is (= 0 (+')))
+  (is (= 5 (+' 5)))
+  (is (= 3 (+' 1 2)))
+  (is (= 10 (+' 1 2 3 4)))
+  ;; same-type bigint arithmetic
+  (is (= 6N (+' 1N 2N 3N)))
+  ;; mixed int/bigint
+  (is (= 3N (+' 1 2N)))
+  (is (= 3N (+' 1N 2)))
+  ;; overflow promotes to bigint
+  (is (= 9223372036854775808N (+' 9223372036854775807 1)))
+  (is (= :bigint (type (+' 9223372036854775807 1))))
+  ;; float anywhere collapses the tier to float
+  (is (= 2.5 (+' 1 1.5)))
+  (is (= 2.5 (+' 1.5 1)))
+  ;; float + bigint -> float (with possible precision loss for huge bigints)
+  (is (= :float (type (+' 1N 2.0)))))
+
+;; --- auto-promoting -' ---
+
+(deftest nt-subq-basics
+  (is (thrown? (-')))
+  (is (= -5 (-' 5)))
+  (is (= 2 (-' 5 3)))
+  (is (= -4 (-' 1 2 3)))
+  ;; bigint operands
+  (is (= 1N (-' 3N 2N)))
+  (is (= -18446744073709551613N
+         (-' -9223372036854775808N 9223372036854775805N)))
+  ;; overflow on unary negation (LLONG_MIN)
+  (is (= 9223372036854775808N (-' -9223372036854775808)))
+  ;; overflow on binary sub
+  (is (= -9223372036854775809N (-' -9223372036854775808 1)))
+  ;; float tier
+  (is (= 0.5 (-' 2 1.5)))
+  (is (= :float (type (-' 1N 0.5)))))
+
+;; --- auto-promoting *' ---
+
+(deftest nt-mulq-basics
+  (is (= 1 (*')))
+  (is (= 5 (*' 5)))
+  (is (= 12 (*' 3 4)))
+  (is (= 24 (*' 1 2 3 4)))
+  (is (= 6N (*' 1N 2N 3N)))
+  ;; overflow promotes to bigint
+  (is (= :bigint (type (*' 100000000000 100000000000))))
+  (is (= 10000000000000000000000N (*' 100000000000 100000000000)))
+  ;; large mixed
+  (is (= 2N (*' 2 1N)))
+  ;; float
+  (is (= 6.0 (*' 2 3.0))))
+
+;; --- auto-promoting inc' / dec' ---
+
+(deftest nt-incq-decq
+  (is (= 2 (inc' 1)))
+  (is (= 0 (dec' 1)))
+  ;; overflow promotes
+  (is (= 9223372036854775808N (inc' 9223372036854775807)))
+  (is (= -9223372036854775809N (dec' -9223372036854775808)))
+  (is (= :bigint (type (inc' 9223372036854775807))))
+  (is (= :bigint (type (dec' -9223372036854775808))))
+  ;; bigint in -> bigint out
+  (is (= 2N (inc' 1N)))
+  (is (= -1N (dec' 0N)))
+  (is (= 100000000000000000000N (inc' 99999999999999999999N)))
+  ;; float passes through
+  (is (= 2.5 (inc' 1.5)))
+  (is (= 0.5 (dec' 1.5)))
+  ;; errors
+  (is (thrown? (inc')))
+  (is (thrown? (dec')))
+  (is (thrown? (inc' 1 2)))
+  (is (thrown? (inc' "x")))
+  (is (thrown? (dec' nil))))
+
+;; --- promotion boundary: iterated inc' crosses long/bigint seam cleanly ---
+
+(deftest nt-iterated-promotion
+  ;; inc' applied twice across the Long max boundary stays correct.
+  (let [max-long 9223372036854775807
+        over (inc' max-long)]
+    (is (= :bigint (type over)))
+    (is (= over 9223372036854775808N))
+    (is (= (inc' over) 9223372036854775809N)))
+  ;; dec' applied twice across the Long min boundary stays correct.
+  (let [min-long -9223372036854775808
+        under (dec' min-long)]
+    (is (= :bigint (type under)))
+    (is (= under -9223372036854775809N))
+    (is (= (dec' under) -9223372036854775810N))))
 
 ;; --- constructor edge cases ---
 
