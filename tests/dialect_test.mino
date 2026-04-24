@@ -200,5 +200,8 @@
 
 (deftest quote-in-symbols
   (testing "symbols can contain single quotes"
-    (def +' (fn [a b] (+ a b)))
-    (is (= 3 (+' 1 2)))))
+    (let [my-fn' (fn [a b] (+ a b))]
+      (is (= 3 (my-fn' 1 2))))
+    ;; trailing-quote in a binding name
+    (let [foo' 42]
+      (is (= 42 foo')))))
