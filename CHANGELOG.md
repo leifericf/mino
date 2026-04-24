@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.52.0 — Extensible Printer
+
+Second release of the Dialect-Complete cycle. `pr` and `prn` now
+route through a mino-level `print-method` multimethod, so user code
+can extend readable printing for its own types.
+
+### Added
+
+- **`print-method` multimethod.** Dispatched on `(type x)`. The
+  `:default` method delegates to a new `pr-builtin` primitive that
+  uses the C formatter unchanged, so every built-in type keeps its
+  current readable form without any per-type default method to
+  register. User extension is `(defmethod print-method :my-type
+  [v] ...)`; bodies write to stdout via `print`, `pr`, or
+  `pr-builtin`.
+
+- **Late-binding dispatch hook in C.** `prim_pr` / `prim_prn` check
+  a hook field on `mino_state_t`; when set, each argument is
+  dispatched through that fn. The hook is installed from
+  `core.mino` by `(set-print-method! print-method)` once the
+  multimethod is defined. Before this line runs, and in sandboxed
+  hosts that never install the multimethod, `pr` / `prn` use the
+  built-in C formatter as a permanently-safe fallback (the Cortex
+  Q5 invariant). The hook is rooted for GC; `set-print-method!`
+  with `nil` removes it.
+
+- **`pr-builtin` primitive.** Prints one value via the built-in C
+  formatter, bypassing the hook. Used by `print-method`'s
+  `:default` method and available to any user method that wants to
+  delegate back to the built-in form for a sub-value.
+
+### Changed
+
+- **`type` honors `:type` metadata** (Clojure semantics). Before,
+  `(type x)` returned the value's type tag unconditionally. Now it
+  returns `(:type (meta x))` first if present, falling back to the
+  tag. This is what makes `print-method` dispatchable for user
+  types attached via `(with-meta obj {:type :my-type})`. Side
+  effect: `(type print-method)` now returns `:multimethod` instead
+  of `:fn`, reflecting the `:type :multimethod` metadata attached
+  by `create-multimethod_`.
+
+### Known limitations
+
+- **`pr-str` and `str`** still use the C formatter without
+  consulting the multimethod. Unifying them with `pr` requires a
+  writer abstraction that mino does not yet have; documented as a
+  known limitation rather than a stub. `(pr x)` / `(prn x)` is the
+  supported dispatch entry point in v0.52.0.
+
+- **Nested user types inside built-in containers** do not route
+  through `print-method`. The C formatter prints container
+  elements directly; only the top-level value each arg to `pr` /
+  `prn` is dispatched. Users wanting per-element dispatch can
+  extend `print-method` for `:vector` / `:map` / `:set` themselves.
+
 ## v0.51.0 — Transients, Sorted-By, Subseq, Pr/Print/Newline
 
 First release of the Dialect-Complete cycle. Four additions on top
