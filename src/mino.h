@@ -26,7 +26,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 52
+#define MINO_VERSION_MINOR 53
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -69,10 +69,16 @@ typedef enum {
     MINO_TAIL_CALL, /* proper tail call: carries {fn, args} for trampoline */
     MINO_REDUCED, /* early termination wrapper for reduce */
     MINO_VAR,     /* first-class var: ns + name + root binding */
-    MINO_TRANSIENT /* mutable staging wrapper for batch mutation of a
+    MINO_TRANSIENT, /* mutable staging wrapper for batch mutation of a
                      * persistent vector, map, or set. Embedders call
                      * mino_transient / mino_persistent and the
                      * *_bang accessors below. */
+    MINO_BIGINT     /* arbitrary-precision signed integer. Backed by the
+                     * vendored imath library (src/vendor/imath.c). The
+                     * mpz_t struct is embedded in the value cell; the
+                     * digit storage is owned by the cell and freed
+                     * during GC sweep. See also `1N` literals and the
+                     * `bigint` / `biginteger` constructors. */
 } mino_type_t;
 
 typedef struct mino_val   mino_val_t;
@@ -183,6 +189,9 @@ struct mino_val {
             mino_val_t *current; /* current persistent value (vec/map/set) */
             int         valid;   /* 0 after persistent!, 1 while mutable */
         } transient;
+        struct {          /* MINO_BIGINT: arbitrary-precision integer */
+            void *mpz;    /* opaque mp_int; malloc-owned, freed at sweep */
+        } bigint;
     } as;
 };
 
@@ -204,6 +213,13 @@ mino_val_t *mino_int(mino_state_t *S, long long n);
 
 /* Create a floating-point value. */
 mino_val_t *mino_float(mino_state_t *S, double f);
+
+/* Create a bigint from a signed long long. */
+mino_val_t *mino_bigint_from_ll(mino_state_t *S, long long n);
+
+/* Create a bigint by parsing a base-10 numeric string (optional leading
+ * '+' or '-'). Returns NULL on parse failure. */
+mino_val_t *mino_bigint_from_string(mino_state_t *S, const char *s);
 
 /* Create a character value from a Unicode codepoint (0..0x10FFFF). */
 mino_val_t *mino_char(mino_state_t *S, int codepoint);

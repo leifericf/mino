@@ -201,6 +201,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_REDUCED:   return mino_keyword(S, "reduced");
     case MINO_VAR:       return mino_keyword(S, "var");
     case MINO_TRANSIENT: return mino_keyword(S, "transient");
+    case MINO_BIGINT:    return mino_keyword(S, "bigint");
     }
     return mino_keyword(S, "unknown");
 }

@@ -146,6 +146,7 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_REDUCED:   return "reduced";
     case MINO_VAR:       return "var";
     case MINO_TRANSIENT: return "transient";
+    case MINO_BIGINT:    return "bigint";
     }
     return "unknown";
 }

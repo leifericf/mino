@@ -260,6 +260,31 @@ uint32_t hash_val(const mino_val_t *v)
         }
         return h;
     }
+    case MINO_BIGINT: {
+        /* Bigints that fit in a long long hash under the MINO_INT tag
+         * so (= 1 1N) and (hash-of 1 1N) agree. Larger magnitudes use a
+         * bigint-dedicated tag seeded from the imath-provided hash. */
+        long long ll;
+        if (mino_as_ll(v, &ll)) {
+            unsigned i;
+            h = fnv_mix(h, 0x03);
+            for (i = 0; i < 8; i++) {
+                h = fnv_mix(h, (unsigned char)(ll & 0xFFu));
+                ll >>= 8;
+            }
+            return h;
+        }
+        {
+            uint32_t bh = mino_bigint_hash(v);
+            unsigned i;
+            h = fnv_mix(h, 0x10);
+            for (i = 0; i < 4; i++) {
+                h = fnv_mix(h, (unsigned char)(bh & 0xFFu));
+                bh >>= 8;
+            }
+            return h;
+        }
+    }
     default: {
         /* PRIM, FN, RECUR: identity-based. */
         uintptr_t p = (uintptr_t)v;

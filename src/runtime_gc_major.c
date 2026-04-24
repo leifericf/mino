@@ -191,6 +191,8 @@ void gc_sweep(mino_state_t *S)
             if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr,
                                        v->as.handle.tag);
+            } else if (v->type == MINO_BIGINT) {
+                mino_bigint_free(v);
             }
         }
         freed_old += h->size;

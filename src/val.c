@@ -460,6 +460,18 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             return a->as.f == (double)b->as.i;
         }
         /*
+         * Cross-tier integer equality: int and bigint compare by value.
+         * Matches Clojure where (= 1 1N) is true. (= 1 1.0) already
+         * follows the above int/float rule; a stricter :default/tier
+         * split can come with Phase C.3 tower dispatch.
+         */
+        if (a->type == MINO_INT && b->type == MINO_BIGINT) {
+            return mino_bigint_equals_ll(b, a->as.i);
+        }
+        if (a->type == MINO_BIGINT && b->type == MINO_INT) {
+            return mino_bigint_equals_ll(a, b->as.i);
+        }
+        /*
          * Cross-type sequential equality: cons, vector, and nil compare
          * element-wise.  Matches Clojure where (= '(1 2) [1 2]) is true.
          */
@@ -590,6 +602,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a == b; /* identity equality */
     case MINO_TRANSIENT:
         return a == b; /* identity equality; transients are mutable */
+    case MINO_BIGINT:
+        return mino_bigint_equals(a, b);
     }
     return 0;
 }

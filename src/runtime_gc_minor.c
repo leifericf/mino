@@ -93,6 +93,8 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
             if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr,
                                        v->as.handle.tag);
+            } else if (v->type == MINO_BIGINT) {
+                mino_bigint_free(v);
             }
         }
         freed_bytes += h->size;

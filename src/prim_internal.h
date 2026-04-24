@@ -193,6 +193,19 @@ mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_pr_builtin(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+
+/* prim_bignum.c */
+mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_biginteger(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+/* Internal (not registered as primitives): */
+void      mino_bigint_free(mino_val_t *v);            /* GC sweep hook */
+uint32_t  mino_bigint_hash(const mino_val_t *v);       /* hash_compare */
+int       mino_bigint_equals(const mino_val_t *a, const mino_val_t *b);
+int       mino_bigint_equals_ll(const mino_val_t *a, long long n);
+int       mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b);
+void      mino_bigint_print(mino_state_t *S, const mino_val_t *v, FILE *out);
+mino_val_t *mino_bigint_from_string_n(mino_state_t *S, const char *s, size_t len);
 mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env);

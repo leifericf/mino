@@ -611,6 +611,13 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Prints a value readably via the built-in C formatter, bypassing print-method.");
     DEF_PRIM(env, "set-print-method!", prim_set_print_method_bang,
              "Installs a fn to dispatch pr / prn output; nil removes the hook.");
+    DEF_PRIM(env, "bigint",     prim_bigint,
+             "Coerces a value to an arbitrary-precision integer. Accepts int, "
+             "bigint, float (truncated toward zero), or a base-10 string.");
+    DEF_PRIM(env, "biginteger", prim_biginteger,
+             "Alias of bigint. Coerces a value to an arbitrary-precision integer.");
+    DEF_PRIM(env, "bigint?",    prim_bigint_p,
+             "Returns true if x is an arbitrary-precision integer.");
     install_core_mino(S, env);
 }
 

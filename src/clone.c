@@ -206,6 +206,16 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     case MINO_REDUCED:
     case MINO_VAR:
         return NULL;
+    case MINO_BIGINT: {
+        /* Round-trip through the base-10 string form so the destination
+         * state gets its own imath allocation (no cross-state sharing). */
+        char       *buf = mino_bigint_to_cstr(v);
+        mino_val_t *out;
+        if (buf == NULL) return NULL;
+        out = mino_bigint_from_string(dst, buf);
+        free(buf);
+        return out;
+    }
     }
     return NULL; /* unreachable */
 }

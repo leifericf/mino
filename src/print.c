@@ -67,6 +67,9 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     case MINO_INT:
         fprintf(out, "%lld", v->as.i);
         return;
+    case MINO_BIGINT:
+        mino_bigint_print(S, v, out);
+        return;
     case MINO_FLOAT: {
         char buf[64];
         int n, needs_dot, i;

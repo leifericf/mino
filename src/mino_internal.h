@@ -611,6 +611,20 @@ struct mino_hamt_node {
 /* Parameters marked "consumed" transfer ownership to the callee.            */
 /* ------------------------------------------------------------------------- */
 
+/* prim_bignum.c: MINO_BIGINT support. Declared here (not prim_internal.h)
+ * because the GC sweep paths call mino_bigint_free when a bigint cell
+ * dies, the printer calls mino_bigint_print, and val.c equality calls
+ * mino_bigint_equals / mino_bigint_hash. */
+void     mino_bigint_free(mino_val_t *v);
+void     mino_bigint_print(mino_state_t *S, const mino_val_t *v, FILE *out);
+int      mino_bigint_equals(const mino_val_t *a, const mino_val_t *b);
+int      mino_bigint_equals_ll(const mino_val_t *a, long long n);
+int      mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b);
+uint32_t mino_bigint_hash(const mino_val_t *v);
+mino_val_t *mino_bigint_from_string_n(mino_state_t *S, const char *s, size_t len);
+char    *mino_bigint_to_cstr(const mino_val_t *v);   /* malloc; caller frees */
+int      mino_as_ll(const mino_val_t *v, long long *out);
+
 /* runtime_gc.c: allocation and collection driver.
  * All gc_alloc/alloc_val returns are GC-owned. */
 void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);
