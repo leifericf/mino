@@ -11,10 +11,15 @@
 
 #include "mino_internal.h"
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifndef _WIN32
+#include <execinfo.h>
+#endif
 
 #define MINO_LINE_MAX 4096
 
@@ -293,6 +298,131 @@ static int has_only_whitespace(const char *s)
     return 1;
 }
 
+/* ---- Crash handler ----------------------------------------------------
+ *
+ * Installs handlers for SIGSEGV / SIGABRT (and SIGBUS where it exists)
+ * so a fatal signal prints a short diagnostic line and a best-effort
+ * backtrace before the OS terminates the process. Three rules govern
+ * what the handler does:
+ *
+ *   1. No allocation. A crash from inside the allocator or collector
+ *      would livelock. The handler uses stack buffers and write(2),
+ *      never malloc or free.
+ *
+ *   2. Best-effort GC stats. mino_gc_stats only copies scalar counters
+ *      out of mino_state_t; if the state is torn mid-mutation those
+ *      numbers may be a little off, but reading them will not segfault
+ *      because every field the accessor touches is a plain integer.
+ *
+ *   3. Re-raise after the report. The handler restores the default
+ *      disposition (SIG_DFL) and re-raises so the OS still produces the
+ *      core file / non-zero exit code the caller expects. We never
+ *      return from the handler into the interrupted instruction.
+ *
+ * Set MINO_NO_CRASH_HANDLER=1 to skip installation (useful when running
+ * under an external debugger or signal-aware test runner that would
+ * rather handle the crash itself).
+ */
+
+static mino_state_t *crash_handler_state = NULL;
+
+static const char *signal_name(int sig)
+{
+    if (sig == SIGSEGV) return "SIGSEGV";
+    if (sig == SIGABRT) return "SIGABRT";
+#ifdef SIGBUS
+    if (sig == SIGBUS)  return "SIGBUS";
+#endif
+    return "signal";
+}
+
+static void crash_handler_write_line(const char *s)
+{
+#ifdef _WIN32
+    fputs(s, stderr);
+    fflush(stderr);
+#else
+    size_t len = strlen(s);
+    ssize_t written = write(STDERR_FILENO, s, len);
+    (void)written;
+#endif
+}
+
+static void crash_handler_report(int sig)
+{
+    char buf[512];
+    int  n;
+    n = snprintf(buf, sizeof(buf),
+                 "\n[mino] fatal %s (signal %d)\n",
+                 signal_name(sig), sig);
+    if (n > 0) crash_handler_write_line(buf);
+
+    if (crash_handler_state != NULL) {
+        mino_gc_stats_t st;
+        mino_gc_stats(crash_handler_state, &st);
+        n = snprintf(buf, sizeof(buf),
+                     "[mino] gc: minor=%zu major=%zu live=%zu alloc=%zu "
+                     "freed=%zu phase=%d remset=%zu/%zu\n",
+                     st.collections_minor, st.collections_major,
+                     st.bytes_live, st.bytes_alloc, st.bytes_freed,
+                     st.phase,
+                     st.remset_entries, st.remset_cap);
+        if (n > 0) crash_handler_write_line(buf);
+    }
+
+#ifndef _WIN32
+    {
+        void *frames[64];
+        int   nframes = backtrace(frames, (int)(sizeof(frames) / sizeof(frames[0])));
+        if (nframes > 0) {
+            const char header[] = "[mino] backtrace (best effort):\n";
+            crash_handler_write_line(header);
+            backtrace_symbols_fd(frames, nframes, STDERR_FILENO);
+        }
+    }
+#else
+    crash_handler_write_line("[mino] backtrace: not implemented on Windows\n");
+#endif
+}
+
+static void crash_handler(int sig)
+{
+    crash_handler_report(sig);
+    /* Restore the default disposition and re-raise so the OS delivers
+     * the intended fate (core dump for SEGV, termination for ABRT). */
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void install_crash_handler(mino_state_t *S)
+{
+    const char *disabled = getenv("MINO_NO_CRASH_HANDLER");
+    if (disabled != NULL && disabled[0] != '\0' && disabled[0] != '0') {
+        return;
+    }
+    crash_handler_state = S;
+#ifndef _WIN32
+    {
+        struct sigaction sa;
+        memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = crash_handler;
+        sigemptyset(&sa.sa_mask);
+        /* SA_RESETHAND would also restore the default after the first
+         * hit; we do the same thing manually inside the handler so the
+         * policy is visible next to the re-raise. */
+        sa.sa_flags = 0;
+        sigaction(SIGSEGV, &sa, NULL);
+        sigaction(SIGABRT, &sa, NULL);
+#ifdef SIGBUS
+        sigaction(SIGBUS,  &sa, NULL);
+#endif
+    }
+#else
+    signal(SIGSEGV, crash_handler);
+    signal(SIGABRT, crash_handler);
+#endif
+}
+
 int main(int argc, char **argv)
 {
     mino_state_t *S;
@@ -322,6 +452,7 @@ int main(int argc, char **argv)
     }
 
     S = mino_state_new();
+    install_crash_handler(S);
     mino_env_t   *env = mino_env_new(S);
     char *buf  = NULL;
     size_t cap = 0;
