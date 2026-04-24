@@ -45,11 +45,36 @@
         (is (= (rem i 50) (count @a)))))
     (is (vector? @a))))
 
-;; Lazy-seq cache barrier stability across multiple minor cycles is
-;; not yet exercised here: a latent coverage gap surfaces when the
-;; lazy seq is reachable only through a persistent structure (mapv
-;; result) across many cycles. Track separately and reinstate once
-;; the missing barrier site is identified and fixed.
+;; Lazy-seq cache barrier: an OLD-promoted lazy seq, reachable only
+;; through a persistent structure, must survive forcing and subsequent
+;; minor pressure. The lazy_force path writes three slots on realisation
+;; (cached, body, env); each store is routed through gc_write_barrier,
+;; so a freshly-realised YOUNG chain installed into an OLD lazy must be
+;; tracked in the remset. Build a vector of unrealized lazy seqs, promote
+;; it via minor pressure, force each lazy (populating its cache with
+;; fresh YOUNG cons cells), run more minor pressure, then re-read every
+;; element. Without the barrier the cached chain is swept on the next
+;; minor and the element values drift from the expected sums.
+(deftest lazy-cache-barrier-across-minors
+  (let [n    64
+        mk   (fn [k] (map inc (range k)))
+        v    (mapv mk (range n))]
+    ;; Pressure: push v into OLD and each lazy element with it.
+    (dotimes [_ 2000]
+      (doall (take 100 (range 1000))))
+    ;; Force every lazy seq inside v. Each force realises the lazy and
+    ;; writes a fresh YOUNG cons chain into the OLD lazy's cache slot.
+    (dotimes [i n]
+      (doall (nth v i)))
+    ;; More minor pressure. Barrier-tracked caches must survive.
+    (dotimes [_ 2000]
+      (doall (take 100 (range 1000))))
+    ;; Every element must still decode to the expected sum. If the
+    ;; barrier were missing, cached chains would be swept and element
+    ;; reads would return corrupt data or crash.
+    (dotimes [i n]
+      (is (= (reduce + 0 (mk i))
+             (reduce + 0 (nth v i)))))))
 
 ;; Var rebind barrier: redefining a namespace-level fn repeatedly
 ;; across minors must keep the most recent value reachable.

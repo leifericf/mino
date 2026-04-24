@@ -33,4 +33,23 @@
       (build__stress (- n 1) (list acc)))))
   (is (cons? (build__stress 50 42))))
 
+;; Lazy-seq cache barrier under stress: promote a vector of unrealized
+;; lazy seqs, force each into its OLD lazy cache slot, then run more
+;; allocation. Every allocation collects in stress mode so a missing
+;; barrier on the cached-store would lose the forced YOUNG chains on
+;; the very next minor.
+(deftest gc-stress-lazy-cache-barrier
+  (let [n  12
+        mk (fn [k] (map inc (range k)))
+        v  (mapv mk (range n))]
+    (dotimes [_ 20]
+      (doall (take 20 (range 50))))
+    (dotimes [i n]
+      (doall (nth v i)))
+    (dotimes [_ 20]
+      (doall (take 20 (range 50))))
+    (dotimes [i n]
+      (is (= (reduce + 0 (mk i))
+             (reduce + 0 (nth v i)))))))
+
 (run-tests)
