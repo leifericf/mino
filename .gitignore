@@ -52,5 +52,8 @@ embed_multi_state_tsan
 tests/transient_test
 tests/transient_test_asan
 tests/transient_test_ubsan
+tests/multimethod_test
+tests/multimethod_test_asan
+tests/multimethod_test_ubsan
 examples/embed_gc_stress
 examples/embed_gc_stress_asan

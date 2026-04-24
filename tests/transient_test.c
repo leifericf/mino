@@ -4,7 +4,7 @@
  *
  * Build (from repo root):
  *   cc -std=c99 -Wall -Wextra -O2 -Isrc -o transient_test \
- *     tests/transient_test.c src/*.c -lm
+ *     tests/transient_test.c src/SRC.c -lm
  * Run:
  *   ./transient_test
  * Exit 0 means every assertion passed; exit 1 prints the first
