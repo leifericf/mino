@@ -1,5 +1,77 @@
 # Changelog
 
+## v0.47.0 — Release Gates
+
+Phase 3 of the C core complete-and-polish cycle. This pass does not
+add mutator-visible surface; it lands the infrastructure that will
+keep the surface from silently decaying once the Dialect-Complete
+cycle starts layering on top. A perf regression gate now runs in CI
+against a pinned baseline. The fuzz corpus grew from four seeds to
+twenty-two, with a libFuzzer nightly job backing it. A native crash
+handler now produces a usable post-mortem line instead of a bare
+segfault. The write barrier grew a structural matrix in its header
+comment plus a debug-time assertion, and the C transient API picked
+up a real barrier for its mutator-stored inner pointer.
+
+### Added
+
+- **Perf regression gate.** `~/Code/mino-bench/benchmarks/perf_gate.mino`
+  runs five stable micro-benches (identity fn call, let-local lookup,
+  `inc` on small int, cons creation, small-vector creation), takes the
+  minimum mean-ns across three runs per bench, and compares to
+  `baselines/perf_baseline.edn`. The gate fails at +15% regression or
+  -30% speedup (both require a baseline refresh in the same commit).
+  mino's own CI gained a `perf-gate` job that checks out mino-bench,
+  overrides its submodule with the current mino SHA, and runs the
+  gate. `perf-gate` and `perf-gate-record` tasks ship with mino-bench.
+- **Fuzz corpus expansion and libFuzzer CI.** mino-bench's reader fuzz
+  corpus grew from 4 to 22 seed files covering character literals,
+  unicode, deep nesting, large and special numbers, metadata, reader
+  conditionals, regex literals, symbol / keyword edges, token
+  boundaries, syntax-quote forms, comments, mixed forms, whitespace
+  edges, string escapes, and four malformed families (unterminated
+  lists / strings / reader macros, stray reader-macro prefixes). The
+  new `fuzz-smoke` task replays every seed through the stdin-mode
+  reader on every push and PR; `fuzz-build-libfuzzer` builds a clang
+  libFuzzer + ASAN + UBSAN target that runs for 24 hours nightly via
+  GitHub Actions and uploads any crash artifacts.
+- **Native crash handler (`main.c`).** SIGSEGV, SIGABRT, and SIGBUS
+  now print `[mino] fatal <SIGNAME> (signal N)`, a one-line GC stats
+  summary (minor / major collections, live / alloc / freed bytes, GC
+  phase, remset size), and a best-effort backtrace from `execinfo.h`
+  before restoring the default disposition and re-raising so the OS
+  still produces the expected core file / exit code. The handler
+  allocates no memory and writes to stderr through `write(2)` and
+  `backtrace_symbols_fd` for async-signal safety. Windows gets signal
+  registration without backtrace. `MINO_NO_CRASH_HANDLER=1` skips
+  installation when a debugger wants to trap the signal instead.
+- **Barrier mutation-site matrix.** `src/runtime_gc_barrier.c`'s file
+  comment now enumerates every in-place-mutable GC slot on each value
+  type plus the helper or direct call that covers it. A debug-time
+  `assert()` at the barrier entry traps bogus container pointers
+  (anything that is not NULL, state-embedded, or preceded by a
+  gc_hdr_t with a legal generation) so an unrecognised caller fails
+  loudly in debug builds instead of silently corrupting the remset.
+
+### Fixed
+
+- **Write-barrier gap in the C transient API.** The `*_bang` mutators
+  and the `persistent!` seal in `src/transient.c` were storing a new
+  persistent result directly into the wrapper's `current` slot,
+  bypassing `gc_write_barrier`. A long batch loop promotes the
+  transient wrapper to OLD after a minor cycle; further YOUNG
+  persistent results then reach the wrapper through an unrecorded
+  OLD→YOUNG edge and the next minor frees the still-reachable result.
+  A new `transient_set_current` helper routes every store through the
+  barrier.
+
+### Changed
+
+- `mino-bench` submodule pin was bumped to v0.46.0 on the bench side
+  so perf baselines track the current mino surface. The mino
+  repository itself stays independent of mino-bench — only CI clones
+  it on demand.
+
 ## v0.46.0 — Dialect C Groundwork
 
 Phase 2 of the C core complete-and-polish cycle. Lands the C-level
