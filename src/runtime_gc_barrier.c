@@ -19,6 +19,52 @@
  * sentinels -- live inside mino_state_t and are not GC-managed. The
  * state-embedded check drops them on both paths so header arithmetic
  * on a singleton cannot corrupt neighbouring state fields.
+ *
+ * -------------------------------------------------------------------
+ * Barrier mutation-site matrix
+ * -------------------------------------------------------------------
+ *
+ * Every in-place mutation of a GC-managed slot on a post-initialisation
+ * container must route through gc_write_barrier (directly or via a
+ * typed helper below). Fresh allocations initialising fields for the
+ * first time are exempt -- the container is young, all fields start as
+ * GC nullish, and SATB on uninitialised memory would be a use-after-
+ * read. If you add a new mutation site, add it to this table in the
+ * same commit.
+ *
+ *   Type         Slot(s)                   Helper / direct call
+ *   -----------------------------------------------------------------
+ *   MINO_CONS    cdr                       mino_cons_cdr_set (helper)
+ *                car                       -- immutable after construction --
+ *   MINO_VAR     root                      gc_write_barrier (runtime_var.c)
+ *   MINO_ATOM    val/watches/validator     gc_write_barrier (prim_stateful.c)
+ *   MINO_LAZY    cached/body/env           gc_write_barrier (mino.c force path)
+ *   MINO_TRANSIENT current                 transient_set_current (transient.c)
+ *   mino_env_t   bindings / ht_buckets /
+ *                per-binding val / per-
+ *                binding name              gc_write_barrier (runtime_env.c)
+ *   valarr_t     slot[i]                   gc_valarr_set (helper)
+ *
+ * Containers whose fields are immutable post-construction and therefore
+ * need no barrier: MINO_STRING / MINO_SYMBOL / MINO_KEYWORD data, the
+ * persistent-trie slots inside vector / map / set root nodes (path-copy
+ * semantics produce a brand-new trie node per edit), MINO_FN params /
+ * body / env, and sorted-map / sorted-set internals (red-black tree
+ * nodes are rebuilt on insert).
+ *
+ * Debug guardrails. Two structural checks back this table up:
+ *
+ *  - MINO_GC_VERIFY=1: gc_verify_remset_complete walks every live OLD
+ *    header after each minor cycle and aborts if a non-remset OLD
+ *    container holds a YOUNG outgoing pointer. This is the canonical
+ *    "did any mutation bypass the barrier" test; the matrix above
+ *    lists what it covers.
+ *
+ *  - NDEBUG-off builds: the assertions below trap the obvious
+ *    structural violations at each barrier call (container is a
+ *    recognisable gc_hdr with a legal generation tag, old/new values
+ *    are gc_hdr-ish or singleton-ish). Expensive invariant checks
+ *    stay gated behind MINO_GC_VERIFY.
  */
 
 #include "mino_internal.h"
@@ -61,6 +107,16 @@ void gc_write_barrier(mino_state_t *S, void *container,
 {
     gc_hdr_t *h_container;
     gc_hdr_t *h_new;
+    /* Debug guardrail: any barrier-managed container must be either
+     * NULL, a singleton embedded in state, or preceded by a gc_hdr_t
+     * with a legal generation tag. A garbage pointer here means the
+     * caller is handing us a non-GC heap allocation and the subsequent
+     * header arithmetic would read random memory. Gated on assert so
+     * the fast path remains untouched in release. */
+    assert(container == NULL
+           || gc_ptr_is_state_embedded(S, container)
+           || ((((gc_hdr_t *)container) - 1)->gen == GC_GEN_YOUNG
+               || (((gc_hdr_t *)container) - 1)->gen == GC_GEN_OLD));
     gc_evt_record(S, GC_EVT_WB, container, old_value, new_value, 0, 0);
     /* SATB: during active major marking, enqueue the previous slot
      * value so it is visited before sweep. Skip singletons (not

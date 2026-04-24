@@ -31,6 +31,9 @@ static mino_val_t *transient_error(mino_state_t *S, const char *msg)
     return prim_throw_classified(S, "eval/type", "MTY001", msg);
 }
 
+static void transient_set_current(mino_state_t *S, mino_val_t *t,
+                                  mino_val_t *new_inner);
+
 /* Build a one-link cons list (car . cdr). Callers pre-root any
  * values that must survive across the allocation. */
 static mino_val_t *cons1(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
@@ -95,17 +98,29 @@ mino_val_t *mino_persistent(mino_state_t *S, mino_val_t *t)
             "persistent!: transient already sealed");
     }
     out = t->as.transient.current;
-    /* Seal against further mutation. The GC can reclaim the transient
-     * once the caller drops its reference; the persistent value it
-     * returned is unaffected. */
-    t->as.transient.valid   = 0;
-    t->as.transient.current = NULL;
+    /* Seal against further mutation. The store to current routes
+     * through the barrier so SATB sees the outgoing inner during a
+     * mid-cycle MAJOR_MARK; the caller's stack slot roots the return
+     * value for everything after. */
+    t->as.transient.valid = 0;
+    transient_set_current(S, t, NULL);
     return out;
 }
 
 /* ------------------------------------------------------------------------- */
 /* Mutators                                                                  */
 /* ------------------------------------------------------------------------- */
+
+/* Update the transient's inner pointer. Must route through the write
+ * barrier: a long batch loop can promote t to OLD, after which a
+ * direct store of a YOUNG persistent result would install an
+ * OLD->YOUNG edge that the remset never hears about. */
+static void transient_set_current(mino_state_t *S, mino_val_t *t,
+                                  mino_val_t *new_inner)
+{
+    gc_write_barrier(S, t, t->as.transient.current, new_inner);
+    t->as.transient.current = new_inner;
+}
 
 /* Guard shared by every *_bang. Returns 1 when t is a live transient,
  * 0 after installing a classified error (the caller propagates NULL). */
@@ -145,7 +160,7 @@ mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
                  cons1(S, key, cons1(S, val, mino_nil(S))));
     result = prim_assoc(S, args, NULL);
     if (result == NULL) return NULL;
-    t->as.transient.current = result;
+    transient_set_current(S, t, result);
     return t;
 }
 
@@ -167,7 +182,7 @@ mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
     args = cons1(S, inner, cons1(S, val, mino_nil(S)));
     result = prim_conj(S, args, NULL);
     if (result == NULL) return NULL;
-    t->as.transient.current = result;
+    transient_set_current(S, t, result);
     return t;
 }
 
@@ -185,7 +200,7 @@ mino_val_t *mino_dissoc_bang(mino_state_t *S, mino_val_t *t,
     args = cons1(S, inner, cons1(S, key, mino_nil(S)));
     result = prim_dissoc(S, args, NULL);
     if (result == NULL) return NULL;
-    t->as.transient.current = result;
+    transient_set_current(S, t, result);
     return t;
 }
 
@@ -203,7 +218,7 @@ mino_val_t *mino_disj_bang(mino_state_t *S, mino_val_t *t,
     args = cons1(S, inner, cons1(S, key, mino_nil(S)));
     result = prim_disj(S, args, NULL);
     if (result == NULL) return NULL;
-    t->as.transient.current = result;
+    transient_set_current(S, t, result);
     return t;
 }
 
@@ -220,6 +235,6 @@ mino_val_t *mino_pop_bang(mino_state_t *S, mino_val_t *t)
     args = cons1(S, inner, mino_nil(S));
     result = prim_pop(S, args, NULL);
     if (result == NULL) return NULL;
-    t->as.transient.current = result;
+    transient_set_current(S, t, result);
     return t;
 }
