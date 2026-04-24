@@ -1,12 +1,11 @@
 # Changelog
 
-## v0.44.0 — GC observability and spawn-path perf
+## v0.44.0 — GC Observability and Spawn-Path Perf
 
 Adds embedder-visible remset and mark-stack sizing fields to
-`gc-stats`, layered on the bot-fleet perf work landed on the
-post-v0.43.1 `overnight-2026-04-23` branch. No functional changes
-to the collector; existing embedders see strictly more data in
-the stats struct and map.
+`gc-stats`, plus targeted perf improvements for spawn-heavy
+workloads. No functional changes to the collector; existing
+embedders see strictly more data in the stats struct and map.
 
 ### Added
 
@@ -47,19 +46,19 @@ the stats struct and map.
   hundreds of thousands. Resident heap at N=10 000 bot-fleet drops
   from 119 MiB to 108 MiB.
 
-## v0.43.1 — Nested-minor UAF fix, GC event ring, multi-state stress
+## v0.43.1 — Nested-Minor UAF Fix, GC Event Ring, Multi-State Stress
 
-Bug-fix and hardening release on top of v0.43.0. Closes a nursery-overflow
-use-after-free under `MAJOR_MARK` surfaced at N=10000 concurrent
-`go-loop` spawns, adds a GC event ring + reachability classifier for
+Bug-fix and hardening release. Closes a nursery-overflow
+use-after-free under `MAJOR_MARK` surfaced at high `go-loop` spawn
+concurrency, adds a GC event ring + reachability classifier for
 future debugging, and moves three pieces of mutable process state
 (filename intern, var-string intern, PRNG) into `mino_state_t` so
 multiple embedded states no longer race.
 
 ### Breaking changes
 
-- **Removed `lib/core/actor.mino`.** The pure-mino actor shim added in
-  v0.43.0 is gone; `(require "core/actor")` now fails. Channels in
+- **Removed `lib/core/actor.mino`.** The pure-mino actor shim is gone;
+  `(require "core/actor")` now fails. Channels in
   `lib/core/channel.mino` cover every use case the shim did. A bot /
   stateful-worker pattern is a `(go-loop [] (let [msg (<! in-ch)] ...))`
   reading a request channel; pair with reply channels for call-style
@@ -84,8 +83,8 @@ multiple embedded states no longer race.
   that the overflow-minor then promoted and (in one path) freed. Fix
   is to force the in-flight major to completion before running the
   overflow-minor so the mark stack is empty when the minor touches
-  YOUNG. Surfaced deterministically under ASAN with
-  `/tmp/repro46.mino` at FLEET_N ≥ 5000.
+  YOUNG. Reproduces deterministically under ASAN at high `go-loop`
+  spawn concurrency.
 - **`MINO_GC_VERIFY=1` false positive on dead OLD zombies.** The verify
   pass scanned every OLD container's outgoing pointers, including
   containers that were themselves unreachable from roots but not yet
@@ -102,8 +101,8 @@ multiple embedded states no longer race.
   env var so there's no cost when unused.
 - **`tests/embed_multi_state.c` + `mino task test-embed`.** Drives
   16 `mino_state_t` instances on 16 pthreads doing concurrent alloc/
-  GC/intern work. Caught two of the three mutable-statics issues
-  folded into this release.
+  GC/intern work. Guards against regressions in multi-state
+  isolation.
 - **`MINO_GC_NURSERY_BYTES` env var at state init.** Override the
   default nursery size from the environment without calling
   `mino_gc_set_param`. Lower bound matches the public-param minimum
@@ -130,10 +129,10 @@ multiple embedded states no longer race.
   `prim_collections.c` and `prim_sequences.c`. Prevents a collection
   mid-conversion from observing an inconsistent half-populated array.
 - **Regression tests.** `tests/spawn_stress_regression.mino` pins
-  three go-loop spawn patterns that surfaced at N=1000–10000 during
-  Phase 3 hardening.
+  three go-loop spawn patterns that previously failed at
+  N=1000–10000.
 
-## v0.43.0 — Pure-mino channels and actors
+## v0.43.0 — Pure-mino Channels and Actors
 
 Two successive demotions move the channel layer and the actor system
 out of C into `lib/core/`. The C runtime keeps only what must be C:
@@ -179,8 +178,7 @@ API is unchanged except where flagged below.
 - **async/merge renamed to async/merge-chans.** The old `merge`
   shadowed `clojure.core/merge` for maps — so `(merge m1 m2 m3)` on
   plain maps failed with 'no matching arity' whenever `core/async`
-  was loaded. Latent bug that surfaced once the nil-callback regression
-  stopped eating the test suite. Use `merge-chans` for channel-merging.
+  was loaded. Use `merge-chans` for channel-merging.
 
 ### Breaking changes (actor demotion)
 
@@ -224,16 +222,12 @@ API is unchanged except where flagged below.
 
 ### Fixed
 
-- **Nil-callback regression** on the 2-arg `put!` / 1-arg `take!` path.
+- **Nil-callback crash** on the 2-arg `put!` / 1-arg `take!` path.
   Both mino wrappers passed an explicit mino `nil` to `chan-put*` /
   `chan-take*`; the primitive forwarded that nil as a callback into
-  the scheduler, whose drain then tried to invoke it. Caused 139 test
-  errors across the async suite in v0.42.0 HEAD. Normalize
+  the scheduler, whose drain then tried to invoke it. Normalize
   `MINO_NIL` to C `NULL` at the primitive boundary (same pattern
-  already used for `xform`/`ex-handler` in `chan-set-xform*`). With
-  the nil-cb fix applied and the pure-mino migration complete, all
-  async suites report clean except six pre-existing go+try exception
-  tests unrelated to the channel layer.
+  already used for `xform`/`ex-handler` in `chan-set-xform*`).
 
 ### Removed
 
@@ -249,8 +243,7 @@ Actor demotion:
 - `spawn*` / `send!` / `receive` DEF_PRIM entries from `src/prim.c`
 
 `prim_async.c` drops from 475 to 127 LOC. `clone.c` drops from 661 to
-213 LOC and keeps only cross-state `mino_clone`. All 940 conformance
-tests pass (5701 assertions).
+213 LOC and keeps only cross-state `mino_clone`.
 
 ## v0.42.0 — Generational + Incremental Garbage Collector
 
