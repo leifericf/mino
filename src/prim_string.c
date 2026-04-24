@@ -688,6 +688,30 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             case MINO_INT:
                 n = snprintf(tmp, sizeof(tmp), "%lld", a->as.i);
                 break;
+            case MINO_CHAR: {
+                /* str of a char emits the codepoint's UTF-8 encoding. */
+                unsigned cp = (unsigned)a->as.ch;
+                if (cp <= 0x7F) {
+                    tmp[0] = (char)cp; n = 1;
+                } else if (cp <= 0x7FF) {
+                    tmp[0] = (char)(0xC0 | (cp >> 6));
+                    tmp[1] = (char)(0x80 | (cp & 0x3F));
+                    n = 2;
+                } else if (cp <= 0xFFFF) {
+                    tmp[0] = (char)(0xE0 | (cp >> 12));
+                    tmp[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    tmp[2] = (char)(0x80 | (cp & 0x3F));
+                    n = 3;
+                } else {
+                    tmp[0] = (char)(0xF0 | (cp >> 18));
+                    tmp[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                    tmp[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    tmp[3] = (char)(0x80 | (cp & 0x3F));
+                    n = 4;
+                }
+                tmp[n] = '\0';
+                break;
+            }
             case MINO_FLOAT: {
                 if (isnan(a->as.f)) {
                     n = snprintf(tmp, sizeof(tmp), "NaN");

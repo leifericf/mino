@@ -45,6 +45,13 @@ mino_val_t *mino_float(mino_state_t *S, double f)
     return v;
 }
 
+mino_val_t *mino_char(mino_state_t *S, int codepoint)
+{
+    mino_val_t *v = alloc_val(S, MINO_CHAR);
+    v->as.ch = codepoint;
+    return v;
+}
+
 mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len)
 {
     /* Allocate the data buffer first so alloc_val runs last; if a
@@ -496,6 +503,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a->as.i == b->as.i;
     case MINO_FLOAT:
         return a->as.f == b->as.f;
+    case MINO_CHAR:
+        return a->as.ch == b->as.ch;
     case MINO_STRING:
     case MINO_SYMBOL:
     case MINO_KEYWORD:

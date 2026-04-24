@@ -118,6 +118,16 @@ uint32_t hash_val(const mino_val_t *v)
             return fnv_bytes(h, buf, sizeof(d));
         }
     }
+    case MINO_CHAR: {
+        unsigned cp = (unsigned)v->as.ch;
+        unsigned i;
+        h = fnv_mix(h, 0x0f);
+        for (i = 0; i < 4; i++) {
+            h = fnv_mix(h, (unsigned char)(cp & 0xFFu));
+            cp >>= 8;
+        }
+        return h;
+    }
     case MINO_STRING:
         h = fnv_mix(h, 0x05);
         return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);

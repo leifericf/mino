@@ -1357,11 +1357,11 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         }
     }
     if (**p == '\\') {
-        /* Character literals: \space, \newline, \A, etc.
-         * Represented as single-character strings (CLJS-style). */
+        /* Character literals: \space, \newline, \A, \uNNNN, \oNNN, etc.
+         * Produce a first-class MINO_CHAR holding a Unicode codepoint. */
         const char *start = *p + 1;
         size_t tlen = 0;
-        char ch;
+        int    cp;
         ADVANCE(S, p);
         if (**p == '\0') {
             set_reader_diag(S, MRE001,
@@ -1372,22 +1372,56 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         while (!is_terminator(start[tlen])) tlen++;
         ADVANCE_N(S, p, tlen);
         if (tlen == 5 && memcmp(start, "space", 5) == 0) {
-            ch = ' ';
+            cp = ' ';
         } else if (tlen == 7 && memcmp(start, "newline", 7) == 0) {
-            ch = '\n';
+            cp = '\n';
         } else if (tlen == 3 && memcmp(start, "tab", 3) == 0) {
-            ch = '\t';
+            cp = '\t';
         } else if (tlen == 6 && memcmp(start, "return", 6) == 0) {
-            ch = '\r';
+            cp = '\r';
         } else if (tlen == 9 && memcmp(start, "backspace", 9) == 0) {
-            ch = '\b';
+            cp = '\b';
         } else if (tlen == 8 && memcmp(start, "formfeed", 8) == 0) {
-            ch = '\f';
+            cp = '\f';
         } else if (tlen == 1) {
-            ch = start[0];
+            cp = (unsigned char)start[0];
+        } else if (tlen >= 2 && tlen <= 4 && ((unsigned char)start[0] & 0x80)) {
+            /* Multi-byte UTF-8 literal: \é, \☃, etc. Decode the leading
+             * byte's bit pattern to determine expected length, then
+             * accumulate continuation bytes. */
+            unsigned char lead = (unsigned char)start[0];
+            size_t expect;
+            unsigned u;
+            size_t j;
+            if ((lead & 0xE0) == 0xC0)      { expect = 2; u = lead & 0x1Fu; }
+            else if ((lead & 0xF0) == 0xE0) { expect = 3; u = lead & 0x0Fu; }
+            else if ((lead & 0xF8) == 0xF0) { expect = 4; u = lead & 0x07u; }
+            else {
+                set_reader_diag(S, MRE008,
+                                "invalid UTF-8 character literal",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            if (tlen != expect) {
+                set_reader_diag(S, MRE008,
+                                "malformed UTF-8 character literal",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            for (j = 1; j < expect; j++) {
+                unsigned char c = (unsigned char)start[j];
+                if ((c & 0xC0) != 0x80) {
+                    set_reader_diag(S, MRE008,
+                                    "invalid UTF-8 continuation byte",
+                                    S->reader_line, S->reader_col);
+                    return NULL;
+                }
+                u = (u << 6) | (c & 0x3Fu);
+            }
+            cp = (int)u;
         } else if (tlen == 0 && start[0] != '\0') {
             /* Single terminator/whitespace character as literal: \{ \; \, etc. */
-            ch = start[0];
+            cp = (unsigned char)start[0];
             ADVANCE(S, p);
         } else if (tlen >= 2 && start[0] == 'o') {
             /* Octal escape: \oNNN */
@@ -1408,10 +1442,10 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
                                 S->reader_line, S->reader_col);
                 return NULL;
             }
-            ch = (char)oval;
+            cp = (int)oval;
         } else if (tlen >= 5 && start[0] == 'u') {
             /* Unicode escape: \uXXXX */
-            unsigned cp = 0;
+            unsigned u = 0;
             size_t j;
             if (tlen != 5) {
                 set_reader_diag(S, MRE008, "invalid unicode character literal",
@@ -1430,32 +1464,15 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
                                     S->reader_line, S->reader_col);
                     return NULL;
                 }
-                cp = (cp << 4) | d;
+                u = (u << 4) | d;
             }
-            {
-                char buf[4];
-                size_t nbytes;
-                if (cp <= 0x7F) {
-                    buf[0] = (char)cp;
-                    nbytes = 1;
-                } else if (cp <= 0x7FF) {
-                    buf[0] = (char)(0xC0 | (cp >> 6));
-                    buf[1] = (char)(0x80 | (cp & 0x3F));
-                    nbytes = 2;
-                } else {
-                    buf[0] = (char)(0xE0 | (cp >> 12));
-                    buf[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                    buf[2] = (char)(0x80 | (cp & 0x3F));
-                    nbytes = 3;
-                }
-                return mino_string_n(S, buf, nbytes);
-            }
+            cp = (int)u;
         } else {
             set_reader_diag(S, MRE008, "unknown character literal",
                             S->reader_line, S->reader_col);
             return NULL;
         }
-        return mino_string_n(S, &ch, 1);
+        return mino_char(S, cp);
     }
     return read_atom(S, p);
 }

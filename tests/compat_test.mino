@@ -4,31 +4,34 @@
 
 (deftest char-literal-terminators
   (testing "single terminator characters as literals"
-    (is (= "{" \{))
-    (is (= "}" \}))
-    (is (= ";" \;))
-    (is (= "\"" \"))
-    (is (= "^" \^))
-    (is (= "~" \~))
-    (is (= "@" \@))
-    (is (= "`" \`))
-    (is (= "(" \())
-    (is (= ")" \)))
-    (is (= "[" \[))
-    (is (= "]" \])))
+    (is (char? \{))
+    (is (= "{" (str \{)))
+    (is (= "}" (str \})))
+    (is (= ";" (str \;)))
+    (is (= "\"" (str \")))
+    (is (= "^" (str \^)))
+    (is (= "~" (str \~)))
+    (is (= "@" (str \@)))
+    (is (= "`" (str \`)))
+    (is (= "(" (str \()))
+    (is (= ")" (str \))))
+    (is (= "[" (str \[)))
+    (is (= "]" (str \]))))
 
   (testing "named character literals still work"
-    (is (= " " \space))
-    (is (= "\n" \newline))
-    (is (= "\t" \tab)))
+    (is (char? \space))
+    (is (= " " (str \space)))
+    (is (= "\n" (str \newline)))
+    (is (= "\t" (str \tab))))
 
-  (testing "unicode escapes"
-    (is (= "A" \u0041))
-    (is (= "a" \u0061))
-    (is (= "0" \u0030)))
+  (testing "unicode escapes (char literals)"
+    (is (= \A \u0041))
+    (is (= \a \u0061))
+    (is (= \0 \u0030))
+    (is (= 65 (int \u0041))))
 
   (testing "whitespace characters as literals"
-    (is (= "," \,))))
+    (is (= "," (str \,)))))
 
 ;; --- Map literal reader conditional key elimination ---
 

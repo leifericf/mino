@@ -22,6 +22,7 @@ typedef enum {
     MINO_BOOL,
     MINO_INT,
     MINO_FLOAT,
+    MINO_CHAR,       /* Unicode scalar value (codepoint) */
     MINO_STRING,
     MINO_SYMBOL,
     MINO_KEYWORD,
@@ -67,6 +68,7 @@ struct mino_val {
         int b;            /* MINO_BOOL: 0 or 1 */
         long long i;      /* MINO_INT */
         double f;         /* MINO_FLOAT */
+        int ch;           /* MINO_CHAR: Unicode codepoint (0..0x10FFFF) */
         struct {          /* MINO_STRING, MINO_SYMBOL, MINO_KEYWORD */
             char *data;   /* byte content (NUL-terminated) */
             size_t len;   /* length in bytes (excluding NUL) */
@@ -167,6 +169,9 @@ mino_val_t *mino_int(mino_state_t *S, long long n);
 
 /* Create a floating-point value. */
 mino_val_t *mino_float(mino_state_t *S, double f);
+
+/* Create a character value from a Unicode codepoint (0..0x10FFFF). */
+mino_val_t *mino_char(mino_state_t *S, int codepoint);
 
 /* Create a string from a NUL-terminated C string. The data is copied. */
 mino_val_t *mino_string(mino_state_t *S, const char *s);

@@ -94,6 +94,28 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         }
         return;
     }
+    case MINO_CHAR: {
+        int cp = v->as.ch;
+        switch (cp) {
+        case ' ':  fputs("\\space",     out); return;
+        case '\n': fputs("\\newline",   out); return;
+        case '\t': fputs("\\tab",       out); return;
+        case '\r': fputs("\\return",    out); return;
+        case '\b': fputs("\\backspace", out); return;
+        case '\f': fputs("\\formfeed",  out); return;
+        default:
+            if (cp >= 0x21 && cp <= 0x7E) {
+                fputc('\\', out);
+                fputc(cp, out);
+            } else {
+                /* Out-of-ASCII codepoints print as \uXXXX. Codepoints
+                 * above 0xFFFF are uncommon; surface them with a full
+                 * width that re-reads correctly. */
+                fprintf(out, "\\u%04X", (unsigned)cp);
+            }
+            return;
+        }
+    }
     case MINO_STRING:
         print_string_escaped(out, v->as.s.data, v->as.s.len);
         return;

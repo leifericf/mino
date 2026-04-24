@@ -43,22 +43,31 @@
 ;; Character literals
 
 (deftest char-literal-named
-  (is (= " " \space))
-  (is (= "\n" \newline))
-  (is (= "\t" \tab))
-  (is (= "\r" \return)))
+  (is (= \space \space))
+  (is (= \newline \newline))
+  (is (= \tab \tab))
+  (is (= \return \return))
+  (is (= " " (str \space)))
+  (is (= "\n" (str \newline)))
+  (is (= "\t" (str \tab)))
+  (is (= "\r" (str \return))))
 
 (deftest char-literal-single
-  (is (= "A" \A))
-  (is (= "z" \z))
-  (is (= "0" \0))
-  (is (= "9" \9))
-  (is (= "!" \!)))
+  (is (= \A \A))
+  (is (char? \A))
+  (is (char? \z))
+  (is (char? \0))
+  (is (char? \9))
+  (is (char? \!))
+  (is (= 65 (int \A)))
+  (is (= "A" (str \A))))
 
-(deftest char-literal-is-string
-  (is (= :string (type \A)))
-  (is (= :string (type \space)))
-  (is (= 1 (count \A))))
+(deftest char-literal-is-char
+  (is (= :char (type \A)))
+  (is (= :char (type \space)))
+  (is (char? \A))
+  (is (not (char? "A")))
+  (is (not (= \A "A"))))
 
 ;; Hex integer literals
 

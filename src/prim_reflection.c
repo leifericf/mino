@@ -173,6 +173,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_BOOL:    return mino_keyword(S, "bool");
     case MINO_INT:     return mino_keyword(S, "int");
     case MINO_FLOAT:   return mino_keyword(S, "float");
+    case MINO_CHAR:    return mino_keyword(S, "char");
     case MINO_STRING:  return mino_keyword(S, "string");
     case MINO_SYMBOL:  return mino_keyword(S, "symbol");
     case MINO_KEYWORD: return mino_keyword(S, "keyword");
@@ -222,7 +223,7 @@ DEFINE_TYPE_PRED(prim_string_p,  (v != NULL && v->type == MINO_STRING),        "
 DEFINE_TYPE_PRED(prim_keyword_p, (v != NULL && v->type == MINO_KEYWORD),       "keyword?")
 DEFINE_TYPE_PRED(prim_symbol_p,  (v != NULL && v->type == MINO_SYMBOL),        "symbol?")
 DEFINE_TYPE_PRED(prim_fn_p,      (v != NULL && (v->type == MINO_FN || v->type == MINO_PRIM)), "fn?")
-DEFINE_TYPE_PRED(prim_char_p,    0, "char?") /* mino has no separate char type */
+DEFINE_TYPE_PRED(prim_char_p,    (v != NULL && v->type == MINO_CHAR),          "char?")
 DEFINE_TYPE_PRED(prim_number_p,  (v != NULL && (v->type == MINO_INT || v->type == MINO_FLOAT)), "number?")
 DEFINE_TYPE_PRED(prim_map_p,     (v != NULL && (v->type == MINO_MAP || v->type == MINO_SORTED_MAP)), "map?")
 DEFINE_TYPE_PRED(prim_set_p,     (v != NULL && (v->type == MINO_SET || v->type == MINO_SORTED_SET)), "set?")

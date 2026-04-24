@@ -282,6 +282,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_BOOL:
     case MINO_INT:
     case MINO_FLOAT:
+    case MINO_CHAR:
     case MINO_STRING:
     case MINO_KEYWORD:
     case MINO_PRIM:

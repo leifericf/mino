@@ -627,7 +627,11 @@ mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (v != NULL && v->type == MINO_INT) return v;
     if (v != NULL && v->type == MINO_FLOAT) return mino_int(S, (long long)v->as.f);
-    /* (int \a) -> 97: single-char string to char code */
+    /* (int \a) -> 97: char value yields its Unicode codepoint. */
+    if (v != NULL && v->type == MINO_CHAR) {
+        return mino_int(S, (long long)v->as.ch);
+    }
+    /* (int "a") -> 97: single-char string to char code (legacy). */
     if (v != NULL && v->type == MINO_STRING && v->as.s.len == 1) {
         return mino_int(S, (long long)(unsigned char)v->as.s.data[0]);
     }
