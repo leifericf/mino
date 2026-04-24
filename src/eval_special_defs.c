@@ -62,17 +62,18 @@ static int dotted_to_path(const char *name, size_t nlen,
 /* Process a single require spec from within an ns form.
  * spec is either a symbol (bare require) or a vector [mod.name :as alias ...].
  * Attempts to load the module via the resolver and stores aliases.
- * When use_mode is true, default to refer-all (:use semantics). */
-static void ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
-                                       mino_env_t *env, int use_mode)
+ * When use_mode is true, default to refer-all (:use semantics).
+ * Returns 0 on success, -1 on failure (with a diagnostic set). */
+static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
+                                      mino_env_t *env, int use_mode)
 {
     char pathbuf[256];
     const char *modname;
     size_t      modlen;
-    const char * volatile alias_name = NULL;
-    volatile size_t       alias_len  = 0;
-    mino_val_t * volatile refer_vec  = NULL;
-    volatile int          refer_all  = use_mode; /* :use defaults to refer-all */
+    const char *alias_name = NULL;
+    size_t       alias_len  = 0;
+    mino_val_t  *refer_vec  = NULL;
+    int          refer_all  = use_mode; /* :use defaults to refer-all */
 
     if (spec->type == MINO_SYMBOL) {
         modname = spec->as.s.data;
@@ -80,7 +81,7 @@ static void ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     } else if (spec->type == MINO_VECTOR && spec->as.vec.len >= 1) {
         mino_val_t *first = vec_nth(spec, 0);
         size_t i;
-        if (first == NULL || first->type != MINO_SYMBOL) return;
+        if (first == NULL || first->type != MINO_SYMBOL) return 0;
         modname = first->as.s.data;
         modlen  = first->as.s.len;
         /* Parse keyword args: :as, :refer, :only */
@@ -114,37 +115,22 @@ static void ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             }
         }
     } else {
-        return; /* skip unrecognized spec form */
+        return 0; /* skip unrecognized spec form */
     }
 
-    /* Convert dotted name to path and try to load.
-     * Wrap in a local try frame so that load errors (which may longjmp
-     * due to error propagation in mino_eval_string) are caught here
-     * instead of escaping the ns form. */
+    /* Convert dotted name to path and load. A missing or failing module
+     * must surface as an error rather than silently succeeding, so the
+     * diagnostic prim_require set is left in place when the call fails. */
     if (dotted_to_path(modname, modlen, pathbuf, sizeof(pathbuf)) == 0) {
         mino_val_t *path_str = mino_string(S, pathbuf);
         mino_val_t *req_args = mino_cons(S, path_str, mino_nil(S));
-        int ns_saved_try = S->try_depth;
+        mino_val_t *req_res;
         gc_pin(req_args);
-        if (S->try_depth < MAX_TRY_DEPTH) {
-            S->try_stack[S->try_depth].exception = NULL;
-            if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
-                /* Load failed — silently ignore (missing module is OK). */
-                S->try_depth = ns_saved_try;
-                S->error_buf[0] = '\0';
-                if (S->last_diag != NULL) {
-                    S->last_diag = NULL;
-                }
-                gc_unpin(1);
-                goto ns_require_done;
-            }
-            S->try_depth++;
-        }
-        prim_require(S, req_args, env);
-        S->try_depth = ns_saved_try;
-        S->error_buf[0] = '\0';
+        req_res = prim_require(S, req_args, env);
         gc_unpin(1);
-    ns_require_done: ;
+        if (req_res == NULL) {
+            return -1;
+        }
     }
 
     /* Store alias if provided. */
@@ -202,18 +188,19 @@ static void ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             }
         }
     }
+    return 0;
 }
 
-static void ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
-                                    mino_env_t *env)
+static int ns_process_require_spec(mino_state_t *S, mino_val_t *spec,
+                                   mino_env_t *env)
 {
-    ns_process_require_spec_ex(S, spec, env, 0);
+    return ns_process_require_spec_ex(S, spec, env, 0);
 }
 
-static void ns_process_use_spec(mino_state_t *S, mino_val_t *spec,
-                                mino_env_t *env)
+static int ns_process_use_spec(mino_state_t *S, mino_val_t *spec,
+                               mino_env_t *env)
 {
-    ns_process_require_spec_ex(S, spec, env, 1);
+    return ns_process_require_spec_ex(S, spec, env, 1);
 }
 
 mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
@@ -249,7 +236,9 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                 /* Process each require spec in the clause. */
                 mino_val_t *specs = clause->as.cons.cdr;
                 while (mino_is_cons(specs)) {
-                    ns_process_require_spec(S, specs->as.cons.car, env);
+                    if (ns_process_require_spec(S, specs->as.cons.car, env) != 0) {
+                        return NULL;
+                    }
                     specs = specs->as.cons.cdr;
                 }
             }
@@ -257,7 +246,9 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                 /* :use is like :require but with implicit :refer :all. */
                 mino_val_t *specs = clause->as.cons.cdr;
                 while (mino_is_cons(specs)) {
-                    ns_process_use_spec(S, specs->as.cons.car, env);
+                    if (ns_process_use_spec(S, specs->as.cons.car, env) != 0) {
+                        return NULL;
+                    }
                     specs = specs->as.cons.cdr;
                 }
             }
