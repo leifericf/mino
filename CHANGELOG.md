@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.49.1 — Callable and Module-Resolution Dedup
+
+Two pieces of internal duplication turned out to be drifting. No
+user-visible surface change from the mino side; the fixes are
+available to C embedders that introspect `mino_last_error` and to
+any code that invokes `(require '[x :as a])` from inside a primitive
+at the same time an `ns` form is pending.
+
+### Changed
+
+- **Non-fn callable dispatch unified.** Keyword, map, vector, set,
+  sorted-map, and sorted-set "call-as-function" behavior was
+  implemented twice -- once on the direct-eval path in
+  `eval_special.c` and once on the higher-order `apply_callable`
+  path in `eval_special_fn.c`. The direct path used the error code
+  `MTY002` for both vector-index type errors and vector-index
+  bounds errors, while the higher-order path used `MTY001` and
+  `MBD001` which match the convention used everywhere else in the
+  error surface. Both sites now delegate to one
+  `apply_non_fn_callable` helper. C embedders reading
+  `mino_last_error` after a callable dispatch error now see the
+  canonical codes from either call path.
+- **Module-resolution helpers unified.** Dotted-name-to-slash-path
+  conversion lived in two byte-identical copies (`dotted_to_path`
+  in the ns form, `dots_to_slashes` in the require primitive),
+  and alias-table mutation was implemented twice with different
+  semantics: the ns form detected duplicate aliases and replaced
+  the existing full name, while the require primitive appended
+  without duplicate detection and could leak alias strings if one
+  of two malloc calls failed. Both now route through a new
+  `src/runtime_module.c` translation unit. The require vector form
+  now matches ns on duplicate handling and is clean under OOM mid
+  insert.
+
 ## v0.49.0 — Docs and Hygiene
 
 A documentation-focused release. No runtime or API changes; the mino
