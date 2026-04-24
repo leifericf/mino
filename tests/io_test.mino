@@ -20,3 +20,15 @@
 
 (deftest prn-returns-nil
   (is (= nil (prn 1 2 3))))
+
+(deftest print-returns-nil
+  (is (= nil (print "io-test-print"))))
+
+(deftest pr-returns-nil
+  (is (= nil (pr 1 2 3))))
+
+(deftest newline-returns-nil
+  (is (= nil (newline))))
+
+(deftest newline-takes-no-args
+  (is (thrown? (newline 1))))

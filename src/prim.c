@@ -610,6 +610,12 @@ void mino_install_io(mino_state_t *S, mino_env_t *env)
              "Prints the arguments followed by a newline.");
     DEF_PRIM(env, "prn",      prim_prn,
              "Prints the arguments readably followed by a newline.");
+    DEF_PRIM(env, "print",    prim_print,
+             "Prints the arguments space-separated, without a trailing newline.");
+    DEF_PRIM(env, "pr",       prim_pr,
+             "Prints the arguments readably, without a trailing newline.");
+    DEF_PRIM(env, "newline",  prim_newline,
+             "Writes a line separator to stdout.");
     DEF_PRIM(env, "slurp",    prim_slurp,
              "Reads the entire contents of a file as a string.");
     DEF_PRIM(env, "spit",     prim_spit,

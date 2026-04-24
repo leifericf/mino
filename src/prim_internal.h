@@ -188,6 +188,9 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* prim_io.c */
 mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_print(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env);

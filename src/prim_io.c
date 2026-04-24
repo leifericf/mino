@@ -54,6 +54,54 @@ mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_nil(S);
 }
 
+/* (print x ...) writes args space-separated, human-readable, without a
+ * trailing newline. Companion to println. */
+mino_val_t *prim_print(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    int first = 1;
+    (void)env;
+    while (mino_is_cons(args)) {
+        if (!first) fputc(' ', stdout);
+        print_str_to(S, stdout, args->as.cons.car);
+        first = 0;
+        args = args->as.cons.cdr;
+    }
+    fflush(stdout);
+    return mino_nil(S);
+}
+
+/* (pr x ...) writes args space-separated, readably (strings quoted, chars
+ * escaped), without a trailing newline. Companion to prn.
+ *
+ * Phase-B note: this is the plain closed-C form. Phase B replaces it with
+ * a mino-level print-method multimethod backed by a late-binding hook. */
+mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    int first = 1;
+    (void)env;
+    while (mino_is_cons(args)) {
+        if (!first) fputc(' ', stdout);
+        mino_print(S, args->as.cons.car);
+        first = 0;
+        args = args->as.cons.cdr;
+    }
+    fflush(stdout);
+    return mino_nil(S);
+}
+
+/* (newline) writes a single line separator. Returns nil. */
+mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "newline takes no arguments");
+    }
+    fputc('\n', stdout);
+    fflush(stdout);
+    return mino_nil(S);
+}
+
 /* (slurp path) — read a file's entire contents as a string. I/O capability;
  * only installed by mino_install_io, not mino_install_core. */
 mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
