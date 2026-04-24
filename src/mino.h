@@ -9,6 +9,33 @@
 
 #include <stddef.h>
 
+/* ------------------------------------------------------------------------- */
+/* Version                                                                   */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Compile-time version constants, bumped by the release process. Host code
+ * can check these at preprocessor time to guard against embedding against an
+ * unexpected runtime:
+ *
+ *   #if MINO_VERSION_MAJOR == 0 && MINO_VERSION_MINOR < 48
+ *   # error "embedded mino is too old; need >= 0.48"
+ *   #endif
+ *
+ * The linked-in version (which may differ if the header was updated without
+ * rebuilding the runtime) is available at runtime via mino_version_string().
+ */
+#define MINO_VERSION_MAJOR 0
+#define MINO_VERSION_MINOR 48
+#define MINO_VERSION_PATCH 0
+
+/*
+ * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
+ * The pointer is to a static string with program lifetime; callers must not
+ * free it.
+ */
+const char *mino_version_string(void);
+
 #ifdef __cplusplus
 extern "C" {
 #endif

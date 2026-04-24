@@ -533,6 +533,7 @@ int main(int argc, char **argv)
         return exit_code;
     }
 
+    fprintf(stderr, "mino %s\n", mino_version_string());
     fputs("mino> ", stderr);
     fflush(stderr);
 
