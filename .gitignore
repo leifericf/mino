@@ -49,5 +49,8 @@ docs/*.md
 embed_multi_state
 embed_multi_state_asan
 embed_multi_state_tsan
+tests/transient_test
+tests/transient_test_asan
+tests/transient_test_ubsan
 examples/embed_gc_stress
 examples/embed_gc_stress_asan

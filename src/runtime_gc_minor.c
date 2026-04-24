@@ -251,6 +251,8 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 break;
             case MINO_VAR:
                 MINO_GC_VERIFY_CHECK(v->as.var.root); break;
+            case MINO_TRANSIENT:
+                MINO_GC_VERIFY_CHECK(v->as.transient.current); break;
             default: break;
             }
             break;

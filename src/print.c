@@ -266,6 +266,20 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         }
         fputs(v->as.var.sym, out);
         return;
+    case MINO_TRANSIENT:
+        fputs("#<transient", out);
+        if (v->as.transient.current != NULL) {
+            fputc(':', out);
+            switch (v->as.transient.current->type) {
+            case MINO_VECTOR: fputs("vector", out); break;
+            case MINO_MAP:    fputs("map",    out); break;
+            case MINO_SET:    fputs("set",    out); break;
+            default: fputs("?", out); break;
+            }
+        }
+        if (!v->as.transient.valid) fputs(" sealed", out);
+        fputc('>', out);
+        return;
     }
 }
 

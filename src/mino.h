@@ -41,7 +41,11 @@ typedef enum {
     MINO_RECUR,   /* internal tail-call trampoline sentinel */
     MINO_TAIL_CALL, /* proper tail call: carries {fn, args} for trampoline */
     MINO_REDUCED, /* early termination wrapper for reduce */
-    MINO_VAR      /* first-class var: ns + name + root binding */
+    MINO_VAR,     /* first-class var: ns + name + root binding */
+    MINO_TRANSIENT /* mutable staging wrapper for batch mutation of a
+                     * persistent vector, map, or set. Embedders call
+                     * mino_transient / mino_persistent and the
+                     * *_bang accessors below. */
 } mino_type_t;
 
 typedef struct mino_val   mino_val_t;
@@ -148,6 +152,10 @@ struct mino_val {
             mino_val_t *root;    /* root binding value */
             int         dynamic; /* 1 if ^:dynamic */
         } var;
+        struct {          /* MINO_TRANSIENT: batch-mutation wrapper */
+            mino_val_t *current; /* current persistent value (vec/map/set) */
+            int         valid;   /* 0 after persistent!, 1 while mutable */
+        } transient;
     } as;
 };
 
@@ -234,6 +242,52 @@ mino_val_t *mino_atom_deref(const mino_val_t *a);
 
 /* Set the value of an atom. */
 void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
+
+/* ------------------------------------------------------------------------- */
+/* Transient (batch-mutation) API                                            */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Transients give embedders an efficient batch-mutation path for
+ * building vectors, maps, and sets without allocating a new
+ * persistent value per step. After calling mino_persistent(t) the
+ * transient is sealed; calling any *_bang on it returns NULL and sets
+ * a runtime error. This matches Clojure's transient/persistent!
+ * semantics at the embedding level. A mino-level (user-visible)
+ * transient API is NOT shipped in this cycle.
+ *
+ * Current implementation wraps persistent ops rather than mutating
+ * the underlying trie nodes in place. The public API shape is
+ * stable; in-place fast-paths may replace the wrapper in a later
+ * release without ABI change.
+ */
+
+/* Wrap a persistent vector, map, or set in a new transient. Throws
+ * on other types. The returned value is reusable until
+ * mino_persistent is called on it. */
+mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll);
+
+/* Extract the current persistent value and invalidate the transient.
+ * Further *_bang calls on t will throw. */
+mino_val_t *mino_persistent(mino_state_t *S, mino_val_t *t);
+
+/* Transient mutators. Each returns t on success (after updating its
+ * inner persistent value) and NULL on a classified error. The caller
+ * must use the returned value instead of retaining its own handle to
+ * the transient across the call, matching Clojure's convention. */
+mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
+                            mino_val_t *key, mino_val_t *val);
+mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
+                           mino_val_t *val);
+mino_val_t *mino_dissoc_bang(mino_state_t *S, mino_val_t *t,
+                             mino_val_t *key);
+mino_val_t *mino_disj_bang(mino_state_t *S, mino_val_t *t,
+                           mino_val_t *key);
+mino_val_t *mino_pop_bang(mino_state_t *S, mino_val_t *t);
+
+/* Transient predicates and accessors. */
+int         mino_is_transient(const mino_val_t *v);
+size_t      mino_transient_count(const mino_val_t *t);
 
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */

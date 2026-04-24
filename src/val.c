@@ -588,6 +588,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a == b;
     case MINO_VAR:
         return a == b; /* identity equality */
+    case MINO_TRANSIENT:
+        return a == b; /* identity equality; transients are mutable */
     }
     return 0;
 }
