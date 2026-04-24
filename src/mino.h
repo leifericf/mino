@@ -725,7 +725,7 @@ void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind);
  *   PROMOTION_AGE       minor-survival count before YOUNG->OLD promotion.
  *                       Default 1. Range 1 .. 8.
  *   INCREMENTAL_BUDGET  headers popped per incremental major slice.
- *                       Default 1024. Range 64 .. 65536.
+ *                       Default 4096. Range 64 .. 65536.
  *   STEP_ALLOC_BYTES    bytes allocated between automatic slices.
  *                       Default 16 KiB. Range 1 KiB .. 16 MiB.
  */
