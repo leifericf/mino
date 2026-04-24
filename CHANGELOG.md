@@ -2,14 +2,14 @@
 
 ## v0.48.0 — Embedder Polish
 
-Phase 4 of the C core complete-and-polish cycle. This pass sharpens
-the embedding surface in `src/mino.h` without rearranging any runtime
-internals. Version constants land so embedders can compile-time guard
-against an unexpected runtime. A reference Makefile ships at repo
-root with sanitizer dev targets. Two new helpers -- `mino_throw` and
-`mino_args_parse` -- pull patterns out of hand-written primitives and
-give host code a shorter path to structured exceptions and validated
-arguments. The README gains an explicit SemVer policy paragraph.
+Sharpens the embedding surface in `src/mino.h` without rearranging any
+runtime internals. Version constants land so embedders can compile-time
+guard against an unexpected runtime. A reference Makefile ships at
+repo root with sanitizer dev targets. Two new helpers -- `mino_throw`
+and `mino_args_parse` -- pull patterns out of hand-written primitives
+and give host code a shorter path to structured exceptions and
+validated arguments. The README gains an explicit SemVer policy
+paragraph.
 
 ### Added
 
@@ -29,7 +29,7 @@ arguments. The README gains an explicit SemVer policy paragraph.
   pre-1.0 and post-1.0 contract: before 1.0 any minor bump may break
   and is called out under the corresponding CHANGELOG heading; after
   1.0 strict SemVer 2.0.0 applies. The ABI freeze is still scheduled
-  for the v1.0 cycle.
+  for a future release.
 - **`mino_throw(S, payload)`.** Raise a mino exception from C carrying
   any value as the payload. Inside a `(try ... (catch ...))` frame the
   payload is delivered to the catch binding; outside any try frame the
@@ -49,10 +49,9 @@ arguments. The README gains an explicit SemVer policy paragraph.
 
 ## v0.47.0 — Release Gates
 
-Phase 3 of the C core complete-and-polish cycle. This pass does not
-add mutator-visible surface; it lands the infrastructure that will
-keep the surface from silently decaying once the Dialect-Complete
-cycle starts layering on top. A perf regression gate now runs in CI
+Release-gate infrastructure pass. No mutator-visible surface changes;
+the work here exists to keep the surface from silently decaying as
+later releases layer on top. A perf regression gate now runs in CI
 against a pinned baseline. The fuzz corpus grew from four seeds to
 twenty-two, with a libFuzzer nightly job backing it. A native crash
 handler now produces a usable post-mortem line instead of a bare
@@ -121,14 +120,13 @@ up a real barrier for its mutator-stored inner pointer.
 
 ## v0.46.0 — Dialect C Groundwork
 
-Phase 2 of the C core complete-and-polish cycle. Lands the C-level
-mechanisms that later dialect work will build on without dragging the
-user-visible surface along yet. Integer arithmetic now refuses to
-silently wrap, character literals are a first-class value type,
-transducer `sequence` accepts multiple collections, and embedders
-get a C API for batch mutation of persistent collections. The
-previously-disabled clj compat assertions that this C work unlocks
-are re-enabled in the same pass — they were gated off precisely
+Lands the C-level mechanisms that later dialect work will build on
+without dragging the user-visible surface along yet. Integer arithmetic
+now refuses to silently wrap, character literals are a first-class
+value type, transducer `sequence` accepts multiple collections, and
+embedders get a C API for batch mutation of persistent collections.
+The previously-disabled clj compat assertions that this C work unlocks
+are re-enabled in the same release — they were gated off precisely
 because this foundation was missing.
 
 ### Added
@@ -152,7 +150,7 @@ because this foundation was missing.
   The initial implementation wraps the persistent ops; a later
   in-place trie-node path can replace it without changing the C ABI.
   The user-level mino `transient`/`persistent!`/`assoc!` names stay
-  deferred to the Dialect-Complete cycle.
+  deferred for now.
 - **Multi-collection `sequence`.** `(sequence xform coll & more-colls)`
   pulls one element from each collection per step, passes all
   elements to the transducer's multi-input reducer arity, and stops
