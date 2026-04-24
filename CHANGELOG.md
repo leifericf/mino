@@ -1,5 +1,72 @@
 # Changelog
 
+## v0.53.0 — Bigint Foundation
+
+Third release of the Dialect-Complete cycle. mino gains the first
+tier of the Clojure numeric tower: an arbitrary-precision integer
+type, backed by vendored imath. Literals, constructors, equality,
+hashing, and readable printing are all wired up; auto-promoting
+arithmetic (`+'`, `-'`, `*'`, `inc'`, `dec'`) and the remaining
+tower tiers (ratio, bigdec) arrive in v0.54.0 and v0.55.0.
+
+### Added
+
+- **`MINO_BIGINT` value type.** New tagged value backed by an
+  `mpz_t` from vendored imath. The `mpz_t` struct is malloc-owned
+  per cell; digit storage is managed by imath and freed during GC
+  sweep through a hook in the major and minor collectors. No
+  cross-state sharing: `mino_clone` transfers bigints by round-
+  tripping through the base-10 string form.
+
+- **`1N` literal reader.** `42N`, `0N`, `-1N`, and magnitudes far
+  beyond `long long` (`99999999999999999999999N`) all read as real
+  bigints. Plain decimal literals without the `N` suffix continue
+  to read as `MINO_INT` and overflow at parse time as before.
+
+- **`bigint` / `biginteger` / `bigint?` primitives.** `bigint`
+  coerces `int`, `bigint`, `float` (truncated toward zero), or a
+  base-10 numeric string to a `MINO_BIGINT`. `biginteger` is an
+  alias. `bigint?` is the type predicate.
+
+- **Cross-tier `=` and `hash` for int / bigint.** `(= 1 1N)`,
+  `(contains? #{1} 1N)`, and `(get {1 :a} 1N)` all behave as in
+  Clojure: int and bigint of the same value compare equal and
+  share a hash bucket. Bigints that don't fit in `long long` hash
+  under a bigint-specific tag.
+
+- **Readable printer via `print-method` default.** `(pr-str 1N)`
+  produces `"1N"`; `(read-string "1N")` produces the original
+  bigint. Round-trip is preserved for bigints of any magnitude,
+  inside vectors, maps, and sets. No per-cell printer wiring
+  needed — the Phase B `print-method` :default method delegates to
+  `pr-builtin`, which picks up the new `MINO_BIGINT` case in the C
+  printer automatically.
+
+- **Vendored imath.** Michael J. Fromberger's imath library is
+  vendored under `src/vendor/` (MIT). Attribution is preserved in
+  the source files, and the top-level `NOTICE` plus
+  `THIRD_PARTY_LICENSES.md` carry the copyright and license text.
+  A single line in `s_realloc` casts the unused `osize` parameter
+  to `void` under the non-DEBUG configuration so the mino build's
+  zero-warnings gate stays green; that line is marked with a
+  `mino:` comment.
+
+### Known limitations
+
+- Plain `+`, `-`, `*`, `/`, `inc`, `dec`, and comparison primitives
+  still reject bigint operands. Use `(bigint x)` to produce
+  bigints; auto-promoting `+'` / `-'` / `*'` / `inc'` / `dec'`
+  arrive in v0.54.0.
+
+- No ratio or bigdec types yet. `(type 1/2)` still returns `:int`
+  (for `6/3`) or `:float` (for `1/3`), matching current behavior.
+  Ratios and bigdecs land in v0.55.0 together with full tower
+  dispatch.
+
+- Cross-tier `=` between `int` and `float` keeps its existing
+  behavior (`(= 1 1.0)` is true). The Clojure-exact split under
+  `=` arrives with tower dispatch in v0.55.0.
+
 ## v0.52.0 — Extensible Printer
 
 Second release of the Dialect-Complete cycle. `pr` and `prn` now
