@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.50.0 — C Core Complete and Polished
+
+Cycle-closure release. The C core is feature-complete for the work
+that had to land at the C level: lazy-seq write-barrier coverage,
+overflow-throwing arithmetic, first-class characters, the callable
+protocol for non-fn values, vector `pop` with metadata, multi-coll
+`sequence`, C-surface transients, C-surface multimethods, a perf
+regression gate wired into CI, fuzz coverage with a nightly libFuzzer
+job, a native crash handler, version constants, and two embedder
+helpers (`mino_throw`, `mino_args_parse`). The embedding API in
+`src/mino.h` stays labelled as evolving until a later ABI-freeze
+cycle; the surface is stable enough for external embedders to build
+against today, with any break called out in its minor-bump CHANGELOG
+entry.
+
+This release is purely a tag. No code changed since v0.49.1. The full
+sanitizer matrix (ASAN, UBSAN, TSAN) is clean across the test suite,
+the GC stress shards, and the multi-state embedding harness.
+
+### What Ships Next
+
+Three separate cycles are queued after v0.50.0, in order:
+
+1. An internal C-core refactor cycle that picks up code-quality and
+   organization items deferred during the complete-and-polish work.
+   User-visible surface stays stable; this is internal hygiene.
+2. A dialect cycle that fills the remaining mino-level surface on top
+   of the C groundwork landed here: public `transient!` / `persistent!`
+   / `assoc!` / `conj!` / `dissoc!` / `pop!` / `disj!`, public
+   `defmulti` / `defmethod` / `prefer-method` plus hierarchy APIs, the
+   currently-disabled clj-compat test blocks that still need a macro
+   layer, and gaps like `sorted-map-by`, `subseq`, `pr` / `print`.
+3. An ABI-freeze cycle that commits `src/mino.h` to a stable contract
+   for the first time. This is the v1.0 tag.
+
+BigInt / Ratio / BigDecimal arithmetic ships as one whole feature
+(hook plus backend plus tower dispatch plus tests plus docs) in one
+of the later cycles, not piecemeal. Integer overflow throws is the
+honest complete behavior in v0.50.0.
+
 ## v0.49.1 — Callable and Module-Resolution Dedup
 
 Two pieces of internal duplication turned out to be drifting. No
