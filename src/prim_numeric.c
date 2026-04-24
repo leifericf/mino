@@ -8,6 +8,91 @@
 #include <string.h>
 #include <stdio.h>
 #include <errno.h>
+#include <limits.h>
+
+/* Integer-overflow-safe arithmetic helpers. GCC >= 5 and Clang >= 3.9
+ * expose __builtin_*_overflow; MSVC and older compilers fall back to
+ * explicit range-based preconditions. Every helper returns 1 on
+ * overflow (caller throws) and 0 on success.
+ *
+ * The signed C-integer rules we rely on:
+ *   - a + b overflows iff (b > 0 && a > LLONG_MAX - b) ||
+ *                         (b < 0 && a < LLONG_MIN - b)
+ *   - a - b overflows iff (b > 0 && a < LLONG_MIN + b) ||
+ *                         (b < 0 && a > LLONG_MAX + b)
+ *   - a * b: split by sign; never perform the multiply (or divide
+ *     LLONG_MIN by -1) before we have proved it safe. */
+#if defined(__has_builtin)
+  #if __has_builtin(__builtin_add_overflow)
+    #define MINO_HAVE_BUILTIN_OVERFLOW 1
+  #endif
+#elif defined(__GNUC__) && (__GNUC__ >= 5)
+  #define MINO_HAVE_BUILTIN_OVERFLOW 1
+#endif
+
+static int iadd_overflow(long long a, long long b, long long *out)
+{
+#ifdef MINO_HAVE_BUILTIN_OVERFLOW
+    return __builtin_add_overflow(a, b, out) ? 1 : 0;
+#else
+    if ((b > 0 && a > LLONG_MAX - b) ||
+        (b < 0 && a < LLONG_MIN - b)) {
+        return 1;
+    }
+    *out = a + b;
+    return 0;
+#endif
+}
+
+static int isub_overflow(long long a, long long b, long long *out)
+{
+#ifdef MINO_HAVE_BUILTIN_OVERFLOW
+    return __builtin_sub_overflow(a, b, out) ? 1 : 0;
+#else
+    if ((b > 0 && a < LLONG_MIN + b) ||
+        (b < 0 && a > LLONG_MAX + b)) {
+        return 1;
+    }
+    *out = a - b;
+    return 0;
+#endif
+}
+
+static int imul_overflow(long long a, long long b, long long *out)
+{
+#ifdef MINO_HAVE_BUILTIN_OVERFLOW
+    return __builtin_mul_overflow(a, b, out) ? 1 : 0;
+#else
+    if (a == 0 || b == 0) { *out = 0; return 0; }
+    if (a > 0) {
+        if (b > 0) {
+            if (a > LLONG_MAX / b) return 1;
+        } else {
+            if (b < LLONG_MIN / a) return 1;
+        }
+    } else {
+        /* a < 0 */
+        if (b > 0) {
+            if (a < LLONG_MIN / b) return 1;
+        } else {
+            /* Both negative: LLONG_MIN / -1 is itself UB, so catch
+             * LLONG_MIN directly before dividing. */
+            if (a == LLONG_MIN || b == LLONG_MIN) return 1;
+            if (a < LLONG_MAX / b) return 1;
+        }
+    }
+    *out = a * b;
+    return 0;
+#endif
+}
+
+static int ineg_overflow(long long a, long long *out)
+{
+    /* Only LLONG_MIN lacks a representable negation. */
+    if (a == LLONG_MIN) return 1;
+    *out = -a;
+    return 0;
+}
 
 /* ------------------------------------------------------------------------- */
 /* Arithmetic                                                                */
@@ -20,7 +105,10 @@ mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     while (mino_is_cons(args)) {
         mino_val_t *a = args->as.cons.car;
         if (a != NULL && a->type == MINO_INT) {
-            iacc += a->as.i;
+            if (iadd_overflow(iacc, a->as.i, &iacc)) {
+                return prim_throw_classified(S, "eval/overflow", "MOV001",
+                    "integer overflow in +");
+            }
             args = args->as.cons.cdr;
             continue;
         }
@@ -55,6 +143,10 @@ mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
+        if (x->as.i == LLONG_MAX) {
+            return prim_throw_classified(S, "eval/overflow", "MOV001",
+                "integer overflow in inc");
+        }
         return mino_int(S, x->as.i + 1);
     }
     if (x != NULL && x->type == MINO_FLOAT) {
@@ -74,6 +166,10 @@ mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
+        if (x->as.i == LLONG_MIN) {
+            return prim_throw_classified(S, "eval/overflow", "MOV001",
+                "integer overflow in dec");
+        }
         return mino_int(S, x->as.i - 1);
     }
     if (x != NULL && x->type == MINO_FLOAT) {
@@ -96,12 +192,20 @@ mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         iacc = first->as.i;
         args = args->as.cons.cdr;
         if (!mino_is_cons(args)) {
-            return mino_int(S, -iacc);
+            long long neg;
+            if (ineg_overflow(iacc, &neg)) {
+                return prim_throw_classified(S, "eval/overflow", "MOV001",
+                    "integer overflow in -");
+            }
+            return mino_int(S, neg);
         }
         while (mino_is_cons(args)) {
             mino_val_t *a = args->as.cons.car;
             if (a != NULL && a->type == MINO_INT) {
-                iacc -= a->as.i;
+                if (isub_overflow(iacc, a->as.i, &iacc)) {
+                    return prim_throw_classified(S, "eval/overflow", "MOV001",
+                        "integer overflow in -");
+                }
                 args = args->as.cons.cdr;
                 continue;
             }
@@ -148,7 +252,10 @@ mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     while (mino_is_cons(args)) {
         mino_val_t *a = args->as.cons.car;
         if (a != NULL && a->type == MINO_INT) {
-            iacc *= a->as.i;
+            if (imul_overflow(iacc, a->as.i, &iacc)) {
+                return prim_throw_classified(S, "eval/overflow", "MOV001",
+                    "integer overflow in *");
+            }
             args = args->as.cons.cdr;
             continue;
         }

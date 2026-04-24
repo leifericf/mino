@@ -96,6 +96,32 @@
   (is (= 5.0 (float 5)))
   (is (= 3.14 (float 3.14))))
 
+(deftest integer-overflow-throws
+  ;; 64-bit signed arithmetic wraps silently in C; we surface the wrap as
+  ;; a classified arithmetic overflow so programs cannot silently drift
+  ;; across the int boundary.
+  (let [max-int 9223372036854775807
+        min-int -9223372036854775808]
+    (is (thrown? (+ max-int 1)))
+    (is (thrown? (+ 1 max-int)))
+    (is (thrown? (+ min-int -1)))
+    (is (thrown? (+ 1 2 max-int)))
+    (is (thrown? (- min-int 1)))
+    (is (thrown? (- max-int -1)))
+    (is (thrown? (- min-int)))
+    (is (thrown? (* max-int 2)))
+    (is (thrown? (* -1 min-int)))
+    (is (thrown? (* min-int -1)))
+    (is (thrown? (inc max-int)))
+    (is (thrown? (dec min-int)))
+    ;; In-range arithmetic still works.
+    (is (= max-int (+ (dec max-int) 1)))
+    (is (= (- max-int 1) (+ max-int -1)))
+    (is (= -1 (+ max-int min-int)))
+    (is (= max-int (* max-int 1)))
+    ;; Float arithmetic is not range-checked; IEEE 754 handles it.
+    (is (float? (+ max-int 1.0)))))
+
 (deftest scientific-notation-signed-exponents
   (is (float? 1e10))
   (is (float? 1e-10))
