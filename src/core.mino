@@ -1633,6 +1633,27 @@
 (defn get-method "Returns the method for dispatch-val, or nil." [mm dispatch-val]
   (get @(:method-table (meta mm)) dispatch-val))
 
+;; ---------------------------------------------------------------------------
+;; Extensible printer: print-method is a multimethod dispatched on (type x)
+;; that routes pr / prn output. Users extend it for their own types via
+;; (defmethod print-method :my-type [v] ...). The :default method delegates
+;; to pr-builtin, which uses the C formatter and handles every built-in.
+;;
+;; (set-print-method! print-method) installs the late-binding hook in C so
+;; pr / prn consult this multimethod. Before this line runs, pr / prn use
+;; the permanently-safe C fallback (the Cortex Q5 invariant).
+;; ---------------------------------------------------------------------------
+
+(defmulti print-method
+  "Multimethod for readable printing. Dispatched on (type x).
+  Extend for user types via (defmethod print-method :my-type [v] ...).
+  Methods write to stdout as a side effect."
+  type)
+
+(defmethod print-method :default [v] (pr-builtin v))
+
+(set-print-method! print-method)
+
 (defmacro with-open "Binds resources, evaluates body, then closes each resource." [bindings & body]
   (if (empty? bindings)
     `(do ~@body)

@@ -39,13 +39,29 @@ mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_nil(S);
 }
 
+/* Dispatch one value through the print-method hook if installed, or the
+ * built-in C formatter otherwise. The hook is a mino fn taking one value
+ * and side-effecting to stdout; we ignore its return value.
+ *
+ * The fallback path stays permanently safe: during boot (before
+ * core.mino installs the hook), pr / prn still work on every built-in
+ * type. Cortex Q5 invariant. */
+static void pr_dispatch_one(mino_state_t *S, mino_val_t *v, mino_env_t *env)
+{
+    if (S->print_method_fn != NULL) {
+        mino_val_t *call_args = mino_cons(S, v, mino_nil(S));
+        (void)mino_call(S, S->print_method_fn, call_args, env);
+        return;
+    }
+    mino_print(S, v);
+}
+
 mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int first = 1;
-    (void)env;
     while (mino_is_cons(args)) {
         if (!first) fputc(' ', stdout);
-        mino_print(S, args->as.cons.car);
+        pr_dispatch_one(S, args->as.cons.car, env);
         first = 0;
         args = args->as.cons.cdr;
     }
@@ -73,19 +89,58 @@ mino_val_t *prim_print(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (pr x ...) writes args space-separated, readably (strings quoted, chars
  * escaped), without a trailing newline. Companion to prn.
  *
- * Phase-B note: this is the plain closed-C form. Phase B replaces it with
- * a mino-level print-method multimethod backed by a late-binding hook. */
+ * Routes each argument through print-method when the hook is installed
+ * (v0.52.0), otherwise uses the built-in C formatter. */
 mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     int first = 1;
-    (void)env;
     while (mino_is_cons(args)) {
         if (!first) fputc(' ', stdout);
-        mino_print(S, args->as.cons.car);
+        pr_dispatch_one(S, args->as.cons.car, env);
         first = 0;
         args = args->as.cons.cdr;
     }
     fflush(stdout);
+    return mino_nil(S);
+}
+
+/* (pr-builtin x) writes one value via the built-in C formatter, bypassing
+ * the print-method hook. Used by print-method's :default method so the
+ * default path does not recurse into itself. */
+mino_val_t *prim_pr_builtin(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "pr-builtin requires one argument");
+    }
+    mino_print(S, args->as.cons.car);
+    fflush(stdout);
+    return mino_nil(S);
+}
+
+/* (set-print-method! fn) — install a late-binding hook for pr / prn.
+ * Calling with nil removes the hook. The hook must be a fn that prints
+ * its one argument to stdout. */
+mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args,
+                                       mino_env_t *env)
+{
+    mino_val_t *fn;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "set-print-method! requires one argument");
+    }
+    fn = args->as.cons.car;
+    if (fn == NULL || fn->type == MINO_NIL) {
+        S->print_method_fn = NULL;
+        return mino_nil(S);
+    }
+    if (fn->type != MINO_FN && fn->type != MINO_PRIM) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "set-print-method! argument must be a fn");
+    }
+    S->print_method_fn = fn;
     return mino_nil(S);
 }
 

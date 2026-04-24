@@ -601,6 +601,16 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_install_host(S, env);
     /* async channels */
     mino_install_async(S, env);
+    /* print-method late-binding hook plumbing.
+     * These two must be bound before core.mino evaluates so the
+     * print-method multimethod definition can install itself via
+     * (set-print-method! print-method). pr / prn themselves are bound
+     * later by mino_install_io; embedders running sandboxed without
+     * I/O keep the multimethod wired but never exercise the hook. */
+    DEF_PRIM(env, "pr-builtin", prim_pr_builtin,
+             "Prints a value readably via the built-in C formatter, bypassing print-method.");
+    DEF_PRIM(env, "set-print-method!", prim_set_print_method_bang,
+             "Installs a fn to dispatch pr / prn output; nil removes the hook.");
     install_core_mino(S, env);
 }
 

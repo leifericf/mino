@@ -500,6 +500,13 @@ struct mino_state {
     mino_val_t     *sort_comp_fn;
     mino_env_t     *sort_comp_env;
 
+    /* Late-binding print-method hook. NULL during core bootstrap and any
+     * state that never installed one; set via set-print-method! once the
+     * multimethod is registered. When non-NULL, prim_pr / prim_prn route
+     * each argument through this fn instead of calling mino_print
+     * directly. The hook is expected to write to stdout as a side effect. */
+    mino_val_t     *print_method_fn;
+
     /* Gensym counter */
     long            gensym_counter;
 

@@ -333,6 +333,8 @@ void gc_mark_roots(mino_state_t *S)
     }
     /* Pin sort comparator if active. */
     gc_mark_interior(S, S->sort_comp_fn);
+    /* Pin print-method hook if installed. */
+    gc_mark_interior(S, S->print_method_fn);
     /* Pin values on the GC save stack. */
     {
         int si;
