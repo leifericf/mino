@@ -48,6 +48,9 @@ void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
         S->gc_remset_cap = new_cap;
     }
     S->gc_remset[S->gc_remset_len++] = container;
+    if (S->gc_remset_len > S->gc_remset_high_water) {
+        S->gc_remset_high_water = S->gc_remset_len;
+    }
     container->dirty = 1;
     gc_evt_record(S, GC_EVT_REMSET_ADD, container, NULL, NULL,
                   (uintptr_t)container->gen, 0);

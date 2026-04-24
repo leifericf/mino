@@ -108,3 +108,15 @@
              (conj (vec (range 200)) (+ i 2))]]
       (is (= (+ i 2) (last (nth v 2))))))
   (is true))
+
+;; Observability: remset and mark-stack expose their configured capacity
+;; and peak usage. Capacity must be >= the current size; high-water must
+;; be >= the current size and non-decreasing across time. These are
+;; read-only introspection fields for embedders tuning workload-sensitive
+;; parameters.
+(deftest gc-stats-observability-fields
+  (let [s (gc-stats)]
+    (is (>= (:remset-cap s) (:remset-entries s)))
+    (is (>= (:remset-high-water s) (:remset-entries s)))
+    (is (>= (:mark-stack-cap s) 0))
+    (is (>= (:mark-stack-high-water s) 0))))

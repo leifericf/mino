@@ -142,5 +142,9 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
     out->total_gc_ns       = S->gc_total_ns;
     out->max_gc_ns         = S->gc_max_ns;
     out->remset_entries    = S->gc_remset_len;
+    out->remset_cap        = S->gc_remset_cap;
+    out->remset_high_water = S->gc_remset_high_water;
+    out->mark_stack_cap        = S->gc_mark_stack_cap;
+    out->mark_stack_high_water = S->gc_mark_stack_high_water;
     out->phase             = phase_to_public(S->gc_phase);
 }

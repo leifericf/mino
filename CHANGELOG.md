@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Added
+
+- **Remset and mark-stack observability in `gc-stats`.** Four new keys
+  — `:remset-cap`, `:remset-high-water`, `:mark-stack-cap`,
+  `:mark-stack-high-water` — let embedders size remset- and
+  mark-stack-sensitive workloads without instrumenting the runtime.
+  The two `*-cap` keys report current capacity of the respective
+  realloc-doubled arrays; the two `*-high-water` keys report the
+  peak usage observed on this `mino_state_t` across its lifetime.
+  Same fields also added to the public `mino_gc_stats_t` struct for
+  C embedders.
+
 ### Changed
 
 - **`gc-stats` now reports `:nursery-bytes`.** The configured nursery

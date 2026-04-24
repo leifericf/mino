@@ -270,6 +270,9 @@ static void gc_mark_stack_push_raw(mino_state_t *S, gc_hdr_t *h)
         S->gc_mark_stack_cap = new_cap;
     }
     S->gc_mark_stack[S->gc_mark_stack_len++] = h;
+    if (S->gc_mark_stack_len > S->gc_mark_stack_high_water) {
+        S->gc_mark_stack_high_water = S->gc_mark_stack_len;
+    }
 }
 
 void gc_mark_push(mino_state_t *S, gc_hdr_t *h)

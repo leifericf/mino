@@ -615,6 +615,10 @@ typedef struct {
     size_t total_gc_ns;
     size_t max_gc_ns;
     size_t remset_entries;     /* current remembered-set size */
+    size_t remset_cap;         /* remembered-set capacity */
+    size_t remset_high_water;  /* peak remset size this state */
+    size_t mark_stack_cap;     /* mark-stack capacity */
+    size_t mark_stack_high_water; /* peak mark-stack depth this state */
     int    phase;              /* MINO_GC_PHASE_* */
 } mino_gc_stats_t;
 

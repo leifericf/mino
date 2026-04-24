@@ -316,6 +316,10 @@ struct mino_state {
     gc_hdr_t      **gc_remset;
     size_t          gc_remset_len;
     size_t          gc_remset_cap;
+    /* High-water mark of gc_remset_len across this state's lifetime.
+     * Exposed via mino_gc_stats so embedders can size remset-sensitive
+     * workloads without instrumenting the runtime. */
+    size_t          gc_remset_high_water;
     /* Collector tuning parameters. gc_nursery_bytes triggers a minor
      * collection when exceeded. gc_promotion_age is the number of
      * minor survivals before a young object flips to old. Both have
@@ -341,6 +345,9 @@ struct mino_state {
     gc_hdr_t      **gc_mark_stack;
     size_t          gc_mark_stack_len;
     size_t          gc_mark_stack_cap;
+    /* High-water mark of gc_mark_stack_len across this state's
+     * lifetime. Exposed via mino_gc_stats. */
+    size_t          gc_mark_stack_high_water;
     gc_hdr_t       *gc_freelists[4];   /* per-size-class recycling */
     /* Cached [min, max) bounds of all managed allocations. Lets the
      * conservative stack scan reject non-pointer words before doing a
