@@ -39,8 +39,7 @@
     (is (= xm (meta (nth y 1))))
     (is (= xm (meta (assoc x 1 "one"))))
     (is (= xm (meta (reduce #(conj %1 %2) x (range 1000)))))
-    ;; TODO: pop not yet implemented
-    ;; (is (= xm (meta (pop (pop (pop x))))))
+    (is (= xm (meta (pop (pop (pop x))))))
     (let [z (assoc-in y [1 2] 18)]
       (is (= ym (meta z)))
       (is (= xm (meta (nth z 1)))))
