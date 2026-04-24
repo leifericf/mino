@@ -1,116 +1,121 @@
 (require "tests/test")
 
-;; Integer range predicates
+;; Numeric tower — Phase C.1 (v0.53.0):
+;;   MINO_BIGINT type, `1N` literal reader, `bigint` / `biginteger` /
+;;   `bigint?` constructors, cross-tier `=` and `hash` for int/bigint,
+;;   readable printer via `print-method` default (pr-builtin).
+;;
+;; Auto-promoting `+'` / `-'` / `*'` etc. and ratio / bigdec / full
+;; tower dispatch arrive in Phases C.2 and C.3.
 
-(deftest pos-int-predicate
-  (is (pos-int? 1))
-  (is (pos-int? 100))
-  (is (not (pos-int? 0)))
-  (is (not (pos-int? -1)))
-  (is (not (pos-int? 1.0)))
-  (is (not (pos-int? "x"))))
+;; --- reader: 1N literals produce real bigints ---
 
-(deftest neg-int-predicate
-  (is (neg-int? -1))
-  (is (neg-int? -100))
-  (is (not (neg-int? 0)))
-  (is (not (neg-int? 1)))
-  (is (not (neg-int? -1.0)))
-  (is (not (neg-int? nil))))
+(deftest nt-literal-reader
+  (is (= :bigint (type 0N)))
+  (is (= :bigint (type 1N)))
+  (is (= :bigint (type -1N)))
+  (is (= :bigint (type 99999999999999999999999N)))
+  (is (= :bigint (type -99999999999999999999999N))))
 
-(deftest nat-int-predicate
-  (is (nat-int? 0))
-  (is (nat-int? 1))
-  (is (nat-int? 100))
-  (is (not (nat-int? -1)))
-  (is (not (nat-int? 0.0)))
-  (is (not (nat-int? "x"))))
+;; --- constructors ---
 
-;; Type stubs
+(deftest nt-constructors
+  (is (bigint? (bigint 0)))
+  (is (bigint? (bigint 42)))
+  (is (bigint? (bigint -42)))
+  (is (bigint? (bigint 1N)))
+  (is (bigint? (bigint "12345")))
+  (is (bigint? (bigint "99999999999999999999999")))
+  ;; biginteger is an alias for bigint
+  (is (= (bigint 7) (biginteger 7)))
+  ;; float truncation
+  (is (= 1N (bigint 1.7)))
+  (is (= -1N (bigint -1.7))))
 
-(deftest ratio-predicate
-  (is (not (ratio? 1)))
-  (is (not (ratio? 1.0)))
-  (is (not (ratio? "x")))
-  (is (not (ratio? nil))))
+;; --- predicates ---
 
-(deftest rational-predicate
-  (is (rational? 0))
-  (is (rational? 1))
-  (is (rational? -1))
-  (is (not (rational? 1.0)))
-  (is (not (rational? "x")))
-  (is (not (rational? nil))))
+(deftest nt-predicates
+  (is (bigint? 1N))
+  (is (not (bigint? 1)))
+  (is (not (bigint? 1.0)))
+  (is (not (bigint? "1")))
+  (is (not (bigint? nil))))
 
-(deftest decimal-predicate
-  (is (not (decimal? 1)))
-  (is (not (decimal? 1.0)))
-  (is (not (decimal? nil))))
+;; --- equality: cross-tier int/bigint ---
 
-;; Coercion aliases
+(deftest nt-equality-cross-tier
+  (is (= 1 1N))
+  (is (= 1N 1))
+  (is (= 0 0N))
+  (is (= -1 -1N))
+  (is (not (= 1 2N)))
+  (is (not (= 2N 1)))
+  ;; distinct bigint values
+  (is (= 1N (bigint 1)))
+  (is (not (= 1N 2N)))
+  ;; large bigints beyond long long
+  (is (= 99999999999999999999999N
+         (bigint "99999999999999999999999")))
+  (is (not (= 99999999999999999999999N
+              99999999999999999999998N))))
 
-(deftest long-coercion
-  (is (= 3 (long 3.7)))
-  (is (= 3 (long 3)))
-  (is (int? (long 3.7))))
+;; --- hash: int and bigint of the same value share a bucket ---
 
-(deftest double-coercion
-  (is (= 3.0 (double 3)))
-  (is (= 3.0 (double 3.0)))
-  (is (float? (double 3))))
+(deftest nt-hash-cross-tier
+  ;; A set keyed by int contains the equivalent bigint.
+  (is (contains? #{1} 1N))
+  (is (contains? #{1N} 1))
+  ;; A map keyed by int looks up under the equivalent bigint.
+  (is (= :one (get {1 :one} 1N)))
+  (is (= :one (get {1N :one} 1)))
+  ;; Two distinct bigint instances with the same value hit the same bucket.
+  (let [a 1N b (bigint 1)]
+    (is (= a b))
+    (is (contains? #{a} b))))
 
-(deftest num-coercion
-  (is (= 3 (num 3)))
-  (is (= 3.14 (num 3.14)))
-  (is (thrown? (num "x")))
-  (is (thrown? (num nil))))
+;; --- printer: readable round-trip via print-method default ---
 
-;; Parse functions
+(deftest nt-printer-roundtrip
+  (doseq [x [0N 1N -1N 42N -42N
+             99999999999999999999999N
+             -99999999999999999999999N]]
+    (is (= x (read-string (pr-str x))))))
 
-(deftest parse-long-basic
-  (is (= 42 (parse-long "42")))
-  (is (= -7 (parse-long "-7")))
-  (is (= 0 (parse-long "0")))
-  (is (int? (parse-long "42"))))
+;; --- bigint in collections round-trips cleanly ---
 
-(deftest parse-long-failure
-  (is (nil? (parse-long "abc")))
-  (is (nil? (parse-long "3.14")))
-  (is (nil? (parse-long "")))
-  (is (thrown? (parse-long nil)))
-  (is (nil? (parse-long " 42")))
-  (is (nil? (parse-long "42 ")))
-  (is (nil? (parse-long "0xFF"))))
+(deftest nt-collections-roundtrip
+  (is (= [1N 2N 3N] (read-string (pr-str [1N 2N 3N]))))
+  (is (= #{1N 2N 3N} (read-string (pr-str #{1N 2N 3N}))))
+  (is (= {:a 1N :b 2N} (read-string (pr-str {:a 1N :b 2N})))))
 
-(deftest parse-double-basic
-  (is (= 3.14 (parse-double "3.14")))
-  (is (= 42.0 (parse-double "42")))
-  (is (= -0.5 (parse-double "-0.5")))
-  (is (float? (parse-double "3.14"))))
+;; --- self-evaluation ---
 
-(deftest parse-double-failure
-  (is (nil? (parse-double "abc")))
-  (is (nil? (parse-double "")))
-  (is (thrown? (parse-double nil)))
-  (is (nil? (parse-double " 3.14"))))
+(deftest nt-self-eval
+  ;; bigints evaluate to themselves, like ints and floats.
+  (is (= 42N (eval '42N))))
 
-(deftest parse-double-special
-  (is (= ##Inf (parse-double "Infinity")))
-  (is (= ##-Inf (parse-double "-Infinity")))
-  (is (NaN? (parse-double "NaN"))))
+;; --- type reporting ---
 
-;; Unsigned bit shift
+(deftest nt-type-reporting
+  ;; type returns :bigint; type-name / type-tag reporting paths all agree.
+  (is (= :bigint (type 1N)))
+  (is (= :bigint (type (bigint "12345678901234567890")))))
 
-(deftest unsigned-bit-shift-right-basic
-  (is (= 9223372036854775807 (unsigned-bit-shift-right -1 1)))
-  (is (= 2 (unsigned-bit-shift-right 4 1)))
-  (is (= 1 (unsigned-bit-shift-right -1 63)))
-  (is (= 0 (unsigned-bit-shift-right 0 5))))
+;; --- errors: arithmetic primitives still reject bigints (Phase C.2) ---
 
-;; == rejects non-numbers (errors via + coercion)
+(deftest nt-arithmetic-still-throws
+  ;; Plain +/-/* stay throwing on bigint until Phase C.2 lands the tower.
+  ;; This asserts the current behavior so we notice if it changes.
+  (is (thrown? (+ 1 1N)))
+  (is (thrown? (* 2N 3N)))
+  (is (thrown? (- 0 1N))))
 
-(deftest numeric-eq-basic
-  (is (== 1 1.0))
-  (is (== 0 0.0))
-  (is (not (== 1 2)))
-  (is (== 1 1 1.0 1)))
+;; --- constructor edge cases ---
+
+(deftest nt-constructor-errors
+  (is (thrown? (bigint)))              ;; arity
+  (is (thrown? (bigint 1 2)))          ;; arity
+  (is (thrown? (bigint nil)))          ;; type
+  (is (thrown? (bigint "not-a-num")))  ;; parse
+  (is (thrown? (bigint [1 2])))        ;; type
+  (is (thrown? (bigint? 1 2))))        ;; arity
