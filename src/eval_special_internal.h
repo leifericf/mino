@@ -49,4 +49,18 @@ mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
                                       const char *diag_code,
                                       const char *label);
 
+/*
+ * Resolve a non-fn callable value (keyword, map, vector, set, sorted
+ * map, sorted set) against an already-evaluated argument list.
+ *
+ * FN must not be MINO_PRIM, MINO_FN, or MINO_MACRO; those are callers'
+ * business. If FN is none of the recognized non-fn callable types,
+ * raises a "not a function" type diagnostic (MTY002) against FORM.
+ * All diagnostics are posted with set_eval_diag against FORM.
+ *
+ * Returns the call result on success, NULL on error.
+ */
+mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
+                                  mino_val_t *args, mino_val_t *form);
+
 #endif /* EVAL_SPECIAL_INTERNAL_H */

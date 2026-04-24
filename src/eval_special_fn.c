@@ -330,14 +330,22 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             return result;
         }
     }
+    return apply_non_fn_callable(S, fn, args, S->eval_current_form);
+}
+
+mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
+                                  mino_val_t *args, mino_val_t *form)
+{
+    int         nargs = 0;
+    mino_val_t *tmp;
+    for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
+        nargs++;
+
     if (fn->type == MINO_KEYWORD) {
-        /* Keyword as function in higher-order context: (:k m) => (get m :k). */
-        int         nargs = 0;
-        mino_val_t *tmp;
-        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
-            nargs++;
+        /* (:k m) => (get m :k); (:k m default) => (get m :k default). */
         if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "keyword as function takes 1 or 2 arguments");
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "keyword as function takes 1 or 2 arguments");
             return NULL;
         }
         {
@@ -358,13 +366,10 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
     }
     if (fn->type == MINO_MAP) {
-        /* Map as function in higher-order context: ({:a 1} :k). */
-        int         nargs = 0;
-        mino_val_t *tmp;
-        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
-            nargs++;
+        /* ({:a 1} :k) => (get {:a 1} :k). */
         if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "map as function takes 1 or 2 arguments");
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "map as function takes 1 or 2 arguments");
             return NULL;
         }
         {
@@ -377,38 +382,34 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
     }
     if (fn->type == MINO_VECTOR) {
-        /* Vector as function in higher-order context: ([1 2 3] 0). */
-        int         nargs = 0;
-        mino_val_t *tmp;
-        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
-            nargs++;
+        /* ([1 2 3] 0) => (nth [1 2 3] 0). */
         if (nargs != 1) {
-            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "vector as function takes 1 argument");
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "vector as function takes 1 argument");
             return NULL;
         }
         {
             mino_val_t *idx = args->as.cons.car;
             long long i;
             if (idx == NULL || idx->type != MINO_INT) {
-                set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "vector index must be an integer");
+                set_eval_diag(S, form, "eval/type", "MTY001",
+                    "vector index must be an integer");
                 return NULL;
             }
             i = idx->as.i;
             if (i < 0 || (size_t)i >= fn->as.vec.len) {
-                set_eval_diag(S, S->eval_current_form, "eval/bounds", "MBD001", "vector index out of bounds");
+                set_eval_diag(S, form, "eval/bounds", "MBD001",
+                    "vector index out of bounds");
                 return NULL;
             }
             return vec_nth(fn, (size_t)i);
         }
     }
     if (fn->type == MINO_SET) {
-        /* Set as function in higher-order context: (#{:a :b} :a) => :a. */
-        int         nargs = 0;
-        mino_val_t *tmp;
-        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
-            nargs++;
+        /* (#{:a :b} :a) => :a or nil. */
         if (nargs != 1) {
-            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "set as function takes 1 argument");
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "set as function takes 1 argument");
             return NULL;
         }
         {
@@ -419,12 +420,9 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
     }
     if (fn->type == MINO_SORTED_MAP) {
-        int         nargs = 0;
-        mino_val_t *tmp;
-        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
-            nargs++;
         if (nargs < 1 || nargs > 2) {
-            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "sorted-map as function takes 1 or 2 arguments");
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "sorted-map as function takes 1 or 2 arguments");
             return NULL;
         }
         {
@@ -438,12 +436,9 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
     }
     if (fn->type == MINO_SORTED_SET) {
-        int         nargs = 0;
-        mino_val_t *tmp;
-        for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
-            nargs++;
         if (nargs != 1) {
-            set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "sorted-set as function takes 1 argument");
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "sorted-set as function takes 1 argument");
             return NULL;
         }
         {
@@ -457,7 +452,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         char msg[128];
         snprintf(msg, sizeof(msg), "not a function (got %s)",
                  type_tag_str(fn));
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY002", msg);
+        set_eval_diag(S, form, "eval/type", "MTY002", msg);
     }
     return NULL;
 }
