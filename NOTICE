@@ -1,0 +1,10 @@
+mino
+Copyright (c) 2026 Leif Eric Fredheim
+Licensed under the MIT License (see LICENSE).
+
+This product bundles third-party source. See THIRD_PARTY_LICENSES.md for
+the full list and license text. At the time of writing:
+
+- src/vendor/imath.{h,c} — imath arbitrary-precision integer arithmetic,
+  Copyright (C) 2002-2007 Michael J. Fromberger. Licensed under the MIT
+  License.

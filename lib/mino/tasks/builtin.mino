@@ -31,7 +31,8 @@
    "src/prim_fs.c" "src/prim_proc.c"
    "src/prim_host.c" "src/host_interop.c"
    "src/clone.c" "src/re.c" "src/transient.c"
-   "src/async_scheduler.c" "src/async_timer.c" "src/prim_async.c"])
+   "src/async_scheduler.c" "src/async_timer.c" "src/prim_async.c"
+   "src/prim_bignum.c" "src/vendor/imath.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 

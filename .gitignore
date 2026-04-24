@@ -44,6 +44,7 @@ docs/**/*.md
 !docs/INTERNAL_MODULE_MAP.md
 !README.md
 !CHANGELOG.md
+!THIRD_PARTY_LICENSES.md
 /design-notes/
 .clj-kondo/
 embed_multi_state
