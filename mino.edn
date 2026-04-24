@@ -9,6 +9,12 @@
   build           {:doc  "Compile and link the mino binary"
                    :deps [gen-core-header]
                    :task mino.tasks.builtin/build}
+  build-asan      {:doc  "Build mino_asan with AddressSanitizer"
+                   :task mino.tasks.builtin/build-asan}
+  build-ubsan     {:doc  "Build mino_ubsan with UndefinedBehaviorSanitizer"
+                   :task mino.tasks.builtin/build-ubsan}
+  build-tsan      {:doc  "Build mino_tsan with ThreadSanitizer"
+                   :task mino.tasks.builtin/build-tsan}
   clean           {:doc  "Remove build artifacts"
                    :task mino.tasks.builtin/clean}
   test            {:doc  "Build and run the test suite"

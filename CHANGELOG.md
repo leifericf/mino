@@ -18,13 +18,14 @@ paragraph.
   code can `#if`-guard against an unexpected runtime. The linked-in
   version is available at runtime via `mino_version_string()`. The
   standalone REPL now prints `mino <version>` before the first prompt.
-- **Example Makefile with sanitizer dev targets.** A top-level
-  `Makefile` builds the mino binary with `-std=c99 -Wall -Wextra
-  -Wpedantic -O2` and offers `dev-asan`, `dev-ubsan`, and `dev-tsan`
-  targets that produce instrumented binaries at `-O1` plus frame
-  pointers. `make examples` compiles every in-tree `examples/*.c`.
-  The task-runner build remains the canonical incremental path; this
-  Makefile always rebuilds from scratch.
+- **Sanitizer dev build tasks.** `mino task build-asan`,
+  `mino task build-ubsan`, and `mino task build-tsan` produce
+  `./mino_asan`, `./mino_ubsan`, and `./mino_tsan` with the matching
+  sanitizer plus `-g -O1 -fno-omit-frame-pointer` so stack traces
+  stay readable. Each binary is built from a full recompile (sanitizer
+  flags change code generation, so sharing `.o` files with the regular
+  build would be unsound) and the three can coexist in the working
+  tree. `mino task clean` now removes all four binaries.
 - **SemVer policy in README.** A Versioning section spells out the
   pre-1.0 and post-1.0 contract: before 1.0 any minor bump may break
   and is called out under the corresponding CHANGELOG heading; after

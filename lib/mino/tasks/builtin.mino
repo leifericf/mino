@@ -121,9 +121,63 @@
       (when (file-exists? dep) (rm-rf dep))))
   (when (file-exists? "mino") (rm-rf "mino"))
   (when (file-exists? "mino.exe") (rm-rf "mino.exe"))
+  (when (file-exists? "mino_asan")  (rm-rf "mino_asan"))
+  (when (file-exists? "mino_ubsan") (rm-rf "mino_ubsan"))
+  (when (file-exists? "mino_tsan")  (rm-rf "mino_tsan"))
   (when (file-exists? "src/core_mino.h")
     (rm-rf "src/core_mino.h"))
   (println "  cleaned"))
+
+;; ---- Sanitizer dev builds -----------------------------------------------
+;;
+;; Each sanitizer build links every source directly into a dedicated
+;; binary. Sanitizer flags change code generation (redzones, shadow
+;; memory, hooks) so we do not share objects with the regular build.
+;; Binary names are suffixed so all three can coexist in the working
+;; tree, e.g. ./mino_asan, ./mino_ubsan, ./mino_tsan.
+
+(def ^:private san-base
+  ["-g" "-O1" "-fno-omit-frame-pointer" "-std=c99"
+   "-Wall" "-Wextra" "-Wpedantic" "-Isrc"])
+
+(defn- build-sanitized [label out-bin extra-flags]
+  (gen-core-header)
+  (let [args (into [cc]
+                   (concat san-base
+                           extra-flags
+                           ldflags
+                           ["-o" out-bin]
+                           all-srcs
+                           libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (str "  " label " build -> " out-bin))))
+
+(defn build-asan
+  "Build mino_asan with AddressSanitizer. Catches heap buffer overflows,
+   use-after-free, stack overflows, and most memory errors. Slower than
+   a release build; intended for development only."
+  []
+  (build-sanitized "asan" "mino_asan"
+                   ["-fsanitize=address"]))
+
+(defn build-ubsan
+  "Build mino_ubsan with UndefinedBehaviorSanitizer. Catches signed
+   overflow, misaligned loads, invalid shifts, and similar UB. The
+   -fno-sanitize-recover switch makes the first finding fatal so it
+   surfaces under a test runner that checks exit status."
+  []
+  (build-sanitized "ubsan" "mino_ubsan"
+                   ["-fsanitize=undefined"
+                    "-fno-sanitize-recover=undefined"]))
+
+(defn build-tsan
+  "Build mino_tsan with ThreadSanitizer. Only meaningful for the
+   multi-state embedding tests; a single mino_state is single-threaded.
+   Intended for running tests/embed_multi_state.c and similar harnesses."
+  []
+  (build-sanitized "tsan" "mino_tsan"
+                   ["-fsanitize=thread"]))
 
 (defn test-suite
   "Run the test suite."
