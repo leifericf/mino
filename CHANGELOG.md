@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.48.0 — Embedder Polish
+
+Phase 4 of the C core complete-and-polish cycle. This pass sharpens
+the embedding surface in `src/mino.h` without rearranging any runtime
+internals. Version constants land so embedders can compile-time guard
+against an unexpected runtime. A reference Makefile ships at repo
+root with sanitizer dev targets. Two new helpers -- `mino_throw` and
+`mino_args_parse` -- pull patterns out of hand-written primitives and
+give host code a shorter path to structured exceptions and validated
+arguments. The README gains an explicit SemVer policy paragraph.
+
+### Added
+
+- **Version constants and runtime query.** `MINO_VERSION_MAJOR`,
+  `MINO_VERSION_MINOR`, `MINO_VERSION_PATCH` live in `mino.h` so host
+  code can `#if`-guard against an unexpected runtime. The linked-in
+  version is available at runtime via `mino_version_string()`. The
+  standalone REPL now prints `mino <version>` before the first prompt.
+- **Example Makefile with sanitizer dev targets.** A top-level
+  `Makefile` builds the mino binary with `-std=c99 -Wall -Wextra
+  -Wpedantic -O2` and offers `dev-asan`, `dev-ubsan`, and `dev-tsan`
+  targets that produce instrumented binaries at `-O1` plus frame
+  pointers. `make examples` compiles every in-tree `examples/*.c`.
+  The task-runner build remains the canonical incremental path; this
+  Makefile always rebuilds from scratch.
+- **SemVer policy in README.** A Versioning section spells out the
+  pre-1.0 and post-1.0 contract: before 1.0 any minor bump may break
+  and is called out under the corresponding CHANGELOG heading; after
+  1.0 strict SemVer 2.0.0 applies. The ABI freeze is still scheduled
+  for the v1.0 cycle.
+- **`mino_throw(S, payload)`.** Raise a mino exception from C carrying
+  any value as the payload. Inside a `(try ... (catch ...))` frame the
+  payload is delivered to the catch binding; outside any try frame the
+  call surfaces as a classified error through `mino_last_error` and
+  returns NULL, matching `(throw ...)` from mino.
+- **`mino_args_parse(S, name, args, fmt, ...)`.** Type-check and
+  destructure a primitive's argument list in one call. The format
+  string lists one character per expected positional argument
+  (`i`/`f`/`s`/`S`/`k`/`y`/`b`/`c`/`v`/`V`/`M`/`L`/`H`/`A`); each
+  variadic pointer receives the extracted value. Arity and type
+  errors are raised as classified diagnostics so the caller can
+  just `return NULL;` on a non-zero result. Replaces hand-written
+  `is_cons` / `type == MINO_*` chains at primitive entry points.
+- **`tests/embed_api_test.c`.** C-level smoke test covering version
+  constants, `mino_args_parse` ok / arity / type paths, and
+  `mino_throw` delivery into a try/catch frame.
+
 ## v0.47.0 — Release Gates
 
 Phase 3 of the C core complete-and-polish cycle. This pass does not
