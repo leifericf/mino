@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## v0.44.0 — GC observability and spawn-path perf
+
+Adds embedder-visible remset and mark-stack sizing fields to
+`gc-stats`, layered on the bot-fleet perf work landed on the
+post-v0.43.1 `overnight-2026-04-23` branch. No functional changes
+to the collector; existing embedders see strictly more data in
+the stats struct and map.
 
 ### Added
 
