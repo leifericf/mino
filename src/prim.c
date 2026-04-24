@@ -546,6 +546,23 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns a seq on the collection, or nil if empty.");
     DEF_PRIM(env, "realized?", prim_realized_p,
              "Returns true if the lazy value has been realized.");
+    /* transients */
+    DEF_PRIM(env, "transient",   prim_transient,
+             "Returns a transient view of coll for batch mutation.");
+    DEF_PRIM(env, "persistent!", prim_persistent_bang,
+             "Seals a transient and returns its persistent collection.");
+    DEF_PRIM(env, "assoc!",      prim_assoc_bang,
+             "Associates key with val in a transient map or vector.");
+    DEF_PRIM(env, "conj!",       prim_conj_bang,
+             "Conjoins val onto a transient vector, map, or set.");
+    DEF_PRIM(env, "dissoc!",     prim_dissoc_bang,
+             "Removes key from a transient map.");
+    DEF_PRIM(env, "disj!",       prim_disj_bang,
+             "Removes key from a transient set.");
+    DEF_PRIM(env, "pop!",        prim_pop_bang,
+             "Removes the last element from a transient vector.");
+    DEF_PRIM(env, "transient?",  prim_transient_p,
+             "Returns true if x is a transient.");
     /* atoms */
     DEF_PRIM(env, "atom",           prim_atom,
              "Creates an atom with the given initial value.");

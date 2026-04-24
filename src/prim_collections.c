@@ -1107,3 +1107,120 @@ mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return vec_subvec(S, v, (size_t)start, (size_t)end);
 }
+
+/* ------------------------------------------------------------------------- */
+/* Transient primitives                                                       */
+/*                                                                            */
+/* Thin wrappers around the C kernel in transient.c. The kernel enforces     */
+/* the validity-bit invariant and write-barrier discipline; the primitives   */
+/* just marshal args. Supported inner types are vector, map, and set.        */
+/* ------------------------------------------------------------------------- */
+
+mino_val_t *prim_transient(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "transient requires one argument");
+    }
+    return mino_transient(S, args->as.cons.car);
+}
+
+mino_val_t *prim_persistent_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "persistent! requires one argument");
+    }
+    return mino_persistent(S, args->as.cons.car);
+}
+
+mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    mino_val_t *t, *key, *val;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 3) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "assoc! requires three arguments");
+    }
+    t   = args->as.cons.car;
+    key = args->as.cons.cdr->as.cons.car;
+    val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    return mino_assoc_bang(S, t, key, val);
+}
+
+mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    mino_val_t *t, *val;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "conj! requires two arguments");
+    }
+    t   = args->as.cons.car;
+    val = args->as.cons.cdr->as.cons.car;
+    return mino_conj_bang(S, t, val);
+}
+
+mino_val_t *prim_dissoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    mino_val_t *t, *key;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "dissoc! requires two arguments");
+    }
+    t   = args->as.cons.car;
+    key = args->as.cons.cdr->as.cons.car;
+    return mino_dissoc_bang(S, t, key);
+}
+
+mino_val_t *prim_disj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    mino_val_t *t, *key;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "disj! requires two arguments");
+    }
+    t   = args->as.cons.car;
+    key = args->as.cons.cdr->as.cons.car;
+    return mino_disj_bang(S, t, key);
+}
+
+mino_val_t *prim_pop_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "pop! requires one argument");
+    }
+    return mino_pop_bang(S, args->as.cons.car);
+}
+
+mino_val_t *prim_transient_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "transient? requires one argument");
+    }
+    return mino_is_transient(args->as.cons.car) ? mino_true(S) : mino_false(S);
+}

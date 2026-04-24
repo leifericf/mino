@@ -127,6 +127,14 @@ mino_val_t *prim_disj(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_transient(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_persistent_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_dissoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_disj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_pop_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_transient_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* prim_sequences.c */
 mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env);
