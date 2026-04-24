@@ -96,7 +96,14 @@
   (is (= 42 42N))
   (is (= 0 0N))
   (is (= -1 -1N))
-  (is (= :int (type 42N))))
+  (is (= :bigint (type 42N)))
+  (is (bigint? 42N))
+  (is (not (bigint? 42)))
+  ;; The arbitrary-precision nature of 1N: magnitudes beyond long long
+  ;; are preserved exactly rather than overflowing.
+  (is (bigint? 99999999999999999999999N))
+  (is (= 99999999999999999999999N
+         (read-string (pr-str 99999999999999999999999N)))))
 
 (deftest bigdec-suffix
   (is (= 1.5 1.5M))

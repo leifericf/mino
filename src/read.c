@@ -784,16 +784,28 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
             }
         }
 
-        /* Bigint N suffix: 42N -> 42 */
+        /* Bigint N suffix: 42N -> (bigint 42). Always produces MINO_BIGINT,
+         * even for values that would fit in a long long. Clojure parity:
+         * `(type 1N)` returns clojure.lang.BigInt regardless of magnitude. */
         if (looks_numeric && len > 1 && buf[len - 1] == 'N') {
+            size_t       digit_start = scan_start;
+            int          all_digits  = 1;
             num_len = len - 1;
-            buf[num_len] = '\0';
-            {
-                long long n = strtoll(buf, &endp, 10);
-                if (endp == buf + num_len)
-                    return mino_int(S, n);
+            /* Require digits before N (possibly after a sign prefix). */
+            if (num_len <= digit_start) {
+                all_digits = 0;
+            } else {
+                for (i = digit_start; i < num_len; i++) {
+                    if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
+                }
             }
-            buf[num_len] = 'N';
+            if (all_digits) {
+                mino_val_t *bi;
+                buf[num_len] = '\0';
+                bi = mino_bigint_from_string_n(S, buf, num_len);
+                buf[num_len] = 'N';
+                if (bi != NULL) return bi;
+            }
             num_len = len;
         }
 
