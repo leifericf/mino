@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.49.0 — Docs and Hygiene
+
+A documentation-focused release. No runtime or API changes; the mino
+binary is bit-for-bit equivalent to v0.48.0. The work here brings the
+public docs back in line with the source of truth.
+
+### Fixed
+
+- **INCREMENTAL_BUDGET default in `mino.h` comment.** The header
+  advertised the default as 1024, but the value set in
+  `runtime_state.c` is 4096 and has been since the old-gen tuning
+  sweep. The mino-site Tuning table already showed 4096; this closes
+  the drift between the header and reality.
+- **Task-runner source list missed `src/public_embed.c`.** The
+  v0.48.0 introduction of `mino_throw` and `mino_args_parse` added
+  a translation unit that the `mino task build` source list did not
+  pick up. The binary still linked because nothing in the standalone
+  core path calls those helpers, but a task-built `mino` had their
+  symbols stripped out and any embedder copying the task-runner
+  manifest would inherit the same omission. Added to the source
+  list so task builds are symbol-complete.
+
+### Changed
+
+- **Removed `docs/architecture/baseline-2026-04-21.md`.** It was a
+  dated capture of the TU-size, function-size, and abort-site
+  inventory. The living `docs/ARCHITECTURE_CONTRACT.md` and
+  `docs/INTERNAL_MODULE_MAP.md` pair supersede it.
+- **Tightened `docs/` .gitignore rule** from `docs/*.md` to
+  `docs/**/*.md` so stray architecture notes in subdirectories do
+  not leak into the tracked set.
+
 ## v0.48.0 — Embedder Polish
 
 Sharpens the embedding surface in `src/mino.h` without rearranging any
