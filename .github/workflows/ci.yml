@@ -36,3 +36,42 @@ jobs:
 
       - name: Test
         run: ./mino task test
+
+  perf-gate:
+    name: perf-gate (linux)
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout mino at current SHA
+        uses: actions/checkout@v4
+        with:
+          path: mino-head
+
+      - name: Checkout mino-bench
+        uses: actions/checkout@v4
+        with:
+          repository: leifericf/mino-bench
+          path: mino-bench
+          submodules: recursive
+
+      - name: Override mino submodule to this SHA
+        working-directory: mino-bench
+        run: |
+          rm -rf mino
+          cp -R ../mino-head mino
+
+      - name: Bootstrap mino
+        working-directory: mino-bench/mino
+        run: |
+          printf 'static const char *core_mino_src =\n' > src/core_mino.h
+          sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
+          printf '    ;\n' >> src/core_mino.h
+          cc -std=c99 -O2 -Isrc -o mino src/*.c main.c -lm
+
+      - name: Build bench binaries
+        working-directory: mino-bench
+        run: ./mino/mino task build
+
+      - name: Run perf gate
+        working-directory: mino-bench
+        run: ./mino/mino task perf-gate
