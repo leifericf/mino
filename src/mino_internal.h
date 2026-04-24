@@ -910,6 +910,11 @@ void rb_to_list(mino_state_t *S, const mino_rb_node_t *n,
                 mino_val_t **head, mino_val_t **tail);
 int rb_trees_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
                    int compare_vals);
+mino_val_t *mino_sorted_map_by(mino_state_t *S, mino_val_t *comparator,
+                                mino_val_t **keys, mino_val_t **vals,
+                                size_t len);
+mino_val_t *mino_sorted_set_by(mino_state_t *S, mino_val_t *comparator,
+                                mino_val_t **items, size_t len);
 mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
                              mino_val_t **vals, size_t len);
 mino_val_t *mino_sorted_set(mino_state_t *S, mino_val_t **items,
@@ -924,6 +929,11 @@ mino_val_t *sorted_set_disj1(mino_state_t *S, const mino_val_t *s,
                               const mino_val_t *elem);
 mino_val_t *sorted_seq(mino_state_t *S, const mino_val_t *coll);
 mino_val_t *sorted_rest(mino_state_t *S, const mino_val_t *coll);
+void rb_bounded_seq(mino_state_t *S, const mino_rb_node_t *n, int is_map,
+                    int has_lo, int lo_inclusive, mino_val_t *lo,
+                    int has_hi, int hi_inclusive, mino_val_t *hi,
+                    mino_val_t *comparator, int reverse,
+                    mino_val_t **head, mino_val_t **tail);
 
 /* print.c */
 void print_val(mino_state_t *S, FILE *out, const mino_val_t *v, int readably);

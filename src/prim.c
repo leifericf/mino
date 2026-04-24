@@ -516,6 +516,14 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns a new sorted map with the given key-value pairs.");
     DEF_PRIM(env, "sorted-set", prim_sorted_set,
              "Returns a new sorted set containing the arguments.");
+    DEF_PRIM(env, "sorted-map-by", prim_sorted_map_by,
+             "Returns a sorted map using the given comparator function.");
+    DEF_PRIM(env, "sorted-set-by", prim_sorted_set_by,
+             "Returns a sorted set using the given comparator function.");
+    DEF_PRIM(env, "subseq",   prim_subseq,
+             "Returns the entries of a sorted collection whose keys fall in the given range, ascending.");
+    DEF_PRIM(env, "rsubseq",  prim_rsubseq,
+             "Returns the entries of a sorted collection whose keys fall in the given range, descending.");
     /* string operations */
     DEF_PRIM(env, "subs",     prim_subs,
              "Returns a substring from start (inclusive) to end (exclusive).");

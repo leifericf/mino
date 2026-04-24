@@ -329,19 +329,20 @@ int rb_trees_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
 
 /* --- Constructors -------------------------------------------------------- */
 
-mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
-                             mino_val_t **vals, size_t len)
+mino_val_t *mino_sorted_map_by(mino_state_t *S, mino_val_t *comparator,
+                                mino_val_t **keys, mino_val_t **vals,
+                                size_t len)
 {
     mino_val_t     *v;
     mino_rb_node_t *root = NULL;
     size_t i;
     S->gc_depth++;
     v = alloc_val(S, MINO_SORTED_MAP);
-    v->as.sorted.comparator = NULL;
+    v->as.sorted.comparator = comparator;
     v->as.sorted.len = 0;
     for (i = 0; i < len; i++) {
         int replaced = 0;
-        root = rb_assoc(S, root, keys[i], vals[i], NULL, &replaced);
+        root = rb_assoc(S, root, keys[i], vals[i], comparator, &replaced);
         if (!replaced) v->as.sorted.len++;
     }
     v->as.sorted.root = root;
@@ -349,23 +350,35 @@ mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
     return v;
 }
 
-mino_val_t *mino_sorted_set(mino_state_t *S, mino_val_t **items, size_t len)
+mino_val_t *mino_sorted_set_by(mino_state_t *S, mino_val_t *comparator,
+                                mino_val_t **items, size_t len)
 {
     mino_val_t     *v;
     mino_rb_node_t *root = NULL;
     size_t i;
     S->gc_depth++;
     v = alloc_val(S, MINO_SORTED_SET);
-    v->as.sorted.comparator = NULL;
+    v->as.sorted.comparator = comparator;
     v->as.sorted.len = 0;
     for (i = 0; i < len; i++) {
         int replaced = 0;
-        root = rb_assoc(S, root, items[i], NULL, NULL, &replaced);
+        root = rb_assoc(S, root, items[i], NULL, comparator, &replaced);
         if (!replaced) v->as.sorted.len++;
     }
     v->as.sorted.root = root;
     S->gc_depth--;
     return v;
+}
+
+mino_val_t *mino_sorted_map(mino_state_t *S, mino_val_t **keys,
+                             mino_val_t **vals, size_t len)
+{
+    return mino_sorted_map_by(S, NULL, keys, vals, len);
+}
+
+mino_val_t *mino_sorted_set(mino_state_t *S, mino_val_t **items, size_t len)
+{
+    return mino_sorted_set_by(S, NULL, items, len);
 }
 
 /* --- High-level operations for prim integration -------------------------- */
@@ -453,4 +466,78 @@ mino_val_t *sorted_rest(mino_state_t *S, const mino_val_t *coll)
     if (coll->as.sorted.len <= 1) return mino_nil(S);
     s = sorted_seq(S, coll);
     return mino_is_cons(s) ? s->as.cons.cdr : mino_nil(S);
+}
+
+/* --- Bounded range walk for subseq / rsubseq ----------------------------- */
+
+/* Walks the tree in order (or reverse order if reverse != 0), appending
+ * entries whose keys satisfy the optional lower and upper bounds. For
+ * MINO_SORTED_MAP the emitted entries are [key val] vectors; for
+ * MINO_SORTED_SET they are bare keys. Subtrees that cannot contain an
+ * in-range key are pruned.
+ *
+ * Mutation-consistency contract is snapshot: the rbtree is persistent, so
+ * the root pointer passed in is an immutable view. No fail-fast check is
+ * needed because no later assoc/dissoc on the containing collection can
+ * affect the captured tree. */
+void rb_bounded_seq(mino_state_t *S, const mino_rb_node_t *n, int is_map,
+                    int has_lo, int lo_inclusive, mino_val_t *lo,
+                    int has_hi, int hi_inclusive, mino_val_t *hi,
+                    mino_val_t *comparator, int reverse,
+                    mino_val_t **head, mino_val_t **tail)
+{
+    int cmp_lo;
+    int cmp_hi;
+    int emit;
+    if (n == NULL) return;
+    cmp_lo = has_lo ? rb_compare(S, n->key, lo, comparator) : 1;
+    cmp_hi = has_hi ? rb_compare(S, n->key, hi, comparator) : -1;
+    emit = (cmp_lo > 0 || (cmp_lo == 0 && lo_inclusive))
+        && (cmp_hi < 0 || (cmp_hi == 0 && hi_inclusive));
+    if (!reverse) {
+        if (cmp_lo > 0) {
+            rb_bounded_seq(S, n->left, is_map,
+                           has_lo, lo_inclusive, lo,
+                           has_hi, hi_inclusive, hi,
+                           comparator, 0, head, tail);
+        }
+    } else {
+        if (cmp_hi < 0) {
+            rb_bounded_seq(S, n->right, is_map,
+                           has_lo, lo_inclusive, lo,
+                           has_hi, hi_inclusive, hi,
+                           comparator, 1, head, tail);
+        }
+    }
+    if (emit) {
+        mino_val_t *entry;
+        mino_val_t *cell;
+        if (is_map) {
+            mino_val_t *kv[2];
+            kv[0] = n->key;
+            kv[1] = n->val;
+            entry = mino_vector(S, kv, 2);
+        } else {
+            entry = n->key;
+        }
+        cell = mino_cons(S, entry, mino_nil(S));
+        if (*tail == NULL) *head = cell;
+        else mino_cons_cdr_set(S, *tail, cell);
+        *tail = cell;
+    }
+    if (!reverse) {
+        if (cmp_hi < 0) {
+            rb_bounded_seq(S, n->right, is_map,
+                           has_lo, lo_inclusive, lo,
+                           has_hi, hi_inclusive, hi,
+                           comparator, 0, head, tail);
+        }
+    } else {
+        if (cmp_lo > 0) {
+            rb_bounded_seq(S, n->left, is_map,
+                           has_lo, lo_inclusive, lo,
+                           has_hi, hi_inclusive, hi,
+                           comparator, 1, head, tail);
+        }
+    }
 }

@@ -983,3 +983,167 @@ mino_val_t *prim_sorted_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return mino_sorted_set(S, tmp, n);
 }
+
+mino_val_t *prim_sorted_map_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n, pairs, i;
+    mino_val_t *comparator, **ks, **vs, *p;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n < 1 || (n - 1) % 2 != 0) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "sorted-map-by requires a comparator and an even number of keys and values");
+    }
+    comparator = args->as.cons.car;
+    if (comparator == NULL
+        || (comparator->type != MINO_FN && comparator->type != MINO_PRIM)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "sorted-map-by: comparator must be a function");
+    }
+    pairs = (n - 1) / 2;
+    if (pairs == 0) return mino_sorted_map_by(S, comparator, NULL, NULL, 0);
+    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*ks));
+    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, pairs * sizeof(*vs));
+    p = args->as.cons.cdr;
+    for (i = 0; i < pairs; i++) {
+        ks[i] = p->as.cons.car; p = p->as.cons.cdr;
+        vs[i] = p->as.cons.car; p = p->as.cons.cdr;
+    }
+    return mino_sorted_map_by(S, comparator, ks, vs, pairs);
+}
+
+mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n, items, i;
+    mino_val_t *comparator, **tmp, *p;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n < 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "sorted-set-by requires a comparator");
+    }
+    comparator = args->as.cons.car;
+    if (comparator == NULL
+        || (comparator->type != MINO_FN && comparator->type != MINO_PRIM)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "sorted-set-by: comparator must be a function");
+    }
+    items = n - 1;
+    if (items == 0) return mino_sorted_set_by(S, comparator, NULL, 0);
+    tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, items * sizeof(*tmp));
+    p = args->as.cons.cdr;
+    for (i = 0; i < items; i++) {
+        tmp[i] = p->as.cons.car;
+        p = p->as.cons.cdr;
+    }
+    return mino_sorted_set_by(S, comparator, tmp, items);
+}
+
+/* Classify one of the four comparison primitives (<, <=, >, >=) by function
+ * pointer. On success, *is_gt tells whether the test is a > family test and
+ * *inclusive tells whether the boundary value itself is included. Returns 0
+ * if v is not one of the four accepted tests. */
+static int classify_subseq_test(const mino_val_t *v, int *is_gt, int *inclusive)
+{
+    if (v == NULL || v->type != MINO_PRIM) return 0;
+    if (v->as.prim.fn == prim_lt)  { *is_gt = 0; *inclusive = 0; return 1; }
+    if (v->as.prim.fn == prim_lte) { *is_gt = 0; *inclusive = 1; return 1; }
+    if (v->as.prim.fn == prim_gt)  { *is_gt = 1; *inclusive = 0; return 1; }
+    if (v->as.prim.fn == prim_gte) { *is_gt = 1; *inclusive = 1; return 1; }
+    return 0;
+}
+
+/* Shared body for subseq / rsubseq. reverse = 0 for subseq, 1 for rsubseq.
+ *
+ * Three-arg form: (subseq sc test key)
+ *   A > or >= test means "entries whose key is > / >= key" (lower bound).
+ *   A < or <= test means "entries whose key is < / <= key" (upper bound).
+ * Five-arg form: (subseq sc start-test start-key end-test end-key)
+ *   start-test must be > or >=, end-test must be < or <=. Both bounds
+ *   apply. */
+static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
+{
+    size_t n;
+    mino_val_t *sc;
+    mino_val_t *head = mino_nil(S);
+    mino_val_t *tail = NULL;
+    int has_lo = 0, lo_inclusive = 0;
+    int has_hi = 0, hi_inclusive = 0;
+    mino_val_t *lo_key = NULL;
+    mino_val_t *hi_key = NULL;
+    const char *name = reverse ? "rsubseq" : "subseq";
+    int is_map;
+    arg_count(S, args, &n);
+    if (n != 3 && n != 5) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            reverse
+              ? "rsubseq requires 3 or 5 arguments"
+              : "subseq requires 3 or 5 arguments");
+    }
+    sc = args->as.cons.car;
+    if (sc == NULL
+        || (sc->type != MINO_SORTED_MAP && sc->type != MINO_SORTED_SET)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            reverse
+              ? "rsubseq: first argument must be a sorted map or sorted set"
+              : "subseq: first argument must be a sorted map or sorted set");
+    }
+    is_map = sc->type == MINO_SORTED_MAP;
+    (void)name;
+    if (n == 3) {
+        mino_val_t *test = args->as.cons.cdr->as.cons.car;
+        mino_val_t *key  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        int is_gt, inclusive;
+        if (!classify_subseq_test(test, &is_gt, &inclusive)) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                reverse
+                  ? "rsubseq: test must be <, <=, > or >="
+                  : "subseq: test must be <, <=, > or >=");
+        }
+        if (is_gt) {
+            has_lo = 1; lo_inclusive = inclusive; lo_key = key;
+        } else {
+            has_hi = 1; hi_inclusive = inclusive; hi_key = key;
+        }
+    } else {
+        mino_val_t *p = args->as.cons.cdr;
+        mino_val_t *start_test = p->as.cons.car; p = p->as.cons.cdr;
+        mino_val_t *start_key  = p->as.cons.car; p = p->as.cons.cdr;
+        mino_val_t *end_test   = p->as.cons.car; p = p->as.cons.cdr;
+        mino_val_t *end_key    = p->as.cons.car;
+        int is_gt, inclusive;
+        if (!classify_subseq_test(start_test, &is_gt, &inclusive) || !is_gt) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                reverse
+                  ? "rsubseq: start-test must be > or >="
+                  : "subseq: start-test must be > or >=");
+        }
+        has_lo = 1; lo_inclusive = inclusive; lo_key = start_key;
+        if (!classify_subseq_test(end_test, &is_gt, &inclusive) || is_gt) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                reverse
+                  ? "rsubseq: end-test must be < or <="
+                  : "subseq: end-test must be < or <=");
+        }
+        has_hi = 1; hi_inclusive = inclusive; hi_key = end_key;
+    }
+    if (sc->as.sorted.len == 0) return mino_nil(S);
+    rb_bounded_seq(S, sc->as.sorted.root, is_map,
+                   has_lo, lo_inclusive, lo_key,
+                   has_hi, hi_inclusive, hi_key,
+                   sc->as.sorted.comparator, reverse,
+                   &head, &tail);
+    return head;
+}
+
+mino_val_t *prim_subseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return subseq_impl(S, args, 0);
+}
+
+mino_val_t *prim_rsubseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return subseq_impl(S, args, 1);
+}

@@ -88,4 +88,82 @@
   (is (= :sorted-set (type (sorted-set))))
   (is (= :sorted-map (type (sorted-map)))))
 
+;; --- sorted-map-by / sorted-set-by ---
+
+(deftest sorted-map-by-custom-order
+  (let [rev (fn [a b] (compare b a))
+        m   (sorted-map-by rev :a 1 :b 2 :c 3)]
+    (is (= '([:c 3] [:b 2] [:a 1]) (seq m)))
+    (is (= 3 (count m)))))
+
+(deftest sorted-map-by-assoc-preserves-comparator
+  (let [rev (fn [a b] (compare b a))
+        m   (assoc (sorted-map-by rev :b 2) :a 1 :c 3)]
+    (is (= '([:c 3] [:b 2] [:a 1]) (seq m)))))
+
+(deftest sorted-set-by-custom-order
+  (let [rev (fn [a b] (compare b a))
+        s   (sorted-set-by rev 1 2 3)]
+    (is (= '(3 2 1) (seq s)))))
+
+(deftest sorted-by-rejects-non-fn
+  (is (thrown? (sorted-map-by 42 :a 1)))
+  (is (thrown? (sorted-set-by :not-a-fn 1 2))))
+
+(deftest sorted-map-natural-still-works
+  ;; Anti-pattern check: verifying sorted-map path still works after the
+  ;; constructor flip.
+  (let [m (sorted-map :c 3 :a 1 :b 2)]
+    (is (= '([:a 1] [:b 2] [:c 3]) (seq m)))))
+
+;; --- subseq / rsubseq ---
+
+(deftest subseq-map-lower-bound
+  (let [m (apply sorted-map (mapcat (fn [i] [i (* i i)]) (range 6)))]
+    (is (= '([3 9] [4 16] [5 25]) (subseq m >= 3)))
+    (is (= '([4 16] [5 25])       (subseq m > 3)))))
+
+(deftest subseq-map-upper-bound
+  (let [m (apply sorted-map (mapcat (fn [i] [i (* i i)]) (range 6)))]
+    (is (= '([0 0] [1 1] [2 4])         (subseq m <= 2)))
+    (is (= '([0 0] [1 1])               (subseq m < 2)))))
+
+(deftest subseq-map-range
+  (let [m (apply sorted-map (mapcat (fn [i] [i (* i i)]) (range 10)))]
+    (is (= '([3 9] [4 16] [5 25] [6 36]) (subseq m >= 3 < 7)))
+    (is (= '([3 9] [4 16] [5 25] [6 36] [7 49]) (subseq m >= 3 <= 7)))
+    (is (= '([4 16] [5 25] [6 36] [7 49]) (subseq m > 3 <= 7)))))
+
+(deftest subseq-set
+  (let [s (sorted-set 1 2 3 4 5)]
+    (is (= '(3 4 5) (subseq s >= 3)))
+    (is (= '(2 3 4) (subseq s > 1 < 5)))))
+
+(deftest rsubseq-map-lower-bound
+  (let [m (apply sorted-map (mapcat (fn [i] [i (* i i)]) (range 6)))]
+    (is (= '([5 25] [4 16] [3 9]) (rsubseq m >= 3)))))
+
+(deftest rsubseq-map-range
+  (let [m (apply sorted-map (mapcat (fn [i] [i (* i i)]) (range 10)))]
+    (is (= '([6 36] [5 25] [4 16] [3 9]) (rsubseq m >= 3 < 7)))))
+
+(deftest rsubseq-set
+  (let [s (sorted-set 1 2 3 4 5)]
+    (is (= '(4 3 2) (rsubseq s > 1 < 5)))))
+
+(deftest subseq-empty-range
+  (let [m (sorted-map 1 :a 5 :b 10 :c)]
+    (is (nil? (subseq m > 5 < 5)))
+    (is (nil? (subseq m > 100)))))
+
+(deftest subseq-empty-coll
+  (is (nil? (subseq (sorted-map) >= 1)))
+  (is (nil? (subseq (sorted-set) >= 1))))
+
+(deftest subseq-rejects-bad-args
+  (is (thrown? (subseq [1 2 3] >= 1)))       ; not sorted
+  (is (thrown? (subseq (sorted-map) map 3))) ; test not comparison
+  (is (thrown? (subseq (sorted-map) < 1 > 5)))  ; start-test must be > family
+  (is (thrown? (subseq (sorted-map) >= 1 > 5)))) ; end-test must be < family
+
 ;; (run-tests) -- called by tests/run.mino
