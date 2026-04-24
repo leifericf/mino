@@ -1,5 +1,82 @@
 # Changelog
 
+## v0.46.0 — Dialect C Groundwork
+
+Phase 2 of the C core complete-and-polish cycle. Lands the C-level
+mechanisms that later dialect work will build on without dragging the
+user-visible surface along yet. Integer arithmetic now refuses to
+silently wrap, character literals are a first-class value type,
+transducer `sequence` accepts multiple collections, and embedders
+get a C API for batch mutation of persistent collections. The
+previously-disabled clj compat assertions that this C work unlocks
+are re-enabled in the same pass — they were gated off precisely
+because this foundation was missing.
+
+### Added
+
+- **First-class character value type.** `\A`, `\space`, `\newline`,
+  `\tab`, `\return`, `\backspace`, `\formfeed`, `\oNNN`, `\uNNNN`, and
+  multi-byte UTF-8 literals (`\é`, `\☃`) parse to a new `MINO_CHAR`
+  value holding a Unicode codepoint. `char?` returns true for chars
+  only. `(type \A)` is `:char`. `int` converts a char to its
+  codepoint. `str` emits the codepoint's UTF-8 encoding. Chars hash
+  and compare distinctly from single-char strings, so they live
+  cleanly as map keys and set members. `pr-str` round-trips the
+  named form for the six control chars, `\X` for printable ASCII, and
+  `\uNNNN` for everything else.
+- **Public C transient API.** `mino_transient`, `mino_persistent`,
+  `mino_assoc_bang`, `mino_conj_bang`, `mino_dissoc_bang`,
+  `mino_disj_bang`, `mino_pop_bang`, `mino_is_transient`, and
+  `mino_transient_count` give embedders a batch-mutation path for
+  building persistent vectors, maps, and sets from C. `persistent!`
+  seals the wrapper; further mutators on a sealed transient throw.
+  The initial implementation wraps the persistent ops; a later
+  in-place trie-node path can replace it without changing the C ABI.
+  The user-level mino `transient`/`persistent!`/`assoc!` names stay
+  deferred to the Dialect-Complete cycle.
+- **Multi-collection `sequence`.** `(sequence xform coll & more-colls)`
+  pulls one element from each collection per step, passes all
+  elements to the transducer's multi-input reducer arity, and stops
+  at the shortest collection. `map`'s transducer gains the matching
+  `[result input & inputs]` arity so `(sequence (map +) [1 2 3]
+  (repeat 10))` returns `(11 12 13)` as in Clojure.
+- **Integer-overflow helpers in `src/prim_numeric.c`.**
+  `iadd_overflow`, `isub_overflow`, `imul_overflow`, and
+  `ineg_overflow` wrap `__builtin_*_overflow` where available and
+  fall back to explicit range-checked preconditions on MSVC and older
+  compilers.
+- **C embedding tests.** `tests/transient_test.c` and
+  `tests/multimethod_test.c` exercise the transient API and
+  multimethod dispatch (including hierarchy resolution and
+  `prefer-method` disambiguation) through the public embedding API.
+
+### Changed
+
+- **Integer overflow throws.** `+`, `-`, `*`, `inc`, and `dec` now
+  raise a classified `eval/overflow` (MOV001) when the result would
+  wrap past `LLONG_MIN`/`LLONG_MAX`. Float arithmetic is unchanged;
+  IEEE 754 already has its own overflow semantics. Unary `-` of
+  `LLONG_MIN` now throws instead of invoking signed-negation UB.
+  Hot-loop micro-benchmarks (inc loop 10000, reduce + 1000) regress
+  2-3% within run-to-run noise; the compiler builtins compile to a
+  single flag-test instruction on x86_64 and ARM64.
+- **Character literals are no longer strings.** Code that compared
+  `\A` to `"A"` or relied on `(string? \A)` now sees `false`. The
+  three internal tests that asserted the old semantics
+  (`compat_test`, `literal_test`, `clojure_string_test`) now assert
+  the char-distinct behaviour. `(seq s)` still yields single-char
+  strings for now — a future cycle aligns that with Clojure's
+  char-producing behaviour.
+
+### Fixed
+
+- **Re-enabled four previously-disabled clj-compat assertions.**
+  Keyword-as-fn and set-as-fn usage (`((juxt :a :b) m)`,
+  `(every? #{:a} xs)`, `(some #{:a} xs)`, etc.) already works;
+  metadata survives three-deep `(pop (pop (pop v)))`; multi-coll
+  `sequence` returns the expected paired result. The TODO comments
+  that had gated these assertions are gone.
+
 ## v0.45.0 — Correctness Closure
 
 Closes the three known correctness gaps in the C core. The lazy-seq
