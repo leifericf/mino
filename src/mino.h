@@ -541,6 +541,66 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                mino_env_t *env, mino_val_t **out);
 
 /* ------------------------------------------------------------------------- */
+/* Exceptions                                                                */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Raise a mino exception carrying `ex` as the payload. When called from a
+ * C primitive that is executing inside a mino (try ... (catch ...)) frame,
+ * the payload is delivered to the matching catch binding. When called
+ * outside any try frame, the exception surfaces as a classified error
+ * through mino_last_error (kind "user", code "MUS001") and the function
+ * returns NULL.
+ *
+ * Inside a try frame this call does NOT return; control transfers to the
+ * try handler via longjmp. Callers should treat it as "returns NULL" for
+ * typing purposes and not rely on any code after the call:
+ *
+ *   return mino_throw(S, mino_keyword(S, "bad-arg"));
+ *
+ * The payload can be any mino value: a keyword, a string, or an
+ * information-carrying map built via mino_map(). This is the C-side
+ * analogue of the (throw ex) mino primitive.
+ */
+mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex);
+
+/* ------------------------------------------------------------------------- */
+/* Argument parsing                                                          */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Type-check and destructure a primitive's argument list into C variables.
+ * The format string lists one character per expected positional argument;
+ * each variadic pointer receives the corresponding extracted value:
+ *
+ *   "i"  long long *        -- MINO_INT
+ *   "f"  double *           -- MINO_FLOAT or MINO_INT (promoted)
+ *   "s"  const char **      -- MINO_STRING; pointer into mino-owned data
+ *   "S"  const char **,     -- MINO_STRING; pointer plus byte length
+ *        size_t *              (write both in order: "S" consumes two ptrs)
+ *   "k"  const char **      -- MINO_KEYWORD name (without the leading :)
+ *   "y"  const char **      -- MINO_SYMBOL name
+ *   "b"  int *              -- MINO_BOOL (0 or 1)
+ *   "c"  int *              -- MINO_CHAR codepoint (0..0x10FFFF)
+ *   "v"  mino_val_t **      -- any value (no type check)
+ *   "V"  mino_val_t **      -- MINO_VECTOR
+ *   "M"  mino_val_t **      -- MINO_MAP
+ *   "L"  mino_val_t **      -- MINO_CONS or MINO_NIL (a list)
+ *   "H"  mino_val_t **      -- MINO_HANDLE
+ *   "A"  mino_val_t **      -- MINO_ATOM
+ *
+ * Returns 0 on success, -1 on arity or type error. On failure the current
+ * error is set via mino_last_error with kind "eval/arity" or "eval/type"
+ * so the caller can just `return NULL;` after a non-zero return. The name
+ * argument is used in error messages ("foo: expected int, got string").
+ *
+ * Extra arguments beyond the format string cause an arity error; missing
+ * arguments do the same.
+ */
+int mino_args_parse(mino_state_t *S, const char *name, mino_val_t *args,
+                    const char *fmt, ...);
+
+/* ------------------------------------------------------------------------- */
 /* Host interop                                                              */
 /* ------------------------------------------------------------------------- */
 
