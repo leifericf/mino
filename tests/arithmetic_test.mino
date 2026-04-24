@@ -57,6 +57,25 @@
   (is (= 16 (bit-shift-left 1 4)))
   (is (= 4 (bit-shift-right 16 2))))
 
+(deftest bit-shift-boundary
+  ;; In-range shifts at both ends of [0, 63] are defined and produce the
+  ;; usual two's-complement results.
+  (is (= 1 (bit-shift-left 1 0)))
+  (is (= -9223372036854775808 (bit-shift-left 1 63)))
+  (is (= 1 (bit-shift-right 1 0)))
+  (is (= 0 (bit-shift-right 1 63)))
+  (is (= 9223372036854775807 (unsigned-bit-shift-right -1 1)))
+  (is (= 1 (unsigned-bit-shift-right -1 63)))
+  ;; Out-of-range shift amounts (negative or >= 64) must throw; C99 leaves
+  ;; such shifts undefined, so surface them as a bounds error rather than
+  ;; letting the underlying shift instruction silently mask the count.
+  (is (thrown? (bit-shift-left 1 64)))
+  (is (thrown? (bit-shift-left 1 -1)))
+  (is (thrown? (bit-shift-right 1 64)))
+  (is (thrown? (bit-shift-right 1 -1)))
+  (is (thrown? (unsigned-bit-shift-right 1 64)))
+  (is (thrown? (unsigned-bit-shift-right 1 -1))))
+
 (deftest trivial-compositions
   (is (= 2 (second [1 2 3])))
   (is (= 1 (ffirst '((1 2) (3 4)))))
