@@ -14,22 +14,9 @@ static int kw_match(const mino_val_t *v, const char *s)
     return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
 }
 
-/* Convert dotted symbol name to slash-separated path in buf.
- * Returns 0 on success, -1 on error. */
-static int dots_to_slashes(const char *src, size_t srclen,
-                           char *buf, size_t bufsize)
-{
-    size_t i;
-    if (srclen == 0 || srclen >= bufsize) return -1;
-    if (src[0] == '.' || src[srclen - 1] == '.') return -1;
-    for (i = 0; i < srclen; i++) {
-        if (src[i] == '.')       buf[i] = '/';
-        else if (src[i] == '-')  buf[i] = '_';
-        else                     buf[i] = src[i];
-    }
-    buf[srclen] = '\0';
-    return 0;
-}
+/* Dotted-name conversion and alias table mutation live in
+ * runtime_module.c so this file and eval_special_defs.c share the
+ * same logic. */
 
 /* (require name) -- load a module by name using the host-supplied resolver.
  * name can be a string ("path/to/mod") or a quoted vector
@@ -70,8 +57,9 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             /* :refer is a no-op */
         }
         /* Convert dotted name and load. */
-        if (dots_to_slashes(mod_sym->as.s.data, mod_sym->as.s.len,
-                            pathbuf, sizeof(pathbuf)) != 0) {
+        if (runtime_module_dotted_to_path(mod_sym->as.s.data,
+                                          mod_sym->as.s.len,
+                                          pathbuf, sizeof(pathbuf)) != 0) {
             set_eval_diag(S, S->eval_current_form, "name", "MNS001", "require: invalid module name");
             return NULL;
         }
@@ -85,35 +73,13 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Store alias. */
         if (result != NULL && alias_name != NULL && alias_len > 0
             && alias_len < 256 && mod_sym->as.s.len < 256) {
-            char abuf[256], fbuf[256];
+            char abuf[256];
+            char fbuf[256];
             memcpy(abuf, alias_name, alias_len);
             abuf[alias_len] = '\0';
             memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
             fbuf[mod_sym->as.s.len] = '\0';
-            /* Add to alias table. */
-            if (S->ns_alias_len == S->ns_alias_cap) {
-                size_t nc = S->ns_alias_cap == 0 ? 8 : S->ns_alias_cap * 2;
-                ns_alias_t *nb = (ns_alias_t *)realloc(
-                    S->ns_aliases, nc * sizeof(*nb));
-                if (nb != NULL) {
-                    S->ns_aliases   = nb;
-                    S->ns_alias_cap = nc;
-                }
-            }
-            if (S->ns_alias_len < S->ns_alias_cap) {
-                size_t an = alias_len + 1;
-                size_t fn = mod_sym->as.s.len + 1;
-                S->ns_aliases[S->ns_alias_len].alias =
-                    (char *)malloc(an);
-                S->ns_aliases[S->ns_alias_len].full_name =
-                    (char *)malloc(fn);
-                if (S->ns_aliases[S->ns_alias_len].alias != NULL
-                    && S->ns_aliases[S->ns_alias_len].full_name != NULL) {
-                    memcpy(S->ns_aliases[S->ns_alias_len].alias, abuf, an);
-                    memcpy(S->ns_aliases[S->ns_alias_len].full_name, fbuf, fn);
-                    S->ns_alias_len++;
-                }
-            }
+            runtime_module_add_alias(S, abuf, fbuf);
         }
         return result != NULL ? result : mino_nil(S);
     }

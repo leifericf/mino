@@ -942,4 +942,12 @@ host_type_t   *host_type_find(mino_state_t *S, const char *type_key);
 host_member_t *host_member_find(host_type_t *t, const char *name,
                                 int kind, int arity);
 
+/* runtime_module.c: shared module-resolution helpers used by the
+ * ns special form (eval_special_defs.c) and the require primitive
+ * (prim_module.c). */
+int  runtime_module_dotted_to_path(const char *name, size_t nlen,
+                                   char *buf, size_t bufsize);
+void runtime_module_add_alias(mino_state_t *S,
+                              const char *alias, const char *full);
+
 #endif /* MINO_INTERNAL_H */
