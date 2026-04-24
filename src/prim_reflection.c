@@ -168,6 +168,13 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL)  return mino_keyword(S, "nil");
+    /* Honor :type metadata (Clojure semantics). Enables print-method
+     * dispatch for user types via (with-meta obj {:type :my-type}). */
+    if (v->meta != NULL && v->meta->type == MINO_MAP) {
+        mino_val_t *tk = mino_keyword(S, "type");
+        mino_val_t *tv = map_get_val(v->meta, tk);
+        if (tv != NULL) return tv;
+    }
     switch (v->type) {
     case MINO_NIL:     return mino_keyword(S, "nil");
     case MINO_BOOL:    return mino_keyword(S, "bool");
