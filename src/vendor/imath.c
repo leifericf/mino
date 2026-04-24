@@ -1736,9 +1736,16 @@ static bool s_pad(mp_int z, mp_size min) {
   return true;
 }
 
-/* Note: This will not work correctly when value == MP_SMALL_MIN */
+/* mino: take the absolute value through unsigned arithmetic so the
+ * negation at MP_SMALL_MIN wraps cleanly in two's complement instead of
+ * tripping signed-overflow UB (caught by UBSAN). For MP_SMALL_MIN the
+ * modular negate yields MP_SMALL_MIN as mp_usmall, which is exactly the
+ * unsigned magnitude |MP_SMALL_MIN|, so s_ufake receives the correct
+ * value. */
 static void s_fake(mp_int z, mp_small value, mp_digit vbuf[]) {
-  mp_usmall uv = (mp_usmall)(value < 0) ? -value : value;
+  mp_usmall uv = (value < 0)
+    ? (mp_usmall)(0 - (mp_usmall)value)
+    : (mp_usmall)value;
   s_ufake(z, uv, vbuf);
   if (value < 0) z->sign = MP_NEG;
 }
