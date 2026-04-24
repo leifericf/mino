@@ -135,7 +135,8 @@
    (fn [rf]
      (fn ([] (rf))
          ([result] (rf result))
-         ([result input] (rf result (f input))))))
+         ([result input] (rf result (f input)))
+         ([result input & inputs] (rf result (apply f input inputs))))))
   ([f & colls]
    (if (= (count colls) 1)
      (map1_ f (first colls))
@@ -1688,34 +1689,68 @@
   ([to from] (into_ to from))
   ([to xf from] (transduce xf conj to from))))
 
-(defn sequence "Returns a lazy sequence of applying transducer xf to coll." [xf coll]
-  (let [acc   (atom [])
-        xrf   (xf (fn
-                     ([] nil)
-                     ([result] result)
-                     ([_ input] (swap! acc conj input) nil)))]
-    ((fn step [s]
-       (lazy-seq
-         (loop [s s]
-           (if-let [s (seq s)]
-             (do
-               (let [ret (xrf nil (first s))]
-                 (if (reduced? ret)
-                   (do (xrf nil)
-                       (let [items @acc]
-                         (reset! acc [])
-                         (when (seq items)
-                           (concat items nil))))
-                   (let [items @acc]
-                     (if (seq items)
-                       (do (reset! acc [])
-                           (concat items (step (rest s))))
-                       (recur (rest s)))))))
-             (do (xrf nil)
-                 (let [items @acc]
-                   (reset! acc [])
-                   (when (seq items) (seq items))))))))
-     coll)))
+(def sequence "Returns a lazy sequence of applying transducer xf to coll, or to the pair-wise step of multiple collections. Parallel collections stop at the shortest." (fn
+  ([xf coll]
+   (let [acc   (atom [])
+         xrf   (xf (fn
+                      ([] nil)
+                      ([result] result)
+                      ([_ input] (swap! acc conj input) nil)))]
+     ((fn step [s]
+        (lazy-seq
+          (loop [s s]
+            (if-let [s (seq s)]
+              (do
+                (let [ret (xrf nil (first s))]
+                  (if (reduced? ret)
+                    (do (xrf nil)
+                        (let [items @acc]
+                          (reset! acc [])
+                          (when (seq items)
+                            (concat items nil))))
+                    (let [items @acc]
+                      (if (seq items)
+                        (do (reset! acc [])
+                            (concat items (step (rest s))))
+                        (recur (rest s)))))))
+              (do (xrf nil)
+                  (let [items @acc]
+                    (reset! acc [])
+                    (when (seq items) (seq items))))))))
+      coll)))
+  ([xf coll & more-colls]
+   ;; Multi-coll variant: pull one element per collection per step and
+   ;; pass them all as inputs to the transducer's reducer. The reducer
+   ;; is expected to support (rf acc in1 in2 ...) for this to be
+   ;; meaningful; map, filter, etc. implement that arity.
+   (let [acc   (atom [])
+         xrf   (xf (fn
+                      ([] nil)
+                      ([result] result)
+                      ([_ input] (swap! acc conj input) nil)
+                      ([_ input & more] (swap! acc conj (apply vector input more)) nil)))]
+     ((fn step [ss]
+        (lazy-seq
+          (loop [ss ss]
+            (let [seqs (map1_ seq ss)]
+              (if (all-some?_ seqs)
+                (let [firsts (map1_ first seqs)
+                      ret   (apply xrf nil firsts)]
+                  (if (reduced? ret)
+                    (do (xrf nil)
+                        (let [items @acc]
+                          (reset! acc [])
+                          (when (seq items) (concat items nil))))
+                    (let [items @acc]
+                      (if (seq items)
+                        (do (reset! acc [])
+                            (concat items (step (map1_ rest seqs))))
+                        (recur (map1_ rest seqs))))))
+                (do (xrf nil)
+                    (let [items @acc]
+                      (reset! acc [])
+                      (when (seq items) (seq items)))))))))
+      (cons coll more-colls))))))
 
 (def halt-when "Returns a transducer that halts reduction when pred is satisfied." (fn
   ([pred] (halt-when pred nil))

@@ -135,8 +135,11 @@
            (eduction cat [[1 2 3 nil] [4 5 6 nil]])))))
 
 ;; --- sequence (multi-collection) ---
-;; TODO: multi-collection sequence not yet implemented
-;; (deftest clj-sequence-multi
-;;   (is (= [11 12 13 14] (sequence (map +) [1 2 3 4] (repeat 10))))
-;;   (is (= [11 12 13 14] (sequence (map +) (repeat 10) [1 2 3 4])))
-;;   (is (= [31 32 33 34] (sequence (map +) (repeat 10) (repeat 20) [1 2 3 4]))))
+
+(deftest clj-sequence-multi
+  (is (= '(11 12 13 14) (sequence (map +) [1 2 3 4] (repeat 10))))
+  (is (= '(11 12 13 14) (sequence (map +) (repeat 10) [1 2 3 4])))
+  (is (= '(31 32 33 34) (sequence (map +) (repeat 10) (repeat 20) [1 2 3 4])))
+  ;; Short coll terminates the walk, matching Clojure.
+  (is (= '(11 22) (sequence (map +) [1 2] [10 20 30 40])))
+  (is (= '(2 4 6) (sequence (map +) [1 2 3] [1 2 3]))))
