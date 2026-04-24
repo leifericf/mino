@@ -470,9 +470,7 @@
   (is (= false (every? pos? [1 -2])))
   (is (= false (every? pos? [1 2 -3])))
   (is (= false (every? pos? [1 2 -3 4])))
-  ;; TODO: sets as functions not yet supported
-  ;; (is (= true (every? #{:a} [:a :a])))
-  )
+  (is (= true (every? #{:a} [:a :a]))))
 
 ;; --- not-every? ---
 
@@ -489,11 +487,9 @@
   (is (= true (not-every? pos? [1 -2])))
   (is (= true (not-every? pos? [1 2 -3])))
   (is (= true (not-every? pos? [1 2 -3 4])))
-  ;; TODO: sets as functions not yet supported
-  ;; (is (= false (not-every? #{:a} [:a :a])))
-  ;; (is (= true (not-every? #{:a} [:a :b])))
-  ;; (is (= true (not-every? #{:a} [:b :b])))
-  )
+  (is (= false (not-every? #{:a} [:a :a])))
+  (is (= true (not-every? #{:a} [:a :b])))
+  (is (= true (not-every? #{:a} [:b :b]))))
 
 ;; --- not-any? ---
 
@@ -510,11 +506,9 @@
   (is (= false (not-any? pos? [1 -2])))
   (is (= false (not-any? pos? [1 2 -3])))
   (is (= false (not-any? pos? [1 2 -3 4])))
-  ;; TODO: sets as functions not yet supported
-  ;; (is (= false (not-any? #{:a} [:a :a])))
-  ;; (is (= false (not-any? #{:a} [:a :b])))
-  ;; (is (= true (not-any? #{:a} [:b :b])))
-  )
+  (is (= false (not-any? #{:a} [:a :a])))
+  (is (= false (not-any? #{:a} [:a :b])))
+  (is (= true (not-any? #{:a} [:b :b]))))
 
 ;; --- some ---
 
@@ -529,13 +523,11 @@
   (is (= nil (some pos? [-1 -2])))
   (is (= true (some pos? [-1 2])))
   (is (= true (some pos? [1 -2])))
-  ;; TODO: sets as functions not yet supported
-  ;; (is (= :a (some #{:a} [:a :a])))
-  ;; (is (= :a (some #{:a} [:b :a])))
-  ;; (is (= nil (some #{:a} [:b :b])))
-  ;; (is (= :a (some #{:a} '(:a :b))))
-  ;; (is (= :a (some #{:a} #{:a :b})))
-  )
+  (is (= :a (some #{:a} [:a :a])))
+  (is (= :a (some #{:a} [:b :a])))
+  (is (= nil (some #{:a} [:b :b])))
+  (is (= :a (some #{:a} '(:a :b))))
+  (is (= :a (some #{:a} #{:a :b}))))
 
 ;; --- empty? ---
 
