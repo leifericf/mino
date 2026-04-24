@@ -12,6 +12,7 @@ bin/
 /mino
 /mino_asan
 /mino_tsan
+/mino_ubsan
 src/core_mino.h
 
 # Test artifacts

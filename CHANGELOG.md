@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.45.0 — Correctness Closure
+
+Closes the three known correctness gaps in the C core. The lazy-seq
+cache-barrier path gains a regression test that exercises the
+realisation slot through promotion. The bit-shift primitives
+bounds-check their amount and raise a classified error on
+out-of-range input, closing the last UBSAN shift-exponent finding.
+`ns :require` surfaces missing-module load failures instead of
+silently swallowing them.
+
+### Added
+
+- **Lazy-seq cache-barrier regression test.** A new generational test
+  promotes a vector of unrealized lazy seqs to OLD, forces each into
+  its cache slot (which writes a fresh YOUNG chain), and re-reads
+  every element after further minor pressure. A moderate-iteration
+  variant of the same scenario lives in the stress runner so the
+  guard also fires under `MINO_GC_STRESS=1`.
+
+### Changed
+
+- **`bit-shift-left`, `bit-shift-right`, and `unsigned-bit-shift-right`
+  bounds-check their shift amount.** Any value outside `[0, 63]` now
+  raises a classified `eval/bounds` error. The left-shift is routed
+  through unsigned arithmetic so `(bit-shift-left 1 63)` keeps its
+  usual wrap result without tripping signed-overflow UB.
+- **`ns :require` raises on missing modules.** A load failure inside a
+  `:require` clause — whether from a typo or from an evaluation error
+  in the loaded file — now propagates out of the `ns` form as a
+  classified load error instead of being silently caught and cleared.
+
+### Fixed
+
+- **UBSAN shift-exponent finding (issue #55) closed.** The full suite
+  runs clean under `UBSAN_OPTIONS=print_stacktrace=1`.
+
 ## v0.44.0 — GC Observability and Spawn-Path Perf
 
 Adds embedder-visible remset and mark-stack sizing fields to
