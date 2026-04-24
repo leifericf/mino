@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.51.0 — Transients, Sorted-By, Subseq, Pr/Print/Newline
+
+First release of the Dialect-Complete cycle. Four additions on top
+of the already-landed C kernels, aimed at the everyday Clojure
+surface that mino was missing: batch-mutation transients at the
+mino level, custom-comparator sorted collections, bounded range
+queries on sorted collections, and the no-trailing-newline
+companions to `prn` / `println`.
+
+### Added
+
+- **Transient public API.** `transient`, `persistent!`, `assoc!`,
+  `conj!`, `dissoc!`, `disj!`, `pop!`, and the `transient?`
+  predicate. Each is a thin wrapper over the existing C kernel at
+  `src/transient.c`; the kernel's validity-bit guard and write-
+  barrier discipline cover correctness. Vector, map, and set
+  transients are supported. A use after `persistent!` throws
+  (`eval/type` / `MTY001`). A new `tests/transient_test.mino`
+  includes three escape-route tests suggested by Cortex's Q3
+  review: transient captured by a lazy seq and realized after
+  sealing (must throw), transient mutated through an atom, and
+  transient survival across forced GC yields.
+
+- **`sorted-map-by` and `sorted-set-by`.** Custom-comparator
+  variants. The rbtree already carried a comparator slot; the
+  natural-ordering constructors now delegate to a shared builder
+  and keep their prior behavior, and the `-by` variants expose
+  that slot at the mino level. A non-callable comparator throws
+  `eval/type` / `MTY001`.
+
+- **`subseq` and `rsubseq`.** Bounded range queries on sorted
+  maps and sorted sets, both three-arg (`(subseq sc >= k)`) and
+  five-arg (`(subseq sc >= k1 < k2)`) shapes, plus their reverse-
+  order counterparts. Backed by a new `rb_bounded_seq` walker
+  that prunes subtrees which cannot contain an in-range key.
+  Mutation-consistency contract is snapshot — the path-copying
+  rbtree makes the root captured at call time immutable, so the
+  returned seq is stable regardless of later writes to the source
+  collection (Cortex Q4). The four comparison primitives
+  `<` / `<=` / `>` / `>=` are identified by function-pointer
+  match.
+
+- **`pr`, `print`, and `newline`.** No-trailing-newline siblings
+  of `prn` / `println`, plus a standalone line-separator. `pr`
+  ships closed-form in this release; Phase B reroutes it through
+  a mino-level `print-method` multimethod per Cortex Q5's
+  confirmation of the late-binding hook shape.
+
+### Reviewed
+
+Cortex reviewed all six open questions for the Dialect-Complete
+cycle. Q3 and Q4 gated Phase A and resolved cleanly into the
+implementation above. Q2 shapes the numeric tower in Phase C, Q5
+shapes the printer rework in Phase B, Q1 gates the dialect-
+semantics audit in Phase D, and Q6 shapes the intentional-
+divergences doc in Phase E.
+
 ## v0.50.0 — C Core Complete and Polished
 
 Cycle-closure release. The C core is feature-complete for the work
