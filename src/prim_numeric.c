@@ -728,27 +728,12 @@ mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* ------------------------------------------------------------------------- */
 /* Auto-promoting arithmetic (+' -' *' inc' dec')                            */
 /*                                                                           */
-/* Like +, -, * but overflow on a long result promotes the running           */
-/* accumulator to a bigint rather than throwing. A float operand anywhere    */
-/* collapses the tower to doubles (matching Clojure's +' behaviour).         */
-/*                                                                           */
-/* The accumulator is tracked in one of three tiers; tier transitions are    */
-/* one-way: int -> bigint -> double (and int -> double direct).              */
+/* Same shape as +, -, *, inc, dec, but a long-overflow promotes the         */
+/* running accumulator to bigint instead of throwing. The implementations    */
+/* delegate to the shared tower-dispatch core (tower_reduce /                */
+/* tower_reduce_seeded) with the promote_long_overflow flag set, so          */
+/* ratio / bigdec / float operands work identically to plain +, -, *, /.    */
 /* ------------------------------------------------------------------------- */
-
-typedef enum { TIER_INT = 0, TIER_BIGINT, TIER_FLOAT } tier_t;
-
-/* Convert any int/bigint/float into a double. Used when collapsing to
- * TIER_FLOAT. bigint conversion may lose precision (cold path, matches
- * Clojure double coercion). */
-static int numeric_as_double(const mino_val_t *v, double *out)
-{
-    if (v == NULL) return 0;
-    if (v->type == MINO_INT)    { *out = (double)v->as.i; return 1; }
-    if (v->type == MINO_FLOAT)  { *out = v->as.f;         return 1; }
-    if (v->type == MINO_BIGINT) { *out = mino_bigint_to_double(v); return 1; }
-    return 0;
-}
 
 /* (+' & args) — tower-aware add with long overflow promoting to bigint
  * instead of throwing. */
