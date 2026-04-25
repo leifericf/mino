@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.63.0
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+The `DEF_PRIM` macro is gone. Each `src/prim/<domain>.c` now exports
+a static `mino_prim_def` table at TU bottom listing the
+`(name, fn, doc)` triples for that domain; the new
+`src/prim/install.c` composes the tables into `k_core_domains[]`
+and walks it via `prim_install_table` to bind primitives and attach
+docstrings. `mino_install_core` becomes one nested loop instead of
+~400 lines of macro calls. The standalone install entry points
+(`mino_install_io`, `mino_install_fs`, `mino_install_proc`,
+`mino_install_host`, `mino_install_async`) each become a thin
+wrapper over `prim_install_table` referencing their own domain's
+table. The registry of primitives is now data, not code: each domain
+file owns the list of names it exposes alongside the implementations.
+
+A new `src/diag/diag_contract.h` introduces a three-class internal
+severity taxonomy: `MINO_ERR_RECOVERABLE` (catchable user faults),
+`MINO_ERR_HOST` (I/O, OS, capability rejections), `MINO_ERR_CORRUPT`
+(invariant violations that abort). The existing user-facing
+diagnostic kinds (`:eval/...`, `:type/...`, `:io/...`, etc.) stay as
+the reporting surface; the new enum drives control-flow policy.
+Each per-subsystem `internal.h` gains an "Error classes emitted"
+block listing which classes its code paths produce, where, and why.
+`diag.c` carries a kind-to-class mapping table next to the code that
+builds the diagnostic record.
+
 ## v0.62.2
 
 Internal cleanup. No user-visible behavior change; the public
