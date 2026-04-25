@@ -88,107 +88,151 @@ mino_state_t *mino_state_new(void)
     return st;
 }
 
-void mino_state_free(mino_state_t *S)
+/* Free the linked list of registered root environments. The mino_env
+ * objects themselves are GC-owned; only the root_env_t link nodes
+ * (malloc'd by mino_env_new_root) belong to us here. */
+static void state_free_root_envs(mino_state_t *S)
 {
-    root_env_t *r;
-    root_env_t *rnext;
-    gc_hdr_t   *h;
-    gc_hdr_t   *hnext;
-    size_t      i;
-    if (S == NULL) {
-        return;
-    }
+    root_env_t *r, *rnext;
     for (r = S->gc_root_envs; r != NULL; r = rnext) {
         rnext = r->next;
         free(r);
     }
-    {
-        mino_ref_t *ref = S->ref_roots;
-        mino_ref_t *rnxt;
-        while (ref != NULL) {
-            rnxt = ref->next;
-            free(ref);
-            ref = rnxt;
-        }
+}
+
+/* Free the host-retained value ref doubly-linked list. */
+static void state_free_refs(mino_state_t *S)
+{
+    mino_ref_t *ref = S->ref_roots;
+    mino_ref_t *rnxt;
+    while (ref != NULL) {
+        rnxt = ref->next;
+        free(ref);
+        ref = rnxt;
     }
-    for (i = 0; i < S->module_cache_len; i++) {
-        free(S->module_cache[i].name);
-    }
+}
+
+/* Free namespace alias strings (alias + full_name) and the array. */
+static void state_free_ns_aliases(mino_state_t *S)
+{
+    size_t i;
     for (i = 0; i < S->ns_alias_len; i++) {
         free(S->ns_aliases[i].alias);
         free(S->ns_aliases[i].full_name);
     }
     free(S->ns_aliases);
-    free(S->var_registry);
+}
+
+/* Free the module cache: per-entry names, then the array itself. */
+static void state_free_module_cache(mino_state_t *S)
+{
+    size_t i;
+    for (i = 0; i < S->module_cache_len; i++) {
+        free(S->module_cache[i].name);
+    }
+    free(S->module_cache);
+}
+
+/* Free the host-interop type registry: per-type member arrays, then
+ * the host_types array. */
+static void state_free_host_types(mino_state_t *S)
+{
+    size_t i;
     for (i = 0; i < S->host_types_len; i++) {
         free(S->host_types[i].members);
     }
     free(S->host_types);
-    free(S->module_cache);
+}
+
+/* Free the metadata table: per-entry name + docstring, then array. */
+static void state_free_meta_table(mino_state_t *S)
+{
+    size_t i;
     for (i = 0; i < S->meta_table_len; i++) {
         free(S->meta_table[i].name);
         free(S->meta_table[i].docstring);
     }
     free(S->meta_table);
+}
+
+/* Free both intern tables (symbols + keywords). The interned values
+ * themselves are GC-owned and freed by state_free_heap below. */
+static void state_free_intern_tables(mino_state_t *S)
+{
     free(S->sym_intern.entries);
     free(S->sym_intern.ht_buckets);
     free(S->kw_intern.entries);
     free(S->kw_intern.ht_buckets);
+}
+
+/* Free the filename and var-name interning tables (string copies plus
+ * the pointer arrays). */
+static void state_free_string_interns(mino_state_t *S)
+{
+    size_t i;
+    for (i = 0; i < S->interned_files_len; i++) {
+        free((void *)S->interned_files[i]);
+    }
+    free(S->interned_files);
+    for (i = 0; i < S->interned_var_strs_len; i++) {
+        free((void *)S->interned_var_strs[i]);
+    }
+    free(S->interned_var_strs);
+}
+
+/* Free GC bookkeeping arrays + freelists. The actual heap (gc_all_young
+ * / gc_all_old) is freed last, by state_free_heap. */
+static void state_free_gc_aux(mino_state_t *S)
+{
+    int i;
     free(S->gc_ranges);
     free(S->gc_ranges_pending);
     free(S->gc_mark_stack);
     free(S->gc_remset);
     gc_evt_free(S);
-    {
-        int i;
-        for (i = 0; i < 4; i++) {
-            gc_hdr_t *h = S->gc_freelists[i];
-            while (h != NULL) {
-                gc_hdr_t *next = h->next;
-                free(h);
-                h = next;
-            }
+    for (i = 0; i < 4; i++) {
+        gc_hdr_t *h = S->gc_freelists[i];
+        while (h != NULL) {
+            gc_hdr_t *next = h->next;
+            free(h);
+            h = next;
         }
     }
     free(S->core_forms);
-    /* Free structured diagnostic. */
+}
+
+/* Free the structured-diagnostic chain plus the source-cache strings.
+ * The diag may reference into source_cache, so it must run first. */
+static void state_free_diag_state(mino_state_t *S)
+{
+    int sci;
     diag_free(S->last_diag);
     S->last_diag = NULL;
-    /* Free source cache. */
-    {
-        int sci;
-        for (sci = 0; sci < MINO_SOURCE_CACHE_SIZE; sci++) {
-            free(S->source_cache[sci].text);
-        }
+    for (sci = 0; sci < MINO_SOURCE_CACHE_SIZE; sci++) {
+        free(S->source_cache[sci].text);
     }
-    /* Free filename intern table. */
-    {
-        size_t fi;
-        for (fi = 0; fi < S->interned_files_len; fi++) {
-            free((void *)S->interned_files[fi]);
-        }
-        free(S->interned_files);
+}
+
+/* Free the async-scheduler run queue and timer priority queue. */
+static void state_free_async(mino_state_t *S)
+{
+    struct sched_entry *e = S->async_run_head;
+    struct sched_entry *enext;
+    while (e != NULL) {
+        enext = e->next;
+        free(e);
+        e = enext;
     }
-    /* Free var-string intern table. */
-    {
-        size_t vi;
-        for (vi = 0; vi < S->interned_var_strs_len; vi++) {
-            free((void *)S->interned_var_strs[vi]);
-        }
-        free(S->interned_var_strs);
-    }
-    /* Free async scheduler run queue. */
-    {
-        struct sched_entry *e = S->async_run_head;
-        struct sched_entry *enext;
-        while (e != NULL) {
-            enext = e->next;
-            free(e);
-            e = enext;
-        }
-    }
-    /* Free async timer queue. */
     async_timers_free(S);
+}
+
+/* Walk every live header on both generation lists, run any registered
+ * finalizers, and free the underlying memory. Must run last because
+ * earlier helpers may inspect heap-resident state (interned values,
+ * meta map entries, etc.). */
+static void state_free_heap(mino_state_t *S)
+{
+    gc_hdr_t *h, *hnext;
     for (h = S->gc_all_young; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
@@ -209,6 +253,31 @@ void mino_state_free(mino_state_t *S)
         }
         free(h);
     }
+}
+
+/* Tear down a state in the deterministic order each helper expects.
+ * Order matters: registries that name heap-resident values release
+ * the names before state_free_heap walks the heap; diag releases
+ * source-cache references before the cache itself goes away; the
+ * heap is always last. */
+void mino_state_free(mino_state_t *S)
+{
+    if (S == NULL) {
+        return;
+    }
+    state_free_root_envs(S);
+    state_free_refs(S);
+    state_free_ns_aliases(S);
+    free(S->var_registry);
+    state_free_host_types(S);
+    state_free_module_cache(S);
+    state_free_meta_table(S);
+    state_free_intern_tables(S);
+    state_free_gc_aux(S);
+    state_free_diag_state(S);
+    state_free_string_interns(S);
+    state_free_async(S);
+    state_free_heap(S);
     free(S);
 }
 
