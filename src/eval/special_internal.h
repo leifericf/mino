@@ -80,6 +80,6 @@ mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
  * Returns the call result on success, NULL on error.
  */
 mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
-                                  mino_val_t *args, mino_val_t *form);
+                                  mino_val_t *args, const mino_val_t *form);
 
 #endif /* EVAL_SPECIAL_INTERNAL_H */

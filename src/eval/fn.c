@@ -333,7 +333,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
 }
 
 mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
-                                  mino_val_t *args, mino_val_t *form)
+                                  mino_val_t *args, const mino_val_t *form)
 {
     int         nargs = 0;
     mino_val_t *tmp;
