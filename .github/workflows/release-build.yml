@@ -1,0 +1,155 @@
+name: release-build
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux-amd64
+            runner: ubuntu-22.04
+            os: linux
+            arch: amd64
+            ext: tar.gz
+            exe: ""
+          - platform: linux-arm64
+            runner: ubuntu-22.04-arm
+            os: linux
+            arch: arm64
+            ext: tar.gz
+            exe: ""
+          - platform: darwin-amd64
+            runner: macos-15-intel
+            os: darwin
+            arch: amd64
+            ext: tar.gz
+            exe: ""
+          - platform: darwin-arm64
+            runner: macos-15
+            os: darwin
+            arch: arm64
+            ext: tar.gz
+            exe: ""
+          - platform: windows-amd64
+            runner: windows-latest
+            os: windows
+            arch: amd64
+            ext: zip
+            exe: ".exe"
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: ${{ matrix.os == 'windows' && 'gcc' || 'cc' }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches src/mino.h
+        run: |
+          src_ver="v$(awk '
+            /^#define MINO_VERSION_MAJOR/ {maj=$3}
+            /^#define MINO_VERSION_MINOR/ {min=$3}
+            /^#define MINO_VERSION_PATCH/ {pat=$3}
+            END {print maj"."min"."pat}
+          ' src/mino.h)"
+          tag_base="${TAG%%-*}"
+          if [ "$src_ver" != "$tag_base" ]; then
+            echo "Tag $TAG (base $tag_base) does not match src/mino.h version $src_ver" >&2
+            exit 1
+          fi
+          echo "Tag $TAG matches source version $src_ver"
+
+      - name: Bootstrap mino
+        run: |
+          printf 'static const char *core_mino_src =\n' > src/core_mino.h
+          sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
+          printf '    ;\n' >> src/core_mino.h
+          $CC -std=c99 -O2 \
+            -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
+            -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
+            -Isrc/diag -Isrc/vendor/imath \
+            -o "mino${{ matrix.exe }}" \
+            src/public/*.c src/runtime/*.c src/gc/*.c src/eval/*.c \
+            src/collections/*.c src/prim/*.c src/async/*.c src/interop/*.c \
+            src/regex/*.c src/diag/*.c src/vendor/imath/*.c \
+            main.c -lm
+
+      - name: Smoke test
+        run: |
+          "./mino${{ matrix.exe }}" --version
+          out=$("./mino${{ matrix.exe }}" -e '(+ 1 2)')
+          if [ "$out" != "3" ]; then
+            echo "Smoke test failed: expected '3', got '$out'" >&2
+            exit 1
+          fi
+
+      - name: Stage release directory
+        run: |
+          dir="mino_${{ matrix.os }}_${{ matrix.arch }}_${TAG}"
+          mkdir -p "$dir"
+          cp "mino${{ matrix.exe }}" "$dir/"
+          cp LICENSE "$dir/"
+          sed \
+            -e "s/__VERSION__/${TAG}/g" \
+            -e "s/__OS__/${{ matrix.os }}/g" \
+            -e "s/__ARCH__/${{ matrix.arch }}/g" \
+            .github/release-templates/release-readme.md > "$dir/README.md"
+          echo "STAGE_DIR=$dir" >> "$GITHUB_ENV"
+
+      - name: Archive
+        run: |
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            7z a -tzip "${STAGE_DIR}.zip" "${STAGE_DIR}" >/dev/null
+          else
+            tar -czf "${STAGE_DIR}.tar.gz" "${STAGE_DIR}"
+          fi
+          ls -la "${STAGE_DIR}.${{ matrix.ext }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}
+          path: mino_${{ matrix.os }}_${{ matrix.arch }}_${{ github.ref_name }}.${{ matrix.ext }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-draft:
+    name: publish draft release
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums.txt
+        working-directory: dist
+        run: |
+          shasum -a 256 mino_* > checksums.txt
+          cat checksums.txt
+
+      - name: Create draft Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/mino_*
+            dist/checksums.txt
