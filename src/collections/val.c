@@ -312,7 +312,7 @@ int mino_to_bool(const mino_val_t *v)
 /* Forward declarations. */
 int mino_eq(const mino_val_t *a, const mino_val_t *b);
 int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b);
-static int seq_equal_force(mino_state_t *S, const mino_val_t *a,
+static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
                            const mino_val_t *b);
 
 /*
@@ -341,7 +341,7 @@ static const mino_val_t *resolve_lazy(const mino_val_t *v)
  * Handles cons lists, vectors, nil, and realized lazy seqs.
  * Returns 1 if they contain the same elements in the same order.
  */
-static int seq_equal(const mino_val_t *a, const mino_val_t *b)
+static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
 {
     const mino_val_t *ca = resolve_lazy(a);
     const mino_val_t *cb = resolve_lazy(b);
@@ -386,7 +386,7 @@ static int seq_equal(const mino_val_t *a, const mino_val_t *b)
  * Cross-type map equality: compare MINO_MAP with MINO_SORTED_MAP.
  * Both must have the same length and identical key-value pairs.
  */
-static int mino_eq_maps_cross(const mino_val_t *a, const mino_val_t *b)
+static int eq_map_like_cross(const mino_val_t *a, const mino_val_t *b)
 {
     const mino_val_t *hmap, *smap;
     size_t i;
@@ -413,7 +413,7 @@ static int mino_eq_maps_cross(const mino_val_t *a, const mino_val_t *b)
 /*
  * Cross-type set equality: compare MINO_SET with MINO_SORTED_SET.
  */
-static int mino_eq_sets_cross(const mino_val_t *a, const mino_val_t *b)
+static int eq_set_like_cross(const mino_val_t *a, const mino_val_t *b)
 {
     const mino_val_t *hset, *sset;
     size_t i;
@@ -434,6 +434,19 @@ static int mino_eq_sets_cross(const mino_val_t *a, const mino_val_t *b)
     return 1;
 }
 
+/*
+ * Equal-implies-equal-hash invariant: every pair (a, b) for which this
+ * function returns 1 MUST satisfy hash_val(a) == hash_val(b). The
+ * grouped helpers above (eq_seq_like, eq_map_like_cross, eq_set_like_cross)
+ * each have a matching branch in hash_val that funnels through the
+ * same XOR-fold or per-tag byte loop so equal pairs hash identically.
+ *
+ * The cross-tier numeric tier (int / integral float / fits-in-ll bigint)
+ * funnels through hash_long_long_bytes under tag 0x03 in hash_val for
+ * the same reason: (= 1 1.0 1N) is true, so all three must hash the
+ * same. New tier additions or new equality bridges must extend the
+ * matching branch in hash_val in the same commit.
+ */
 int mino_eq(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == b) {
@@ -474,7 +487,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             int b_seq = (b->type == MINO_CONS || b->type == MINO_VECTOR
                          || b->type == MINO_NIL || b->type == MINO_LAZY);
             if (a_seq && b_seq) {
-                return seq_equal(a, b);
+                return eq_seq_like(a, b);
             }
         }
         /*
@@ -484,7 +497,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             int a_map = (a->type == MINO_MAP || a->type == MINO_SORTED_MAP);
             int b_map = (b->type == MINO_MAP || b->type == MINO_SORTED_MAP);
             if (a_map && b_map) {
-                return mino_eq_maps_cross(a, b);
+                return eq_map_like_cross(a, b);
             }
         }
         /*
@@ -494,7 +507,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
             int a_set = (a->type == MINO_SET || a->type == MINO_SORTED_SET);
             int b_set = (b->type == MINO_SET || b->type == MINO_SORTED_SET);
             if (a_set && b_set) {
-                return mino_eq_sets_cross(a, b);
+                return eq_set_like_cross(a, b);
             }
         }
         return 0;
@@ -608,7 +621,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
 /*
  * Compare two sequential values element-by-element, forcing lazy seqs.
  */
-static int seq_equal_force(mino_state_t *S, const mino_val_t *a,
+static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
                            const mino_val_t *b)
 {
     const mino_val_t *ca = a;
@@ -667,7 +680,7 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
     /* Cross-type sequential: cons vs vector, nil vs vector, etc. */
     if (a->type != b->type && is_sequential(a->type) && is_sequential(b->type)) {
         /* Force any remaining lazy seqs in elements during comparison. */
-        return seq_equal_force(S, a, b);
+        return eq_seq_like_force(S, a, b);
     }
     /* Vectors: compare elements with forcing. */
     if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
