@@ -1,5 +1,5 @@
 /*
- * prim_fs.c -- filesystem primitives: file-exists?, directory?, mkdir-p, rm-rf.
+ * fs.c -- filesystem primitives: file-exists?, directory?, mkdir-p, rm-rf.
  *
  * These are in C rather than mino sh! wrappers for two reasons:
  *   - file-exists? and directory? are called on every module resolution

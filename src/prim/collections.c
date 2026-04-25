@@ -1,5 +1,5 @@
 /*
- * prim_collections.c -- collection primitives: car, cdr, cons, count,
+ * collections.c -- collection primitives: car, cdr, cons, count,
  *                       nth, first, rest, vector, hash-map, assoc, get,
  *                       conj, keys, vals, hash-set, contains?, disj,
  *                       dissoc, seq, realized?, val_to_seq, set_conj1.
@@ -1066,12 +1066,6 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return coll;
 }
-
-/*
- * (seq coll) — coerce a collection to a sequence (cons chain).
- * Returns nil for empty collections. Forces lazy sequences.
- */
-/* prim_seq and prim_realized_p moved to prim_sequences.c */
 
 mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {

@@ -1,7 +1,5 @@
 /*
- * prim_meta.c -- metadata primitives: meta, with-meta, vary-meta, alter-meta!.
- *
- * Extracted from prim.c. No behavior change.
+ * meta.c -- metadata primitives: meta, with-meta, vary-meta, alter-meta!.
  */
 
 #include "prim/internal.h"

@@ -1,7 +1,5 @@
 /*
- * eval_special_fn.c -- fn special form, arity dispatch, apply_callable.
- *
- * Extracted from eval_special.c. No behavior change.
+ * fn.c -- fn special form, arity dispatch, apply_callable.
  */
 
 #include "eval/special_internal.h"

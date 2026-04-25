@@ -1,5 +1,5 @@
 /*
- * prim_async.c -- minimal C surface for the async scheduler.
+ * async.c -- minimal C surface for the async scheduler.
  *
  * Channels, buffers, and alts live in lib/core/channel.mino. The three
  * things that still need to touch C are:

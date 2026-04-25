@@ -324,9 +324,7 @@ void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
  * building vectors, maps, and sets without allocating a new
  * persistent value per step. After calling mino_persistent(t) the
  * transient is sealed; calling any *_bang on it returns NULL and sets
- * a runtime error. This matches Clojure's transient/persistent!
- * semantics at the embedding level. A mino-level (user-visible)
- * transient API is NOT shipped in this cycle.
+ * a runtime error.
  *
  * Current implementation wraps persistent ops rather than mutating
  * the underlying trie nodes in place. The public API shape is

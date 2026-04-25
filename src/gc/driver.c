@@ -1,13 +1,13 @@
 /*
- * runtime_gc.c -- allocation driver, shared trace machinery, collection
+ * driver.c -- allocation driver, shared trace machinery, collection
  * entry point.
  *
- * The range index, root enumeration and conservative stack scan live in
- * runtime_gc_roots.c; the full-heap sweep lives in runtime_gc_major.c.
- * The driver below stitches them together for one STW mark-and-sweep
- * cycle. Trace primitives (gc_mark_push, gc_drain_mark_stack,
- * gc_process_header) stay here because they will be reused by the
- * generational minor collector introduced in a later step.
+ * The range index, root enumeration, and conservative stack scan
+ * live in roots.c; the full-heap sweep lives in major.c. The driver
+ * below stitches them together for one mark-and-sweep cycle.
+ * Trace primitives (gc_mark_push, gc_drain_mark_stack,
+ * gc_process_header) stay here because they are reused by the
+ * generational minor collector in minor.c.
  */
 
 #include "runtime/internal.h"
@@ -505,7 +505,7 @@ void gc_drain_mark_stack(mino_state_t *S)
 /* ------------------------------------------------------------------------- */
 /*
  * The major collector is structured as a four-step state machine
- * (begin / step / remark / sweep; see runtime_gc_major.c). For a fully
+ * (begin / step / remark / sweep; see major.c). For a fully
  * stop-the-world cycle the orchestrator below chains the four
  * back-to-back, keeping the mutator paused for the duration and
  * charging the combined time to a single gc_max_ns event. The

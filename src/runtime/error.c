@@ -1,7 +1,5 @@
 /*
- * runtime_error.c -- error reporting, call stack traces, type labels.
- *
- * Extracted from mino.c. No behavior change.
+ * error.c -- error reporting, call stack traces, type labels.
  */
 
 #include "runtime/internal.h"

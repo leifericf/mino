@@ -1,14 +1,10 @@
 /*
- * runtime_module.c -- shared module-resolution helpers.
- *
- * Two call sites -- eval_special_defs.c (the ns special form) and
- * prim_module.c (the require primitive with a vector spec) -- used to
- * carry their own copies of dotted-name-to-path conversion and alias
- * table mutation. They drifted: the require-side appended aliases
- * without checking for duplicates, silently swallowed malloc failures
- * mid-record, and had a subtly different lifetime for its temporary
- * strings. This file holds the canonical implementation that both
- * call sites share.
+ * module.c -- shared module-resolution helpers used by the ns
+ * special form (eval/defs.c) and the require primitive
+ * (prim/module.c). Both call sites share the same dotted-name-to-
+ * path conversion and alias-table mutation here so the ns and
+ * require paths cannot drift on duplicate-alias handling, malloc
+ * failure semantics, or temp-string lifetime.
  */
 
 #include "runtime/internal.h"

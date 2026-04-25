@@ -60,7 +60,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                               mino_env_t *env);
 
 /* ------------------------------------------------------------------------- */
-/* eval_special.c: dispatch, special forms, destructuring, apply             */
+/* special.c: dispatch, special forms, destructuring, apply                  */
 /*                                                                           */
 /* All return GC-owned values (NULL on error).                               */
 /* ------------------------------------------------------------------------- */

@@ -1,5 +1,5 @@
 /*
- * host_interop.c -- capability registry and registration API for host interop.
+ * syntax.c -- capability registry and registration API for host interop.
  *
  * Hosts register constructors, methods, static methods, and getters per
  * type tag. The registry is immutable after init: all registration must
@@ -93,7 +93,7 @@ void mino_host_register_getter(mino_state_t *S, const char *type_key,
     if (t != NULL) member_add(t, field_key, 0, HOST_GETTER, fn, ctx);
 }
 
-/* Lookup helpers used by prim_host.c. */
+/* Lookup helpers used by prim/host.c. */
 
 host_type_t *host_type_find(mino_state_t *S, const char *type_key)
 {

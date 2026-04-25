@@ -1,8 +1,9 @@
 /*
- * prim_internal.h -- shared declarations for primitive implementation files.
+ * internal.h -- shared declarations for primitive implementation files.
  *
- * Not part of the public API. Each prim_*.c includes this for access to
- * shared helpers and to declare its primitives for registration.
+ * Not part of the public API. Each prim/<domain>.c includes this for
+ * access to shared helpers and to declare its primitives for
+ * registration.
  *
  * Error classes emitted (see diag/diag_contract.h):
  *
@@ -86,7 +87,7 @@ void prim_install_table(mino_state_t *S, mino_env_t *env,
  * All follow the standard primitive signature: args are borrowed,
  * return value is GC-owned (NULL on error via set_error). */
 
-/* prim_numeric.c */
+/* numeric.c */
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -134,13 +135,13 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_meta.c */
+/* meta.c */
 mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_collections.c */
+/* collections.c */
 mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -171,7 +172,7 @@ mino_val_t *prim_disj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_pop_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_transient_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_sequences.c */
+/* sequences.c */
 mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_reduced(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -202,7 +203,7 @@ mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
 mino_val_t *prim_subseq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rsubseq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_string.c */
+/* string.c */
 mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -220,7 +221,7 @@ mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_io.c */
+/* io.c */
 mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_prn(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_print(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -229,7 +230,7 @@ mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_pr_builtin(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_bignum.c */
+/* bignum.c */
 mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_biginteger(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -244,7 +245,7 @@ mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
  * mino_bigdec_*) are declared in collections_internal.h because val.c
  * equality, the printer, and the GC sweep hook all need them. */
 
-/* prim_io.c (continued) */
+/* io.c (continued) */
 mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -255,7 +256,7 @@ mino_val_t *prim_getenv(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_getcwd(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_chdir(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_reflection.c */
+/* reflection.c */
 mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -302,11 +303,11 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_regex.c */
+/* regex.c */
 mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_stateful.c */
+/* stateful.c */
 mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -320,28 +321,28 @@ mino_val_t *prim_reset_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_module.c */
+/* module.c */
 mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
-/* prim_proc.c */
+/* proc.c */
 mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 void mino_install_proc(mino_state_t *S, mino_env_t *env);
 
-/* prim_fs.c */
+/* fs.c */
 mino_val_t *prim_file_exists_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_directory_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_mkdir_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rm_rf(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 void mino_install_fs(mino_state_t *S, mino_env_t *env);
 
-/* prim_host.c */
+/* host.c */
 void mino_install_host(mino_state_t *S, mino_env_t *env);
 
-/* prim_async.c */
+/* async.c */
 void mino_install_async(mino_state_t *S, mino_env_t *env);
 
 /* Per-domain primitive tables.  Each prim_*.c exports the table and

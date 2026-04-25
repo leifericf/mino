@@ -1,5 +1,5 @@
 /*
- * prim_string.c -- string primitives: str, pr-str, format, read-string,
+ * string.c -- string primitives: str, pr-str, format, read-string,
  *                  char-at, subs, split, join, starts-with?, ends-with?,
  *                  includes?, upper-case, lower-case, trim.
  */

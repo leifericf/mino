@@ -1,5 +1,5 @@
 /*
- * runtime_gc_major.c -- major collector state machine.
+ * major.c -- major collector state machine.
  *
  * Major collection is a four-phase pipeline:
  *
@@ -8,10 +8,11 @@
  *   gc_major_remark       MAJOR_MARK -> MAJOR_MARK   (stack rescan, drain)
  *   gc_major_sweep_phase  MAJOR_MARK -> IDLE         (sweep OLD dead)
  *
- * gc_major_collect in runtime_gc.c chains the four back-to-back for a
- * fully STW cycle. The incremental allocator pacing (B.3) calls
- * gc_major_step in slices interleaved with mutator progress, then fires
- * gc_major_remark + gc_major_sweep_phase when the mark stack drains.
+ * gc_major_collect in driver.c chains the four back-to-back for a
+ * fully STW cycle. The incremental allocator pacing calls
+ * gc_major_step in slices interleaved with mutator progress, then
+ * fires gc_major_remark + gc_major_sweep_phase when the mark stack
+ * drains.
  *
  * Each function owns its own depth guard and is a no-op if the phase
  * it expects is not the current phase, so the driver can call them

@@ -1,11 +1,8 @@
 /*
- * runtime_gc_roots.c -- root enumeration, conservative stack scan, and
- * the sorted range index used to resolve raw machine words to their
- * owning headers.
- *
- * Split out of runtime_gc.c as a pure refactor; call graph unchanged.
- * The range index is rebuilt at the start of every collection; new
- * allocations append to a small pending buffer so the sorted array
+ * roots.c -- root enumeration, conservative stack scan, and the sorted
+ * range index used to resolve raw machine words to their owning
+ * headers. The range index is rebuilt at the start of every collection;
+ * new allocations append to a small pending buffer so the sorted array
  * avoids an O(n) memmove per alloc.
  */
 

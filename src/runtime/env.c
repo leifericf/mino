@@ -1,7 +1,5 @@
 /*
- * runtime_env.c -- environment allocation, binding, lookup, dynamic bindings.
- *
- * Extracted from mino.c. No behavior change.
+ * env.c -- environment allocation, binding, lookup, dynamic bindings.
  */
 
 #include "runtime/internal.h"

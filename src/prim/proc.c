@@ -1,5 +1,5 @@
 /*
- * prim_proc.c -- process execution primitives: sh, sh!.
+ * proc.c -- process execution primitives: sh, sh!.
  *
  * Uses popen(3) to capture stdout from external commands.  popen is
  * POSIX; Windows provides _popen with the same interface.

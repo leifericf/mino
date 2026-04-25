@@ -1,5 +1,5 @@
 /*
- * runtime_internal.h -- mino_state struct, environments, var registry,
+ * internal.h -- mino_state struct, environments, var registry,
  * dynamic bindings, error reporting, module resolution.
  *
  * Pulls in the per-subsystem internal headers so any field on
@@ -207,7 +207,7 @@ struct mino_state {
      * the allocation volume that has to accumulate between steps before
      * the alloc path fires another slice. gc_major_step_alloc holds
      * the running count since the previous step. All three are shared
-     * between the driver (runtime_gc.c) and gc_major_step itself. */
+     * between the driver (gc/driver.c) and gc_major_step itself. */
     size_t          gc_major_work_budget;
     size_t          gc_major_alloc_quantum;
     size_t          gc_major_step_alloc;
@@ -415,7 +415,7 @@ struct mino_state {
 };
 
 /* ------------------------------------------------------------------------- */
-/* runtime_error.c                                                           */
+/* error.c                                                                   */
 /* ------------------------------------------------------------------------- */
 
 /* set_error/set_error_at copy msg into S->error_buf; msg is borrowed. */
@@ -443,7 +443,7 @@ void meta_set(mino_state_t *S, const char *name,              /* name: borrowed 
               mino_val_t *source);                             /* source: GC-owned, retained */
 
 /* ------------------------------------------------------------------------- */
-/* runtime_env.c: environment and dynamic bindings                           */
+/* env.c: environment and dynamic bindings                                   */
 /*                                                                           */
 /* Environments are GC-owned. Bindings within are borrowed views.            */
 /* ------------------------------------------------------------------------- */
@@ -462,7 +462,7 @@ mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */
 void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
 
 /* ------------------------------------------------------------------------- */
-/* runtime_var.c: var registry helpers                                       */
+/* var.c: var registry helpers                                               */
 /* ------------------------------------------------------------------------- */
 
 mino_val_t    *var_intern(mino_state_t *S, const char *ns, const char *name);
@@ -470,15 +470,15 @@ void           var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val);
 mino_val_t    *var_find(mino_state_t *S, const char *ns, const char *name);
 
 /* ------------------------------------------------------------------------- */
-/* runtime_state.c: per-state PRNG. Seeds lazily on first call.              */
+/* state.c: per-state PRNG. Seeds lazily on first call.                      */
 /* ------------------------------------------------------------------------- */
 
 uint64_t state_rand64(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
-/* runtime_module.c: shared module-resolution helpers used by the            */
-/* ns special form (eval_special_defs.c) and the require primitive           */
-/* (prim_module.c).                                                          */
+/* module.c: shared module-resolution helpers used by the                    */
+/* ns special form (eval/defs.c) and the require primitive                   */
+/* (prim/module.c).                                                          */
 /* ------------------------------------------------------------------------- */
 
 int  runtime_module_dotted_to_path(const char *name, size_t nlen,

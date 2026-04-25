@@ -1,7 +1,5 @@
 /*
- * prim_module.c -- module, require, doc, source, apropos primitives.
- *
- * Extracted from prim.c. No behavior change.
+ * module.c -- module, require, doc, source, apropos primitives.
  */
 
 #include "prim/internal.h"
@@ -15,7 +13,7 @@ static int kw_match(const mino_val_t *v, const char *s)
 }
 
 /* Dotted-name conversion and alias table mutation live in
- * runtime_module.c so this file and eval_special_defs.c share the
+ * runtime/module.c so this file and eval/defs.c share the
  * same logic. */
 
 /* (require name) -- load a module by name using the host-supplied resolver.

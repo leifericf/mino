@@ -1,5 +1,5 @@
 /*
- * prim_io.c -- I/O primitives: println, prn, slurp, spit, exit, time-ms,
+ * io.c -- I/O primitives: println, prn, slurp, spit, exit, time-ms,
  *              nano-time, file-seq, print_str_to helper.
  */
 

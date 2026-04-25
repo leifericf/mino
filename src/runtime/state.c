@@ -1,8 +1,6 @@
 /*
- * runtime_state.c -- state lifecycle, refs, public eval entry points,
- *                    execution limits, fault injection, interrupt.
- *
- * Extracted from mino.c. No behavior change.
+ * state.c -- state lifecycle, refs, public eval entry points,
+ *            execution limits, fault injection, interrupt.
  */
 
 #include "runtime/internal.h"
@@ -48,13 +46,10 @@ static void state_init(mino_state_t *S)
     }
     S->gc_promotion_age        = 1;
     S->gc_major_growth_tenths  = 15;        /* 1.5x old-gen growth */
-    /* Slice budget was 1024 during Phase B. The tuning sweep (see
-     * mino-bench analysis-gc-phase-c-2026-04-22.md) showed 4096
-     * recovers the per-slice overhead that hurt small-heap
-     * allocation-heavy workloads while tail-heavy max pause stays
-     * within the Phase B ~60 ms headline. Small-heap max pause rises
-     * to roughly twice the 1024 value but stays under 20 ms. */
-    S->gc_major_work_budget    = 4096;      /* headers popped per slice */
+    /* Headers popped per slice. 4096 amortizes the per-slice overhead
+     * on small-heap allocation-heavy workloads; max pause rises but
+     * stays under 20 ms on the GC stress shards. */
+    S->gc_major_work_budget    = 4096;
     S->gc_major_alloc_quantum  = 16u * 1024u;  /* bytes between auto steps */
     S->gc_major_step_alloc     = 0;
     S->gc_stress               = -1;

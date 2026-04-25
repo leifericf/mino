@@ -1,7 +1,5 @@
 /*
- * eval_special_bindings.c -- destructuring, let, loop, binding special forms.
- *
- * Extracted from eval_special.c. No behavior change.
+ * bindings.c -- destructuring, let, loop, binding special forms.
  */
 
 #include "eval/special_internal.h"

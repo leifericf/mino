@@ -145,7 +145,7 @@ typedef struct {
 /* Shared GC function declarations                                           */
 /* ------------------------------------------------------------------------- */
 
-/* runtime_gc.c: allocation and collection driver.
+/* driver.c: allocation and collection driver.
  * All gc_alloc/alloc_val returns are GC-owned. */
 void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);
 mino_val_t *alloc_val(mino_state_t *S, mino_type_t type);     /* GC-owned */
@@ -171,11 +171,11 @@ void   gc_force_finish_major(mino_state_t *S);
 void   gc_note_host_frame(mino_state_t *S, void *addr);
 
 /* Free-list size class lookup. Returns -1 for variable-size allocations
- * that cannot be recycled. Shared between alloc (runtime_gc.c) and sweep
- * (runtime_gc_major.c). */
+ * that cannot be recycled. Shared between alloc (driver.c) and sweep
+ * (major.c). */
 int    gc_freelist_class(size_t size);
 
-/* Mark-stack primitives (runtime_gc.c). Mark the header live and push it
+/* Mark-stack primitives (driver.c). Mark the header live and push it
  * for tracing; interior-pointer variant resolves a heap pointer to its
  * header first and is safe on stale/stack words. gc_drain_mark_stack pops
  * until empty, tracing each header's outgoing references.

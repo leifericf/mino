@@ -1,7 +1,5 @@
 /*
- * eval_special_control.c -- try/catch/finally special form.
- *
- * Extracted from eval_special.c. No behavior change.
+ * control.c -- try/catch/finally special form.
  */
 
 #include "eval/special_internal.h"

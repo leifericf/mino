@@ -10,7 +10,7 @@
 
 /* --- Comparison ---------------------------------------------------------- */
 
-/* Natural ordering for mino values. Shared with sort in prim_sequences.c. */
+/* Natural ordering for mino values. Shared with sort in prim/sequences.c. */
 int val_compare(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == b) return 0;

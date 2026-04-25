@@ -1,5 +1,5 @@
 /*
- * prim_lazy.c -- C-level lazy sequence primitives: range, lazy-map-1,
+ * lazy.c -- C-level lazy sequence primitives: range, lazy-map-1,
  *                lazy-filter. Each keeps a cons-shaped context in the
  *                lazy's body field and walks it via a static c_thunk,
  *                avoiding the per-element fn-call frame that a pure

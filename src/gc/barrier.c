@@ -1,5 +1,5 @@
 /*
- * runtime_gc_barrier.c -- write barrier, remembered set, and SATB push.
+ * barrier.c -- write barrier, remembered set, and SATB push.
  *
  * The barrier handles two tasks at every mutation of a GC-managed slot:
  *
@@ -36,13 +36,13 @@
  *   -----------------------------------------------------------------
  *   MINO_CONS    cdr                       mino_cons_cdr_set (helper)
  *                car                       -- immutable after construction --
- *   MINO_VAR     root                      gc_write_barrier (runtime_var.c)
- *   MINO_ATOM    val/watches/validator     gc_write_barrier (prim_stateful.c)
- *   MINO_LAZY    cached/body/env           gc_write_barrier (mino.c force path)
- *   MINO_TRANSIENT current                 transient_set_current (transient.c)
+ *   MINO_VAR     root                      gc_write_barrier (runtime/var.c)
+ *   MINO_ATOM    val/watches/validator     gc_write_barrier (prim/stateful.c)
+ *   MINO_LAZY    cached/body/env           gc_write_barrier (eval/eval.c force path)
+ *   MINO_TRANSIENT current                 transient_set_current (collections/transient.c)
  *   mino_env_t   bindings / ht_buckets /
  *                per-binding val / per-
- *                binding name              gc_write_barrier (runtime_env.c)
+ *                binding name              gc_write_barrier (runtime/env.c)
  *   valarr_t     slot[i]                   gc_valarr_set (helper)
  *
  * Containers whose fields are immutable post-construction and therefore

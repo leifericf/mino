@@ -1,6 +1,5 @@
 /*
- * runtime_gc_minor.c -- young-only mark-and-sweep with age-based
- * promotion.
+ * minor.c -- young-only mark-and-sweep with age-based promotion.
  *
  * The minor collector walks the YOUNG subset of the heap in one STW
  * cycle. Its three input sources are: the usual roots (registered

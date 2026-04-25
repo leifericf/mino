@@ -1,5 +1,5 @@
 /*
- * prim_host.c -- host/new, host/call, host/static-call, host/get primitives.
+ * host.c -- host/new, host/call, host/static-call, host/get primitives.
  *
  * These are always registered but throw "interop disabled" unless the
  * host has called mino_host_enable().

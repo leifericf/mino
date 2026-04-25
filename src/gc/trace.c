@@ -1,5 +1,5 @@
 /*
- * runtime_gc_trace.c -- diagnostic GC event ring + abort-time
+ * trace.c -- diagnostic GC event ring + abort-time
  * reachability classifier. Opt-in via MINO_GC_EVT=1 at state init.
  *
  * Design goal: capture enough context to reconstruct the timeline

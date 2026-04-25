@@ -1,5 +1,5 @@
 /*
- * prim_numeric.c -- numeric, math, bitwise, coercion, and comparison primitives.
+ * numeric.c -- numeric, math, bitwise, coercion, and comparison primitives.
  */
 
 #include "prim/internal.h"

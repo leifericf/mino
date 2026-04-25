@@ -1,5 +1,5 @@
 /*
- * prim_bignum.c -- arbitrary-precision integer support.
+ * bignum.c -- arbitrary-precision integer support.
  *
  * Backed by vendored imath (src/vendor/imath/imath.c). The mpz_t
  * struct for each MINO_BIGINT value is malloc-owned and referenced
@@ -168,11 +168,11 @@ int mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b)
                           (mp_int)b->as.bigint.mpz);
 }
 
-/* Hash: reduce the bigint modulo (2^31 - 1) using imath, then fold via
- * the same FNV-style mixer used elsewhere. Cross-tier hash equivalence
- * is NOT required in this phase; ints and bigints hash separately
- * and never compare equal under `=` (they do under `==`, covered in
- * Phase C.3 with tower dispatch). */
+/* Upper-magnitude bigint hash: reduce modulo (2^31 - 1) using imath,
+ * then fold via the same FNV-style mixer used elsewhere. The fits-in-
+ * long-long path is short-circuited in hash_val before reaching here
+ * so that (= 1 1N) ⇒ matching hashes via hash_long_long_bytes; this
+ * function only fires when the bigint is genuinely larger than ll. */
 uint32_t mino_bigint_hash(const mino_val_t *v)
 {
     mp_small r = 0;

@@ -1,7 +1,5 @@
 /*
- * prim_regex.c -- regex primitives: re-find, re-matches.
- *
- * Extracted from prim.c. No behavior change.
+ * regex.c -- regex primitives: re-find, re-matches.
  */
 
 #include "prim/internal.h"

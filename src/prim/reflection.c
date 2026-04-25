@@ -1,7 +1,5 @@
 /*
- * prim_reflection.c -- reflection, introspection, and utility primitives.
- *
- * Extracted from prim.c. No behavior change.
+ * reflection.c -- reflection, introspection, and utility primitives.
  */
 
 #include "prim/internal.h"

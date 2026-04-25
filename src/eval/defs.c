@@ -1,7 +1,5 @@
 /*
- * eval_special_defs.c -- def, defmacro, declare special forms.
- *
- * Extracted from eval_special.c. No behavior change.
+ * defs.c -- def, defmacro, declare, ns special forms.
  */
 
 #include "eval/special_internal.h"
@@ -9,7 +7,7 @@
 /* --- ns special form helpers ---
  *
  * Module-name path conversion and alias table mutation live in
- * runtime_module.c so this file and prim_module.c share one
+ * runtime/module.c so this file and prim/module.c share one
  * implementation. */
 
 /* Process a single require spec from within an ns form.
