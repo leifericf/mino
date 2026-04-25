@@ -26,7 +26,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 64
+#define MINO_VERSION_MINOR 65
 #define MINO_VERSION_PATCH 0
 
 /*

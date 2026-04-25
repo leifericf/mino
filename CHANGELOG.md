@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.65.0
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+The regex engine in `src/regex/` is now a fully isolated module.
+Its sole header `re.h` is consumed only from `src/prim/regex.c`
+and the include is path-qualified (`#include "regex/re.h"`); the
+`-Isrc/regex` flag is gone from the build configuration, the CI
+bootstrap, and the README. `re.c` no longer pulls in `<stdio.h>`
+or any mino subsystem header — it depends only on the C standard
+library. The dead-code debug helper `re_print` has been removed,
+so the only symbols exported from `src/regex/re.o` are the four
+functions declared in `re.h` (`re_compile`, `re_free`, `re_match`,
+`re_matchp`); a `nm` probe of the object file confirms no other
+external symbols. A style-exception note at the top of `re.c`
+records that the module preserves its upstream tinyregex-c
+conventions (Allman braces, two-space indent, fixed-size pattern
+arena) under Rule 15 of the project's C implementation guide.
+
 ## v0.64.0
 
 Internal cleanup. No user-visible behavior change; the public
