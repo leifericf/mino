@@ -16,7 +16,7 @@
  * That's it: four primitives.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 #include "prim_internal.h"
 #include "async_scheduler.h"
 #include "async_timer.h"

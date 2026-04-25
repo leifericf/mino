@@ -18,7 +18,7 @@
  * defensively without reasoning about exact call ordering.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* Seed the mark stack with every root. Does NOT perform the
  * conservative stack scan -- that is deferred to gc_major_remark so

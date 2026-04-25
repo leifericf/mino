@@ -92,7 +92,17 @@
                       (str-replace "\"" "\\\""))
           body    (str-replace escaped "\n" "\\n\"\n    \"")]
       (spit "src/core_mino.h"
-            (str "static const char *core_mino_src =\n    \""
+            (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
+                 " *\n"
+                 " * Produced by `gen-core-header` from src/core.mino.\n"
+                 " * Embeds the bundled mino-side core library as a C\n"
+                 " * string literal so the runtime can install it without\n"
+                 " * needing core.mino on disk at startup.\n"
+                 " *\n"
+                 " * Edit src/core.mino, then `./mino task build` (which\n"
+                 " * regenerates this file). Gitignored.\n"
+                 " */\n"
+                 "static const char *core_mino_src =\n    \""
                  body "\\n\"\n    ;\n")))
     (println "gen-core-header: src/core_mino.h updated")))
 

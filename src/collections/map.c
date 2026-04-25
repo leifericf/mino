@@ -2,7 +2,7 @@
  * map.c -- persistent hash array mapped trie (HAMT) map and set.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Persistent map: 32-wide HAMT + insertion-order companion vector           */
@@ -30,7 +30,7 @@
  * fresh root that shares unmodified subtrees with its predecessor.
  */
 
-/* Types and constants in mino_internal.h */
+/*/* Types and constants in collections_internal.h */
 
 unsigned popcount32(uint32_t x)
 {

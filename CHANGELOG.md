@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.62.1
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+`src/mino_internal.h` is decomposed into per-subsystem internal
+headers so each translation unit pulls in just the types and
+declarations it needs:
+
+- `src/runtime/runtime_internal.h` — `mino_state` and `mino_env`
+  structs, runtime-support types, and runtime function declarations.
+  Includes the per-subsystem headers transitively required to define
+  `mino_state`'s fields.
+- `src/gc/gc_internal.h` — `gc_hdr_t`, `gc_evt_t`, `gc_range_t`,
+  the `GC_T_*` / `GC_GEN_*` / `GC_PHASE_*` / `GC_EVT_*` enums,
+  `gc_pin` / `gc_unpin` macros, and GC function declarations.
+- `src/collections/collections_internal.h` — persistent vector,
+  HAMT, red-black tree, and intern-table types; val.c constructors,
+  hashing, and equality; bignum / ratio / bigdec value support.
+- `src/eval/eval_internal.h` — `try_frame_t` + `MAX_TRY_DEPTH`,
+  evaluator core helpers, macroexpand, quasiquote, `print_val`,
+  `intern_filename`.
+- `src/interop/interop_internal.h` — host-interop capability
+  registry types and lookup helpers.
+- `src/async/async_internal.h` — umbrella over the existing
+  `async_scheduler.h` + `async_timer.h`.
+
+The old `src/mino_internal.h` is deleted with no compatibility
+shim. `src/eval/eval_special_internal.h` and
+`src/prim/prim_internal.h` now include `runtime_internal.h`. Per-
+subsystem .c files include the header(s) they actually need.
+
+`docs/INTERNAL_MODULE_MAP.md` and `docs/ARCHITECTURE_CONTRACT.md`
+reflect the new header layout.
+
 ## v0.62.0
 
 Internal cleanup. No user-visible behavior change; the public

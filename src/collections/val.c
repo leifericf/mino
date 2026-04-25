@@ -2,7 +2,7 @@
  * val.c -- value constructors, predicates, accessors, and equality.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Singletons                                                                */

@@ -9,7 +9,7 @@
  */
 
 #include "mino.h"
-#include "mino_internal.h"
+#include "runtime_internal.h"
 #include "prim_internal.h"
 
 #include <setjmp.h>

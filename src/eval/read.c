@@ -2,7 +2,7 @@
  * read.c -- tokenizer and reader.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Reader                                                                    */

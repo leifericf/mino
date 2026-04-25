@@ -2,7 +2,7 @@
  * runtime_var.c -- var registry: intern, lookup, root binding management.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* Intern a string into the state's var-string table.
  * Strings are malloc-owned and freed at state teardown. */

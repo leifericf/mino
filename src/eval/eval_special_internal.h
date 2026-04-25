@@ -8,7 +8,7 @@
 #ifndef EVAL_SPECIAL_INTERNAL_H
 #define EVAL_SPECIAL_INTERNAL_H
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* prim_module.c: needed by eval_ns for require delegation. */
 mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);

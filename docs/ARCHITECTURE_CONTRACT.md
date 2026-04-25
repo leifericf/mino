@@ -94,7 +94,7 @@ These structures use direct `malloc`/`calloc`/`realloc`:
 - `*_take` = ownership transfers to caller
 
 **State access:** All state field access uses explicit `S->field` syntax.
-No alias macros exist. The `gc_pin`/`gc_unpin` macros in `mino_internal.h`
+No alias macros exist. The `gc_pin`/`gc_unpin` macros in `gc/gc_internal.h`
 are the only macros that implicitly require a local `S` variable.
 
 ## 5. Error Model

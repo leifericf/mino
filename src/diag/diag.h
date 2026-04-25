@@ -1,7 +1,7 @@
 /*
  * diag.h -- structured diagnostic types for error reporting.
  *
- * Internal header included by mino_internal.h. Not part of the public API.
+ * Internal header included by runtime_internal.h. Not part of the public API.
  * The public API exposes mino_diag_t as an opaque struct through mino.h.
  */
 
@@ -10,7 +10,7 @@
 
 #include <stddef.h>
 
-/* This header is included from mino_internal.h, after mino.h.
+/* This header is included from runtime_internal.h, after mino.h.
  * mino_val_t, mino_state_t, and mino_diag_t are typedef'd in mino.h. */
 
 /* ------------------------------------------------------------------------- */

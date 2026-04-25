@@ -31,7 +31,7 @@
  * and could never mark the offender.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ---------------------------------------------------------------- */
 /* Ring buffer: init / free / record / dump                         */

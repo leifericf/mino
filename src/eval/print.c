@@ -2,7 +2,7 @@
  * print.c -- value printer.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */

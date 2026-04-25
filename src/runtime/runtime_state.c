@@ -5,7 +5,7 @@
  * Extracted from mino.c. No behavior change.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 #include "async_scheduler.h"
 #include "async_timer.h"
 

@@ -11,7 +11,7 @@
  * call sites share.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* Convert a dotted module symbol like "some.lib" into a slash
  * separated path like "some/lib" in BUF (size BUFSIZE). Returns 0 on

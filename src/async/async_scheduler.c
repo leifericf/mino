@@ -4,7 +4,7 @@
 
 #include "async_scheduler.h"
 #include "async_timer.h"
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
                          mino_val_t *value)

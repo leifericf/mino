@@ -67,7 +67,7 @@
  *    stay gated behind MINO_GC_VERIFY.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* True iff p lies inside the mino_state_t struct, i.e. p is a
  * singleton or small-int cache entry rather than a GC allocation. */

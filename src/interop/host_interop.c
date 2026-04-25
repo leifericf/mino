@@ -6,7 +6,7 @@
  * happen before eval starts.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* Find or create a host_type_t entry for the given type key. */
 static host_type_t *type_ensure(mino_state_t *S, const char *type_key)

@@ -24,7 +24,7 @@
  * OLD headers are left alone.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* Seed the mark stack with the YOUNG outgoing pointers held by every
  * remembered-set container. gc_trace_children pushes each child into

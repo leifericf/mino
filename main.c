@@ -9,7 +9,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 #include "path_buf.h"
 
 #include <signal.h>

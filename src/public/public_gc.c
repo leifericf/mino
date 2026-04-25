@@ -8,7 +8,7 @@
  */
 
 #include "mino.h"
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
 {

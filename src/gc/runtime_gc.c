@@ -10,7 +10,7 @@
  * generational minor collector introduced in a later step.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the

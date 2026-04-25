@@ -4,7 +4,7 @@
  * Extracted from mino.c. No behavior change.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Error reporting                                                           */

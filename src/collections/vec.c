@@ -2,7 +2,7 @@
  * vec.c -- persistent 32-way trie vector.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Persistent vector: 32-way trie with tail                                  */
@@ -22,7 +22,7 @@
  * by the node's level during traversal rather than a per-node tag.
  */
 
-/* Types and constants in mino_internal.h */
+/*/* Types and constants in collections_internal.h */
 
 static mino_vec_node_t *vnode_new(mino_state_t *S, unsigned count, int is_leaf)
 {

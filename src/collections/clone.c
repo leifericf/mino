@@ -9,7 +9,7 @@
  * isolated runtime instances.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Value cloning (cross-state transfer)                                      */

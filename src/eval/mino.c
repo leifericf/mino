@@ -3,7 +3,7 @@
  *           eval_value, eval_implicit_do, lazy_force, eval_args.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 int sym_eq(const mino_val_t *v, const char *s)
 {

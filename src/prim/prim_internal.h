@@ -8,7 +8,7 @@
 #ifndef PRIM_INTERNAL_H
 #define PRIM_INTERNAL_H
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* Shared helpers (defined in prim.c).
  * These operate on borrowed args and return GC-owned values unless noted. */
@@ -211,14 +211,11 @@ mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
-/* Internal (not registered as primitives): */
-void      mino_bigint_free(mino_val_t *v);            /* GC sweep hook */
-uint32_t  mino_bigint_hash(const mino_val_t *v);       /* hash_compare */
-int       mino_bigint_equals(const mino_val_t *a, const mino_val_t *b);
-int       mino_bigint_equals_ll(const mino_val_t *a, long long n);
-int       mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b);
-void      mino_bigint_print(mino_state_t *S, const mino_val_t *v, FILE *out);
-mino_val_t *mino_bigint_from_string_n(mino_state_t *S, const char *s, size_t len);
+/* Internal bignum/ratio/bigdec helpers (mino_bigint_*, mino_ratio_*,
+ * mino_bigdec_*) are declared in collections_internal.h because val.c
+ * equality, the printer, and the GC sweep hook all need them. */
+
+/* prim_io.c (continued) */
 mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env);

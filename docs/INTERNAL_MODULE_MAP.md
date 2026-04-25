@@ -10,16 +10,15 @@ src/
 ├── mino.h                         # public embedding API (stable surface)
 ├── core.mino                      # bundled mino-side core library
 ├── core_mino.h                    # generated from core.mino
-├── mino_internal.h                # shared C-side internal types + decls
 │
 ├── public/                        # host-facing C API
-├── runtime/                       # state, env, vars, errors, modules
-├── gc/                            # generational + incremental collector
-├── eval/                          # evaluator + reader + printer
-├── collections/                   # val, vec, map, rbtree, transient, clone
-├── prim/                          # primitive registration tables
-├── async/                         # scheduler + timers
-├── interop/                       # host interop syntax
+├── runtime/                       # state, env, vars, errors, modules (+ runtime_internal.h)
+├── gc/                            # generational + incremental collector (+ gc_internal.h)
+├── eval/                          # evaluator + reader + printer (+ eval_internal.h)
+├── collections/                   # val, vec, map, rbtree, transient, clone (+ collections_internal.h)
+├── prim/                          # primitive registration tables (+ prim_internal.h)
+├── async/                         # scheduler + timers (+ async_internal.h)
+├── interop/                       # host interop syntax (+ interop_internal.h)
 ├── regex/                         # self-contained regex engine
 ├── diag/                          # diagnostic kinds + reporting
 └── vendor/imath/                  # MIT-licensed bignum (vendored)
@@ -126,12 +125,17 @@ and a four-primitive bridge.
 | File | Contents |
 |------|----------|
 | `src/mino.h` | Public embedding API (stable surface) |
-| `src/mino_internal.h` | Internal types (`gc_hdr_t`, `try_frame_t`, `mino_state` struct), `gc_pin`/`gc_unpin` macros, shared function declarations with ownership annotations |
+| `src/runtime/runtime_internal.h` | `mino_state` and `mino_env` structs, runtime-support types (`module_entry_t`, `meta_entry_t`, `call_frame_t`, `root_env_t`, `mino_ref`, `dyn_frame_t`, `dyn_binding_t`, `ns_alias_t`, `var_entry_t`, `env_binding_t`), runtime function declarations, ownership annotations. Includes the per-subsystem internal headers below. |
+| `src/gc/gc_internal.h` | GC types (`gc_hdr_t`, `gc_evt_t`, `gc_range_t`), enums (`GC_T_*`, `GC_GEN_*`, `GC_PHASE_*`, `GC_EVT_*`), `gc_pin`/`gc_unpin` macros, GC function declarations |
+| `src/collections/collections_internal.h` | Persistent collection types (`mino_vec_node`, `mino_hamt_node`, `mino_rb_node`, `hamt_entry_t`), `intern_table_t`, val.c constructors and equality, vec/HAMT/rbtree declarations, bignum/ratio/bigdec value support |
+| `src/eval/eval_internal.h` | `try_frame_t` + `MAX_TRY_DEPTH`, evaluator core helpers, macroexpand, quasiquote, `print_val`, `intern_filename` |
 | `src/eval/eval_special_internal.h` | Cross-domain declarations for evaluator special-form files |
+| `src/interop/interop_internal.h` | Host-interop capability registry types (`host_member_t`, `host_type_t`), `HOST_*` enum, lookup helpers |
+| `src/async/async_internal.h` | Async umbrella (includes `async_scheduler.h` + `async_timer.h`) |
+| `src/async/async_scheduler.h` | Scheduler types and public surface |
+| `src/async/async_timer.h` | Timer types and public surface |
 | `src/prim/prim_internal.h` | Shared primitive helpers, `seq_iter_t`, per-domain primitive declarations |
 | `src/regex/re.h` | Regex public header |
-| `src/async/async_scheduler.h` | Scheduler public surface |
-| `src/async/async_timer.h` | Timer public surface |
 
 ## Entry Point
 
@@ -144,17 +148,21 @@ and a four-primitive bridge.
 Allowed include directions (no cycles):
 
 ```
-main.c -> mino.h
+main.c -> runtime/runtime_internal.h -> mino.h
 
-eval/eval_special_*.c -> eval/eval_special_internal.h -> mino_internal.h -> mino.h
-prim/prim_*.c          -> prim/prim_internal.h          -> mino_internal.h -> mino.h
+runtime/runtime_internal.h -> { gc/gc_internal.h, collections/collections_internal.h,
+                                eval/eval_internal.h, interop/interop_internal.h,
+                                async/async_internal.h, diag/diag.h, mino.h }
+
+eval/eval_special_*.c -> eval/eval_special_internal.h -> runtime/runtime_internal.h
+prim/prim_*.c          -> prim/prim_internal.h         -> runtime/runtime_internal.h
 prim/prim_regex.c      -> prim/prim_internal.h + regex/re.h
 prim/prim_bignum.c     -> prim/prim_internal.h + vendor/imath/imath.h
 
 runtime/*.c, gc/*.c, public/*.c, async/*.c, prim/prim_async.c,
 eval/mino.c, eval/read.c, eval/print.c,
 collections/*.c, interop/host_interop.c
-                       -> mino_internal.h -> mino.h
+                       -> runtime/runtime_internal.h
 
 regex/re.c             -> regex/re.h (standalone, no mino headers)
 vendor/imath/imath.c   -> vendor/imath/imath.h (standalone)
@@ -164,7 +172,7 @@ Rules:
 - No circular includes.
 - Primitive files access shared helpers through `prim/prim_internal.h`.
 - Evaluator special-form files access cross-domain helpers through `eval/eval_special_internal.h`.
-- Runtime core files use `mino_internal.h` directly.
+- Runtime core files include `runtime/runtime_internal.h`, which in turn includes the per-subsystem internal headers needed to define `mino_state`. Files that only touch a single subsystem can include just that subsystem's header.
 - Only `prim/prim_regex.c` includes `regex/re.h` (regex is isolated from the rest of the primitive layer).
 - Only `prim/prim_bignum.c` includes `vendor/imath/imath.h`.
 - `prim/prim.c` includes `core_mino.h` (generated) for the core library bootstrap.

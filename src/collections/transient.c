@@ -17,7 +17,7 @@
  * real transient path). The C API stays identical.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 #include "prim_internal.h"
 
 #include <stdio.h>

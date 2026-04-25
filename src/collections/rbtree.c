@@ -6,7 +6,7 @@
  * leaving the source tree intact.
  */
 
-#include "mino_internal.h"
+#include "runtime_internal.h"
 
 /* --- Comparison ---------------------------------------------------------- */
 
