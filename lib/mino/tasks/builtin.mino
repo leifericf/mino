@@ -8,7 +8,7 @@
 (def ^:private include-flags
   (str "-Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
        " -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop"
-       " -Isrc/regex -Isrc/diag -Isrc/vendor/imath"))
+       " -Isrc/diag -Isrc/vendor/imath"))
 (def ^:private cflags  (split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
                                        include-flags)) " "))

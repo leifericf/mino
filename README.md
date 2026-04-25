@@ -10,7 +10,7 @@ Requires only an ANSI C compiler. No external dependencies.
 cc -std=c99 -O2 \
   -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
   -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
-  -Isrc/regex -Isrc/diag -Isrc/vendor/imath \
+  -Isrc/diag -Isrc/vendor/imath \
   -o mino \
   src/public/*.c src/runtime/*.c src/gc/*.c src/eval/*.c \
   src/collections/*.c src/prim/*.c src/async/*.c src/interop/*.c \

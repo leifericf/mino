@@ -5,7 +5,7 @@
  */
 
 #include "prim/internal.h"
-#include "re.h"
+#include "regex/re.h"
 
 /* (re-find pattern text) -- find first match of pattern in text.
  * Returns the matched substring, or nil if no match. */

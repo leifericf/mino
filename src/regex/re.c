@@ -25,12 +25,20 @@
  *   '\D'       Non-digits
  *
  *
+ * Style note. This translation unit and its header preserve the
+ * upstream tinyregex-c style (Allman braces, two-space indent, dense
+ * locals, fixed-size pattern arena). Per Rule 15 of the project's C
+ * implementation guide, the local conventions inside src/regex/ take
+ * precedence over the codebase-wide style. Do not reformat to match
+ * the rest of the tree. The module reaches no other mino subsystem
+ * and its public surface is the four functions in re.h; only
+ * src/prim/regex.c consumes the header.
+ *
  */
 
 
 
 #include "re.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -263,45 +271,6 @@ re_t re_compile(const char* pattern)
 
   return (re_t) re_compiled;
 }
-
-void re_print(regex_t* pattern)
-{
-  const char* types[] = { "UNUSED", "DOT", "BEGIN", "END", "QUESTIONMARK", "STAR", "PLUS", "CHAR", "CHAR_CLASS", "INV_CHAR_CLASS", "DIGIT", "NOT_DIGIT", "ALPHA", "NOT_ALPHA", "WHITESPACE", "NOT_WHITESPACE", "BRANCH" };
-
-  int i;
-  int j;
-  char c;
-  for (i = 0; i < MAX_REGEXP_OBJECTS; ++i)
-  {
-    if (pattern[i].type == UNUSED)
-    {
-      break;
-    }
-
-    printf("type: %s", types[pattern[i].type]);
-    if (pattern[i].type == CHAR_CLASS || pattern[i].type == INV_CHAR_CLASS)
-    {
-      printf(" [");
-      for (j = 0; j < MAX_CHAR_CLASS_LEN; ++j)
-      {
-        c = pattern[i].u.ccl[j];
-        if ((c == '\0') || (c == ']'))
-        {
-          break;
-        }
-        printf("%c", c);
-      }
-      printf("]");
-    }
-    else if (pattern[i].type == CHAR)
-    {
-      printf(" '%c'", pattern[i].u.ch);
-    }
-    printf("\n");
-  }
-}
-
-
 
 /* Private functions: */
 static int matchdigit(char c)
