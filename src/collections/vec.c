@@ -2,7 +2,7 @@
  * vec.c -- persistent 32-way trie vector.
  */
 
-#include "runtime_internal.h"
+#include "runtime/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Persistent vector: 32-way trie with tail                                  */

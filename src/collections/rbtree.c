@@ -6,7 +6,7 @@
  * leaving the source tree intact.
  */
 
-#include "runtime_internal.h"
+#include "runtime/internal.h"
 
 /* --- Comparison ---------------------------------------------------------- */
 

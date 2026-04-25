@@ -2,7 +2,7 @@
  * map.c -- persistent hash array mapped trie (HAMT) map and set.
  */
 
-#include "runtime_internal.h"
+#include "runtime/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Persistent map: 32-wide HAMT + insertion-order companion vector           */

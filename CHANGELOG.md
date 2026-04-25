@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.62.2
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+Source files under a subsystem directory drop the redundant
+subsystem prefix wherever the prefix duplicated the directory name.
+
+`.c` renames:
+
+- `src/runtime/runtime_*.c` → `src/runtime/*.c` (`state.c`, `env.c`,
+  `var.c`, `error.c`, `module.c`).
+- `src/gc/runtime_gc.c` → `src/gc/driver.c`; `src/gc/runtime_gc_*.c`
+  → `src/gc/*.c` (`minor.c`, `major.c`, `barrier.c`, `roots.c`,
+  `trace.c`).
+- `src/eval/mino.c` → `src/eval/eval.c`;
+  `src/eval/eval_special.c` → `src/eval/special.c`;
+  `src/eval/special_*.c` → `src/eval/{bindings,control,defs,fn}.c`.
+- `src/prim/prim_*.c` → `src/prim/*.c` for every domain
+  (`numeric`, `bignum`, `collections`, `sequences`, `lazy`,
+  `string`, `io`, `reflection`, `meta`, `regex`, `stateful`,
+  `module`, `fs`, `proc`, `host`, `async`).
+- `src/public/public_*.c` → `src/public/*.c` (`gc.c`, `embed.c`).
+- `src/async/async_*.c` → `src/async/*.c` (`scheduler.c`,
+  `timer.c`).
+- `src/interop/host_interop.c` → `src/interop/syntax.c`.
+
+Header renames (path-qualified includes throughout):
+
+- `src/<subsys>/<subsys>_internal.h` → `src/<subsys>/internal.h`
+  for `runtime`, `gc`, `collections`, `eval`, `interop`, `async`,
+  `prim`.
+- `src/eval/eval_special_internal.h` →
+  `src/eval/special_internal.h`.
+- `src/async/async_scheduler.h` → `src/async/scheduler.h`;
+  `src/async/async_timer.h` → `src/async/timer.h`.
+
+Includes are now path-qualified for the renamed subsystem headers
+(`#include "runtime/internal.h"` etc.) — bare `internal.h` would
+resolve based on `-I` flag order across the per-subdirectory
+include paths added in v0.61.0.
+
+`lib/mino/tasks/builtin.mino`, `docs/INTERNAL_MODULE_MAP.md`, and
+`docs/ARCHITECTURE_CONTRACT.md` reflect the new filenames.
+Embedders enumerating individual source files need to update their
+build configuration; the CI bootstrap glob at
+`.github/workflows/ci.yml` and the `README.md` snippet are
+unchanged because both already use per-subdirectory globs.
+
 ## v0.62.1
 
 Internal cleanup. No user-visible behavior change; the public

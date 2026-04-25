@@ -2,7 +2,7 @@
  * print.c -- value printer.
  */
 
-#include "runtime_internal.h"
+#include "runtime/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */

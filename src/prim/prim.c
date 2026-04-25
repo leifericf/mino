@@ -14,7 +14,7 @@
  *   prim_module.c      -- require, doc, source, apropos
  */
 
-#include "prim_internal.h"
+#include "prim/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Shared helpers                                                            */

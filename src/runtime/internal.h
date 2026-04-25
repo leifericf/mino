@@ -1,0 +1,503 @@
+/*
+ * runtime_internal.h -- mino_state struct, environments, var registry,
+ * dynamic bindings, error reporting, module resolution.
+ *
+ * Pulls in the per-subsystem internal headers so any field on
+ * mino_state has a complete type at struct-definition time. .c files
+ * that only need a single subsystem's types can include just that
+ * subsystem's header instead.
+ *
+ * Internal to the runtime; embedders should only use mino.h.
+ */
+
+#ifndef RUNTIME_INTERNAL_H
+#define RUNTIME_INTERNAL_H
+
+#include "mino.h"
+#include "diag.h"
+
+#include "gc/internal.h"
+#include "collections/internal.h"
+#include "eval/internal.h"
+#include "interop/internal.h"
+#include "async/internal.h"
+
+#include <assert.h>
+#include <ctype.h>
+#include <math.h>
+#include <setjmp.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+/* ------------------------------------------------------------------------- */
+/* Runtime support types                                                     */
+/* ------------------------------------------------------------------------- */
+
+/* Module cache entry. */
+typedef struct {
+    char       *name;
+    mino_val_t *value;
+} module_entry_t;
+
+/* Metadata table entry. */
+typedef struct {
+    char       *name;
+    char       *docstring;
+    mino_val_t *source;
+} meta_entry_t;
+
+/* Call-stack frame for stack traces. */
+#define MAX_CALL_DEPTH 256
+
+typedef struct {
+    const char *name;
+    const char *file;
+    int         line;
+    int         column;
+} call_frame_t;
+
+/* GC root-environment registry node (malloc-owned). */
+typedef struct root_env {
+    mino_env_t      *env;
+    struct root_env *next;
+} root_env_t;
+
+/* Host-retained value ref (malloc-owned). */
+struct mino_ref {
+    mino_val_t      *val;
+    struct mino_ref *next;
+    struct mino_ref *prev;
+};
+
+/* Dynamic binding frame. */
+typedef struct dyn_binding {
+    const char          *name;
+    mino_val_t          *val;
+    struct dyn_binding  *next;
+} dyn_binding_t;
+
+typedef struct dyn_frame {
+    dyn_binding_t       *bindings;
+    struct dyn_frame    *prev;
+} dyn_frame_t;
+
+/* Environment binding. */
+typedef struct {
+    char       *name;
+    mino_val_t *val;
+} env_binding_t;
+
+/* Namespace alias entry. */
+typedef struct {
+    char *alias;
+    char *full_name;
+} ns_alias_t;
+
+/* Var registry entry. */
+typedef struct {
+    const char *ns;      /* interned namespace */
+    const char *name;    /* interned name */
+    mino_val_t *var;     /* the MINO_VAR value */
+} var_entry_t;
+
+/* Full environment definition.
+ * Large frames (>= ENV_HASH_THRESHOLD bindings) get a hash index for O(1)
+ * lookup; small frames use linear scan (faster for typical let/fn sizes). */
+#define ENV_HASH_THRESHOLD 32
+
+/* Small-integer cache range. Must fit in the small_ints[] array (256 slots). */
+#define MINO_SMALL_INT_LO (-128)
+#define MINO_SMALL_INT_HI  127
+
+struct mino_env {
+    env_binding_t *bindings;
+    size_t         len;
+    size_t         cap;
+    mino_env_t    *parent;
+    size_t        *ht_buckets;  /* hash index: maps hash -> binding slot */
+    size_t         ht_cap;      /* power of 2; SIZE_MAX = empty slot */
+};
+
+/* ------------------------------------------------------------------------- */
+/* Runtime state                                                             */
+/* ------------------------------------------------------------------------- */
+
+struct mino_state {
+    /* Garbage collection.
+     *
+     * gc_all_young and gc_all_old are singly-linked lists partitioning
+     * every live header by generation. Alloc prepends to the young
+     * list; minor sweep walks only young (promotion moves a header
+     * between lists); major sweep walks old to free dead, and young
+     * only to clear mark bits major set during cross-gen tracing.
+     * Keeping the two separated caps minor-sweep cost at O(young-live)
+     * instead of O(total-heap). */
+    gc_hdr_t       *gc_all_young;
+    gc_hdr_t       *gc_all_old;
+    size_t          gc_bytes_alloc;
+    size_t          gc_bytes_live;
+    size_t          gc_threshold;
+    int             gc_stress;
+    int             gc_depth;
+    void           *gc_stack_bottom;
+    root_env_t     *gc_root_envs;
+    gc_range_t     *gc_ranges;
+    size_t          gc_ranges_len;
+    size_t          gc_ranges_cap;
+    size_t          gc_ranges_valid;
+    /* Allocations between collections land here instead of memmove-ing
+     * into the sorted main array on every alloc. Merged at the next
+     * collection via sort-then-merge (cheaper than re-qsorting n+K
+     * entries from scratch). Grows dynamically; sized by
+     * gc_ranges_pending_cap. */
+    gc_range_t     *gc_ranges_pending;
+    size_t          gc_ranges_pending_len;
+    size_t          gc_ranges_pending_cap;
+    size_t          gc_collections_minor;
+    size_t          gc_collections_major;
+    size_t          gc_total_freed;
+    size_t          gc_total_ns;       /* cumulative ns spent in gc_major_collect */
+    size_t          gc_max_ns;         /* largest single-collection ns */
+    /* Generational bookkeeping. Maintained continuously on every
+     * allocation, sweep, and promotion: gc_bytes_young + gc_bytes_old
+     * equals gc_bytes_alloc. gc_old_baseline captures gc_bytes_old
+     * right after the last major sweep; future major cycles trigger
+     * when gc_bytes_old exceeds baseline by the growth tenths factor. */
+    size_t          gc_bytes_young;
+    size_t          gc_bytes_old;
+    size_t          gc_old_baseline;
+    /* Remembered set: every old-gen header that observed a store of a
+     * young-gen pointer since the last minor or major cycle. The array
+     * doubles as needed. Each member has gc_hdr_t::dirty = 1 while
+     * present, so repeated stores to the same container are deduped. */
+    gc_hdr_t      **gc_remset;
+    size_t          gc_remset_len;
+    size_t          gc_remset_cap;
+    /* High-water mark of gc_remset_len across this state's lifetime.
+     * Exposed via mino_gc_stats so embedders can size remset-sensitive
+     * workloads without instrumenting the runtime. */
+    size_t          gc_remset_high_water;
+    /* Collector tuning parameters. gc_nursery_bytes triggers a minor
+     * collection when exceeded. gc_promotion_age is the number of
+     * minor survivals before a young object flips to old. Both have
+     * defaults from state_init; a future mino_gc_set_param lets a
+     * host override them. */
+    size_t          gc_nursery_bytes;
+    unsigned        gc_promotion_age;
+    /* Major trigger threshold: gc_bytes_old must exceed
+     * gc_old_baseline * gc_major_growth_tenths / 10 (floored at
+     * gc_threshold) before a major cycle is started. Tenths precision
+     * keeps the setter integer-only while covering 1.1x through 4.0x. */
+    unsigned        gc_major_growth_tenths;
+    /* Incremental major parameters. gc_major_work_budget bounds the
+     * headers popped per gc_major_step slice; gc_major_alloc_quantum is
+     * the allocation volume that has to accumulate between steps before
+     * the alloc path fires another slice. gc_major_step_alloc holds
+     * the running count since the previous step. All three are shared
+     * between the driver (runtime_gc.c) and gc_major_step itself. */
+    size_t          gc_major_work_budget;
+    size_t          gc_major_alloc_quantum;
+    size_t          gc_major_step_alloc;
+    int             gc_phase;
+    gc_hdr_t      **gc_mark_stack;
+    size_t          gc_mark_stack_len;
+    size_t          gc_mark_stack_cap;
+    /* High-water mark of gc_mark_stack_len across this state's
+     * lifetime. Exposed via mino_gc_stats. */
+    size_t          gc_mark_stack_high_water;
+    gc_hdr_t       *gc_freelists[4];   /* per-size-class recycling */
+    /* Cached [min, max) bounds of all managed allocations. Lets the
+     * conservative stack scan reject non-pointer words before doing a
+     * binary search through the range index. */
+    uintptr_t       gc_heap_min;
+    uintptr_t       gc_heap_max;
+
+    /* GC event ring buffer (diagnostic only). Allocated lazily when
+     * MINO_GC_EVT=1 is set at state init; NULL otherwise and every
+     * recording site is a no-op. See gc_evt_t. */
+    gc_evt_t       *gc_evt_ring;
+    uint64_t        gc_evt_seq;
+
+    /* Singletons */
+    mino_val_t      nil_singleton;
+    mino_val_t      true_singleton;
+    mino_val_t      false_singleton;
+    /* Trampoline sentinels reused across recur/tail-call to avoid
+     * per-iteration allocation. Their args/fn fields are replaced in-place
+     * and the containing eval loop consumes them before any other code
+     * runs, so sharing one cell per kind is safe. */
+    mino_val_t      recur_sentinel;
+    mino_val_t      tail_call_sentinel;
+
+    /* Small-integer cache: mino_int(S, n) returns the shared cell for
+     * n in [MINO_SMALL_INT_LO, MINO_SMALL_INT_HI]. Arithmetic-heavy code
+     * (fib, loops, reductions) produces many small-int results and
+     * re-boxing them dominates allocation without this cache. */
+    mino_val_t      small_ints[256];
+
+    /* Intern tables */
+    intern_table_t  sym_intern;
+    intern_table_t  kw_intern;
+
+    /* Cached interned special-form symbols for O(1) pointer-eq dispatch.
+     * Populated lazily on first eval_impl call. */
+    int             sf_initialized;
+    mino_val_t     *sf_quote;
+    mino_val_t     *sf_quasiquote;
+    mino_val_t     *sf_unquote;
+    mino_val_t     *sf_unquote_splicing;
+    mino_val_t     *sf_defmacro;
+    mino_val_t     *sf_declare;
+    mino_val_t     *sf_ns;
+    mino_val_t     *sf_var;
+    mino_val_t     *sf_def;
+    mino_val_t     *sf_if;
+    mino_val_t     *sf_do;
+    mino_val_t     *sf_let;
+    mino_val_t     *sf_let_star;
+    mino_val_t     *sf_fn;
+    mino_val_t     *sf_fn_star;
+    mino_val_t     *sf_recur;
+    mino_val_t     *sf_loop;
+    mino_val_t     *sf_loop_star;
+    mino_val_t     *sf_try;
+    mino_val_t     *sf_binding;
+    mino_val_t     *sf_lazy_seq;
+    mino_val_t     *sf_new;
+    mino_val_t     *sf_when;
+    mino_val_t     *sf_and;
+    mino_val_t     *sf_or;
+
+    /* Execution limits */
+    size_t          limit_steps;
+    size_t          limit_heap;
+    size_t          eval_steps;
+    int             limit_exceeded;
+
+    /* Exception handling */
+    try_frame_t     try_stack[MAX_TRY_DEPTH];
+    int             try_depth;
+
+    /* Module system */
+    mino_resolve_fn module_resolver;
+    void           *module_resolver_ctx;
+    module_entry_t *module_cache;
+    size_t          module_cache_len;
+    size_t          module_cache_cap;
+
+    /* Metadata */
+    meta_entry_t   *meta_table;
+    size_t          meta_table_len;
+    size_t          meta_table_cap;
+
+    /* Printer */
+    int             print_depth;
+
+    /* Error reporting */
+    char            error_buf[2048];
+    call_frame_t    call_stack[MAX_CALL_DEPTH];
+    int             call_depth;
+    int             trace_added;
+    mino_diag_t    *last_diag;      /* malloc-owned structured diagnostic */
+
+    /* Reader */
+    const char     *reader_file;
+    int             reader_line;
+    int             reader_col;
+    const char     *reader_dialect;   /* "mino" */
+
+    /* Filename intern table. Strings are malloc-owned, freed at state
+     * teardown. Held here (not process-global) so two runtimes on two
+     * threads don't race on a shared table. */
+    const char    **interned_files;
+    size_t          interned_files_len;
+    size_t          interned_files_cap;
+
+    /* Var-name intern table (ns + name for MINO_VAR). Same rationale
+     * as interned_files: strings outlive the state's vars but not the
+     * state itself. */
+    const char    **interned_var_strs;
+    size_t          interned_var_strs_len;
+    size_t          interned_var_strs_cap;
+
+    /* Source cache for diagnostic rendering. */
+    #define MINO_SOURCE_CACHE_SIZE 4
+    struct {
+        const char *file;   /* interned filename */
+        char       *text;   /* malloc-owned full source text */
+        size_t      len;    /* length of text */
+    } source_cache[4];
+
+    /* Namespace */
+    const char     *current_ns;       /* from (ns ...), default "user" */
+    ns_alias_t     *ns_aliases;
+    size_t          ns_alias_len;
+    size_t          ns_alias_cap;
+
+    /* Var registry */
+    var_entry_t    *var_registry;
+    size_t          var_registry_len;
+    size_t          var_registry_cap;
+
+    /* Host interop */
+    int             interop_enabled;
+    host_type_t    *host_types;
+    size_t          host_types_len;
+    size_t          host_types_cap;
+
+    /* Eval */
+    const mino_val_t *eval_current_form;
+
+    /* Per-state PRNG (xorshift64*). Seeded lazily on first draw so two
+     * runtimes initialised at the same instant get distinct sequences.
+     * Per-state so cross-thread use doesn't race on libc rand(). */
+    uint64_t        rand_state;
+
+    /* Sort comparator */
+    mino_val_t     *sort_comp_fn;
+    mino_env_t     *sort_comp_env;
+
+    /* Late-binding print-method hook. NULL during core bootstrap and any
+     * state that never installed one; set via set-print-method! once the
+     * multimethod is registered. When non-NULL, prim_pr / prim_prn route
+     * each argument through this fn instead of calling mino_print
+     * directly. The hook is expected to write to stdout as a side effect. */
+    mino_val_t     *print_method_fn;
+
+    /* Gensym counter */
+    long            gensym_counter;
+
+    /* Host-retained value refs */
+    mino_ref_t     *ref_roots;
+
+    /* Dynamic bindings */
+    dyn_frame_t    *dyn_stack;
+
+    /* Interrupt flag */
+    volatile int    interrupted;
+
+    /* GC save stack */
+    mino_val_t     *gc_save[64];
+    int             gc_save_len;
+
+    /* Cached parsed core.mino forms (avoids re-parsing on second
+     * mino_install_core call within the same state). */
+    mino_val_t    **core_forms;
+    size_t          core_forms_len;
+
+    /* Fault injection: when fi_alloc_countdown > 0, decrement on each
+     * gc_alloc_typed call; when it reaches zero, simulate OOM. */
+    long            fi_alloc_countdown;
+
+    /* Fault injection for raw (non-GC) allocation paths such as the
+     * clone serialization buffer. Same semantics as above. */
+    long            fi_raw_countdown;
+
+    /* Async scheduler run queue. */
+    sched_entry_t  *async_run_head;
+    sched_entry_t  *async_run_tail;
+
+    /* Async timer queue. */
+    timer_entry_t  *async_timers;
+};
+
+/* ------------------------------------------------------------------------- */
+/* runtime_error.c                                                           */
+/* ------------------------------------------------------------------------- */
+
+/* set_error/set_error_at copy msg into S->error_buf; msg is borrowed. */
+void        set_error(mino_state_t *S, const char *msg);          /* msg: borrowed */
+void        set_error_at(mino_state_t *S, const mino_val_t *form, /* form: borrowed */
+                         const char *msg);                         /* msg: borrowed */
+void        clear_error(mino_state_t *S);
+void        set_diag(mino_state_t *S, mino_diag_t *d);           /* d: consumed */
+void        source_cache_store(mino_state_t *S, const char *file,
+                               const char *text, size_t len);
+const char *source_cache_get_line(mino_state_t *S, const char *file,
+                                  int line, size_t *out_len);
+void        set_eval_diag(mino_state_t *S, const mino_val_t *form,
+                          const char *kind, const char *code,
+                          const char *msg);
+const char *type_tag_str(const mino_val_t *v);                    /* static string */
+void        push_frame(mino_state_t *S, const char *name,     /* name: borrowed */
+                       const char *file, int line,            /* file: borrowed */
+                       int column);
+void        pop_frame(mino_state_t *S);
+void        append_trace(mino_state_t *S);
+meta_entry_t *meta_find(mino_state_t *S, const char *name);   /* borrowed into meta_table */
+void meta_set(mino_state_t *S, const char *name,              /* name: borrowed (copied) */
+              const char *doc, size_t doc_len,                 /* doc: borrowed (copied) */
+              mino_val_t *source);                             /* source: GC-owned, retained */
+
+/* ------------------------------------------------------------------------- */
+/* runtime_env.c: environment and dynamic bindings                           */
+/*                                                                           */
+/* Environments are GC-owned. Bindings within are borrowed views.            */
+/* ------------------------------------------------------------------------- */
+
+mino_env_t    *env_alloc(mino_state_t *S, mino_env_t *parent); /* GC-owned */
+env_binding_t *env_find_here(mino_env_t *env, const char *name); /* borrowed */
+void           env_bind(mino_state_t *S, mino_env_t *env,
+                        const char *name,                      /* borrowed (copied) */
+                        mino_val_t *val);                      /* GC-owned, retained */
+void           env_bind_sym(mino_state_t *S, mino_env_t *env,
+                        mino_val_t *sym,                       /* interned symbol */
+                        mino_val_t *val);                      /* GC-owned, retained */
+mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent); /* GC-owned */
+mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);     /* borrowed (walks up) */
+mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */
+void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
+
+/* ------------------------------------------------------------------------- */
+/* runtime_var.c: var registry helpers                                       */
+/* ------------------------------------------------------------------------- */
+
+mino_val_t    *var_intern(mino_state_t *S, const char *ns, const char *name);
+void           var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val);
+mino_val_t    *var_find(mino_state_t *S, const char *ns, const char *name);
+
+/* ------------------------------------------------------------------------- */
+/* runtime_state.c: per-state PRNG. Seeds lazily on first call.              */
+/* ------------------------------------------------------------------------- */
+
+uint64_t state_rand64(mino_state_t *S);
+
+/* ------------------------------------------------------------------------- */
+/* runtime_module.c: shared module-resolution helpers used by the            */
+/* ns special form (eval_special_defs.c) and the require primitive           */
+/* (prim_module.c).                                                          */
+/* ------------------------------------------------------------------------- */
+
+int  runtime_module_dotted_to_path(const char *name, size_t nlen,
+                                   char *buf, size_t bufsize);
+void runtime_module_add_alias(mino_state_t *S,
+                              const char *alias, const char *full);
+
+/* ------------------------------------------------------------------------- */
+/* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,          */
+/* QueryPerformanceCounter on Windows, clock() as coarse fallback.           */
+/* Shared between prim_nano_time and gc_major_collect timing.                */
+/* ------------------------------------------------------------------------- */
+
+long long mino_monotonic_ns(void);
+
+/* ------------------------------------------------------------------------- */
+/* Ownership conventions used in the per-subsystem internal headers:         */
+/*   GC-owned  — returned pointer is managed by the garbage collector.       */
+/*               It survives until the next collection unless pinned or      */
+/*               reachable from a rooted environment.  Callers that need     */
+/*               a value to survive across allocation must gc_pin it.        */
+/*   borrowed  — returned pointer aliases existing storage.  The caller      */
+/*               must not free it and must not retain it past the next       */
+/*               mutation of the owning container.                           */
+/*   static    — returned pointer has program lifetime; never freed.         */
+/*   malloc-owned — returned pointer must be freed by the caller or by a     */
+/*               documented owner (e.g. dyn_binding_list_free).              */
+/* Parameters marked "borrowed" are read-only and not retained.              */
+/* Parameters marked "consumed" transfer ownership to the callee.            */
+/* ------------------------------------------------------------------------- */
+
+#endif /* RUNTIME_INTERNAL_H */

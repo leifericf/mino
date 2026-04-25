@@ -9,7 +9,7 @@
  * isolated runtime instances.
  */
 
-#include "runtime_internal.h"
+#include "runtime/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Value cloning (cross-state transfer)                                      */

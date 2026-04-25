@@ -20,28 +20,28 @@
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
 
 (def ^:private lib-srcs
-  ["src/eval/mino.c" "src/diag/diag.c" "src/eval/eval_special.c"
-   "src/eval/eval_special_defs.c" "src/eval/eval_special_bindings.c"
-   "src/eval/eval_special_control.c" "src/eval/eval_special_fn.c"
-   "src/runtime/runtime_state.c" "src/runtime/runtime_var.c"
-   "src/runtime/runtime_error.c" "src/runtime/runtime_env.c"
+  ["src/eval/eval.c" "src/diag/diag.c" "src/eval/special.c"
+   "src/eval/defs.c" "src/eval/bindings.c"
+   "src/eval/control.c" "src/eval/fn.c"
+   "src/runtime/state.c" "src/runtime/var.c"
+   "src/runtime/error.c" "src/runtime/env.c"
    "src/runtime/path_buf.c"
-   "src/gc/runtime_gc.c" "src/gc/runtime_gc_roots.c" "src/gc/runtime_gc_major.c"
-   "src/gc/runtime_gc_barrier.c" "src/gc/runtime_gc_minor.c"
-   "src/gc/runtime_gc_trace.c" "src/runtime/runtime_module.c"
-   "src/public/public_gc.c" "src/public/public_embed.c"
+   "src/gc/driver.c" "src/gc/roots.c" "src/gc/major.c"
+   "src/gc/barrier.c" "src/gc/minor.c"
+   "src/gc/trace.c" "src/runtime/module.c"
+   "src/public/gc.c" "src/public/embed.c"
    "src/collections/val.c" "src/collections/vec.c" "src/collections/map.c"
    "src/collections/rbtree.c" "src/eval/read.c" "src/eval/print.c"
-   "src/prim/prim.c" "src/prim/prim_numeric.c" "src/prim/prim_collections.c"
-   "src/prim/prim_sequences.c" "src/prim/prim_lazy.c"
-   "src/prim/prim_string.c" "src/prim/prim_io.c"
-   "src/prim/prim_reflection.c" "src/prim/prim_meta.c" "src/prim/prim_regex.c"
-   "src/prim/prim_stateful.c" "src/prim/prim_module.c"
-   "src/prim/prim_fs.c" "src/prim/prim_proc.c"
-   "src/prim/prim_host.c" "src/interop/host_interop.c"
+   "src/prim/prim.c" "src/prim/numeric.c" "src/prim/collections.c"
+   "src/prim/sequences.c" "src/prim/lazy.c"
+   "src/prim/string.c" "src/prim/io.c"
+   "src/prim/reflection.c" "src/prim/meta.c" "src/prim/regex.c"
+   "src/prim/stateful.c" "src/prim/module.c"
+   "src/prim/fs.c" "src/prim/proc.c"
+   "src/prim/host.c" "src/interop/syntax.c"
    "src/collections/clone.c" "src/regex/re.c" "src/collections/transient.c"
-   "src/async/async_scheduler.c" "src/async/async_timer.c" "src/prim/prim_async.c"
-   "src/prim/prim_bignum.c" "src/vendor/imath/imath.c"])
+   "src/async/scheduler.c" "src/async/timer.c" "src/prim/async.c"
+   "src/prim/bignum.c" "src/vendor/imath/imath.c"])
 
 (def ^:private all-srcs (conj lib-srcs "main.c"))
 
@@ -244,13 +244,13 @@
 
 ;; Files allowed to exceed the TU size limit, with rationale.
 (def ^:private tu-allowlist
-  {"src/eval/read.c"               "lexer/parser -- inherently sequential, not decomposable"
-   "src/prim/prim_collections.c"   "14 domain primitives in one module, barely over limit"})
+  {"src/eval/read.c"            "lexer/parser -- inherently sequential, not decomposable"
+   "src/prim/collections.c"     "14 domain primitives in one module, barely over limit"})
 
 ;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
 (def ^:private fn-allowlist
-  #{"src/eval/eval_special.c:eval_impl"  ;; main evaluator dispatch -- inherently large
-    "src/prim/prim.c:mino_install_core"   ;; primitive registration table
+  #{"src/eval/special.c:eval_impl"     ;; main evaluator dispatch -- inherently large
+    "src/prim/prim.c:mino_install_core" ;; primitive registration table
     "src/eval/read.c:read_form"})
 
 (defn- count-lines

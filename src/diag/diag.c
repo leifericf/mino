@@ -2,7 +2,7 @@
  * diag.c -- structured diagnostic lifecycle and rendering.
  */
 
-#include "runtime_internal.h"
+#include "runtime/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Source cache                                                              */
