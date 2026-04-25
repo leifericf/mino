@@ -54,13 +54,14 @@ mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
 }
 
 mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env)
+                    mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *fn_name = NULL;
     mino_val_t *params;
     mino_val_t *body;
     mino_val_t *p;
     mino_val_t *fn_val;
+    (void)tail;
     int         multi_arity = 0;
     if (!mino_is_cons(args)) {
         set_eval_diag(S, form, "syntax", "MSY002", "fn requires a parameter list");

@@ -408,11 +408,12 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
 }
 
 mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env)
+                         mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *pairs, *body, *result;
     dyn_frame_t frame;
     dyn_binding_t *bhead = NULL;
+    (void)tail;
     if (!mino_is_cons(args)) {
         set_eval_diag(S, form, "syntax", "MSY001", "binding requires a binding list and body");
         return NULL;

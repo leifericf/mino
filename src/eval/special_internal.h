@@ -18,16 +18,26 @@ int kw_eq(const mino_val_t *v, const char *s);
 int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
                 mino_val_t *args, const char *ctx);
 
+/*
+ * Special-form handler signature. Every entry in the special-form
+ * registry table (eval/special_registry.c) takes (S, form, args, env,
+ * tail). Handlers that don't need `tail` accept it and ignore it; the
+ * uniform shape is what makes the data-table dispatch work.
+ */
+typedef mino_val_t *(*special_fn)(mino_state_t *S, mino_val_t *form,
+                                   mino_val_t *args, mino_env_t *env,
+                                   int tail);
+
 /* eval_special_defs.c */
 mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
-                          mino_val_t *args, mino_env_t *env);
+                          mino_val_t *args, mino_env_t *env, int tail);
 mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env);
+                         mino_val_t *args, mino_env_t *env, int tail);
 mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env);
+                     mino_val_t *args, mino_env_t *env, int tail);
 
 mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env);
+                    mino_val_t *args, mino_env_t *env, int tail);
 
 /* eval_special_bindings.c */
 mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
@@ -35,15 +45,21 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
 mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
                       mino_val_t *args, mino_env_t *env, int tail);
 mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env);
+                         mino_val_t *args, mino_env_t *env, int tail);
 
 /* eval_special_control.c */
 mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env);
+                     mino_val_t *args, mino_env_t *env, int tail);
 
 /* eval_special_fn.c */
 mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env);
+                    mino_val_t *args, mino_env_t *env, int tail);
+
+/* eval/special_registry.c */
+int eval_try_special_form(mino_state_t *S, mino_val_t *form,
+                          mino_val_t *head, mino_val_t *args,
+                          mino_env_t *env, int tail,
+                          mino_val_t **out);
 mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
                                       mino_val_t *arity_list,
                                       const char *diag_code,

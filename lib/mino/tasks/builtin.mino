@@ -21,6 +21,7 @@
 
 (def ^:private lib-srcs
   ["src/eval/eval.c" "src/diag/diag.c" "src/eval/special.c"
+   "src/eval/special_registry.c"
    "src/eval/defs.c" "src/eval/bindings.c"
    "src/eval/control.c" "src/eval/fn.c"
    "src/runtime/state.c" "src/runtime/var.c"

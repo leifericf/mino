@@ -7,13 +7,14 @@
 #include "eval/special_internal.h"
 
 mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env)
+                     mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *body_head = NULL;
     mino_val_t *body_tail = NULL;
     mino_val_t *catch_body = NULL;
     mino_val_t *finally_body = NULL;
     char        var_buf[256];
+    (void)tail;
     int         has_catch   = 0;
     int         has_finally = 0;
     int         saved_try   = S->try_depth;

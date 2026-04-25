@@ -158,10 +158,11 @@ static int ns_process_use_spec(mino_state_t *S, mino_val_t *spec,
 }
 
 mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
-                    mino_val_t *args, mino_env_t *env)
+                    mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *rest;
     (void)form;
+    (void)tail;
     if (!mino_is_cons(args)) {
         set_eval_diag(S, form, "syntax", "MSY001", "ns requires a name");
         return NULL;
@@ -216,7 +217,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
 /* --- def, defmacro, declare --- */
 
 mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
-                          mino_val_t *args, mino_env_t *env)
+                          mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *name_form;
     mino_val_t *params;
@@ -224,6 +225,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     mino_val_t *mac;
     const char *doc     = NULL;
     size_t      doc_len = 0;
+    (void)tail;
     char        buf[256];
     size_t      n;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
@@ -295,9 +297,10 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
 }
 
 mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
-                         mino_val_t *args, mino_env_t *env)
+                         mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *rest = args;
+    (void)tail;
     while (mino_is_cons(rest)) {
         mino_val_t *sym = rest->as.cons.car;
         char buf[256];
@@ -320,7 +323,7 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
 }
 
 mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
-                     mino_val_t *args, mino_env_t *env)
+                     mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *name_form;
     mino_val_t *value_form;
@@ -328,6 +331,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
     const char *doc     = NULL;
     size_t      doc_len = 0;
     char buf[256];
+    (void)tail;
     size_t n;
     if (!mino_is_cons(args)) {
         set_eval_diag(S, form, "syntax", "MSY001", "def requires a name");
