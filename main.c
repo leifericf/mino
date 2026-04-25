@@ -316,6 +316,19 @@ static void print_usage(FILE *out)
         out);
 }
 
+/* Short on-screen help shown when the user types `:help` at the REPL. */
+static void print_repl_help(FILE *out)
+{
+    fputs(
+        "REPL meta-commands:\n"
+        "  :help      Show this help\n"
+        "  :quit      Exit the REPL (or press Ctrl-D)\n"
+        "\n"
+        "Type a form and press Enter to evaluate it. Multi-line forms are\n"
+        "gathered until the parens balance.\n",
+        out);
+}
+
 /* Exec a companion binary ("mino-nrepl" / "mino-lsp") from PATH, passing
  * remaining argv through. Replaces argv[first] with the binary name so the
  * companion observes its own argv[0]. Only returns on failure. */
@@ -686,7 +699,8 @@ int main(int argc, char **argv)
     }
 
     fprintf(stderr, "mino %s\n", mino_version_string());
-    fputs("mino> ", stderr);
+    fputs("Type :help for help, :quit to exit\n", stderr);
+    fputs("mino=> ", stderr);
     fflush(stderr);
 
     for (;;) {
@@ -731,6 +745,25 @@ int main(int argc, char **argv)
             source_cache_store(S, S->reader_file, buf, len);
 
             form = mino_read(S, cursor, &end);
+            if (form != NULL && form->type == MINO_KEYWORD) {
+                const char *name = form->as.s.data;
+                if (strcmp(name, "quit") == 0) {
+                    fputc('\n', stderr);
+                    exit_code = 0;
+                    goto cleanup;
+                }
+                if (strcmp(name, "help") == 0) {
+                    print_repl_help(stderr);
+                    {
+                        size_t consumed  = (size_t)(end - buf);
+                        size_t remaining = len - consumed;
+                        memmove(buf, end, remaining + 1);
+                        len = remaining;
+                    }
+                    awaiting_continuation = 0;
+                    continue;
+                }
+            }
             if (form == NULL) {
                 const char *err = mino_last_error(S);
                 if (is_unterminated_error(err)) {
@@ -782,7 +815,7 @@ int main(int argc, char **argv)
             awaiting_continuation = 0;
         }
 
-        fputs(awaiting_continuation ? "...   " : "mino> ", stderr);
+        fputs(awaiting_continuation ? "  #_=> " : "mino=> ", stderr);
         fflush(stderr);
     }
 
