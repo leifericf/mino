@@ -638,6 +638,40 @@ mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
 mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a);
 double   mino_bigint_to_double(const mino_val_t *v);
 
+/* MINO_RATIO support. */
+mino_val_t *mino_ratio_make(mino_state_t *S, mino_val_t *num, mino_val_t *denom);
+mino_val_t *mino_ratio_make_unchecked(mino_state_t *S, mino_val_t *num,
+                                      mino_val_t *denom);
+void     mino_ratio_print(mino_state_t *S, const mino_val_t *v, FILE *out);
+int      mino_ratio_equals(const mino_val_t *a, const mino_val_t *b);
+int      mino_ratio_cmp(const mino_val_t *a, const mino_val_t *b);
+uint32_t mino_ratio_hash(const mino_val_t *v);
+double   mino_ratio_to_double(const mino_val_t *v);
+mino_val_t *mino_ratio_add(mino_state_t *S, const mino_val_t *a,
+                           const mino_val_t *b);
+mino_val_t *mino_ratio_sub(mino_state_t *S, const mino_val_t *a,
+                           const mino_val_t *b);
+mino_val_t *mino_ratio_mul(mino_state_t *S, const mino_val_t *a,
+                           const mino_val_t *b);
+mino_val_t *mino_ratio_div(mino_state_t *S, const mino_val_t *a,
+                           const mino_val_t *b);
+
+/* MINO_BIGDEC support. */
+mino_val_t *mino_bigdec_make(mino_state_t *S, mino_val_t *unscaled, int scale);
+void     mino_bigdec_print(mino_state_t *S, const mino_val_t *v, FILE *out);
+int      mino_bigdec_equals(const mino_val_t *a, const mino_val_t *b);
+int      mino_bigdec_cmp(const mino_val_t *a, const mino_val_t *b);
+uint32_t mino_bigdec_hash(const mino_val_t *v);
+double   mino_bigdec_to_double(const mino_val_t *v);
+mino_val_t *mino_bigdec_add(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigdec_sub(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigdec_mul(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigdec_neg(mino_state_t *S, const mino_val_t *a);
+mino_val_t *mino_to_bigdec(mino_state_t *S, const mino_val_t *v);
+
 /* runtime_gc.c: allocation and collection driver.
  * All gc_alloc/alloc_val returns are GC-owned. */
 void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);

@@ -406,6 +406,13 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         case MINO_TRANSIENT:
             gc_mark_child_push(S, v->as.transient.current);
             break;
+        case MINO_RATIO:
+            gc_mark_child_push(S, v->as.ratio.num);
+            gc_mark_child_push(S, v->as.ratio.denom);
+            break;
+        case MINO_BIGDEC:
+            gc_mark_child_push(S, v->as.bigdec.unscaled);
+            break;
         default:
             break;
         }

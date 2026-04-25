@@ -216,6 +216,19 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         free(buf);
         return out;
     }
+    case MINO_RATIO: {
+        mino_val_t *n = clone_val(dst, v->as.ratio.num);
+        mino_val_t *d;
+        if (n == NULL) return NULL;
+        d = clone_val(dst, v->as.ratio.denom);
+        if (d == NULL) return NULL;
+        return mino_ratio_make_unchecked(dst, n, d);
+    }
+    case MINO_BIGDEC: {
+        mino_val_t *u = clone_val(dst, v->as.bigdec.unscaled);
+        if (u == NULL) return NULL;
+        return mino_bigdec_make(dst, u, v->as.bigdec.scale);
+    }
     }
     return NULL; /* unreachable */
 }

@@ -95,6 +95,7 @@ mino_val_t *prim_math_tan(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_math_pow(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_math_atan2(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_num_eq(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_identical(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lt(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lte(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -203,6 +204,13 @@ mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args, mino_e
 mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_biginteger(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_numerator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_denominator(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ratio_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 /* Internal (not registered as primitives): */
 void      mino_bigint_free(mino_val_t *v);            /* GC sweep hook */
 uint32_t  mino_bigint_hash(const mino_val_t *v);       /* hash_compare */

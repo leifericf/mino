@@ -73,12 +73,22 @@ typedef enum {
                      * persistent vector, map, or set. Embedders call
                      * mino_transient / mino_persistent and the
                      * *_bang accessors below. */
-    MINO_BIGINT     /* arbitrary-precision signed integer. Backed by the
+    MINO_BIGINT,    /* arbitrary-precision signed integer. Backed by the
                      * vendored imath library (src/vendor/imath.c). The
                      * mpz_t struct is embedded in the value cell; the
                      * digit storage is owned by the cell and freed
                      * during GC sweep. See also `1N` literals and the
                      * `bigint` / `biginteger` constructors. */
+    MINO_RATIO,     /* arbitrary-precision rational number, stored as
+                     * a numerator/denominator pair of bigints. The
+                     * representation is always reduced (gcd = 1) and
+                     * the denominator is always positive (sign lives
+                     * on the numerator). See also `1/2` literals and
+                     * the `numerator` / `denominator` primitives. */
+    MINO_BIGDEC     /* arbitrary-precision decimal, stored as an
+                     * unscaled bigint plus a non-negative integer
+                     * scale: value = unscaled * 10^-scale. Constructed
+                     * from `1.5M` / `1M` literals or via `(bigdec x)`. */
 } mino_type_t;
 
 typedef struct mino_val   mino_val_t;
@@ -192,6 +202,14 @@ struct mino_val {
         struct {          /* MINO_BIGINT: arbitrary-precision integer */
             void *mpz;    /* opaque mp_int; malloc-owned, freed at sweep */
         } bigint;
+        struct {          /* MINO_RATIO: numerator/denominator bigints */
+            mino_val_t *num;   /* MINO_BIGINT */
+            mino_val_t *denom; /* MINO_BIGINT, always positive */
+        } ratio;
+        struct {          /* MINO_BIGDEC: unscaled bigint + decimal scale */
+            mino_val_t *unscaled; /* MINO_BIGINT */
+            int         scale;    /* value = unscaled * 10^-scale */
+        } bigdec;
     } as;
 };
 
@@ -220,6 +238,17 @@ mino_val_t *mino_bigint_from_ll(mino_state_t *S, long long n);
 /* Create a bigint by parsing a base-10 numeric string (optional leading
  * '+' or '-'). Returns NULL on parse failure. */
 mino_val_t *mino_bigint_from_string(mino_state_t *S, const char *s);
+
+/* Create a rational from numerator and denominator long longs. The result
+ * is reduced (gcd = 1) and normalised so the denominator is positive.
+ * If denom is zero, throws division-by-zero. If the result is integer,
+ * returns a MINO_INT or MINO_BIGINT instead of a MINO_RATIO. */
+mino_val_t *mino_ratio_from_ll(mino_state_t *S, long long num, long long denom);
+
+/* Create a bigdec from a base-10 numeric string. Returns NULL on parse
+ * failure. Recognises optional sign, fractional part, and 'e'-prefixed
+ * exponent; the trailing 'M' suffix is optional in this entry point. */
+mino_val_t *mino_bigdec_from_string(mino_state_t *S, const char *s);
 
 /* Create a character value from a Unicode codepoint (0..0x10FFFF). */
 mino_val_t *mino_char(mino_state_t *S, int codepoint);

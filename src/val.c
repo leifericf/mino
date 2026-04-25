@@ -451,19 +451,12 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     if (a == b) return 1;
     if (a->type != b->type) {
         /*
-         * Cross-type numeric equality: int and float compare by value.
-         */
-        if (a->type == MINO_INT && b->type == MINO_FLOAT) {
-            return (double)a->as.i == b->as.f;
-        }
-        if (a->type == MINO_FLOAT && b->type == MINO_INT) {
-            return a->as.f == (double)b->as.i;
-        }
-        /*
-         * Cross-tier integer equality: int and bigint compare by value.
-         * Matches Clojure where (= 1 1N) is true. (= 1 1.0) already
-         * follows the above int/float rule; a stricter :default/tier
-         * split can come with Phase C.3 tower dispatch.
+         * Cross-tier integer equality: int and bigint represent the
+         * same arbitrary-precision integer kind, and Clojure treats
+         * them as `=` when they hold the same value (`(= 1 1N)` is
+         * true). Other tier combinations — int/float, ratio/float,
+         * bigdec/anything-else — are NOT equal under `=`; use `==`
+         * for cross-tier numeric equality.
          */
         if (a->type == MINO_INT && b->type == MINO_BIGINT) {
             return mino_bigint_equals_ll(b, a->as.i);
@@ -604,6 +597,10 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a == b; /* identity equality; transients are mutable */
     case MINO_BIGINT:
         return mino_bigint_equals(a, b);
+    case MINO_RATIO:
+        return mino_ratio_equals(a, b);
+    case MINO_BIGDEC:
+        return mino_bigdec_equals(a, b);
     }
     return 0;
 }

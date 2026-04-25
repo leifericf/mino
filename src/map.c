@@ -285,6 +285,26 @@ uint32_t hash_val(const mino_val_t *v)
             return h;
         }
     }
+    case MINO_RATIO: {
+        uint32_t rh = mino_ratio_hash(v);
+        unsigned i;
+        h = fnv_mix(h, 0x11);
+        for (i = 0; i < 4; i++) {
+            h = fnv_mix(h, (unsigned char)(rh & 0xFFu));
+            rh >>= 8;
+        }
+        return h;
+    }
+    case MINO_BIGDEC: {
+        uint32_t dh = mino_bigdec_hash(v);
+        unsigned i;
+        h = fnv_mix(h, 0x12);
+        for (i = 0; i < 4; i++) {
+            h = fnv_mix(h, (unsigned char)(dh & 0xFFu));
+            dh >>= 8;
+        }
+        return h;
+    }
     default: {
         /* PRIM, FN, RECUR: identity-based. */
         uintptr_t p = (uintptr_t)v;

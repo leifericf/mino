@@ -246,6 +246,9 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Returns the quotient of the arguments.");
     DEF_PRIM(env, "=",        prim_eq,
              "Returns true if all arguments are equal.");
+    DEF_PRIM(env, "==",       prim_num_eq,
+             "Returns true if all arguments are numerically equal across "
+             "the numeric tower (int, bigint, ratio, bigdec, float).");
     DEF_PRIM(env, "identical?", prim_identical,
              "Returns true if the arguments are the same object.");
     DEF_PRIM(env, "meta",      prim_meta,
@@ -628,6 +631,20 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
              "Like inc, but promotes to bigint on overflow rather than throwing.");
     DEF_PRIM(env, "dec'",       prim_decq,
              "Like dec, but promotes to bigint on overflow rather than throwing.");
+    DEF_PRIM(env, "numerator",   prim_numerator,
+             "Returns the numerator of a rational number.");
+    DEF_PRIM(env, "denominator", prim_denominator,
+             "Returns the denominator of a rational number.");
+    DEF_PRIM(env, "ratio?",      prim_ratio_p,
+             "Returns true if x is a ratio.");
+    DEF_PRIM(env, "rational?",   prim_rational_p,
+             "Returns true if x is a rational number (int, bigint, or ratio).");
+    DEF_PRIM(env, "rationalize", prim_rationalize,
+             "Returns the rational value nearest to the argument.");
+    DEF_PRIM(env, "bigdec",      prim_bigdec,
+             "Coerces a value to an arbitrary-precision decimal.");
+    DEF_PRIM(env, "decimal?",    prim_decimal_p,
+             "Returns true if x is an arbitrary-precision decimal.");
     install_core_mino(S, env);
 }
 

@@ -766,20 +766,31 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
                     }
                 }
                 if (all_digits) {
-                    long long num = strtoll(buf, &endp, 10);
-                    long long den;
-                    (void)num;
-                    den = strtoll(slash + 1, &endp, 10);
-                    if (den == 0) {
+                    /* Parse numerator and denominator as bigints so
+                     * arbitrary magnitudes are supported, then build the
+                     * canonical ratio. mino_ratio_make handles gcd-
+                     * reduction and integer narrowing (e.g. `4/2` reads
+                     * back as `2`). */
+                    size_t      num_str_len = (size_t)(slash - buf);
+                    size_t      den_str_len = len - num_str_len - 1;
+                    mino_val_t *num_bi = mino_bigint_from_string_n(
+                        S, buf, num_str_len);
+                    mino_val_t *den_bi;
+                    if (num_bi == NULL) {
                         set_reader_diag(S, MRE008,
-                                        "divide by zero in ratio literal",
+                                        "invalid ratio literal",
                                         S->reader_line, S->reader_col);
                         return NULL;
                     }
-                    num = strtoll(buf, &endp, 10);
-                    if (num % den == 0)
-                        return mino_int(S, num / den);
-                    return mino_float(S, (double)num / (double)den);
+                    den_bi = mino_bigint_from_string_n(
+                        S, slash + 1, den_str_len);
+                    if (den_bi == NULL) {
+                        set_reader_diag(S, MRE008,
+                                        "invalid ratio literal",
+                                        S->reader_line, S->reader_col);
+                        return NULL;
+                    }
+                    return mino_ratio_make(S, num_bi, den_bi);
                 }
             }
         }
@@ -809,17 +820,15 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
             num_len = len;
         }
 
-        /* Bigdec M suffix: 1.5M -> 1.5 */
+        /* Bigdec M suffix: 1.5M -> arbitrary-precision decimal. */
         if (looks_numeric && len > 1 && buf[len - 1] == 'M') {
+            mino_val_t *bd;
             num_len = len - 1;
             buf[num_len] = '\0';
-            {
-                double d = strtod(buf, &endp);
-                if (endp == buf + num_len)
-                    return mino_float(S, d);
-            }
+            bd = mino_bigdec_from_string(S, buf);
             buf[num_len] = 'M';
             num_len = len;
+            if (bd != NULL) return bd;
         }
 
         /* Standard decimal. */

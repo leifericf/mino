@@ -517,9 +517,8 @@
 (def neg-int?  "Returns true if x is a negative integer." (fn [x] (and (int? x) (neg? x))))
 (def nat-int?  "Returns true if x is a non-negative integer." (fn [x] (and (int? x) (not (neg? x)))))
 (def double?   "Returns true if x is a float." float?)
-(def ratio?    "Returns false. Ratios are not supported." (fn [x] false))
-(def decimal?  "Returns false. Decimals are not supported." (fn [x] false))
-(def rational? "Returns true if x is rational (integer)." (fn [x] (int? x)))
+;; ratio? / rational? / decimal? are C primitives that consult the real
+;; numeric-tower types (MINO_RATIO, MINO_BIGDEC); registered in prim.c.
 (def long      "Coerces x to an integer." int)
 (def double    "Coerces x to a float." float)
 (def num       "Returns x if it is a number, otherwise throws." (fn [x] (if (number? x) x (throw "num expects a number"))))
