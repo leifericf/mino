@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.56.0 — Dialect-Semantics Audit
+
+Sixth release of the Dialect-Complete cycle. Targeted fixes to
+mino's multimethod / hierarchy implementation tighten dialect
+alignment with Clojure on four edge cases that don't show up until
+you reach for them.
+
+### Fixed
+
+- **`(derive child parent)` returns `nil`.** The 2-arity form was
+  returning the new global hierarchy; Clojure's contract is that
+  the side-effecting form returns `nil`. Code that captured the
+  return value was getting a value that should have been an
+  implementation detail.
+
+- **Stale dispatch caches after `derive` / `underive`.** Multimethod
+  caches were invalidated on `defmethod`, `prefer-method`, and
+  `remove-method` but not on hierarchy mutation. After a multimethod
+  populated its cache for a dispatch value, a subsequent `derive`
+  that should have changed the resolution was silently ignored.
+  A version counter on the global hierarchy now lets every
+  multimethod compare cache validity on dispatch and clear when
+  needed.
+
+- **Transitive `prefer-method` resolution.** `find-best-method_`
+  treated the prefer-table as a flat lookup; Clojure's `prefers?`
+  follows hierarchy parents recursively, so `(prefer-method m :A
+  :B)` covers descendants of `:A` over descendants of `:B` without
+  a per-pair declaration. mino now matches that behaviour.
+
+### Added
+
+- **`prefers` and `remove-all-methods`.** Two missing pieces of the
+  Clojure multimethod surface. `(prefers mm)` returns the
+  prefer-table; `(remove-all-methods mm)` clears the method table
+  and dispatch cache.
+
 ## v0.55.0 — Numeric Tower Complete
 
 Fifth release of the Dialect-Complete cycle. mino's numeric tower
