@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       publish_brew:
-        description: "Open a PR to leifericf/homebrew-mino"
+        description: "Push formula update to leifericf/homebrew-mino main"
         type: boolean
         default: false
       publish_scoop:
-        description: "Open a PR to leifericf/scoop-mino"
+        description: "Push manifest update to leifericf/scoop-mino main"
         type: boolean
         default: false
 
@@ -78,7 +78,7 @@ jobs:
           done < checksums.txt
 
   brew:
-    name: open homebrew-mino PR
+    name: update homebrew-mino main
     needs: validate
     if: ${{ inputs.publish_brew }}
     runs-on: ubuntu-22.04
@@ -96,10 +96,11 @@ jobs:
         with:
           path: mino
 
-      - name: Checkout homebrew-mino
+      - name: Checkout homebrew-mino main
         uses: actions/checkout@v4
         with:
           repository: leifericf/homebrew-mino
+          ref: main
           token: ${{ secrets.TAP_REPO_TOKEN }}
           path: tap
 
@@ -116,28 +117,21 @@ jobs:
             ../mino/.github/release-templates/brew-formula.rb > Formula/mino.rb
           cat Formula/mino.rb
 
-      - name: Push branch and open PR
+      - name: Commit and push main
         working-directory: tap
         run: |
-          branch="mino-${VERSION}"
           git config user.name "mino-bot"
           git config user.email "noreply@github.com"
-          git checkout -b "$branch"
           git add Formula/mino.rb
-          git commit -m "mino ${VERSION}"
-          git push -u --force origin "$branch"
-          existing=$(gh pr list --repo leifericf/homebrew-mino --head "$branch" --json number --jq '.[0].number // empty')
-          body="Automated formula bump for mino ${VERSION}.
-
-          Release notes: https://github.com/leifericf/mino/releases/tag/${VERSION}"
-          if [ -n "$existing" ]; then
-            gh pr edit "$existing" --repo leifericf/homebrew-mino --title "mino ${VERSION}" --body "$body"
-          else
-            gh pr create --repo leifericf/homebrew-mino --title "mino ${VERSION}" --body "$body" --base main --head "$branch"
+          if git diff --cached --quiet; then
+            echo "Formula/mino.rb already matches main; nothing to push."
+            exit 0
           fi
+          git commit -m "mino ${VERSION}"
+          git push origin main
 
   scoop:
-    name: open scoop-mino PR
+    name: update scoop-mino main
     needs: validate
     if: ${{ inputs.publish_scoop }}
     runs-on: ubuntu-22.04
@@ -152,10 +146,11 @@ jobs:
         with:
           path: mino
 
-      - name: Checkout scoop-mino
+      - name: Checkout scoop-mino main
         uses: actions/checkout@v4
         with:
           repository: leifericf/scoop-mino
+          ref: main
           token: ${{ secrets.BUCKET_REPO_TOKEN }}
           path: bucket-repo
 
@@ -169,22 +164,15 @@ jobs:
             ../mino/.github/release-templates/scoop-manifest.json > bucket/mino.json
           cat bucket/mino.json
 
-      - name: Push branch and open PR
+      - name: Commit and push main
         working-directory: bucket-repo
         run: |
-          branch="mino-${VERSION}"
           git config user.name "mino-bot"
           git config user.email "noreply@github.com"
-          git checkout -b "$branch"
           git add bucket/mino.json
-          git commit -m "mino ${VERSION}"
-          git push -u --force origin "$branch"
-          existing=$(gh pr list --repo leifericf/scoop-mino --head "$branch" --json number --jq '.[0].number // empty')
-          body="Automated manifest bump for mino ${VERSION}.
-
-          Release notes: https://github.com/leifericf/mino/releases/tag/${VERSION}"
-          if [ -n "$existing" ]; then
-            gh pr edit "$existing" --repo leifericf/scoop-mino --title "mino ${VERSION}" --body "$body"
-          else
-            gh pr create --repo leifericf/scoop-mino --title "mino ${VERSION}" --body "$body" --base main --head "$branch"
+          if git diff --cached --quiet; then
+            echo "bucket/mino.json already matches main; nothing to push."
+            exit 0
           fi
+          git commit -m "mino ${VERSION}"
+          git push origin main
