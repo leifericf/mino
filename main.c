@@ -12,6 +12,7 @@
 #include "runtime/internal.h"
 #include "path_buf.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -305,11 +306,31 @@ static void print_usage(FILE *out)
         "    --                  End of options; treat the rest as FILE\n"
         "\n"
         "SUBCOMMANDS:\n"
+        "    repl                Start the interactive REPL (default with no FILE)\n"
         "    task [NAME]         Run a task from mino.edn, or list tasks\n"
         "    deps                Resolve and fetch mino.edn dependencies\n"
+        "    nrepl [ARGS...]     Discover and exec 'mino-nrepl' from PATH\n"
+        "    lsp   [ARGS...]     Discover and exec 'mino-lsp' from PATH\n"
         "\n"
         "If neither FILE, -e, nor a subcommand is given, the REPL is started.\n",
         out);
+}
+
+/* Exec a companion binary ("mino-nrepl" / "mino-lsp") from PATH, passing
+ * remaining argv through. Replaces argv[first] with the binary name so the
+ * companion observes its own argv[0]. Only returns on failure. */
+static int exec_companion(const char *bin, char **rest)
+{
+    rest[0] = (char *)bin;
+    execvp(bin, rest);
+    if (errno == ENOENT) {
+        fprintf(stderr,
+                "mino: '%s' subcommand requires '%s' on PATH\n",
+                bin + 5 /* skip "mino-" */, bin);
+        return 127;
+    }
+    fprintf(stderr, "mino: failed to exec %s: %s\n", bin, strerror(errno));
+    return 1;
 }
 
 /* Run `mino -e EXPR`: evaluate one expression and print its result. */
@@ -534,6 +555,15 @@ int main(int argc, char **argv)
     if (parse_state == 1) return 0;
     if (parse_state == 2) return 2;
 
+    /* Companion-binary subcommands. Exec before runtime init so we don't
+     * pay for an interpreter we're about to discard. */
+    if (!dash_dash && eval_expr == NULL && first < argc) {
+        if (strcmp(argv[first], "nrepl") == 0)
+            return exec_companion("mino-nrepl", argv + first);
+        if (strcmp(argv[first], "lsp") == 0)
+            return exec_companion("mino-lsp", argv + first);
+    }
+
     getcwd(initial_dir, sizeof(initial_dir));
 
     /* Compute binary_dir from argv[0] for finding bundled lib/. */
@@ -626,6 +656,12 @@ int main(int argc, char **argv)
         mino_env_free(S, env);
         mino_state_free(S);
         return exit_code;
+    }
+
+    /* `mino repl` is an explicit alias for bare `mino`: skip file mode and
+     * fall through to the REPL block. Extra positional args are ignored. */
+    if (!dash_dash && first < argc && strcmp(argv[first], "repl") == 0) {
+        first = argc;
     }
 
     /* File mode: evaluate a script and exit. */
