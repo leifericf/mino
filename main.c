@@ -281,6 +281,104 @@ static int run_deps(mino_state_t *S, mino_env_t *env)
     return 0;
 }
 
+/* ---- standalone-mode CLI helpers ---- */
+
+static void print_version(FILE *out)
+{
+    fprintf(out, "mino %s\n", mino_version_string());
+}
+
+static void print_usage(FILE *out)
+{
+    fputs(
+        "mino - tiny embeddable Lisp\n"
+        "\n"
+        "USAGE:\n"
+        "    mino [OPTIONS] [FILE]\n"
+        "    mino [OPTIONS] -e EXPR\n"
+        "    mino <SUBCOMMAND> [ARGS...]\n"
+        "\n"
+        "OPTIONS:\n"
+        "    -e, --eval EXPR     Evaluate EXPR and print the result\n"
+        "    -h, --help          Show this help and exit\n"
+        "    -V, --version       Show version and exit\n"
+        "    --                  End of options; treat the rest as FILE\n"
+        "\n"
+        "SUBCOMMANDS:\n"
+        "    task [NAME]         Run a task from mino.edn, or list tasks\n"
+        "    deps                Resolve and fetch mino.edn dependencies\n"
+        "\n"
+        "If neither FILE, -e, nor a subcommand is given, the REPL is started.\n",
+        out);
+}
+
+/* Run `mino -e EXPR`: evaluate one expression and print its result. */
+static int run_eval_expr(mino_state_t *S, mino_env_t *env, const char *expr)
+{
+    mino_val_t *result = mino_eval_string(S, expr, env);
+    if (result == NULL) {
+        report_eval_error(S);
+        return 1;
+    }
+    mino_println(S, result);
+    return 0;
+}
+
+/* Parse leading options. On success, sets *out_first to the index of the
+ * first non-option argv slot (== argc if none) and may set *out_eval to a
+ * pointer into argv for -e/--eval EXPR, *out_dash_dash if `--` was seen.
+ *
+ * Returns:
+ *    0   normal exit from parsing; caller continues with dispatch
+ *    1   handled completely (--help / --version printed); caller should exit 0
+ *    2   usage error; caller should exit 2
+ */
+static int parse_cli_flags(int argc, char **argv,
+                           int *out_first,
+                           const char **out_eval,
+                           int *out_dash_dash)
+{
+    int i = 1;
+    *out_eval = NULL;
+    *out_dash_dash = 0;
+    while (i < argc) {
+        const char *a = argv[i];
+        if (strcmp(a, "--") == 0) {
+            *out_dash_dash = 1;
+            i++;
+            break;
+        }
+        if (a[0] != '-' || a[1] == '\0') break; /* positional or bare "-" */
+        if (strcmp(a, "-h") == 0 || strcmp(a, "--help") == 0) {
+            print_usage(stdout);
+            return 1;
+        }
+        if (strcmp(a, "-V") == 0 || strcmp(a, "--version") == 0) {
+            print_version(stdout);
+            return 1;
+        }
+        if (strcmp(a, "-e") == 0 || strcmp(a, "--eval") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr,
+                        "mino: %s requires an EXPR argument\n"
+                        "Try 'mino --help' for usage.\n",
+                        a);
+                return 2;
+            }
+            *out_eval = argv[i + 1];
+            i += 2;
+            continue;
+        }
+        fprintf(stderr,
+                "mino: unknown option: %s\n"
+                "Try 'mino --help' for usage.\n",
+                a);
+        return 2;
+    }
+    *out_first = i;
+    return 0;
+}
+
 /* ---- helpers ---- */
 
 static int is_unterminated_error(const char *msg)
@@ -427,6 +525,15 @@ static void install_crash_handler(mino_state_t *S)
 int main(int argc, char **argv)
 {
     mino_state_t *S;
+    int           first       = 1;
+    const char   *eval_expr   = NULL;
+    int           dash_dash   = 0;
+    int           parse_state;
+
+    parse_state = parse_cli_flags(argc, argv, &first, &eval_expr, &dash_dash);
+    if (parse_state == 1) return 0;
+    if (parse_state == 2) return 2;
+
     getcwd(initial_dir, sizeof(initial_dir));
 
     /* Compute binary_dir from argv[0] for finding bundled lib/. */
@@ -492,7 +599,7 @@ int main(int argc, char **argv)
     mino_set_resolver(S, cwd_resolve, NULL);
 
     /* Subcommand: mino deps */
-    if (argc > 1 && strcmp(argv[1], "deps") == 0) {
+    if (!dash_dash && first < argc && strcmp(argv[first], "deps") == 0) {
         exit_code = run_deps(S, env);
         mino_env_free(S, env);
         mino_state_free(S);
@@ -502,10 +609,18 @@ int main(int argc, char **argv)
     /* Auto-wire project paths from mino.edn if present. */
     setup_project(S, env);
 
+    /* -e / --eval EXPR mode: evaluate one expression and exit. */
+    if (eval_expr != NULL) {
+        exit_code = run_eval_expr(S, env, eval_expr);
+        mino_env_free(S, env);
+        mino_state_free(S);
+        return exit_code;
+    }
+
     /* Subcommand: mino task [<name>] */
-    if (argc >= 2 && strcmp(argv[1], "task") == 0) {
-        if (argc >= 3)
-            exit_code = run_task(S, env, argv[2]);
+    if (!dash_dash && first < argc && strcmp(argv[first], "task") == 0) {
+        if (first + 1 < argc)
+            exit_code = run_task(S, env, argv[first + 1]);
         else
             exit_code = run_task_list(S, env);
         mino_env_free(S, env);
@@ -514,8 +629,8 @@ int main(int argc, char **argv)
     }
 
     /* File mode: evaluate a script and exit. */
-    if (argc > 1) {
-        mino_val_t *result = mino_load_file(S, argv[1], env);
+    if (first < argc) {
+        mino_val_t *result = mino_load_file(S, argv[first], env);
         if (result == NULL) {
             const mino_diag_t *d = mino_last_diag(S);
             if (d != NULL) {
