@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.66.0
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+`hash_val` is decomposed into a switch dispatch over named byte-
+loop helpers (`hash_long_long_bytes`, `hash_pointer_bytes`,
+`hash_uint32_bytes`). The numeric tier collapse — `(= 1 1.0 1N)`
+mapping to a single hash under tag `0x03` — funnels through one
+helper, making the equal-implies-equal-hash invariant explicit
+in the source. The `MINO_MAP` branch's inlined HAMT walk is
+replaced with a call to the shared `map_get_val` so the per-entry
+lookup path stays in lock step with the public API.
+
+`mino_eq`'s grouped helpers are renamed to the `eq_*_like` family
+that pairs with the hash side: `seq_equal` becomes `eq_seq_like`,
+`mino_eq_maps_cross` becomes `eq_map_like_cross`, and the
+matching set variant becomes `eq_set_like_cross`. A doc block
+above `mino_eq` states the equal-implies-equal-hash contract and
+notes that new tier additions or new equality bridges must
+extend the matching `hash_val` branch in the same commit.
+
 ## v0.65.0
 
 Internal cleanup. No user-visible behavior change; the public
