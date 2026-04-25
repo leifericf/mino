@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.72.0 — Release Pipeline & Build Polish
+
+Tag-triggered builds and a controlled promotion path. Pushing a tag
+matching `v*` now produces a draft GitHub Release with five platform
+archives (linux/darwin amd64 and arm64, windows amd64) plus a
+`checksums.txt`. Each build job verifies the tag against
+`MINO_VERSION_*` in `src/mino.h`, bootstraps with the canonical
+recipe, runs a `--version` and arithmetic smoke test, and uploads
+its archive. A fan-in publish step concatenates checksums and
+creates the draft Release. Nothing is published downstream until a
+maintainer un-drafts the Release and runs the manual
+`promote-packages` workflow.
+
+The promote workflow takes a tag and per-ecosystem booleans
+(`publish_brew`, `publish_scoop`). It fails loudly if the Release
+does not exist or is still a draft, downloads `checksums.txt` and
+all assets, re-verifies SHA-256s against the assets, renders the
+formula or manifest from a template under
+`.github/release-templates/`, and opens or updates a PR against the
+corresponding tap or bucket repo. Auto-merge stays off so the
+maintainer can review every formula and manifest before users see
+it.
+
+Three small build issues are also addressed. The `form` parameter of
+`apply_non_fn_callable` is now `const mino_val_t *` to match
+`S->eval_current_form`'s qualifier, which clears a `-Wcast-qual`
+warning at the only caller without changing behavior. The host-
+interop dispatch doc comment in `src/eval/special.c` was tripping
+`-Wcomment` because of a `/*` glob inside an open block comment; it
+now reads `host/...`. The README's pasteable bootstrap snippet was
+missing the `printf`/`sed` prelude that generates
+`src/core_mino.h`, so a fresh-clone copy-paste failed with
+`'core_mino.h' file not found`; the README now mirrors the canonical
+recipe in `mino.edn`.
+
+The public embedding API in `src/mino.h` is unchanged.
+
 ## v0.71.0 — Standalone CLI Polished
 
 The standalone `mino` binary now recognises `-h`/`--help`,
