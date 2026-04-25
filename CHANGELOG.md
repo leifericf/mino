@@ -1,5 +1,106 @@
 # Changelog
 
+## v0.55.0 — Numeric Tower Complete
+
+Fifth release of the Dialect-Complete cycle. mino's numeric tower
+closes: ratio and bigdec types arrive, the four arithmetic
+primitives plus all comparison primitives tier-dispatch across the
+five numeric tiers (int, bigint, ratio, bigdec, float), and `=`
+goes Clojure-strict on the numeric tier with a new `==` for
+cross-tier numeric equality.
+
+### Added
+
+- **`MINO_RATIO` value type.** Numerator/denominator stored as a
+  pair of `MINO_BIGINT` cells. Always reduced (gcd = 1) and
+  normalised so the denominator is positive; `1/2`, `-3/4`, and
+  arbitrary-magnitude literals like `99999999999999999999999/3`
+  all read as canonical ratios. When the denominator collapses to
+  1 the constructor returns an integer (or bigint) instead of a
+  ratio cell, so `(type 6/3)` is `:int`, not `:ratio`.
+
+- **`MINO_BIGDEC` value type.** Unscaled `MINO_BIGINT` plus a
+  non-negative integer scale; value = unscaled × 10⁻ᵃᶜᵃˡᵉ. Reads
+  via the `M` literal suffix (`1M`, `1.5M`, `0.1M`,
+  `-2.5e+10M`). Equality under `=` is representation-strict
+  (`(= 1.0M 1.00M)` is false), while `==` collapses scale.
+
+- **Reader literals: `1/2` and `1M`.** The previously placeholder
+  forms (`1/2` parsed to a float, `1.5M` to a float) now produce
+  real ratio / bigdec values. Arbitrary-magnitude numerators and
+  denominators are supported; the lookup `mino_ratio_make` reduces
+  by gcd and narrows to int / bigint when possible.
+
+- **Tower dispatch in `+`, `-`, `*`, `/`.** Walks the operand list
+  with a one-way tier-promotion accumulator: int → bigint → ratio
+  → bigdec, with float collapsing everything. Mixed ratio/bigdec
+  drops to float (the exact ratio→bigdec coercion needs an
+  explicit precision; `with-precision` is deferred). `/` follows
+  Clojure: int/int with a non-zero remainder yields a ratio
+  (`(/ 1 2)` ⇒ `1/2`), and the unary form is a tier-aware
+  reciprocal (`(/ 2)` ⇒ `1/2`).
+
+- **Tower dispatch in `<`, `<=`, `>`, `>=`.** Comparison crosses
+  every tier without coercion artefacts: int/bigint comparison is
+  exact, ratio comparison cross-multiplies through bigints, bigdec
+  comparison aligns scales, and float comparison collapses to
+  double.
+
+- **`==` numeric-equality primitive.** Returns true whenever the
+  values are numerically equal regardless of tier or
+  representation: `(== 1 1.0)`, `(== 1 1N)`, `(== 1/2 0.5)`,
+  `(== 1.0M 1.00M)`, `(== 1 1M)` are all true. Use `==` when you
+  want Clojure's old "all-numeric" `=` semantics.
+
+- **`numerator`, `denominator`, `rationalize`, `bigdec`,
+  `decimal?`, `ratio?`, `rational?`.** Accessors and constructors
+  for the new types. `numerator` / `denominator` narrow back to
+  int when the result fits in a long. `rationalize` decomposes an
+  IEEE-754 double into its mantissa/exponent and produces an
+  exact ratio.
+
+- **Auto-promoting `+'`/`-'`/`*'`/`inc'`/`dec'` extend to
+  ratio and bigdec.** Same code path as plain `+/-/*` for those
+  tiers, only the long-overflow case differs (promote vs throw).
+
+### Changed
+
+- **Strict `=` on the numeric tier.** `(= 1 1.0)` is now false,
+  matching Clojure's type-strict equality. `(= 1 1N)` stays true
+  because int and bigint represent the same arbitrary-precision
+  integer kind. Use `==` for the old cross-tier numeric-equality
+  behaviour.
+
+- **`(/ 1 2)` returns `1/2`.** Integer division with a non-zero
+  remainder produces a ratio rather than coercing to a float.
+  Code that relied on the old behaviour can wrap the call in
+  `double` or write `(/ 1.0 2)`.
+
+- **`number?`, `int`, `float` accept the new tiers.** `(number?
+  1/2)` is true; `(int 1/2)` truncates toward zero; `(float 1/2)`
+  yields the nearest representable double.
+
+- **`(int x)` on a bigint that doesn't fit in a long throws** with
+  `eval/overflow`, matching Clojure semantics. Use `(bigint x)`
+  to keep the magnitude or `(double x)` to coerce.
+
+### Known limitations
+
+- **Mixed ratio/bigdec arithmetic collapses to float.** `(* 1/2
+  1.5M)` yields `0.75` (double), not `0.75M`. Exact
+  ratio→bigdec coercion needs an explicit precision context;
+  `with-precision` arrives in a later cycle.
+
+- **`bigdec / bigdec` throws.** The result generally has an
+  infinite or non-terminating decimal expansion, so a precision
+  must be picked explicitly. Until `with-precision` lands, divide
+  via `(double a)` / `(double b)` or pre-rationalise.
+
+- **`rationalize` on huge magnitudes loses precision.** The
+  recovery uses `frexp` + a 53-bit mantissa, which matches
+  IEEE-754 doubles exactly but can't recover bits the source
+  double never carried.
+
 ## v0.54.0 — Auto-Promoting Arithmetic
 
 Fourth release of the Dialect-Complete cycle. The promoting siblings
