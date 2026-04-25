@@ -106,3 +106,17 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
     obj->meta = (new_meta->type == MINO_NIL) ? NULL : new_meta;
     return obj->meta != NULL ? obj->meta : mino_nil(S);
 }
+
+const mino_prim_def k_prims_meta[] = {
+    {"meta",        prim_meta,
+     "Returns the metadata map of the given value, or nil."},
+    {"with-meta",   prim_with_meta,
+     "Returns a copy of the value with the given metadata map."},
+    {"vary-meta",   prim_vary_meta,
+     "Returns a copy of the value with (apply f meta args) as its metadata."},
+    {"alter-meta!", prim_alter_meta,
+     "Atomically applies f to the metadata of a reference."},
+};
+
+const size_t k_prims_meta_count =
+    sizeof(k_prims_meta) / sizeof(k_prims_meta[0]);

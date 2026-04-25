@@ -239,14 +239,21 @@ static mino_val_t *prim_host_get(mino_state_t *S, mino_val_t *args,
     }
 }
 
+const mino_prim_def k_prims_host[] = {
+    {"host/new",         prim_host_new,
+     "Creates a new instance of a host-registered type."},
+    {"host/call",        prim_host_call,
+     "Calls a method on a host handle."},
+    {"host/static-call", prim_host_static_call,
+     "Calls a static method on a host-registered type."},
+    {"host/get",         prim_host_get,
+     "Returns the value of a field on a host handle."},
+};
+
+const size_t k_prims_host_count =
+    sizeof(k_prims_host) / sizeof(k_prims_host[0]);
+
 void mino_install_host(mino_state_t *S, mino_env_t *env)
 {
-    DEF_PRIM(env, "host/new", prim_host_new,
-             "Creates a new instance of a host-registered type.");
-    DEF_PRIM(env, "host/call", prim_host_call,
-             "Calls a method on a host handle.");
-    DEF_PRIM(env, "host/static-call", prim_host_static_call,
-             "Calls a static method on a host-registered type.");
-    DEF_PRIM(env, "host/get", prim_host_get,
-             "Returns the value of a field on a host handle.");
+    prim_install_table(S, env, k_prims_host, k_prims_host_count);
 }

@@ -59,3 +59,13 @@ mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return mino_nil(S);
 }
+
+const mino_prim_def k_prims_regex[] = {
+    {"re-find",    prim_re_find,
+     "Returns the first regex match in the string, or nil."},
+    {"re-matches", prim_re_matches,
+     "Returns the match if the entire string matches the regex, or nil."},
+};
+
+const size_t k_prims_regex_count =
+    sizeof(k_prims_regex) / sizeof(k_prims_regex[0]);

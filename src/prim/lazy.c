@@ -357,3 +357,19 @@ mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return range_make_lazy(S, start, end, step, infinite);
 }
+
+const mino_prim_def k_prims_lazy[] = {
+    {"range",       prim_range,
+     "Returns a lazy sequence of nums from start (inclusive) to end (exclusive), by step. With no args, returns an infinite sequence from 0."},
+    {"lazy-map-1",  prim_lazy_map_1,
+     "Internal fast path for single-collection lazy map."},
+    {"lazy-filter", prim_lazy_filter,
+     "Internal fast path for lazy filter."},
+    {"lazy-take",   prim_lazy_take,
+     "Internal fast path for lazy take."},
+    {"drop-seq",    prim_drop_seq,
+     "Internal fast path for eager drop."},
+};
+
+const size_t k_prims_lazy_count =
+    sizeof(k_prims_lazy) / sizeof(k_prims_lazy[0]);

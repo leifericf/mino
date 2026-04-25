@@ -248,3 +248,17 @@ void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx)
     S->module_resolver     = fn;
     S->module_resolver_ctx = ctx;
 }
+
+const mino_prim_def k_prims_module[] = {
+    {"require", prim_require,
+     "Loads and evaluates a mino source file."},
+    {"doc",     prim_doc,
+     "Prints the documentation for the named var."},
+    {"source",  prim_source,
+     "Prints the source code of the named var."},
+    {"apropos", prim_apropos,
+     "Returns a list of vars whose names match the given pattern."},
+};
+
+const size_t k_prims_module_count =
+    sizeof(k_prims_module) / sizeof(k_prims_module[0]);

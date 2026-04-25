@@ -239,10 +239,17 @@ mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* ---- install ---- */
 
+const mino_prim_def k_prims_proc[] = {
+    {"sh",  prim_sh,
+     "Runs an external command. Returns {:exit n :out \"...\"}."},
+    {"sh!", prim_sh_bang,
+     "Runs an external command. Returns stdout; throws on non-zero exit."},
+};
+
+const size_t k_prims_proc_count =
+    sizeof(k_prims_proc) / sizeof(k_prims_proc[0]);
+
 void mino_install_proc(mino_state_t *S, mino_env_t *env)
 {
-    DEF_PRIM(env, "sh",  prim_sh,
-             "Runs an external command. Returns {:exit n :out \"...\"}.");
-    DEF_PRIM(env, "sh!", prim_sh_bang,
-             "Runs an external command. Returns stdout; throws on non-zero exit.");
+    prim_install_table(S, env, k_prims_proc, k_prims_proc_count);
 }

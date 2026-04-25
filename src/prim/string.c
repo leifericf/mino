@@ -849,3 +849,41 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
         bytes[12], bytes[13], bytes[14], bytes[15]);
     return mino_string_n(S, buf, 36);
 }
+
+const mino_prim_def k_prims_string[] = {
+    {"str",          prim_str,
+     "Returns the string representation of the arguments concatenated."},
+    {"pr-str",       prim_pr_str,
+     "Returns a readable string representation of the arguments."},
+    {"read-string",  prim_read_string,
+     "Reads one form from the string."},
+    {"format",       prim_format,
+     "Returns a formatted string using a format specifier and arguments."},
+    {"char-at",      prim_char_at,
+     "Returns the character at the given index as a string."},
+    {"subs",         prim_subs,
+     "Returns a substring from start (inclusive) to end (exclusive)."},
+    {"split",        prim_split,
+     "Splits a string on a regex pattern."},
+    {"join",         prim_join,
+     "Returns a string of the items in coll joined by separator."},
+    {"str-replace",  prim_str_replace,
+     "Replaces all occurrences of match in s with replacement."},
+    {"starts-with?", prim_starts_with_p,
+     "Returns true if the string starts with the given prefix."},
+    {"ends-with?",   prim_ends_with_p,
+     "Returns true if the string ends with the given suffix."},
+    {"includes?",    prim_includes_p,
+     "Returns true if the string contains the given substring."},
+    {"upper-case",   prim_upper_case,
+     "Returns the string converted to upper case."},
+    {"lower-case",   prim_lower_case,
+     "Returns the string converted to lower case."},
+    {"trim",         prim_trim,
+     "Returns the string with leading and trailing whitespace removed."},
+    {"random-uuid",  prim_random_uuid,
+     "Returns a random UUID v4 string."},
+};
+
+const size_t k_prims_string_count =
+    sizeof(k_prims_string) / sizeof(k_prims_string[0]);

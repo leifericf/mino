@@ -389,3 +389,60 @@ mino_val_t *prim_file_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     free(items);
     return result;
 }
+
+/* k_prims_io_core -- printer hooks installed during mino_install_core so
+ * core.mino's print-method multimethod can register itself before any
+ * code calls pr.  pr / prn / etc. live in k_prims_io and are installed
+ * by mino_install_io, which sandboxed embedders may skip. */
+const mino_prim_def k_prims_io_core[] = {
+    {"pr-builtin",        prim_pr_builtin,
+     "Prints a value readably via the built-in C formatter, bypassing print-method."},
+    {"set-print-method!", prim_set_print_method_bang,
+     "Installs a fn to dispatch pr / prn output; nil removes the hook."},
+};
+
+const size_t k_prims_io_core_count =
+    sizeof(k_prims_io_core) / sizeof(k_prims_io_core[0]);
+
+const mino_prim_def k_prims_io[] = {
+    {"println",  prim_println,
+     "Prints the arguments followed by a newline."},
+    {"prn",      prim_prn,
+     "Prints the arguments readably followed by a newline."},
+    {"print",    prim_print,
+     "Prints the arguments space-separated, without a trailing newline."},
+    {"pr",       prim_pr,
+     "Prints the arguments readably, without a trailing newline."},
+    {"newline",  prim_newline,
+     "Writes a line separator to stdout."},
+    {"slurp",    prim_slurp,
+     "Reads the entire contents of a file as a string."},
+    {"spit",     prim_spit,
+     "Writes the string content to a file."},
+    {"exit",     prim_exit,
+     "Exits the process with the given status code."},
+    {"time-ms",  prim_time_ms,
+     "Returns the current time in milliseconds."},
+    {"nano-time", prim_nano_time,
+     "Returns monotonic wall-clock time in nanoseconds."},
+    {"file-seq", prim_file_seq,
+     "Returns a vector of all file paths under a directory, recursively."},
+    {"getenv",   prim_getenv,
+     "Returns the value of an environment variable, or nil."},
+    {"getcwd",   prim_getcwd,
+     "Returns the current working directory."},
+    {"chdir",    prim_chdir,
+     "Changes the current working directory."},
+    {"gc-stats", prim_gc_stats,
+     "Returns a map of GC statistics."},
+    {"gc!",      prim_gc_bang,
+     "Forces a full garbage collection. Returns nil."},
+};
+
+const size_t k_prims_io_count =
+    sizeof(k_prims_io) / sizeof(k_prims_io[0]);
+
+void mino_install_io(mino_state_t *S, mino_env_t *env)
+{
+    prim_install_table(S, env, k_prims_io, k_prims_io_count);
+}

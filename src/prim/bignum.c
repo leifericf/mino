@@ -1340,3 +1340,30 @@ int mino_bigdec_cmp(const mino_val_t *a, const mino_val_t *b)
         return r;
     }
 }
+
+const mino_prim_def k_prims_bignum[] = {
+    {"bigint",      prim_bigint,
+     "Coerces a value to an arbitrary-precision integer. Accepts int, "
+     "bigint, float (truncated toward zero), or a base-10 string."},
+    {"biginteger",  prim_biginteger,
+     "Alias of bigint. Coerces a value to an arbitrary-precision integer."},
+    {"bigint?",     prim_bigint_p,
+     "Returns true if x is an arbitrary-precision integer."},
+    {"numerator",   prim_numerator,
+     "Returns the numerator of a rational number."},
+    {"denominator", prim_denominator,
+     "Returns the denominator of a rational number."},
+    {"ratio?",      prim_ratio_p,
+     "Returns true if x is a ratio."},
+    {"rational?",   prim_rational_p,
+     "Returns true if x is a rational number (int, bigint, or ratio)."},
+    {"rationalize", prim_rationalize,
+     "Returns the rational value nearest to the argument."},
+    {"bigdec",      prim_bigdec,
+     "Coerces a value to an arbitrary-precision decimal."},
+    {"decimal?",    prim_decimal_p,
+     "Returns true if x is an arbitrary-precision decimal."},
+};
+
+const size_t k_prims_bignum_count =
+    sizeof(k_prims_bignum) / sizeof(k_prims_bignum[0]);

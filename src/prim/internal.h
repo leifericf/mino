@@ -47,11 +47,24 @@ mino_val_t  *set_conj1(mino_state_t *S, const mino_val_t *s,
 /* print_str_to: write v to out; strings as raw bytes, others via printer. */
 void         print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 
-/* DEF_PRIM: register a primitive with a docstring in the meta table. */
-#define DEF_PRIM(env, name, fn, doc) do {                  \
-    mino_env_set(S, env, name, mino_prim(S, name, fn));    \
-    meta_set(S, name, doc, sizeof(doc) - 1, NULL);         \
-} while (0)
+/* Primitive install tables.  Each prim_*.c defines a static array of
+ * mino_prim_def at file bottom; the central install.c composes them
+ * into k_core_domains[] and iterates via prim_install_table to bind
+ * each entry into the env and attach its docstring. */
+typedef struct {
+    const char  *name;     /* binding name visible to mino code */
+    mino_prim_fn fn;       /* C implementation; signature in mino.h */
+    const char  *doc;      /* docstring for (doc name); never NULL */
+} mino_prim_def;
+
+typedef struct {
+    const char           *domain;     /* short label, e.g. "numeric" */
+    const mino_prim_def  *defs;
+    const size_t         *count_ptr;  /* &k_prims_<domain>_count */
+} mino_prim_domain;
+
+void prim_install_table(mino_state_t *S, mino_env_t *env,
+                        const mino_prim_def *defs, size_t count);
 
 /* Primitives declared per domain (each prim_*.c defines these).
  * All follow the standard primitive signature: args are borrowed,
@@ -314,5 +327,62 @@ void mino_install_host(mino_state_t *S, mino_env_t *env);
 
 /* prim_async.c */
 void mino_install_async(mino_state_t *S, mino_env_t *env);
+
+/* Per-domain primitive tables.  Each prim_*.c exports the table and
+ * its element count; prim/install.c composes them into k_core_domains[]
+ * (and io.c keeps two tables: io_core for bootstrap-essential printer
+ * hooks, io for the I/O surface installed via mino_install_io).
+ */
+
+extern const mino_prim_def k_prims_numeric[];
+extern const size_t        k_prims_numeric_count;
+
+extern const mino_prim_def k_prims_meta[];
+extern const size_t        k_prims_meta_count;
+
+extern const mino_prim_def k_prims_collections[];
+extern const size_t        k_prims_collections_count;
+
+extern const mino_prim_def k_prims_sequences[];
+extern const size_t        k_prims_sequences_count;
+
+extern const mino_prim_def k_prims_lazy[];
+extern const size_t        k_prims_lazy_count;
+
+extern const mino_prim_def k_prims_string[];
+extern const size_t        k_prims_string_count;
+
+extern const mino_prim_def k_prims_reflection[];
+extern const size_t        k_prims_reflection_count;
+
+extern const mino_prim_def k_prims_regex[];
+extern const size_t        k_prims_regex_count;
+
+extern const mino_prim_def k_prims_stateful[];
+extern const size_t        k_prims_stateful_count;
+
+extern const mino_prim_def k_prims_module[];
+extern const size_t        k_prims_module_count;
+
+extern const mino_prim_def k_prims_bignum[];
+extern const size_t        k_prims_bignum_count;
+
+extern const mino_prim_def k_prims_io_core[];
+extern const size_t        k_prims_io_core_count;
+
+extern const mino_prim_def k_prims_io[];
+extern const size_t        k_prims_io_count;
+
+extern const mino_prim_def k_prims_host[];
+extern const size_t        k_prims_host_count;
+
+extern const mino_prim_def k_prims_async[];
+extern const size_t        k_prims_async_count;
+
+extern const mino_prim_def k_prims_fs[];
+extern const size_t        k_prims_fs_count;
+
+extern const mino_prim_def k_prims_proc[];
+extern const size_t        k_prims_proc_count;
 
 #endif /* PRIM_INTERNAL_H */

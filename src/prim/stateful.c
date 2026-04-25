@@ -382,3 +382,33 @@ mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args,
     mino_set_fail_alloc_at(S, (long)n->as.i);
     return mino_nil(S);
 }
+
+const mino_prim_def k_prims_stateful[] = {
+    {"atom",           prim_atom,
+     "Creates an atom with the given initial value."},
+    {"deref",          prim_deref,
+     "Returns the current value of a reference (atom, delay, etc.)."},
+    {"reset!",         prim_reset_bang,
+     "Sets the value of an atom to newval and returns newval."},
+    {"swap!",          prim_swap_bang,
+     "Atomically applies f to the current value of the atom and any additional args."},
+    {"atom?",          prim_atom_p,
+     "Returns true if x is an atom."},
+    {"add-watch",      prim_add_watch,
+     "Adds a watch function to an atom, called on state changes."},
+    {"remove-watch",   prim_remove_watch,
+     "Removes a watch function from an atom by key."},
+    {"set-validator!", prim_set_validator,
+     "Sets a validator function on an atom."},
+    {"get-validator",  prim_get_validator,
+     "Returns the validator function of an atom, or nil."},
+    {"reset-vals!",    prim_reset_vals,
+     "Sets the value of an atom and returns [old new]."},
+    {"swap-vals!",     prim_swap_vals,
+     "Atomically applies f to the atom and returns [old new]."},
+    {"set-fail-alloc-at!", prim_set_fail_alloc_at,
+     "Make the n-th GC allocation fail (simulated OOM). Pass 0 to disable."},
+};
+
+const size_t k_prims_stateful_count =
+    sizeof(k_prims_stateful) / sizeof(k_prims_stateful[0]);

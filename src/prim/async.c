@@ -111,14 +111,21 @@ static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
     }
 }
 
+const mino_prim_def k_prims_async[] = {
+    {"async-sched-enqueue*",  prim_sched_enqueue,
+     "Enqueue a callback on the async scheduler run queue."},
+    {"async-schedule-timer*", prim_timer_schedule,
+     "Schedule a callback to fire after ms milliseconds."},
+    {"drain!",                prim_drain,
+     "Drain the async run queue once."},
+    {"drain-loop!",           prim_drain_loop,
+     "Drain until done-thunk returns truthy or no progress."},
+};
+
+const size_t k_prims_async_count =
+    sizeof(k_prims_async) / sizeof(k_prims_async[0]);
+
 void mino_install_async(mino_state_t *S, mino_env_t *env)
 {
-    DEF_PRIM(env, "async-sched-enqueue*", prim_sched_enqueue,
-             "Enqueue a callback on the async scheduler run queue.");
-    DEF_PRIM(env, "async-schedule-timer*", prim_timer_schedule,
-             "Schedule a callback to fire after ms milliseconds.");
-    DEF_PRIM(env, "drain!", prim_drain,
-             "Drain the async run queue once.");
-    DEF_PRIM(env, "drain-loop!", prim_drain_loop,
-             "Drain until done-thunk returns truthy or no progress.");
+    prim_install_table(S, env, k_prims_async, k_prims_async_count);
 }

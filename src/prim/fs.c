@@ -186,16 +186,23 @@ mino_val_t *prim_file_mtime(mino_state_t *S, mino_val_t *args,
 
 /* ---- install ---- */
 
+const mino_prim_def k_prims_fs[] = {
+    {"file-exists?", prim_file_exists_p,
+     "Returns true if the path exists (file or directory)."},
+    {"directory?",   prim_directory_p,
+     "Returns true if the path is a directory."},
+    {"mkdir-p",      prim_mkdir_p,
+     "Creates a directory and any missing parent directories."},
+    {"rm-rf",        prim_rm_rf,
+     "Recursively removes a file or directory."},
+    {"file-mtime",   prim_file_mtime,
+     "Returns the file modification time in milliseconds, or nil."},
+};
+
+const size_t k_prims_fs_count =
+    sizeof(k_prims_fs) / sizeof(k_prims_fs[0]);
+
 void mino_install_fs(mino_state_t *S, mino_env_t *env)
 {
-    DEF_PRIM(env, "file-exists?", prim_file_exists_p,
-             "Returns true if the path exists (file or directory).");
-    DEF_PRIM(env, "directory?",   prim_directory_p,
-             "Returns true if the path is a directory.");
-    DEF_PRIM(env, "mkdir-p",      prim_mkdir_p,
-             "Creates a directory and any missing parent directories.");
-    DEF_PRIM(env, "rm-rf",        prim_rm_rf,
-             "Recursively removes a file or directory.");
-    DEF_PRIM(env, "file-mtime",   prim_file_mtime,
-             "Returns the file modification time in milliseconds, or nil.");
+    prim_install_table(S, env, k_prims_fs, k_prims_fs_count);
 }

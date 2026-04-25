@@ -32,7 +32,7 @@
    "src/public/gc.c" "src/public/embed.c"
    "src/collections/val.c" "src/collections/vec.c" "src/collections/map.c"
    "src/collections/rbtree.c" "src/eval/read.c" "src/eval/print.c"
-   "src/prim/prim.c" "src/prim/numeric.c" "src/prim/collections.c"
+   "src/prim/prim.c" "src/prim/install.c" "src/prim/numeric.c" "src/prim/collections.c"
    "src/prim/sequences.c" "src/prim/lazy.c"
    "src/prim/string.c" "src/prim/io.c"
    "src/prim/reflection.c" "src/prim/meta.c" "src/prim/regex.c"
@@ -250,7 +250,6 @@
 ;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
 (def ^:private fn-allowlist
   #{"src/eval/special.c:eval_impl"     ;; main evaluator dispatch -- inherently large
-    "src/prim/prim.c:mino_install_core" ;; primitive registration table
     "src/eval/read.c:read_form"})
 
 (defn- count-lines
