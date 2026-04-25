@@ -99,37 +99,59 @@ are the only macros that implicitly require a local `S` variable.
 
 ## 5. Error Model
 
-Two error classes exist:
+Three internal severity classes, declared in `src/diag/diag_contract.h`:
 
-### Class I: Invariant-fatal (abort)
+### `MINO_ERR_CORRUPT` (abort)
 
 Used when no recovery is possible because the runtime is in an
 inconsistent state or no state exists to report through.
 
-Current abort sites (all verified Class I):
+Current abort sites:
 
-- `runtime_state.c` -- `mino_state_new` initial alloc failure (no state exists)
-- `runtime_gc.c` -- `gc_alloc_typed` OOM with no try frame (2 sites)
-- `runtime_gc.c` -- GC range index realloc inside GC (2 sites)
-- `runtime_gc.c` -- unexpected `setjmp` return in `gc_collect`
-- `prim.c` -- `install_core_mino` bootstrap failures (5 sites: OOM, parse, eval)
+- `runtime/state.c` -- `mino_state_new` initial alloc failure
+  (no state exists)
+- `gc/driver.c` -- `gc_alloc_typed` OOM with no try frame; range
+  index realloc inside GC; unexpected `setjmp` return in `gc_collect`
+- `gc/{barrier,major,minor,roots,trace}.c` -- corruption-only paths
+  inside the collector
+- `prim/install.c` -- `install_core_mino` bootstrap failures
+  (5 sites: OOM, parse, eval -- the state has not finished
+  initializing)
 
 **Rule:** Every `abort()` must have a comment explaining why recovery is
 impossible. New abort sites require explicit justification.
 
-### Class II: Recoverable (error return)
+### `MINO_ERR_RECOVERABLE` (catchable user fault)
 
-Used for conditions the host or mino code can handle:
+Used for argument/type errors and any condition that mino code can
+catch via `try`/`catch`:
 
-- Argument/type errors in primitives: `prim_throw_error` (catchable via
-  try/catch in mino code).
-- Resource failures during eval (OOM after try frame is established):
-  `set_error` + return NULL, surfaced via `mino_last_error`.
-- Reader errors: return NULL + error message.
-- File I/O errors: return NULL + error message.
+- `prim_throw_classified` from primitives (the dominant path)
+- `set_eval_diag` + longjmp from the evaluator
+- Reader errors set a diagnostic and return NULL; the caller
+  surfaces it via `mino_last_error`
 
-**Rule:** No user-triggerable input may reach a Class I path. If user input
-can cause an abort, that is a bug.
+Diagnostic kinds: `:eval/...`, `:type/...`, `:arity/...`,
+`:user/...`
+
+### `MINO_ERR_HOST` (host-visible non-fatal)
+
+Used for conditions the host needs to observe but mino code may not
+sensibly catch:
+
+- Step-limit / heap-limit hits (the host-installed budget fired)
+- File I/O failures, OS errors
+- Host capability rejections from registered callbacks
+
+Diagnostic kinds: `:limit/steps`, `:limit/heap`, `:io/...`,
+`:host/...`, `:internal/...`
+
+**Rule:** No user-triggerable input may reach a `MINO_ERR_CORRUPT`
+path. If user input can cause an abort, that is a bug.
+
+Per-subsystem `internal.h` files carry "Error classes emitted"
+blocks listing which classes their code paths produce, where, and
+why. `diag.c` carries the kind-to-class mapping table.
 
 ## 6. Special Forms
 
@@ -173,8 +195,8 @@ justification. Special forms cannot be shadowed by environment bindings
 
 - All runtime code targets C99 (`-std=c99`).
 - Platform-specific code is isolated: mutex shims in `clone.c`
-  (`_WIN32` vs pthreads) and GCC/Clang warning pragmas in `runtime_gc.c`
-  and `prim.c`.
+  (`_WIN32` vs pthreads) and GCC/Clang warning pragmas in `gc/driver.c`
+  and `prim/install.c` (the latter wraps the bundled `core_mino.h`).
 - The regex engine (`re.c`) is a self-contained translation unit with its
   own header.
 - No compiler extensions are required for core functionality.

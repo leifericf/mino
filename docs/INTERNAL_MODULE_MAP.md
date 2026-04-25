@@ -20,7 +20,7 @@ src/
 ├── async/                         # scheduler + timers (+ internal.h)
 ├── interop/                       # host interop syntax (+ internal.h)
 ├── regex/                         # self-contained regex engine
-├── diag/                          # diagnostic kinds + reporting
+├── diag/                          # diagnostic kinds + reporting (+ diag_contract.h severity classes)
 └── vendor/imath/                  # MIT-licensed bignum (vendored)
 ```
 
@@ -52,7 +52,8 @@ src/
 
 | File | Responsibility |
 |------|----------------|
-| `src/prim/prim.c` | Shared helpers (`prim_throw_error`, `print_to_string`, seq iterator), `install_core_mino`, `mino_install_core`, `mino_install_io` |
+| `src/prim/prim.c` | Shared helpers (`prim_throw_classified`, `prim_throw_error`, `args_have_float`, `as_double`, `as_long`, `print_to_string`) |
+| `src/prim/install.c` | `prim_install_table` helper, `install_core_mino` bootstrap, `mino_install_core` data-driven loop over `k_core_domains[]` |
 | `src/prim/numeric.c` | Arithmetic (`+`, `-`, `*`, `/`, `mod`, `rem`, `quot`), coercion (`int`, `float`), bitwise ops, math functions, comparison (`=`, `<`, `compare`, `identical?`) |
 | `src/prim/bignum.c` | Arbitrary-precision integer/ratio/decimal primitives backed by vendored imath |
 | `src/prim/collections.c` | List/vector/map/set primitives (`car`, `cdr`, `cons`, `count`, `nth`, `first`, `rest`, `assoc`, `get`, `conj`, `keys`, `vals`, `hash-set`, `contains?`, `disj`, `dissoc`, `seq`, `realized?`) |
@@ -110,8 +111,9 @@ and a four-primitive bridge.
 
 | File | Responsibility |
 |------|----------------|
-| `src/diag/diag.c` | Diagnostic kind taxonomy and reporting |
+| `src/diag/diag.c` | Diagnostic kind taxonomy and reporting; kind-to-severity-class mapping table |
 | `src/diag/diag.h` | Diagnostic kind enum + reporting API |
+| `src/diag/diag_contract.h` | Three-class internal severity enum (`MINO_ERR_RECOVERABLE`, `MINO_ERR_HOST`, `MINO_ERR_CORRUPT`) |
 
 ## Vendored Libraries
 
@@ -134,7 +136,7 @@ and a four-primitive bridge.
 | `src/async/internal.h` | Async umbrella (includes `async/scheduler.h` + `async/timer.h`) |
 | `src/async/scheduler.h` | Scheduler types and public surface |
 | `src/async/timer.h` | Timer types and public surface |
-| `src/prim/internal.h` | Shared primitive helpers, `seq_iter_t`, per-domain primitive declarations |
+| `src/prim/internal.h` | Shared primitive helpers, `seq_iter_t`, install-table types (`mino_prim_def`, `mino_prim_domain`), per-domain table externs, per-prim function declarations, "Error classes emitted" contract block |
 | `src/regex/re.h` | Regex public header |
 
 ## Entry Point
@@ -180,14 +182,14 @@ Rules:
 - Runtime core files include `runtime/internal.h`, which in turn includes the per-subsystem internal headers needed to define `mino_state`. Files that only touch a single subsystem can include just that subsystem's header.
 - Only `prim/regex.c` includes `regex/re.h` (regex is isolated from the rest of the primitive layer).
 - Only `prim/bignum.c` includes `vendor/imath/imath.h`.
-- `prim/prim.c` includes `core_mino.h` (generated) for the core library bootstrap.
+- `prim/install.c` includes `core_mino.h` (generated) for the core library bootstrap.
 
 ## How to Add a Primitive
 
 1. Choose the domain file (`src/prim/numeric.c`, `src/prim/collections.c`, etc.).
 2. Write the function with signature `mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)`.
 3. Declare it in `src/prim/internal.h` under the appropriate domain section.
-4. Register it in `mino_install_core()` or `mino_install_io()` in `src/prim/prim.c`.
+4. Append a `{"name", prim_name, "docstring..."}` entry to the file's `k_prims_<domain>[]` table at TU bottom. The domain is already wired into `k_core_domains[]` in `src/prim/install.c`; new entries pick up the install loop automatically.
 5. Add tests in `tests/` and run `./mino task test`.
 
 ## How to Add a Special Form
