@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.62.0
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+The `mino_state_free` teardown function is split into per-subsystem
+helpers (`state_free_root_envs`, `state_free_refs`,
+`state_free_ns_aliases`, `state_free_module_cache`,
+`state_free_host_types`, `state_free_meta_table`,
+`state_free_intern_tables`, `state_free_string_interns`,
+`state_free_gc_aux`, `state_free_diag_state`, `state_free_async`,
+`state_free_heap`) called in fixed order from a thin orchestrator.
+Teardown order is preserved.
+
+The remaining behavioral macros become regular functions:
+`FMT_ENSURE` becomes `fmt_ensure` (a static inline that returns the
+new buffer or NULL on OOM); `MINO_GC_VERIFY_CHECK` becomes
+`gc_verify_check` (a static inline taking the state and container
+header explicitly); `MATH_UNARY` becomes `math_unary` (a static
+inline taking a function pointer, replacing nine macro-expansion
+copies).
+
+A new `src/runtime/path_buf.{c,h}` centralizes the `PATH_BUF_CAP`
+constant (4096) that was repeated across the file-I/O primitives,
+and exposes a `path_buf_t` struct + `path_buf_init` / `path_buf_set`
+/ `path_buf_append` / `path_buf_format` API for new callers that
+want explicit truncation reporting.
+
 ## v0.61.0
 
 Internal source-tree reorganization. No user-visible behavior change;
