@@ -1,5 +1,87 @@
 # Changelog
 
+## v0.60.0 — Dialect Complete
+
+Banner release closing the Dialect-Complete cycle. mino is now
+the Clojure dialect at embedded scale: code that doesn't reach
+for JVM interop, chunked-seq throughput, or host-thread
+primitives runs on mino unchanged.
+
+This release adds no new runtime features over v0.56.0. It is a
+docs and ecosystem ripple — the dialect surface is settled and
+the companion tooling (mino-site, mino-lsp, mino-nrepl,
+tree-sitter-mino, mino-examples) all track the new numeric-tower
+type tags and the Clojure-shape multimethod / hierarchy
+semantics.
+
+What's complete after this cycle:
+
+- **Transients** as a public mino-level API (v0.51.0). `transient`,
+  `persistent!`, `assoc!`, `conj!`, `dissoc!`, `disj!`, `pop!` over
+  vec / map / set, sitting on the existing C kernel.
+- **Sorted-by + bounded walks** (v0.51.0). `sorted-map-by` and
+  `sorted-set-by` accept a custom comparator; `subseq` and
+  `rsubseq` walk in-order over the rbtree against bounded keys.
+- **Plain `pr` / `print` / `newline`** (v0.51.0). No-trailing-
+  newline output primitives mirroring `prn` / `println`.
+- **`print-method` multimethod** (v0.52.0). The C-level printer
+  routes through a mino-level multimethod with a late-binding
+  hook; user types extend printing via `(defmethod print-method
+  MyType ...)`. Built-in round-trip preserved across every core
+  type.
+- **Full numeric tower** (v0.53.0 — v0.55.0). Real `MINO_BIGINT`,
+  `MINO_RATIO`, and `MINO_BIGDEC` types backed by vendored
+  MIT-licensed imath. Literal readers `1N`, `1/2`, `1M`. Auto-
+  promoting `+'` / `-'` / `*'` / `inc'` / `dec'` use
+  `__builtin_add_overflow` with int64 fallback. Tower dispatch
+  across all five tiers in `+` / `-` / `*` / `/` / `=` / `<` /
+  `<=` / `>` / `>=`. Predicates `ratio?` / `decimal?` /
+  `rational?` point at the real types. Plain `+` / `-` / `*`
+  keep their throw-on-overflow contract; promotion is opt-in via
+  the prime variants.
+- **Dialect-semantics fixes** (v0.56.0). Hierarchy version
+  counter invalidates stale multimethod dispatch caches across
+  `derive` / `underive`. Transitive prefer-method resolution
+  matches Clojure's `prefers?` recursion through parents.
+  2-arity `(derive child parent)` returns `nil`. `prefers` and
+  `remove-all-methods` round out the multimethod surface.
+
+### Documentation
+
+- New `Compatibility Matrix` page on mino-site enumerating every
+  Clojure core function and macro as supported / differs / absent.
+- New `Intentional Divergences` page on mino-site giving the
+  rationale behind each gap (no JVM interop, no host threads, no
+  STM, no chunked seqs, plain arithmetic throws on overflow).
+- `Coming from Clojure` refreshed to reflect the numeric tower
+  and to link both new pages.
+
+### Companion ripple
+
+- **tree-sitter-mino**: corpus fixtures cover ratio, bigint-N, and
+  bigdec-M literal forms.
+- **mino-lsp**: hover type-name switch covers `bigint`, `ratio`,
+  and `bigdec`. `MINO_SRCS` tracks `prim_bignum.c` and the
+  vendored imath.
+- **mino-nrepl** and **mino-examples**: `MINO_SRCS` tracks
+  `prim_bignum.c` and the vendored imath.
+
+### What's next
+
+The Dialect-Complete cycle closes here. Two cycles are queued:
+
+1. **C-Core Refactor cycle.** Reader decomposition, evaluator
+   dispatch split, behavior-macro cleanup, error-class contract,
+   regex-engine isolation. Internal-only refactoring; the user
+   surface stays put.
+2. **v1.0 / ABI freeze cycle.** `src/mino.h` frozen and the
+   evolving-API language removed from the header. Numeric-tower
+   type tags (`MINO_BIGINT`, `MINO_RATIO`, `MINO_BIGDEC`) lock
+   in. Optional `mino.hpp` C++ RAII wrappers.
+
+Until v1.0, `src/mino.h` stays labelled evolving and any item in
+this cycle is revisitable under a minor bump.
+
 ## v0.56.0 — Dialect-Semantics Audit
 
 Sixth release of the Dialect-Complete cycle. Targeted fixes to
