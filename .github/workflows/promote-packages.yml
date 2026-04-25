@@ -1,0 +1,190 @@
+name: promote-packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v0.72.0). Must already exist as a non-draft Release."
+        required: true
+        type: string
+      publish_brew:
+        description: "Open a PR to leifericf/homebrew-mino"
+        type: boolean
+        default: false
+      publish_scoop:
+        description: "Open a PR to leifericf/scoop-mino"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate release
+    runs-on: ubuntu-22.04
+    outputs:
+      version_number: ${{ steps.parse.outputs.version_number }}
+      sha_darwin_amd64: ${{ steps.checksums.outputs.sha_darwin_amd64 }}
+      sha_darwin_arm64: ${{ steps.checksums.outputs.sha_darwin_arm64 }}
+      sha_linux_amd64: ${{ steps.checksums.outputs.sha_linux_amd64 }}
+      sha_linux_arm64: ${{ steps.checksums.outputs.sha_linux_arm64 }}
+      sha_windows_amd64: ${{ steps.checksums.outputs.sha_windows_amd64 }}
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate tag format
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "Version must be vX.Y.Z or vX.Y.Z-suffix; got: $VERSION" >&2
+            exit 1
+          fi
+
+      - name: Parse version number
+        id: parse
+        run: echo "version_number=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Look up release
+        run: |
+          gh release view "$VERSION" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft > release.json
+          if [ "$(jq -r '.isDraft' release.json)" = "true" ]; then
+            echo "Release $VERSION is still a draft; un-draft it before promoting" >&2
+            exit 1
+          fi
+          echo "Release $VERSION is published"
+
+      - name: Download checksums.txt and assets
+        run: |
+          gh release download "$VERSION" --repo "${GITHUB_REPOSITORY}" --pattern checksums.txt --dir .
+          gh release download "$VERSION" --repo "${GITHUB_REPOSITORY}" --pattern 'mino_*' --dir .
+
+      - name: Verify checksums
+        run: shasum -a 256 -c checksums.txt
+
+      - name: Extract per-asset SHA256s
+        id: checksums
+        run: |
+          while IFS= read -r line; do
+            sha=$(echo "$line" | awk '{print $1}')
+            name=$(echo "$line" | awk '{print $2}' | sed 's|^[*]||')
+            case "$name" in
+              *darwin_amd64*) echo "sha_darwin_amd64=$sha"   >> "$GITHUB_OUTPUT" ;;
+              *darwin_arm64*) echo "sha_darwin_arm64=$sha"   >> "$GITHUB_OUTPUT" ;;
+              *linux_amd64*)  echo "sha_linux_amd64=$sha"    >> "$GITHUB_OUTPUT" ;;
+              *linux_arm64*)  echo "sha_linux_arm64=$sha"    >> "$GITHUB_OUTPUT" ;;
+              *windows_amd64*) echo "sha_windows_amd64=$sha" >> "$GITHUB_OUTPUT" ;;
+            esac
+          done < checksums.txt
+
+  brew:
+    name: open homebrew-mino PR
+    needs: validate
+    if: ${{ inputs.publish_brew }}
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ inputs.version }}
+      VERSION_NUMBER: ${{ needs.validate.outputs.version_number }}
+      SHA_DARWIN_AMD64: ${{ needs.validate.outputs.sha_darwin_amd64 }}
+      SHA_DARWIN_ARM64: ${{ needs.validate.outputs.sha_darwin_arm64 }}
+      SHA_LINUX_AMD64: ${{ needs.validate.outputs.sha_linux_amd64 }}
+      SHA_LINUX_ARM64: ${{ needs.validate.outputs.sha_linux_arm64 }}
+      GH_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+    steps:
+      - name: Checkout mino (for templates)
+        uses: actions/checkout@v4
+        with:
+          path: mino
+
+      - name: Checkout homebrew-mino
+        uses: actions/checkout@v4
+        with:
+          repository: leifericf/homebrew-mino
+          token: ${{ secrets.TAP_REPO_TOKEN }}
+          path: tap
+
+      - name: Render formula
+        working-directory: tap
+        run: |
+          mkdir -p Formula
+          sed \
+            -e "s|__VERSION_NUMBER__|${VERSION_NUMBER}|g" \
+            -e "s|__SHA_DARWIN_AMD64__|${SHA_DARWIN_AMD64}|g" \
+            -e "s|__SHA_DARWIN_ARM64__|${SHA_DARWIN_ARM64}|g" \
+            -e "s|__SHA_LINUX_AMD64__|${SHA_LINUX_AMD64}|g" \
+            -e "s|__SHA_LINUX_ARM64__|${SHA_LINUX_ARM64}|g" \
+            ../mino/.github/release-templates/brew-formula.rb > Formula/mino.rb
+          cat Formula/mino.rb
+
+      - name: Push branch and open PR
+        working-directory: tap
+        run: |
+          branch="mino-${VERSION}"
+          git config user.name "mino-bot"
+          git config user.email "noreply@github.com"
+          git checkout -b "$branch"
+          git add Formula/mino.rb
+          git commit -m "mino ${VERSION}"
+          git push -u --force origin "$branch"
+          existing=$(gh pr list --repo leifericf/homebrew-mino --head "$branch" --json number --jq '.[0].number // empty')
+          body="Automated formula bump for mino ${VERSION}.
+
+          Release notes: https://github.com/leifericf/mino/releases/tag/${VERSION}"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --repo leifericf/homebrew-mino --title "mino ${VERSION}" --body "$body"
+          else
+            gh pr create --repo leifericf/homebrew-mino --title "mino ${VERSION}" --body "$body" --base main --head "$branch"
+          fi
+
+  scoop:
+    name: open scoop-mino PR
+    needs: validate
+    if: ${{ inputs.publish_scoop }}
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ inputs.version }}
+      VERSION_NUMBER: ${{ needs.validate.outputs.version_number }}
+      HASH_WINDOWS_AMD64: ${{ needs.validate.outputs.sha_windows_amd64 }}
+      GH_TOKEN: ${{ secrets.BUCKET_REPO_TOKEN }}
+    steps:
+      - name: Checkout mino (for templates)
+        uses: actions/checkout@v4
+        with:
+          path: mino
+
+      - name: Checkout scoop-mino
+        uses: actions/checkout@v4
+        with:
+          repository: leifericf/scoop-mino
+          token: ${{ secrets.BUCKET_REPO_TOKEN }}
+          path: bucket-repo
+
+      - name: Render manifest
+        working-directory: bucket-repo
+        run: |
+          mkdir -p bucket
+          sed \
+            -e "s|__VERSION_NUMBER__|${VERSION_NUMBER}|g" \
+            -e "s|__HASH_WINDOWS_AMD64__|${HASH_WINDOWS_AMD64}|g" \
+            ../mino/.github/release-templates/scoop-manifest.json > bucket/mino.json
+          cat bucket/mino.json
+
+      - name: Push branch and open PR
+        working-directory: bucket-repo
+        run: |
+          branch="mino-${VERSION}"
+          git config user.name "mino-bot"
+          git config user.email "noreply@github.com"
+          git checkout -b "$branch"
+          git add bucket/mino.json
+          git commit -m "mino ${VERSION}"
+          git push -u --force origin "$branch"
+          existing=$(gh pr list --repo leifericf/scoop-mino --head "$branch" --json number --jq '.[0].number // empty')
+          body="Automated manifest bump for mino ${VERSION}.
+
+          Release notes: https://github.com/leifericf/mino/releases/tag/${VERSION}"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --repo leifericf/scoop-mino --title "mino ${VERSION}" --body "$body"
+          else
+            gh pr create --repo leifericf/scoop-mino --title "mino ${VERSION}" --body "$body" --base main --head "$branch"
+          fi
