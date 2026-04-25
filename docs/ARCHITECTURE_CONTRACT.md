@@ -166,6 +166,16 @@ environment bindings:
     binding  lazy-seq
     ns  var
 
+`when`, `and`, and `or` are macros defined in `core.mino` and ALSO have
+fast-path entries in the special-form registry — the evaluator inlines
+them to skip per-invocation macro expansion. `macroexpand` still
+returns their macro expansion, so user-observable semantics are
+unchanged.
+
+The full registry lives in `src/eval/special_registry.c` as a static
+`k_special_forms[]` table; recognition is one pointer-eq table walk
+against the cached interned-symbol slots on `mino_state_t`.
+
 **Must stay true:** Adding or removing a special form requires explicit
 justification. Special forms cannot be shadowed by environment bindings
 (the evaluator checks them first).

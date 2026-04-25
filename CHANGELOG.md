@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.70.0 — C-Core Refactored
+
+Cycle banner. No user-visible behavior change; the public embedding
+API in `src/mino.h` is unchanged.
+
+This closes the C-Core Refactor cycle that began at v0.61.0. Across
+v0.61.0 through v0.68.0 the runtime was reorganized into per-
+subsystem subdirectories, decomposed into named helpers with
+explicit boundaries, switched to data-driven primitive
+registration, gained a three-class internal severity contract,
+isolated the regex engine, decomposed equality and hashing,
+flattened the reader into a thin classifier with named dispatch
+helpers, and replaced the cascading evaluator dispatch with a
+data-table for special-form recognition.
+
+This release pass focuses on documentation:
+
+  - File-level headers no longer carry "Extracted from X / No
+    behavior change" provenance lines that survived the rename
+    pass; each header describes what's in the file, not where it
+    came from. Embedded references to old filenames
+    (`runtime_gc.c`, `prim_*.c`, `eval_special_*.c`,
+    `host_interop.c`) update to the current paths in comments
+    and doc blocks across the headers and source.
+  - `docs/INTERNAL_MODULE_MAP.md` lists `src/eval/special_registry.c`
+    and updates "How to Add a Special Form" for the data-table
+    dispatch.
+  - `docs/ARCHITECTURE_CONTRACT.md` Section 6 records that `when`,
+    `and`, and `or` have fast-path special-form entries on top of
+    their `core.mino` macro definitions, so `macroexpand` is
+    unaffected but the evaluator skips the expansion.
+  - `src/mino.h` drops a stale claim that the user-visible
+    transient API isn't shipped (it landed in v0.51.0).
+  - `src/prim/bignum.c` documents that the upper-magnitude hash
+    path is reached only when the bigint exceeds `long long`; the
+    fits-in-ll path joins int and float at tag `0x03` in
+    `hash_val`.
+
 ## v0.68.0
 
 Internal cleanup. No user-visible behavior change; the public

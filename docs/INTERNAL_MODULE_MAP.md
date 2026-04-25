@@ -29,8 +29,9 @@ src/
 | File | Responsibility |
 |------|----------------|
 | `src/eval/eval.c` | Evaluator front door: `mino_eval`, `mino_eval_string`, `mino_load_file`, `mino_call`, `mino_pcall`, REPL, core eval helpers (`eval_value`, `eval_implicit_do`, `eval_args`, `macroexpand*`, `quasiquote_expand`, `lazy_force`) |
-| `src/eval/special.c` | Eval dispatch (`eval_impl`, `eval`), literal evaluation (symbol/vector/map/set), `ns`, `var` |
-| `src/eval/defs.c` | Definition special forms: `def`, `defmacro`, `declare` |
+| `src/eval/special.c` | Eval orchestrator (`eval_impl`, `eval`), `eval_check_limits`, `eval_try_host_syntax`, `eval_apply_regular_call`, literal evaluation (symbol/vector/map/set) |
+| `src/eval/special_registry.c` | Data-table dispatch for special forms (`k_special_forms[]`, `eval_try_special_form`); inline-form handlers for `quote`, `quasiquote`, `var`, `if`, `do`, `recur`, `lazy-seq`, `when`, `and`, `or`, plus the unquote-outside-quasiquote error |
+| `src/eval/defs.c` | Definition special forms: `def`, `defmacro`, `declare`, `ns` |
 | `src/eval/bindings.c` | Destructuring (`bind_form`, `bind_params`), `let`, `loop`, `binding` |
 | `src/eval/control.c` | `try`/`catch`/`finally` |
 | `src/eval/fn.c` | `fn`, `apply_callable`, multi-arity dispatch |
@@ -194,7 +195,8 @@ Rules:
 
 ## How to Add a Special Form
 
-1. Add the handler in the appropriate `src/eval/{bindings,control,defs,fn,special}.c` file by domain.
-2. Declare it in `src/eval/special_internal.h` if it needs to be called from the dispatch.
-3. Add the keyword check in `eval_impl`'s dispatch chain in `src/eval/special.c`.
-4. Add tests. Special forms are recognized by the evaluator, not installed.
+1. If the form has substantive logic, add the handler in the appropriate `src/eval/{bindings,control,defs,fn}.c` file by domain. Otherwise (short inline body), add a static helper in `src/eval/special_registry.c`. Either way the handler signature is `(mino_state_t *S, mino_val_t *form, mino_val_t *args, mino_env_t *env, int tail)`; ignore `tail` with `(void)tail;` if unused.
+2. Declare the handler in `src/eval/special_internal.h` if it lives outside `special_registry.c`.
+3. Add the symbol slot on `mino_state_t` (e.g. `sf_myform`) and intern + cache it in `sf_init` (`src/eval/special.c`).
+4. Append a row to `k_special_forms[]` in `src/eval/special_registry.c`: `SF(sf_myform, "myform", eval_myform)`. The dispatch picks it up automatically.
+5. Add tests. Special forms are recognized by the evaluator, not installed.
