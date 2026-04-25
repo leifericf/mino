@@ -29,7 +29,15 @@ jobs:
           printf 'static const char *core_mino_src =\n' > src/core_mino.h
           sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
           printf '    ;\n' >> src/core_mino.h
-          $CC -std=c99 -O2 -Isrc -o mino_bootstrap src/*.c src/vendor/*.c main.c -lm
+          $CC -std=c99 -O2 \
+            -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
+            -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
+            -Isrc/regex -Isrc/diag -Isrc/vendor/imath \
+            -o mino_bootstrap \
+            src/public/*.c src/runtime/*.c src/gc/*.c src/eval/*.c \
+            src/collections/*.c src/prim/*.c src/async/*.c src/interop/*.c \
+            src/regex/*.c src/diag/*.c src/vendor/imath/*.c \
+            main.c -lm
 
       - name: Build
         run: ./mino_bootstrap task build
@@ -66,7 +74,15 @@ jobs:
           printf 'static const char *core_mino_src =\n' > src/core_mino.h
           sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
           printf '    ;\n' >> src/core_mino.h
-          cc -std=c99 -O2 -Isrc -o mino src/*.c src/vendor/*.c main.c -lm
+          cc -std=c99 -O2 \
+            -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
+            -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
+            -Isrc/regex -Isrc/diag -Isrc/vendor/imath \
+            -o mino \
+            src/public/*.c src/runtime/*.c src/gc/*.c src/eval/*.c \
+            src/collections/*.c src/prim/*.c src/async/*.c src/interop/*.c \
+            src/regex/*.c src/diag/*.c src/vendor/imath/*.c \
+            main.c -lm
 
       - name: Build bench binaries
         working-directory: mino-bench

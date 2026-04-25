@@ -7,7 +7,15 @@ Drop it into a C or C++ application and gain a programmable extension layer. The
 Requires only an ANSI C compiler. No external dependencies.
 
 ```
-cc -std=c99 -O2 -Isrc -o mino src/*.c main.c -lm
+cc -std=c99 -O2 \
+  -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
+  -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
+  -Isrc/regex -Isrc/diag -Isrc/vendor/imath \
+  -o mino \
+  src/public/*.c src/runtime/*.c src/gc/*.c src/eval/*.c \
+  src/collections/*.c src/prim/*.c src/async/*.c src/interop/*.c \
+  src/regex/*.c src/diag/*.c src/vendor/imath/*.c \
+  main.c -lm
 ./mino
 ```
 

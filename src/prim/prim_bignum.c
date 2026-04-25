@@ -1,11 +1,12 @@
 /*
  * prim_bignum.c -- arbitrary-precision integer support.
  *
- * Backed by vendored imath (src/vendor/imath.c). The mpz_t struct for
- * each MINO_BIGINT value is malloc-owned and referenced through the
- * opaque `v->as.bigint.mpz` pointer. The cell's digit storage (managed
- * by imath internally) is freed by mino_bigint_free, which the minor
- * and major sweep loops call when a bigint cell becomes unreachable.
+ * Backed by vendored imath (src/vendor/imath/imath.c). The mpz_t
+ * struct for each MINO_BIGINT value is malloc-owned and referenced
+ * through the opaque `v->as.bigint.mpz` pointer. The cell's digit
+ * storage (managed by imath internally) is freed by mino_bigint_free,
+ * which the minor and major sweep loops call when a bigint cell
+ * becomes unreachable.
  *
  * Constructors return GC-owned cells. The cell's mpz_t is allocated
  * and initialised BEFORE the mino_val_t so that, once alloc_val
@@ -14,7 +15,7 @@
  */
 
 #include "prim_internal.h"
-#include "vendor/imath.h"
+#include "imath.h"
 
 #include <stdlib.h>
 #include <string.h>

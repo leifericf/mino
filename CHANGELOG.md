@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.61.0
+
+Internal source-tree reorganization. No user-visible behavior change;
+the public embedding API in `src/mino.h` is unchanged. Source files
+under `src/` are now grouped into per-subsystem directories: `public/`,
+`runtime/`, `gc/`, `eval/`, `collections/`, `prim/`, `async/`,
+`interop/`, `regex/`, `diag/`, and `vendor/imath/`.
+
+The bootstrap-compile command in `README.md` and the GitHub Actions
+workflow now use explicit per-subdirectory globs in place of the
+flat `src/*.c src/vendor/*.c` pattern. Embedders building mino from
+source need to update their build to enumerate the new subdirectories
+and add a matching `-I` flag for each.
+
+`docs/INTERNAL_MODULE_MAP.md` reflects the new layout. `CLAUDE.md` and
+`docs/ARCHITECTURE_CONTRACT.md` are unchanged.
+
 ## v0.60.0 — Dialect Complete
 
 Banner release closing the Dialect-Complete cycle. mino is now
