@@ -121,6 +121,34 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
     S->gc_total_freed += freed_bytes;
 }
 
+/* Helper for gc_verify_remset_complete below. If `p` references a
+ * live YOUNG target while its containing OLD header `h` is not in
+ * the remembered set, dump diagnostic context and abort -- the only
+ * call path is the verify pass and `MINO_GC_VERIFY=1` opts in. */
+static inline void gc_verify_check(mino_state_t *S, gc_hdr_t *h, void *p)
+{
+    gc_hdr_t *child;
+    int       vt, cvt;
+    if (p == NULL) return;
+    child = gc_find_header_for_ptr(S, p);
+    if (child == NULL || child->gen != GC_GEN_YOUNG) return;
+    vt  = (h->type_tag == GC_T_VAL)
+          ? (int)((mino_val_t *)(h + 1))->type : -1;
+    cvt = (child->type_tag == GC_T_VAL)
+          ? (int)((mino_val_t *)(child + 1))->type : -1;
+    fprintf(stderr,
+            "[gc-verify] OLD %p tag=%d vtype=%d -> YOUNG %p tag=%d vtype=%d\n",
+            (void *)h, (int)h->type_tag, vt,
+            (void *)child, (int)child->type_tag, cvt);
+    fprintf(stderr,
+            "  h: dirty=%u mark=%u age=%u  child: mark=%u age=%u\n",
+            (unsigned)h->dirty, (unsigned)h->mark, (unsigned)h->age,
+            (unsigned)child->mark, (unsigned)child->age);
+    gc_classify_offender(S, h);
+    gc_evt_dump_around(S, (void *)h, (void *)child, p);
+    abort();
+}
+
 /* Diagnostic helper (opt-in via MINO_GC_VERIFY=1): asserts that every
  * LIVE OLD header's outgoing GC pointers reference OLD targets,
  * unless the header is in the remembered set (dirty=1). A YOUNG
@@ -188,133 +216,109 @@ static void gc_verify_remset_complete(mino_state_t *S)
     gc_drain_mark_stack_to(S, saved_floor);
     S->gc_phase = saved_phase;
 
-#define MINO_GC_VERIFY_CHECK(p) do { \
-    if ((p) != NULL) { \
-        gc_hdr_t *__child = gc_find_header_for_ptr(S, (p)); \
-        if (__child != NULL && __child->gen == GC_GEN_YOUNG) { \
-            int __vt = (h->type_tag == GC_T_VAL) \
-                ? (int)((mino_val_t *)(h + 1))->type : -1; \
-            int __cvt = (__child->type_tag == GC_T_VAL) \
-                ? (int)((mino_val_t *)(__child + 1))->type : -1; \
-            fprintf(stderr, \
-                "[gc-verify] OLD %p tag=%d vtype=%d -> YOUNG %p tag=%d vtype=%d\n", \
-                (void *)h, (int)h->type_tag, __vt, \
-                (void *)__child, (int)__child->type_tag, __cvt); \
-            fprintf(stderr, \
-                "  h: dirty=%u mark=%u age=%u  child: mark=%u age=%u\n", \
-                (unsigned)h->dirty, (unsigned)h->mark, (unsigned)h->age, \
-                (unsigned)__child->mark, (unsigned)__child->age); \
-            gc_classify_offender(S, h); \
-            gc_evt_dump_around(S, (void *)h, (void *)__child, (void *)(p)); \
-            abort(); \
-        } \
-    } \
-} while (0)
-
     for (h = S->gc_all_old; h != NULL; h = h->next) {
         if (h->dirty) continue;
         if (!h->mark) continue; /* dead OLD zombie; skip (see comment above) */
         switch (h->type_tag) {
         case GC_T_VAL: {
             mino_val_t *v = (mino_val_t *)(h + 1);
-            MINO_GC_VERIFY_CHECK(v->meta);
+            gc_verify_check(S, h, v->meta);
             switch (v->type) {
             case MINO_STRING: case MINO_SYMBOL: case MINO_KEYWORD:
-                MINO_GC_VERIFY_CHECK(v->as.s.data); break;
+                gc_verify_check(S, h, v->as.s.data); break;
             case MINO_CONS:
-                MINO_GC_VERIFY_CHECK(v->as.cons.car);
-                MINO_GC_VERIFY_CHECK(v->as.cons.cdr); break;
+                gc_verify_check(S, h, v->as.cons.car);
+                gc_verify_check(S, h, v->as.cons.cdr); break;
             case MINO_VECTOR:
-                MINO_GC_VERIFY_CHECK(v->as.vec.root);
-                MINO_GC_VERIFY_CHECK(v->as.vec.tail); break;
+                gc_verify_check(S, h, v->as.vec.root);
+                gc_verify_check(S, h, v->as.vec.tail); break;
             case MINO_MAP:
-                MINO_GC_VERIFY_CHECK(v->as.map.root);
-                MINO_GC_VERIFY_CHECK(v->as.map.key_order); break;
+                gc_verify_check(S, h, v->as.map.root);
+                gc_verify_check(S, h, v->as.map.key_order); break;
             case MINO_SET:
-                MINO_GC_VERIFY_CHECK(v->as.set.root);
-                MINO_GC_VERIFY_CHECK(v->as.set.key_order); break;
+                gc_verify_check(S, h, v->as.set.root);
+                gc_verify_check(S, h, v->as.set.key_order); break;
             case MINO_SORTED_MAP: case MINO_SORTED_SET:
-                MINO_GC_VERIFY_CHECK(v->as.sorted.root);
-                MINO_GC_VERIFY_CHECK(v->as.sorted.comparator); break;
+                gc_verify_check(S, h, v->as.sorted.root);
+                gc_verify_check(S, h, v->as.sorted.comparator); break;
             case MINO_FN: case MINO_MACRO:
-                MINO_GC_VERIFY_CHECK(v->as.fn.params);
-                MINO_GC_VERIFY_CHECK(v->as.fn.body);
-                MINO_GC_VERIFY_CHECK(v->as.fn.env); break;
+                gc_verify_check(S, h, v->as.fn.params);
+                gc_verify_check(S, h, v->as.fn.body);
+                gc_verify_check(S, h, v->as.fn.env); break;
             case MINO_ATOM:
-                MINO_GC_VERIFY_CHECK(v->as.atom.val);
-                MINO_GC_VERIFY_CHECK(v->as.atom.watches);
-                MINO_GC_VERIFY_CHECK(v->as.atom.validator); break;
+                gc_verify_check(S, h, v->as.atom.val);
+                gc_verify_check(S, h, v->as.atom.watches);
+                gc_verify_check(S, h, v->as.atom.validator); break;
             case MINO_LAZY:
-                if (v->as.lazy.realized) MINO_GC_VERIFY_CHECK(v->as.lazy.cached);
+                if (v->as.lazy.realized) gc_verify_check(S, h, v->as.lazy.cached);
                 else {
-                    MINO_GC_VERIFY_CHECK(v->as.lazy.body);
-                    MINO_GC_VERIFY_CHECK(v->as.lazy.env);
+                    gc_verify_check(S, h, v->as.lazy.body);
+                    gc_verify_check(S, h, v->as.lazy.env);
                 }
                 break;
             case MINO_VAR:
-                MINO_GC_VERIFY_CHECK(v->as.var.root); break;
+                gc_verify_check(S, h, v->as.var.root); break;
             case MINO_TRANSIENT:
-                MINO_GC_VERIFY_CHECK(v->as.transient.current); break;
+                gc_verify_check(S, h, v->as.transient.current); break;
             default: break;
             }
             break;
         }
         case GC_T_ENV: {
             mino_env_t *e = (mino_env_t *)(h + 1);
-            MINO_GC_VERIFY_CHECK(e->parent);
+            gc_verify_check(S, h, e->parent);
             if (e->bindings != NULL) {
                 size_t k;
-                MINO_GC_VERIFY_CHECK(e->bindings);
+                gc_verify_check(S, h, e->bindings);
                 for (k = 0; k < e->len; k++) {
-                    MINO_GC_VERIFY_CHECK(e->bindings[k].name);
-                    MINO_GC_VERIFY_CHECK(e->bindings[k].val);
+                    gc_verify_check(S, h, e->bindings[k].name);
+                    gc_verify_check(S, h, e->bindings[k].val);
                 }
             }
-            MINO_GC_VERIFY_CHECK(e->ht_buckets);
+            gc_verify_check(S, h, e->ht_buckets);
             break;
         }
         case GC_T_HAMT_NODE: {
             mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
             unsigned count, k;
-            MINO_GC_VERIFY_CHECK(n->slots);
+            gc_verify_check(S, h, n->slots);
             count = (n->collision_count > 0)
                 ? n->collision_count : popcount32(n->bitmap);
             if (n->slots != NULL) {
-                for (k = 0; k < count; k++) MINO_GC_VERIFY_CHECK(n->slots[k]);
+                for (k = 0; k < count; k++) gc_verify_check(S, h, n->slots[k]);
             }
             break;
         }
         case GC_T_HAMT_ENTRY: {
             hamt_entry_t *e = (hamt_entry_t *)(h + 1);
-            MINO_GC_VERIFY_CHECK(e->key);
-            MINO_GC_VERIFY_CHECK(e->val);
+            gc_verify_check(S, h, e->key);
+            gc_verify_check(S, h, e->val);
             break;
         }
         case GC_T_VEC_NODE: {
             mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
             unsigned k;
-            for (k = 0; k < n->count; k++) MINO_GC_VERIFY_CHECK(n->slots[k]);
+            for (k = 0; k < n->count; k++) gc_verify_check(S, h, n->slots[k]);
             break;
         }
         case GC_T_VALARR: case GC_T_PTRARR: {
             void **arr = (void **)(h + 1);
             size_t n = h->size / sizeof(*arr);
             size_t k;
-            for (k = 0; k < n; k++) MINO_GC_VERIFY_CHECK(arr[k]);
+            for (k = 0; k < n; k++) gc_verify_check(S, h, arr[k]);
             break;
         }
         case GC_T_RB_NODE: {
             mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
-            MINO_GC_VERIFY_CHECK(rb->key);
-            MINO_GC_VERIFY_CHECK(rb->val);
-            MINO_GC_VERIFY_CHECK(rb->left);
-            MINO_GC_VERIFY_CHECK(rb->right);
+            gc_verify_check(S, h, rb->key);
+            gc_verify_check(S, h, rb->val);
+            gc_verify_check(S, h, rb->left);
+            gc_verify_check(S, h, rb->right);
             break;
         }
         default: break;
         }
     }
-#undef MINO_GC_VERIFY_CHECK
 
     /* Restore every saved mark so the caller's real mark pass starts
      * from the zero state it expects. */

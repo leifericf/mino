@@ -966,32 +966,48 @@ mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Math functions (thin wrappers around math.h)                              */
 /* ------------------------------------------------------------------------- */
 
-#define MATH_UNARY(cname, cfn, label)                                  \
-    mino_val_t *cname(mino_state_t *S, mino_val_t *args, mino_env_t *env) \
-    {                                                                   \
-        double x;                                                       \
-        (void)env;                                                      \
-        if (!mino_is_cons(args) ||                                      \
-            mino_is_cons(args->as.cons.cdr)) {                          \
-            return prim_throw_classified(S, "eval/arity", "MAR001", label " requires one argument");  \
-        }                                                               \
-        if (!as_double(args->as.cons.car, &x)) {                       \
-            return prim_throw_classified(S, "eval/type", "MTY001", label " expects a number");     \
-        }                                                               \
-        return mino_float(S, cfn(x));                                      \
+static inline mino_val_t *math_unary(mino_state_t *S, mino_val_t *args,
+                                     double (*fn)(double), const char *label)
+{
+    char    msg[64];
+    double  x;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        snprintf(msg, sizeof(msg), "%s requires one argument", label);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
     }
+    if (!as_double(args->as.cons.car, &x)) {
+        snprintf(msg, sizeof(msg), "%s expects a number", label);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    }
+    return mino_float(S, fn(x));
+}
 
-MATH_UNARY(prim_math_floor, floor, "math-floor")
-MATH_UNARY(prim_math_ceil,  ceil,  "math-ceil")
-MATH_UNARY(prim_math_round, round, "math-round")
-MATH_UNARY(prim_math_sqrt,  sqrt,  "math-sqrt")
-MATH_UNARY(prim_math_log,   log,   "math-log")
-MATH_UNARY(prim_math_exp,   exp,   "math-exp")
-MATH_UNARY(prim_math_sin,   sin,   "math-sin")
-MATH_UNARY(prim_math_cos,   cos,   "math-cos")
-MATH_UNARY(prim_math_tan,   tan,   "math-tan")
+mino_val_t *prim_math_floor(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, floor, "math-floor"); }
 
-#undef MATH_UNARY
+mino_val_t *prim_math_ceil(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, ceil, "math-ceil"); }
+
+mino_val_t *prim_math_round(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, round, "math-round"); }
+
+mino_val_t *prim_math_sqrt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, sqrt, "math-sqrt"); }
+
+mino_val_t *prim_math_log(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, log, "math-log"); }
+
+mino_val_t *prim_math_exp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, exp, "math-exp"); }
+
+mino_val_t *prim_math_sin(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, sin, "math-sin"); }
+
+mino_val_t *prim_math_cos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, cos, "math-cos"); }
+
+mino_val_t *prim_math_tan(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, tan, "math-tan"); }
 
 mino_val_t *prim_math_pow(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {

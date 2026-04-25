@@ -6,6 +6,30 @@
 
 #include "prim_internal.h"
 
+/* Grow `buf` so that `len + extra + 1` bytes fit. Returns the (possibly
+ * realloc'd) buffer, or NULL if allocation failed (in which case an
+ * MIN001 diagnostic has already been recorded on S). The caller updates
+ * its own `cap` via cap_ptr; `buf` is replaced by the return value. */
+static inline char *fmt_ensure(mino_state_t *S, char *buf,
+                               size_t len, size_t *cap_ptr, size_t extra)
+{
+    size_t need = len + extra + 1;
+    if (need > *cap_ptr) {
+        size_t newcap = *cap_ptr == 0 ? 128 : *cap_ptr;
+        char  *newbuf;
+        while (newcap < need) newcap *= 2;
+        newbuf = (char *)realloc(buf, newcap);
+        if (newbuf == NULL) {
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+                          "out of memory");
+            return NULL;
+        }
+        *cap_ptr = newcap;
+        return newbuf;
+    }
+    return buf;
+}
+
 /*
  * (format fmt & args) — simple string formatting.
  * Directives: %s (str of arg), %d (integer), %f (float), %% (literal %).
@@ -31,16 +55,6 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     fmt     = fmt_val->as.s.data;
     fmt_len = fmt_val->as.s.len;
     arg_list = args->as.cons.cdr;
-
-#define FMT_ENSURE(extra) do { \
-        size_t _need = len + (extra) + 1; \
-        if (_need > cap) { \
-            cap = cap == 0 ? 128 : cap; \
-            while (cap < _need) cap *= 2; \
-            buf = (char *)realloc(buf, cap); \
-            if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; } \
-        } \
-    } while (0)
 
     for (i = 0; i < fmt_len; i++) {
         if (fmt[i] == '%' && i + 1 < fmt_len) {
@@ -74,14 +88,16 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             }
             if (i >= fmt_len) {
                 /* Incomplete directive at end of string: emit literal. */
-                FMT_ENSURE(di);
+                buf = fmt_ensure(S, buf, len, &cap, di);
+                if (buf == NULL) return NULL;
                 memcpy(buf + len, directive, di);
                 len += di;
                 break;
             }
             spec = fmt[i];
             if (spec == '%') {
-                FMT_ENSURE(1);
+                buf = fmt_ensure(S, buf, len, &cap, 1);
+                if (buf == NULL) return NULL;
                 buf[len++] = '%';
             } else if (spec == 's') {
                 mino_val_t *a;
@@ -92,13 +108,15 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 a = arg_list->as.cons.car;
                 arg_list = arg_list->as.cons.cdr;
                 if (a != NULL && a->type == MINO_STRING) {
-                    FMT_ENSURE(a->as.s.len);
+                    buf = fmt_ensure(S, buf, len, &cap, a->as.s.len);
+                    if (buf == NULL) return NULL;
                     memcpy(buf + len, a->as.s.data, a->as.s.len);
                     len += a->as.s.len;
                 } else {
                     mino_val_t *s = print_to_string(S, a);
                     if (s == NULL) { free(buf); return NULL; }
-                    FMT_ENSURE(s->as.s.len);
+                    buf = fmt_ensure(S, buf, len, &cap, s->as.s.len);
+                    if (buf == NULL) return NULL;
                     memcpy(buf + len, s->as.s.data, s->as.s.len);
                     len += s->as.s.len;
                 }
@@ -126,7 +144,8 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 directive[di++] = spec;
                 directive[di]   = '\0';
                 tn = snprintf(tmp, sizeof(tmp), directive, n2);
-                FMT_ENSURE((size_t)tn);
+                buf = fmt_ensure(S, buf, len, &cap, (size_t)tn);
+                if (buf == NULL) return NULL;
                 memcpy(buf + len, tmp, (size_t)tn);
                 len += (size_t)tn;
             } else if (spec == 'f' || spec == 'e' || spec == 'g') {
@@ -145,22 +164,24 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 directive[di++] = spec;
                 directive[di]   = '\0';
                 tn = snprintf(tmp, sizeof(tmp), directive, d);
-                FMT_ENSURE((size_t)tn);
+                buf = fmt_ensure(S, buf, len, &cap, (size_t)tn);
+                if (buf == NULL) return NULL;
                 memcpy(buf + len, tmp, (size_t)tn);
                 len += (size_t)tn;
             } else {
                 /* Unknown directive: emit literal. */
-                FMT_ENSURE(di + 1);
+                buf = fmt_ensure(S, buf, len, &cap, di + 1);
+                if (buf == NULL) return NULL;
                 memcpy(buf + len, directive, di);
                 len += di;
                 buf[len++] = spec;
             }
         } else {
-            FMT_ENSURE(1);
+            buf = fmt_ensure(S, buf, len, &cap, 1);
+            if (buf == NULL) return NULL;
             buf[len++] = fmt[i];
         }
     }
-#undef FMT_ENSURE
     {
         mino_val_t *result = mino_string_n(S, buf != NULL ? buf : "", len);
         free(buf);
