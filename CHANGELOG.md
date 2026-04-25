@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.54.0 — Auto-Promoting Arithmetic
+
+Fourth release of the Dialect-Complete cycle. The promoting siblings
+of `+`, `-`, `*`, `inc`, and `dec` arrive: when a `long` accumulator
+overflows, the running sum / product crosses into bigint instead of
+throwing. Plain `+` / `-` / `*` / `inc` / `dec` are unchanged — the
+overflow-throwing semantics from v0.45.0 stay in place — so the
+choice between fail-fast and auto-promote is now a per-call-site
+decision.
+
+### Added
+
+- **`+'`, `-'`, `*'`, `inc'`, `dec'` primitives.** The accumulator
+  tracks one of three tiers — `long`, bigint, double — with one-way
+  transitions. A `long` × `long` overflow promotes the running value
+  to bigint; a bigint operand mixed in switches to bigint mode; a
+  `float` operand anywhere collapses to double for the remainder of
+  the computation. Homogeneous `long` operands stay on the existing
+  `__builtin_*_overflow` fast path so the perf gate is unaffected.
+
+- **Internal bigint arithmetic helpers.** `mino_bigint_add`,
+  `mino_bigint_sub`, `mino_bigint_mul`, and `mino_bigint_neg`
+  centralise the imath calls under a single binop driver that
+  takes a small scratch view of `int` operands so the same code
+  path handles all int/bigint mixings. A cold-path
+  `mino_bigint_to_double` round-trips through base-10 to handle
+  the bigint → double tier collapse.
+
+### Fixed
+
+- **Vendored imath UB at `MP_SMALL_MIN`.** `s_fake` negated a signed
+  long before casting to unsigned, which is undefined behaviour
+  when the value is `LONG_MIN`; UBSAN tripped on it as soon as any
+  bigint path hit `LLONG_MIN` (`(inc' Long/MAX_VALUE)`,
+  `(-' Long/MIN_VALUE)`, etc.). Take the magnitude through unsigned
+  arithmetic so the modular negation wraps cleanly. The change is
+  marked with a `mino:` comment for audit on upstream sync, and
+  `THIRD_PARTY_LICENSES.md` documents both annotated lines.
+
+### Known limitations
+
+- Mixing `bigint` with `float` in `+'` / `-'` / `*'` collapses to
+  `double`. Magnitudes that don't fit in a double round to the
+  nearest representable value, matching Clojure's coercion. Use
+  `(bigint x)` first if you need exact bigint × bigdec arithmetic
+  — that path arrives in v0.55.0 alongside the bigdec type.
+
+- Ratio and bigdec types still don't exist; `1/2`, `1M` are not
+  yet readable as their respective tower tiers. v0.55.0 adds them
+  along with comparison-primitive tower dispatch (`<`, `<=`, `>`,
+  `>=` across mixed numeric tiers).
+
+- Cross-tier `=` between `int` and `float` keeps its existing
+  behaviour (`(= 1 1.0)` is true). The Clojure-exact split lands
+  with v0.55.0.
+
 ## v0.53.0 — Bigint Foundation
 
 Third release of the Dialect-Complete cycle. mino gains the first
