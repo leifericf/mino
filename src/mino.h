@@ -790,8 +790,15 @@ int mino_gc_set_param(mino_state_t *S, mino_gc_param_t p, size_t value);
 
 /*
  * Collector statistics. Populated by mino_gc_stats. No allocation is
- * performed; the host owns the out struct. All counters are cumulative
- * since state creation except bytes_* which reflect current heap state.
+ * performed; the host owns the out struct. Counters are cumulative
+ * since state creation except where noted.
+ *
+ * Note: bytes_alloc is NOT a monotonic total. It tracks bytes live in
+ * the bump path; minor GC decrements it by the bytes it sweeps and
+ * major GC resets it to bytes_live. To recover a true allocation
+ * total over a window, sum (delta bytes_alloc + delta bytes_freed) —
+ * bytes_freed IS monotonic. This is the formula the perf-gate
+ * allocation tracker uses.
  */
 typedef struct {
     size_t collections_minor;
@@ -799,8 +806,8 @@ typedef struct {
     size_t bytes_live;         /* young + old */
     size_t bytes_young;
     size_t bytes_old;
-    size_t bytes_alloc;        /* total ever allocated */
-    size_t bytes_freed;        /* total ever swept */
+    size_t bytes_alloc;        /* current; reset by major, decremented by minor */
+    size_t bytes_freed;        /* monotonic: total ever swept */
     size_t total_gc_ns;
     size_t max_gc_ns;
     size_t remset_entries;     /* current remembered-set size */
