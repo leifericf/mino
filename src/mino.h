@@ -1,5 +1,5 @@
 /*
- * mino.h — public C API for the mino runtime.
+ * mino.h - public C API for the mino runtime.
  *
  * UNSTABLE until v1.0.0. Symbol names, types, and semantics may change.
  */
@@ -796,7 +796,7 @@ int mino_gc_set_param(mino_state_t *S, mino_gc_param_t p, size_t value);
  * Note: bytes_alloc is NOT a monotonic total. It tracks bytes live in
  * the bump path; minor GC decrements it by the bytes it sweeps and
  * major GC resets it to bytes_live. To recover a true allocation
- * total over a window, sum (delta bytes_alloc + delta bytes_freed) —
+ * total over a window, sum (delta bytes_alloc + delta bytes_freed);
  * bytes_freed IS monotonic. This is the formula the perf-gate
  * allocation tracker uses.
  */
@@ -845,11 +845,11 @@ mino_repl_t *mino_repl_new(mino_state_t *S, mino_env_t *env);
 
 /*
  * Feed one line of input to the REPL. Returns:
- *   MINO_REPL_OK    — a complete form was read and evaluated. The result
+ *   MINO_REPL_OK    - a complete form was read and evaluated. The result
  *                      is written to *out (when out is non-NULL).
- *   MINO_REPL_MORE  — the line was accumulated; more input is needed to
+ *   MINO_REPL_MORE  - the line was accumulated; more input is needed to
  *                      complete the current form.
- *   MINO_REPL_ERROR — a parse or eval error occurred. The error message
+ *   MINO_REPL_ERROR - a parse or eval error occurred. The error message
  *                      is available via mino_last_error(). The buffer is
  *                      reset so the next feed starts a fresh form.
  *
