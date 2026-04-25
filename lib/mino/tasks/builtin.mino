@@ -25,6 +25,7 @@
    "src/eval/eval_special_control.c" "src/eval/eval_special_fn.c"
    "src/runtime/runtime_state.c" "src/runtime/runtime_var.c"
    "src/runtime/runtime_error.c" "src/runtime/runtime_env.c"
+   "src/runtime/path_buf.c"
    "src/gc/runtime_gc.c" "src/gc/runtime_gc_roots.c" "src/gc/runtime_gc_major.c"
    "src/gc/runtime_gc_barrier.c" "src/gc/runtime_gc_minor.c"
    "src/gc/runtime_gc_trace.c" "src/runtime/runtime_module.c"

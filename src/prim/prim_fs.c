@@ -9,6 +9,7 @@
  */
 
 #include "prim_internal.h"
+#include "path_buf.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -61,7 +62,7 @@ mino_val_t *prim_directory_p(mino_state_t *S, mino_val_t *args,
 
 static int mkdirp(const char *path)
 {
-    char buf[4096];
+    char buf[PATH_BUF_CAP];
     size_t len;
     size_t i;
     struct stat st;
@@ -123,7 +124,7 @@ static int rmrf(const char *path)
         struct dirent *ent;
         if (d == NULL) return -1;
         while ((ent = readdir(d)) != NULL) {
-            char child[4096];
+            char child[PATH_BUF_CAP];
             if (strcmp(ent->d_name, ".") == 0 ||
                 strcmp(ent->d_name, "..") == 0)
                 continue;

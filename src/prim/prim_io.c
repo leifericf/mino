@@ -4,6 +4,7 @@
  */
 
 #include "prim_internal.h"
+#include "path_buf.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -279,7 +280,7 @@ mino_val_t *prim_nano_time(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* (getcwd) -- return the current working directory as a string. */
 mino_val_t *prim_getcwd(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    char buf[4096];
+    char buf[PATH_BUF_CAP];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -342,7 +343,7 @@ static void file_seq_recurse(mino_state_t *S, const char *dir,
     struct dirent *ent;
     if (d == NULL) return;
     while ((ent = readdir(d)) != NULL) {
-        char path[4096];
+        char path[PATH_BUF_CAP];
         struct stat st;
         if (ent->d_name[0] == '.') continue;
         snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);

@@ -10,6 +10,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "mino_internal.h"
+#include "path_buf.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -21,7 +22,7 @@
 #include <execinfo.h>
 #endif
 
-#define MINO_LINE_MAX 4096
+#define MINO_LINE_MAX PATH_BUF_CAP
 
 /* ---- CWD-relative module resolver ---- */
 
@@ -35,11 +36,11 @@ static int file_exists(const char *path)
 
 /* Directory where the mino binary was invoked from. Used as fallback
  * for resolving lib/ modules even after chdir. */
-static char initial_dir[4096] = "";
+static char initial_dir[PATH_BUF_CAP] = "";
 
 /* Directory containing the mino binary itself. Used to find bundled
  * lib/ modules when running from a different working directory. */
-static char binary_dir[4096] = "";
+static char binary_dir[PATH_BUF_CAP] = "";
 
 static int try_resolve(const char *name, size_t nlen, char *buf, size_t bufsz)
 {
@@ -74,7 +75,7 @@ static int try_resolve(const char *name, size_t nlen, char *buf, size_t bufsz)
 
 static const char *cwd_resolve(const char *name, void *ctx)
 {
-    static char path_buf[4096];
+    static char path_buf[PATH_BUF_CAP];
     size_t nlen;
     (void)ctx;
     if (name == NULL) return NULL;
@@ -131,7 +132,7 @@ static int try_resolve_in(const char *dir, const char *name, size_t nlen,
 /* Resolver that checks project paths first, then falls through to cwd. */
 static const char *project_resolve(const char *name, void *ctx)
 {
-    static char pbuf[4096];
+    static char pbuf[PATH_BUF_CAP];
     size_t i, nlen;
     (void)ctx;
     if (name == NULL) return NULL;
@@ -430,7 +431,7 @@ int main(int argc, char **argv)
 
     /* Compute binary_dir from argv[0] for finding bundled lib/. */
     {
-        char resolved[4096];
+        char resolved[PATH_BUF_CAP];
         const char *slash;
 #ifdef _WIN32
         if (_fullpath(resolved, argv[0], sizeof(resolved)) != NULL) {
