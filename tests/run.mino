@@ -65,6 +65,7 @@
 (require "tests/collections_semantics_test")
 (require "tests/stateful_test")
 (require "tests/hierarchy_test")
+(require "tests/multimethod_test")
 (require "tests/clojure_string_test")
 (require "tests/spawn_stress_regression")
 (require "tests/tasks_test")

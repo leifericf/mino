@@ -144,3 +144,9 @@
   (is (isa? :test-dog :test-pet))
   (is (not (isa? :test-pet :test-dog)))
   (underive :test-dog :test-pet))
+
+;; --- 2-arity derive / underive return nil (Clojure dialect) ---
+
+(deftest global-derive-returns-nil
+  (is (nil? (derive :gd-child :gd-parent)))
+  (is (nil? (underive :gd-child :gd-parent))))

@@ -1448,6 +1448,11 @@
 
 (def global-hierarchy_ (atom {:parents {} :ancestors {} :descendants {}}))
 
+;; Bumped on every mutation of global-hierarchy_; multimethods compare it
+;; against their cached version to invalidate stale dispatch entries when
+;; derive / underive runs after methods have populated the cache.
+(def hierarchy-version_ (atom 0))
+
 (defn make-hierarchy "Returns an empty hierarchy." [] {:parents {} :ancestors {} :descendants {}})
 
 (defn tc-ancestors_ [parents-map node]
@@ -1480,7 +1485,8 @@
 (defn derive "Establishes a parent/child relationship between child and parent in a hierarchy."
   ([child parent]
    (swap! global-hierarchy_ derive child parent)
-   @global-hierarchy_)
+   (swap! hierarchy-version_ inc)
+   nil)
   ([h child parent]
    (when (= child parent)
      (throw (ex-info "Cannot derive tag from itself" {:child child :parent parent})))
@@ -1496,6 +1502,7 @@
 (defn underive "Removes a parent/child relationship between child and parent."
   ([child parent]
    (swap! global-hierarchy_ underive child parent)
+   (swap! hierarchy-version_ inc)
    nil)
   ([h child parent]
    (when-not (valid-hierarchy?_ h)
@@ -1540,6 +1547,15 @@
 ;; Multimethods: value-dispatched polymorphism.
 ;; ---------------------------------------------------------------------------
 
+(defn- prefers?_ [x y prefer-table hierarchy]
+  ;; True when x is preferred over y, considering transitive preferences
+  ;; through hierarchy parents (matching Clojure's prefers? semantics).
+  (or (contains? (get prefer-table x #{}) y)
+      (boolean (some (fn [yp] (prefers?_ x yp prefer-table hierarchy))
+                     (or (parents hierarchy y) #{})))
+      (boolean (some (fn [xp] (prefers?_ xp y prefer-table hierarchy))
+                     (or (parents hierarchy x) #{})))))
+
 (defn- find-best-method_ [methods dval default-val prefer-table hierarchy]
   (let [exact (get methods dval)]
     (if exact
@@ -1559,7 +1575,7 @@
                               (every?
                                 (fn [[k2 _]]
                                   (or (= k k2)
-                                      (contains? (get prefer-table k #{}) k2)))
+                                      (prefers?_ k k2 prefer-table hierarchy)))
                                 matches))
                             matches)]
             (if (= 1 (count preferred))
@@ -1574,7 +1590,12 @@
   (let [method-table   (atom {})
         prefer-table   (atom {})
         dispatch-cache (atom {})
+        cache-version  (atom @hierarchy-version_)
         mm (fn [& args]
+             (let [hver @hierarchy-version_]
+               (when (not= hver @cache-version)
+                 (reset! dispatch-cache {})
+                 (reset! cache-version hver)))
              (let [dval    (apply dispatch-fn args)
                    cached  (get @dispatch-cache dval)]
                (if cached
@@ -1596,6 +1617,7 @@
                    :method-table   method-table
                    :prefer-table   prefer-table
                    :dispatch-cache dispatch-cache
+                   :cache-version  cache-version
                    :default        default-val})))
 
 (defn- register-method_ [mm dispatch-val f]
@@ -1626,11 +1648,19 @@
   (reset! (:dispatch-cache (meta mm)) {})
   mm)
 
+(defn remove-all-methods "Removes all methods from multimethod mm." [mm]
+  (reset! (:method-table (meta mm)) {})
+  (reset! (:dispatch-cache (meta mm)) {})
+  mm)
+
 (defn methods "Returns the method table of multimethod mm." [mm]
   @(:method-table (meta mm)))
 
 (defn get-method "Returns the method for dispatch-val, or nil." [mm dispatch-val]
   (get @(:method-table (meta mm)) dispatch-val))
+
+(defn prefers "Returns the prefer-table of multimethod mm." [mm]
+  @(:prefer-table (meta mm)))
 
 ;; ---------------------------------------------------------------------------
 ;; Extensible printer: print-method is a multimethod dispatched on (type x)
