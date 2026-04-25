@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.68.0
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+The evaluator's `eval_impl` is split. The orchestrator function
+becomes a thin classifier plus four named helpers:
+
+  - `eval_check_limits` gates each step on the host limit knobs
+    (`limit_steps`, `limit_heap`), the interrupt flag, and the
+    sticky `limit_exceeded` latch. One source of truth for bail-
+    out.
+  - `eval_try_host_syntax` owns the four interop sugar shapes
+    (`.method`, `.-field`, `(new T ...)`, `(T/static ...)`) and
+    rewrites them into the matching `host/*` primitive call.
+  - `eval_try_special_form` (new `src/eval/special_registry.c`)
+    walks a static `k_special_forms[]` table that pairs cached
+    interned-symbol slots with handlers. The previous cascading
+    `if (HEAD_IS(...))` chain is gone; new special forms are one
+    table row.
+  - `eval_apply_regular_call` wraps the function / macro /
+    non-fn-callable dispatch.
+
+Every special-form handler now takes `(S, form, args, env, tail)`
+— the seven that didn't already accept `tail` accept and ignore
+it. The inline-bodied special forms (`quote`, `quasiquote`,
+`var`, `if`, `do`, `recur`, `lazy-seq`, `when`, `and`, `or`)
+move into static helpers in the registry file so the table can
+reference them uniformly.
+
 ## v0.67.0
 
 Internal cleanup. No user-visible behavior change; the public
