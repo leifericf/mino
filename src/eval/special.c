@@ -244,7 +244,7 @@ static void sf_init(mino_state_t *S)
 
 /*
  * Host-syntax sugar dispatch. Recognises the four interop shapes
- * and rewrites them into the corresponding host/* primitive call:
+ * and rewrites them into the corresponding host/... primitive call:
  *
  *   (.method target args...)         -> (host/call target :method args...)
  *   (.-field target)                 -> (host/get  target :field)
