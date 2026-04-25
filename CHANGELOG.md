@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.67.0
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+The reader in `src/eval/read.c` is decomposed. `read_form`
+shrinks from ~380 lines to a ~80-line classifier and three new
+helpers absorb the bulk:
+
+  - `read_dispatch` handles the full `#`-prefix family in one
+    place: `#{` set, `#_` discard, `#(` anon-fn, `#'` var-quote,
+    `##Inf`/`##-Inf`/`##NaN`, `#"…"` regex literal, `#?`/`#?@`
+    reader-conditional, and the tagged-literal fallback.
+  - `read_wrap_one` captures the prefix-quote pattern that the
+    six reader macros (`'`, `\``, `@`, `~`, `~@`, `#'`) all
+    share — read one form, wrap as `(sym form)`, preserve the
+    macro's source position. Five near-identical inline blocks
+    collapse to five one-line calls.
+  - `read_char_literal` owns the character-literal decoding
+    (`\space`, `\uNNNN`, UTF-8 codepoints, octal escapes).
+
+The `ADVANCE` / `ADVANCE_N` macros are replaced with `static
+inline` helpers — same emit, type-checked arguments, no behavior
+change.
+
 ## v0.66.0
 
 Internal cleanup. No user-visible behavior change; the public
