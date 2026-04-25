@@ -633,8 +633,8 @@ tower tiers (ratio, bigdec) arrive in v0.54.0 and v0.55.0.
 
 - **Vendored imath.** Michael J. Fromberger's imath library is
   vendored under `src/vendor/` (MIT). Attribution is preserved in
-  the source files, and the top-level `NOTICE` plus
-  `THIRD_PARTY_LICENSES.md` carry the copyright and license text.
+  the source files, and the top-level `THIRD_PARTY_LICENSES.md`
+  carries the copyright and license text.
   A single line in `s_realloc` casts the unused `osize` parameter
   to `void` under the non-DEBUG configuration so the mino build's
   zero-warnings gate stays green; that line is marked with a
