@@ -2,6 +2,19 @@
  * gc_internal.h -- garbage collector internal types and declarations.
  *
  * Internal to the runtime; embedders should only use mino.h.
+ *
+ * Error classes emitted (see diag/diag_contract.h):
+ *
+ *   MINO_ERR_CORRUPT -- driver.c, barrier.c, major.c, minor.c, roots.c,
+ *      trace.c.  Every abort() in this subsystem is a CORRUPT path:
+ *      OOM with no try frame established, GC range index realloc
+ *      inside a collection, an unexpected setjmp return inside
+ *      gc_collect, or a write barrier fired with no recovery option.
+ *      Reaching any of these means the heap is in an unrecoverable
+ *      state.
+ *   MINO_ERR_RECOVERABLE -- gc_alloc_typed with a try frame in place
+ *      longjmps into the catch handler so user code can observe an
+ *      OOM via :internal/MIN001.
  */
 
 #ifndef GC_INTERNAL_H

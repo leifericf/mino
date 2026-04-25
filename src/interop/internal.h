@@ -2,6 +2,18 @@
  * interop_internal.h -- host-interop capability registry types.
  *
  * Internal to the runtime; embedders should only use mino.h.
+ *
+ * Error classes emitted (see diag/diag_contract.h):
+ *
+ *   MINO_ERR_HOST -- syntax.c (interop_error) when a registered host
+ *      callback returns NULL or rejects its arguments.  Diagnostic
+ *      kind: :host/MHO001.  Reaching this means the embedder's
+ *      capability returned an error rather than a value; user mino
+ *      code can catch it normally.
+ *   MINO_ERR_RECOVERABLE -- arity / type errors at the eval-side
+ *      surface (e.g. (.method receiver ...) with a non-handle
+ *      receiver) go through prim_throw_classified just like any
+ *      other primitive.
  */
 
 #ifndef INTEROP_INTERNAL_H

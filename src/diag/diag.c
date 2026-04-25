@@ -1,5 +1,21 @@
 /*
  * diag.c -- structured diagnostic lifecycle and rendering.
+ *
+ * Diagnostic kinds vs internal severity classes (see diag_contract.h):
+ *
+ *   :eval/...      -> MINO_ERR_RECOVERABLE   (catchable user errors)
+ *   :type/...      -> MINO_ERR_RECOVERABLE
+ *   :arity/...     -> MINO_ERR_RECOVERABLE
+ *   :user/...      -> MINO_ERR_RECOVERABLE   (raised by `throw`)
+ *   :limit/steps   -> MINO_ERR_HOST          (host-set step budget)
+ *   :limit/heap    -> MINO_ERR_HOST          (host-set heap budget)
+ *   :host/...      -> MINO_ERR_HOST          (capability rejected the call)
+ *   :io/...        -> MINO_ERR_HOST          (file / OS failure)
+ *   :internal/...  -> MINO_ERR_HOST          (OOM with try frame, etc.)
+ *
+ * MINO_ERR_CORRUPT does not surface here -- those paths abort before
+ * a diagnostic can be constructed.  See per-subsystem internal.h
+ * "Error classes emitted" blocks for the abort sites.
  */
 
 #include "runtime/internal.h"

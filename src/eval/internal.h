@@ -2,6 +2,21 @@
  * eval_internal.h -- evaluator core, macroexpansion, reader, printer hooks.
  *
  * Internal to the runtime; embedders should only use mino.h.
+ *
+ * Error classes emitted (see diag/diag_contract.h):
+ *
+ *   MINO_ERR_RECOVERABLE -- the dominant path.  Type errors, arity
+ *      mismatches, undefined symbols, and any error raised by user
+ *      code surface here through set_eval_diag plus a longjmp into
+ *      the active try frame (or a propagating NULL when no try frame
+ *      is on the stack).  Diagnostic kinds: :eval/..., :type/...,
+ *      :arity/..., :user/...
+ *   MINO_ERR_HOST -- step-limit and heap-limit hits set a host-visible
+ *      diagnostic and return NULL without unwinding.  Diagnostic
+ *      kinds: :limit/steps, :limit/heap.
+ *   MINO_ERR_RECOVERABLE -- read.c reader errors set a diagnostic and
+ *      return NULL; mino_read's caller surfaces them via
+ *      mino_last_error.
  */
 
 #ifndef EVAL_INTERNAL_H

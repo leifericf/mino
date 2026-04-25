@@ -3,6 +3,17 @@
  * intern table types and value-layer helpers.
  *
  * Internal to the runtime; embedders should only use mino.h.
+ *
+ * Error classes emitted (see diag/diag_contract.h):
+ *
+ *   MINO_ERR_RECOVERABLE -- transient.c, val.c, and the public
+ *      collection APIs reach prim_throw_classified for type errors
+ *      and contract violations (e.g. (assoc! v k) on a frozen
+ *      transient, mismatched arity on rb-tree comparators).
+ *      Diagnostic kinds: :eval/type, :eval/contract, :eval/arity.
+ *   MINO_ERR_CORRUPT -- map.c HAMT walks assert internal invariants
+ *      in debug builds; release builds rely on the GC trace and
+ *      collector contracts to keep nodes consistent.
  */
 
 #ifndef COLLECTIONS_INTERNAL_H

@@ -8,6 +8,16 @@
  * subsystem's header instead.
  *
  * Internal to the runtime; embedders should only use mino.h.
+ *
+ * Error classes emitted (see diag/diag_contract.h):
+ *
+ *   MINO_ERR_RECOVERABLE -- error.c (set_error, set_eval_diag,
+ *      append_trace).  Standard path for runtime-detected user errors;
+ *      lifts into :eval/..., :type/..., :arity/... diagnostic kinds.
+ *   MINO_ERR_CORRUPT -- state.c (mino_state_new initial alloc).  No
+ *      state exists to report through, so abort is the only option.
+ *      module.c uses set_eval_diag for all module-loading failures
+ *      (RECOVERABLE), never abort.
  */
 
 #ifndef RUNTIME_INTERNAL_H

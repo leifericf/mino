@@ -3,6 +3,22 @@
  *
  * Not part of the public API. Each prim_*.c includes this for access to
  * shared helpers and to declare its primitives for registration.
+ *
+ * Error classes emitted (see diag/diag_contract.h):
+ *
+ *   MINO_ERR_RECOVERABLE -- the dominant path.  prim_throw_classified
+ *      either longjmps into the active try frame (catchable user error)
+ *      or sets a host-visible diagnostic and returns NULL when no try
+ *      frame exists.  Every prim/<domain>.c arity / type / contract
+ *      check uses this helper.  Diagnostic kinds: :eval/arity,
+ *      :eval/type, :eval/contract.
+ *   MINO_ERR_HOST -- prim/proc.c (sh fork/exec failures), prim/io.c
+ *      (slurp / spit / file I/O), prim/fs.c.  Diagnostic kinds:
+ *      :host/MHO001, :io/...
+ *   MINO_ERR_CORRUPT -- install.c (core.mino bootstrap parse / eval
+ *      failures, malloc OOM during the very first install).  At this
+ *      point the state has not finished initializing, so abort is the
+ *      only meaningful response.
  */
 
 #ifndef PRIM_INTERNAL_H
