@@ -11,12 +11,14 @@
     (is (integer? (/ 10 2)))
     (is (= 10 (/ 100 2 5)))
     (is (integer? (/ 100 2 5))))
-  (testing "inexact division returns float"
-    (is (float? (/ 10 3)))
+  (testing "inexact integer division returns a ratio (Clojure dialect)"
+    (is (ratio? (/ 10 3)))
+    (is (= 10/3 (/ 10 3)))
     (is (float? (/ 7.0 2.0)))
     (is (= 3.5 (/ 7.0 2.0))))
   (testing "reciprocal"
-    (is (= 0.5 (/ 2)))))
+    (is (= 1/2 (/ 2)))
+    (is (= 0.5 (/ 2.0)))))
 
 ;; --- Variadic max / min ---
 
