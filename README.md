@@ -7,6 +7,9 @@ Drop it into a C or C++ application and gain a programmable extension layer. The
 Requires only an ANSI C compiler. No external dependencies.
 
 ```
+printf 'static const char *core_mino_src =\n' > src/core_mino.h
+sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
+printf '    ;\n' >> src/core_mino.h
 cc -std=c99 -O2 \
   -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
   -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
