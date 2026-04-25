@@ -68,6 +68,55 @@ uint32_t fnv_bytes(uint32_t h, const unsigned char *p, size_t n)
 }
 
 /*
+ * Equal-implies-equal-hash helpers. Every hash_val branch that is
+ * reachable from a `mino_eq`-equal pair must funnel through the same
+ * little-endian byte loop, so callers that share a tag (numeric tier
+ * collapse, identity-by-pointer, accumulated subhashes) emit identical
+ * byte sequences for equal inputs.
+ */
+
+/* Mix the eight little-endian bytes of a long long. Used by the numeric
+ * tier collapse (MINO_INT, integral MINO_FLOAT, fits-in-ll MINO_BIGINT),
+ * which all share tag byte 0x03 so (= 1 1.0 1N) ⇒ all hash the same. */
+static uint32_t hash_long_long_bytes(uint32_t h, long long n)
+{
+    unsigned i;
+    for (i = 0; i < 8; i++) {
+        h = fnv_mix(h, (unsigned char)(n & 0xFFu));
+        n >>= 8;
+    }
+    return h;
+}
+
+/* Mix the bytes of a uintptr_t. Used by identity-hashed types (HANDLE,
+ * ATOM, and the default PRIM/FN/RECUR fallback); each caller mixes a
+ * distinct tag byte first so different identity-kinds don't collide. */
+static uint32_t hash_pointer_bytes(uint32_t h, uintptr_t p)
+{
+    unsigned i;
+    for (i = 0; i < sizeof(uintptr_t); i++) {
+        h = fnv_mix(h, (unsigned char)(p & 0xFFu));
+        p >>= 8;
+    }
+    return h;
+}
+
+/* Mix the four little-endian bytes of a uint32_t. Used wherever a
+ * subhash gets folded into the parent (CONS car/cdr, VECTOR elements,
+ * MAP/SET XOR accumulator, the upper-magnitude BIGINT/RATIO/BIGDEC
+ * paths). Equal sub-values → equal sub-hashes → equal byte sequence
+ * here. */
+static uint32_t hash_uint32_bytes(uint32_t h, uint32_t x)
+{
+    unsigned i;
+    for (i = 0; i < 4; i++) {
+        h = fnv_mix(h, (unsigned char)(x & 0xFFu));
+        x >>= 8;
+    }
+    return h;
+}
+
+/*
  * Hash function compatible with mino_eq:
  *   - Integral floats hash the same as the equivalent int so (= 1 1.0) ⇒ 1.
  *   - Strings, symbols, and keywords each carry a distinct type tag so byte-
@@ -88,28 +137,16 @@ uint32_t hash_val(const mino_val_t *v)
     case MINO_BOOL:
         h = fnv_mix(h, 0x02);
         return fnv_mix(h, (unsigned char)(v->as.b ? 1 : 0));
-    case MINO_INT: {
-        long long n = v->as.i;
-        unsigned  i;
+    case MINO_INT:
         h = fnv_mix(h, 0x03);
-        for (i = 0; i < 8; i++) {
-            h = fnv_mix(h, (unsigned char)(n & 0xFFu));
-            n >>= 8;
-        }
-        return h;
-    }
+        return hash_long_long_bytes(h, v->as.i);
     case MINO_FLOAT: {
         double    d  = v->as.f;
         long long ll = (long long)d;
         if ((double)ll == d) {
             /* Same tag as MINO_INT so (= 1 1.0) matches in hash too. */
-            unsigned i;
             h = fnv_mix(h, 0x03);
-            for (i = 0; i < 8; i++) {
-                h = fnv_mix(h, (unsigned char)(ll & 0xFFu));
-                ll >>= 8;
-            }
-            return h;
+            return hash_long_long_bytes(h, ll);
         }
         h = fnv_mix(h, 0x04);
         {
@@ -118,16 +155,9 @@ uint32_t hash_val(const mino_val_t *v)
             return fnv_bytes(h, buf, sizeof(d));
         }
     }
-    case MINO_CHAR: {
-        unsigned cp = (unsigned)v->as.ch;
-        unsigned i;
+    case MINO_CHAR:
         h = fnv_mix(h, 0x0f);
-        for (i = 0; i < 4; i++) {
-            h = fnv_mix(h, (unsigned char)(cp & 0xFFu));
-            cp >>= 8;
-        }
-        return h;
-    }
+        return hash_uint32_bytes(h, (uint32_t)v->as.ch);
     case MINO_STRING:
         h = fnv_mix(h, 0x05);
         return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);
@@ -137,26 +167,16 @@ uint32_t hash_val(const mino_val_t *v)
     case MINO_KEYWORD:
         h = fnv_mix(h, 0x07);
         return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);
-    case MINO_CONS: {
-        uint32_t hc = hash_val(v->as.cons.car);
-        uint32_t hd = hash_val(v->as.cons.cdr);
-        unsigned i;
+    case MINO_CONS:
         h = fnv_mix(h, 0x08);
-        for (i = 0; i < 4; i++) { h = fnv_mix(h, (unsigned char)(hc & 0xFFu)); hc >>= 8; }
-        for (i = 0; i < 4; i++) { h = fnv_mix(h, (unsigned char)(hd & 0xFFu)); hd >>= 8; }
-        return h;
-    }
+        h = hash_uint32_bytes(h, hash_val(v->as.cons.car));
+        return hash_uint32_bytes(h, hash_val(v->as.cons.cdr));
     case MINO_VECTOR: {
         size_t n = v->as.vec.len;
         size_t i;
         h = fnv_mix(h, 0x09);
         for (i = 0; i < n; i++) {
-            uint32_t hi = hash_val(vec_nth(v, i));
-            unsigned k;
-            for (k = 0; k < 4; k++) {
-                h = fnv_mix(h, (unsigned char)(hi & 0xFFu));
-                hi >>= 8;
-            }
+            h = hash_uint32_bytes(h, hash_val(vec_nth(v, i)));
         }
         return h;
     }
@@ -167,155 +187,56 @@ uint32_t hash_val(const mino_val_t *v)
         uint32_t acc = 0;
         size_t   n   = v->as.map.len;
         size_t   i;
-        unsigned k;
         for (i = 0; i < n; i++) {
             mino_val_t *key = vec_nth(v->as.map.key_order, i);
-            mino_val_t *val;
             uint32_t    hk  = hash_val(key);
-            uint32_t    hv;
-            val = (mino_val_t *)(size_t)0; /* silence warnings */
-            (void)val;
-            /* Look up the value via the HAMT at the root. Use identity
-             * equality via the same hash path. */
-            {
-                const mino_hamt_node_t *n2 = v->as.map.root;
-                uint32_t                hh = hk;
-                unsigned                shift = 0;
-                mino_val_t             *found = NULL;
-                while (n2 != NULL) {
-                    if (n2->collision_count > 0) {
-                        unsigned j;
-                        for (j = 0; j < n2->collision_count; j++) {
-                            hamt_entry_t *e = (hamt_entry_t *)n2->slots[j];
-                            if (mino_eq(e->key, key)) { found = e->val; break; }
-                        }
-                        break;
-                    } else {
-                        uint32_t bit  = 1u << ((hh >> shift) & HAMT_MASK);
-                        unsigned phys;
-                        if ((n2->bitmap & bit) == 0) break;
-                        phys = popcount32(n2->bitmap & (bit - 1u));
-                        if (n2->subnode_mask & bit) {
-                            n2 = (const mino_hamt_node_t *)n2->slots[phys];
-                            shift += HAMT_B;
-                        } else {
-                            hamt_entry_t *e = (hamt_entry_t *)n2->slots[phys];
-                            if (mino_eq(e->key, key)) { found = e->val; }
-                            break;
-                        }
-                    }
-                }
-                hv = hash_val(found);
-            }
+            uint32_t    hv  = hash_val(map_get_val(v, key));
             hk ^= hv * 2654435761u;
             acc ^= hk;
-            (void)k;
         }
         h = fnv_mix(h, 0x0a);
-        {
-            unsigned i2;
-            for (i2 = 0; i2 < 4; i2++) {
-                h = fnv_mix(h, (unsigned char)(acc & 0xFFu));
-                acc >>= 8;
-            }
-        }
-        return h;
+        return hash_uint32_bytes(h, acc);
     }
     case MINO_SET: {
         /* XOR-fold of element hashes for order independence. */
         uint32_t acc = 0;
         size_t   n   = v->as.set.len;
         size_t   i;
-        unsigned k;
         for (i = 0; i < n; i++) {
             mino_val_t *elem = vec_nth(v->as.set.key_order, i);
             acc ^= hash_val(elem);
         }
         h = fnv_mix(h, 0x0d);
-        for (k = 0; k < 4; k++) {
-            h = fnv_mix(h, (unsigned char)(acc & 0xFFu));
-            acc >>= 8;
-        }
-        return h;
+        return hash_uint32_bytes(h, acc);
     }
-    case MINO_HANDLE: {
-        /* Handles compare by their host pointer, so we hash that. */
-        uintptr_t p = (uintptr_t)v->as.handle.ptr;
-        unsigned  i;
+    case MINO_HANDLE:
         h = fnv_mix(h, 0x0c);
-        for (i = 0; i < sizeof(uintptr_t); i++) {
-            h = fnv_mix(h, (unsigned char)(p & 0xFFu));
-            p >>= 8;
-        }
-        return h;
-    }
-    case MINO_ATOM: {
-        /* Atoms are identity-based (each atom is unique). */
-        uintptr_t p = (uintptr_t)v;
-        unsigned  i;
+        return hash_pointer_bytes(h, (uintptr_t)v->as.handle.ptr);
+    case MINO_ATOM:
         h = fnv_mix(h, 0x0e);
-        for (i = 0; i < sizeof(uintptr_t); i++) {
-            h = fnv_mix(h, (unsigned char)(p & 0xFFu));
-            p >>= 8;
-        }
-        return h;
-    }
+        return hash_pointer_bytes(h, (uintptr_t)v);
     case MINO_BIGINT: {
         /* Bigints that fit in a long long hash under the MINO_INT tag
          * so (= 1 1N) and (hash-of 1 1N) agree. Larger magnitudes use a
          * bigint-dedicated tag seeded from the imath-provided hash. */
         long long ll;
         if (mino_as_ll(v, &ll)) {
-            unsigned i;
             h = fnv_mix(h, 0x03);
-            for (i = 0; i < 8; i++) {
-                h = fnv_mix(h, (unsigned char)(ll & 0xFFu));
-                ll >>= 8;
-            }
-            return h;
+            return hash_long_long_bytes(h, ll);
         }
-        {
-            uint32_t bh = mino_bigint_hash(v);
-            unsigned i;
-            h = fnv_mix(h, 0x10);
-            for (i = 0; i < 4; i++) {
-                h = fnv_mix(h, (unsigned char)(bh & 0xFFu));
-                bh >>= 8;
-            }
-            return h;
-        }
+        h = fnv_mix(h, 0x10);
+        return hash_uint32_bytes(h, mino_bigint_hash(v));
     }
-    case MINO_RATIO: {
-        uint32_t rh = mino_ratio_hash(v);
-        unsigned i;
+    case MINO_RATIO:
         h = fnv_mix(h, 0x11);
-        for (i = 0; i < 4; i++) {
-            h = fnv_mix(h, (unsigned char)(rh & 0xFFu));
-            rh >>= 8;
-        }
-        return h;
-    }
-    case MINO_BIGDEC: {
-        uint32_t dh = mino_bigdec_hash(v);
-        unsigned i;
+        return hash_uint32_bytes(h, mino_ratio_hash(v));
+    case MINO_BIGDEC:
         h = fnv_mix(h, 0x12);
-        for (i = 0; i < 4; i++) {
-            h = fnv_mix(h, (unsigned char)(dh & 0xFFu));
-            dh >>= 8;
-        }
-        return h;
-    }
-    default: {
+        return hash_uint32_bytes(h, mino_bigdec_hash(v));
+    default:
         /* PRIM, FN, RECUR: identity-based. */
-        uintptr_t p = (uintptr_t)v;
-        unsigned  i;
         h = fnv_mix(h, 0x0b);
-        for (i = 0; i < sizeof(uintptr_t); i++) {
-            h = fnv_mix(h, (unsigned char)(p & 0xFFu));
-            p >>= 8;
-        }
-        return h;
-    }
+        return hash_pointer_bytes(h, (uintptr_t)v);
     }
 }
 
