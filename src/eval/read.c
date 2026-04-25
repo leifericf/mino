@@ -71,10 +71,18 @@ static void set_reader_diag(mino_state_t *S, const char *code,
 }
 
 /* Advance the cursor by one character and track column position. */
-#define ADVANCE(S, p) do { (*(p))++; (S)->reader_col++; } while (0)
+static inline void ADVANCE(mino_state_t *S, const char **p)
+{
+    (*p)++;
+    S->reader_col++;
+}
 
 /* Advance by n characters (no embedded newlines expected). */
-#define ADVANCE_N(S, p, n) do { *(p) += (n); (S)->reader_col += (int)(n); } while (0)
+static inline void ADVANCE_N(mino_state_t *S, const char **p, size_t n)
+{
+    *p += n;
+    S->reader_col += (int)n;
+}
 
 static int is_ws(char c)
 {
@@ -1116,6 +1124,284 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
     }
 }
 
+/*
+ * Character literal reader: \space, \newline, \A, \uNNNN, \oNNN,
+ * UTF-8 codepoints (\é, \☃), and single-character tokens like \{.
+ * Produces a first-class MINO_CHAR holding the decoded codepoint.
+ * On entry, **p == '\\'.
+ */
+static mino_val_t *read_char_literal(mino_state_t *S, const char **p)
+{
+    const char *start = *p + 1;
+    size_t      tlen  = 0;
+    int         cp;
+    ADVANCE(S, p);
+    if (**p == '\0') {
+        set_reader_diag(S, MRE001,
+                        "unexpected end of input after \\",
+                        S->reader_line, S->reader_col);
+        return NULL;
+    }
+    while (!is_terminator(start[tlen])) tlen++;
+    ADVANCE_N(S, p, tlen);
+    if (tlen == 5 && memcmp(start, "space", 5) == 0) {
+        cp = ' ';
+    } else if (tlen == 7 && memcmp(start, "newline", 7) == 0) {
+        cp = '\n';
+    } else if (tlen == 3 && memcmp(start, "tab", 3) == 0) {
+        cp = '\t';
+    } else if (tlen == 6 && memcmp(start, "return", 6) == 0) {
+        cp = '\r';
+    } else if (tlen == 9 && memcmp(start, "backspace", 9) == 0) {
+        cp = '\b';
+    } else if (tlen == 8 && memcmp(start, "formfeed", 8) == 0) {
+        cp = '\f';
+    } else if (tlen == 1) {
+        cp = (unsigned char)start[0];
+    } else if (tlen >= 2 && tlen <= 4 && ((unsigned char)start[0] & 0x80)) {
+        /* Multi-byte UTF-8 literal: \é, \☃, etc. Decode the leading
+         * byte's bit pattern to determine expected length, then
+         * accumulate continuation bytes. */
+        unsigned char lead = (unsigned char)start[0];
+        size_t        expect;
+        unsigned      u;
+        size_t        j;
+        if      ((lead & 0xE0) == 0xC0) { expect = 2; u = lead & 0x1Fu; }
+        else if ((lead & 0xF0) == 0xE0) { expect = 3; u = lead & 0x0Fu; }
+        else if ((lead & 0xF8) == 0xF0) { expect = 4; u = lead & 0x07u; }
+        else {
+            set_reader_diag(S, MRE008,
+                            "invalid UTF-8 character literal",
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
+        if (tlen != expect) {
+            set_reader_diag(S, MRE008,
+                            "malformed UTF-8 character literal",
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
+        for (j = 1; j < expect; j++) {
+            unsigned char c = (unsigned char)start[j];
+            if ((c & 0xC0) != 0x80) {
+                set_reader_diag(S, MRE008,
+                                "invalid UTF-8 continuation byte",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            u = (u << 6) | (c & 0x3Fu);
+        }
+        cp = (int)u;
+    } else if (tlen == 0 && start[0] != '\0') {
+        /* Single terminator/whitespace character as literal: \{ \; \, etc. */
+        cp = (unsigned char)start[0];
+        ADVANCE(S, p);
+    } else if (tlen >= 2 && start[0] == 'o') {
+        /* Octal escape: \oNNN */
+        unsigned oval = 0;
+        size_t   j;
+        for (j = 1; j < tlen; j++) {
+            if (start[j] < '0' || start[j] > '7') {
+                set_reader_diag(S, MRE008,
+                                "invalid octal character literal",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            oval = (oval << 3) | (unsigned)(start[j] - '0');
+        }
+        if (oval > 0377) {
+            set_reader_diag(S, MRE008,
+                            "octal character literal out of range",
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
+        cp = (int)oval;
+    } else if (tlen >= 5 && start[0] == 'u') {
+        /* Unicode escape: \uXXXX */
+        unsigned u = 0;
+        size_t   j;
+        if (tlen != 5) {
+            set_reader_diag(S, MRE008, "invalid unicode character literal",
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
+        for (j = 1; j < 5; j++) {
+            unsigned d;
+            char     c = start[j];
+            if      (c >= '0' && c <= '9') d = (unsigned)(c - '0');
+            else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A' + 10);
+            else {
+                set_reader_diag(S, MRE008,
+                                "invalid unicode character literal",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            u = (u << 4) | d;
+        }
+        cp = (int)u;
+    } else {
+        set_reader_diag(S, MRE008, "unknown character literal",
+                        S->reader_line, S->reader_col);
+        return NULL;
+    }
+    return mino_char(S, cp);
+}
+
+/*
+ * Wrap the next form in (sym form), preserving the source position
+ * of the originating reader macro. Used by the prefix-quote family
+ * (`'`, `\``, `@`, `~`, `~@`, `#'`) where each macro reads exactly
+ * one following form and tags it with a known head symbol.
+ */
+static mino_val_t *read_wrap_one(mino_state_t *S, const char **p,
+                                 const char *sym_name, const char *after_msg,
+                                 int q_line, int q_col)
+{
+    mino_val_t *inner = read_form(S, p);
+    mino_val_t *outer;
+    if (inner == NULL) {
+        if (mino_last_error(S) == NULL) {
+            set_reader_diag(S, MRE009, after_msg,
+                            S->reader_line, S->reader_col);
+        }
+        return NULL;
+    }
+    outer = mino_cons(S, mino_symbol(S, sym_name),
+                      mino_cons(S, inner, mino_nil(S)));
+    outer->as.cons.file   = S->reader_file;
+    outer->as.cons.line   = q_line;
+    outer->as.cons.column = q_col;
+    return outer;
+}
+
+/*
+ * Dispatch the `#`-prefix family. On entry, **p == '#'. Handles the
+ * full set of dispatch macros: #{ set, #_ discard, #( anon-fn, #'
+ * var-quote, ## special-float, #" regex, #?@ splice (top-level error),
+ * #? reader-conditional, and #tag tagged-literal. Returns the read
+ * form, NULL with a reader diag on error, or NULL without an error
+ * to signal "no form produced" (for #_ at end-of-list and #? with no
+ * matching branch).
+ */
+static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
+{
+    char next = *(*p + 1);
+    if (next == '{') {
+        ADVANCE(S, p); /* skip '#', read_set_form will skip '{' */
+        return read_set_form(S, p);
+    }
+    if (next == '_') {
+        /* Discard reader macro: #_ discards the next form. */
+        mino_val_t *discarded;
+        ADVANCE_N(S, p, 2);
+        discarded = read_form(S, p);
+        (void)discarded;
+        if (mino_last_error(S) != NULL)
+            return NULL;
+        skip_ws(S, p);
+        if (**p == ')' || **p == ']' || **p == '}' || **p == '\0')
+            return NULL; /* let parent handle closing delimiter */
+        return read_form(S, p);
+    }
+    if (next == '(') {
+        return read_anon_fn_form(S, p);
+    }
+    if (next == '\'') {
+        int vq_line = S->reader_line;
+        int vq_col  = S->reader_col;
+        ADVANCE_N(S, p, 2);
+        return read_wrap_one(S, p, "var", "expected form after #'",
+                             vq_line, vq_col);
+    }
+    if (next == '#') {
+        /* Special float tokens: ##Inf, ##-Inf, ##NaN */
+        const char *start;
+        size_t      tlen;
+        ADVANCE_N(S, p, 2);
+        start = *p;
+        tlen = 0;
+        while (!is_terminator((*p)[tlen])) tlen++;
+        ADVANCE_N(S, p, tlen);
+        if (tlen == 3 && memcmp(start, "Inf", 3) == 0)
+            return mino_float(S, INFINITY);
+        if (tlen == 4 && memcmp(start, "-Inf", 4) == 0)
+            return mino_float(S, -INFINITY);
+        if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
+            return mino_float(S, NAN);
+        set_reader_diag(S, MRE008, "unknown tagged literal",
+                        S->reader_line, S->reader_col);
+        return NULL;
+    }
+    if (next == '"') {
+        /* Regex literal: #"pattern" -- wrap as (re-pattern "pattern"). */
+        int         rx_line = S->reader_line;
+        int         rx_col  = S->reader_col;
+        mino_val_t *str;
+        mino_val_t *outer;
+        ADVANCE(S, p); /* skip '#', now *p points at '"' */
+        str = read_string_form(S, p);
+        if (str == NULL) return NULL;
+        outer = mino_cons(S, mino_symbol(S, "re-pattern"),
+                          mino_cons(S, str, mino_nil(S)));
+        outer->as.cons.file   = S->reader_file;
+        outer->as.cons.line   = rx_line;
+        outer->as.cons.column = rx_col;
+        return outer;
+    }
+    if (next == '?' && *(*p + 2) == '@') {
+        set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
+                        S->reader_line, S->reader_col);
+        return NULL;
+    }
+    if (next == '?') {
+        mino_val_t *found = NULL;
+        ADVANCE_N(S, p, 2);
+        skip_ws(S, p);
+        if (**p != '(') {
+            set_reader_diag(S, MRE007, "#? must be followed by a list",
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
+        ADVANCE(S, p);
+        read_cond_body(S, p, &found);
+        if (mino_last_error(S) != NULL) return NULL;
+        if (found != NULL) {
+            gc_unpin(1);
+            return found;
+        }
+        /* No branch matched: return NULL without error to signal
+         * "no form produced" to the enclosing reader (list, vector,
+         * or map). The enclosing reader will continue to the next
+         * form. For maps this is critical -- the map reader must
+         * consume and discard the paired value. */
+        return NULL;
+    }
+    if (isalpha((unsigned char)next)) {
+        /* Tagged literals: #tag form -- wrap as (tagged-literal :tag form).
+         * Handles unknown tags like #js, #inst, #uuid gracefully. */
+        const char *tag_start;
+        size_t      tag_len;
+        mino_val_t *tag_val;
+        mino_val_t *body;
+        ADVANCE(S, p);
+        tag_start = *p;
+        tag_len = 0;
+        while (!is_terminator((*p)[tag_len])) tag_len++;
+        ADVANCE_N(S, p, tag_len);
+        skip_ws(S, p);
+        body = read_form(S, p);
+        if (body == NULL && mino_last_error(S) != NULL) return NULL;
+        tag_val = mino_keyword_n(S, tag_start, tag_len);
+        return mino_cons(S, mino_symbol(S, "tagged-literal"),
+                         mino_cons(S, tag_val,
+                                   mino_cons(S, body, mino_nil(S))));
+    }
+    set_reader_diag(S, MRE008, "unknown reader dispatch macro",
+                    S->reader_line, S->reader_col);
+    return NULL;
+}
+
 static mino_val_t *read_form(mino_state_t *S, const char **p)
 {
     skip_ws(S, p);
@@ -1146,133 +1432,8 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
                         S->reader_line, S->reader_col);
         return NULL;
     }
-    if (**p == '#' && *(*p + 1) == '{') {
-        ADVANCE(S, p); /* skip '#', read_set_form will skip '{' */
-        return read_set_form(S, p);
-    }
-    if (**p == '#' && *(*p + 1) == '_') {
-        /* Discard reader macro: #_ discards the next form. */
-        ADVANCE_N(S, p, 2);
-        {
-            mino_val_t *discarded = read_form(S, p);
-            (void)discarded;
-            if (mino_last_error(S) != NULL)
-                return NULL;
-            skip_ws(S, p);
-            if (**p == ')' || **p == ']' || **p == '}' || **p == '\0')
-                return NULL; /* let parent handle closing delimiter */
-            return read_form(S, p);
-        }
-    }
-    if (**p == '#' && *(*p + 1) == '(') {
-        return read_anon_fn_form(S, p);
-    }
-    if (**p == '#' && *(*p + 1) == '\'') {
-        int vq_line = S->reader_line;
-        int vq_col  = S->reader_col;
-        ADVANCE_N(S, p, 2);
-        {
-            mino_val_t *sym = read_form(S, p);
-            mino_val_t *outer;
-            if (sym == NULL) {
-                if (mino_last_error(S) == NULL) {
-                    set_reader_diag(S, MRE009, "expected form after #'",
-                                    S->reader_line, S->reader_col);
-                }
-                return NULL;
-            }
-            outer = mino_cons(S, mino_symbol(S, "var"),
-                              mino_cons(S, sym, mino_nil(S)));
-            outer->as.cons.file   = S->reader_file;
-            outer->as.cons.line   = vq_line;
-            outer->as.cons.column = vq_col;
-            return outer;
-        }
-    }
-    if (**p == '#' && *(*p + 1) == '#') {
-        /* Special float tokens: ##Inf, ##-Inf, ##NaN */
-        const char *start;
-        size_t tlen;
-        ADVANCE_N(S, p, 2);
-        start = *p;
-        tlen = 0;
-        while (!is_terminator((*p)[tlen])) tlen++;
-        ADVANCE_N(S, p, tlen);
-        if (tlen == 3 && memcmp(start, "Inf", 3) == 0)
-            return mino_float(S, INFINITY);
-        if (tlen == 4 && memcmp(start, "-Inf", 4) == 0)
-            return mino_float(S, -INFINITY);
-        if (tlen == 3 && memcmp(start, "NaN", 3) == 0)
-            return mino_float(S, NAN);
-        set_reader_diag(S, MRE008, "unknown tagged literal",
-                        S->reader_line, S->reader_col);
-        return NULL;
-    }
-    /* Regex literal: #"pattern" — wrap as (re-pattern "pattern"). */
-    if (**p == '#' && *(*p + 1) == '"') {
-        int         rx_line = S->reader_line;
-        int         rx_col  = S->reader_col;
-        mino_val_t *str;
-        mino_val_t *outer;
-        ADVANCE(S, p); /* skip '#', now *p points at '"' */
-        str = read_string_form(S, p);
-        if (str == NULL) return NULL;
-        outer = mino_cons(S, mino_symbol(S, "re-pattern"),
-                          mino_cons(S, str, mino_nil(S)));
-        outer->as.cons.file   = S->reader_file;
-        outer->as.cons.line   = rx_line;
-        outer->as.cons.column = rx_col;
-        return outer;
-    }
-    /* Tagged literals: #tag form — read and wrap as (tagged-literal tag form).
-     * Handles unknown tags like #js, #inst, #uuid gracefully. */
-    if (**p == '#' && isalpha((unsigned char)*(*p + 1))) {
-        const char *tag_start;
-        size_t      tag_len;
-        mino_val_t *tag_val;
-        mino_val_t *body;
-        ADVANCE(S, p);
-        tag_start = *p;
-        tag_len = 0;
-        while (!is_terminator((*p)[tag_len])) tag_len++;
-        ADVANCE_N(S, p, tag_len);
-        /* Read the body form that follows the tag. */
-        skip_ws(S, p);
-        body = read_form(S, p);
-        if (body == NULL && mino_last_error(S) != NULL) return NULL;
-        /* Wrap as (tagged-literal :tag body). */
-        tag_val = mino_keyword_n(S, tag_start, tag_len);
-        return mino_cons(S, mino_symbol(S, "tagged-literal"),
-                         mino_cons(S, tag_val,
-                                   mino_cons(S, body, mino_nil(S))));
-    }
-    if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) == '@') {
-        set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
-                        S->reader_line, S->reader_col);
-        return NULL;
-    }
-    if (**p == '#' && *(*p + 1) == '?' && *(*p + 2) != '@') {
-        mino_val_t *found = NULL;
-        ADVANCE_N(S, p, 2);
-        skip_ws(S, p);
-        if (**p != '(') {
-            set_reader_diag(S, MRE007, "#? must be followed by a list",
-                            S->reader_line, S->reader_col);
-            return NULL;
-        }
-        ADVANCE(S, p);
-        read_cond_body(S, p, &found);
-        if (mino_last_error(S) != NULL) return NULL;
-        if (found != NULL) {
-            gc_unpin(1);
-            return found;
-        }
-        /* No branch matched: return NULL without error to signal
-         * "no form produced" to the enclosing reader (list, vector,
-         * or map). The enclosing reader will continue to the next
-         * form. For maps this is critical — the map reader must
-         * consume and discard the paired value. */
-        return NULL;
+    if (**p == '#') {
+        return read_dispatch(S, p);
     }
     if (**p == '"') {
         return read_string_form(S, p);
@@ -1281,70 +1442,22 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
         int q_line = S->reader_line;
         int q_col  = S->reader_col;
         ADVANCE(S, p);
-        {
-            mino_val_t *quoted = read_form(S, p);
-            mino_val_t *outer;
-            if (quoted == NULL) {
-                if (mino_last_error(S) == NULL) {
-                    set_reader_diag(S, MRE009,
-                                    "expected form after quote",
-                                    S->reader_line, S->reader_col);
-                }
-                return NULL;
-            }
-            outer = mino_cons(S, mino_symbol(S, "quote"),
-                              mino_cons(S, quoted, mino_nil(S)));
-            outer->as.cons.file   = S->reader_file;
-            outer->as.cons.line   = q_line;
-            outer->as.cons.column = q_col;
-            return outer;
-        }
+        return read_wrap_one(S, p, "quote", "expected form after quote",
+                             q_line, q_col);
     }
     if (**p == '`') {
         int q_line = S->reader_line;
         int q_col  = S->reader_col;
         ADVANCE(S, p);
-        {
-            mino_val_t *qq = read_form(S, p);
-            mino_val_t *outer;
-            if (qq == NULL) {
-                if (mino_last_error(S) == NULL) {
-                    set_reader_diag(S, MRE009,
-                                    "expected form after `",
-                                    S->reader_line, S->reader_col);
-                }
-                return NULL;
-            }
-            outer = mino_cons(S, mino_symbol(S, "quasiquote"),
-                              mino_cons(S, qq, mino_nil(S)));
-            outer->as.cons.file   = S->reader_file;
-            outer->as.cons.line   = q_line;
-            outer->as.cons.column = q_col;
-            return outer;
-        }
+        return read_wrap_one(S, p, "quasiquote", "expected form after `",
+                             q_line, q_col);
     }
     if (**p == '@') {
         int q_line = S->reader_line;
         int q_col  = S->reader_col;
         ADVANCE(S, p);
-        {
-            mino_val_t *target = read_form(S, p);
-            mino_val_t *outer;
-            if (target == NULL) {
-                if (mino_last_error(S) == NULL) {
-                    set_reader_diag(S, MRE009,
-                                    "expected form after @",
-                                    S->reader_line, S->reader_col);
-                }
-                return NULL;
-            }
-            outer = mino_cons(S, mino_symbol(S, "deref"),
-                              mino_cons(S, target, mino_nil(S)));
-            outer->as.cons.file   = S->reader_file;
-            outer->as.cons.line   = q_line;
-            outer->as.cons.column = q_col;
-            return outer;
-        }
+        return read_wrap_one(S, p, "deref", "expected form after @",
+                             q_line, q_col);
     }
     if (**p == '^') {
         return read_metadata_form(S, p);
@@ -1352,148 +1465,17 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     if (**p == '~') {
         int         q_line = S->reader_line;
         int         q_col  = S->reader_col;
-        const char *name = "unquote";
+        const char *name   = "unquote";
         ADVANCE(S, p);
         if (**p == '@') {
             name = "unquote-splicing";
             ADVANCE(S, p);
         }
-        {
-            mino_val_t *uq = read_form(S, p);
-            mino_val_t *outer;
-            if (uq == NULL) {
-                if (mino_last_error(S) == NULL) {
-                    set_reader_diag(S, MRE009,
-                                    "expected form after ~",
-                                    S->reader_line, S->reader_col);
-                }
-                return NULL;
-            }
-            outer = mino_cons(S, mino_symbol(S, name),
-                              mino_cons(S, uq, mino_nil(S)));
-            outer->as.cons.file   = S->reader_file;
-            outer->as.cons.line   = q_line;
-            outer->as.cons.column = q_col;
-            return outer;
-        }
+        return read_wrap_one(S, p, name, "expected form after ~",
+                             q_line, q_col);
     }
     if (**p == '\\') {
-        /* Character literals: \space, \newline, \A, \uNNNN, \oNNN, etc.
-         * Produce a first-class MINO_CHAR holding a Unicode codepoint. */
-        const char *start = *p + 1;
-        size_t tlen = 0;
-        int    cp;
-        ADVANCE(S, p);
-        if (**p == '\0') {
-            set_reader_diag(S, MRE001,
-                            "unexpected end of input after \\",
-                            S->reader_line, S->reader_col);
-            return NULL;
-        }
-        while (!is_terminator(start[tlen])) tlen++;
-        ADVANCE_N(S, p, tlen);
-        if (tlen == 5 && memcmp(start, "space", 5) == 0) {
-            cp = ' ';
-        } else if (tlen == 7 && memcmp(start, "newline", 7) == 0) {
-            cp = '\n';
-        } else if (tlen == 3 && memcmp(start, "tab", 3) == 0) {
-            cp = '\t';
-        } else if (tlen == 6 && memcmp(start, "return", 6) == 0) {
-            cp = '\r';
-        } else if (tlen == 9 && memcmp(start, "backspace", 9) == 0) {
-            cp = '\b';
-        } else if (tlen == 8 && memcmp(start, "formfeed", 8) == 0) {
-            cp = '\f';
-        } else if (tlen == 1) {
-            cp = (unsigned char)start[0];
-        } else if (tlen >= 2 && tlen <= 4 && ((unsigned char)start[0] & 0x80)) {
-            /* Multi-byte UTF-8 literal: \é, \☃, etc. Decode the leading
-             * byte's bit pattern to determine expected length, then
-             * accumulate continuation bytes. */
-            unsigned char lead = (unsigned char)start[0];
-            size_t expect;
-            unsigned u;
-            size_t j;
-            if ((lead & 0xE0) == 0xC0)      { expect = 2; u = lead & 0x1Fu; }
-            else if ((lead & 0xF0) == 0xE0) { expect = 3; u = lead & 0x0Fu; }
-            else if ((lead & 0xF8) == 0xF0) { expect = 4; u = lead & 0x07u; }
-            else {
-                set_reader_diag(S, MRE008,
-                                "invalid UTF-8 character literal",
-                                S->reader_line, S->reader_col);
-                return NULL;
-            }
-            if (tlen != expect) {
-                set_reader_diag(S, MRE008,
-                                "malformed UTF-8 character literal",
-                                S->reader_line, S->reader_col);
-                return NULL;
-            }
-            for (j = 1; j < expect; j++) {
-                unsigned char c = (unsigned char)start[j];
-                if ((c & 0xC0) != 0x80) {
-                    set_reader_diag(S, MRE008,
-                                    "invalid UTF-8 continuation byte",
-                                    S->reader_line, S->reader_col);
-                    return NULL;
-                }
-                u = (u << 6) | (c & 0x3Fu);
-            }
-            cp = (int)u;
-        } else if (tlen == 0 && start[0] != '\0') {
-            /* Single terminator/whitespace character as literal: \{ \; \, etc. */
-            cp = (unsigned char)start[0];
-            ADVANCE(S, p);
-        } else if (tlen >= 2 && start[0] == 'o') {
-            /* Octal escape: \oNNN */
-            unsigned oval = 0;
-            size_t j;
-            for (j = 1; j < tlen; j++) {
-                if (start[j] < '0' || start[j] > '7') {
-                    set_reader_diag(S, MRE008,
-                                    "invalid octal character literal",
-                                    S->reader_line, S->reader_col);
-                    return NULL;
-                }
-                oval = (oval << 3) | (unsigned)(start[j] - '0');
-            }
-            if (oval > 0377) {
-                set_reader_diag(S, MRE008,
-                                "octal character literal out of range",
-                                S->reader_line, S->reader_col);
-                return NULL;
-            }
-            cp = (int)oval;
-        } else if (tlen >= 5 && start[0] == 'u') {
-            /* Unicode escape: \uXXXX */
-            unsigned u = 0;
-            size_t j;
-            if (tlen != 5) {
-                set_reader_diag(S, MRE008, "invalid unicode character literal",
-                                S->reader_line, S->reader_col);
-                return NULL;
-            }
-            for (j = 1; j < 5; j++) {
-                unsigned d;
-                char c = start[j];
-                if (c >= '0' && c <= '9')      d = (unsigned)(c - '0');
-                else if (c >= 'a' && c <= 'f') d = (unsigned)(c - 'a' + 10);
-                else if (c >= 'A' && c <= 'F') d = (unsigned)(c - 'A' + 10);
-                else {
-                    set_reader_diag(S, MRE008,
-                                    "invalid unicode character literal",
-                                    S->reader_line, S->reader_col);
-                    return NULL;
-                }
-                u = (u << 4) | d;
-            }
-            cp = (int)u;
-        } else {
-            set_reader_diag(S, MRE008, "unknown character literal",
-                            S->reader_line, S->reader_col);
-            return NULL;
-        }
-        return mino_char(S, cp);
+        return read_char_literal(S, p);
     }
     return read_atom(S, p);
 }
