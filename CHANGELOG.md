@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.71.0 — Standalone CLI Polished
+
+The standalone `mino` binary now recognises `-h`/`--help`,
+`-V`/`--version`, and `-e`/`--eval EXPR`, with a `--` separator
+that ends option processing in the usual POSIX way. Help and
+version output goes to stdout and exits 0; usage errors go to
+stderr and exit 2. The `-e EXPR` path runs one expression
+through the same evaluator that file mode uses and prints the
+result via `mino_println`.
+
+A small subcommand surface is recognised after option
+processing. `mino repl` is an explicit alias for the bare REPL
+invocation; `mino nrepl ...` and `mino lsp ...` exec the
+matching companion binary from `PATH` and exit 127 if the
+companion is not installed, with a clear message naming the
+missing binary. `mino task` and `mino deps` continue to work
+as before.
+
+The REPL banner gains a `Type :help for help, :quit to exit`
+hint, and the prompt is now `mino=>` with a 7-char-aligned
+continuation prompt. Two reader-level meta-commands are
+intercepted before eval: a bare `:help` prints a one-screen
+description of the REPL, and a bare `:quit` exits cleanly with
+code 0. Both fire only when the entire form is the keyword, so
+they do not affect `(println :help)` or `(do :quit)`.
+
+The public embedding API in `src/mino.h` is unchanged.
+
 ## v0.70.0 — C-Core Refactored
 
 Cycle banner. No user-visible behavior change; the public embedding
