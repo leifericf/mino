@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.64.0
+
+Internal cleanup. No user-visible behavior change; the public
+embedding API in `src/mino.h` is unchanged.
+
+The companion-repo perf gate at `mino-bench/benchmarks/perf_gate.mino`
+grows from five micros to fifteen, covering reader (`read-string` over
+ints and lists), eval-special (`fn`, `let`, `if`, `do`, `loop`/`recur`),
+allocation (`cons`, vector, map), host-call (`inc`, `+`, `count`,
+`assoc`), and regex (`re-find`) paths so a regression in any of them
+surfaces at the gate. Each bench reports timing and bytes-allocated-
+per-op; the gate fails on either dimension. Allocation counts are
+deterministic, so the alloc gate uses zero tolerance for zero-baseline
+entries and a tight 10% band elsewhere. The timing gate stays at +15%
+locally but widens to +30% on CI runners (`CI=true`) to absorb the
+shared-runner noise that produced a uniform +74% skew on
+`ubuntu-latest` at the close of the prior cycle. The pinned baseline
+at `baselines/perf_baseline.edn` is re-recorded against the current
+runner shape and now stores both metrics per bench.
+
 ## v0.63.0
 
 Internal cleanup. No user-visible behavior change; the public
