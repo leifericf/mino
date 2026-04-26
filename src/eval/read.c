@@ -938,6 +938,13 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
         }
     }
 
+    /* Symbols must not end with a colon (foo: is rejected by upstream
+     * readers; ::-prefix and :name keywords are handled earlier). */
+    if (len > 0 && start[len - 1] == ':') {
+        set_reader_diag(S, MRE008, "invalid symbol",
+                        S->reader_line, S->reader_col);
+        return NULL;
+    }
     return mino_symbol_n(S, start, len);
 }
 
