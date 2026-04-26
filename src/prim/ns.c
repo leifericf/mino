@@ -58,9 +58,21 @@ static int ns_to_name(mino_state_t *S, mino_val_t *v, char *buf, size_t cap,
  * expect when comparing equality. */
 mino_val_t *prim_star_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    const char *name;
+    mino_val_t *sym;
+    mino_val_t *meta;
     (void)args;
     (void)env;
-    return mino_symbol(S, S->current_ns != NULL ? S->current_ns : "user");
+    name = S->current_ns != NULL ? S->current_ns : "user";
+    sym  = mino_symbol(S, name);
+    meta = ns_env_get_meta(S, name);
+    if (meta != NULL && sym != NULL) {
+        mino_val_t *copy = alloc_val(S, sym->type);
+        copy->as   = sym->as;
+        copy->meta = meta;
+        return copy;
+    }
+    return sym;
 }
 
 /* --- in-ns ---------------------------------------------------------------- */
@@ -76,6 +88,21 @@ mino_val_t *prim_in_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_symbol(S, buf);
 }
 
+/* Return a symbol naming NAME, carrying the namespace's metadata
+ * (if any) so callers can read it back via `meta`. */
+static mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
+{
+    mino_val_t *sym  = mino_symbol(S, name);
+    mino_val_t *meta = ns_env_get_meta(S, name);
+    if (meta != NULL && sym != NULL) {
+        mino_val_t *copy = alloc_val(S, sym->type);
+        copy->as   = sym->as;
+        copy->meta = meta;
+        return copy;
+    }
+    return sym;
+}
+
 /* --- find-ns / the-ns / create-ns / remove-ns ---------------------------- */
 mino_val_t *prim_find_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
@@ -87,7 +114,7 @@ mino_val_t *prim_find_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (arg == NULL || arg->type == MINO_NIL) return mino_nil(S);
     if (!ns_to_name(S, arg, buf, sizeof(buf), "find-ns")) return NULL;
     if (ns_env_lookup(S, buf) == NULL) return mino_nil(S);
-    return mino_symbol(S, buf);
+    return ns_symbol_with_meta(S, buf);
 }
 
 mino_val_t *prim_the_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -102,7 +129,7 @@ mino_val_t *prim_the_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         snprintf(msg, sizeof(msg), "no namespace: %s", buf);
         return prim_throw_classified(S, "name", "MNS001", msg);
     }
-    return mino_symbol(S, buf);
+    return ns_symbol_with_meta(S, buf);
 }
 
 mino_val_t *prim_create_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)

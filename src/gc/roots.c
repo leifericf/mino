@@ -292,6 +292,15 @@ void gc_mark_roots(mino_state_t *S)
             gc_mark_interior(S, S->module_cache[mi].value);
         }
     }
+    /* Pin per-namespace metadata maps. */
+    {
+        size_t ni;
+        for (ni = 0; ni < S->ns_env_len; ni++) {
+            if (S->ns_env_table[ni].meta != NULL) {
+                gc_mark_interior(S, S->ns_env_table[ni].meta);
+            }
+        }
+    }
     /* Pin metadata source forms. */
     {
         size_t mi;

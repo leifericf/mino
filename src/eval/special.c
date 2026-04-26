@@ -114,11 +114,20 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
 
     /* *ns* derefs to the current namespace symbol. Clojure exposes this
      * as a dynamic var; mino reads S->current_ns directly so any
-     * (ns ...) / (in-ns ...) is observable in the same expression. */
+     * (ns ...) / (in-ns ...) is observable in the same expression. The
+     * symbol carries the namespace's metadata so (meta *ns*) works. */
     if (n == 4 && memcmp(data, "*ns*", 4) == 0) {
         if (mino_env_get(env, data) == NULL) {
-            return mino_symbol(S,
-                S->current_ns != NULL ? S->current_ns : "user");
+            const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+            mino_val_t *sym = mino_symbol(S, cur);
+            mino_val_t *meta = ns_env_get_meta(S, cur);
+            if (meta != NULL && sym != NULL) {
+                mino_val_t *copy = alloc_val(S, sym->type);
+                copy->as   = sym->as;
+                copy->meta = meta;
+                return copy;
+            }
+            return sym;
         }
     }
 

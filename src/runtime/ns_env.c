@@ -69,6 +69,7 @@ mino_env_t *ns_env_ensure(mino_state_t *S, const char *name)
         if (S->ns_env_len == S->ns_env_cap) ns_env_table_grow(S);
         S->ns_env_table[S->ns_env_len].name = intern_filename(S, "mino.core");
         S->ns_env_table[S->ns_env_len].env  = S->mino_core_env;
+        S->ns_env_table[S->ns_env_len].meta = NULL;
         S->ns_env_len++;
         if (strcmp(name, "mino.core") == 0) return S->mino_core_env;
     }
@@ -80,8 +81,32 @@ mino_env_t *ns_env_ensure(mino_state_t *S, const char *name)
     if (S->ns_env_len == S->ns_env_cap) ns_env_table_grow(S);
     S->ns_env_table[S->ns_env_len].name = iname;
     S->ns_env_table[S->ns_env_len].env  = e;
+    S->ns_env_table[S->ns_env_len].meta = NULL;
     S->ns_env_len++;
     return e;
+}
+
+mino_val_t *ns_env_get_meta(mino_state_t *S, const char *name)
+{
+    size_t i;
+    if (name == NULL) return NULL;
+    for (i = 0; i < S->ns_env_len; i++) {
+        if (strcmp(S->ns_env_table[i].name, name) == 0)
+            return S->ns_env_table[i].meta;
+    }
+    return NULL;
+}
+
+void ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta)
+{
+    size_t i;
+    if (name == NULL) return;
+    for (i = 0; i < S->ns_env_len; i++) {
+        if (strcmp(S->ns_env_table[i].name, name) == 0) {
+            S->ns_env_table[i].meta = meta;
+            return;
+        }
+    }
 }
 
 mino_env_t *current_ns_env(mino_state_t *S)

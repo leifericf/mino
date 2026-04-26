@@ -169,6 +169,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *refer_vec         = NULL;
         int         refer_all         = 0;
         int         needs_load        = 0;
+        mino_val_t *exclude_vec       = NULL;
         size_t      vi;
         if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
             set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
@@ -201,6 +202,11 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         "require: :refer requires a vector of symbols or :all");
                     return NULL;
                 }
+            } else if (kw_match(k, "exclude")
+                       && v != NULL && v->type == MINO_VECTOR) {
+                exclude_vec = v;
+                /* :exclude is meaningful only alongside :refer :all (which
+                 * use injects); does not by itself trigger a load. */
             }
         }
         /* If only :as-alias is present, register the alias without
@@ -325,8 +331,24 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (refer_all && src != NULL) {
                 size_t ri;
                 for (ri = 0; ri < src->len; ri++) {
+                    const char *bname = src->bindings[ri].name;
+                    /* Honor :exclude when paired with :refer :all. */
+                    if (exclude_vec != NULL) {
+                        size_t  ei, blen = strlen(bname);
+                        int     skip = 0;
+                        for (ei = 0; ei < exclude_vec->as.vec.len; ei++) {
+                            mino_val_t *e = vec_nth(exclude_vec, ei);
+                            if (e != NULL && e->type == MINO_SYMBOL
+                                && e->as.s.len == blen
+                                && memcmp(e->as.s.data, bname, blen) == 0) {
+                                skip = 1;
+                                break;
+                            }
+                        }
+                        if (skip) continue;
+                    }
                     env_bind(S, target,
-                             src->bindings[ri].name,
+                             bname,
                              src->bindings[ri].val);
                 }
             }

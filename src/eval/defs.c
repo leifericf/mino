@@ -10,6 +10,50 @@
  * runtime/module.c so this file and prim/module.c share one
  * implementation. */
 
+/* Merge two metadata maps. Returns NEW (or B) if A is nil/non-map.
+ * Otherwise rebuilds the union with later writes winning. */
+static mino_val_t *ns_meta_merge(mino_state_t *S,
+                                 mino_val_t *a, mino_val_t *b)
+{
+    if (a == NULL || a->type != MINO_MAP) return b;
+    if (b == NULL || b->type != MINO_MAP) return a;
+    {
+        size_t       len = a->as.map.len + b->as.map.len;
+        mino_val_t **ks  = (mino_val_t **)gc_alloc_typed(
+            S, GC_T_VALARR, len * sizeof(*ks));
+        mino_val_t **vs  = (mino_val_t **)gc_alloc_typed(
+            S, GC_T_VALARR, len * sizeof(*vs));
+        size_t       i, n = 0;
+        /* Start with a's entries. */
+        for (i = 0; i < a->as.map.len; i++) {
+            mino_val_t *k = vec_nth(a->as.map.key_order, i);
+            gc_valarr_set(S, ks, n, k);
+            gc_valarr_set(S, vs, n, map_get_val(a, k));
+            n++;
+        }
+        /* Overlay b's entries; replace duplicates. */
+        for (i = 0; i < b->as.map.len; i++) {
+            mino_val_t *k = vec_nth(b->as.map.key_order, i);
+            mino_val_t *v = map_get_val(b, k);
+            size_t      j;
+            int         replaced = 0;
+            for (j = 0; j < n; j++) {
+                if (mino_eq(ks[j], k)) {
+                    gc_valarr_set(S, vs, j, v);
+                    replaced = 1;
+                    break;
+                }
+            }
+            if (!replaced) {
+                gc_valarr_set(S, ks, n, k);
+                gc_valarr_set(S, vs, n, v);
+                n++;
+            }
+        }
+        return mino_map(S, ks, vs, n);
+    }
+}
+
 /* True if `name` is bound in the current ns env via :refer from another
  * namespace (env binding exists but no var owned by current_ns). Used by
  * def/declare/defmacro to surface a "already refers to" collision before
@@ -288,20 +332,54 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
     /* First arg: namespace name symbol. */
     {
         mino_val_t *name_form = args->as.cons.car;
+        char buf[256];
+        size_t n;
         if (name_form == NULL || name_form->type != MINO_SYMBOL) {
             set_eval_diag(S, form, "syntax", "MSY001",
                           "ns: first arg must be a symbol");
             return NULL;
         }
-        /* Store as interned string. */
+        n = name_form->as.s.len;
+        if (n >= sizeof(buf)) {
+            set_eval_diag(S, form, "syntax", "MSY001",
+                          "ns: name too long");
+            return NULL;
+        }
+        memcpy(buf, name_form->as.s.data, n);
+        buf[n] = '\0';
+        S->current_ns = intern_filename(S, buf);
+        (void)ns_env_ensure(S, S->current_ns);
+        /* Pull together metadata from ^meta on the name, an optional
+         * docstring as the second arg, and an optional attr-map as the
+         * third (or second when no docstring). */
         {
-            char buf[256];
-            size_t n = name_form->as.s.len;
-            if (n < sizeof(buf)) {
-                memcpy(buf, name_form->as.s.data, n);
-                buf[n] = '\0';
-                S->current_ns = intern_filename(S, buf);
+            mino_val_t *meta = name_form->meta;
+            mino_val_t *cur  = args->as.cons.cdr;
+            mino_val_t *next = (mino_is_cons(cur)) ? cur->as.cons.car : NULL;
+            if (next != NULL && next->type == MINO_STRING) {
+                /* Docstring -> {:doc "..."}. Merge with existing meta. */
+                mino_val_t *kk = mino_keyword(S, "doc");
+                mino_val_t **ks = (mino_val_t **)gc_alloc_typed(
+                    S, GC_T_VALARR, sizeof(*ks));
+                mino_val_t **vs = (mino_val_t **)gc_alloc_typed(
+                    S, GC_T_VALARR, sizeof(*vs));
+                gc_valarr_set(S, ks, 0, kk);
+                gc_valarr_set(S, vs, 0, next);
+                {
+                    mino_val_t *doc_map = mino_map(S, ks, vs, 1);
+                    meta = ns_meta_merge(S, meta, doc_map);
+                }
+                cur  = cur->as.cons.cdr;
+                next = (mino_is_cons(cur)) ? cur->as.cons.car : NULL;
             }
+            if (next != NULL && next->type == MINO_MAP) {
+                meta = ns_meta_merge(S, meta, next);
+                cur = cur->as.cons.cdr;
+            }
+            if (meta != NULL) {
+                ns_env_set_meta(S, S->current_ns, meta);
+            }
+            args = mino_cons(S, name_form, cur);
         }
     }
     /* Walk remaining args for (:require ...) and other clauses. */
