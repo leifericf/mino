@@ -507,6 +507,7 @@ mino_env_t *current_ns_env(mino_state_t *S);                    /* GC-owned, roo
 mino_val_t    *var_intern(mino_state_t *S, const char *ns, const char *name);
 void           var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val);
 mino_val_t    *var_find(mino_state_t *S, const char *ns, const char *name);
+void           var_unintern(mino_state_t *S, const char *ns, const char *name);
 
 /* ------------------------------------------------------------------------- */
 /* state.c: per-state PRNG. Seeds lazily on first call.                      */

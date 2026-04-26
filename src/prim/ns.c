@@ -150,66 +150,192 @@ mino_val_t *prim_ns_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* --- ns-publics / ns-interns / ns-refers / ns-map -------------------------
  *
- * mino doesn't track public/private vs interned/refer'd separately yet
- * (privacy enforcement is a follow-up item), so the four primitives all
- * return the same shape today: a map from symbol to value. The
- * distinction lives in the metadata once privacy lands. */
-static mino_val_t *ns_bindings_map(mino_state_t *S, mino_env_t *e)
+ * publics / interns: bindings the ns owns (a var entry exists for ns/name).
+ * refers: bindings without an owning var entry, plus parent-walk inheritance
+ *         (mino.core, etc.) so inherited names show up like Clojure expects.
+ * map: union of the above plus aliases.
+ *
+ * Values are vars (via var_find / promote-from-binding) so callers can
+ * pr-str them and get "#'ns/name". Falls back to the env value if no var
+ * exists (e.g., bare primitives). */
+
+static int append_kv(mino_state_t *S, mino_val_t ***ks_io, mino_val_t ***vs_io,
+                     size_t *len_io, size_t *cap_io,
+                     mino_val_t *k, mino_val_t *v)
 {
-    mino_val_t **ks;
-    mino_val_t **vs;
-    size_t       i;
-    if (e == NULL) return mino_map(S, NULL, NULL, 0);
-    if (e->len == 0) return mino_map(S, NULL, NULL, 0);
-    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
-                                        e->len * sizeof(*ks));
-    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
-                                        e->len * sizeof(*vs));
-    for (i = 0; i < e->len; i++) {
-        gc_valarr_set(S, ks, i, mino_symbol(S, e->bindings[i].name));
-        gc_valarr_set(S, vs, i, e->bindings[i].val);
+    if (*len_io == *cap_io) {
+        size_t new_cap = *cap_io == 0 ? 16 : *cap_io * 2;
+        mino_val_t **nks = (mino_val_t **)gc_alloc_typed(
+            S, GC_T_VALARR, new_cap * sizeof(*nks));
+        mino_val_t **nvs = (mino_val_t **)gc_alloc_typed(
+            S, GC_T_VALARR, new_cap * sizeof(*nvs));
+        size_t       i;
+        if (nks == NULL || nvs == NULL) return 0;
+        for (i = 0; i < *len_io; i++) {
+            gc_valarr_set(S, nks, i, (*ks_io)[i]);
+            gc_valarr_set(S, nvs, i, (*vs_io)[i]);
+        }
+        *ks_io  = nks;
+        *vs_io  = nvs;
+        *cap_io = new_cap;
     }
-    return mino_map(S, ks, vs, e->len);
+    gc_valarr_set(S, *ks_io, *len_io, k);
+    gc_valarr_set(S, *vs_io, *len_io, v);
+    (*len_io)++;
+    return 1;
+}
+
+/* True if NAMES already contains a binding with this name. */
+static int names_contains(mino_val_t **ks, size_t n, const char *name)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (ks[i] != NULL && ks[i]->type == MINO_SYMBOL
+            && strlen(name) == ks[i]->as.s.len
+            && memcmp(ks[i]->as.s.data, name, ks[i]->as.s.len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Render a binding as the var (preferred) or the raw value. */
+static mino_val_t *binding_as_var(mino_state_t *S, const char *ns,
+                                  env_binding_t *b)
+{
+    mino_val_t *var = var_find(S, ns, b->name);
+    return var != NULL ? var : b->val;
 }
 
 mino_val_t *prim_ns_publics(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *arg;
-    char        buf[256];
+    mino_val_t  *arg;
+    char         buf[256];
+    mino_env_t  *e;
+    mino_val_t **ks  = NULL;
+    mino_val_t **vs  = NULL;
+    size_t       len = 0;
+    size_t       cap = 0;
+    size_t       i;
     (void)env;
     if (!ns_one_arg(S, args, "ns-publics", &arg)) return NULL;
     if (!ns_to_name(S, arg, buf, sizeof(buf), "ns-publics")) return NULL;
-    return ns_bindings_map(S, ns_env_lookup(S, buf));
+    e = ns_env_lookup(S, buf);
+    if (e == NULL) return mino_map(S, NULL, NULL, 0);
+    for (i = 0; i < e->len; i++) {
+        mino_val_t *var = var_find(S, buf, e->bindings[i].name);
+        if (var == NULL) continue;
+        if (var->type == MINO_VAR && var->as.var.is_private) continue;
+        if (!append_kv(S, &ks, &vs, &len, &cap,
+                       mino_symbol(S, e->bindings[i].name), var)) return NULL;
+    }
+    return mino_map(S, ks, vs, len);
 }
 
 mino_val_t *prim_ns_interns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *arg;
-    char        buf[256];
+    mino_val_t  *arg;
+    char         buf[256];
+    mino_env_t  *e;
+    mino_val_t **ks  = NULL;
+    mino_val_t **vs  = NULL;
+    size_t       len = 0;
+    size_t       cap = 0;
+    size_t       i;
     (void)env;
     if (!ns_one_arg(S, args, "ns-interns", &arg)) return NULL;
     if (!ns_to_name(S, arg, buf, sizeof(buf), "ns-interns")) return NULL;
-    return ns_bindings_map(S, ns_env_lookup(S, buf));
+    e = ns_env_lookup(S, buf);
+    if (e == NULL) return mino_map(S, NULL, NULL, 0);
+    for (i = 0; i < e->len; i++) {
+        mino_val_t *var = var_find(S, buf, e->bindings[i].name);
+        if (var == NULL) continue;
+        if (!append_kv(S, &ks, &vs, &len, &cap,
+                       mino_symbol(S, e->bindings[i].name), var)) return NULL;
+    }
+    return mino_map(S, ks, vs, len);
 }
 
 mino_val_t *prim_ns_refers(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *arg;
-    char        buf[256];
+    mino_val_t  *arg;
+    char         buf[256];
+    mino_env_t  *e;
+    mino_env_t  *p;
+    mino_val_t **ks  = NULL;
+    mino_val_t **vs  = NULL;
+    size_t       len = 0;
+    size_t       cap = 0;
+    size_t       i;
     (void)env;
     if (!ns_one_arg(S, args, "ns-refers", &arg)) return NULL;
     if (!ns_to_name(S, arg, buf, sizeof(buf), "ns-refers")) return NULL;
-    return ns_bindings_map(S, ns_env_lookup(S, buf));
+    e = ns_env_lookup(S, buf);
+    if (e == NULL) return mino_map(S, NULL, NULL, 0);
+    /* Self bindings without an owning var → explicit (refer ...) entries. */
+    for (i = 0; i < e->len; i++) {
+        if (var_find(S, buf, e->bindings[i].name) != NULL) continue;
+        if (!append_kv(S, &ks, &vs, &len, &cap,
+                       mino_symbol(S, e->bindings[i].name),
+                       binding_as_var(S, buf, &e->bindings[i]))) return NULL;
+    }
+    /* Parent walk: bindings inherited from mino.core (and any deeper). */
+    for (p = e->parent; p != NULL; p = p->parent) {
+        for (i = 0; i < p->len; i++) {
+            const char *nm = p->bindings[i].name;
+            if (names_contains(ks, len, nm)) continue;
+            /* Skip if the current ns has its own intern shadowing the
+             * inherited name. */
+            if (var_find(S, buf, nm) != NULL) continue;
+            if (!append_kv(S, &ks, &vs, &len, &cap,
+                           mino_symbol(S, nm),
+                           binding_as_var(S, p == e ? buf : "mino.core",
+                                          &p->bindings[i]))) return NULL;
+        }
+    }
+    return mino_map(S, ks, vs, len);
 }
 
 mino_val_t *prim_ns_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *arg;
-    char        buf[256];
+    mino_val_t  *arg;
+    char         buf[256];
+    mino_env_t  *e;
+    mino_env_t  *p;
+    mino_val_t **ks  = NULL;
+    mino_val_t **vs  = NULL;
+    size_t       len = 0;
+    size_t       cap = 0;
+    size_t       i;
     (void)env;
     if (!ns_one_arg(S, args, "ns-map", &arg)) return NULL;
     if (!ns_to_name(S, arg, buf, sizeof(buf), "ns-map")) return NULL;
-    return ns_bindings_map(S, ns_env_lookup(S, buf));
+    e = ns_env_lookup(S, buf);
+    if (e == NULL) return mino_map(S, NULL, NULL, 0);
+    /* Everything in the self env first (interns and explicit refers). */
+    for (i = 0; i < e->len; i++) {
+        if (!append_kv(S, &ks, &vs, &len, &cap,
+                       mino_symbol(S, e->bindings[i].name),
+                       binding_as_var(S, buf, &e->bindings[i]))) return NULL;
+    }
+    /* Then inherited names from parent chain. */
+    for (p = e->parent; p != NULL; p = p->parent) {
+        for (i = 0; i < p->len; i++) {
+            const char *nm = p->bindings[i].name;
+            if (names_contains(ks, len, nm)) continue;
+            if (!append_kv(S, &ks, &vs, &len, &cap,
+                           mino_symbol(S, nm),
+                           binding_as_var(S, "mino.core",
+                                          &p->bindings[i]))) return NULL;
+        }
+    }
+    /* Finally aliases as symbol → ns-symbol entries (ns-aliases shape). */
+    for (i = 0; i < S->ns_alias_len; i++) {
+        if (names_contains(ks, len, S->ns_aliases[i].alias)) continue;
+        if (!append_kv(S, &ks, &vs, &len, &cap,
+                       mino_symbol(S, S->ns_aliases[i].alias),
+                       mino_symbol(S, S->ns_aliases[i].full_name))) return NULL;
+    }
+    return mino_map(S, ks, vs, len);
 }
 
 /* --- ns-aliases ---------------------------------------------------------- */
@@ -355,12 +481,9 @@ mino_val_t *prim_ns_unmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     e = ns_env_lookup(S, ns_buf);
     if (e == NULL) return mino_nil(S);
-    /* Find the binding and rebind to nil. We don't physically delete
-     * to keep the bindings array stable; ns-publics callers can filter
-     * on val != nil if they need true "absence" semantics. */
+    /* Remove the env binding. */
     for (i = 0; i < e->len; i++) {
         if (strcmp(e->bindings[i].name, s_buf) == 0) {
-            /* Compact: shift remaining entries down. */
             size_t j;
             for (j = i + 1; j < e->len; j++) {
                 e->bindings[j - 1] = e->bindings[j];
@@ -369,6 +492,8 @@ mino_val_t *prim_ns_unmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             break;
         }
     }
+    /* Also drop the var registry entry so resolve / find-var report nil. */
+    var_unintern(S, ns_buf, s_buf);
     return mino_nil(S);
 }
 

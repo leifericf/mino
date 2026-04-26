@@ -97,3 +97,18 @@ mino_val_t *var_find(mino_state_t *S, const char *ns, const char *name)
     }
     return NULL;
 }
+
+void var_unintern(mino_state_t *S, const char *ns, const char *name)
+{
+    size_t i, j;
+    for (i = 0; i < S->var_registry_len; i++) {
+        if (strcmp(S->var_registry[i].ns, ns) == 0
+            && strcmp(S->var_registry[i].name, name) == 0) {
+            for (j = i + 1; j < S->var_registry_len; j++) {
+                S->var_registry[j - 1] = S->var_registry[j];
+            }
+            S->var_registry_len--;
+            return;
+        }
+    }
+}
