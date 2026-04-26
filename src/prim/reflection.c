@@ -528,27 +528,34 @@ found_ns:
         return var != NULL ? var : mino_nil(S);
     }
 
-    /* Unqualified: try current ns, then "user", then scan all vars. */
+    /* Unqualified: walk current ns env chain (which terminates at
+     * mino.core) and return a var for whatever's bound. The wide
+     * "scan every ns for any var with this name" fallback is gone --
+     * it picked up unrelated names from sibling namespaces. */
     {
-        mino_val_t *var = var_find(S, S->current_ns, buf);
-        if (var == NULL) var = var_find(S, "user", buf);
-        if (var == NULL) {
-            size_t i;
-            for (i = 0; i < S->var_registry_len; i++) {
-                if (strcmp(S->var_registry[i].name, buf) == 0) {
-                    return S->var_registry[i].var;
-                }
-            }
-        }
+        const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+        mino_val_t *var = var_find(S, cur, buf);
+        mino_env_t *e;
         if (var != NULL) return var;
-        /* Fallback: check root env for C primitives (no var object). */
-        {
-            mino_val_t *val = mino_env_get(env, buf);
-            if (val != NULL) {
-                /* Auto-create a var for this binding. */
-                var = var_intern(S, "mino.core", buf);
-                var_set_root(S, var, val);
-                return var;
+        e = ns_env_lookup(S, cur);
+        for (; e != NULL; e = e->parent) {
+            env_binding_t *b = env_find_here(e, buf);
+            if (b != NULL) {
+                size_t k;
+                for (k = 0; k < S->ns_env_len; k++) {
+                    if (S->ns_env_table[k].env == e) {
+                        const char *src_ns = S->ns_env_table[k].name;
+                        mino_val_t *v = var_find(S, src_ns, buf);
+                        if (v != NULL) return v;
+                        v = var_intern(S, src_ns, buf);
+                        if (v != NULL) {
+                            var_set_root(S, v, b->val);
+                            return v;
+                        }
+                        break;
+                    }
+                }
+                break;
             }
         }
         return mino_nil(S);
