@@ -110,3 +110,73 @@
   [s]
   (apply str (clojure.core/reverse (seq (assert-string s)))))
 
+(defn- index-of-from_ [s sub from]
+  ;; Brute-force substring search. Returns the index of the first
+  ;; occurrence of sub in s at or after from, or nil. The hot path
+  ;; reuses prim-includes? for the early-out — if sub never appears
+  ;; we don't walk character by character.
+  (let [s    (assert-string s)
+        sub  (as-str sub)
+        nlen (count s)
+        slen (count sub)]
+    (cond
+      (zero? slen)        from
+      (> (+ from slen) nlen) nil
+      (not (prim-includes? (subs s from) sub)) nil
+      :else
+      (loop [i (max 0 from)]
+        (cond
+          (> (+ i slen) nlen) nil
+          (= (subs s i (+ i slen)) sub) i
+          :else (recur (+ i 1)))))))
+
+(defn index-of
+  "Return index of value (string or char) in s, optionally searching
+   forward from from-index. Returns nil if value not found."
+  ([s value]            (index-of-from_ s value 0))
+  ([s value from-index] (index-of-from_ s value from-index)))
+
+(defn last-index-of
+  "Return last index of value (string or char) in s, optionally
+   searching backward from from-index. Returns nil if value not found."
+  ([s value]
+   (last-index-of s value (count (assert-string s))))
+  ([s value from-index]
+   (let [s     (assert-string s)
+         sub   (as-str value)
+         slen  (count sub)
+         start (min from-index (- (count s) slen))]
+     (when (and (>= start 0) (>= slen 0))
+       (loop [i start]
+         (cond
+           (< i 0) nil
+           (= (subs s i (+ i slen)) sub) i
+           :else (recur (- i 1))))))))
+
+(defn re-quote-replacement
+  "Escapes $ and \\ in replacement so s can be used literally in
+   replacement strings without triggering backreference syntax."
+  [replacement]
+  (let [s (as-str replacement)]
+    (loop [i 0 acc []]
+      (if (>= i (count s))
+        (apply str acc)
+        (let [c (char-at s i)]
+          (recur (+ i 1)
+                 (cond
+                   (= c "\\") (conj acc "\\\\")
+                   (= c "$")  (conj acc "\\$")
+                   :else      (conj acc c))))))))
+
+(defn replace-first
+  "Replaces only the first occurrence of match in s with replacement.
+   match is a string (mino's regex literals share the string type, so
+   regex matching follows the literal-substring path the same way
+   clojure.string/replace does)."
+  [s match replacement]
+  (let [s (assert-string s)
+        m (as-str match)]
+    (if-let [i (index-of s m)]
+      (str (subs s 0 i) replacement (subs s (+ i (count m))))
+      s)))
+

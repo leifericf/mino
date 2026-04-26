@@ -85,6 +85,35 @@
                     :r (cons (first loc) (:r p)))]
         (meta loc)))))
 
+(defn leftmost
+  "Returns the loc of the leftmost sibling, or self if no siblings to
+   the left."
+  [loc]
+  (let [p (second loc)]
+    (if (and p (seq (:l p)))
+      (with-meta [(first (:l p))
+                  (assoc p
+                    :l []
+                    :r (concat (rest (:l p))
+                               (cons (first loc) (:r p))))]
+        (meta loc))
+      loc)))
+
+(defn rightmost
+  "Returns the loc of the rightmost sibling, or self if no siblings to
+   the right."
+  [loc]
+  (let [p (second loc)]
+    (if (and p (seq (:r p)))
+      (let [siblings (concat (:l p) [(first loc)] (:r p))
+            new-loc  (last siblings)]
+        (with-meta [new-loc
+                    (assoc p
+                      :l (vec (butlast siblings))
+                      :r [])]
+          (meta loc)))
+      loc)))
+
 (defn insert-left [loc item]
   (let [p (second loc)]
     (if (nil? p)

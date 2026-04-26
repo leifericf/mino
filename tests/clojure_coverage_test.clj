@@ -164,7 +164,7 @@
      send-off send-via shutdown-agents release-pending-sends
      restart-agent set-agent-send-executor! set-agent-send-off-executor!
      set-error-handler! set-error-mode! error-handler error-mode
-     binding-conveyor-fn
+     binding-conveyor-fn clear-agent-errors
      ;; refs (STM, JVM-coupled)
      ref ref-history-count ref-max-history ref-min-history ref-set
      alter commute dosync ensure io! sync

@@ -176,6 +176,29 @@ mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
+mino_val_t *prim_compare_and_set_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *a, *expected, *new_val;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "compare-and-set! requires three arguments: atom, expected, new-val");
+    }
+    a        = args->as.cons.car;
+    expected = args->as.cons.cdr->as.cons.car;
+    new_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    if (a == NULL || a->type != MINO_ATOM) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "compare-and-set!: first argument must be an atom");
+    }
+    if (!mino_eq(a->as.atom.val, expected)) {
+        return mino_false(S);
+    }
+    if (atom_set(S, a, a->as.atom.val, new_val, env) != 0) return NULL;
+    return mino_true(S);
+}
+
 mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -405,6 +428,8 @@ const mino_prim_def k_prims_stateful[] = {
      "Sets the value of an atom to newval and returns newval."},
     {"swap!",          prim_swap_bang,
      "Atomically applies f to the current value of the atom and any additional args."},
+    {"compare-and-set!", prim_compare_and_set_bang,
+     "Atomically sets the atom to new-val if its current value equals expected. Returns true on swap, false otherwise."},
     {"atom?",          prim_atom_p,
      "Returns true if x is an atom."},
     {"add-watch",      prim_add_watch,
