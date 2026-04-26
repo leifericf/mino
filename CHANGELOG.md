@@ -8,6 +8,67 @@ real var, `bound-fn` / `bound-fn*`, `read` with options,
 — land in this cycle. With them the `clojure.core` and
 `clojure.edn` portable surfaces hit 100% in the coverage report.
 
+`*ns*` is now interned as a dynamic var in `clojure.core`, so
+`(find-var 'clojure.core/*ns*)` resolves and `(deref ...)` tracks
+user-visible namespace switches: `in-ns` and the `(ns ...)` special
+form republish the var, and `require`'s save/restore boundary
+republishes the saved name on the way out so loading a file does
+not leak the loaded namespace into the caller. The bare-symbol
+fast path stays as a fallback for embedders that read `*ns*`
+before installation finishes.
+
+`bound-fn` and `bound-fn*` capture and replay dynamic bindings
+around an invocation, layered on two new C primitives:
+`get-thread-bindings` snapshots the active dynamic bindings into a
+symbol-keyed map (newest-first wins on shadowing), and
+`with-bindings*` pushes a transient frame around a thunk. The
+mino-side macros provide the standard Clojure call shape for
+inheriting context into a returned function.
+
+`read-string` accepts an optional opts-map first argument with the
+`:read-cond` key (`:allow` default, `:preserve`, `:disallow`). The
+reader threads the mode through a new `reader_cond_mode` field so
+`#?` and `#?@` sites consult it: `:preserve` emits a
+reader-conditional record (the same shape `clojure.core/reader-conditional`
+constructs), and `:disallow` rejects the form. Top-level, list-context,
+and vector-context conditionals all participate; `#?@` inside a map
+literal is unsupported in `:preserve` mode and errors with a clear
+message. `read` aliases `read-string` (mino has no PushbackReader
+type so the string form is the only shape). `clojure.edn/read` and
+`clojure.edn/read-string` force `:read-cond :preserve` so untrusted
+text never auto-evaluates a reader conditional.
+
+`destructure` surfaces mino's destructuring algorithm as a
+function. It takes a binding-pairs vector `[lhs1 rhs1 ...]` and
+emits a flat `[name init ...]` vector that, fed to `(let ...)`,
+produces the same bindings. Vector patterns lower through `nth`, &
+rest through `nthnext`, map `:keys` / `:strs` / `:syms` through
+`get` with optional `:or` defaults, plus `:as` and explicit `{sym
+:key}` entries. Implementation lives next to `bind_form` in
+`src/eval/bindings.c`; the primitive is registered in `clojure.core`
+via the reflection table.
+
+The bundled regex engine grows a parenthesised-group construct.
+Compile parses `(` and `)` into `GROUP_OPEN` / `GROUP_CLOSE` markers
+with sequential ids; the matcher treats the markers as zero-width
+hooks that record the current text offset. `re-find` and
+`re-matches` now return `[whole g1 g2 ...]` vectors when the
+pattern has groups and keep the old string shape otherwise.
+`re-matcher` returns an atom-backed iterator that `re-find`
+advances; `re-groups` reads the matcher's last recorded result.
+Pattern `\(` still escapes a literal paren. Caveat: `#"..."`
+literals run through the regular string-escape path, so `\d` /
+`\s` / `\w` lose their backslash before the regex engine sees
+them; pass patterns as strings (`"\\d+"`) until a regex-aware
+reader escape mode lands.
+
+Caveats. `read` accepts only the string form — mino has no stream
+reader value. `#?@` splice in `:preserve` mode is supported in lists
+and vectors but not inside map literals. `re-matcher` is mino-side,
+so its `:pos` advance uses substring scanning; this is acceptable
+for typical input but is not the right choice for very large
+strings.
+
 ## v0.73.0 — First-Class Namespaces
 
 Namespaces are now real. Each namespace has its own root binding
