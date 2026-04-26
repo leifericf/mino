@@ -674,17 +674,25 @@ mino_val_t *prim_ns_resolve(mino_state_t *S, mino_val_t *args,
 {
     mino_val_t *ns_arg;
     mino_val_t *sym_arg;
+    mino_val_t *locals = NULL;
     char        ns_buf[256];
     char        sym_buf[256];
     mino_val_t *var;
+    size_t      argc = 0;
+    mino_val_t *cur;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
-        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+    for (cur = args; mino_is_cons(cur); cur = cur->as.cons.cdr) argc++;
+    if (argc < 2 || argc > 3) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "ns-resolve: expected (ns-resolve ns sym)");
+            "ns-resolve: expected (ns-resolve ns ?env-map? sym)");
     }
     ns_arg  = args->as.cons.car;
-    sym_arg = args->as.cons.cdr->as.cons.car;
+    if (argc == 3) {
+        locals  = args->as.cons.cdr->as.cons.car;
+        sym_arg = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    } else {
+        sym_arg = args->as.cons.cdr->as.cons.car;
+    }
     if (!ns_to_name(S, ns_arg, ns_buf, sizeof(ns_buf), "ns-resolve"))
         return NULL;
     if (sym_arg == NULL || sym_arg->type != MINO_SYMBOL
@@ -711,6 +719,12 @@ mino_val_t *prim_ns_resolve(mino_state_t *S, mino_val_t *args,
             memcpy(sym_buf, sym_arg->as.s.data, sym_arg->as.s.len);
             sym_buf[sym_arg->as.s.len] = '\0';
         }
+    }
+    /* If a locals map was passed and the unqualified symbol is in it,
+     * Clojure returns nil (the local shadows the global). */
+    if (locals != NULL && locals->type == MINO_MAP) {
+        mino_val_t *probe = map_get_val(locals, sym_arg);
+        if (probe != NULL) return mino_nil(S);
     }
     var = resolve_in_ns(S, ns_buf, sym_buf);
     return var != NULL ? var : mino_nil(S);
