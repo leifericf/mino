@@ -26,9 +26,23 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     const char *path;
     size_t      i;
     mino_val_t *result;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "require requires one argument");
+    if (!mino_is_cons(args)) {
+        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "require requires at least one argument");
         return NULL;
+    }
+    /* Multi-arg form: (require 'foo 'bar ...) -- recurse for each. */
+    if (mino_is_cons(args->as.cons.cdr)) {
+        mino_val_t *cur  = args;
+        mino_val_t *last = mino_nil(S);
+        while (mino_is_cons(cur)) {
+            mino_val_t *one = mino_cons(S, cur->as.cons.car, mino_nil(S));
+            gc_pin(one);
+            last = prim_require(S, one, env);
+            gc_unpin(1);
+            if (last == NULL) return NULL;
+            cur = cur->as.cons.cdr;
+        }
+        return last;
     }
     name_val = args->as.cons.car;
 
@@ -256,6 +270,21 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     for (i = 0; i < S->module_cache_len; i++) {
         if (strcmp(S->module_cache[i].name, name) == 0) {
             return S->module_cache[i].value;
+        }
+    }
+    /* If the dotted form of name corresponds to a runtime-created namespace
+     * already in the env table, treat it as already loaded. This lets
+     * (require 'foo) succeed when foo was made by (ns foo) in-memory. */
+    {
+        char dotted[512];
+        size_t nl = strlen(name);
+        size_t k;
+        if (nl < sizeof(dotted)) {
+            for (k = 0; k < nl; k++) dotted[k] = (name[k] == '/') ? '.' : name[k];
+            dotted[nl] = '\0';
+            if (ns_env_lookup(S, dotted) != NULL) {
+                return mino_nil(S);
+            }
         }
     }
     /* Cycle check: name on the load stack means a transitive require
