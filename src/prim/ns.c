@@ -405,15 +405,99 @@ static int kw_eq(const mino_val_t *v, const char *s)
         && memcmp(v->as.s.data, s, v->as.s.len) == 0;
 }
 
-static int sym_in_vec(mino_val_t *vec, const char *name, size_t namelen)
+/* True if SEL contains a symbol with the given byte name. SEL may be a
+ * vector (the common form from :only [a b]) or a list (e.g., '(a b)). */
+static int sym_in_vec(mino_val_t *sel, const char *name, size_t namelen)
 {
     size_t i;
-    if (vec == NULL || vec->type != MINO_VECTOR) return 0;
-    for (i = 0; i < vec->as.vec.len; i++) {
-        mino_val_t *e = vec_nth(vec, i);
+    if (sel == NULL) return 0;
+    if (sel->type == MINO_VECTOR) {
+        for (i = 0; i < sel->as.vec.len; i++) {
+            mino_val_t *e = vec_nth(sel, i);
+            if (e != NULL && e->type == MINO_SYMBOL
+                && e->as.s.len == namelen
+                && memcmp(e->as.s.data, name, namelen) == 0) return 1;
+        }
+        return 0;
+    }
+    if (mino_is_cons(sel)) {
+        mino_val_t *cur = sel;
+        while (mino_is_cons(cur)) {
+            mino_val_t *e = cur->as.cons.car;
+            if (e != NULL && e->type == MINO_SYMBOL
+                && e->as.s.len == namelen
+                && memcmp(e->as.s.data, name, namelen) == 0) return 1;
+            cur = cur->as.cons.cdr;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+/* Validate every symbol in SEL exists as a binding in SRC and isn't a
+ * private var owned by SRC_NS. Returns 0 on success, sets a diagnostic
+ * and returns -1 on failure. */
+static int validate_only_names(mino_state_t *S, mino_val_t *sel,
+                                mino_env_t *src, const char *src_ns)
+{
+    mino_val_t *cur;
+    size_t      i;
+    if (sel == NULL) return 0;
+    if (sel->type == MINO_VECTOR) {
+        for (i = 0; i < sel->as.vec.len; i++) {
+            mino_val_t *e = vec_nth(sel, i);
+            char        nm[256];
+            mino_val_t *var;
+            if (e == NULL || e->type != MINO_SYMBOL
+                || e->as.s.len >= sizeof(nm)) continue;
+            memcpy(nm, e->as.s.data, e->as.s.len);
+            nm[e->as.s.len] = '\0';
+            if (env_find_here(src, nm) == NULL) {
+                char msg[300];
+                snprintf(msg, sizeof(msg),
+                    "refer: %s does not exist in %s", nm, src_ns);
+                prim_throw_classified(S, "name", "MNS001", msg);
+                return -1;
+            }
+            var = var_find(S, src_ns, nm);
+            if (var != NULL && var->type == MINO_VAR
+                && var->as.var.is_private) {
+                char msg[300];
+                snprintf(msg, sizeof(msg),
+                    "refer: %s is not public in %s", nm, src_ns);
+                prim_throw_classified(S, "name", "MNS001", msg);
+                return -1;
+            }
+        }
+        return 0;
+    }
+    cur = sel;
+    while (mino_is_cons(cur)) {
+        mino_val_t *e = cur->as.cons.car;
+        char        nm[256];
+        mino_val_t *var;
         if (e != NULL && e->type == MINO_SYMBOL
-            && e->as.s.len == namelen
-            && memcmp(e->as.s.data, name, namelen) == 0) return 1;
+            && e->as.s.len < sizeof(nm)) {
+            memcpy(nm, e->as.s.data, e->as.s.len);
+            nm[e->as.s.len] = '\0';
+            if (env_find_here(src, nm) == NULL) {
+                char msg[300];
+                snprintf(msg, sizeof(msg),
+                    "refer: %s does not exist in %s", nm, src_ns);
+                prim_throw_classified(S, "name", "MNS001", msg);
+                return -1;
+            }
+            var = var_find(S, src_ns, nm);
+            if (var != NULL && var->type == MINO_VAR
+                && var->as.var.is_private) {
+                char msg[300];
+                snprintf(msg, sizeof(msg),
+                    "refer: %s is not public in %s", nm, src_ns);
+                prim_throw_classified(S, "name", "MNS001", msg);
+                return -1;
+            }
+        }
+        cur = cur->as.cons.cdr;
     }
     return 0;
 }
@@ -486,13 +570,25 @@ mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     dst = current_ns_env(S);
     if (dst == NULL) return mino_nil(S);
+    if (only_v != NULL && validate_only_names(S, only_v, src, ns_buf) != 0) {
+        return NULL;
+    }
     for (i = 0; i < src->len; i++) {
         const char *name = src->bindings[i].name;
         size_t      nlen = strlen(name);
         char        rbuf[256];
         const char *bind_name;
+        mino_val_t *var;
         if (only_v != NULL && !sym_in_vec(only_v, name, nlen)) continue;
         if (excl_v != NULL && sym_in_vec(excl_v, name, nlen)) continue;
+        /* Skip privates on a bare (refer 'ns) or :exclude form; :only
+         * already validated above and binds the named entries even if
+         * the test re-asserts privacy. */
+        if (only_v == NULL) {
+            var = var_find(S, ns_buf, name);
+            if (var != NULL && var->type == MINO_VAR
+                && var->as.var.is_private) continue;
+        }
         bind_name = rename_lookup(rename_v, name, nlen, rbuf, sizeof(rbuf));
         if (bind_name == NULL) bind_name = name;
         env_bind(S, dst, bind_name, src->bindings[i].val);
