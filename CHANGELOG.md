@@ -4,10 +4,11 @@
 
 Namespaces are now real. Each namespace has its own root binding
 table, so `(ns a) (def x 1)` and `(ns b) (def x 2)` are independent
-and visible only by qualified name from each other. `mino.core` is
-the bundled-core namespace; every other namespace's root env chains
-to it via a parent pointer, so unqualified references to `if`,
-`map`, `let` and friends keep working without an explicit refer.
+and visible only by qualified name from each other. `clojure.core`
+is the bundled-core namespace; every other namespace's root env
+chains to it via a parent pointer, so unqualified references to
+`if`, `map`, `let` and friends keep working without an explicit
+refer.
 
 The full namespace machinery landed in one cycle. `(ns name ...)`
 clauses accept `:require`, `:use`, and `:refer-clojure` with the
@@ -118,7 +119,7 @@ form imposes the namespace-must-match-name check. `(doc 'foo)`
 falls back to the namespace's `:doc` metadata when the named-
 binding table doesn't have an entry, so namespaces declared with
 `(ns foo "docstring" ...)` are documented through the same
-primitive that surfaces `defn` docs. `(doc 'mino.core/inc)` also
+primitive that surfaces `defn` docs. `(doc 'clojure.core/inc)` also
 finds the docstring registered under the bare name.
 
 ### Breaking Changes
@@ -129,6 +130,14 @@ clobbering `x` in `b` (and vice versa) must now qualify references
 explicitly or use `:require`/`:use`/`:refer`. Files loaded via
 `require` whose first `(ns ...)` declares a different name than
 the require argument now error rather than silently mismatching.
+
+The bundled-core namespace is renamed from `mino.core` to
+`clojure.core`, matching the convention other Clojure dialects use
+for their bundled core. Code that referenced `mino.core/foo`
+qualified-name forms must update to `clojure.core/foo`.
+Embedding-side C identifiers (`mino_state_t`, `mino_env_t`,
+`mino_install_core`, etc.) are unchanged. The string operations
+that already lived in the `clojure.string` namespace are unaffected.
 
 ## v0.72.0 — Release Pipeline & Build Polish
 
