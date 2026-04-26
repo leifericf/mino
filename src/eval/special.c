@@ -88,13 +88,23 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
             {
                 char msg[300];
                 int  is_alias = (resolved_ns != ns_buf);
-                if (target_env == NULL && !is_alias) {
-                    snprintf(msg, sizeof(msg),
-                             "no such namespace: %s", resolved_ns);
-                } else {
+                if (target_env != NULL) {
                     snprintf(msg, sizeof(msg),
                              "no var %s in namespace %s",
                              sym_name, resolved_ns);
+                } else if (is_alias) {
+                    /* alias_resolve gave us a name but no ns env exists:
+                     * the alias points at an unloaded namespace. */
+                    snprintf(msg, sizeof(msg),
+                             "no such namespace: %s", resolved_ns);
+                } else {
+                    /* Neither an alias nor a loaded namespace -- most
+                     * likely the user meant an alias that isn't set up. */
+                    const char *cur =
+                        (S->current_ns != NULL) ? S->current_ns : "user";
+                    snprintf(msg, sizeof(msg),
+                             "no such alias: %s in namespace %s",
+                             ns_buf, cur);
                 }
                 set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
                 return NULL;
