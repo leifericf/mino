@@ -129,14 +129,17 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Symbol form: '(require 'foo.bar) — Clojure's everyday form. */
     if (name_val != NULL && name_val->type == MINO_SYMBOL) {
         char pathbuf[256];
-        /* Runtime-ns shortcut: if a namespace by this exact (dashed) name
-         * already exists, treat as already-loaded. Path conversion would
-         * mangle dashes into underscores and lose the binding. */
+        /* Runtime-ns shortcut: skip path conversion when the namespace
+         * already has substantive bindings (i.e., something has actually
+         * loaded into it). An empty placeholder created by :as-alias
+         * doesn't count -- the load still has to happen. */
         if (name_val->as.s.len < 256) {
             char dotbuf[256];
+            mino_env_t *e;
             memcpy(dotbuf, name_val->as.s.data, name_val->as.s.len);
             dotbuf[name_val->as.s.len] = '\0';
-            if (ns_env_lookup(S, dotbuf) != NULL) {
+            e = ns_env_lookup(S, dotbuf);
+            if (e != NULL && e->len > 0) {
                 return mino_nil(S);
             }
         }
@@ -229,15 +232,18 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             runtime_module_add_alias(S, abuf, fbuf);
             return mino_nil(S);
         }
-        /* Runtime-ns shortcut: skip path conversion if the namespace
-         * already exists by its dashed name. */
+        /* Runtime-ns shortcut: skip path conversion only when the
+         * namespace already has loaded bindings (an empty alias-only
+         * placeholder doesn't count). */
         {
             int runtime_hit = 0;
             if (mod_sym->as.s.len < 256) {
                 char dotbuf[256];
+                mino_env_t *e;
                 memcpy(dotbuf, mod_sym->as.s.data, mod_sym->as.s.len);
                 dotbuf[mod_sym->as.s.len] = '\0';
-                if (ns_env_lookup(S, dotbuf) != NULL) {
+                e = ns_env_lookup(S, dotbuf);
+                if (e != NULL && e->len > 0) {
                     runtime_hit = 1;
                     result      = mino_nil(S);
                 }
@@ -368,24 +374,27 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
     }
     /* If the dotted form of name corresponds to a runtime-created namespace
-     * already in the env table, treat it as already loaded. This lets
+     * with substantive bindings, treat it as already loaded. This lets
      * (require 'foo) succeed when foo was made by (ns foo) in-memory.
      * Path names use underscores where ns names use dashes, so try both
-     * the underscored and dashed variants when looking up the live ns. */
+     * variants. An empty placeholder created by :as-alias doesn't count. */
     {
         char dotted[512];
         char dashed[512];
         size_t nl = strlen(name);
         size_t k;
         if (nl < sizeof(dotted)) {
+            mino_env_t *e;
             for (k = 0; k < nl; k++) dotted[k] = (name[k] == '/') ? '.' : name[k];
             dotted[nl] = '\0';
-            if (ns_env_lookup(S, dotted) != NULL) {
+            e = ns_env_lookup(S, dotted);
+            if (e != NULL && e->len > 0) {
                 return mino_nil(S);
             }
             for (k = 0; k < nl; k++) dashed[k] = (dotted[k] == '_') ? '-' : dotted[k];
             dashed[nl] = '\0';
-            if (ns_env_lookup(S, dashed) != NULL) {
+            e = ns_env_lookup(S, dashed);
+            if (e != NULL && e->len > 0) {
                 return mino_nil(S);
             }
         }
@@ -463,18 +472,32 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* File-to-ns validation: if the loaded file changed current_ns
          * (i.e. it contained an `(ns x.y)` form) the resulting ns must
          * match the requested module name. Files with no `(ns ...)` are
-         * accepted as-is so loading utility scripts by path still works. */
+         * accepted as-is so loading utility scripts by path still works.
+         * The ns name may use dashes where the path uses underscores
+         * (e.g. ns foo-bar from file foo_bar.mino), so compare in a
+         * canonicalized form where both use dashes. */
         if (post_ns != NULL && saved_ns != NULL
             && strcmp(post_ns, saved_ns) != 0) {
             char        expected[256];
+            char        post_canon[256];
             size_t      nl = strlen(name);
+            size_t      pl = strlen(post_ns);
             size_t      k;
-            if (nl < sizeof(expected)) {
+            if (nl < sizeof(expected) && pl < sizeof(post_canon)) {
                 for (k = 0; k < nl; k++) {
-                    expected[k] = (name[k] == '/') ? '.' : name[k];
+                    char c = name[k];
+                    if (c == '/') c = '.';
+                    else if (c == '_') c = '-';
+                    expected[k] = c;
                 }
                 expected[nl] = '\0';
-                if (strcmp(post_ns, expected) != 0) {
+                for (k = 0; k < pl; k++) {
+                    char c = post_ns[k];
+                    if (c == '_') c = '-';
+                    post_canon[k] = c;
+                }
+                post_canon[pl] = '\0';
+                if (strcmp(post_canon, expected) != 0) {
                     char msg[512];
                     snprintf(msg, sizeof(msg),
                         "require: file %s declared namespace %s, expected %s",
