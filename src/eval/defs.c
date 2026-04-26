@@ -386,6 +386,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
              * outright; merging only happens between the ^meta, the
              * docstring, and the attribute map within a single call. */
             ns_env_set_meta(S, S->current_ns, meta);
+            mino_publish_current_ns(S);
             args = mino_cons(S, name_form, cur);
         }
     }

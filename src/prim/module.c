@@ -553,6 +553,11 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         result  = mino_load_file(S, path, env);
         post_ns = S->current_ns;
         S->current_ns = saved_ns;
+        /* Re-publish *ns* to track the restored ns. Inside the loaded
+         * file, an (ns ...) form will have set the var to the file's
+         * declared namespace; the require boundary is not a
+         * user-visible switch, so the var follows current_ns back. */
+        mino_publish_current_ns(S);
         /* Pop load stack regardless of success. */
         if (S->load_stack_len > 0) {
             free(S->load_stack[--S->load_stack_len]);

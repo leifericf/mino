@@ -118,10 +118,12 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         }
     }
 
-    /* *ns* derefs to the current namespace symbol. Clojure exposes this
-     * as a dynamic var; mino reads S->current_ns directly so any
-     * (ns ...) / (in-ns ...) is observable in the same expression. The
-     * symbol carries the namespace's metadata so (meta *ns*) works. */
+    /* *ns* derefs to the current namespace symbol. Once mino_install_core
+     * runs, *ns* is interned as a dynamic var in clojure.core (see
+     * runtime/ns_env.c:mino_publish_current_ns); this fast path stays
+     * for embedders that read *ns* before installation completes and
+     * for reading the running ns without going through the var registry.
+     * The symbol carries the namespace's metadata so (meta *ns*) works. */
     if (n == 4 && memcmp(data, "*ns*", 4) == 0) {
         if (mino_env_get(env, data) == NULL) {
             const char *cur = S->current_ns != NULL ? S->current_ns : "user";

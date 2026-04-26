@@ -106,3 +106,18 @@
   (is (= 2 root-target))
   (alter-var-root #'root-target (fn [v] (* v 10)))
   (is (= 20 root-target)))
+
+(deftest test-star-ns-as-var
+  ;; *ns* is interned as a dynamic var in clojure.core, so find-var
+  ;; resolves it and (deref ...) tracks the user-visible namespace.
+  (let [v (find-var 'clojure.core/*ns*)]
+    (is (some? v))
+    (is (= (deref v) (ns-name *ns*)))))
+
+(deftest test-star-ns-tracks-in-ns
+  (let [v   (find-var 'clojure.core/*ns*)
+        cur (ns-name *ns*)]
+    (in-ns 'star-ns-tracks-target)
+    (is (= 'star-ns-tracks-target (deref v)))
+    (in-ns cur)
+    (is (= cur (deref v)))))

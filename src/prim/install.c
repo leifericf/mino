@@ -199,4 +199,20 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
      * clojure.core itself stays as-is. */
     (void)core_env;
     (void)env;
+
+    /* Intern *ns* as a dynamic var so (find-var 'clojure.core/*ns*)
+     * resolves and (deref ...) tracks the user-visible namespace.
+     * The bare-symbol fast path in eval/special.c stays as a fallback
+     * for embedders that look up *ns* before the var is interned. */
+    {
+        mino_val_t *var = var_intern(S, "clojure.core", "*ns*");
+        if (var != NULL) {
+            var->as.var.dynamic = 1;
+            if (S->current_ns == NULL) {
+                S->current_ns = intern_filename(S, "user");
+                (void)ns_env_ensure(S, "user");
+            }
+            mino_publish_current_ns(S);
+        }
+    }
 }

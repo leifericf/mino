@@ -113,3 +113,32 @@ mino_env_t *current_ns_env(mino_state_t *S)
 {
     return ns_env_ensure(S, S->current_ns);
 }
+
+/* Return a symbol naming NAME, carrying the namespace's metadata
+ * (if any) so callers can read it back via `meta`. */
+mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
+{
+    mino_val_t *sym  = mino_symbol(S, name);
+    mino_val_t *meta = ns_env_get_meta(S, name);
+    if (meta != NULL && sym != NULL) {
+        mino_val_t *copy = alloc_val(S, sym->type);
+        copy->as   = sym->as;
+        copy->meta = meta;
+        return copy;
+    }
+    return sym;
+}
+
+/* Update clojure.core/*ns*'s root binding to a fresh symbol naming the
+ * current namespace, so (deref (find-var 'clojure.core/*ns*)) tracks
+ * user-visible namespace switches. No-op when the var has not yet been
+ * interned (init order: install.c interns it after the primitives are
+ * registered). */
+void mino_publish_current_ns(mino_state_t *S)
+{
+    mino_val_t *var;
+    if (S->current_ns == NULL) return;
+    var = var_find(S, "clojure.core", "*ns*");
+    if (var == NULL) return;
+    var_set_root(S, var, ns_symbol_with_meta(S, S->current_ns));
+}

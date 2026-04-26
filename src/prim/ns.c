@@ -59,20 +59,10 @@ static int ns_to_name(mino_state_t *S, mino_val_t *v, char *buf, size_t cap,
 mino_val_t *prim_star_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     const char *name;
-    mino_val_t *sym;
-    mino_val_t *meta;
     (void)args;
     (void)env;
     name = S->current_ns != NULL ? S->current_ns : "user";
-    sym  = mino_symbol(S, name);
-    meta = ns_env_get_meta(S, name);
-    if (meta != NULL && sym != NULL) {
-        mino_val_t *copy = alloc_val(S, sym->type);
-        copy->as   = sym->as;
-        copy->meta = meta;
-        return copy;
-    }
-    return sym;
+    return ns_symbol_with_meta(S, name);
 }
 
 /* --- in-ns ---------------------------------------------------------------- */
@@ -85,22 +75,8 @@ mino_val_t *prim_in_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!ns_to_name(S, arg, buf, sizeof(buf), "in-ns")) return NULL;
     (void)ns_env_ensure(S, buf);
     S->current_ns = intern_filename(S, buf);
+    mino_publish_current_ns(S);
     return mino_symbol(S, buf);
-}
-
-/* Return a symbol naming NAME, carrying the namespace's metadata
- * (if any) so callers can read it back via `meta`. */
-static mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
-{
-    mino_val_t *sym  = mino_symbol(S, name);
-    mino_val_t *meta = ns_env_get_meta(S, name);
-    if (meta != NULL && sym != NULL) {
-        mino_val_t *copy = alloc_val(S, sym->type);
-        copy->as   = sym->as;
-        copy->meta = meta;
-        return copy;
-    }
-    return sym;
 }
 
 /* --- find-ns / the-ns / create-ns / remove-ns ---------------------------- */

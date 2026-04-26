@@ -504,6 +504,8 @@ void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc c
 void load_stack_truncate(mino_state_t *S, size_t len);
 mino_env_t *ns_env_lookup(mino_state_t *S, const char *name);   /* borrowed */
 mino_env_t *ns_env_ensure(mino_state_t *S, const char *name);   /* GC-owned, rooted */
+mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name);
+void        mino_publish_current_ns(mino_state_t *S);
 mino_val_t *ns_env_get_meta(mino_state_t *S, const char *name);
 void        ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta);
 mino_env_t *current_ns_env(mino_state_t *S);                    /* GC-owned, rooted */
