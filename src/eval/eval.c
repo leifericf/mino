@@ -107,9 +107,35 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
     const char *name = sym->as.s.data;
     size_t      nlen = sym->as.s.len;
     mino_env_t *e;
+    const char *slash;
     if (nlen == 0) return sym;
     if (nlen == 1 && name[0] == '/') return sym;
-    if (memchr(name, '/', nlen) != NULL) return sym;
+    /* For namespaced symbols, expand a leading alias to its target ns
+     * (matching Clojure syntax-quote). Bare ns/name passes through. */
+    slash = memchr(name, '/', nlen);
+    if (slash != NULL) {
+        size_t prefix_len = (size_t)(slash - name);
+        size_t suffix_len = nlen - prefix_len - 1;
+        char   prefix_buf[256];
+        size_t i;
+        if (prefix_len == 0 || prefix_len >= sizeof(prefix_buf)) return sym;
+        memcpy(prefix_buf, name, prefix_len);
+        prefix_buf[prefix_len] = '\0';
+        for (i = 0; i < S->ns_alias_len; i++) {
+            if (strcmp(S->ns_aliases[i].alias, prefix_buf) == 0) {
+                const char *full   = S->ns_aliases[i].full_name;
+                size_t      flen   = strlen(full);
+                char        buf[512];
+                if (flen + 1 + suffix_len + 1 > sizeof(buf)) return sym;
+                memcpy(buf, full, flen);
+                buf[flen] = '/';
+                memcpy(buf + flen + 1, slash + 1, suffix_len);
+                buf[flen + 1 + suffix_len] = '\0';
+                return mino_symbol_n(S, buf, flen + 1 + suffix_len);
+            }
+        }
+        return sym;
+    }
     if (qq_locally_bound(S, env, name)) return sym;
     if (S->current_ns == NULL) return sym;
     for (e = current_ns_env(S); e != NULL; e = e->parent) {
