@@ -24,9 +24,9 @@
 
 (deftest unquote
   (let [x 10]
-    ;; Bare `+` in a syntax-quoted template auto-qualifies to mino.core/+
+    ;; Bare `+` in a syntax-quoted template auto-qualifies to clojure.core/+
     ;; because backquote namespace-resolves any non-locally-bound symbol.
-    (is (= '(mino.core/+ 10 1) `(+ ~x 1)))))
+    (is (= '(clojure.core/+ 10 1) `(+ ~x 1)))))
 
 (deftest unquote-splicing
   (def xs '(1 2 3))

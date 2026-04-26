@@ -195,7 +195,7 @@ mino_val_t *prim_ns_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  *
  * publics / interns: bindings the ns owns (a var entry exists for ns/name).
  * refers: bindings without an owning var entry, plus parent-walk inheritance
- *         (mino.core, etc.) so inherited names show up like Clojure expects.
+ *         (clojure.core, etc.) so inherited names show up like Clojure expects.
  * map: union of the above plus aliases.
  *
  * Values are vars (via var_find / promote-from-binding) so callers can
@@ -321,14 +321,14 @@ mino_val_t *prim_ns_refers(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                        mino_symbol(S, e->bindings[i].name),
                        binding_as_var(S, buf, &e->bindings[i]))) return NULL;
     }
-    /* Parent walk: bindings inherited from mino.core (and any deeper).
+    /* Parent walk: bindings inherited from clojure.core (and any deeper).
      * ns-refers returns publics, so skip privates -- matching Clojure
      * where (refer 'foo) and the auto-refer of clojure.core only bring
      * in non-private vars. */
     for (p = e->parent; p != NULL; p = p->parent) {
         for (i = 0; i < p->len; i++) {
             const char *nm = p->bindings[i].name;
-            const char *src_ns = p == e ? buf : "mino.core";
+            const char *src_ns = p == e ? buf : "clojure.core";
             mino_val_t *src_var;
             if (names_contains(ks, len, nm)) continue;
             /* Skip if the current ns has its own intern shadowing the
@@ -374,7 +374,7 @@ mino_val_t *prim_ns_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (names_contains(ks, len, nm)) continue;
             if (!append_kv(S, &ks, &vs, &len, &cap,
                            mino_symbol(S, nm),
-                           binding_as_var(S, "mino.core",
+                           binding_as_var(S, "clojure.core",
                                           &p->bindings[i]))) return NULL;
         }
     }
@@ -629,7 +629,7 @@ mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Prefer to bind the source var so syntax-quote and meta-on-var
          * still see the source namespace. Auto-intern when the source
          * env carries a primitive without an interned var so the same
-         * delegation works for mino.core entries. */
+         * delegation works for clojure.core entries. */
         var = var_find(S, ns_buf, name);
         if (var == NULL) {
             var = var_intern(S, ns_buf, name);

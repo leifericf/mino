@@ -112,7 +112,7 @@ typedef struct {
 /* Per-namespace root env entry. */
 typedef struct {
     const char *name;     /* interned ns name */
-    mino_env_t *env;      /* root env for this ns; parent → mino.core (or NULL for mino.core itself) */
+    mino_env_t *env;      /* root env for this ns; parent → clojure.core (or NULL for clojure.core itself) */
     mino_val_t *meta;     /* nil or a map of ns-level metadata */
 } ns_env_entry_t;
 
@@ -364,12 +364,12 @@ struct mino_state {
     size_t          ns_alias_cap;
 
     /* Per-namespace root env table. Each entry's env owns the ns's
-     * value bindings (def, refer). Every ns env except mino.core has
-     * parent → mino.core, so unqualified lookup walks ns → mino.core. */
+     * value bindings (def, refer). Every ns env except clojure.core has
+     * parent → clojure.core, so unqualified lookup walks ns → clojure.core. */
     ns_env_entry_t *ns_env_table;
     size_t          ns_env_len;
     size_t          ns_env_cap;
-    mino_env_t     *mino_core_env;    /* root env for mino.core; parent NULL */
+    mino_env_t     *mino_core_env;    /* root env for clojure.core; parent NULL */
     /* Ambient namespace for free-var resolution inside the active fn body.
      * apply_callable sets this to the fn's defining ns; eval_symbol's
      * fall-through consults it after current_ns_env, so `(ns ...)`
@@ -497,8 +497,8 @@ void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc c
 /* ns_env.c: per-namespace root env table.                                   */
 /*                                                                           */
 /* Each ns has a root env owning that ns's def/refer bindings. Every ns env  */
-/* except mino.core has parent → mino.core, so unqualified lookup walks      */
-/* lexical → current-ns env → mino.core env.                                 */
+/* except clojure.core has parent → clojure.core, so unqualified lookup     */
+/* walks lexical → current-ns env → clojure.core env.                        */
 /* ------------------------------------------------------------------------- */
 
 void load_stack_truncate(mino_state_t *S, size_t len);

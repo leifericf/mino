@@ -108,5 +108,5 @@
 (defn reverse
   "Returns s with its characters reversed."
   [s]
-  (apply str (mino.core/reverse (seq (assert-string s)))))
+  (apply str (clojure.core/reverse (seq (assert-string s)))))
 

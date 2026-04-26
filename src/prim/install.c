@@ -45,8 +45,8 @@ void prim_install_table(mino_state_t *S, mino_env_t *env,
  * first call for a state, then caching the parsed AST so subsequent
  * mino_install_core calls into other envs can replay without re-parsing.
  *
- * Runs with current_ns set to "mino.core" by the caller, so every def in
- * core.mino lands in the mino.core ns env. */
+ * Runs with current_ns set to "clojure.core" by the caller, so every def
+ * in core.mino lands in the clojure.core ns env. */
 static void install_core_mino(mino_state_t *S, mino_env_t *env)
 {
     size_t i;
@@ -154,10 +154,10 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     (void)probe;
 
     /* All bundled-core bindings (primitives + core.mino defs) live in
-     * the mino.core ns env. Every other ns env (including the embedder's
-     * default) chains its parent here so unqualified lookup walks
-     * lexical → current-ns env → mino.core. */
-    core_env = ns_env_ensure(S, "mino.core");
+     * the clojure.core ns env. Every other ns env (including the
+     * embedder's default) chains its parent here so unqualified lookup
+     * walks lexical → current-ns env → clojure.core. */
+    core_env = ns_env_ensure(S, "clojure.core");
 
     mino_env_set(S, core_env, "math-pi", mino_float(S, 3.14159265358979323846));
 
@@ -167,14 +167,14 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     }
 
     saved_ns      = S->current_ns;
-    S->current_ns = "mino.core";
+    S->current_ns = "clojure.core";
     install_core_mino(S, core_env);
     S->current_ns = saved_ns;
 
     /* Install string operations into the clojure.string namespace,
      * matching the namespace name that Babashka, ClojureScript, and
      * Jank use. The wrappers in lib/clojure/string.mino layer
-     * nil-handling on top. Putting these here instead of mino.core
+     * nil-handling on top. Putting these here instead of clojure.core
      * means a fresh user namespace doesn't accidentally inherit (and
      * shadow) names like `join` or `split` through :refer-clojure. */
     {
@@ -187,10 +187,10 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
 
     /* The embedder's env stays parent-less. eval_symbol falls back to
      * current_ns_env after the lexical chain runs out, and per-ns envs
-     * chain to mino.core themselves -- so a namespace that detaches
+     * chain to clojure.core themselves -- so a namespace that detaches
      * its parent (e.g. via :refer-clojure :only) is properly isolated
      * instead of leaking core bindings through the embedder root.
-     * mino.core itself stays as-is. */
+     * clojure.core itself stays as-is. */
     (void)core_env;
     (void)env;
 }

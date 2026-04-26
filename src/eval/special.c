@@ -38,7 +38,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     mino_val_t *v;
     const char *slash;
 
-    /* Check for namespace-qualified symbol (e.g. t/is, mino.core/+).
+    /* Check for namespace-qualified symbol (e.g. t/is, clojure.core/+).
      * Single-char "/" is the division function, not a qualified symbol. */
     slash = (n > 1) ? memchr(data, '/', n) : NULL;
     if (slash != NULL) {

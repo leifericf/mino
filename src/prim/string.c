@@ -850,7 +850,7 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
     return mino_string_n(S, buf, 36);
 }
 
-/* Core string operations live in mino.core: the always-available
+/* Core string operations live in clojure.core: the always-available
  * conversion and formatting primitives that have no Clojure-side
  * namespace either (str, format, name, namespace, subs, ...). */
 const mino_prim_def k_prims_string[] = {

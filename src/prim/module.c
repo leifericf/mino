@@ -837,7 +837,7 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     pat = pat_val->as.s.data;
     /* Walk every env frame from the given env up to root, then also
-     * the current namespace chain so primitives interned in mino.core
+     * the current namespace chain so primitives interned in clojure.core
      * are reachable when the caller env doesn't chain into it. */
     {
         mino_env_t *chains[2];

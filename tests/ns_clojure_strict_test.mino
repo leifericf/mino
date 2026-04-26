@@ -37,8 +37,7 @@
 ;; CLJS:    only :exclude and :rename — :only is not supported.
 ;; Mino:    matches Clojure (supports all three).
 ;; The lens here is: declare a ns that auto-refers ONLY a small
-;; whitelist of clojure.core (or mino.core) names; everything else is
-;; absent.
+;; whitelist of clojure.core names; everything else is absent.
 
 (deftest refer-clojure-only-restricts-imports
   ;; Names listed in :only are available.

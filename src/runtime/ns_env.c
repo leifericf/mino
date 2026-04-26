@@ -2,10 +2,10 @@
  * ns_env.c -- per-namespace root env table.
  *
  * Every namespace gets a root env owning its def/refer bindings. The
- * mino.core env is special: parent NULL, holds primitives plus everything
- * core.mino installs. Every other ns env has parent → mino.core, so
- * unqualified lookup that misses a ns env walks naturally into core
- * without an explicit auto-refer.
+ * clojure.core env is special: parent NULL, holds primitives plus
+ * everything core.mino installs. Every other ns env has parent →
+ * clojure.core, so unqualified lookup that misses a ns env walks naturally
+ * into core without an explicit auto-refer.
  *
  * Envs are GC-owned. Each is registered as a GC root the same way
  * mino_env_new does it, so the table can outlive any single eval frame.
@@ -61,20 +61,20 @@ mino_env_t *ns_env_ensure(mino_state_t *S, const char *name)
     e = ns_env_lookup(S, name);
     if (e != NULL) return e;
 
-    /* mino.core must exist before any other ns env so we can wire the
+    /* clojure.core must exist before any other ns env so we can wire the
      * parent pointer. Create it lazily on first request. */
     if (S->mino_core_env == NULL) {
         S->mino_core_env = env_alloc(S, NULL);
         ns_env_register_root(S, S->mino_core_env);
         if (S->ns_env_len == S->ns_env_cap) ns_env_table_grow(S);
-        S->ns_env_table[S->ns_env_len].name = intern_filename(S, "mino.core");
+        S->ns_env_table[S->ns_env_len].name = intern_filename(S, "clojure.core");
         S->ns_env_table[S->ns_env_len].env  = S->mino_core_env;
         S->ns_env_table[S->ns_env_len].meta = NULL;
         S->ns_env_len++;
-        if (strcmp(name, "mino.core") == 0) return S->mino_core_env;
+        if (strcmp(name, "clojure.core") == 0) return S->mino_core_env;
     }
 
-    /* Create the requested ns env with parent → mino.core. */
+    /* Create the requested ns env with parent → clojure.core. */
     e = env_alloc(S, S->mino_core_env);
     ns_env_register_root(S, e);
     iname = intern_filename(S, name);

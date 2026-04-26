@@ -65,10 +65,10 @@ static int refer_collision_check(mino_state_t *S, mino_val_t *form,
     mino_env_t    *ns_env;
     env_binding_t *b;
     if (S->current_ns == NULL) return 0;
-    /* mino.core itself "owns" its primitives via env_bind at install time
-     * without interning vars; skip the check there so core.mino can def
-     * names whose primitive bindings live in the same env. */
-    if (strcmp(S->current_ns, "mino.core") == 0) return 0;
+    /* clojure.core itself "owns" its primitives via env_bind at install
+     * time without interning vars; skip the check there so core.mino can
+     * def names whose primitive bindings live in the same env. */
+    if (strcmp(S->current_ns, "clojure.core") == 0) return 0;
     ns_env = current_ns_env(S);
     if (ns_env == NULL) return 0;
     b = env_find_here(ns_env, name);
@@ -415,7 +415,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
             }
             if (kw_eq(head, "refer-clojure")) {
                 /* :refer-clojure :only/:exclude/:rename. Detach parent
-                 * (which is mino.core) and explicitly bring in the
+                 * (which is clojure.core) and explicitly bring in the
                  * filtered subset, so excluded names are actually hidden
                  * rather than served by the parent chain. */
                 mino_val_t *opts = clause->as.cons.cdr;

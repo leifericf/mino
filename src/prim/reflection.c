@@ -529,7 +529,7 @@ found_ns:
     }
 
     /* Unqualified: walk current ns env chain (which terminates at
-     * mino.core) and return a var for whatever's bound. The wide
+     * clojure.core) and return a var for whatever's bound. The wide
      * "scan every ns for any var with this name" fallback is gone --
      * it picked up unrelated names from sibling namespaces. */
     {

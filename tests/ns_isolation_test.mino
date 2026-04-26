@@ -40,7 +40,7 @@
 ;; --- core auto-refers --------------------------------------------------------
 
 (deftest core-visible-from-any-ns
-  ;; Bundled-core fns (mino.core/inc, mino.core/+ etc.) should be visible
+  ;; Bundled-core fns (clojure.core/inc, clojure.core/+ etc.) should be visible
   ;; by unqualified name from any namespace via the parent-pointer chain.
   (ns iso.user.code)
   (is (= 4 (inc 3)))
@@ -48,9 +48,9 @@
   (is (= [2 4 6] (map (fn [x] (* 2 x)) [1 2 3]))))
 
 (deftest defs-do-not-leak-into-core
-  ;; A def in user code must not pollute mino.core.
+  ;; A def in user code must not pollute clojure.core.
   (ns iso.leak.test) (def some-private-helper 99)
-  (is (nil? (find-var 'mino.core/some-private-helper))))
+  (is (nil? (find-var 'clojure.core/some-private-helper))))
 
 ;; --- cross-ns shadowing ----------------------------------------------------
 

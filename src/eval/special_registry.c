@@ -93,7 +93,7 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
             ns_buf[ns_len] = '\0';
             var = var_find(S, ns_buf, name);
             if (var != NULL) return var;
-            /* Auto-promote env binding to var so #'mino.core/inc works
+            /* Auto-promote env binding to var so #'clojure.core/inc works
              * for primitives that were never explicitly interned. */
             target = ns_env_lookup(S, ns_buf);
             if (target != NULL) {
@@ -123,7 +123,7 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
     if (var != NULL) return var;
     /* No var found: check for a C primitive in the env or in the
      * current ns chain so #'inc works for prim-backed names. The
-     * embedder env no longer chains to mino.core, so we fall through
+     * embedder env no longer chains to clojure.core, so we fall through
      * to current_ns_env (which does) to mirror eval_symbol's lookup. */
     {
         mino_val_t *val = mino_env_get(env, vbuf);
@@ -132,7 +132,7 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
             if (ns_env != NULL) val = mino_env_get(ns_env, vbuf);
         }
         if (val != NULL) {
-            var = var_intern(S, "mino.core", vbuf);
+            var = var_intern(S, "clojure.core", vbuf);
             var_set_root(S, var, val);
             return var;
         }
