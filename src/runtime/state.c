@@ -370,12 +370,14 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     /* Top-level try frame so that OOM and unhandled throw during eval
      * surface as a NULL return instead of aborting the process. */
     if (S->try_depth < MAX_TRY_DEPTH) {
-        S->try_stack[S->try_depth].exception = NULL;
-        S->try_stack[S->try_depth].saved_ns  = S->current_ns;
+        S->try_stack[S->try_depth].exception     = NULL;
+        S->try_stack[S->try_depth].saved_ns      = S->current_ns;
+        S->try_stack[S->try_depth].saved_ambient = S->fn_ambient_ns;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
             mino_val_t *ex = S->try_stack[saved_try].exception;
-            S->current_ns = S->try_stack[saved_try].saved_ns;
+            S->current_ns    = S->try_stack[saved_try].saved_ns;
+            S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
             S->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
                 /* If the exception is a diagnostic map, extract its
@@ -455,11 +457,13 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     /* Top-level try frame so that OOM during read or eval surfaces as a
      * NULL return instead of aborting the process. */
     if (S->try_depth < MAX_TRY_DEPTH) {
-        S->try_stack[S->try_depth].exception = NULL;
-        S->try_stack[S->try_depth].saved_ns  = S->current_ns;
+        S->try_stack[S->try_depth].exception     = NULL;
+        S->try_stack[S->try_depth].saved_ns      = S->current_ns;
+        S->try_stack[S->try_depth].saved_ambient = S->fn_ambient_ns;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             mino_val_t *ex = S->try_stack[saved_try].exception;
-            S->current_ns = S->try_stack[saved_try].saved_ns;
+            S->current_ns    = S->try_stack[saved_try].saved_ns;
+            S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
             S->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;

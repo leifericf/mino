@@ -246,17 +246,21 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         const char *file      = NULL;
         int         line      = 0;
         int         col       = 0;
-        const char *saved_ns  = S->current_ns;
+        const char *saved_ns      = S->current_ns;
+        const char *saved_ambient = S->fn_ambient_ns;
         mino_val_t *result;
         if (fn->type == MINO_MACRO) {
             env_bind(S, local, "&env", mino_nil(S));
         }
         /* Closures resolve free unqualified vars in the namespace they
-         * were created in, not the namespace of the caller. Swap
-         * current_ns for the body so eval_symbol's fall-through targets
-         * the defining ns env. */
+         * were created in. Swap current_ns for the body so def/etc land
+         * in the right place by default; record the same ns as the
+         * "ambient" so eval_symbol can still find these bindings even
+         * after the body itself mutates current_ns via (ns ...) or
+         * (in-ns ...). */
         if (fn->as.fn.defining_ns != NULL) {
-            S->current_ns = fn->as.fn.defining_ns;
+            S->current_ns    = fn->as.fn.defining_ns;
+            S->fn_ambient_ns = fn->as.fn.defining_ns;
         }
         if (S->eval_current_form != NULL
             && S->eval_current_form->type == MINO_CONS) {
@@ -273,7 +277,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 char msg[96];
                 snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
                 set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR002", msg);
-                S->current_ns = saved_ns;
+                S->current_ns    = saved_ns;
+                S->fn_ambient_ns = saved_ambient;
                 return NULL;
             }
             cur_params = clause->as.cons.car;
@@ -281,12 +286,14 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
         for (;;) {
             if (!bind_params(S, local, cur_params, call_args, tag)) {
-                S->current_ns = saved_ns;
+                S->current_ns    = saved_ns;
+                S->fn_ambient_ns = saved_ambient;
                 return NULL; /* leave frame for trace */
             }
             result = eval_implicit_do_impl(S, cur_body, local, 1);
             if (result == NULL) {
-                S->current_ns = saved_ns;
+                S->current_ns    = saved_ns;
+                S->fn_ambient_ns = saved_ambient;
                 return NULL; /* leave frame for trace */
             }
             if (result->type == MINO_RECUR) {
@@ -326,7 +333,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 /* Tail-call to a different fn: switch to its defining ns
                  * so its body's free vars resolve correctly. */
                 if (fn->type == MINO_FN && fn->as.fn.defining_ns != NULL) {
-                    S->current_ns = fn->as.fn.defining_ns;
+                    S->current_ns    = fn->as.fn.defining_ns;
+                    S->fn_ambient_ns = fn->as.fn.defining_ns;
                 }
                 if (cur_params == NULL) {
                     int argc = list_len(call_args);
@@ -344,7 +352,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 continue;
             }
             pop_frame(S);
-            S->current_ns = saved_ns;
+            S->current_ns    = saved_ns;
+            S->fn_ambient_ns = saved_ambient;
             return result;
         }
     }

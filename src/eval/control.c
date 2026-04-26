@@ -84,8 +84,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     }
 
     /* Phase 1: evaluate body forms. */
-    S->try_stack[S->try_depth].exception = NULL;
-    S->try_stack[S->try_depth].saved_ns  = S->current_ns;
+    S->try_stack[S->try_depth].exception     = NULL;
+    S->try_stack[S->try_depth].saved_ns      = S->current_ns;
+    S->try_stack[S->try_depth].saved_ambient = S->fn_ambient_ns;
     if (setjmp(S->try_stack[S->try_depth].buf) == 0) {
         mino_val_t *r;
         S->try_depth++;
@@ -99,10 +100,11 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         }
         vol_result = r;
     } else {
-        /* longjmp'd from throw in body. Restore current_ns since the
-         * throw bypassed any per-fn restore on its way up. */
+        /* longjmp'd from throw in body. Restore current_ns and ambient
+         * since the throw bypassed any per-fn restore on its way up. */
         vol_ex      = S->try_stack[saved_try].exception;
-        S->current_ns = S->try_stack[saved_try].saved_ns;
+        S->current_ns    = S->try_stack[saved_try].saved_ns;
+        S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
         S->try_depth   = saved_try;
         S->call_depth  = saved_call;
         S->trace_added = saved_trace;
@@ -158,8 +160,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             int         it = S->trace_added;
             int         is = S->try_depth; /* save before setjmp */
             dyn_frame_t *id = S->dyn_stack;
-            S->try_stack[is].exception = NULL;
-            S->try_stack[is].saved_ns  = S->current_ns;
+            S->try_stack[is].exception     = NULL;
+            S->try_stack[is].saved_ns      = S->current_ns;
+            S->try_stack[is].saved_ambient = S->fn_ambient_ns;
             if (setjmp(S->try_stack[is].buf) == 0) {
                 mino_val_t *r;
                 S->try_depth++;
@@ -174,7 +177,8 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             } else {
                 /* Catch handler re-threw. */
                 vol_ex      = S->try_stack[is].exception;
-                S->current_ns = S->try_stack[is].saved_ns;
+                S->current_ns    = S->try_stack[is].saved_ns;
+                S->fn_ambient_ns = S->try_stack[is].saved_ambient;
                 S->try_depth   = is;
                 S->call_depth  = ic;
                 S->trace_added = it;

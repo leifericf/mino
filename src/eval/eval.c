@@ -47,6 +47,13 @@ mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
         mino_env_t *ns_env = current_ns_env(S);
         if (ns_env != NULL) mac = mino_env_get(ns_env, buf);
     }
+    if (mac == NULL && S->fn_ambient_ns != NULL
+        && S->fn_ambient_ns != S->current_ns
+        && (S->current_ns == NULL
+            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
+        mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
+        if (amb != NULL) mac = mino_env_get(amb, buf);
+    }
     if (mac == NULL || mac->type != MINO_MACRO) {
         return form;
     }

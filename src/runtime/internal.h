@@ -360,6 +360,12 @@ struct mino_state {
     size_t          ns_env_len;
     size_t          ns_env_cap;
     mino_env_t     *mino_core_env;    /* root env for mino.core; parent NULL */
+    /* Ambient namespace for free-var resolution inside the active fn body.
+     * apply_callable sets this to the fn's defining ns; eval_symbol's
+     * fall-through consults it after current_ns_env, so `(ns ...)`
+     * mutations inside a body don't lose access to the macros and helpers
+     * the body was written against. */
+    const char     *fn_ambient_ns;
 
     /* Var registry */
     var_entry_t    *var_registry;

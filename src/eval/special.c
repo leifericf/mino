@@ -87,12 +87,19 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         }
     }
 
-    /* Unqualified: dynamic → lexical → current-ns env (parent → mino.core). */
+    /* Unqualified: dynamic → lexical → current-ns env → fn ambient ns. */
     v = (S->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
     if (v == NULL) v = mino_env_get(env, data);
     if (v == NULL) {
         mino_env_t *ns_env = current_ns_env(S);
         if (ns_env != NULL) v = mino_env_get(ns_env, data);
+    }
+    if (v == NULL && S->fn_ambient_ns != NULL
+        && S->fn_ambient_ns != S->current_ns
+        && (S->current_ns == NULL
+            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
+        mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
+        if (amb != NULL) v = mino_env_get(amb, data);
     }
     if (v == NULL) {
         char msg[300];
