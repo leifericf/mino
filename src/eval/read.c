@@ -679,6 +679,78 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
     ADVANCE_N(S, p, len);
 
     if (len >= 2 && start[0] == ':') {
+        /* ::foo / ::alias/foo: auto-resolve at read time. */
+        if (len >= 3 && start[1] == ':') {
+            const char *body = start + 2;
+            size_t      body_len = len - 2;
+            const char *slash = memchr(body, '/', body_len);
+            const char *resolved_ns = NULL;
+            size_t      resolved_ns_len = 0;
+            const char *kw_name;
+            size_t      kw_name_len;
+            char        full[512];
+            if (body_len == 0) {
+                set_reader_diag(S, MRE008,
+                                "auto-resolved keyword missing name",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            if (slash != NULL) {
+                size_t alias_len = (size_t)(slash - body);
+                size_t i;
+                if (alias_len == 0 || alias_len + 1 == body_len) {
+                    set_reader_diag(S, MRE008,
+                                    "malformed auto-resolved keyword",
+                                    S->reader_line, S->reader_col);
+                    return NULL;
+                }
+                for (i = 0; i < S->ns_alias_len; i++) {
+                    const char *a = S->ns_aliases[i].alias;
+                    if (strlen(a) == alias_len
+                        && memcmp(a, body, alias_len) == 0) {
+                        resolved_ns     = S->ns_aliases[i].full_name;
+                        resolved_ns_len = strlen(resolved_ns);
+                        break;
+                    }
+                }
+                if (resolved_ns == NULL) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                             "no such alias: %.*s",
+                             (int)alias_len, body);
+                    set_reader_diag(S, MRE008, msg,
+                                    S->reader_line, S->reader_col);
+                    return NULL;
+                }
+                kw_name     = slash + 1;
+                kw_name_len = body_len - alias_len - 1;
+            } else {
+                resolved_ns     = (S->current_ns != NULL)
+                                  ? S->current_ns : "user";
+                resolved_ns_len = strlen(resolved_ns);
+                kw_name         = body;
+                kw_name_len     = body_len;
+            }
+            if (resolved_ns_len + 1 + kw_name_len >= sizeof(full)) {
+                set_reader_diag(S, MRE008,
+                                "auto-resolved keyword too long",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            memcpy(full, resolved_ns, resolved_ns_len);
+            full[resolved_ns_len] = '/';
+            memcpy(full + resolved_ns_len + 1, kw_name, kw_name_len);
+            return mino_keyword_n(S, full, resolved_ns_len + 1 + kw_name_len);
+        }
+        /* Reject trailing slash like :bar/ */
+        {
+            const char *slash = memchr(start + 1, '/', len - 1);
+            if (slash != NULL && slash == start + len - 1) {
+                set_reader_diag(S, MRE008, "malformed keyword",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+        }
         return mino_keyword_n(S, start + 1, len - 1);
     }
     if (len == 1 && start[0] == ':') {

@@ -58,9 +58,9 @@
   ;; test-cljs-1677 — JS host only (#js, js/goog, isArrayLike). Skipped.
   ;; test-cljs-2292 — JS host only (exists? macro). Skipped.
 
-  (deftest test-cljs-3399
-    (is (= ::fake/foo :fake.ns/foo))
-    (is (= `fake/foo 'fake.ns/foo)))
+  ;; test-cljs-3399 -- depends on (:require [fake.ns :as-alias fake]) which
+  ;; this parked file never establishes; ::fake/foo would fail at read
+  ;; time. Re-enable when the ns form above runs.
 
   ;; --- end parked CLJS translation ---
   )
