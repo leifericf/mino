@@ -166,7 +166,7 @@ environment bindings:
     binding  lazy-seq
     ns  var
 
-`when`, `and`, and `or` are macros defined in `core.mino` and ALSO have
+`when`, `and`, and `or` are macros defined in `core.clj` and ALSO have
 fast-path entries in the special-form registry — the evaluator inlines
 them to skip per-invocation macro expansion. `macroexpand` still
 returns their macro expansion, so user-observable semantics are

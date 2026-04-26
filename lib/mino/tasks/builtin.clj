@@ -83,10 +83,10 @@
 ;; ---- Tasks ----
 
 (defn gen-core-header
-  "Escape src/core.mino into src/core_mino.h as a C string literal."
+  "Escape src/core.clj into src/core_mino.h as a C string literal."
   []
-  (when (stale? ["src/core.mino"] "src/core_mino.h")
-    (let [src     (slurp "src/core.mino")
+  (when (stale? ["src/core.clj"] "src/core_mino.h")
+    (let [src     (slurp "src/core.clj")
           src     (if (str/ends-with? src "\n")
                     (subs src 0 (- (count src) 1))
                     src)
@@ -97,12 +97,12 @@
       (spit "src/core_mino.h"
             (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
                  " *\n"
-                 " * Produced by `gen-core-header` from src/core.mino.\n"
+                 " * Produced by `gen-core-header` from src/core.clj.\n"
                  " * Embeds the bundled mino-side core library as a C\n"
                  " * string literal so the runtime can install it without\n"
-                 " * needing core.mino on disk at startup.\n"
+                 " * needing core.clj on disk at startup.\n"
                  " *\n"
-                 " * Edit src/core.mino, then `./mino task build` (which\n"
+                 " * Edit src/core.clj, then `./mino task build` (which\n"
                  " * regenerates this file). Gitignored.\n"
                  " */\n"
                  "static const char *core_mino_src =\n    \""
@@ -207,22 +207,22 @@
 (defn test-suite
   "Run the test suite."
   []
-  (println (sh! mino-bin "tests/run.mino")))
+  (println (sh! mino-bin "tests/run.clj")))
 
 (defn test-external
   "Run the external test runner."
   []
-  (println (sh! mino-bin "tests/external_runner.mino")))
+  (println (sh! mino-bin "tests/external_runner.clj")))
 
 (defn test-fault-inject
   "Run fault injection tests (simulated OOM)."
   []
-  (println (sh! mino-bin "tests/fault_inject_runner.mino")))
+  (println (sh! mino-bin "tests/fault_inject_runner.clj")))
 
 (defn test-gc-stress
   "Run GC stability tests under MINO_GC_STRESS=1 (collect on every allocation)."
   []
-  (println (sh! "env" "MINO_GC_STRESS=1" mino-bin "tests/gc_stress_runner.mino")))
+  (println (sh! "env" "MINO_GC_STRESS=1" mino-bin "tests/gc_stress_runner.clj")))
 
 (defn test-embed
   "Compile and run the C embedding stress tests (embed_multi_state).

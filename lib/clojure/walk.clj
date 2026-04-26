@@ -1,7 +1,7 @@
 (ns clojure.walk)
 
 ;; walk, postwalk, prewalk, postwalk-replace, prewalk-replace
-;; are defined in core.mino and available in every namespace.
+;; are defined in core.clj and available in every namespace.
 
 (defn keywordize-keys [m]
   (postwalk (fn [x]

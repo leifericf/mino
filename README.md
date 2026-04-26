@@ -8,7 +8,7 @@ Requires only an ANSI C compiler. No external dependencies.
 
 ```
 printf 'static const char *core_mino_src =\n' > src/core_mino.h
-sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.mino >> src/core_mino.h
+sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.clj >> src/core_mino.h
 printf '    ;\n' >> src/core_mino.h
 cc -std=c99 -O2 \
   -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \

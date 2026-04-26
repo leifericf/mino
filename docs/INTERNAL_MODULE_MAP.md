@@ -8,8 +8,8 @@ State access is explicit (`S->field`).
 ```
 src/
 ├── mino.h                         # public embedding API (stable surface)
-├── core.mino                      # bundled mino-side core library
-├── core_mino.h                    # generated from core.mino
+├── core.clj                       # bundled mino-side core library
+├── core_mino.h                    # generated from core.clj
 │
 ├── public/                        # host-facing C API
 ├── runtime/                       # state, env, vars, errors, modules (+ internal.h)
@@ -98,7 +98,7 @@ src/
 
 ## Async
 
-Channels, buffers, and alts arbitration live in `lib/core/channel.mino`.
+Channels, buffers, and alts arbitration live in `lib/core/channel.clj`.
 The C surface is limited to the scheduler run queue, deadline timers,
 and a four-primitive bridge.
 
