@@ -94,13 +94,55 @@
 
 ;; --- Definitions ---
 
-(defmacro defn "Defines a named function. Supports docstrings and multi-arity." [name & fdecl]
+;; Walk a single fn arity (params-vec body...) and, if the first body
+;; form is a {:pre [...] :post [...]} map, rewrite the arity so the
+;; conditions run around the body. % in :post bodies refers to the
+;; return value, matching Clojure.
+(def fn-arity-with-prepost_
+  (fn [arity]
+    (let [params (first arity)
+          body   (rest arity)
+          head   (first body)]
+      (if (and (map? head) (or (contains? head :pre) (contains? head :post)))
+        (let [pre   (get head :pre [])
+              post  (get head :post [])
+              rest-body (rest body)
+              assert-pre (map (fn [p]
+                                (list 'when-not p
+                                      (list 'throw
+                                            (list 'ex-info
+                                                  (str "Pre-condition failed: " (pr-str p))
+                                                  {:pre (list 'quote p)})))) pre)
+              assert-post (map (fn [p]
+                                 (list 'when-not p
+                                       (list 'throw
+                                             (list 'ex-info
+                                                   (str "Post-condition failed: " (pr-str p))
+                                                   {:post (list 'quote p)})))) post)
+              wrapped (apply list
+                             (concat assert-pre
+                                     [(apply list 'let ['% (apply list 'do rest-body)]
+                                             [(apply list 'do
+                                                     (concat assert-post ['%]))])]))]
+          (cons params wrapped))
+        arity))))
+
+(defmacro defn "Defines a named function. Supports docstrings, multi-arity, and :pre/:post conditions." [name & fdecl]
   (let [has-doc  (string? (first fdecl))
         doc      (if has-doc (first fdecl) nil)
         fdecl    (if has-doc (rest fdecl) fdecl)
         has-attr (map? (first fdecl))
         fdecl    (if has-attr (rest fdecl) fdecl)
-        form     (cons 'fn fdecl)]
+        ;; If the first remaining form is a vector, this is single-arity
+        ;; (params-vec body...). Otherwise it's a sequence of arity
+        ;; lists (params-vec body...) (params-vec body...). Handle the
+        ;; :pre/:post map either way.
+        rewritten (if (vector? (first fdecl))
+                    (fn-arity-with-prepost_ fdecl)
+                    (mapv fn-arity-with-prepost_ fdecl))
+        form     (if (vector? (first fdecl))
+                   (cons 'fn rewritten)
+                   (apply list 'fn rewritten))]
     (if doc
       `(def ~name ~doc ~form)
       `(def ~name ~form))))
@@ -1928,6 +1970,45 @@
    runtime; this exists for source compatibility."
   [type-sym fields & specs]
   (apply list 'defrecord type-sym fields specs))
+
+(def ^:dynamic *assert*
+  "Controls assertion compilation. When false, `assert` is a no-op.
+   Defaults to true."
+  true)
+
+(defn record?
+  "Returns true if x is a record value (a map carrying the
+   :mino/record-type metadata that defrecord/deftype/reify attach)."
+  [x]
+  (and (map? x)
+       (let [m (meta x)]
+         (and (map? m) (some? (:mino/record-type m))))))
+
+(defn instance-impl_
+  "Implements (instance? class x) on the small set of Clojure-shaped
+   class markers mino can answer for. Everything else returns false."
+  [cname x]
+  (let [n (name cname)]
+    (cond
+      (= n "Number")                            (number? x)
+      (= n "String")                            (string? x)
+      (= n "Character")                         (char? x)
+      (= n "Boolean")                           (boolean? x)
+      (or (= n "Long") (= n "Integer")
+          (= n "Short") (= n "Byte"))           (integer? x)
+      (or (= n "Double") (= n "Float"))         (float? x)
+      :else                                     false)))
+
+(defmacro instance?
+  "Returns true when x is an instance of the named class. The class
+   argument is taken as a symbol literal — mino has no JVM classes to
+   resolve at runtime — and only Clojure-shaped names with a mino
+   equivalent (Number, String, Long, Double, ...) answer truthfully.
+   Unknown class names (Java interfaces, library types) return false
+   so code that conditionally takes a JVM-only fast path falls through
+   to the portable branch."
+  [class x]
+  (list 'instance-impl_ (list 'quote class) x))
 
 (defmacro reify
   "Anonymous map implementing the given protocols. Methods register on

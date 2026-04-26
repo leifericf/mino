@@ -832,6 +832,15 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     m = args->as.cons.car;
     k = args->as.cons.cdr->as.cons.car;
     if (m == NULL || m->type == MINO_NIL) return mino_nil(S);
+    /* Transient associatives delegate to their underlying persistent
+     * collection, matching Clojure's semantics. */
+    if (m->type == MINO_TRANSIENT) {
+        if (!m->as.transient.valid)
+            return prim_throw_classified(S, "eval/state", "MST001",
+                "find: transient is no longer valid");
+        m = m->as.transient.current;
+        if (m == NULL || m->type == MINO_NIL) return mino_nil(S);
+    }
     if (m->type == MINO_SORTED_MAP) {
         if (!rb_contains(S, m->as.sorted.root, k, m->as.sorted.comparator))
             return mino_nil(S);
