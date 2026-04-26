@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.73.0 — First-Class Namespaces
+
+Namespaces are now real. Each namespace has its own root binding
+table, so `(ns a) (def x 1)` and `(ns b) (def x 2)` are independent
+and visible only by qualified name from each other. `mino.core` is
+the bundled-core namespace; every other namespace's root env chains
+to it via a parent pointer, so unqualified references to `if`,
+`map`, `let` and friends keep working without an explicit refer.
+
+The full namespace machinery landed in one cycle. `(ns name ...)`
+clauses accept `:require`, `:use`, and `:refer-clojure` with the
+expected modifier set: `:as`, `:as-alias`, `:refer [syms]`,
+`:refer :all`, `:only`, `:exclude`, and `:rename`. Prefix lists
+work too: `(:require [pkg [a :as a] [b :as b]])`. `require` itself
+accepts symbol, vector, prefix-list, and string arguments and is
+multi-arg. A namespace created by `(ns ...)` in memory is
+requirable without a backing file -- the resolver checks the
+runtime registry before falling back to the filesystem.
+
+Vars are first-class runtime objects. `(def x 1)` returns the var
+`#'<ns>/x`; `(def x)` creates an unbound var that `bound?` reports
+as `false` and that throws on deref. `intern`, `find-var`,
+`var-get`, `var-set`, and `alter-var-root` all work; the
+`with-redefs` macro binds a stack of root-value swaps so test code
+can stub vars temporarily. `^:private` is a hard error on
+cross-namespace qualified access, and `:refer :all` skips privates
+rather than exposing them.
+
+Auto-resolved keywords landed too. `::foo` reads as
+`:<current-ns>/foo`; `::alias/foo` looks the alias up in the
+session's alias table at read time and errors if absent. The
+namespaced-map literals follow: `#:foo{:b 1}` qualifies bare keys
+with `foo`; `#::{:b 1}` qualifies with the current namespace; and
+`#::alias{...}` resolves the alias the same way `::alias/foo`
+does. The underscore namespace (`:_/x`) strips off, leaving a bare
+key.
+
+A handful of correctness gaps closed alongside. Cyclic `require`
+chains now throw with the load chain in the message rather than
+recursing into a stack overflow. A loaded file whose first
+`(ns ...)` form disagrees with the requested module name is
+rejected. `def`, `declare`, and `defmacro` refuse to shadow a name
+brought in by `:refer` from another namespace, so accidental
+collisions surface immediately. The "unbound" diagnostic for
+qualified symbols distinguishes "no such alias", "no such
+namespace", and "no var X in namespace Y".
+
+The introspection surface is roughly the runtime-namespace shape
+that other interpreted dialects expose: `in-ns`, `find-ns`,
+`the-ns`, `create-ns`, `remove-ns`, `ns-name`, `ns-publics`,
+`ns-interns`, `ns-refers`, `ns-aliases`, `ns-map`, `ns-unmap`,
+`ns-unalias`, `alias`, `all-ns`, `loaded-libs`, `find-var`,
+`ns-resolve`, `requiring-resolve`, `intern`, `var-get`, `var-set`,
+`var?`, `bound?`, `alter-var-root`, plus `*ns*` for the current
+namespace symbol.
+
+### Breaking Changes
+
+The single shared global env that previously masqueraded as many
+namespaces is gone. Code that relied on `(ns a) (def x ...)`
+clobbering `x` in `b` (and vice versa) must now qualify references
+explicitly or use `:require`/`:use`/`:refer`. Files loaded via
+`require` whose first `(ns ...)` declares a different name than
+the require argument now error rather than silently mismatching.
+
 ## v0.72.0 — Release Pipeline & Build Polish
 
 Tag-triggered builds and a controlled promotion path. Pushing a tag
