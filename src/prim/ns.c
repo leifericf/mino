@@ -365,15 +365,67 @@ mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* --- refer ----------------------------------------------------------------
  *
- * (refer 'ns) bring all of ns's publics into the current namespace.
- * Mirrors Clojure's clojure.core/refer for the bare and :refer :all
- * forms. Future passes can grow it to honor :only, :exclude, :rename. */
+ * (refer 'ns) brings all of ns's publics into the current namespace.
+ * (refer 'ns :only [...]) restricts to the listed names.
+ * (refer 'ns :exclude [...]) brings in everything except the listed names.
+ * (refer 'ns :rename {old new ...}) renames bound symbols.
+ * The three options compose: :only wins, :exclude filters whatever survives,
+ * :rename remaps the surviving names. */
+static int kw_eq(const mino_val_t *v, const char *s)
+{
+    return v != NULL && v->type == MINO_KEYWORD
+        && v->as.s.len == strlen(s)
+        && memcmp(v->as.s.data, s, v->as.s.len) == 0;
+}
+
+static int sym_in_vec(mino_val_t *vec, const char *name, size_t namelen)
+{
+    size_t i;
+    if (vec == NULL || vec->type != MINO_VECTOR) return 0;
+    for (i = 0; i < vec->as.vec.len; i++) {
+        mino_val_t *e = vec_nth(vec, i);
+        if (e != NULL && e->type == MINO_SYMBOL
+            && e->as.s.len == namelen
+            && memcmp(e->as.s.data, name, namelen) == 0) return 1;
+    }
+    return 0;
+}
+
+static const char *rename_lookup(mino_val_t *map, const char *name,
+                                  size_t namelen, char *buf, size_t bufsz)
+{
+    size_t i;
+    mino_val_t *order;
+    if (map == NULL || map->type != MINO_MAP) return NULL;
+    order = map->as.map.key_order;
+    if (order == NULL) return NULL;
+    for (i = 0; i < map->as.map.len; i++) {
+        mino_val_t *k = vec_nth(order, i);
+        mino_val_t *v;
+        if (k == NULL || k->type != MINO_SYMBOL) continue;
+        if (k->as.s.len != namelen
+            || memcmp(k->as.s.data, name, namelen) != 0) continue;
+        v = map_get_val(map, k);
+        if (v == NULL || v->type != MINO_SYMBOL) continue;
+        if (v->as.s.len < bufsz) {
+            memcpy(buf, v->as.s.data, v->as.s.len);
+            buf[v->as.s.len] = '\0';
+            return buf;
+        }
+    }
+    return NULL;
+}
+
 mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *ns_arg;
+    mino_val_t *only_v   = NULL;
+    mino_val_t *excl_v   = NULL;
+    mino_val_t *rename_v = NULL;
     char        ns_buf[256];
     mino_env_t *src;
     mino_env_t *dst;
+    mino_val_t *cur;
     size_t      i;
     (void)env;
     if (!mino_is_cons(args)) {
@@ -382,6 +434,23 @@ mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     ns_arg = args->as.cons.car;
     if (!ns_to_name(S, ns_arg, ns_buf, sizeof(ns_buf), "refer")) return NULL;
+    /* Parse :only / :exclude / :rename pairs. */
+    cur = args->as.cons.cdr;
+    while (mino_is_cons(cur)) {
+        mino_val_t *kw = cur->as.cons.car;
+        if (!mino_is_cons(cur->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "refer: option key without value");
+        }
+        if (kw_eq(kw, "only")) {
+            only_v = cur->as.cons.cdr->as.cons.car;
+        } else if (kw_eq(kw, "exclude")) {
+            excl_v = cur->as.cons.cdr->as.cons.car;
+        } else if (kw_eq(kw, "rename")) {
+            rename_v = cur->as.cons.cdr->as.cons.car;
+        }
+        cur = cur->as.cons.cdr->as.cons.cdr;
+    }
     src = ns_env_lookup(S, ns_buf);
     if (src == NULL) {
         char msg[300];
@@ -391,7 +460,15 @@ mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     dst = current_ns_env(S);
     if (dst == NULL) return mino_nil(S);
     for (i = 0; i < src->len; i++) {
-        env_bind(S, dst, src->bindings[i].name, src->bindings[i].val);
+        const char *name = src->bindings[i].name;
+        size_t      nlen = strlen(name);
+        char        rbuf[256];
+        const char *bind_name;
+        if (only_v != NULL && !sym_in_vec(only_v, name, nlen)) continue;
+        if (excl_v != NULL && sym_in_vec(excl_v, name, nlen)) continue;
+        bind_name = rename_lookup(rename_v, name, nlen, rbuf, sizeof(rbuf));
+        if (bind_name == NULL) bind_name = name;
+        env_bind(S, dst, bind_name, src->bindings[i].val);
     }
     return mino_nil(S);
 }
