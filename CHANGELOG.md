@@ -111,6 +111,16 @@ resolved). `resolve` no longer falls back to a global var-registry
 scan when the current namespace doesn't own a name; that fallback
 picked up unrelated names from sibling namespaces.
 
+`(require "deps/foo/src/foo.cljc")` -- a literal path argument --
+no longer trips file-to-namespace validation. Path-style requires
+are deliberate "load this file" requests; only the dotted-name
+form imposes the namespace-must-match-name check. `(doc 'foo)`
+falls back to the namespace's `:doc` metadata when the named-
+binding table doesn't have an entry, so namespaces declared with
+`(ns foo "docstring" ...)` are documented through the same
+primitive that surfaces `defn` docs. `(doc 'mino.core/inc)` also
+finds the docstring registered under the bare name.
+
 ### Breaking Changes
 
 The single shared global env that previously masqueraded as many
