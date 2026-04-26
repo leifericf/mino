@@ -41,11 +41,33 @@ A handful of correctness gaps closed alongside. Cyclic `require`
 chains now throw with the load chain in the message rather than
 recursing into a stack overflow. A loaded file whose first
 `(ns ...)` form disagrees with the requested module name is
-rejected. `def`, `declare`, and `defmacro` refuse to shadow a name
-brought in by `:refer` from another namespace, so accidental
-collisions surface immediately. The "unbound" diagnostic for
-qualified symbols distinguishes "no such alias", "no such
-namespace", and "no var X in namespace Y".
+rejected; the comparison treats dashes and underscores as
+equivalent so `(ns foo-bar)` in `foo_bar.mino` is fine. `def`,
+`declare`, and `defmacro` refuse to shadow a name brought in by
+`:refer` from another namespace, so accidental collisions surface
+immediately. The "unbound" diagnostic for qualified symbols
+distinguishes "no such alias", "no such namespace", and "no var X
+in namespace Y". Symbols ending in a colon (`foo:`) are rejected at
+read time, namespaced map literals reject duplicate keys after
+prefix qualification, and `(ns 1)` errors instead of silently
+returning nil.
+
+`refer` accepts `:only`, `:exclude`, and `:rename`. Names listed in
+`:only` are validated up front: each must exist in the source
+namespace and must not be a private var, so `refer` no longer
+silently drops missing or hidden names. `find-var` throws for an
+unknown namespace; the var-not-found case still returns nil to
+match upstream. `ns-resolve` accepts the optional environment-map
+arg so `(ns-resolve ns env-map sym)` returns nil when the symbol
+is shadowed locally.
+
+Namespaces carry metadata. `(ns ^{:a 1} foo "docstring" {:b 1})`
+collects the `^meta`, the docstring (as `{:doc "..."}`), and the
+attribute map into a single map and stores it on the namespace.
+`(meta *ns*)`, `(meta (find-ns 'foo))`, and `(meta (the-ns 'foo))`
+return that map. Each `(ns ...)` invocation replaces the namespace
+metadata wholesale; merging only happens between the three sources
+within one call.
 
 The introspection surface is roughly the runtime-namespace shape
 that other interpreted dialects expose: `in-ns`, `find-ns`,
@@ -54,7 +76,17 @@ that other interpreted dialects expose: `in-ns`, `find-ns`,
 `ns-unalias`, `alias`, `all-ns`, `loaded-libs`, `find-var`,
 `ns-resolve`, `requiring-resolve`, `intern`, `var-get`, `var-set`,
 `var?`, `bound?`, `alter-var-root`, plus `*ns*` for the current
-namespace symbol.
+namespace symbol. `ns-publics` returns only the namespace's own
+public vars; `ns-refers` walks the parent chain to surface
+inherited names; `ns-map` combines both with the alias table.
+Values come back as vars (so `pr-str` produces `#'ns/name`), and
+`ns-unmap` clears both the env binding and the var registry entry.
+
+Syntax-quote (`\``) auto-qualifies bare symbols against the
+current-namespace lexical chain (already true since the cycle
+opened) and now also expands an alias prefix on namespaced
+symbols, so `\`str/x` becomes `clojure.string/x` when `str` is
+aliased.
 
 ### Breaking Changes
 
