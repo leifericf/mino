@@ -1897,3 +1897,19 @@
           (vec (mapcat (fn [old v] [old (list 'deref (list 'var v))])
                        olds var-syms))
           try-form)))
+
+(defmacro with-local-vars
+  "Binds names to fresh, lexically-scoped vars holding init values.
+   Within body the names refer to vars: read with @name, mutate with
+   (var-set name val). The vars are interned in the current namespace
+   under gensym'd suffixes so they don't collide with named defs."
+  [bindings & body]
+  (let [pairs (partition 2 bindings)
+        let-pairs (mapcat (fn [pair]
+                            (let [n    (first pair)
+                                  init (first (rest pair))]
+                              [n (list 'intern '*ns*
+                                       (list 'gensym (str (name n) "__lv__"))
+                                       init)]))
+                          pairs)]
+    (apply list 'let (vec let-pairs) body)))
