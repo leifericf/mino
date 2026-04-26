@@ -10,6 +10,36 @@
  * runtime/module.c so this file and prim/module.c share one
  * implementation. */
 
+/* True if `name` is bound in the current ns env via :refer from another
+ * namespace (env binding exists but no var owned by current_ns). Used by
+ * def/declare/defmacro to surface a "already refers to" collision before
+ * silently shadowing. Names that already have a var entry for the current
+ * namespace are normal redefs and pass through. */
+static int refer_collision_check(mino_state_t *S, mino_val_t *form,
+                                 const char *name)
+{
+    mino_env_t    *ns_env;
+    env_binding_t *b;
+    if (S->current_ns == NULL) return 0;
+    /* mino.core itself "owns" its primitives via env_bind at install time
+     * without interning vars; skip the check there so core.mino can def
+     * names whose primitive bindings live in the same env. */
+    if (strcmp(S->current_ns, "mino.core") == 0) return 0;
+    ns_env = current_ns_env(S);
+    if (ns_env == NULL) return 0;
+    b = env_find_here(ns_env, name);
+    if (b == NULL) return 0;
+    if (var_find(S, S->current_ns, name) != NULL) return 0;
+    {
+        char msg[300];
+        snprintf(msg, sizeof(msg),
+                 "%s already refers to a var from another namespace",
+                 name);
+        set_eval_diag(S, form, "name", "MNS001", msg);
+    }
+    return 1;
+}
+
 /* Process a single require spec from within an ns form.
  * spec is either a symbol (bare require) or a vector [mod.name :as alias ...].
  * Attempts to load the module via the resolver and stores aliases.
@@ -429,6 +459,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     }
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
+    if (refer_collision_check(S, form, buf)) return NULL;
     gc_pin(mac);
     env_bind(S, current_ns_env(S), buf, mac);
     gc_unpin(1);
@@ -456,6 +487,10 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
         }
         memcpy(buf, sym->as.s.data, n);
         buf[n] = '\0';
+        if (refer_collision_check(S, form, buf)) return NULL;
+        /* Intern the var so a later def/declare doesn't look like a
+         * cross-namespace refer collision. */
+        var_intern(S, S->current_ns, buf);
         env_bind(S, current_ns_env(S), buf, mino_nil(S));
         rest = rest->as.cons.cdr;
     }
@@ -489,6 +524,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
     }
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
+    if (refer_collision_check(S, form, buf)) return NULL;
     /* Check for ^:dynamic / ^:private metadata on the name symbol. */
     {
         int is_dynamic = 0;
