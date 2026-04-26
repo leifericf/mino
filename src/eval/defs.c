@@ -15,6 +15,41 @@
  * Attempts to load the module via the resolver and stores aliases.
  * When use_mode is true, default to refer-all (:use semantics).
  * Returns 0 on success, -1 on failure (with a diagnostic set). */
+/* True if vec contains a symbol with the given byte name. */
+static int sym_vec_contains(mino_val_t *vec, const char *name, size_t namelen)
+{
+    size_t i;
+    if (vec == NULL || vec->type != MINO_VECTOR) return 0;
+    for (i = 0; i < vec->as.vec.len; i++) {
+        mino_val_t *e = vec_nth(vec, i);
+        if (e != NULL && e->type == MINO_SYMBOL
+            && e->as.s.len == namelen
+            && memcmp(e->as.s.data, name, namelen) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Look up a rename target in a rename map: { old-sym new-sym }. */
+static mino_val_t *rename_map_lookup(mino_val_t *m, const char *name,
+                                     size_t namelen)
+{
+    if (m == NULL || m->type != MINO_MAP) return NULL;
+    {
+        size_t i;
+        for (i = 0; i < m->as.map.len; i++) {
+            mino_val_t *k = vec_nth(m->as.map.key_order, i);
+            if (k != NULL && k->type == MINO_SYMBOL
+                && k->as.s.len == namelen
+                && memcmp(k->as.s.data, name, namelen) == 0) {
+                return map_get_val(m, k);
+            }
+        }
+    }
+    return NULL;
+}
+
 static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                                       mino_env_t *env, int use_mode)
 {
@@ -23,8 +58,10 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     size_t      modlen;
     const char *alias_name = NULL;
     size_t       alias_len  = 0;
-    mino_val_t  *refer_vec  = NULL;
-    int          refer_all  = use_mode; /* :use defaults to refer-all */
+    mino_val_t  *refer_vec   = NULL;
+    mino_val_t  *exclude_vec = NULL;
+    mino_val_t  *rename_map  = NULL;
+    int          refer_all   = use_mode; /* :use defaults to refer-all */
 
     if (spec->type == MINO_SYMBOL) {
         modname = spec->as.s.data;
@@ -35,7 +72,7 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
         if (first == NULL || first->type != MINO_SYMBOL) return 0;
         modname = first->as.s.data;
         modlen  = first->as.s.len;
-        /* Parse keyword args: :as, :refer, :only */
+        /* Parse keyword args: :as, :refer, :only, :exclude, :rename */
         for (i = 1; i + 1 < spec->as.vec.len; i += 2) {
             mino_val_t *k = vec_nth(spec, i);
             mino_val_t *v = vec_nth(spec, i + 1);
@@ -63,6 +100,14 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                 for (tmp = v; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
                     refer_vec = vec_conj1(S, refer_vec, tmp->as.cons.car);
                 refer_all = 0;
+            }
+            if (kw_eq(k, "exclude") && v->type == MINO_VECTOR) {
+                exclude_vec = v;
+                /* :exclude implies :refer :all unless :refer is set */
+                if (refer_vec == NULL) refer_all = 1;
+            }
+            if (kw_eq(k, "rename") && v->type == MINO_MAP) {
+                rename_map = v;
             }
         }
     } else {
@@ -116,9 +161,15 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                         char rbuf[256];
                         size_t rn = rsym->as.s.len;
                         mino_val_t *val = NULL;
+                        mino_val_t *renamed;
+                        const char *bind_name;
+                        size_t bind_len;
                         if (rn >= sizeof(rbuf)) continue;
                         memcpy(rbuf, rsym->as.s.data, rn);
                         rbuf[rn] = '\0';
+                        if (sym_vec_contains(exclude_vec, rbuf, rn)) {
+                            continue;
+                        }
                         if (src != NULL) {
                             env_binding_t *b = env_find_here(src, rbuf);
                             if (b != NULL) val = b->val;
@@ -127,21 +178,45 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                             mino_val_t *var = var_find(S, modbuf, rbuf);
                             if (var != NULL) val = var->as.var.root;
                         }
-                        if (val != NULL) env_bind(S, target, rbuf, val);
+                        if (val == NULL) continue;
+                        renamed = rename_map_lookup(rename_map, rbuf, rn);
+                        if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                            bind_name = renamed->as.s.data;
+                            bind_len  = renamed->as.s.len;
+                        } else {
+                            bind_name = rbuf;
+                            bind_len  = rn;
+                        }
+                        if (bind_len < sizeof(rbuf)) {
+                            char nbuf[256];
+                            memcpy(nbuf, bind_name, bind_len);
+                            nbuf[bind_len] = '\0';
+                            env_bind(S, target, nbuf, val);
+                        }
                     }
                 }
             }
             if (refer_all && src != NULL) {
                 size_t vi;
                 for (vi = 0; vi < src->len; vi++) {
+                    const char *nm  = src->bindings[vi].name;
+                    size_t      nl  = strlen(nm);
+                    mino_val_t *renamed;
                     /* Skip private vars: :refer :all only brings in
                      * publics, just like Clojure. */
-                    mino_val_t *var = var_find(S, modbuf,
-                                               src->bindings[vi].name);
+                    mino_val_t *var = var_find(S, modbuf, nm);
                     if (var != NULL && var->as.var.is_private) continue;
-                    env_bind(S, target,
-                             src->bindings[vi].name,
-                             src->bindings[vi].val);
+                    if (sym_vec_contains(exclude_vec, nm, nl)) continue;
+                    renamed = rename_map_lookup(rename_map, nm, nl);
+                    if (renamed != NULL && renamed->type == MINO_SYMBOL
+                        && renamed->as.s.len < 256) {
+                        char nbuf[256];
+                        memcpy(nbuf, renamed->as.s.data, renamed->as.s.len);
+                        nbuf[renamed->as.s.len] = '\0';
+                        env_bind(S, target, nbuf, src->bindings[vi].val);
+                    } else {
+                        env_bind(S, target, nm, src->bindings[vi].val);
+                    }
                 }
             }
         }
@@ -211,7 +286,68 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                     specs = specs->as.cons.cdr;
                 }
             }
-            /* Silently skip :import, :gen-class, :refer-clojure, etc. */
+            if (kw_eq(head, "refer-clojure")) {
+                /* :refer-clojure :only/:exclude/:rename. Detach parent
+                 * (which is mino.core) and explicitly bring in the
+                 * filtered subset, so excluded names are actually hidden
+                 * rather than served by the parent chain. */
+                mino_val_t *opts = clause->as.cons.cdr;
+                mino_val_t *only_vec    = NULL;
+                mino_val_t *exclude_vec = NULL;
+                mino_val_t *rename_map  = NULL;
+                while (mino_is_cons(opts)) {
+                    mino_val_t *k = opts->as.cons.car;
+                    mino_val_t *v;
+                    if (!mino_is_cons(opts->as.cons.cdr)) break;
+                    v = opts->as.cons.cdr->as.cons.car;
+                    if (kw_eq(k, "only") && v != NULL
+                        && v->type == MINO_VECTOR) {
+                        only_vec = v;
+                    } else if (kw_eq(k, "exclude") && v != NULL
+                               && v->type == MINO_VECTOR) {
+                        exclude_vec = v;
+                    } else if (kw_eq(k, "rename") && v != NULL
+                               && v->type == MINO_MAP) {
+                        rename_map = v;
+                    }
+                    opts = opts->as.cons.cdr->as.cons.cdr;
+                }
+                {
+                    mino_env_t *target = current_ns_env(S);
+                    mino_env_t *core   = S->mino_core_env;
+                    size_t      i;
+                    if (target == NULL || core == NULL) {
+                        set_eval_diag(S, form, "internal", "MIN001",
+                            "ns: refer-clojure missing core env");
+                        return NULL;
+                    }
+                    target->parent = NULL;
+                    for (i = 0; i < core->len; i++) {
+                        const char *nm = core->bindings[i].name;
+                        size_t      nl = strlen(nm);
+                        mino_val_t *renamed;
+                        if (only_vec != NULL
+                            && !sym_vec_contains(only_vec, nm, nl)) {
+                            continue;
+                        }
+                        if (sym_vec_contains(exclude_vec, nm, nl)) {
+                            continue;
+                        }
+                        renamed = rename_map_lookup(rename_map, nm, nl);
+                        if (renamed != NULL && renamed->type == MINO_SYMBOL
+                            && renamed->as.s.len < 256) {
+                            char nbuf[256];
+                            memcpy(nbuf, renamed->as.s.data,
+                                   renamed->as.s.len);
+                            nbuf[renamed->as.s.len] = '\0';
+                            env_bind(S, target, nbuf, core->bindings[i].val);
+                        } else {
+                            env_bind(S, target, nm, core->bindings[i].val);
+                        }
+                    }
+                }
+            }
+            /* Silently skip :import, :gen-class, etc. */
         }
         rest = rest->as.cons.cdr;
     }
