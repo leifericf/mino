@@ -118,6 +118,14 @@ static void state_free_ns_aliases(mino_state_t *S)
     free(S->ns_aliases);
 }
 
+/* Free the per-ns env table. Names are interned via intern_filename
+ * (freed by state_free_string_interns); envs themselves are GC-owned
+ * (freed by state_free_heap). Only the array storage is malloc-owned. */
+static void state_free_ns_env_table(mino_state_t *S)
+{
+    free(S->ns_env_table);
+}
+
 /* Free the module cache: per-entry names, then the array itself. */
 static void state_free_module_cache(mino_state_t *S)
 {
@@ -263,6 +271,7 @@ void mino_state_free(mino_state_t *S)
     state_free_root_envs(S);
     state_free_refs(S);
     state_free_ns_aliases(S);
+    state_free_ns_env_table(S);
     free(S->var_registry);
     state_free_host_types(S);
     state_free_module_cache(S);
@@ -362,9 +371,11 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
      * surface as a NULL return instead of aborting the process. */
     if (S->try_depth < MAX_TRY_DEPTH) {
         S->try_stack[S->try_depth].exception = NULL;
+        S->try_stack[S->try_depth].saved_ns  = S->current_ns;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
             mino_val_t *ex = S->try_stack[saved_try].exception;
+            S->current_ns = S->try_stack[saved_try].saved_ns;
             S->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
                 /* If the exception is a diagnostic map, extract its
@@ -445,8 +456,10 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
      * NULL return instead of aborting the process. */
     if (S->try_depth < MAX_TRY_DEPTH) {
         S->try_stack[S->try_depth].exception = NULL;
+        S->try_stack[S->try_depth].saved_ns  = S->current_ns;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             mino_val_t *ex = S->try_stack[saved_try].exception;
+            S->current_ns = S->try_stack[saved_try].saved_ns;
             S->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;
@@ -600,9 +613,11 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
     }
 
     S->try_stack[S->try_depth].exception = NULL;
+    S->try_stack[S->try_depth].saved_ns  = S->current_ns;
     if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. */
         mino_val_t *ex = S->try_stack[saved_try].exception;
+        S->current_ns = S->try_stack[saved_try].saved_ns;
         S->try_depth = saved_try;
         /* Populate last_error from the exception value so the host
          * can inspect it via mino_last_error(). */

@@ -101,13 +101,3 @@
   ([coll] (apply str coll))
   ([separator coll] (apply str (interpose separator coll))))
 
-;; Restore core globals that were shadowed by same-named defs above.
-(ns user)
-(def blank?       core-blank?_)
-(def starts-with? core-starts-with?_)
-(def ends-with?   core-ends-with?_)
-(def upper-case   core-upper-case_)
-(def lower-case   core-lower-case_)
-(def reverse      core-reverse_)
-(def includes?    core-includes?_)
-(def replace      core-replace_)

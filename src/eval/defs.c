@@ -98,12 +98,16 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
         }
     }
 
-    /* Process :refer — bind referred vars into current root env. */
+    /* Process :refer — bind referred names into current ns env.
+     * Iterate the source ns env so macros come through too. */
     {
         char modbuf[256];
         if (modlen < sizeof(modbuf)) {
+            mino_env_t *target = current_ns_env(S);
+            mino_env_t *src;
             memcpy(modbuf, modname, modlen);
             modbuf[modlen] = '\0';
+            src = ns_env_lookup(S, modbuf);
             if (refer_vec != NULL) {
                 size_t ri;
                 for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
@@ -111,31 +115,28 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                     if (rsym != NULL && rsym->type == MINO_SYMBOL) {
                         char rbuf[256];
                         size_t rn = rsym->as.s.len;
-                        mino_val_t *var;
+                        mino_val_t *val = NULL;
                         if (rn >= sizeof(rbuf)) continue;
                         memcpy(rbuf, rsym->as.s.data, rn);
                         rbuf[rn] = '\0';
-                        var = var_find(S, modbuf, rbuf);
-                        if (var != NULL) {
-                            env_bind(S, env_root(S, env), rbuf,
-                                     var->as.var.root);
-                        } else {
-                            /* Fallback: try looking up in root env by bare name. */
-                            mino_val_t *val = mino_env_get(env, rbuf);
-                            if (val != NULL)
-                                env_bind(S, env_root(S, env), rbuf, val);
+                        if (src != NULL) {
+                            env_binding_t *b = env_find_here(src, rbuf);
+                            if (b != NULL) val = b->val;
                         }
+                        if (val == NULL) {
+                            mino_val_t *var = var_find(S, modbuf, rbuf);
+                            if (var != NULL) val = var->as.var.root;
+                        }
+                        if (val != NULL) env_bind(S, target, rbuf, val);
                     }
                 }
             }
-            if (refer_all) {
+            if (refer_all && src != NULL) {
                 size_t vi;
-                for (vi = 0; vi < S->var_registry_len; vi++) {
-                    if (strcmp(S->var_registry[vi].ns, modbuf) == 0) {
-                        env_bind(S, env_root(S, env),
-                                 S->var_registry[vi].name,
-                                 S->var_registry[vi].var->as.var.root);
-                    }
+                for (vi = 0; vi < src->len; vi++) {
+                    env_bind(S, target,
+                             src->bindings[vi].name,
+                             src->bindings[vi].val);
                 }
             }
         }
@@ -288,7 +289,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
     gc_pin(mac);
-    env_bind(S, env_root(S, env), buf, mac);
+    env_bind(S, current_ns_env(S), buf, mac);
     gc_unpin(1);
     meta_set(S, buf, doc, doc_len, form);
     return mac;
@@ -314,7 +315,7 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
         }
         memcpy(buf, sym->as.s.data, n);
         buf[n] = '\0';
-        env_bind(S, env_root(S, env), buf, mino_nil(S));
+        env_bind(S, current_ns_env(S), buf, mino_nil(S));
         rest = rest->as.cons.cdr;
     }
     return mino_nil(S);
@@ -363,7 +364,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
                 var_set_root(S, var, mino_nil(S));
                 if (is_dynamic) var->as.var.dynamic = 1;
             }
-            env_bind(S, env_root(S, env), buf, mino_nil(S));
+            env_bind(S, current_ns_env(S), buf, mino_nil(S));
             meta_set(S, buf, NULL, 0, form);
             return mino_nil(S);
         }
@@ -392,7 +393,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
                 if (is_dynamic) var->as.var.dynamic = 1;
             }
         }
-        env_bind(S, env_root(S, env), buf, value);
+        env_bind(S, current_ns_env(S), buf, value);
         gc_unpin(1);
         meta_set(S, buf, doc, doc_len, form);
         return value;

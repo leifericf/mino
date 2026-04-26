@@ -36,6 +36,7 @@
 typedef struct {
     jmp_buf     buf;
     mino_val_t *exception;
+    const char *saved_ns;   /* current_ns at try-frame entry; restored on catch */
 } try_frame_t;
 
 /* ------------------------------------------------------------------------- */

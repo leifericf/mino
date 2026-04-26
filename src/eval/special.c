@@ -32,7 +32,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     mino_val_t *v;
     const char *slash;
 
-    /* Check for namespace-qualified symbol (e.g. t/is, clojure.core/+).
+    /* Check for namespace-qualified symbol (e.g. t/is, mino.core/+).
      * Single-char "/" is the division function, not a qualified symbol. */
     slash = (n > 1) ? memchr(data, '/', n) : NULL;
     if (slash != NULL) {
@@ -62,20 +62,38 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         var = var_find(S, resolved_ns, sym_name);
         if (var != NULL) return var->as.var.root;
 
-        /* Also try looking up the bare name in root env as fallback. */
-        v = mino_env_get(env, sym_name);
-        if (v != NULL) return v;
-
         {
-            char msg[300];
-            snprintf(msg, sizeof(msg), "unbound symbol: %s", data);
-            set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
-            return NULL;
+            /* Primitives live in the ns env but aren't interned as vars,
+             * so a var_find miss falls back to the ns env's own bindings. */
+            mino_env_t *target_env = ns_env_lookup(S, resolved_ns);
+            if (target_env != NULL) {
+                env_binding_t *b = env_find_here(target_env, sym_name);
+                if (b != NULL) return b->val;
+            }
+            {
+                char msg[300];
+                int  is_alias = (resolved_ns != ns_buf);
+                if (target_env == NULL && !is_alias) {
+                    snprintf(msg, sizeof(msg),
+                             "no such namespace: %s", resolved_ns);
+                } else {
+                    snprintf(msg, sizeof(msg),
+                             "no var %s in namespace %s",
+                             sym_name, resolved_ns);
+                }
+                set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
+                return NULL;
+            }
         }
     }
 
+    /* Unqualified: dynamic → lexical → current-ns env (parent → mino.core). */
     v = (S->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
     if (v == NULL) v = mino_env_get(env, data);
+    if (v == NULL) {
+        mino_env_t *ns_env = current_ns_env(S);
+        if (ns_env != NULL) v = mino_env_get(ns_env, data);
+    }
     if (v == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "unbound symbol: %s", data);
@@ -466,8 +484,8 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
         return apply_callable(S, fn, evaled, env);
     }
     if (fn->type == MINO_MACRO) {
-        /* Expand with unevaluated args; re-eval the resulting form
-         * in the caller's environment. */
+        /* Expand with unevaluated args; re-eval the resulting form in
+         * the caller's environment. */
         mino_val_t *expanded = apply_callable(S, fn, args, env);
         gc_unpin(1);
         if (expanded == NULL) {

@@ -159,6 +159,7 @@ struct mino_val {
             mino_val_t *params; /* parameter list or vector */
             mino_val_t *body;   /* body forms */
             mino_env_t *env;    /* captured lexical environment */
+            const char *defining_ns; /* ns at creation time (interned), or NULL */
         } fn;
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
             void       *ptr;   /* host-owned pointer */

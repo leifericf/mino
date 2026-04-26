@@ -23,7 +23,9 @@
 
 (deftest unquote
   (let [x 10]
-    (is (= '(+ 10 1) `(+ ~x 1)))))
+    ;; Bare `+` in a syntax-quoted template auto-qualifies to mino.core/+
+    ;; because backquote namespace-resolves any non-locally-bound symbol.
+    (is (= '(mino.core/+ 10 1) `(+ ~x 1)))))
 
 (deftest unquote-splicing
   (def xs '(1 2 3))

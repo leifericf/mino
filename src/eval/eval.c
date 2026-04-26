@@ -43,6 +43,10 @@ mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
     memcpy(buf, head->as.s.data, n);
     buf[n] = '\0';
     mac = mino_env_get(env, buf);
+    if (mac == NULL) {
+        mino_env_t *ns_env = current_ns_env(S);
+        if (ns_env != NULL) mac = mino_env_get(ns_env, buf);
+    }
     if (mac == NULL || mac->type != MINO_MACRO) {
         return form;
     }
@@ -67,14 +71,76 @@ mino_val_t *macroexpand_all(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 }
 
 /*
+ * Walk lexical-frame chain stopping at the first ns env, returning 1
+ * if `name` is bound there. Used by syntax-quote auto-qualification to
+ * leave macro-local symbols (let/fn args) bare.
+ */
+static int qq_locally_bound(mino_state_t *S, mino_env_t *env, const char *name)
+{
+    mino_env_t *e;
+    for (e = env; e != NULL; e = e->parent) {
+        size_t i;
+        for (i = 0; i < S->ns_env_len; i++) {
+            if (S->ns_env_table[i].env == e) return 0; /* hit ns boundary */
+        }
+        if (env_find_here(e, name) != NULL) return 1;
+    }
+    return 0;
+}
+
+/*
+ * Auto-qualify a bare symbol against the current namespace's chain:
+ * find the namespace whose env owns the binding (env_find_here), and
+ * return ns/name. Symbols not found in any ns env stay bare so special
+ * forms (try, catch, &) and gensym names pass through unchanged.
+ */
+static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
+                                     mino_env_t *env)
+{
+    const char *name = sym->as.s.data;
+    size_t      nlen = sym->as.s.len;
+    mino_env_t *e;
+    if (nlen == 0) return sym;
+    if (nlen == 1 && name[0] == '/') return sym;
+    if (memchr(name, '/', nlen) != NULL) return sym;
+    if (qq_locally_bound(S, env, name)) return sym;
+    if (S->current_ns == NULL) return sym;
+    for (e = current_ns_env(S); e != NULL; e = e->parent) {
+        if (env_find_here(e, name) != NULL) {
+            size_t i;
+            for (i = 0; i < S->ns_env_len; i++) {
+                if (S->ns_env_table[i].env == e) {
+                    const char *nsn  = S->ns_env_table[i].name;
+                    size_t      cnlen = strlen(nsn);
+                    char        buf[512];
+                    if (cnlen + 1 + nlen + 1 > sizeof(buf)) return sym;
+                    memcpy(buf, nsn, cnlen);
+                    buf[cnlen] = '/';
+                    memcpy(buf + cnlen + 1, name, nlen);
+                    buf[cnlen + 1 + nlen] = '\0';
+                    return mino_symbol_n(S, buf, cnlen + 1 + nlen);
+                }
+            }
+            return sym; /* env without ns name (shouldn't happen) */
+        }
+    }
+    return sym;
+}
+
+/*
  * quasiquote_expand: walk `form` as a template. Sublists, subvectors, and
  * submaps are recursed into; (unquote x) evaluates x and uses its value;
  * (unquote-splicing x) evaluates x (expected to yield a list) and splices
- * its elements into the enclosing list.
+ * its elements into the enclosing list. Bare symbols are auto-qualified
+ * to the namespace owning the binding (when one exists), matching the
+ * Clojure backquote contract.
  */
 mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                                      mino_env_t *env)
 {
+    if (form != NULL && form->type == MINO_SYMBOL) {
+        return qq_qualify_symbol(S, form, env);
+    }
     if (form != NULL && form->type == MINO_VECTOR) {
         size_t       nn  = form->as.vec.len;
         size_t       i;

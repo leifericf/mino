@@ -106,6 +106,12 @@ typedef struct {
     char *full_name;
 } ns_alias_t;
 
+/* Per-namespace root env entry. */
+typedef struct {
+    const char *name;     /* interned ns name */
+    mino_env_t *env;      /* root env for this ns; parent → mino.core (or NULL for mino.core itself) */
+} ns_env_entry_t;
+
 /* Var registry entry. */
 typedef struct {
     const char *ns;      /* interned namespace */
@@ -347,6 +353,14 @@ struct mino_state {
     size_t          ns_alias_len;
     size_t          ns_alias_cap;
 
+    /* Per-namespace root env table. Each entry's env owns the ns's
+     * value bindings (def, refer). Every ns env except mino.core has
+     * parent → mino.core, so unqualified lookup walks ns → mino.core. */
+    ns_env_entry_t *ns_env_table;
+    size_t          ns_env_len;
+    size_t          ns_env_cap;
+    mino_env_t     *mino_core_env;    /* root env for mino.core; parent NULL */
+
     /* Var registry */
     var_entry_t    *var_registry;
     size_t          var_registry_len;
@@ -460,6 +474,18 @@ mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent); /* GC-owned */
 mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);     /* borrowed (walks up) */
 mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */
 void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
+
+/* ------------------------------------------------------------------------- */
+/* ns_env.c: per-namespace root env table.                                   */
+/*                                                                           */
+/* Each ns has a root env owning that ns's def/refer bindings. Every ns env  */
+/* except mino.core has parent → mino.core, so unqualified lookup walks      */
+/* lexical → current-ns env → mino.core env.                                 */
+/* ------------------------------------------------------------------------- */
+
+mino_env_t *ns_env_lookup(mino_state_t *S, const char *name);   /* borrowed */
+mino_env_t *ns_env_ensure(mino_state_t *S, const char *name);   /* GC-owned, rooted */
+mino_env_t *current_ns_env(mino_state_t *S);                    /* GC-owned, rooted */
 
 /* ------------------------------------------------------------------------- */
 /* var.c: var registry helpers                                               */

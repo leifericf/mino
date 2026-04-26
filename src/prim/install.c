@@ -43,7 +43,10 @@ void prim_install_table(mino_state_t *S, mino_env_t *env,
 
 /* Bootstraps lib/core by reading and evaluating embedded source on the
  * first call for a state, then caching the parsed AST so subsequent
- * mino_install_core calls into other envs can replay without re-parsing. */
+ * mino_install_core calls into other envs can replay without re-parsing.
+ *
+ * Runs with current_ns set to "mino.core" by the caller, so every def in
+ * core.mino lands in the mino.core ns env. */
 static void install_core_mino(mino_state_t *S, mino_env_t *env)
 {
     size_t i;
@@ -143,16 +146,35 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
 {
     volatile char probe = 0;
     size_t i;
+    mino_env_t  *core_env;
+    const char  *saved_ns;
 
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
 
-    mino_env_set(S, env, "math-pi", mino_float(S, 3.14159265358979323846));
+    /* All bundled-core bindings (primitives + core.mino defs) live in
+     * the mino.core ns env. Every other ns env (including the embedder's
+     * default) chains its parent here so unqualified lookup walks
+     * lexical → current-ns env → mino.core. */
+    core_env = ns_env_ensure(S, "mino.core");
+
+    mino_env_set(S, core_env, "math-pi", mino_float(S, 3.14159265358979323846));
 
     for (i = 0; i < K_CORE_DOMAIN_COUNT; i++) {
-        prim_install_table(S, env, k_core_domains[i].defs,
+        prim_install_table(S, core_env, k_core_domains[i].defs,
                            *k_core_domains[i].count_ptr);
     }
 
-    install_core_mino(S, env);
+    saved_ns      = S->current_ns;
+    S->current_ns = "mino.core";
+    install_core_mino(S, core_env);
+    S->current_ns = saved_ns;
+
+    /* Wire the embedder's env so unqualified lookup falls through into
+     * mino.core when nothing matches in the lexical chain. Skip if the
+     * caller already chained it (e.g. when env is the core env itself). */
+    if (env != NULL && env != core_env && env->parent == NULL) {
+        gc_write_barrier(S, env, env->parent, core_env);
+        env->parent = core_env;
+    }
 }

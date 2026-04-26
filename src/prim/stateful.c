@@ -53,12 +53,14 @@ static void atom_notify_watches(mino_state_t *S, mino_val_t *atom,
         saved_try = S->try_depth;
         if (S->try_depth < MAX_TRY_DEPTH) {
             S->try_stack[S->try_depth].exception = NULL;
+            S->try_stack[S->try_depth].saved_ns  = S->current_ns;
             if (setjmp(S->try_stack[S->try_depth].buf) == 0) {
                 S->try_depth++;
                 (void)mino_call(S, fn, wargs, env);
                 S->try_depth = saved_try;
             } else {
                 /* Watch threw -- swallow and continue. */
+                S->current_ns = S->try_stack[saved_try].saved_ns;
                 S->try_depth = saved_try;
             }
         }

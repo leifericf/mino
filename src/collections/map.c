@@ -621,9 +621,10 @@ mino_val_t *make_fn(mino_state_t *S, mino_val_t *params, mino_val_t *body,
                     mino_env_t *env)
 {
     mino_val_t *v = alloc_val(S, MINO_FN);
-    v->as.fn.params = params;
-    v->as.fn.body   = body;
-    v->as.fn.env    = env;
+    v->as.fn.params      = params;
+    v->as.fn.body        = body;
+    v->as.fn.env         = env;
+    v->as.fn.defining_ns = S->current_ns;
     return v;
 }
 
