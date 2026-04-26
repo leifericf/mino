@@ -92,6 +92,7 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     mino_val_t  *exclude_vec = NULL;
     mino_val_t  *rename_map  = NULL;
     int          refer_all   = use_mode; /* :use defaults to refer-all */
+    int          as_alias_only = 0;
 
     if (spec->type == MINO_SYMBOL) {
         modname = spec->as.s.data;
@@ -109,6 +110,11 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             if (kw_eq(k, "as") && v->type == MINO_SYMBOL) {
                 alias_name = v->as.s.data;
                 alias_len  = v->as.s.len;
+            }
+            if (kw_eq(k, "as-alias") && v->type == MINO_SYMBOL) {
+                alias_name    = v->as.s.data;
+                alias_len     = v->as.s.len;
+                as_alias_only = 1;
             }
             if (kw_eq(k, "refer") && v->type == MINO_VECTOR) {
                 refer_vec = v;
@@ -146,9 +152,12 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
 
     /* Convert dotted name to path and load. A missing or failing module
      * must surface as an error rather than silently succeeding, so the
-     * diagnostic prim_require set is left in place when the call fails. */
-    if (runtime_module_dotted_to_path(modname, modlen,
-                                      pathbuf, sizeof(pathbuf)) == 0) {
+     * diagnostic prim_require set is left in place when the call fails.
+     * :as-alias skips the load entirely -- the alias is registered
+     * regardless of whether the target namespace exists. */
+    if (!as_alias_only
+        && runtime_module_dotted_to_path(modname, modlen,
+                                         pathbuf, sizeof(pathbuf)) == 0) {
         mino_val_t *path_str = mino_string(S, pathbuf);
         mino_val_t *req_args = mino_cons(S, path_str, mino_nil(S));
         mino_val_t *req_res;

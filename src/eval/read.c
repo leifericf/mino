@@ -1356,9 +1356,180 @@ static mino_val_t *read_wrap_one(mino_state_t *S, const char **p,
  * to signal "no form produced" (for #_ at end-of-list and #? with no
  * matching branch).
  */
+/* Build a key keyword/symbol qualified against `prefix` per the
+ * namespaced-map literal rules:
+ *   bare :name      -> :<prefix>/name
+ *   :foo/name       -> unchanged (already qualified)
+ *   :_/name         -> :name (the underscore namespace strips off)
+ *   non keyword/sym -> unchanged
+ */
+static mino_val_t *namespaced_map_qualify_key(mino_state_t *S, mino_val_t *k,
+                                              const char *prefix,
+                                              size_t prefix_len)
+{
+    int is_kw;
+    const char *name;
+    size_t      namelen;
+    const char *slash;
+    char        full[512];
+    size_t      flen;
+    if (k == NULL) return k;
+    if (k->type != MINO_KEYWORD && k->type != MINO_SYMBOL) return k;
+    is_kw   = (k->type == MINO_KEYWORD);
+    name    = k->as.s.data;
+    namelen = k->as.s.len;
+    slash   = memchr(name, '/', namelen);
+    if (slash != NULL) {
+        size_t ns_len = (size_t)(slash - name);
+        if (ns_len == 1 && name[0] == '_') {
+            /* :_/x -> :x */
+            const char *bare = slash + 1;
+            size_t      bare_len = namelen - 2;
+            if (is_kw) return mino_keyword_n(S, bare, bare_len);
+            return mino_symbol_n(S, bare, bare_len);
+        }
+        return k; /* already qualified */
+    }
+    if (prefix_len + 1 + namelen >= sizeof(full)) return k;
+    memcpy(full, prefix, prefix_len);
+    full[prefix_len] = '/';
+    memcpy(full + prefix_len + 1, name, namelen);
+    flen = prefix_len + 1 + namelen;
+    if (is_kw) return mino_keyword_n(S, full, flen);
+    return mino_symbol_n(S, full, flen);
+}
+
+static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
+{
+    /* On entry, **p == '#'. Caller already saw "#:" prefix. */
+    char        prefix[256];
+    size_t      prefix_len = 0;
+    int         saw_double_colon = 0;
+    mino_val_t *m;
+    mino_val_t *out;
+    int         line = S->reader_line;
+    int         col  = S->reader_col;
+    ADVANCE_N(S, p, 2); /* skip "#:" */
+    if (**p == ':') {
+        /* "#::" -- auto-resolve form */
+        saw_double_colon = 1;
+        ADVANCE(S, p);
+    } else if (**p == ' ' || **p == '\t' || **p == '\n' || **p == '\r') {
+        /* "#: name" -- whitespace between #: and name is illegal. */
+        set_reader_diag(S, MRE008,
+            "namespaced map: no whitespace allowed after #:",
+            line, col);
+        return NULL;
+    }
+    /* Read prefix name (optional after ::, required after :). */
+    {
+        const char *start = *p;
+        size_t      tlen  = 0;
+        while ((*p)[tlen] != '\0' && (*p)[tlen] != '{'
+               && (*p)[tlen] != ' ' && (*p)[tlen] != '\t'
+               && (*p)[tlen] != '\n' && (*p)[tlen] != '\r'
+               && (*p)[tlen] != ',') {
+            tlen++;
+        }
+        if (tlen >= sizeof(prefix)) {
+            set_reader_diag(S, MRE008,
+                "namespaced map prefix too long", line, col);
+            return NULL;
+        }
+        if (memchr(start, '/', tlen) != NULL) {
+            set_reader_diag(S, MRE008,
+                "namespaced map prefix must not contain /", line, col);
+            return NULL;
+        }
+        if (tlen > 0) {
+            if (saw_double_colon) {
+                /* #::alias -- look up alias to a real namespace. */
+                size_t i;
+                const char *resolved = NULL;
+                for (i = 0; i < S->ns_alias_len; i++) {
+                    const char *a = S->ns_aliases[i].alias;
+                    if (strlen(a) == tlen && memcmp(a, start, tlen) == 0) {
+                        resolved = S->ns_aliases[i].full_name;
+                        break;
+                    }
+                }
+                if (resolved == NULL) {
+                    char msg[256];
+                    snprintf(msg, sizeof(msg),
+                        "namespaced map: no such alias: %.*s",
+                        (int)tlen, start);
+                    set_reader_diag(S, MRE008, msg, line, col);
+                    return NULL;
+                }
+                prefix_len = strlen(resolved);
+                if (prefix_len >= sizeof(prefix)) {
+                    set_reader_diag(S, MRE008,
+                        "namespaced map alias target too long", line, col);
+                    return NULL;
+                }
+                memcpy(prefix, resolved, prefix_len);
+                prefix[prefix_len] = '\0';
+            } else {
+                memcpy(prefix, start, tlen);
+                prefix[tlen] = '\0';
+                prefix_len = tlen;
+            }
+            ADVANCE_N(S, p, tlen);
+        } else if (saw_double_colon) {
+            /* #::{...} -- current namespace */
+            const char *cur = (S->current_ns != NULL) ? S->current_ns : "user";
+            prefix_len = strlen(cur);
+            if (prefix_len >= sizeof(prefix)) {
+                set_reader_diag(S, MRE008,
+                    "namespaced map current ns too long", line, col);
+                return NULL;
+            }
+            memcpy(prefix, cur, prefix_len);
+            prefix[prefix_len] = '\0';
+        } else {
+            /* "#:" with no prefix and no `::` -- malformed. */
+            set_reader_diag(S, MRE008,
+                "malformed namespaced map prefix", line, col);
+            return NULL;
+        }
+    }
+    skip_ws(S, p);
+    if (**p != '{') {
+        set_reader_diag(S, MRE008,
+            "namespaced map prefix must be followed by {",
+            S->reader_line, S->reader_col);
+        return NULL;
+    }
+    m = read_map_form(S, p);
+    if (m == NULL) return NULL;
+    if (m->type != MINO_MAP) return m;
+    /* Walk the map and rebuild with qualified keys. */
+    {
+        size_t       n   = m->as.map.len;
+        mino_val_t **ks  = (mino_val_t **)gc_alloc_typed(S,
+            GC_T_VALARR, n > 0 ? n * sizeof(*ks) : sizeof(*ks));
+        mino_val_t **vs  = (mino_val_t **)gc_alloc_typed(S,
+            GC_T_VALARR, n > 0 ? n * sizeof(*vs) : sizeof(*vs));
+        size_t       i;
+        for (i = 0; i < n; i++) {
+            mino_val_t *k = vec_nth(m->as.map.key_order, i);
+            mino_val_t *v = map_get_val(m, k);
+            mino_val_t *qk = namespaced_map_qualify_key(S, k, prefix,
+                                                       prefix_len);
+            gc_valarr_set(S, ks, i, qk);
+            gc_valarr_set(S, vs, i, v);
+        }
+        out = mino_map(S, ks, vs, n);
+    }
+    return out;
+}
+
 static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
 {
     char next = *(*p + 1);
+    if (next == ':') {
+        return read_namespaced_map(S, p);
+    }
     if (next == '{') {
         ADVANCE(S, p); /* skip '#', read_set_form will skip '{' */
         return read_set_form(S, p);
