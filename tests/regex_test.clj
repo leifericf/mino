@@ -1,5 +1,35 @@
 (require "tests/test")
 
+;; mino's #"..." reader runs through the regular string-escape path,
+;; so \d / \s / \w lose their backslash before reaching the regex
+;; engine. Tests that rely on those escapes pass the pattern as a
+;; literal string ("\\d+" → \d+) until the reader gains a regex-aware
+;; escape mode.
+(deftest re-find-groups-vector
+  (is (= ["12-34" "12" "34"] (re-find "(\\d+)-(\\d+)" "12-34")))
+  (is (= ["a/b" "a" "b"]     (re-matches "(.+)/(.+)" "a/b"))))
+
+(deftest re-find-groupless-still-string
+  (is (= "abc" (re-find "abc" "xabcx"))))
+
+(deftest re-matcher-iterates
+  (let [m (re-matcher "\\d+" "1 2 3")]
+    (is (= "1" (re-find m)))
+    (is (= "2" (re-find m)))
+    (is (= "3" (re-find m)))
+    (is (nil? (re-find m)))))
+
+(deftest re-groups-returns-last-match
+  (let [m (re-matcher "(\\d+)" "1 2 3")]
+    (is (some? (re-find m)))
+    (is (= ["1" "1"] (re-groups m)))
+    (re-find m)
+    (is (= ["2" "2"] (re-groups m)))))
+
+(deftest re-groups-throws-without-match
+  (let [m (re-matcher "\\d+" "abc")]
+    (is (thrown? (re-groups m)))))
+
 ;; Regex: re-find and re-matches via bundled tiny-regex-c.
 
 (deftest re-find-basic

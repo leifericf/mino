@@ -1172,7 +1172,20 @@
 
 (def re-pattern "Returns pattern unchanged. Provided for compatibility." identity)
 
-(def re-seq "Returns a lazy sequence of all matches of pattern in string s."
+;; Capture the C primitives before the matcher-aware wrappers below
+;; shadow them.
+(def ^:private prim-re-find    re-find)
+(def ^:private prim-re-matches re-matches)
+
+(defn ^:private match-whole_ [m]
+  ;; The C primitives return either a string (no groups) or a vector
+  ;; [whole g1 g2 ...] (groups present). Normalise to the whole match.
+  (if (vector? m) (first m) m))
+
+(def re-seq
+  "Returns a lazy sequence of all matches of pattern in string s. Each
+   match is a string when the pattern has no groups, or a vector
+   [whole g1 g2 ...] when it does."
   (let [find-index (fn [s sub i]
                      (if (> (+ i (count sub)) (count s))
                        nil
@@ -1181,11 +1194,80 @@
                          (find-index s sub (inc i)))))]
     (fn [pattern s]
       (lazy-seq
-        (when-let [m (re-find pattern s)]
-          (let [idx (find-index s m 0)]
+        (when-let [m (prim-re-find pattern s)]
+          (let [whole (match-whole_ m)
+                idx   (find-index s whole 0)]
             (when (not (nil? idx))
-              (let [rest-s (subs s (+ idx (max (count m) 1)))]
+              (let [rest-s (subs s (+ idx (max (count whole) 1)))]
                 (cons m (re-seq pattern rest-s))))))))))
+
+;; re-matcher: a stateful matcher value backed by an atom holding
+;; {:pattern :text :pos :last}. Each (re-find m) advances :pos past the
+;; previous match's end and stores the latest result under :last.
+(defn re-matcher
+  "Returns a matcher value for repeated find/match operations on text
+   using pattern. The resulting value is consumed by re-find, re-groups
+   and so on."
+  [pattern text]
+  (atom {::matcher? true :pattern pattern :text text :pos 0 :last nil}))
+
+(defn ^:private matcher? [m]
+  (and (atom? m)
+       (let [v (deref m)]
+         (and (map? v) (::matcher? v)))))
+
+(defn ^:private substring-index_ [s sub]
+  ;; Brute-force scan for the first index of sub in s. Used by
+  ;; re-find-on-matcher_ to advance the matcher's :pos. Lives here
+  ;; (rather than calling clojure.string/index-of) because core.clj
+  ;; loads before clojure.string.
+  (let [slen (count s)
+        nlen (count sub)]
+    (if (zero? nlen)
+      0
+      (loop [i 0]
+        (cond
+          (> (+ i nlen) slen) nil
+          (= (subs s i (+ i nlen)) sub) i
+          :else (recur (+ i 1)))))))
+
+(defn ^:private re-find-on-matcher_ [m]
+  (let [state   @m
+        pattern (:pattern state)
+        text    (:text state)
+        pos     (:pos state)
+        rem     (subs text pos)
+        result  (prim-re-find pattern rem)]
+    (when (some? result)
+      (let [whole  (match-whole_ result)
+            offset (substring-index_ rem whole)]
+        (when (some? offset)
+          (let [end (+ pos offset (max (count whole) 1))]
+            (swap! m assoc :pos end :last result)
+            result))))))
+
+(defn re-find
+  "Find the first match. (re-find pattern text) returns a string (no
+   groups) or [whole g1 g2 ...] (groups). (re-find m) advances a matcher."
+  ([m]            (re-find-on-matcher_ m))
+  ([pattern text] (prim-re-find pattern text)))
+
+(defn re-matches
+  "Like re-find but anchored to the whole string. Returns a string
+   (no groups) or [whole g1 g2 ...] (groups), or nil."
+  [pattern text]
+  (prim-re-matches pattern text))
+
+(defn re-groups
+  "Returns the most recent match groups for matcher m: a vector
+   [whole g1 g2 ...] when the pattern has groups, the whole-match string
+   otherwise. Throws when the matcher has no recorded match yet."
+  [m]
+  (let [last-match (:last @m)]
+    (when (nil? last-match)
+      (throw (ex-info "No match has been performed by the matcher"
+                      {:matcher m})))
+    last-match))
 
 ;; --- Complex macros ---
 

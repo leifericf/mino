@@ -61,6 +61,28 @@ int re_matchp(re_t pattern, const char* text, int* matchlength);
 /* Find matches of the txt pattern inside text (will compile automatically first). */
 int re_match(const char* pattern, const char* text, int* matchlength);
 
+/* Capture-group support.
+ *   Maximum capture groups in a pattern (Clojure indexes 9 positionally
+ *   via re-groups; mino's #" reader has no group-name syntax). */
+#define RE_MAX_GROUPS 16
+
+typedef struct re_groups_s {
+  int n;                      /* number of captured groups (0..RE_MAX_GROUPS) */
+  int starts[RE_MAX_GROUPS];  /* offset relative to the matched text start    */
+  int ends[RE_MAX_GROUPS];    /* end offset (exclusive); -1 if not matched    */
+} re_groups_t;
+
+/* Number of groups in the compiled pattern. */
+int re_n_groups(re_t pattern);
+
+/* re_matchp_groups: like re_matchp, but also fills `out` with span
+ * positions for each capture group on a successful match. The spans
+ * are byte offsets relative to the input `text` (so callers should add
+ * them to the match start). On no match returns -1 and `out` is left
+ * untouched. */
+int re_matchp_groups(re_t pattern, const char* text, int* matchlength,
+                     re_groups_t* out);
+
 
 #ifdef __cplusplus
 }

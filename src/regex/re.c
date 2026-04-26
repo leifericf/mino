@@ -49,7 +49,7 @@
 #define MAX_CHAR_CLASS_LEN      40    /* Max length of character-class buffer in.   */
 
 
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, /* BRANCH */ };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE /* , BRANCH */ };
 
 typedef struct regex_t
 {
@@ -58,8 +58,24 @@ typedef struct regex_t
   {
     unsigned char  ch;   /*      the character itself             */
     unsigned char* ccl;  /*  OR  a pointer to characters in class */
+    unsigned char  gid;  /*  OR  the capture group id (1..15)     */
   } u;
 } regex_t;
+
+/* Per-pattern group count is recorded in the sentinel UNUSED slot's
+ * u.gid field at the end of the compiled buffer. re_n_groups reads
+ * it back. */
+
+/* Capture-group state for the active match call. The matcher walks
+ * the pattern in a forward-only fashion with limited backtracking
+ * inside matchstar / matchplus / matchquestion, so a successful match
+ * leaves spans pointing at the final write for each group. */
+static struct {
+  const char *base;                 /* start of input text */
+  int         n;
+  int         starts[RE_MAX_GROUPS];
+  int         ends[RE_MAX_GROUPS];
+} re_g_state;
 
 
 
@@ -89,9 +105,54 @@ int re_match(const char* pattern, const char* text, int* matchlength)
   return result;
 }
 
+static void re_g_state_reset(const char* base, int n)
+{
+  int i;
+  re_g_state.base = base;
+  re_g_state.n    = n;
+  for (i = 0; i < RE_MAX_GROUPS; i++)
+  {
+    re_g_state.starts[i] = -1;
+    re_g_state.ends[i]   = -1;
+  }
+}
+
+int re_matchp_groups(re_t pattern, const char* text, int* matchlength,
+                     re_groups_t* out)
+{
+  int idx;
+  int n_groups = 0;
+  if (pattern != 0)
+  {
+    int j = 0;
+    while (pattern[j].type != UNUSED) j++;
+    n_groups = (int)pattern[j].u.gid;
+  }
+  re_g_state_reset(text, n_groups);
+  idx = re_matchp(pattern, text, matchlength);
+  if (out != NULL)
+  {
+    int i;
+    out->n = n_groups;
+    for (i = 0; i < RE_MAX_GROUPS; i++)
+    {
+      out->starts[i] = re_g_state.starts[i];
+      out->ends[i]   = re_g_state.ends[i];
+    }
+  }
+  return idx;
+}
+
 int re_matchp(re_t pattern, const char* text, int* matchlength)
 {
   *matchlength = 0;
+  /* Reset group spans for groupless callers too, so stale state from
+   * a prior re_matchp_groups call doesn't bleed in. The base pointer
+   * is set so GROUP_OPEN/CLOSE markers (if any) can record offsets. */
+  if (re_g_state.base != text)
+  {
+    re_g_state_reset(text, 0);
+  }
   if (pattern != 0)
   {
     if (pattern[0].type == BEGIN)
@@ -140,6 +201,9 @@ re_t re_compile(const char* pattern)
   char c;     /* current char in pattern   */
   int i = 0;  /* index into pattern        */
   int j = 0;  /* index into re_compiled    */
+  int           group_count       = 0;
+  unsigned char group_stack[RE_MAX_GROUPS];
+  int           group_stack_depth = 0;
 
   re_compiled = (regex_t *)malloc(total);
   if (re_compiled == NULL) return 0;
@@ -250,6 +314,29 @@ re_t re_compile(const char* pattern)
         re_compiled[j].u.ccl = &ccl_buf[buf_begin];
       } break;
 
+      /* Capture groups. Maximum nesting depth = RE_MAX_GROUPS. */
+      case '(':
+      {
+        if (group_count >= RE_MAX_GROUPS - 1
+         || group_stack_depth >= RE_MAX_GROUPS - 1)
+        {
+          free(re_compiled); return 0;
+        }
+        group_count++;
+        group_stack[group_stack_depth++] = (unsigned char)group_count;
+        re_compiled[j].type   = GROUP_OPEN;
+        re_compiled[j].u.gid  = (unsigned char)group_count;
+      } break;
+      case ')':
+      {
+        if (group_stack_depth == 0)
+        {
+          free(re_compiled); return 0;
+        }
+        re_compiled[j].type  = GROUP_CLOSE;
+        re_compiled[j].u.gid = group_stack[--group_stack_depth];
+      } break;
+
       /* Other characters: */
       default:
       {
@@ -266,10 +353,26 @@ re_t re_compile(const char* pattern)
     i += 1;
     j += 1;
   }
-  /* 'UNUSED' is a sentinel used to indicate end-of-pattern */
-  re_compiled[j].type = UNUSED;
+  if (group_stack_depth != 0)
+  {
+    /* Unmatched opening paren in pattern. */
+    free(re_compiled); return 0;
+  }
+  /* 'UNUSED' is a sentinel used to indicate end-of-pattern. The slot
+   * also carries the pattern's total group count so re_n_groups can
+   * read it back without scanning. */
+  re_compiled[j].type  = UNUSED;
+  re_compiled[j].u.gid = (unsigned char)group_count;
 
   return (re_t) re_compiled;
+}
+
+int re_n_groups(re_t pattern)
+{
+  int j = 0;
+  if (pattern == NULL) return 0;
+  while (pattern[j].type != UNUSED) j++;
+  return (int)pattern[j].u.gid;
 }
 
 /* Private functions: */
@@ -480,6 +583,27 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
   int pre = *matchlength;
   do
   {
+    /* Capture-group markers are no-op for the matcher; they just
+     * record the current text offset for the corresponding group.
+     * Multiple writes during backtracking inside matchstar / matchplus
+     * settle to the final successful path's offsets. */
+    while (pattern[0].type == GROUP_OPEN || pattern[0].type == GROUP_CLOSE)
+    {
+      int gid = (int)pattern[0].u.gid;
+      if (gid >= 1 && gid <= RE_MAX_GROUPS)
+      {
+        int off = (int)(text - re_g_state.base);
+        if (pattern[0].type == GROUP_OPEN)
+        {
+          re_g_state.starts[gid - 1] = off;
+        }
+        else
+        {
+          re_g_state.ends[gid - 1] = off;
+        }
+      }
+      pattern++;
+    }
     if ((pattern[0].type == UNUSED) || (pattern[1].type == QUESTIONMARK))
     {
       return matchquestion(pattern[0], &pattern[2], text, matchlength);
