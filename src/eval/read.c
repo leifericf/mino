@@ -192,9 +192,17 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
 }
 
 /* Read a reader-conditional body: (keyword form keyword form ...).
- * Matches S->reader_dialect first, then "default".
- * Returns the matched form in *found, or NULL if no match.
- * Caller must have consumed the opening '('. */
+ * Matches S->reader_dialect first, then "clj" (because mino is a
+ * non-JVM Clojure dialect), then "default". Returns the matched form
+ * in *found, or NULL if no match. Caller must have consumed the
+ * opening '('. */
+static int reader_cond_active(const char *dialect,
+                              const char *kname, size_t klen)
+{
+    if (klen == strlen(dialect) && memcmp(kname, dialect, klen) == 0) return 1;
+    if (klen == 3 && memcmp(kname, "clj", 3) == 0) return 1;
+    return 0;
+}
 static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
                                   mino_val_t **found)
 {
@@ -242,12 +250,11 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
         if (!matched) {
             const char *kname = key->as.s.data;
             size_t      klen  = key->as.s.len;
-            if ((klen == strlen(S->reader_dialect)
-                 && memcmp(kname, S->reader_dialect, klen) == 0)
-                || (klen == 7 && memcmp(kname, "default", 7) == 0)) {
+            int is_default = (klen == 7 && memcmp(kname, "default", 7) == 0);
+            if (reader_cond_active(S->reader_dialect, kname, klen)
+                || is_default) {
                 result  = val;
-                matched = (klen != 7
-                           || memcmp(kname, "default", 7) != 0);
+                matched = !is_default;
                 gc_pin(result);
             }
         }

@@ -36,17 +36,22 @@
 ;; --- Map literal reader conditional key elimination ---
 
 (deftest map-reader-conditional-key-elim
+  ;; Mino matches both :mino and :clj, so we use :cljs to drive
+  ;; elimination behavior — :cljs is the always-skipped tag.
   (testing "eliminated key skips paired value"
-    (is (= {:c 2} {#?(:clj :a :cljs :b) 1 :c 2})))
+    (is (= {:c 2} {#?(:cljs :b) 1 :c 2})))
 
   (testing "both branches eliminated"
-    (is (= {:ok 42} {#?(:clj :x :cljs :y) #?(:clj 1 :cljs 2) :ok 42})))
+    (is (= {:ok 42} {#?(:cljs :y) #?(:cljs 2) :ok 42})))
 
   (testing "empty map after elimination"
-    (is (= {} {#?(:clj :a :cljs :b) 1})))
+    (is (= {} {#?(:cljs :b) 1})))
 
   (testing "mino branch matches"
-    (is (= {:a 1} {#?(:mino :a :clj :b) 1}))))
+    (is (= {:a 1} {#?(:mino :a :clj :b) 1})))
+
+  (testing "clj branch also matches under reader-conditional"
+    (is (= {:a 1} {#?(:clj :a :cljs :b) 1}))))
 
 ;; --- Unquote-splicing in vectors ---
 
@@ -288,7 +293,7 @@
 
 (deftest reader-cond-splice-in-map
   (testing "unmatched splice is silently skipped"
-    (is (= {:a 1} {:a 1 #?@(:clj [:b 2])})))
+    (is (= {:a 1} {:a 1 #?@(:cljs [:b 2])})))
 
   (testing "matched :mino splice adds pairs"
     (is (= {:a 1 :b 2 :c 3} {:a 1 #?@(:mino [:b 2 :c 3])})))
