@@ -1,4 +1,5 @@
-(ns clojure.test)
+(ns clojure.test
+  (:require [clojure.string :refer [join]]))
 
 ;; --- State ---
 

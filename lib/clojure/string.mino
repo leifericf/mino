@@ -1,64 +1,73 @@
 (ns clojure.string)
 
-;; Capture core references before shadowing.
-(def core-upper-case_   upper-case)
-(def core-lower-case_   lower-case)
-(def core-starts-with?_ starts-with?)
-(def core-ends-with?_   ends-with?)
-(def core-reverse_      reverse)
-(def core-blank?_       blank?)
-(def core-includes?_    includes?)
-(def core-str-replace_  str-replace)
-(def core-replace_      replace)
+;; The C primitives `clojure.string/lower-case`, `upper-case`,
+;; `starts-with?`, `ends-with?`, `includes?`, `replace`, `split`,
+;; `join`, and `trim` are installed into this namespace by
+;; mino_install_core. The defs below add nil-handling and
+;; arity-coercion wrappers around them and define the rest of the
+;; clojure.string surface (capitalize, blank?, escape, triml,
+;; trimr, split-lines, trim-newline) on top.
 
-(defn assert-string_ [s]
+;; Capture primitive references before the wrappers shadow them.
+(def ^:private prim-upper-case   upper-case)
+(def ^:private prim-lower-case   lower-case)
+(def ^:private prim-starts-with? starts-with?)
+(def ^:private prim-ends-with?   ends-with?)
+(def ^:private prim-includes?    includes?)
+(def ^:private prim-replace      replace)
+(def ^:private prim-trim         trim)
+
+(defn- assert-string [s]
   (when-not (string? s)
     (throw (ex-info (str "Argument must be a string, got " (type s)) {:arg s})))
   s)
 
-(defn as-str_ [s]
+(defn- as-str [s]
   (if (string? s) s (str s)))
 
 (defn blank? [s]
   (if (nil? s)
     true
-    (do (assert-string_ s)
-        (core-blank?_ s))))
+    (let [s (assert-string s)]
+      (loop [i 0 len (count s)]
+        (if (>= i len)
+          true
+          (let [c (char-at s i)]
+            (if (or (= c " ") (= c "\t") (= c "\n") (= c "\r"))
+              (recur (+ i 1) len)
+              false)))))))
 
 (defn capitalize [s]
-  (let [s (as-str_ s)]
+  (let [s (as-str s)]
     (if (= s "")
       ""
-      (str (core-upper-case_ (subs s 0 1))
-           (core-lower-case_ (subs s 1))))))
+      (str (prim-upper-case (subs s 0 1))
+           (prim-lower-case (subs s 1))))))
 
 (defn starts-with? [s prefix]
-  (core-starts-with?_ (as-str_ s) prefix))
+  (prim-starts-with? (as-str s) prefix))
 
 (defn ends-with? [s suffix]
-  (core-ends-with?_ (as-str_ s) suffix))
+  (prim-ends-with? (as-str s) suffix))
 
 (defn escape [s cmap]
-  (let [s (assert-string_ s)]
+  (let [s (assert-string s)]
     (apply str (map (fn [c] (or (get cmap c) c)) (seq s)))))
 
 (defn lower-case [s]
-  (core-lower-case_ (as-str_ s)))
+  (prim-lower-case (as-str s)))
 
 (defn upper-case [s]
-  (core-upper-case_ (as-str_ s)))
-
-(defn reverse [s]
-  (apply str (core-reverse_ (seq (assert-string_ s)))))
+  (prim-upper-case (as-str s)))
 
 (defn replace [s match replacement]
-  (core-str-replace_ (assert-string_ s) match replacement))
+  (prim-replace (assert-string s) match replacement))
 
 (defn split-lines [s]
-  (split (assert-string_ s) "\n"))
+  (split (assert-string s) "\n"))
 
 (defn triml [s]
-  (let [s (assert-string_ s)
+  (let [s (assert-string s)
         len (count s)]
     (loop [i 0]
       (if (>= i len)
@@ -69,7 +78,7 @@
             (subs s i)))))))
 
 (defn trimr [s]
-  (let [s (assert-string_ s)
+  (let [s (assert-string s)
         len (count s)]
     (loop [i len]
       (if (<= i 0)
@@ -83,7 +92,7 @@
   (trimr (triml s)))
 
 (defn trim-newline [s]
-  (let [s (assert-string_ s)
+  (let [s (assert-string s)
         len (count s)]
     (loop [i len]
       (if (<= i 0)
@@ -94,10 +103,10 @@
             (subs s 0 i)))))))
 
 (defn includes? [s substr]
-  (core-includes?_ (assert-string_ s) (assert-string_ substr)))
+  (prim-includes? (assert-string s) (assert-string substr)))
 
-(defn join
-  ([] "")
-  ([coll] (apply str coll))
-  ([separator coll] (apply str (interpose separator coll))))
+(defn reverse
+  "Returns s with its characters reversed."
+  [s]
+  (apply str (mino.core/reverse (seq (assert-string s)))))
 

@@ -850,6 +850,9 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
     return mino_string_n(S, buf, 36);
 }
 
+/* Core string operations live in mino.core: the always-available
+ * conversion and formatting primitives that have no Clojure-side
+ * namespace either (str, format, name, namespace, subs, ...). */
 const mino_prim_def k_prims_string[] = {
     {"str",          prim_str,
      "Returns the string representation of the arguments concatenated."},
@@ -863,11 +866,24 @@ const mino_prim_def k_prims_string[] = {
      "Returns the character at the given index as a string."},
     {"subs",         prim_subs,
      "Returns a substring from start (inclusive) to end (exclusive)."},
+    {"random-uuid",  prim_random_uuid,
+     "Returns a random UUID v4 string."},
+};
+
+const size_t k_prims_string_count =
+    sizeof(k_prims_string) / sizeof(k_prims_string[0]);
+
+/* Operations that match Clojure's clojure.string namespace. mino
+ * installs these into clojure.string directly so user code that
+ * refers them in via :require works the way Clojure programmers
+ * expect, and so :refer-clojure :exclude doesn't accidentally
+ * shadow them in a fresh namespace. */
+const mino_prim_def k_prims_clojure_string[] = {
     {"split",        prim_split,
      "Splits a string on a regex pattern."},
     {"join",         prim_join,
      "Returns a string of the items in coll joined by separator."},
-    {"str-replace",  prim_str_replace,
+    {"replace",      prim_str_replace,
      "Replaces all occurrences of match in s with replacement."},
     {"starts-with?", prim_starts_with_p,
      "Returns true if the string starts with the given prefix."},
@@ -881,9 +897,7 @@ const mino_prim_def k_prims_string[] = {
      "Returns the string converted to lower case."},
     {"trim",         prim_trim,
      "Returns the string with leading and trailing whitespace removed."},
-    {"random-uuid",  prim_random_uuid,
-     "Returns a random UUID v4 string."},
 };
 
-const size_t k_prims_string_count =
-    sizeof(k_prims_string) / sizeof(k_prims_string[0]);
+const size_t k_prims_clojure_string_count =
+    sizeof(k_prims_clojure_string) / sizeof(k_prims_clojure_string[0]);

@@ -74,6 +74,10 @@ static int refer_collision_check(mino_state_t *S, mino_val_t *form,
     b = env_find_here(ns_env, name);
     if (b == NULL) return 0;
     if (var_find(S, S->current_ns, name) != NULL) return 0;
+    /* Bare-primitive bindings come from C-side installs (e.g. the
+     * clojure.string primitives) and are intentionally meant to be
+     * shadowable by mino-side wrappers in the same ns. */
+    if (b->val != NULL && b->val->type == MINO_PRIM) return 0;
     {
         char msg[300];
         snprintf(msg, sizeof(msg),

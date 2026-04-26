@@ -398,6 +398,9 @@ extern const size_t        k_prims_lazy_count;
 extern const mino_prim_def k_prims_string[];
 extern const size_t        k_prims_string_count;
 
+extern const mino_prim_def k_prims_clojure_string[];
+extern const size_t        k_prims_clojure_string_count;
+
 extern const mino_prim_def k_prims_reflection[];
 extern const size_t        k_prims_reflection_count;
 

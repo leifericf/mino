@@ -1,4 +1,8 @@
 (require "tests/test")
+(require '[clojure.string :as str])
+(require '[clojure.string :refer [split join trim upper-case lower-case
+                                  starts-with? ends-with? includes?]])
+;; replace stays under str/ to avoid clobbering clojure.core/replace.
 
 ;; String operations and formatting.
 

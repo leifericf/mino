@@ -1,4 +1,6 @@
 (require "tests/test")
+(require '[clojure.string :as str])
+(require '[clojure.string :refer [blank? trim]])
 
 ;; Tests for core.mino functions added beyond the original set.
 
@@ -174,8 +176,8 @@
   (is (= [1 :c 2] (into [] (replace {:a 1 :b 2} [:a :c :b])))))
 
 (deftest str-replace-fn
-  (is (= "hello-world" (str-replace "hello world" " " "-")))
-  (is (= "abc" (str-replace "a.b.c" "." ""))))
+  (is (= "hello-world" (str/replace "hello world" " " "-")))
+  (is (= "abc" (str/replace "a.b.c" "." ""))))
 
 ;; --- Bitwise ---
 

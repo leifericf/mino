@@ -129,18 +129,36 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Symbol form: '(require 'foo.bar) — Clojure's everyday form. */
     if (name_val != NULL && name_val->type == MINO_SYMBOL) {
         char pathbuf[256];
-        /* Runtime-ns shortcut: skip path conversion when the namespace
-         * already has substantive bindings (i.e., something has actually
-         * loaded into it). An empty placeholder created by :as-alias
-         * doesn't count -- the load still has to happen. */
+        /* Runtime-ns shortcut: skip the file load when either the
+         * file's already in module_cache (loaded earlier) or no file
+         * backs the namespace (caller built it at runtime via
+         * (ns foo) (def ...) ). Primitive-only env entries don't
+         * trigger a skip on first load -- the wrapper file still
+         * has to run. */
         if (name_val->as.s.len < 256) {
             char dotbuf[256];
+            char shortcut_path[256];
             mino_env_t *e;
+            int         path_ok;
             memcpy(dotbuf, name_val->as.s.data, name_val->as.s.len);
             dotbuf[name_val->as.s.len] = '\0';
             e = ns_env_lookup(S, dotbuf);
+            path_ok = runtime_module_dotted_to_path(
+                          name_val->as.s.data, name_val->as.s.len,
+                          shortcut_path, sizeof(shortcut_path)) == 0;
             if (e != NULL && e->len > 0) {
-                return mino_nil(S);
+                if (path_ok) {
+                    size_t ci;
+                    for (ci = 0; ci < S->module_cache_len; ci++) {
+                        if (strcmp(S->module_cache[ci].name,
+                                   shortcut_path) == 0) {
+                            return mino_nil(S);
+                        }
+                    }
+                } else {
+                    /* No filesystem path -- runtime-only namespace. */
+                    return mino_nil(S);
+                }
             }
         }
         if (runtime_module_dotted_to_path(name_val->as.s.data,
@@ -236,9 +254,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             runtime_module_add_alias(S, abuf, fbuf);
             return mino_nil(S);
         }
-        /* Runtime-ns shortcut: skip path conversion only when the
-         * namespace already has loaded bindings (an empty alias-only
-         * placeholder doesn't count). */
+        /* Runtime-ns shortcut: skip the file load only when the
+         * namespace already has user-defined vars (someone ran
+         * (ns foo) (def ...) at runtime). Empty alias-only
+         * placeholders and primitive-only env entries (e.g.
+         * clojure.string after install dumped its primitives in)
+         * don't count. */
         {
             int runtime_hit = 0;
             if (mod_sym->as.s.len < 256) {
@@ -248,8 +269,14 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 dotbuf[mod_sym->as.s.len] = '\0';
                 e = ns_env_lookup(S, dotbuf);
                 if (e != NULL && e->len > 0) {
-                    runtime_hit = 1;
-                    result      = mino_nil(S);
+                    size_t vi;
+                    for (vi = 0; vi < S->var_registry_len; vi++) {
+                        if (strcmp(S->var_registry[vi].ns, dotbuf) == 0) {
+                            runtime_hit = 1;
+                            result      = mino_nil(S);
+                            break;
+                        }
+                    }
                 }
             }
             if (!runtime_hit) {
@@ -422,11 +449,18 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return S->module_cache[i].value;
         }
     }
-    /* If the dotted form of name corresponds to a runtime-created namespace
-     * with substantive bindings, treat it as already loaded. This lets
-     * (require 'foo) succeed when foo was made by (ns foo) in-memory.
-     * Path names use underscores where ns names use dashes, so try both
-     * variants. An empty placeholder created by :as-alias doesn't count. */
+    /* If the dotted form of name corresponds to a runtime-only ns
+     * (a (ns foo) without a backing file) and the namespace already
+     * has substantive bindings, treat it as loaded so (require 'foo)
+     * doesn't go searching for a foo.mino that was never written to
+     * disk. Bindings that came from C primitive installs (e.g. the
+     * clojure.string namespace) don't count -- a wrapper file may
+     * exist on disk and still need to load the first time.
+     *
+     * The check fires only when (a) the ns env has bindings AND
+     * (b) the resolver can't find a file for this name. Path names
+     * use underscores where ns names use dashes, so try both
+     * dot-form and dash-form. */
     {
         char dotted[512];
         char dashed[512];
@@ -434,17 +468,25 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t k;
         if (nl < sizeof(dotted)) {
             mino_env_t *e;
-            for (k = 0; k < nl; k++) dotted[k] = (name[k] == '/') ? '.' : name[k];
-            dotted[nl] = '\0';
-            e = ns_env_lookup(S, dotted);
-            if (e != NULL && e->len > 0) {
-                return mino_nil(S);
+            int has_file = 0;
+            if (S->module_resolver != NULL) {
+                const char *resolved = S->module_resolver(name,
+                                          S->module_resolver_ctx);
+                if (resolved != NULL) has_file = 1;
             }
-            for (k = 0; k < nl; k++) dashed[k] = (dotted[k] == '_') ? '-' : dotted[k];
-            dashed[nl] = '\0';
-            e = ns_env_lookup(S, dashed);
-            if (e != NULL && e->len > 0) {
-                return mino_nil(S);
+            if (!has_file) {
+                for (k = 0; k < nl; k++) dotted[k] = (name[k] == '/') ? '.' : name[k];
+                dotted[nl] = '\0';
+                e = ns_env_lookup(S, dotted);
+                if (e != NULL && e->len > 0) {
+                    return mino_nil(S);
+                }
+                for (k = 0; k < nl; k++) dashed[k] = (dotted[k] == '_') ? '-' : dotted[k];
+                dashed[nl] = '\0';
+                e = ns_env_lookup(S, dashed);
+                if (e != NULL && e->len > 0) {
+                    return mino_nil(S);
+                }
             }
         }
     }

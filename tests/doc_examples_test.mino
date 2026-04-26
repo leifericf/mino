@@ -1,4 +1,5 @@
 (require "tests/test")
+(require '[clojure.string :refer [blank?]])
 
 ;; Documentation examples: clean, self-contained assertions designed
 ;; to appear in the Language Reference on mino-lang.org. Each deftest

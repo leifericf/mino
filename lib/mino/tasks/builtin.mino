@@ -9,12 +9,12 @@
   (str "-Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval"
        " -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop"
        " -Isrc/diag -Isrc/vendor/imath"))
-(def ^:private cflags  (split (or (getenv "CFLAGS")
+(def ^:private cflags  (str/split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
                                        include-flags)) " "))
 (def ^:private ldflags (let [v (or (getenv "LDFLAGS") "")]
-                         (if (= v "") [] (split v " "))))
-(def ^:private libs    (split (or (getenv "LIBS") "-lm") " "))
+                         (if (= v "") [] (str/split v " "))))
+(def ^:private libs    (str/split (or (getenv "LIBS") "-lm") " "))
 
 (def ^:private windows? (some? (getenv "OS")))
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
@@ -72,11 +72,11 @@
     (let [content (slurp path)
           ;; Remove backslash-newline continuations and trailing whitespace
           flat    (-> content
-                      (str-replace "\\\n" " ")
-                      (str-replace "\n" " ")
-                      trim)
+                      (str/replace "\\\n" " ")
+                      (str/replace "\n" " ")
+                      str/trim)
           ;; Split on whitespace, skip target (first token ending in :)
-          tokens  (filter #(not (= "" %)) (split flat " "))
+          tokens  (filter #(not (= "" %)) (str/split flat " "))
           deps    (rest tokens)]
       (vec (filter #(not (= "\\" %)) deps)))))
 
@@ -91,9 +91,9 @@
                     (subs src 0 (- (count src) 1))
                     src)
           escaped (-> src
-                      (str-replace "\\" "\\\\")
-                      (str-replace "\"" "\\\""))
-          body    (str-replace escaped "\n" "\\n\"\n    \"")]
+                      (str/replace "\\" "\\\\")
+                      (str/replace "\"" "\\\""))
+          body    (str/replace escaped "\n" "\\n\"\n    \"")]
       (spit "src/core_mino.h"
             (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
                  " *\n"
@@ -163,7 +163,7 @@
 (def ^:private san-base
   (into ["-g" "-O1" "-fno-omit-frame-pointer" "-std=c99"
          "-Wall" "-Wextra" "-Wpedantic"]
-        (split include-flags " ")))
+        (str/split include-flags " ")))
 
 (defn- build-sanitized [label out-bin extra-flags]
   (gen-core-header)
@@ -258,14 +258,14 @@
 (defn- count-lines
   "Return the number of lines in a file."
   [path]
-  (count (split (slurp path) "\n")))
+  (count (str/split (slurp path) "\n")))
 
 (defn- find-large-functions
   "Find functions exceeding fn-limit lines.
    Uses column-0 brace tracking: { at col 0 opens a function body,
    } at col 0 closes it. Returns a vector of {:file :name :lines} maps."
   [path]
-  (let [lines  (split (slurp path) "\n")
+  (let [lines  (str/split (slurp path) "\n")
         nlines (count lines)]
     (loop [i 0 depth 0 fn-start nil fn-name nil results []]
       (if (>= i nlines)
@@ -277,7 +277,7 @@
             (let [sig (loop [j (- i 1)]
                         (if (< j 0)
                           "<unknown>"
-                          (let [prev (trim (nth lines j))]
+                          (let [prev (str/trim (nth lines j))]
                             (if (= prev "")
                               (recur (- j 1))
                               prev))))]
@@ -297,7 +297,7 @@
 (defn- find-abort-sites
   "Find abort() call sites. Returns a vector of {:file :line :text :has-rationale} maps."
   [path]
-  (let [lines  (split (slurp path) "\n")
+  (let [lines  (str/split (slurp path) "\n")
         nlines (count lines)]
     (loop [i 0 results []]
       (if (>= i nlines)
@@ -313,7 +313,7 @@
                                              (some? (re-find #"//" prev))))))]
               (recur (+ i 1) (conj results {:file path
                                             :line (+ i 1)
-                                            :text (trim line)
+                                            :text (str/trim line)
                                             :has-rationale has-comment})))
             (recur (+ i 1) results)))))))
 
@@ -348,7 +348,7 @@
           (let [file  (:file m)
                 sig   (:name m)
                 allowed (some (fn [entry]
-                          (let [parts (split entry ":")
+                          (let [parts (str/split entry ":")
                                 af    (first parts)
                                 afn   (first (rest parts))]
                             (and (= file af) (includes? sig afn))))

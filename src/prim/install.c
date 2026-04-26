@@ -171,6 +171,20 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     install_core_mino(S, core_env);
     S->current_ns = saved_ns;
 
+    /* Install string operations into the clojure.string namespace,
+     * matching the namespace name that Babashka, ClojureScript, and
+     * Jank use. The wrappers in lib/clojure/string.mino layer
+     * nil-handling on top. Putting these here instead of mino.core
+     * means a fresh user namespace doesn't accidentally inherit (and
+     * shadow) names like `join` or `split` through :refer-clojure. */
+    {
+        mino_env_t *cs_env = ns_env_ensure(S, "clojure.string");
+        if (cs_env != NULL) {
+            prim_install_table(S, cs_env, k_prims_clojure_string,
+                               k_prims_clojure_string_count);
+        }
+    }
+
     /* The embedder's env stays parent-less. eval_symbol falls back to
      * current_ns_env after the lexical chain runs out, and per-ns envs
      * chain to mino.core themselves -- so a namespace that detaches
