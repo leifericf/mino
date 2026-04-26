@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.74.0 — Deferred Core Surface
+
+The deferred names from the v0.73.0 coverage report — `*ns*` as a
+real var, `bound-fn` / `bound-fn*`, `read` with options,
+`clojure.edn/read`, `destructure`, `re-groups`, and `re-matcher`
+— land in this cycle. With them the `clojure.core` and
+`clojure.edn` portable surfaces hit 100% in the coverage report.
+
 ## v0.73.0 — First-Class Namespaces
 
 Namespaces are now real. Each namespace has its own root binding
