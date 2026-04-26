@@ -122,6 +122,19 @@ binding table doesn't have an entry, so namespaces declared with
 primitive that surfaces `defn` docs. `(doc 'clojure.core/inc)` also
 finds the docstring registered under the bare name.
 
+A few small interop affordances landed alongside the namespace
+work to broaden compatibility with pure-Clojure libraries.
+`extend-protocol` now accepts `nil` as a type marker (translated
+to the `:nil` keyword) and accepts bare symbols (`Object`,
+`Exception`, `String`, ...) by mapping them to `:default`, so
+nil-safe and JVM-shaped protocol implementations don't blow up
+the macro expansion. Reader conditionals now treat `:clj` as an
+active dialect alongside `:mino`, so libraries that only have
+`:clj` and `:cljs` branches read correctly under `mino`. The
+stale `clojure.core/blank?` wrapper has been removed; `blank?`
+lives only in `clojure.string` now, matching the upstream
+contract.
+
 ### Breaking Changes
 
 The single shared global env that previously masqueraded as many
@@ -138,6 +151,16 @@ qualified-name forms must update to `clojure.core/foo`.
 Embedding-side C identifiers (`mino_state_t`, `mino_env_t`,
 `mino_install_core`, etc.) are unchanged. The string operations
 that already lived in the `clojure.string` namespace are unaffected.
+
+`blank?` is no longer reachable through the `clojure.core` parent
+chain. Code that called bare `(blank? s)` from a namespace that
+did not `:require [clojure.string :refer [blank?]]` must now bring
+the name in explicitly or call `clojure.string/blank?`.
+
+Reader conditionals now match `:clj` as an active dialect. Tests
+or code that asserted `#?(:clj X)` would be skipped under `mino`
+must use `:cljs` (or any other inactive tag) to drive elimination
+behavior.
 
 ## v0.72.0 — Release Pipeline & Build Polish
 
