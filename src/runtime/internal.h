@@ -486,6 +486,8 @@ void           env_bind(mino_state_t *S, mino_env_t *env,
 void           env_bind_sym(mino_state_t *S, mino_env_t *env,
                         mino_val_t *sym,                       /* interned symbol */
                         mino_val_t *val);                      /* GC-owned, retained */
+int            env_unbind(mino_state_t *S, mino_env_t *env,
+                        const char *name);                     /* 1 if removed */
 mino_env_t    *env_child(mino_state_t *S, mino_env_t *parent); /* GC-owned */
 mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);     /* borrowed (walks up) */
 mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */

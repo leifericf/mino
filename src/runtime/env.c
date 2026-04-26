@@ -201,6 +201,35 @@ void env_bind(mino_state_t *S, mino_env_t *env, const char *name,
     env_bind_impl(S, env, name, strlen(name), NULL, val);
 }
 
+int env_unbind(mino_state_t *S, mino_env_t *env, const char *name)
+{
+    size_t i;
+    for (i = 0; i < env->len; i++) {
+        const char *bn = env->bindings[i].name;
+        if (bn == name || strcmp(bn, name) == 0) {
+            size_t j;
+            for (j = i + 1; j < env->len; j++) {
+                env->bindings[j - 1] = env->bindings[j];
+            }
+            env->len--;
+            /* Hash buckets index by slot number, so a shift invalidates
+             * everything; cheapest correct fix is to rebuild the table.
+             * Leave it dropped if we fall under threshold so future
+             * env_bind paths re-create it on demand. */
+            if (env->ht_buckets != NULL) {
+                if (env->len < ENV_HASH_THRESHOLD) {
+                    env->ht_buckets = NULL;
+                    env->ht_cap = 0;
+                } else {
+                    env_ht_rebuild(S, env);
+                }
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
 /* Hot-path variant: caller supplies an already-interned symbol, so the
  * binding name pointer and length come free and we skip strlen plus the
  * intern hash-table probe. */

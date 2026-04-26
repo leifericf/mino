@@ -719,17 +719,9 @@ mino_val_t *prim_ns_unmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     e = ns_env_lookup(S, ns_buf);
     if (e == NULL) return mino_nil(S);
-    /* Remove the env binding. */
-    for (i = 0; i < e->len; i++) {
-        if (strcmp(e->bindings[i].name, s_buf) == 0) {
-            size_t j;
-            for (j = i + 1; j < e->len; j++) {
-                e->bindings[j - 1] = e->bindings[j];
-            }
-            e->len--;
-            break;
-        }
-    }
+    /* Remove the env binding (handles both linear and hashed envs). */
+    env_unbind(S, e, s_buf);
+    (void)i;
     /* Also drop the var registry entry so resolve / find-var report nil. */
     var_unintern(S, ns_buf, s_buf);
     return mino_nil(S);
