@@ -665,6 +665,14 @@ mino_val_t *prim_find_var(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         memcpy(sym_buf, slash + 1, sym_len);
         sym_buf[sym_len] = '\0';
     }
+    /* No such namespace is a hard error; var that doesn't exist in a
+     * loaded namespace returns nil (matching upstream). */
+    if (ns_env_lookup(S, ns_buf) == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg),
+                 "find-var: no such namespace: %s", ns_buf);
+        return prim_throw_classified(S, "name", "MNS001", msg);
+    }
     var = resolve_in_ns(S, ns_buf, sym_buf);
     return var != NULL ? var : mino_nil(S);
 }

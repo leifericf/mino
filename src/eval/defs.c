@@ -288,8 +288,13 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
     /* First arg: namespace name symbol. */
     {
         mino_val_t *name_form = args->as.cons.car;
-        if (name_form != NULL && name_form->type == MINO_SYMBOL) {
-            /* Store as interned string. */
+        if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+            set_eval_diag(S, form, "syntax", "MSY001",
+                          "ns: first arg must be a symbol");
+            return NULL;
+        }
+        /* Store as interned string. */
+        {
             char buf[256];
             size_t n = name_form->as.s.len;
             if (n < sizeof(buf)) {

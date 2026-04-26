@@ -499,6 +499,10 @@ mino_val_t *prim_use(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *arg;
     mino_val_t *last = mino_nil(S);
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "use requires at least one argument");
+    }
     while (mino_is_cons(args)) {
         mino_val_t *libspec;
         size_t      vi, total = 0, j;
