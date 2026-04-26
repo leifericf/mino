@@ -1406,16 +1406,30 @@
               groups)]
     (apply list 'do (vec swaps))))
 
+(defn type-marker-key_
+  "Translates an extend-protocol type marker to the keyword key
+   extend-type understands. Keywords pass through; nil maps to :nil so
+   nil-safe protocol implementations work; bare symbols (Object,
+   Exception, String, ...) map to :default since mino has no JVM class
+   types."
+  [marker]
+  (cond
+    (keyword? marker) marker
+    (nil? marker)     :nil
+    (symbol? marker)  :default
+    :else (throw (ex-info (str "extend-protocol: unrecognized type marker: " marker)
+                          {:marker marker}))))
+
 (defn partition-protocol-specs_ [specs]
-  (loop [remaining (remove nil? specs) groups [] current nil]
+  (loop [remaining specs groups [] current nil]
     (if (empty? remaining)
       (if current (conj groups current) groups)
       (let [item (first remaining)]
-        (if (keyword? item)
+        (if (or (cons? item) (list? item))
+          (recur (rest remaining) groups (conj current item))
           (recur (rest remaining)
                  (if current (conj groups current) groups)
-                 [item])
-          (recur (rest remaining) groups (conj current item)))))))
+                 [(type-marker-key_ item)]))))))
 
 (defmacro extend-protocol "Extends a protocol with implementations for multiple types." [proto & specs]
   (let [groups (partition-protocol-specs_ specs)
