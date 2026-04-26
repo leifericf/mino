@@ -88,10 +88,24 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
             char        ns_buf[256];
             size_t      ns_len = (size_t)(sl - vbuf);
             const char *name   = sl + 1;
+            mino_env_t *target;
             memcpy(ns_buf, vbuf, ns_len);
             ns_buf[ns_len] = '\0';
             var = var_find(S, ns_buf, name);
             if (var != NULL) return var;
+            /* Auto-promote env binding to var so #'mino.core/inc works
+             * for primitives that were never explicitly interned. */
+            target = ns_env_lookup(S, ns_buf);
+            if (target != NULL) {
+                env_binding_t *b = env_find_here(target, name);
+                if (b != NULL) {
+                    var = var_intern(S, ns_buf, name);
+                    if (var != NULL) {
+                        var_set_root(S, var, b->val);
+                        return var;
+                    }
+                }
+            }
         }
     }
     /* Unqualified: try current ns, then "user", then scan all. */
