@@ -349,7 +349,7 @@ void gc_mark_roots(mino_state_t *S)
             gc_mark_interior(S, S->gc_save[si]);
         }
     }
-    /* Pin cached core.mino parsed forms. */
+    /* Pin cached core.clj parsed forms. */
     if (S->core_forms != NULL) {
         size_t ci;
         for (ci = 0; ci < S->core_forms_len; ci++) {

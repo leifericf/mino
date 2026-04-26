@@ -14,7 +14,7 @@
 ;;
 ;; Many of these will fail until ::foo / #:foo{...} / #::{...} are
 ;; implemented in the mino reader. That is intentional — failing
-;; tests drive the work. See also reader_macros_test.mino for the
+;; tests drive the work. See also reader_macros_test.clj for the
 ;; non-namespace dispatch reader features that already exist.
 ;;
 ;; Upstream deftests we drew from:
@@ -22,7 +22,7 @@
 ;;   namespaced-maps, namespaced-map-errors, namespaced-map-edn,
 ;;   test-read+string (the namespaced-keyword aspect).
 ;; Excluded: number/string/regex/char readers, reader-conditionals
-;; (covered by reader_cond_test.mino), instants/UUIDs, line/column
+;; (covered by reader_cond_test.clj), instants/UUIDs, line/column
 ;; metadata, #= reader-eval, Java-specific dispatch.
 
 ;; ------------------------------------------------------------------

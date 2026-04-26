@@ -120,4 +120,4 @@
     (conj! t 3)
     (is (= [1 2 3] (persistent! t)))))
 
-;; (run-tests) -- called by tests/run.mino
+;; (run-tests) -- called by tests/run.clj

@@ -8,7 +8,7 @@
 ;; Most tests are RED today (Phase 0 of the namespace-correctness cycle).
 ;; The PASS count climbs as Phase A primitives land.
 ;;
-;; Usage:  ./mino tests/ns_parity_run.mino
+;; Usage:  ./mino tests/ns_parity_run.clj
 
 (require "tests/test")
 

@@ -2,7 +2,7 @@
 (require '[clojure.string :as str])
 (require '[clojure.string :refer [blank? trim]])
 
-;; Tests for core.mino functions added beyond the original set.
+;; Tests for core.clj functions added beyond the original set.
 
 ;; --- Type predicates ---
 

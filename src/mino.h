@@ -507,7 +507,7 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name);
 /*
  * Install all core primitive bindings and the standard library into `env`.
  * This includes arithmetic, comparison, collections, sequences, predicates,
- * strings, reflection, and the `core.mino` stdlib. Does not install I/O
+ * strings, reflection, and the `core.clj` stdlib. Does not install I/O
  * primitives; call `mino_install_io` separately to opt in.
  */
 void        mino_install_core(mino_state_t *S, mino_env_t *env);

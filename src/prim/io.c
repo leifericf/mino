@@ -45,7 +45,7 @@ mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * and side-effecting to stdout; we ignore its return value.
  *
  * The fallback path stays permanently safe: during boot (before
- * core.mino installs the hook), pr / prn still work on every built-in
+ * core.clj installs the hook), pr / prn still work on every built-in
  * type. Cortex Q5 invariant. */
 static void pr_dispatch_one(mino_state_t *S, mino_val_t *v, mino_env_t *env)
 {
@@ -391,7 +391,7 @@ mino_val_t *prim_file_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* k_prims_io_core -- printer hooks installed during mino_install_core so
- * core.mino's print-method multimethod can register itself before any
+ * core.clj's print-method multimethod can register itself before any
  * code calls pr.  pr / prn / etc. live in k_prims_io and are installed
  * by mino_install_io, which sandboxed embedders may skip. */
 const mino_prim_def k_prims_io_core[] = {

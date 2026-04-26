@@ -62,4 +62,4 @@
   (is (thrown? (pr-builtin)))
   (is (thrown? (pr-builtin 1 2))))
 
-;; (run-tests) -- called by tests/run.mino
+;; (run-tests) -- called by tests/run.clj

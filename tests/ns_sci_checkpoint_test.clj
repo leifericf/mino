@@ -429,8 +429,8 @@
 (deftest cyclic-load-test
   (let [dir "/tmp/sci-test-cycle"]
     (mkdir-p dir)
-    (spit (str dir "/foo.mino") "(ns foo (:require bar)) bar/x")
-    (spit (str dir "/bar.mino") "(ns bar (:require foo)) (def x)")
+    (spit (str dir "/foo.clj") "(ns foo (:require bar)) bar/x")
+    (spit (str dir "/bar.clj") "(ns bar (:require foo)) (def x)")
     ;; Cyclic load dependency: [ foo ]->bar->[ foo ]
     (is (thrown? (require 'foo)))
     ;; Cyclic load dependency: [ bar ]->foo->[ bar ]
@@ -438,9 +438,9 @@
 
   (let [dir "/tmp/sci-test-cycle-ok"]
     (mkdir-p dir)
-    (spit (str dir "/foo.mino")
+    (spit (str dir "/foo.clj")
           "(ns foo) (def foo 1) (require 'bar) bar/bar")
-    (spit (str dir "/bar.mino")
+    (spit (str dir "/bar.clj")
           "(ns bar (:require foo)) (def bar foo/foo)")
     ;; foo already loaded, should be ok to have cyclic dep on foo from bar
     (is (= 1 (do (require 'foo) foo/foo)))))

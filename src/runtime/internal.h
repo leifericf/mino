@@ -423,7 +423,7 @@ struct mino_state {
     mino_val_t     *gc_save[64];
     int             gc_save_len;
 
-    /* Cached parsed core.mino forms (avoids re-parsing on second
+    /* Cached parsed core.clj forms (avoids re-parsing on second
      * mino_install_core call within the same state). */
     mino_val_t    **core_forms;
     size_t          core_forms_len;

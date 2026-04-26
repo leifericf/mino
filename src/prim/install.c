@@ -46,7 +46,7 @@ void prim_install_table(mino_state_t *S, mino_env_t *env,
  * mino_install_core calls into other envs can replay without re-parsing.
  *
  * Runs with current_ns set to "clojure.core" by the caller, so every def
- * in core.mino lands in the clojure.core ns env. */
+ * in core.clj lands in the clojure.core ns env. */
 static void install_core_mino(mino_state_t *S, mino_env_t *env)
 {
     size_t i;
@@ -61,7 +61,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
         S->core_forms_len = 0;
         if (!S->core_forms) {
             /* Class I: init-time; no try-frame to recover through */
-            fprintf(stderr, "core.mino: out of memory\n"); abort();
+            fprintf(stderr, "core.clj: out of memory\n"); abort();
         }
 
         S->reader_file = intern_filename(S, "<core>");
@@ -72,7 +72,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             if (form == NULL) {
                 if (mino_last_error(S) != NULL) {
                     /* Class I: core library parse failure is unrecoverable */
-                    fprintf(stderr, "core.mino parse error: %s\n",
+                    fprintf(stderr, "core.clj parse error: %s\n",
                             mino_last_error(S));
                     abort();
                 }
@@ -88,14 +88,14 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
                                         cap * sizeof(mino_val_t *));
                 if (!S->core_forms) {
                     /* Class I: init-time; no try-frame to recover through */
-                    fprintf(stderr, "core.mino: out of memory\n");
+                    fprintf(stderr, "core.clj: out of memory\n");
                     abort();
                 }
             }
             S->core_forms[S->core_forms_len++] = form;
             if (mino_eval(S, form, env) == NULL) {
                 /* Class I: core library eval failure is unrecoverable */
-                fprintf(stderr, "core.mino eval error: %s\n",
+                fprintf(stderr, "core.clj eval error: %s\n",
                         mino_last_error(S));
                 abort();
             }
@@ -109,7 +109,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
     for (i = 0; i < S->core_forms_len; i++) {
         if (mino_eval(S, S->core_forms[i], env) == NULL) {
             /* Class I: cached core form eval failure is unrecoverable */
-            fprintf(stderr, "core.mino eval error: %s\n", mino_last_error(S));
+            fprintf(stderr, "core.clj eval error: %s\n", mino_last_error(S));
             abort();
         }
     }
@@ -117,7 +117,7 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
 
 /* k_core_domains -- ordered list of primitive domains installed into
  * every state's core env.  io_core carries pr-builtin and
- * set-print-method! so core.mino can wire its print-method multimethod
+ * set-print-method! so core.clj can wire its print-method multimethod
  * before any code calls pr.  Host and async domains install here even
  * though they expose mino_install_host / mino_install_async helpers, so
  * embedders bypassing mino_install_core can still install them directly.
@@ -153,7 +153,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
 
-    /* All bundled-core bindings (primitives + core.mino defs) live in
+    /* All bundled-core bindings (primitives + core.clj defs) live in
      * the clojure.core ns env. Every other ns env (including the
      * embedder's default) chains its parent here so unqualified lookup
      * walks lexical → current-ns env → clojure.core. */
@@ -173,7 +173,7 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
 
     /* Install string operations into the clojure.string namespace,
      * matching the namespace name that Babashka, ClojureScript, and
-     * Jank use. The wrappers in lib/clojure/string.mino layer
+     * Jank use. The wrappers in lib/clojure/string.clj layer
      * nil-handling on top. Putting these here instead of clojure.core
      * means a fresh user namespace doesn't accidentally inherit (and
      * shadow) names like `join` or `split` through :refer-clojure. */

@@ -1,4 +1,4 @@
-;; mutation_test.mino -- thorough testing of all mutable state paths.
+;; mutation_test.clj -- thorough testing of all mutable state paths.
 ;; Covers atoms, swap!, reset!, deref, dynamic binding, and side effects.
 
 (require "tests/test")

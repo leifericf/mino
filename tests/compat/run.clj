@@ -2,8 +2,8 @@
 ;; through mino to measure language coverage.
 ;;
 ;; Usage:
-;;   ./mino tests/compat/run.mino           ;; run all repos
-;;   REPOS=medley,hiccup ./mino tests/compat/run.mino  ;; specific repos
+;;   ./mino tests/compat/run.clj           ;; run all repos
+;;   REPOS=medley,hiccup ./mino tests/compat/run.clj  ;; specific repos
 
 (def cache-dir
   (str (getenv "HOME") "/.cache/mino-compat"))

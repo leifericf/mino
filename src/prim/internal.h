@@ -16,7 +16,7 @@
  *   MINO_ERR_HOST -- prim/proc.c (sh fork/exec failures), prim/io.c
  *      (slurp / spit / file I/O), prim/fs.c.  Diagnostic kinds:
  *      :host/MHO001, :io/...
- *   MINO_ERR_CORRUPT -- install.c (core.mino bootstrap parse / eval
+ *   MINO_ERR_CORRUPT -- install.c (core.clj bootstrap parse / eval
  *      failures, malloc OOM during the very first install).  At this
  *      point the state has not finished initializing, so abort is the
  *      only meaningful response.

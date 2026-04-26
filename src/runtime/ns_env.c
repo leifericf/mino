@@ -3,7 +3,7 @@
  *
  * Every namespace gets a root env owning its def/refer bindings. The
  * clojure.core env is special: parent NULL, holds primitives plus
- * everything core.mino installs. Every other ns env has parent →
+ * everything core.clj installs. Every other ns env has parent →
  * clojure.core, so unqualified lookup that misses a ns env walks naturally
  * into core without an explicit auto-refer.
  *

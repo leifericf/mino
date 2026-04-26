@@ -166,4 +166,4 @@
   (is (thrown? (subseq (sorted-map) < 1 > 5)))  ; start-test must be > family
   (is (thrown? (subseq (sorted-map) >= 1 > 5)))) ; end-test must be < family
 
-;; (run-tests) -- called by tests/run.mino
+;; (run-tests) -- called by tests/run.clj

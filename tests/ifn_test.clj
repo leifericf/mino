@@ -49,4 +49,4 @@
   (is (= :b (apply [:a :b :c] [1])))
   (is (= :a (apply #{:a :b} [:a]))))
 
-;; (run-tests) -- called by tests/run.mino
+;; (run-tests) -- called by tests/run.clj

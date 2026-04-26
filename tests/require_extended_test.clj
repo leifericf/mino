@@ -3,7 +3,7 @@
 ;; Extended require syntax tests
 
 (deftest require-string-still-works
-  (is (= 1 1))) ;; if we got here, string require worked (test.mino loaded)
+  (is (= 1 1))) ;; if we got here, string require worked (test.clj loaded)
 
 (deftest require-vector-syntax-succeeds-for-existing-module
   ;; Vector form must successfully load a real module and install the

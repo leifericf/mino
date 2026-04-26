@@ -3,7 +3,7 @@
  * dispatch, hierarchy, and prefer-method semantics as exercised
  * through the public embedding API.
  *
- * mino ships multimethods as a mino-level construct (see core.mino
+ * mino ships multimethods as a mino-level construct (see core.clj
  * defmulti / defmethod / prefer-method / remove-method / methods /
  * get-method), so embedders reach them via mino_eval_string and
  * mino_call like any other user-defined fn. This file pins that path

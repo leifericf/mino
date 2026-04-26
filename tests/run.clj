@@ -1,5 +1,5 @@
 ;; Test runner: loads all test files and runs them.
-;; Usage: ./mino tests/run.mino
+;; Usage: ./mino tests/run.clj
 
 (require "tests/test")
 (require "tests/compat_test")

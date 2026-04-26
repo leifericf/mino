@@ -59,4 +59,4 @@
   (is (thrown? "pop" (pop [])))
   (is (= nil (pop nil))))
 
-;; (run-tests) -- called by tests/run.mino
+;; (run-tests) -- called by tests/run.clj

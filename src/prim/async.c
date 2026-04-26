@@ -1,7 +1,7 @@
 /*
  * async.c -- minimal C surface for the async scheduler.
  *
- * Channels, buffers, and alts live in lib/core/channel.mino. The three
+ * Channels, buffers, and alts live in lib/core/channel.clj. The three
  * things that still need to touch C are:
  *
  *   1. The scheduler run queue. Callbacks for any pending channel op or

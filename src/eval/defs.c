@@ -66,7 +66,7 @@ static int refer_collision_check(mino_state_t *S, mino_val_t *form,
     env_binding_t *b;
     if (S->current_ns == NULL) return 0;
     /* clojure.core itself "owns" its primitives via env_bind at install
-     * time without interning vars; skip the check there so core.mino can
+     * time without interning vars; skip the check there so core.clj can
      * def names whose primitive bindings live in the same env. */
     if (strcmp(S->current_ns, "clojure.core") == 0) return 0;
     ns_env = current_ns_env(S);

@@ -1,8 +1,8 @@
 ;; GC stress runner: allocation-heavy tests run under MINO_GC_STRESS=1.
-;; Uses smaller iteration counts than gc_test.mino since every allocation
+;; Uses smaller iteration counts than gc_test.clj since every allocation
 ;; triggers a collection in stress mode.
 ;;
-;; Usage: MINO_GC_STRESS=1 ./mino tests/gc_stress_runner.mino
+;; Usage: MINO_GC_STRESS=1 ./mino tests/gc_stress_runner.clj
 
 (require "tests/test")
 

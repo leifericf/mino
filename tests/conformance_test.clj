@@ -195,4 +195,4 @@
   (let [r (reduced 42)]
     (is (identical? r (ensure-reduced r)))))
 
-;; (run-tests) -- called by tests/run.mino
+;; (run-tests) -- called by tests/run.clj

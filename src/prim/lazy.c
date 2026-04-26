@@ -56,7 +56,7 @@ static mino_val_t *lazy_map1_thunk(mino_state_t *S, mino_val_t *ctx)
 
 /* (lazy-map-1 f coll) -- lazy map for a single collection. Named with a
  * leading "lazy-" prefix to signal it is the single-coll fast path; the
- * public `map` in core.mino dispatches to it for the 1-collection case
+ * public `map` in core.clj dispatches to it for the 1-collection case
  * and keeps the multi-coll implementation for the uncommon wide form. */
 mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
@@ -283,7 +283,7 @@ mino_val_t *prim_lazy_take(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* (drop-seq n coll) -- eagerly walk past n items, returning the tail
  * seq. Mirrors Clojure's eager-drop; the public `drop` dispatches here
- * for the 2-arg form and keeps the transducer path in core.mino. */
+ * for the 2-arg form and keeps the transducer path in core.clj. */
 mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     long long n;
