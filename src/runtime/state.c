@@ -134,6 +134,20 @@ static void state_free_module_cache(mino_state_t *S)
         free(S->module_cache[i].name);
     }
     free(S->module_cache);
+    for (i = 0; i < S->load_stack_len; i++) {
+        free(S->load_stack[i]);
+    }
+    free(S->load_stack);
+}
+
+/* Truncate the load stack back to LEN, freeing any entries pushed past
+ * that point. Used when a throw unwinds out of a require call before its
+ * normal cleanup runs. */
+void load_stack_truncate(mino_state_t *S, size_t len)
+{
+    while (S->load_stack_len > len) {
+        free(S->load_stack[--S->load_stack_len]);
+    }
 }
 
 /* Free the host-interop type registry: per-type member arrays, then
@@ -370,14 +384,16 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     /* Top-level try frame so that OOM and unhandled throw during eval
      * surface as a NULL return instead of aborting the process. */
     if (S->try_depth < MAX_TRY_DEPTH) {
-        S->try_stack[S->try_depth].exception     = NULL;
-        S->try_stack[S->try_depth].saved_ns      = S->current_ns;
-        S->try_stack[S->try_depth].saved_ambient = S->fn_ambient_ns;
+        S->try_stack[S->try_depth].exception      = NULL;
+        S->try_stack[S->try_depth].saved_ns       = S->current_ns;
+        S->try_stack[S->try_depth].saved_ambient  = S->fn_ambient_ns;
+        S->try_stack[S->try_depth].saved_load_len = S->load_stack_len;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
             mino_val_t *ex = S->try_stack[saved_try].exception;
             S->current_ns    = S->try_stack[saved_try].saved_ns;
             S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
+            load_stack_truncate(S, S->try_stack[saved_try].saved_load_len);
             S->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
                 /* If the exception is a diagnostic map, extract its
@@ -457,13 +473,15 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     /* Top-level try frame so that OOM during read or eval surfaces as a
      * NULL return instead of aborting the process. */
     if (S->try_depth < MAX_TRY_DEPTH) {
-        S->try_stack[S->try_depth].exception     = NULL;
-        S->try_stack[S->try_depth].saved_ns      = S->current_ns;
-        S->try_stack[S->try_depth].saved_ambient = S->fn_ambient_ns;
+        S->try_stack[S->try_depth].exception      = NULL;
+        S->try_stack[S->try_depth].saved_ns       = S->current_ns;
+        S->try_stack[S->try_depth].saved_ambient  = S->fn_ambient_ns;
+        S->try_stack[S->try_depth].saved_load_len = S->load_stack_len;
         if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
             mino_val_t *ex = S->try_stack[saved_try].exception;
             S->current_ns    = S->try_stack[saved_try].saved_ns;
             S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
+            load_stack_truncate(S, S->try_stack[saved_try].saved_load_len);
             S->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;
@@ -616,12 +634,16 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
         return -1;
     }
 
-    S->try_stack[S->try_depth].exception = NULL;
-    S->try_stack[S->try_depth].saved_ns  = S->current_ns;
+    S->try_stack[S->try_depth].exception      = NULL;
+    S->try_stack[S->try_depth].saved_ns       = S->current_ns;
+    S->try_stack[S->try_depth].saved_ambient  = S->fn_ambient_ns;
+    S->try_stack[S->try_depth].saved_load_len = S->load_stack_len;
     if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. */
         mino_val_t *ex = S->try_stack[saved_try].exception;
-        S->current_ns = S->try_stack[saved_try].saved_ns;
+        S->current_ns    = S->try_stack[saved_try].saved_ns;
+        S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
+        load_stack_truncate(S, S->try_stack[saved_try].saved_load_len);
         S->try_depth = saved_try;
         /* Populate last_error from the exception value so the host
          * can inspect it via mino_last_error(). */

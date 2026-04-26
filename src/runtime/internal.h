@@ -303,6 +303,12 @@ struct mino_state {
     module_entry_t *module_cache;
     size_t          module_cache_len;
     size_t          module_cache_cap;
+    /* Load stack: names of modules currently being loaded (for cycle
+     * detection). A module is on this stack between require entry and
+     * the point where it's added to module_cache. */
+    char          **load_stack;
+    size_t          load_stack_len;
+    size_t          load_stack_cap;
 
     /* Metadata */
     meta_entry_t   *meta_table;
@@ -489,6 +495,7 @@ void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc c
 /* lexical → current-ns env → mino.core env.                                 */
 /* ------------------------------------------------------------------------- */
 
+void load_stack_truncate(mino_state_t *S, size_t len);
 mino_env_t *ns_env_lookup(mino_state_t *S, const char *name);   /* borrowed */
 mino_env_t *ns_env_ensure(mino_state_t *S, const char *name);   /* GC-owned, rooted */
 mino_env_t *current_ns_env(mino_state_t *S);                    /* GC-owned, rooted */

@@ -84,9 +84,10 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     }
 
     /* Phase 1: evaluate body forms. */
-    S->try_stack[S->try_depth].exception     = NULL;
-    S->try_stack[S->try_depth].saved_ns      = S->current_ns;
-    S->try_stack[S->try_depth].saved_ambient = S->fn_ambient_ns;
+    S->try_stack[S->try_depth].exception      = NULL;
+    S->try_stack[S->try_depth].saved_ns       = S->current_ns;
+    S->try_stack[S->try_depth].saved_ambient  = S->fn_ambient_ns;
+    S->try_stack[S->try_depth].saved_load_len = S->load_stack_len;
     if (setjmp(S->try_stack[S->try_depth].buf) == 0) {
         mino_val_t *r;
         S->try_depth++;
@@ -105,6 +106,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         vol_ex      = S->try_stack[saved_try].exception;
         S->current_ns    = S->try_stack[saved_try].saved_ns;
         S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
+        load_stack_truncate(S, S->try_stack[saved_try].saved_load_len);
         S->try_depth   = saved_try;
         S->call_depth  = saved_call;
         S->trace_added = saved_trace;
@@ -160,9 +162,10 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             int         it = S->trace_added;
             int         is = S->try_depth; /* save before setjmp */
             dyn_frame_t *id = S->dyn_stack;
-            S->try_stack[is].exception     = NULL;
-            S->try_stack[is].saved_ns      = S->current_ns;
-            S->try_stack[is].saved_ambient = S->fn_ambient_ns;
+            S->try_stack[is].exception      = NULL;
+            S->try_stack[is].saved_ns       = S->current_ns;
+            S->try_stack[is].saved_ambient  = S->fn_ambient_ns;
+            S->try_stack[is].saved_load_len = S->load_stack_len;
             if (setjmp(S->try_stack[is].buf) == 0) {
                 mino_val_t *r;
                 S->try_depth++;
@@ -179,6 +182,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
                 vol_ex      = S->try_stack[is].exception;
                 S->current_ns    = S->try_stack[is].saved_ns;
                 S->fn_ambient_ns = S->try_stack[is].saved_ambient;
+                load_stack_truncate(S, S->try_stack[is].saved_load_len);
                 S->try_depth   = is;
                 S->call_depth  = ic;
                 S->trace_added = it;

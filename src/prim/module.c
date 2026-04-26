@@ -244,6 +244,26 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return S->module_cache[i].value;
         }
     }
+    /* Cycle check: name on the load stack means a transitive require
+     * looped back. Report the chain. */
+    for (i = 0; i < S->load_stack_len; i++) {
+        if (strcmp(S->load_stack[i], name) == 0) {
+            char msg[512];
+            size_t off = 0;
+            size_t j;
+            off += (size_t)snprintf(msg, sizeof(msg),
+                "require: cyclic load dependency: ");
+            for (j = i; j < S->load_stack_len && off < sizeof(msg); j++) {
+                off += (size_t)snprintf(msg + off, sizeof(msg) - off,
+                    "%s -> ", S->load_stack[j]);
+            }
+            if (off < sizeof(msg)) {
+                snprintf(msg + off, sizeof(msg) - off, "%s", name);
+            }
+            set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
+            return NULL;
+        }
+    }
     /* Resolve. */
     if (S->module_resolver == NULL) {
         set_eval_diag(S, S->eval_current_form, "name", "MNS001", "require: no module resolver configured");
@@ -256,12 +276,39 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
         return NULL;
     }
+    /* Push name onto load stack before loading; pop after. */
+    if (S->load_stack_len == S->load_stack_cap) {
+        size_t new_cap = S->load_stack_cap == 0 ? 8 : S->load_stack_cap * 2;
+        char **nb = (char **)realloc(S->load_stack, new_cap * sizeof(*nb));
+        if (nb == NULL) {
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+                "require: out of memory");
+            return NULL;
+        }
+        S->load_stack     = nb;
+        S->load_stack_cap = new_cap;
+    }
+    {
+        size_t nlen = strlen(name);
+        char *dup = (char *)malloc(nlen + 1);
+        if (dup == NULL) {
+            set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+                "require: out of memory");
+            return NULL;
+        }
+        memcpy(dup, name, nlen + 1);
+        S->load_stack[S->load_stack_len++] = dup;
+    }
     /* Load — save/restore current namespace so ns forms inside the
      * loaded file don't leak into the caller's namespace. */
     {
         const char *saved_ns = S->current_ns;
         result = mino_load_file(S, path, env);
         S->current_ns = saved_ns;
+        /* Pop load stack regardless of success. */
+        if (S->load_stack_len > 0) {
+            free(S->load_stack[--S->load_stack_len]);
+        }
         if (result == NULL) {
             return NULL;
         }
