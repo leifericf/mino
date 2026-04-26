@@ -255,5 +255,5 @@ const size_t k_prims_host_count =
 
 void mino_install_host(mino_state_t *S, mino_env_t *env)
 {
-    prim_install_table(S, env, k_prims_host, k_prims_host_count);
+    prim_install_table(S, env, "clojure.core", k_prims_host, k_prims_host_count);
 }

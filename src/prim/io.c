@@ -444,5 +444,5 @@ const size_t k_prims_io_count =
 
 void mino_install_io(mino_state_t *S, mino_env_t *env)
 {
-    prim_install_table(S, env, k_prims_io, k_prims_io_count);
+    prim_install_table(S, env, "clojure.core", k_prims_io, k_prims_io_count);
 }

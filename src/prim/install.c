@@ -13,13 +13,17 @@
 
 #include <string.h>
 
-void prim_install_table(mino_state_t *S, mino_env_t *env,
+void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
                         const mino_prim_def *defs, size_t count)
 {
     size_t i;
     for (i = 0; i < count; i++) {
-        mino_env_set(S, env, defs[i].name,
-                     mino_prim(S, defs[i].name, defs[i].fn));
+        mino_val_t *pv = mino_prim(S, defs[i].name, defs[i].fn);
+        mino_env_set(S, env, defs[i].name, pv);
+        if (ns_name != NULL) {
+            mino_val_t *var = var_intern(S, ns_name, defs[i].name);
+            if (var != NULL) var_set_root(S, var, pv);
+        }
         if (defs[i].doc != NULL) {
             meta_set(S, defs[i].name,
                      defs[i].doc, strlen(defs[i].doc), NULL);
@@ -162,7 +166,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     mino_env_set(S, core_env, "math-pi", mino_float(S, 3.14159265358979323846));
 
     for (i = 0; i < K_CORE_DOMAIN_COUNT; i++) {
-        prim_install_table(S, core_env, k_core_domains[i].defs,
+        prim_install_table(S, core_env, "clojure.core",
+                           k_core_domains[i].defs,
                            *k_core_domains[i].count_ptr);
     }
 
@@ -180,7 +185,8 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     {
         mino_env_t *cs_env = ns_env_ensure(S, "clojure.string");
         if (cs_env != NULL) {
-            prim_install_table(S, cs_env, k_prims_clojure_string,
+            prim_install_table(S, cs_env, "clojure.string",
+                               k_prims_clojure_string,
                                k_prims_clojure_string_count);
         }
     }

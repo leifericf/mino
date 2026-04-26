@@ -80,7 +80,7 @@ typedef struct {
     const size_t         *count_ptr;  /* &k_prims_<domain>_count */
 } mino_prim_domain;
 
-void prim_install_table(mino_state_t *S, mino_env_t *env,
+void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
                         const mino_prim_def *defs, size_t count);
 
 /* Primitives declared per domain (each prim_*.c defines these).
