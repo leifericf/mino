@@ -129,6 +129,17 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Symbol form: '(require 'foo.bar) — Clojure's everyday form. */
     if (name_val != NULL && name_val->type == MINO_SYMBOL) {
         char pathbuf[256];
+        /* Runtime-ns shortcut: if a namespace by this exact (dashed) name
+         * already exists, treat as already-loaded. Path conversion would
+         * mangle dashes into underscores and lose the binding. */
+        if (name_val->as.s.len < 256) {
+            char dotbuf[256];
+            memcpy(dotbuf, name_val->as.s.data, name_val->as.s.len);
+            dotbuf[name_val->as.s.len] = '\0';
+            if (ns_env_lookup(S, dotbuf) != NULL) {
+                return mino_nil(S);
+            }
+        }
         if (runtime_module_dotted_to_path(name_val->as.s.data,
                                           name_val->as.s.len,
                                           pathbuf, sizeof(pathbuf)) != 0) {
@@ -181,21 +192,40 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 }
             }
         }
-        /* Convert dotted name and load. */
-        if (runtime_module_dotted_to_path(mod_sym->as.s.data,
-                                          mod_sym->as.s.len,
-                                          pathbuf, sizeof(pathbuf)) != 0) {
-            set_eval_diag(S, S->eval_current_form, "name", "MNS001", "require: invalid module name");
-            return NULL;
-        }
+        /* Runtime-ns shortcut: skip path conversion if the namespace
+         * already exists by its dashed name. */
         {
-            mino_val_t *path_str = mino_string(S, pathbuf);
-            mino_val_t *str_args = mino_cons(S, path_str, mino_nil(S));
-            gc_pin(str_args);
-            result = prim_require(S, str_args, env);
-            gc_unpin(1);
+            int runtime_hit = 0;
+            if (mod_sym->as.s.len < 256) {
+                char dotbuf[256];
+                memcpy(dotbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+                dotbuf[mod_sym->as.s.len] = '\0';
+                if (ns_env_lookup(S, dotbuf) != NULL) {
+                    runtime_hit = 1;
+                    result      = mino_nil(S);
+                }
+            }
+            if (!runtime_hit) {
+                /* Convert dotted name and load. */
+                if (runtime_module_dotted_to_path(mod_sym->as.s.data,
+                                                  mod_sym->as.s.len,
+                                                  pathbuf,
+                                                  sizeof(pathbuf)) != 0) {
+                    set_eval_diag(S, S->eval_current_form, "name",
+                                  "MNS001", "require: invalid module name");
+                    return NULL;
+                }
+                {
+                    mino_val_t *path_str = mino_string(S, pathbuf);
+                    mino_val_t *str_args = mino_cons(S, path_str,
+                                                     mino_nil(S));
+                    gc_pin(str_args);
+                    result = prim_require(S, str_args, env);
+                    gc_unpin(1);
+                }
+                if (result == NULL) return NULL;
+            }
         }
-        if (result == NULL) return NULL;
         /* Store alias. */
         if (alias_name != NULL && alias_len > 0
             && alias_len < 256 && mod_sym->as.s.len < 256) {
@@ -274,15 +304,23 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     /* If the dotted form of name corresponds to a runtime-created namespace
      * already in the env table, treat it as already loaded. This lets
-     * (require 'foo) succeed when foo was made by (ns foo) in-memory. */
+     * (require 'foo) succeed when foo was made by (ns foo) in-memory.
+     * Path names use underscores where ns names use dashes, so try both
+     * the underscored and dashed variants when looking up the live ns. */
     {
         char dotted[512];
+        char dashed[512];
         size_t nl = strlen(name);
         size_t k;
         if (nl < sizeof(dotted)) {
             for (k = 0; k < nl; k++) dotted[k] = (name[k] == '/') ? '.' : name[k];
             dotted[nl] = '\0';
             if (ns_env_lookup(S, dotted) != NULL) {
+                return mino_nil(S);
+            }
+            for (k = 0; k < nl; k++) dashed[k] = (dotted[k] == '_') ? '-' : dotted[k];
+            dashed[nl] = '\0';
+            if (ns_env_lookup(S, dashed) != NULL) {
                 return mino_nil(S);
             }
         }
