@@ -425,6 +425,7 @@
 
 (deftest cyclic-load-test
   (let [dir "/tmp/sci-test-cycle"]
+    (mkdir-p dir)
     (spit (str dir "/foo.mino") "(ns foo (:require bar)) bar/x")
     (spit (str dir "/bar.mino") "(ns bar (:require foo)) (def x)")
     ;; Cyclic load dependency: [ foo ]->bar->[ foo ]
@@ -433,6 +434,7 @@
     (is (thrown? (require 'bar))))
 
   (let [dir "/tmp/sci-test-cycle-ok"]
+    (mkdir-p dir)
     (spit (str dir "/foo.mino")
           "(ns foo) (def foo 1) (require 'bar) bar/bar")
     (spit (str dir "/bar.mino")

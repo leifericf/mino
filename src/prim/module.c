@@ -153,13 +153,18 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (kw_match(k, "as") && v->type == MINO_SYMBOL) {
                 alias_name = v->as.s.data;
                 alias_len  = v->as.s.len;
-            }
-            if (kw_match(k, "refer") && v->type == MINO_VECTOR) {
-                refer_vec = v;
-            }
-            if (kw_match(k, "refer") && v->type == MINO_KEYWORD
-                && kw_match(v, "all")) {
-                refer_all = 1;
+            } else if (kw_match(k, "refer")) {
+                if (v != NULL && v->type == MINO_VECTOR) {
+                    refer_vec = v;
+                } else if (v != NULL && v->type == MINO_KEYWORD
+                           && kw_match(v, "all")) {
+                    refer_all = 1;
+                } else {
+                    set_eval_diag(S, S->eval_current_form,
+                        "eval/type", "MTY001",
+                        "require: :refer requires a vector of symbols or :all");
+                    return NULL;
+                }
             }
         }
         /* Convert dotted name and load. */
@@ -217,7 +222,16 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                             mino_val_t *var = var_find(S, modbuf, rbuf);
                             if (var != NULL) val = var->as.var.root;
                         }
-                        if (val != NULL) env_bind(S, target, rbuf, val);
+                        if (val == NULL) {
+                            char msg[300];
+                            snprintf(msg, sizeof(msg),
+                                "require: %s does not refer var %s",
+                                modbuf, rbuf);
+                            set_eval_diag(S, S->eval_current_form,
+                                "name", "MNS001", msg);
+                            return NULL;
+                        }
+                        env_bind(S, target, rbuf, val);
                     }
                 }
             }
