@@ -9,7 +9,39 @@ static int supports_meta(mino_type_t t)
 {
     return t == MINO_SYMBOL || t == MINO_CONS || t == MINO_VECTOR
         || t == MINO_MAP    || t == MINO_SET  || t == MINO_FN
-        || t == MINO_MACRO;
+        || t == MINO_MACRO  || t == MINO_VAR;
+}
+
+/* Vars don't store an explicit meta map -- :ns and :name come from the
+ * var's ns and sym fields, and ^:private / ^:dynamic come from flags.
+ * Synthesize a fresh map on each call (callers don't expect identity
+ * stability on var meta). */
+static mino_val_t *synth_var_meta(mino_state_t *S, mino_val_t *var)
+{
+    mino_val_t *keys[4];
+    mino_val_t *vals[4];
+    size_t      n = 0;
+    keys[n] = mino_keyword(S, "ns");
+    vals[n] = var->as.var.ns != NULL
+              ? mino_symbol(S, var->as.var.ns)
+              : mino_nil(S);
+    n++;
+    keys[n] = mino_keyword(S, "name");
+    vals[n] = var->as.var.sym != NULL
+              ? mino_symbol(S, var->as.var.sym)
+              : mino_nil(S);
+    n++;
+    if (var->as.var.is_private) {
+        keys[n] = mino_keyword(S, "private");
+        vals[n] = mino_true(S);
+        n++;
+    }
+    if (var->as.var.dynamic) {
+        keys[n] = mino_keyword(S, "dynamic");
+        vals[n] = mino_true(S);
+        n++;
+    }
+    return mino_map(S, keys, vals, n);
 }
 
 mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
@@ -23,6 +55,10 @@ mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
     obj = args->as.cons.car;
     if (obj == NULL || !supports_meta(obj->type)) {
         return mino_nil(S);
+    }
+    if (obj->type == MINO_VAR) {
+        if (obj->meta != NULL) return obj->meta;
+        return synth_var_meta(S, obj);
     }
     return obj->meta != NULL ? obj->meta : mino_nil(S);
 }
