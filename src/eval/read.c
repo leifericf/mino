@@ -191,6 +191,30 @@ static mino_val_t *read_string_form(mino_state_t *S, const char **p)
     }
 }
 
+/* Build a reader-conditional record value matching the shape produced
+ * by core.clj's `reader-conditional`: a map {:form FORM :splicing? B}
+ * with meta {:mino/reader-conditional true}. Used by :read-cond
+ * :preserve to retain the conditional as data instead of evaluating
+ * it. */
+static mino_val_t *make_reader_conditional_record(
+    mino_state_t *S, mino_val_t *form, int splicing)
+{
+    mino_val_t *keys[2];
+    mino_val_t *vals[2];
+    mino_val_t *mkeys[1];
+    mino_val_t *mvals[1];
+    mino_val_t *m;
+    keys[0]  = mino_keyword(S, "form");
+    vals[0]  = form;
+    keys[1]  = mino_keyword(S, "splicing?");
+    vals[1]  = splicing ? mino_true(S) : mino_false(S);
+    m        = mino_map(S, keys, vals, 2);
+    mkeys[0] = mino_keyword(S, "mino/reader-conditional");
+    mvals[0] = mino_true(S);
+    m->meta  = mino_map(S, mkeys, mvals, 1);
+    return m;
+}
+
 /* Read a reader-conditional body: (keyword form keyword form ...).
  * Matches S->reader_dialect first, then "clj" (because mino is a
  * non-JVM Clojure dialect), then "default". Returns the matched form
@@ -302,6 +326,31 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                                 "#?@ must be followed by a list",
                                 S->reader_line, S->reader_col);
                 return NULL;
+            }
+            if (S->reader_cond_mode == 2) {
+                set_reader_diag(S, MRE007,
+                    "reader conditional not allowed when :read-cond is :disallow",
+                    S->reader_line, S->reader_col);
+                return NULL;
+            }
+            if (S->reader_cond_mode == 1) {
+                /* preserve: append a reader-conditional record (no splice). */
+                mino_val_t *body = read_list_form(S, p);
+                mino_val_t *record;
+                mino_val_t *cell;
+                if (body == NULL && mino_last_error(S) != NULL) return NULL;
+                record = make_reader_conditional_record(S, body, 1);
+                cell = mino_cons(S, record, mino_nil(S));
+                cell->as.cons.file   = S->reader_file;
+                cell->as.cons.line   = (tail == NULL) ? list_line : splice_line;
+                cell->as.cons.column = (tail == NULL) ? list_col : 0;
+                if (tail == NULL) {
+                    head = cell;
+                } else {
+                    mino_cons_cdr_set(S, tail, cell);
+                }
+                tail = cell;
+                continue;
             }
             ADVANCE(S, p);
             read_cond_body(S, p, &found);
@@ -417,6 +466,28 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                                 S->reader_line, S->reader_col);
                 return NULL;
             }
+            if (S->reader_cond_mode == 2) {
+                set_reader_diag(S, MRE007,
+                    "reader conditional not allowed when :read-cond is :disallow",
+                    S->reader_line, S->reader_col);
+                return NULL;
+            }
+            if (S->reader_cond_mode == 1) {
+                mino_val_t *body = read_list_form(S, p);
+                mino_val_t *record;
+                if (body == NULL && mino_last_error(S) != NULL) return NULL;
+                record = make_reader_conditional_record(S, body, 1);
+                if (len == cap) {
+                    size_t       new_cap = cap == 0 ? 8 : cap * 2;
+                    mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(
+                        S, GC_T_VALARR, new_cap * sizeof(*nb));
+                    if (buf != NULL && len > 0)
+                        memcpy(nb, buf, len * sizeof(*nb));
+                    buf = nb; cap = new_cap;
+                }
+                buf[len++] = record;
+                continue;
+            }
             ADVANCE(S, p);
             read_cond_body(S, p, &found);
             if (mino_last_error(S) != NULL) return NULL;
@@ -517,6 +588,18 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
                 set_reader_diag(S, MRE007,
                                 "#?@ must be followed by a list",
                                 S->reader_line, S->reader_col);
+                return NULL;
+            }
+            if (S->reader_cond_mode == 2) {
+                set_reader_diag(S, MRE007,
+                    "reader conditional not allowed when :read-cond is :disallow",
+                    S->reader_line, S->reader_col);
+                return NULL;
+            }
+            if (S->reader_cond_mode == 1) {
+                set_reader_diag(S, MRE007,
+                    "#?@ inside map literal not supported with :read-cond :preserve",
+                    S->reader_line, S->reader_col);
                 return NULL;
             }
             ADVANCE(S, p);
@@ -1663,13 +1746,35 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         outer->as.cons.column = rx_col;
         return outer;
     }
-    if (next == '?' && *(*p + 2) == '@') {
-        set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
-                        S->reader_line, S->reader_col);
-        return NULL;
-    }
     if (next == '?') {
-        mino_val_t *found = NULL;
+        int         splicing = (*(*p + 2) == '@');
+        mino_val_t *found    = NULL;
+        if (S->reader_cond_mode == 2 /* disallow */) {
+            set_reader_diag(S, MRE007,
+                "reader conditional not allowed when :read-cond is :disallow",
+                S->reader_line, S->reader_col);
+            return NULL;
+        }
+        if (S->reader_cond_mode == 1 /* preserve */) {
+            mino_val_t *body;
+            ADVANCE_N(S, p, splicing ? 3 : 2);
+            skip_ws(S, p);
+            if (**p != '(') {
+                set_reader_diag(S, MRE007,
+                    splicing ? "#?@ must be followed by a list"
+                             : "#? must be followed by a list",
+                    S->reader_line, S->reader_col);
+                return NULL;
+            }
+            body = read_list_form(S, p);
+            if (body == NULL && mino_last_error(S) != NULL) return NULL;
+            return make_reader_conditional_record(S, body, splicing);
+        }
+        if (splicing) {
+            set_reader_diag(S, MRE007, "#?@ splice not allowed at top level",
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
         ADVANCE_N(S, p, 2);
         skip_ws(S, p);
         if (**p != '(') {

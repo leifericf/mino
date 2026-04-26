@@ -554,3 +554,32 @@
       (is (= 7 (g)))
       (binding [*bf-x* 99]
         (is (= 7 (g)))))))
+
+(deftest read-default-mirrors-read-string
+  (is (= '(+ 1 2) (read "(+ 1 2)")))
+  (is (= 42       (read "42"))))
+
+(deftest read-cond-allow-evaluates-conditional
+  (is (= 1 (read "#?(:clj 1 :cljs 2)")))
+  (is (= 1 (read {:read-cond :allow} "#?(:clj 1 :cljs 2)"))))
+
+(deftest read-cond-preserve-builds-record
+  (let [r (read {:read-cond :preserve} "#?(:clj 1 :cljs 2)")]
+    (is (reader-conditional? r))
+    (is (= '(:clj 1 :cljs 2) (:form r)))
+    (is (false? (:splicing? r)))))
+
+(deftest read-cond-preserve-vector-element
+  (let [v (read {:read-cond :preserve} "[#?(:clj 1) :tail]")
+        r (first v)]
+    (is (reader-conditional? r))
+    (is (= :tail (second v)))))
+
+(deftest read-cond-disallow-throws
+  (is (thrown? (read {:read-cond :disallow} "#?(:clj 1)"))))
+
+(deftest edn-read-preserves-conditionals
+  (require 'clojure.edn)
+  (let [r (clojure.edn/read "#?(:clj 1 :mino 2)")]
+    (is (reader-conditional? r))
+    (is (= '(:clj 1 :mino 2) (:form r)))))

@@ -334,6 +334,11 @@ struct mino_state {
     int             reader_line;
     int             reader_col;
     const char     *reader_dialect;   /* "mino" */
+    /* :read-cond mode for reader conditionals.
+     *   0 = allow (default; match S->reader_dialect / clj / default)
+     *   1 = preserve (return a reader-conditional record)
+     *   2 = disallow (error on any #? or #?@) */
+    int             reader_cond_mode;
 
     /* Filename intern table. Strings are malloc-owned, freed at state
      * teardown. Held here (not process-global) so two runtimes on two

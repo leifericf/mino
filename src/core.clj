@@ -2101,6 +2101,14 @@
   (throw (ex-info "inst-ms is not supported on mino — there is no Inst type"
                   {:mino/unsupported :inst-ms})))
 
+;; read: Clojure-compatible alias of read-string. Real Clojure's read
+;; accepts a PushbackReader; mino has no stream type, so the string
+;; form is the only shape. The opts map is forwarded so callers can
+;; pass {:read-cond :preserve} to retain reader conditionals.
+(defn read
+  ([s]      (read-string s))
+  ([opts s] (read-string opts s)))
+
 ;; bound-fn / bound-fn*: capture the dynamic-binding context active at
 ;; capture time and replay it around every invocation of the wrapped fn.
 ;; Layered on the C primitives get-thread-bindings + with-bindings*.
