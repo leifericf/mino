@@ -505,16 +505,26 @@
                                 (cons x (dist-impl (conj seen x) (rest s)))))))))]
      (dist-impl #{} coll)))))
 
-(def partition "Returns a lazy sequence of lists of n items each, at offsets step apart."
-  (let [part-impl (fn [n step coll]
-         (lazy-seq
-           (when-let [s (seq coll)]
-             (let [p (doall (take n s))]
-               (when (= n (count p))
-                 (cons p (part-impl n step (drop step s))))))))]
+(def partition "Returns a lazy sequence of lists of n items each, at offsets step apart. With pad, the final partition is filled from pad to reach n; if pad is shorter than needed, returns a partition with fewer than n items."
+  (let [part-impl
+        (fn part-impl [n step coll]
+          (lazy-seq
+            (when-let [s (seq coll)]
+              (let [p (doall (take n s))]
+                (when (= n (count p))
+                  (cons p (part-impl n step (drop step s))))))))
+        part-pad-impl
+        (fn part-pad-impl [n step pad coll]
+          (lazy-seq
+            (when-let [s (seq coll)]
+              (let [p (doall (take n s))]
+                (if (= n (count p))
+                  (cons p (part-pad-impl n step pad (drop step s)))
+                  (list (take n (concat p pad))))))))]
     (fn
-      ([n coll] (part-impl n n coll))
-      ([n step coll] (part-impl n step coll)))))
+      ([n coll]            (part-impl n n coll))
+      ([n step coll]       (part-impl n step coll))
+      ([n step pad coll]   (part-pad-impl n step pad coll)))))
 
 (def partition-by "Splits coll into lazy sequences of consecutive items with the same (f item) value. When called with no collection, returns a transducer." (fn
   ([f]
@@ -1919,6 +1929,218 @@
   "Controls assertion compilation. When false, `assert` is a no-op.
    Defaults to true."
   true)
+
+;; --- Pure-Clojure surface ---
+
+;; Identifier predicates.
+(defn ident?
+  "Returns true if x is a symbol or keyword."
+  [x] (or (symbol? x) (keyword? x)))
+
+(defn simple-ident?
+  "Returns true if x is a non-namespace-qualified symbol or keyword."
+  [x] (and (ident? x) (nil? (namespace x))))
+
+(defn qualified-ident?
+  "Returns true if x is a namespace-qualified symbol or keyword."
+  [x] (and (ident? x) (some? (namespace x))))
+
+(def ^:private special-symbols-set_
+  '#{if let do fn quote def set! var loop recur try throw new ns
+     refer-clojure binding lazy-seq})
+
+(defn special-symbol?
+  "Returns true if x is a symbol that names a special form."
+  [x] (contains? special-symbols-set_ x))
+
+(defn map-entry?
+  "Returns true if x is a map entry (mino represents entries as
+   2-vectors)."
+  [x] (and (vector? x) (= 2 (count x))))
+
+;; Mino has no host byte-arrays, no Inst protocol, and no URI type.
+;; These predicates exist for portability with portable-Clojure code
+;; and always return false.
+(defn bytes? [_] false)
+(defn inst?  [_] false)
+(defn uri?   [_] false)
+
+(def ^:private uuid-hex-pattern_ #"[0-9a-fA-F]+")
+
+(defn- uuid-string?_
+  "Validates RFC 4122 textual layout: 36 chars with dashes at the
+   8/13/18/23 positions and hex digits everywhere else. Avoids the
+   {n} quantifier mino's regex engine does not support."
+  [s]
+  (and (string? s)
+       (= 36 (count s))
+       (= "-" (nth s 8))
+       (= "-" (nth s 13))
+       (= "-" (nth s 18))
+       (= "-" (nth s 23))
+       (some? (re-matches uuid-hex-pattern_
+                          (str (subs s 0  8)
+                               (subs s 9  13)
+                               (subs s 14 18)
+                               (subs s 19 23)
+                               (subs s 24 36))))))
+
+(defn uuid?
+  "Returns true if x looks like a UUID string. Mino has no dedicated
+   UUID type; UUIDs round-trip as their canonical string form."
+  [x] (uuid-string?_ x))
+
+(defn tagged-literal?
+  "Returns true if x is a tagged-literal record produced by
+   tagged-literal."
+  [x] (boolean (some-> x meta :mino/tagged-literal)))
+
+(defn reader-conditional?
+  "Returns true if x is a reader-conditional record produced by
+   reader-conditional."
+  [x] (boolean (some-> x meta :mino/reader-conditional)))
+
+;; Keyword interning probe. Mino interns every keyword on construction,
+;; so any keyword we can construct already exists.
+(defn find-keyword
+  "Returns the keyword for the given string. In mino keywords are
+   always interned, so this is equivalent to keyword for string input
+   and nil for other input."
+  ([s]      (when (string? s) (keyword s)))
+  ([ns nm]  (when (and (string? ns) (string? nm)) (keyword ns nm))))
+
+;; Parsing helpers (Clojure 1.11+).
+(defn parse-boolean
+  "Parses 'true' or 'false' (case-sensitive) and returns the boolean.
+   Returns nil for any other input."
+  [s]
+  (when (string? s)
+    (case s "true" true "false" false nil)))
+
+(defn parse-uuid
+  "Parses s as a UUID. Returns the canonical lowercase string (mino
+   has no UUID type) or nil if s does not match the UUID format."
+  [s]
+  (when (uuid-string?_ s)
+    (clojure.string/lower-case s)))
+
+;; Eager-vector partitioning (Clojure 1.13+ surface, useful pre-1.13).
+(defn partitionv
+  "Like partition but returns a lazy seq of vectors instead of lists."
+  ([n coll]          (map vec (partition n coll)))
+  ([n step coll]     (map vec (partition n step coll)))
+  ([n step pad coll] (map vec (partition n step pad coll))))
+
+(defn partitionv-all
+  "Like partition-all but returns a lazy seq of vectors instead of
+   lists."
+  ([n coll]      (map vec (partition-all n coll)))
+  ([n step coll] (map vec (partition-all n step coll))))
+
+(defn splitv-at
+  "Returns a vector [(vec (take n coll)) (vec (drop n coll))]."
+  [n coll] [(vec (take n coll)) (vec (drop n coll))])
+
+(defn replicate
+  "Returns a lazy seq of n copies of x. Deprecated alias for
+   (take n (repeat x))."
+  [n x] (take n (repeat x)))
+
+;; Collection-hash helpers. Real Clojure mixes via Murmur3; mino uses
+;; a simpler combiner that is consistent across runs but does not
+;; match Clojure's exact bit pattern. Suitable for in-process equality
+;; bookkeeping; not for cross-runtime hash compatibility.
+(defn mix-collection-hash
+  "Combines a hash-basis with the collection's count."
+  [hash-basis cnt]
+  (bit-xor (or hash-basis 0) (or cnt 0)))
+
+(defn hash-ordered-coll
+  "Computes a sequence-position-aware hash for an ordered collection."
+  [coll]
+  (mix-collection-hash
+    (reduce (fn [h v] (bit-xor (* 31 h) (hash v))) 1 coll)
+    (count coll)))
+
+(defn hash-unordered-coll
+  "Computes a position-independent hash for an unordered collection."
+  [coll]
+  (mix-collection-hash
+    (reduce + 0 (map hash coll))
+    (count coll)))
+
+;; Exception cause (mino has no Throwable.getCause, so this reads from
+;; ex-data or attached metadata).
+(defn ex-cause
+  "Returns the cause attached to the given exception, or nil."
+  [ex]
+  (or (some-> ex ex-data :cause)
+      (some-> ex meta :cause)))
+
+;; Inst protocol shape. Mino has no Inst type; calling inst-ms on any
+;; value throws.
+(defn inst-ms
+  "Throws — mino has no Inst type."
+  [_]
+  (throw (ex-info "inst-ms is not supported on mino — there is no Inst type"
+                  {:mino/unsupported :inst-ms})))
+
+;; with-redefs-fn: low-level redef (the macro variant lives above).
+(defn with-redefs-fn
+  "Temporarily rebinds the root values of vars to new-values while
+   thunk runs, restoring originals afterward. bindings-map is a map
+   of var -> new-value."
+  [bindings-map thunk]
+  (let [pairs (vec bindings-map)
+        olds  (mapv (fn [pair] [(first pair) (deref (first pair))]) pairs)]
+    (try
+      (doseq [pair pairs]
+        (alter-var-root (first pair) (constantly (second pair))))
+      (thunk)
+      (finally
+        (doseq [pair olds]
+          (alter-var-root (first pair) (constantly (second pair))))))))
+
+;; Tap mechanism: a registry of fns invoked from tap>.
+(def ^:private tap-fns_ (atom #{}))
+
+(defn add-tap
+  "Registers f as a tap target. Each call to tap> invokes every
+   registered tap with the tapped value. Returns nil."
+  [f]
+  (swap! tap-fns_ conj f)
+  nil)
+
+(defn remove-tap
+  "Unregisters f from the tap registry. Returns nil."
+  [f]
+  (swap! tap-fns_ disj f)
+  nil)
+
+(defn tap>
+  "Sends x to every registered tap. Tap fns that throw are silently
+   skipped so a misbehaving subscriber does not poison the stream.
+   Returns true."
+  [x]
+  (doseq [f @tap-fns_]
+    (try (f x) (catch __e nil)))
+  true)
+
+;; Reader-extension records. tagged-literal and reader-conditional are
+;; exposed as constructors so portable Clojure code can build round-
+;; trippable values without depending on host-specific record types.
+(defn tagged-literal
+  "Builds a tagged-literal record with tag and form fields. Predicate
+   tagged-literal? returns true on the result."
+  [tag form]
+  (with-meta {:tag tag :form form} {:mino/tagged-literal true}))
+
+(defn reader-conditional
+  "Builds a reader-conditional record with form and splicing? fields.
+   Predicate reader-conditional? returns true on the result."
+  [form splicing?]
+  (with-meta {:form form :splicing? (boolean splicing?)}
+             {:mino/reader-conditional true}))
 
 ;; --- Platform-specific forms (not supported on mino) ---
 ;;

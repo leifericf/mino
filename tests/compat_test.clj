@@ -319,3 +319,214 @@
 
   (testing "contains? on nil &env returns falsy"
     (is (not (env-contains? x)))))
+
+;; --- Pure-Clojure surface ---
+
+(deftest ident-predicates
+  (testing "ident? covers symbols and keywords"
+    (is (true? (ident? 'foo)))
+    (is (true? (ident? :foo)))
+    (is (false? (ident? "foo")))
+    (is (false? (ident? 42))))
+
+  (testing "simple-ident? excludes namespaced forms"
+    (is (true? (simple-ident? 'foo)))
+    (is (true? (simple-ident? :foo)))
+    (is (false? (simple-ident? 'a/b)))
+    (is (false? (simple-ident? :a/b))))
+
+  (testing "qualified-ident? selects only namespaced forms"
+    (is (true? (qualified-ident? 'a/b)))
+    (is (true? (qualified-ident? :a/b)))
+    (is (false? (qualified-ident? 'foo)))
+    (is (false? (qualified-ident? :foo)))))
+
+(deftest special-symbol-membership
+  (testing "common specials"
+    (is (true? (special-symbol? 'if)))
+    (is (true? (special-symbol? 'fn)))
+    (is (true? (special-symbol? 'quote)))
+    (is (true? (special-symbol? 'recur))))
+
+  (testing "non-specials"
+    (is (false? (special-symbol? 'inc)))
+    (is (false? (special-symbol? :if)))
+    (is (false? (special-symbol? "if")))))
+
+(deftest map-entry-predicate
+  (testing "two-vector is a map entry"
+    (is (true? (map-entry? [:a 1])))
+    (is (true? (map-entry? ["k" "v"]))))
+
+  (testing "non-entries"
+    (is (false? (map-entry? [1])))
+    (is (false? (map-entry? [1 2 3])))
+    (is (false? (map-entry? '(1 2))))
+    (is (false? (map-entry? {:a 1})))))
+
+(deftest unsupported-predicates-return-false
+  (testing "bytes?, inst?, uri? all return false on mino"
+    (is (false? (bytes? "anything")))
+    (is (false? (bytes? [1 2 3])))
+    (is (false? (inst? :now)))
+    (is (false? (uri? "https://example.com")))))
+
+(deftest uuid-predicate
+  (testing "valid uuid strings"
+    (is (true? (uuid? "550e8400-e29b-41d4-a716-446655440000")))
+    (is (true? (uuid? "00000000-0000-0000-0000-000000000000"))))
+
+  (testing "invalid uuid strings"
+    (is (false? (uuid? "550e8400-e29b-41d4-a716-44665544000")))
+    (is (false? (uuid? "not-a-uuid")))
+    (is (false? (uuid? "")))
+    (is (false? (uuid? nil)))
+    (is (false? (uuid? 42)))))
+
+(deftest find-keyword-equivalence
+  (testing "find-keyword returns interned keyword for strings"
+    (is (= :a (find-keyword "a")))
+    (is (= :ns/a (find-keyword "ns" "a"))))
+
+  (testing "find-keyword returns nil for non-strings"
+    (is (nil? (find-keyword 42)))
+    (is (nil? (find-keyword nil)))))
+
+(deftest parse-boolean-cases
+  (testing "valid booleans"
+    (is (true?  (parse-boolean "true")))
+    (is (false? (parse-boolean "false"))))
+
+  (testing "case-sensitive — 'True' is not parsed"
+    (is (nil? (parse-boolean "True")))
+    (is (nil? (parse-boolean "FALSE"))))
+
+  (testing "non-boolean inputs"
+    (is (nil? (parse-boolean "")))
+    (is (nil? (parse-boolean "yes")))
+    (is (nil? (parse-boolean nil)))
+    (is (nil? (parse-boolean 42)))))
+
+(deftest parse-uuid-canonicalization
+  (testing "canonical lowercase round-trip"
+    (is (= "550e8400-e29b-41d4-a716-446655440000"
+           (parse-uuid "550E8400-E29B-41D4-A716-446655440000")))
+    (is (= "550e8400-e29b-41d4-a716-446655440000"
+           (parse-uuid "550e8400-e29b-41d4-a716-446655440000"))))
+
+  (testing "rejected inputs"
+    (is (nil? (parse-uuid "junk")))
+    (is (nil? (parse-uuid nil)))))
+
+(deftest partitionv-returns-vectors
+  (testing "exact partitions"
+    (is (= [[1 2] [3 4]] (vec (partitionv 2 [1 2 3 4]))))
+    (is (every? vector? (partitionv 2 [1 2 3 4]))))
+
+  (testing "step form"
+    (is (= [[1 2] [2 3] [3 4]] (vec (partitionv 2 1 [1 2 3 4])))))
+
+  (testing "step + pad"
+    (is (= [[1 2] [3 4] [5 :p]] (vec (partitionv 2 2 [:p :p] [1 2 3 4 5]))))))
+
+(deftest partitionv-all-returns-vectors
+  (testing "all-partition keeps trailing remainder as a vector"
+    (is (= [[1 2] [3 4] [5]] (vec (partitionv-all 2 [1 2 3 4 5]))))
+    (is (every? vector? (partitionv-all 2 [1 2 3 4 5])))))
+
+(deftest splitv-at-tuple
+  (testing "basic split returns two vectors"
+    (is (= [[1 2] [3 4]] (splitv-at 2 [1 2 3 4]))))
+
+  (testing "n exceeding length yields empty second element"
+    (is (= [[1 2 3] []] (splitv-at 5 [1 2 3]))))
+
+  (testing "n=0 yields empty first element"
+    (is (= [[] [1 2 3]] (splitv-at 0 [1 2 3])))))
+
+(deftest replicate-deprecated-alias
+  (testing "n copies"
+    (is (= [:x :x :x] (vec (replicate 3 :x))))
+    (is (= [] (vec (replicate 0 :x))))))
+
+(deftest hash-collection-helpers
+  (testing "hash-ordered-coll is order-sensitive"
+    (is (not= (hash-ordered-coll [1 2 3])
+              (hash-ordered-coll [3 2 1]))))
+
+  (testing "hash-unordered-coll is order-insensitive"
+    (is (= (hash-unordered-coll #{1 2 3})
+           (hash-unordered-coll #{3 2 1}))))
+
+  (testing "mix-collection-hash returns a number"
+    (is (number? (mix-collection-hash 12345 3)))))
+
+(deftest ex-cause-from-data-or-meta
+  (testing "ex-data :cause"
+    (is (= :down (ex-cause (ex-info "boom" {:cause :down})))))
+
+  (testing "no cause yields nil"
+    (is (nil? (ex-cause (ex-info "boom" {})))))
+
+  (testing "non-exception input is nil-safe"
+    (is (nil? (ex-cause nil)))))
+
+(deftest inst-ms-throws
+  (testing "inst-ms is unsupported"
+    (is (thrown? (inst-ms 0)))
+    (let [d (try (inst-ms 0) nil
+                 (catch e (ex-data e)))]
+      (is (= :inst-ms (:mino/unsupported d))))))
+
+(deftest tap-mechanism
+  (testing "add-tap and tap> deliver values"
+    (let [received (atom [])
+          f        (fn [v] (swap! received conj v))]
+      (add-tap f)
+      (tap> :hi)
+      (tap> :ho)
+      (remove-tap f)
+      (is (= [:hi :ho] @received))))
+
+  (testing "remove-tap stops further deliveries"
+    (let [received (atom [])
+          f        (fn [v] (swap! received conj v))]
+      (add-tap f)
+      (tap> :first)
+      (remove-tap f)
+      (tap> :second)
+      (is (= [:first] @received))))
+
+  (testing "tap> returns true and survives misbehaving taps"
+    (let [received (atom 0)
+          ok       (fn [_] (swap! received inc))
+          bad      (fn [_] (throw (ex-info "boom" {})))]
+      (add-tap ok)
+      (add-tap bad)
+      (is (true? (tap> :v)))
+      (remove-tap ok)
+      (remove-tap bad)
+      (is (= 1 @received)))))
+
+(deftest tagged-literal-and-reader-conditional-records
+  (testing "tagged-literal stores tag and form, predicate detects"
+    (let [t (tagged-literal :foo 42)]
+      (is (true? (tagged-literal? t)))
+      (is (= :foo (:tag t)))
+      (is (= 42 (:form t)))
+      (is (false? (tagged-literal? {:tag :foo :form 42})))))
+
+  (testing "reader-conditional stores form and splicing? flag"
+    (let [r (reader-conditional [:a 1] true)]
+      (is (true? (reader-conditional? r)))
+      (is (= [:a 1] (:form r)))
+      (is (true?    (:splicing? r))))))
+
+(deftest with-redefs-fn-restores-roots
+  (testing "rebinds during thunk and restores after"
+    (def my-fn-w-redefs-fn_ (fn [] :original))
+    (let [observed (atom nil)]
+      (with-redefs-fn {#'my-fn-w-redefs-fn_ (fn [] :redef)}
+                      (fn [] (reset! observed (my-fn-w-redefs-fn_))))
+      (is (= :redef    @observed))
+      (is (= :original (my-fn-w-redefs-fn_))))))
