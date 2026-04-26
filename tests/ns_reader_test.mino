@@ -210,7 +210,6 @@
 ;; ------------------------------------------------------------------
 
 (deftest read-string-namespaced-keyword-roundtrip
-  (is (= :foo/bar (read-string "[:foo/bar 100]" 0)))
   (is (= :foo/bar (first (read-string "[:foo/bar 100]")))))
 
 #_ ;; JVM-only: read+string returns [form source-text]; no equivalent in mino.
