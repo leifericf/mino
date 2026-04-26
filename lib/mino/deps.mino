@@ -69,9 +69,22 @@
       (fetch-dep dep-name spec)))
   (println "Dependencies up to date."))
 
+(defn- detect-roots
+  "Pick source roots that actually exist on disk for a fetched dep.
+   Many pure-Clojure libraries follow the Maven layout
+   (src/main/clojure/...); others put sources directly under src/.
+   Returning both when both exist keeps require resolution working
+   for sibling namespaces inside a multi-file library."
+  [base]
+  (let [candidates ["src" "src/main/clojure" "src/main/cljc"
+                    "src/main/cljs"]
+        existing   (filterv #(directory? (str base "/" %)) candidates)]
+    (if (seq existing) existing ["src"])))
+
 (defn- dep-source-paths
   "Return the source directories for a single dependency.
-   Git deps default to [\"src\"] if :deps/root is not specified."
+   :deps/root in the spec wins; otherwise we probe common conventions
+   and use whichever roots exist under the fetched directory."
   [dep-name spec]
   (cond
     (:path spec)
@@ -79,7 +92,7 @@
 
     (:git spec)
     (let [base (str deps-dir "/" (name dep-name))
-          roots (or (:deps/root spec) ["src"])]
+          roots (or (:deps/root spec) (detect-roots base))]
       (mapv #(str base "/" %) roots))))
 
 (defn resolve-paths
