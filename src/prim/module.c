@@ -173,6 +173,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         int         refer_all         = 0;
         int         needs_load        = 0;
         mino_val_t *exclude_vec       = NULL;
+        mino_val_t *rename_map        = NULL;
         size_t      vi;
         if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
             set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
@@ -210,6 +211,9 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 exclude_vec = v;
                 /* :exclude is meaningful only alongside :refer :all (which
                  * use injects); does not by itself trigger a load. */
+            } else if (kw_match(k, "rename")
+                       && v != NULL && v->type == MINO_MAP) {
+                rename_map = v;
             }
         }
         /* If only :as-alias is present, register the alias without
@@ -311,6 +315,8 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         char rbuf[256];
                         size_t rn = rsym->as.s.len;
                         mino_val_t *val = NULL;
+                        const char *bind_name = rbuf;
+                        size_t      bind_len  = rn;
                         memcpy(rbuf, rsym->as.s.data, rn);
                         rbuf[rn] = '\0';
                         if (src != NULL) {
@@ -330,7 +336,28 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                 "name", "MNS001", msg);
                             return NULL;
                         }
-                        env_bind(S, target, rbuf, val);
+                        if (rename_map != NULL && rename_map->type == MINO_MAP) {
+                            size_t mi;
+                            for (mi = 0; mi < rename_map->as.map.len; mi++) {
+                                mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
+                                if (k != NULL && k->type == MINO_SYMBOL
+                                    && k->as.s.len == rn
+                                    && memcmp(k->as.s.data, rbuf, rn) == 0) {
+                                    mino_val_t *renamed = map_get_val(rename_map, k);
+                                    if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                                        bind_name = renamed->as.s.data;
+                                        bind_len  = renamed->as.s.len;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        if (bind_len < sizeof(rbuf)) {
+                            char nbuf[256];
+                            memcpy(nbuf, bind_name, bind_len);
+                            nbuf[bind_len] = '\0';
+                            env_bind(S, target, nbuf, val);
+                        }
                     }
                 }
             }
@@ -338,9 +365,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 size_t ri;
                 for (ri = 0; ri < src->len; ri++) {
                     const char *bname = src->bindings[ri].name;
+                    size_t       blen  = strlen(bname);
+                    const char *bind_name = bname;
+                    size_t      bind_len  = blen;
                     /* Honor :exclude when paired with :refer :all. */
                     if (exclude_vec != NULL) {
-                        size_t  ei, blen = strlen(bname);
+                        size_t  ei;
                         int     skip = 0;
                         for (ei = 0; ei < exclude_vec->as.vec.len; ei++) {
                             mino_val_t *e = vec_nth(exclude_vec, ei);
@@ -353,9 +383,28 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         }
                         if (skip) continue;
                     }
-                    env_bind(S, target,
-                             bname,
-                             src->bindings[ri].val);
+                    if (rename_map != NULL && rename_map->type == MINO_MAP) {
+                        size_t mi;
+                        for (mi = 0; mi < rename_map->as.map.len; mi++) {
+                            mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
+                            if (k != NULL && k->type == MINO_SYMBOL
+                                && k->as.s.len == blen
+                                && memcmp(k->as.s.data, bname, blen) == 0) {
+                                mino_val_t *renamed = map_get_val(rename_map, k);
+                                if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                                    bind_name = renamed->as.s.data;
+                                    bind_len  = renamed->as.s.len;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if (bind_len < 256) {
+                        char nbuf[256];
+                        memcpy(nbuf, bind_name, bind_len);
+                        nbuf[bind_len] = '\0';
+                        env_bind(S, target, nbuf, src->bindings[ri].val);
+                    }
                 }
             }
         }
