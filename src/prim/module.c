@@ -346,7 +346,9 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * loaded file don't leak into the caller's namespace. */
     {
         const char *saved_ns = S->current_ns;
-        result = mino_load_file(S, path, env);
+        const char *post_ns;
+        result  = mino_load_file(S, path, env);
+        post_ns = S->current_ns;
         S->current_ns = saved_ns;
         /* Pop load stack regardless of success. */
         if (S->load_stack_len > 0) {
@@ -354,6 +356,31 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (result == NULL) {
             return NULL;
+        }
+        /* File-to-ns validation: if the loaded file changed current_ns
+         * (i.e. it contained an `(ns x.y)` form) the resulting ns must
+         * match the requested module name. Files with no `(ns ...)` are
+         * accepted as-is so loading utility scripts by path still works. */
+        if (post_ns != NULL && saved_ns != NULL
+            && strcmp(post_ns, saved_ns) != 0) {
+            char        expected[256];
+            size_t      nl = strlen(name);
+            size_t      k;
+            if (nl < sizeof(expected)) {
+                for (k = 0; k < nl; k++) {
+                    expected[k] = (name[k] == '/') ? '.' : name[k];
+                }
+                expected[nl] = '\0';
+                if (strcmp(post_ns, expected) != 0) {
+                    char msg[512];
+                    snprintf(msg, sizeof(msg),
+                        "require: file %s declared namespace %s, expected %s",
+                        path, post_ns, expected);
+                    set_eval_diag(S, S->eval_current_form,
+                        "name", "MNS001", msg);
+                    return NULL;
+                }
+            }
         }
     }
     /* Cache. */
