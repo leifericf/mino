@@ -142,20 +142,38 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
     if (qq_locally_bound(S, env, name)) return sym;
     if (S->current_ns == NULL) return sym;
     for (e = current_ns_env(S); e != NULL; e = e->parent) {
-        if (env_find_here(e, name) != NULL) {
-            size_t i;
-            for (i = 0; i < S->ns_env_len; i++) {
-                if (S->ns_env_table[i].env == e) {
-                    const char *nsn  = S->ns_env_table[i].name;
-                    size_t      cnlen = strlen(nsn);
-                    char        buf[512];
-                    if (cnlen + 1 + nlen + 1 > sizeof(buf)) return sym;
-                    memcpy(buf, nsn, cnlen);
-                    buf[cnlen] = '/';
-                    memcpy(buf + cnlen + 1, name, nlen);
-                    buf[cnlen + 1 + nlen] = '\0';
-                    return mino_symbol_n(S, buf, cnlen + 1 + nlen);
+        env_binding_t *b = env_find_here(e, name);
+        if (b != NULL) {
+            size_t      i;
+            const char *nsn  = NULL;
+            const char *bname = name;
+            size_t      bnlen = nlen;
+            /* When the binding is a var, the var carries its source ns
+             * and original name -- use those so refer'd entries are
+             * qualified back to where they live, matching the Clojure
+             * syntax-quote contract. */
+            if (b->val != NULL && b->val->type == MINO_VAR) {
+                nsn   = b->val->as.var.ns;
+                bname = b->val->as.var.sym;
+                bnlen = bname != NULL ? strlen(bname) : 0;
+            }
+            if (nsn == NULL) {
+                for (i = 0; i < S->ns_env_len; i++) {
+                    if (S->ns_env_table[i].env == e) {
+                        nsn = S->ns_env_table[i].name;
+                        break;
+                    }
                 }
+            }
+            if (nsn != NULL) {
+                size_t cnlen = strlen(nsn);
+                char   buf[512];
+                if (cnlen + 1 + bnlen + 1 > sizeof(buf)) return sym;
+                memcpy(buf, nsn, cnlen);
+                buf[cnlen] = '/';
+                memcpy(buf + cnlen + 1, bname, bnlen);
+                buf[cnlen + 1 + bnlen] = '\0';
+                return mino_symbol_n(S, buf, cnlen + 1 + bnlen);
             }
             return sym; /* env without ns name (shouldn't happen) */
         }

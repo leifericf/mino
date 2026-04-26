@@ -626,7 +626,20 @@ mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         bind_name = rename_lookup(rename_v, name, nlen, rbuf, sizeof(rbuf));
         if (bind_name == NULL) bind_name = name;
-        env_bind(S, dst, bind_name, src->bindings[i].val);
+        /* Prefer to bind the source var so syntax-quote and meta-on-var
+         * still see the source namespace. Auto-intern when the source
+         * env carries a primitive without an interned var so the same
+         * delegation works for mino.core entries. */
+        var = var_find(S, ns_buf, name);
+        if (var == NULL) {
+            var = var_intern(S, ns_buf, name);
+            if (var != NULL) var_set_root(S, var, src->bindings[i].val);
+        }
+        if (var != NULL) {
+            env_bind(S, dst, bind_name, var);
+        } else {
+            env_bind(S, dst, bind_name, src->bindings[i].val);
+        }
     }
     return mino_nil(S);
 }
