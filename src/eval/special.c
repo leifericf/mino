@@ -60,7 +60,22 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
 
         /* Look up in var registry by resolved namespace + name. */
         var = var_find(S, resolved_ns, sym_name);
-        if (var != NULL) return var->as.var.root;
+        if (var != NULL) {
+            /* Cross-ns access of a private var is rejected. Same-ns
+             * access is fine since callers within a namespace are not
+             * "outsiders". */
+            if (var->as.var.is_private
+                && (S->current_ns == NULL
+                    || strcmp(S->current_ns, resolved_ns) != 0)) {
+                char msg[300];
+                snprintf(msg, sizeof(msg),
+                         "var %s/%s is private", resolved_ns, sym_name);
+                set_eval_diag(S, S->eval_current_form, "name", "MNS001",
+                              msg);
+                return NULL;
+            }
+            return var->as.var.root;
+        }
 
         {
             /* Primitives live in the ns env but aren't interned as vars,

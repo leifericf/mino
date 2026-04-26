@@ -85,10 +85,9 @@
 ;; Mino:    matches Clojure — hard error.
 
 (deftest private-cross-ns-access-throws
-  (eval (read-string "(ns cs-strict-priv) (def ^:private hidden 1)"))
-  (eval (read-string "(ns cs-strict-priv-other)"))
+  (eval (read-string "(do (ns cs-strict-priv) (def ^:private hidden 1))"))
   (is (thrown?
-       (eval (read-string "(ns cs-strict-priv-other) cs-strict-priv/hidden")))))
+       (eval (read-string "(do (ns cs-strict-priv-other) cs-strict-priv/hidden)")))))
 
 ;; --- intern is implemented -------------------------------------------------
 ;; Clojure: (intern 'some.ns 'sym value) is supported.

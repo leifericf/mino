@@ -134,6 +134,11 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             if (refer_all && src != NULL) {
                 size_t vi;
                 for (vi = 0; vi < src->len; vi++) {
+                    /* Skip private vars: :refer :all only brings in
+                     * publics, just like Clojure. */
+                    mino_val_t *var = var_find(S, modbuf,
+                                               src->bindings[vi].name);
+                    if (var != NULL && var->as.var.is_private) continue;
                     env_bind(S, target,
                              src->bindings[vi].name,
                              src->bindings[vi].val);
@@ -348,20 +353,27 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
     }
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
-    /* Check for ^:dynamic metadata on the name symbol. */
+    /* Check for ^:dynamic / ^:private metadata on the name symbol. */
     {
         int is_dynamic = 0;
+        int is_priv    = 0;
         mino_val_t *m = name_form->meta;
         if (m != NULL && m->type == MINO_MAP) {
             mino_val_t *dk = mino_keyword(S, "dynamic");
             mino_val_t *dv = map_get_val(m, dk);
+            mino_val_t *pk = mino_keyword(S, "private");
+            mino_val_t *pv = map_get_val(m, pk);
             if (dv != NULL && mino_is_truthy(dv)) is_dynamic = 1;
+            if (pv != NULL && mino_is_truthy(pv)) is_priv    = 1;
         }
         /* (def name) -- declaration only. Var stays unbound unless previously
          * defined; returns the var. */
         if (!mino_is_cons(args->as.cons.cdr)) {
             mino_val_t *var = var_intern(S, S->current_ns, buf);
-            if (var != NULL && is_dynamic) var->as.var.dynamic = 1;
+            if (var != NULL) {
+                if (is_dynamic) var->as.var.dynamic = 1;
+                if (is_priv)    var->as.var.is_private = 1;
+            }
             meta_set(S, buf, NULL, 0, form);
             return var != NULL ? var : mino_nil(S);
         }
@@ -388,6 +400,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
             if (var != NULL) {
                 var_set_root(S, var, value);
                 if (is_dynamic) var->as.var.dynamic = 1;
+                if (is_priv)    var->as.var.is_private = 1;
             }
             env_bind(S, current_ns_env(S), buf, value);
             gc_unpin(1);

@@ -196,8 +196,9 @@ mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
     v->as.var.ns      = ns;
     v->as.var.sym     = name;
     v->as.var.root    = root;
-    v->as.var.dynamic = 0;
-    v->as.var.bound   = 0;
+    v->as.var.dynamic    = 0;
+    v->as.var.bound      = 0;
+    v->as.var.is_private = 0;
     return v;
 }
 
