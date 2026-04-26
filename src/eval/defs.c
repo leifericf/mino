@@ -376,9 +376,10 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                 meta = ns_meta_merge(S, meta, next);
                 cur = cur->as.cons.cdr;
             }
-            if (meta != NULL) {
-                ns_env_set_meta(S, S->current_ns, meta);
-            }
+            /* Each (ns ...) invocation replaces the namespace's metadata
+             * outright; merging only happens between the ^meta, the
+             * docstring, and the attribute map within a single call. */
+            ns_env_set_meta(S, S->current_ns, meta);
             args = mino_cons(S, name_form, cur);
         }
     }
