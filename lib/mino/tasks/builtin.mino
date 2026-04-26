@@ -87,7 +87,7 @@
   []
   (when (stale? ["src/core.mino"] "src/core_mino.h")
     (let [src     (slurp "src/core.mino")
-          src     (if (ends-with? src "\n")
+          src     (if (str/ends-with? src "\n")
                     (subs src 0 (- (count src) 1))
                     src)
           escaped (-> src
@@ -271,7 +271,7 @@
       (if (>= i nlines)
         results
         (let [line (nth lines i)]
-          (if (and (= depth 0) (starts-with? line "{"))
+          (if (and (= depth 0) (str/starts-with? line "{"))
             ;; Opening brace at col 0: entering function body.
             ;; The function signature is on the preceding non-blank line.
             (let [sig (loop [j (- i 1)]
@@ -282,7 +282,7 @@
                               (recur (- j 1))
                               prev))))]
               (recur (+ i 1) 1 i sig results))
-            (if (and (> depth 0) (starts-with? line "}"))
+            (if (and (> depth 0) (str/starts-with? line "}"))
               ;; Closing brace at col 0: leaving function body.
               (let [body-lines (+ (- i fn-start) 1)
                     new-results (if (> body-lines fn-limit)
@@ -320,7 +320,7 @@
 (defn qa-arch
   "Architecture quality gates: TU size, function size, abort inventory."
   []
-  (let [src-files (sort (filterv #(ends-with? % ".c") (file-seq "src")))
+  (let [src-files (sort (filterv #(str/ends-with? % ".c") (file-seq "src")))
         failures  (atom 0)]
 
     ;; --- TU size check ---
