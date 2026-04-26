@@ -214,13 +214,34 @@ across the standard library).
 
 A new `clojure.* coverage` test reports the breadth of Clojure-
 core-namespace surface mino exposes against a manifest of
-canonical 1.11 names. The current snapshot: `clojure.core` 402/411
-portable names (97%), `clojure.string` 17/21 (80%), `clojure.set`
-12/12 (100%), `clojure.walk` 8/8 (100%), `clojure.edn` 1/2 (50%),
-`clojure.zip` 26/28 (92%). JVM-only names and special forms are
-excluded from the percentages and accounted separately. Missing
+canonical 1.11 names. JVM-only names and special forms are
+excluded from the percentages and accounted separately; missing
 names are printed by namespace so the gap is visible without
 grep'ing the source.
+
+The coverage report drove a follow-up pass that closed the easy
+gaps. `clojure.string` adds `index-of` (with optional `from-index`),
+`last-index-of`, `re-quote-replacement`, and `replace-first`. The
+substring-search helpers are mino-side brute-force scans on top of
+the existing `prim-includes?` short-circuit; `replace-first` uses
+literal-substring semantics because mino's regex literals share
+the string type (the same constraint that scopes `clojure.string/
+replace` today). `clojure.zip` adds `leftmost` and `rightmost`.
+`compare-and-set!` lands as a stateful primitive in `clojure.core`:
+it checks the atom's current value against an expected value and
+only swaps on equality, returning `true` on success and `false`
+when the expected value did not match.
+
+Final coverage: `clojure.core` 405/413 portable names (98%),
+`clojure.string` 21/21 (100%), `clojure.set` 12/12 (100%),
+`clojure.walk` 8/8 (100%), `clojure.edn` 1/2 (50%), `clojure.zip`
+28/28 (100%). The remaining `clojure.core` gaps are queued as
+follow-ups: `bound-fn` / `bound-fn*` need a dynamic-binding-capture
+API; `destructure` would rewrite the C-side destructuring helper as
+a mino-callable function; `re-groups` / `re-matcher` need regex
+capture groups; `read` and `clojure.edn/read` need a reader-with-
+options surface; `*ns*` works at the symbol-resolution level today
+and would need a real dynamic var to be `find-var`-visible.
 
 ### Breaking Changes
 
