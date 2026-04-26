@@ -718,6 +718,17 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (e != NULL && e->docstring != NULL) {
         return mino_string(S, e->docstring);
     }
+    /* Qualified-name fallback: docstrings register under the bare name,
+     * so ns/sym lookups should also try the part after the slash. */
+    {
+        const char *slash = (n > 1) ? memchr(buf, '/', n) : NULL;
+        if (slash != NULL && slash[1] != '\0') {
+            e = meta_find(S, slash + 1);
+            if (e != NULL && e->docstring != NULL) {
+                return mino_string(S, e->docstring);
+            }
+        }
+    }
     /* Fall back to namespace metadata: (ns foo "docstring" ...) puts
      * {:doc "..."} on the namespace; surface it through doc when no
      * named-binding docstring is registered. */
