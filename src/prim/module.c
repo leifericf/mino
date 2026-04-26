@@ -162,23 +162,34 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         && name_val->as.vec.len >= 1) {
         mino_val_t *mod_sym = vec_nth(name_val, 0);
         char pathbuf[256];
-        const char *alias_name = NULL;
-        size_t      alias_len  = 0;
-        mino_val_t *refer_vec  = NULL;
-        int         refer_all  = 0;
+        const char *alias_name        = NULL;
+        size_t      alias_len         = 0;
+        const char *as_alias_name     = NULL;
+        size_t      as_alias_len      = 0;
+        mino_val_t *refer_vec         = NULL;
+        int         refer_all         = 0;
+        int         needs_load        = 0;
         size_t      vi;
         if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
             set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
             return NULL;
         }
-        /* Parse keyword args. */
+        /* Parse keyword args.
+         * :as / :refer require loading; :as-alias does not. The two
+         * alias forms can coexist (an entry can have :as and :as-alias
+         * in the same libspec to register two aliases). */
         for (vi = 1; vi + 1 < name_val->as.vec.len; vi += 2) {
             mino_val_t *k = vec_nth(name_val, vi);
             mino_val_t *v = vec_nth(name_val, vi + 1);
             if (kw_match(k, "as") && v->type == MINO_SYMBOL) {
                 alias_name = v->as.s.data;
                 alias_len  = v->as.s.len;
+                needs_load = 1;
+            } else if (kw_match(k, "as-alias") && v->type == MINO_SYMBOL) {
+                as_alias_name = v->as.s.data;
+                as_alias_len  = v->as.s.len;
             } else if (kw_match(k, "refer")) {
+                needs_load = 1;
                 if (v != NULL && v->type == MINO_VECTOR) {
                     refer_vec = v;
                 } else if (v != NULL && v->type == MINO_KEYWORD
@@ -191,6 +202,26 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     return NULL;
                 }
             }
+        }
+        /* If only :as-alias is present, register the alias without
+         * loading. The target ns is created (empty) so find-ns /
+         * the-ns succeed and qualified keywords resolve. */
+        if (!needs_load && as_alias_name != NULL) {
+            char fbuf[256];
+            char abuf[256];
+            if (mod_sym->as.s.len >= sizeof(fbuf)
+                || as_alias_len >= sizeof(abuf)) {
+                set_eval_diag(S, S->eval_current_form, "name", "MNS001",
+                              "require: :as-alias name too long");
+                return NULL;
+            }
+            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+            fbuf[mod_sym->as.s.len] = '\0';
+            memcpy(abuf, as_alias_name, as_alias_len);
+            abuf[as_alias_len] = '\0';
+            (void)ns_env_ensure(S, fbuf);
+            runtime_module_add_alias(S, abuf, fbuf);
+            return mino_nil(S);
         }
         /* Runtime-ns shortcut: skip path conversion if the namespace
          * already exists by its dashed name. */
@@ -233,6 +264,18 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             char fbuf[256];
             memcpy(abuf, alias_name, alias_len);
             abuf[alias_len] = '\0';
+            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+            fbuf[mod_sym->as.s.len] = '\0';
+            runtime_module_add_alias(S, abuf, fbuf);
+        }
+        /* Store :as-alias when paired with a load-triggering option;
+         * the alias-only path returned earlier when no load was needed. */
+        if (as_alias_name != NULL && as_alias_len > 0
+            && as_alias_len < 256 && mod_sym->as.s.len < 256) {
+            char abuf[256];
+            char fbuf[256];
+            memcpy(abuf, as_alias_name, as_alias_len);
+            abuf[as_alias_len] = '\0';
             memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
             fbuf[mod_sym->as.s.len] = '\0';
             runtime_module_add_alias(S, abuf, fbuf);
