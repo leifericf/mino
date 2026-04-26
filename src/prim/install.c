@@ -171,11 +171,12 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     install_core_mino(S, core_env);
     S->current_ns = saved_ns;
 
-    /* Wire the embedder's env so unqualified lookup falls through into
-     * mino.core when nothing matches in the lexical chain. Skip if the
-     * caller already chained it (e.g. when env is the core env itself). */
-    if (env != NULL && env != core_env && env->parent == NULL) {
-        gc_write_barrier(S, env, env->parent, core_env);
-        env->parent = core_env;
-    }
+    /* The embedder's env stays parent-less. eval_symbol falls back to
+     * current_ns_env after the lexical chain runs out, and per-ns envs
+     * chain to mino.core themselves -- so a namespace that detaches
+     * its parent (e.g. via :refer-clojure :only) is properly isolated
+     * instead of leaking core bindings through the embedder root.
+     * mino.core itself stays as-is. */
+    (void)core_env;
+    (void)env;
 }

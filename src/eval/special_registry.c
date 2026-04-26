@@ -121,11 +121,16 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
         }
     }
     if (var != NULL) return var;
-    /* No var found: check for a C primitive in the env. resolve does
-     * the same auto-creation so var-on-fn tests pass for prim-backed
-     * names like inc/map. */
+    /* No var found: check for a C primitive in the env or in the
+     * current ns chain so #'inc works for prim-backed names. The
+     * embedder env no longer chains to mino.core, so we fall through
+     * to current_ns_env (which does) to mirror eval_symbol's lookup. */
     {
         mino_val_t *val = mino_env_get(env, vbuf);
+        if (val == NULL) {
+            mino_env_t *ns_env = current_ns_env(S);
+            if (ns_env != NULL) val = mino_env_get(ns_env, vbuf);
+        }
         if (val != NULL) {
             var = var_intern(S, "mino.core", vbuf);
             var_set_root(S, var, val);

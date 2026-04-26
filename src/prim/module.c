@@ -706,19 +706,30 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     pat = pat_val->as.s.data;
-    /* Walk every env frame from the given env up to root. */
-    for (e = env; e != NULL; e = e->parent) {
-        size_t i;
-        for (i = 0; i < e->len; i++) {
-            if (strstr(e->bindings[i].name, pat) != NULL) {
-                mino_val_t *sym  = mino_symbol(S, e->bindings[i].name);
-                mino_val_t *cell = mino_cons(S, sym, mino_nil(S));
-                if (tail == NULL) {
-                    head = cell;
-                } else {
-                    mino_cons_cdr_set(S, tail, cell);
+    /* Walk every env frame from the given env up to root, then also
+     * the current namespace chain so primitives interned in mino.core
+     * are reachable when the caller env doesn't chain into it. */
+    {
+        mino_env_t *chains[2];
+        size_t      ci;
+        chains[0] = env;
+        chains[1] = current_ns_env(S);
+        for (ci = 0; ci < 2; ci++) {
+            for (e = chains[ci]; e != NULL; e = e->parent) {
+                size_t i;
+                if (ci == 1 && e == chains[0]) continue;
+                for (i = 0; i < e->len; i++) {
+                    if (strstr(e->bindings[i].name, pat) != NULL) {
+                        mino_val_t *sym  = mino_symbol(S, e->bindings[i].name);
+                        mino_val_t *cell = mino_cons(S, sym, mino_nil(S));
+                        if (tail == NULL) {
+                            head = cell;
+                        } else {
+                            mino_cons_cdr_set(S, tail, cell);
+                        }
+                        tail = cell;
+                    }
                 }
-                tail = cell;
             }
         }
     }
