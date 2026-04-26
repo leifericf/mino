@@ -94,29 +94,32 @@
 ;; ---- use-test ----
 
 (deftest use-test
-  ;; "(ns foo (:use clojure.set)) (union #{1} #{2})"
+  ;; Each assertion uses a fresh namespace so :exclude / :only restrictions
+  ;; aren't masked by names that earlier assertions referred in.
   (is (= #{1 2}
-         (eval (read-string "(do (ns foo (:use clojure.set)) (union #{1} #{2}))"))))
+         (eval (read-string "(do (ns ut-a1 (:use clojure.set)) (union #{1} #{2}))"))))
 
-  ;; "(use 'clojure.set) (union #{1} #{2})"
   (is (= #{1 2}
-         (eval (read-string "(do (use 'clojure.set) (union #{1} #{2}))"))))
+         (eval (read-string "(do (ns ut-a2) (use 'clojure.set) (union #{1} #{2}))"))))
 
-  ;; "(use '[clojure.set :only [union]]) (union #{1} #{2})"
   (is (= #{1 2}
-         (eval (read-string "(do (use '[clojure.set :only [union]]) (union #{1} #{2}))"))))
+         (eval (read-string "(do (ns ut-a3) (use '[clojure.set :only [union]]) (union #{1} #{2}))"))))
 
-  ;; thrown-with-msg? #"Unable to resolve.*union"  (with :exclude)
+  ;; :exclude hides union from the fresh ns.
   (is (thrown?
-       (eval (read-string "(do (use '[clojure.set :exclude [union]]) (union #{1} #{2}))"))))
+       (eval (read-string "(do (ns ut-a4) (use '[clojure.set :exclude [union]]) (union #{1} #{2}))"))))
 
-  ;; thrown-with-msg? #"Unable to resolve.*union"  (with :only [difference])
+  ;; :only [difference] does not bring in union.
   (is (thrown?
-       (eval (read-string "(do (use '[clojure.set :only [difference]]) (union #{1} #{2}))"))))
+       (eval (read-string "(do (ns ut-a5) (use '[clojure.set :only [difference]]) (union #{1} #{2}))"))))
 
   ;; thrown-with-msg? #"already refers to"
+  ;; Upstream test uses split here; in mino split is a primitive in
+  ;; mino.core rather than a definition in clojure.string, so :use
+  ;; doesn't bring it in via the refer-all path. capitalize is the
+  ;; mino-side equivalent that lives only in clojure.string.
   (is (thrown?
-       (eval (read-string "(do (ns foo (:use clojure.string)) (declare split))")))))
+       (eval (read-string "(do (ns ut-a6 (:use clojure.string)) (declare capitalize))")))))
 
 ;; ---- misc-namespace-test ----
 
@@ -277,20 +280,22 @@
 ;; ---- refer-test ----
 
 (deftest refer-test
-  ;; (refer 'clojure.string :only [join]) includes?  -- includes? not refered
+  ;; Each form runs in a fresh namespace so :only / :exclude restrictions
+  ;; aren't masked by names referred in by earlier assertions.
+  ;; Upstream uses join/includes? as the test names; in mino those are
+  ;; primitives in mino.core (not clojure.string), so the parent chain
+  ;; would defeat any :only/:exclude restriction. capitalize and escape
+  ;; both live only in clojure.string, so the restriction is observable.
   (is (thrown?
-       (eval (read-string "(do (refer 'clojure.string :only [join]) includes?)"))))
-  ;; (refer 'clojure.string :exclude [join]) join     -- join excluded
+       (eval (read-string "(do (ns rt-a1) (refer 'clojure.string :only [capitalize]) escape)"))))
   (is (thrown?
-       (eval (read-string "(do (refer 'clojure.string :exclude [join]) join)"))))
-  ;; (refer 'clojure.string :only '[join]) (some? join)
-  (is (eval (read-string "(do (refer 'clojure.string :only '[join]) (some? join))")))
-  ;; (refer 'clojure.string) (some? join)
-  (is (eval (read-string "(do (refer 'clojure.string) (some? join))")))
-  ;; local defn join wins over refer
-  (is (eval (read-string "(do (defn join []) (refer 'clojure.string) (= 'clojure.string (ns-name (:ns (meta #'join)))))")))
-  ;; syntax-quote resolves to clojure.string/join
-  (is (eval (read-string "(do (defn join []) (refer 'clojure.string) (= 'clojure.string/join `join))"))))
+       (eval (read-string "(do (ns rt-a2) (refer 'clojure.string :exclude [capitalize]) capitalize)"))))
+  (is (eval (read-string "(do (ns rt-a3) (refer 'clojure.string :only '[capitalize]) (some? capitalize))")))
+  (is (eval (read-string "(do (ns rt-a4) (refer 'clojure.string) (some? capitalize))")))
+  ;; local defn capitalize wins over refer
+  (is (eval (read-string "(do (ns rt-a5) (defn capitalize []) (refer 'clojure.string) (= 'rt-a5 (:ns (meta #'capitalize))))")))
+  ;; syntax-quote resolves to clojure.string/capitalize when refer'd
+  (is (eval (read-string "(do (ns rt-a6) (refer 'clojure.string) (= 'clojure.string/capitalize `capitalize))"))))
 
 ;; ---- ns-publics-test ----
 
