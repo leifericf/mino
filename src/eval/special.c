@@ -87,6 +87,16 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         }
     }
 
+    /* *ns* derefs to the current namespace symbol. Clojure exposes this
+     * as a dynamic var; mino reads S->current_ns directly so any
+     * (ns ...) / (in-ns ...) is observable in the same expression. */
+    if (n == 4 && memcmp(data, "*ns*", 4) == 0) {
+        if (mino_env_get(env, data) == NULL) {
+            return mino_symbol(S,
+                S->current_ns != NULL ? S->current_ns : "user");
+        }
+    }
+
     /* Unqualified: dynamic → lexical → current-ns env → fn ambient ns. */
     v = (S->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
     if (v == NULL) v = mino_env_get(env, data);

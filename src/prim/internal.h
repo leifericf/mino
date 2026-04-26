@@ -327,6 +327,33 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
+/* ns.c -- namespace and var introspection */
+mino_val_t *prim_in_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_find_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_the_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_create_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_remove_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_name(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_publics(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_interns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_refers(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_map(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_alias(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_unalias(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_unmap(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_all_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_loaded_libs(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_find_var(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_ns_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_requiring_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_intern(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_var_get(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_var_set(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_alter_var_root(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+extern const mino_prim_def k_prims_ns[];
+extern const size_t        k_prims_ns_count;
+
 /* proc.c */
 mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);

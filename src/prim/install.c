@@ -133,6 +133,7 @@ static const mino_prim_domain k_core_domains[] = {
     {"regex",       k_prims_regex,       &k_prims_regex_count},
     {"stateful",    k_prims_stateful,    &k_prims_stateful_count},
     {"module",      k_prims_module,      &k_prims_module_count},
+    {"ns",          k_prims_ns,          &k_prims_ns_count},
     {"bignum",      k_prims_bignum,      &k_prims_bignum_count},
     {"io_core",     k_prims_io_core,     &k_prims_io_core_count},
     {"host",        k_prims_host,        &k_prims_host_count},
