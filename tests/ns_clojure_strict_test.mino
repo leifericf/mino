@@ -1,0 +1,159 @@
+(require "tests/test")
+
+;; Clojure-strict namespace and var semantics that ClojureScript explicitly
+;; diverges from. Sourced from clojurescript.org/about/differences. Mino
+;; tracks Clojure (the gold standard) here, not CLJS. These tests pin
+;; down the divergences where mino is intentionally stricter than CLJS,
+;; using the more permissive (and more useful) Clojure behavior.
+;;
+;; Most assertions are RED today; they specify the Phase A target.
+
+;; --- def returns the var ---------------------------------------------------
+;; Clojure: (def x 1) returns the var #'user/x (or current-ns/x).
+;; CLJS:    returns the value 1 (unless [:def-emits-var] is set in REPL).
+;; Mino:    matches Clojure.
+
+(deftest def-returns-the-var
+  (let [r (eval (read-string "(def cs-strict-1 42)"))]
+    (is (var? r))
+    (is (= 42 (deref r)))))
+
+;; --- (def x) declares an unbound var ---------------------------------------
+;; Clojure: (def x) creates an unbound var; (var-get #'x) throws or returns
+;;          a sentinel; (bound? #'x) is false.
+;; CLJS:    (def x) yields nil — unbound is not representable.
+;; Mino:    matches Clojure.
+
+(deftest def-without-init-is-unbound
+  (eval (read-string "(def cs-strict-unbound)"))
+  (is (false? (bound? #'cs-strict-unbound))))
+
+(deftest bound-question-on-bound-var
+  (eval (read-string "(def cs-strict-bound 99)"))
+  (is (true? (bound? #'cs-strict-bound))))
+
+;; --- :refer-clojure :only --------------------------------------------------
+;; Clojure: supports :only, :exclude, :rename in :refer-clojure.
+;; CLJS:    only :exclude and :rename — :only is not supported.
+;; Mino:    matches Clojure (supports all three).
+;; The lens here is: declare a ns that auto-refers ONLY a small
+;; whitelist of clojure.core (or mino.core) names; everything else is
+;; absent.
+
+(deftest refer-clojure-only-restricts-imports
+  (is (true?
+       (eval (read-string
+              "(do (ns cs-strict-only.a (:refer-clojure :only [+ -])) (some? +))"))))
+  ;; Names not in :only are NOT auto-referred.
+  (is (thrown?
+       (eval (read-string
+              "(do (ns cs-strict-only.b (:refer-clojure :only [+ -])) map)")))))
+
+;; --- single-segment namespaces ---------------------------------------------
+;; Clojure: allows single-segment ns names like (ns foo); they intern
+;;          under the bare 'foo symbol.
+;; CLJS:    requires multi-segment names (e.g. (ns my.foo)); single-segment
+;;          forms throw or warn.
+;; Mino:    allows single-segment per Clojure (matches the SCI corpus
+;;          tests that use (ns foo) freely).
+
+(deftest single-segment-ns-is-allowed
+  (eval (read-string "(ns cs-strict-foo)"))
+  (is (= 'cs-strict-foo
+         (eval (read-string "(do (in-ns 'cs-strict-foo) (ns-name *ns*))")))))
+
+;; --- vars are reified at runtime -------------------------------------------
+;; Clojure: vars are first-class runtime objects; you can pass them around,
+;;          deref them, alter their root, query metadata, etc.
+;; CLJS:    vars are compile-time only; #'foo at runtime returns a stub
+;;          carrying compile-time metadata, not a manipulable var.
+;; Mino:    matches Clojure — first-class vars at runtime.
+
+(deftest vars-are-first-class-values
+  (eval (read-string "(def cs-strict-fc 7)"))
+  (let [v (eval (read-string "#'cs-strict-fc"))]
+    (is (var? v))
+    (is (= 7 (deref v)))
+    ;; Round-trip via a let binding — would be impossible if var was
+    ;; compile-time only.
+    (let [held v]
+      (is (= 7 (deref held))))))
+
+;; --- :private is a hard error, not a warning -------------------------------
+;; Clojure: cross-ns access of a ^:private var throws IllegalAccessError.
+;; CLJS:    only emits a compiler warning; access still works.
+;; Mino:    matches Clojure — hard error.
+
+(deftest private-cross-ns-access-throws
+  (eval (read-string "(ns cs-strict-priv) (def ^:private hidden 1)"))
+  (eval (read-string "(ns cs-strict-priv-other)"))
+  (is (thrown?
+       (eval (read-string "(ns cs-strict-priv-other) cs-strict-priv/hidden")))))
+
+;; --- intern is implemented -------------------------------------------------
+;; Clojure: (intern 'some.ns 'sym value) is supported.
+;; CLJS:    not implemented (no reified vars to intern into).
+;; Mino:    matches Clojure.
+
+(deftest intern-creates-a-var
+  (eval (read-string "(create-ns 'cs-strict-int)"))
+  (let [v (eval (read-string "(intern 'cs-strict-int 'planted 123)"))]
+    (is (var? v))
+    (is (= 123 (deref v)))
+    (is (= 'cs-strict-int (.-ns v)))
+    (is (= 'planted (.-sym v)))))
+
+;; --- :refer :all is supported ---------------------------------------------
+;; Clojure: (:require [foo :refer :all]) brings every public var of foo
+;;          into the current namespace.
+;; CLJS:    not supported — must enumerate refers explicitly.
+;; Mino:    matches Clojure.
+
+(deftest refer-all-imports-everything-public
+  (eval (read-string "(ns cs-strict-all-src) (defn pubA [] :a) (defn pubB [] :b)"))
+  (eval (read-string "(ns cs-strict-all-dst (:require [cs-strict-all-src :refer :all]))"))
+  (is (= :a (eval (read-string "(do (in-ns 'cs-strict-all-dst) (pubA))"))))
+  (is (= :b (eval (read-string "(do (in-ns 'cs-strict-all-dst) (pubB))")))))
+
+;; --- prefix lists are supported -------------------------------------------
+;; Clojure: (:require [clojure [set :as set] [string :as str]]) — multiple
+;;          libs sharing a common prefix in one libspec.
+;; CLJS:    not supported.
+;; Mino:    matches Clojure.
+
+(deftest require-prefix-list-form
+  (is (= #{1 2 3 4}
+         (eval (read-string
+                "(do (require '[clojure [set :refer [union]]]) (union #{1 2 3} #{2 3 4}))")))))
+
+;; --- :use with full Clojure options ---------------------------------------
+;; Clojure: (:use [foo :only [...]]), (:use [foo :exclude [...]]),
+;;          (:use foo) bare are all valid.
+;; CLJS:    only the :only form is supported.
+;; Mino:    matches Clojure.
+
+(deftest use-bare-imports-everything
+  (is (true? (eval (read-string "(do (ns cs-strict-use-1 (:use clojure.set)) (some? union))")))))
+
+(deftest use-with-only-restricts
+  (is (true? (eval (read-string "(do (ns cs-strict-use-2 (:use [clojure.set :only [union]])) (some? union))"))))
+  (is (thrown? (eval (read-string "(do (ns cs-strict-use-3 (:use [clojure.set :only [union]])) difference)")))))
+
+;; --- require accepts symbol, vector, or string ---------------------------
+;; Clojure: (require 'foo.bar) is the everyday form. (require '[foo.bar :as f])
+;;          and (require "foo/bar") also work.
+;; CLJS:    same.
+;; mino today: only string/vector. Symbol arg throws "argument must be a
+;;             string or vector". Real Clojure libs uniformly use the symbol
+;;             form, so failure here blocks loading any lib that does internal
+;;             requires.
+;; mino target: accept all three forms. Driven by 2026-04-26 acid test.
+
+(deftest require-accepts-symbol-arg
+  (is (any? (require 'clojure.string))))
+
+(deftest require-accepts-vector-with-symbol
+  (is (any? (require '[clojure.string :as cs-test-string]))))
+
+(deftest require-accepts-string-arg
+  (is (any? (require "clojure/string"))))

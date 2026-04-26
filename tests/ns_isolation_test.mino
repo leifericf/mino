@@ -1,0 +1,79 @@
+(require "tests/test")
+
+;; Per-namespace value-binding isolation tests.
+;;
+;; This file exercises the central guarantee: each namespace has its own
+;; binding table, so `(def x ...)` in two different namespaces produces two
+;; independent vars, both reachable by their qualified names, with the
+;; current namespace's binding winning for unqualified lookup.
+;;
+;; Today (mino v0.72.0) this file is mostly red: the runtime has a single
+;; shared root env, so `def` in two namespaces clobbers a single global
+;; entry.  These tests are the spec for the fix.
+
+;; --- Qualified access between sibling namespaces ---------------------------
+
+(deftest sibling-ns-qualified-access
+  ;; Two namespaces with same-named defs, accessed by qualified name.
+  (ns iso.a) (def x 1)
+  (ns iso.b) (def x 2)
+  (is (= 1 iso.a/x))
+  (is (= 2 iso.b/x)))
+
+;; --- Unqualified resolution honors current namespace -----------------------
+
+(deftest unqualified-resolves-to-current-ns
+  ;; After (ns iso.c) the unqualified `x` should be iso.c/x's value, not
+  ;; the most-recent-anywhere x.
+  (ns iso.c) (def x 30)
+  (ns iso.d) (def x 40)
+  (ns iso.c)
+  (is (= 30 x)))
+
+(deftest in-ns-switches-resolution
+  ;; (in-ns 'iso.e) should restore iso.e's bindings for unqualified reads.
+  (ns iso.e) (def y 50)
+  (ns iso.f) (def y 60)
+  (in-ns 'iso.e)
+  (is (= 50 y)))
+
+;; --- core auto-refers --------------------------------------------------------
+
+(deftest core-visible-from-any-ns
+  ;; Bundled-core fns (mino.core/inc, mino.core/+ etc.) should be visible
+  ;; by unqualified name from any namespace via the parent-pointer chain.
+  (ns iso.user.code)
+  (is (= 4 (inc 3)))
+  (is (= 6 (+ 1 2 3)))
+  (is (= [2 4 6] (map (fn [x] (* 2 x)) [1 2 3]))))
+
+(deftest defs-do-not-leak-into-core
+  ;; A def in user code must not pollute mino.core.
+  (ns iso.leak.test) (def some-private-helper 99)
+  (is (nil? (find-var 'mino.core/some-private-helper))))
+
+;; --- cross-ns shadowing ----------------------------------------------------
+
+#_ ;; SKIPPED until Phase A: this test redefines `inc` in user code to
+   ;; demonstrate per-ns shadowing. Today the redef leaks into the global
+   ;; root env, clobbering the test framework's own (swap! ... update :pass inc)
+   ;; calls and corrupting state. The fact that this test breaks the framework
+   ;; *is* the bug being fixed — re-enable once Phase A makes def writes
+   ;; ns-local. Using a non-core name like `my-inc` would lose the test's
+   ;; intent (shadowing a core function specifically).
+(deftest local-def-shadows-core-in-its-ns
+  (ns iso.shadow.user) (defn inc [_] :user-inc)
+  (is (= :user-inc (inc 7)))
+  (ns iso.shadow.other)
+  (is (= 8 (inc 7))))
+
+;; --- *ns* dynamic binding -----------------------------------------------------
+
+(deftest current-ns-tracks-active-namespace
+  (ns iso.curr.a)
+  (is (= 'iso.curr.a (ns-name *ns*)))
+  (in-ns 'iso.curr.b)
+  (is (= 'iso.curr.b (ns-name *ns*))))
+
+;; --- File-to-ns declaration validation -------------------------------------
+;; File-load tests live in the require/load file once we have on-disk fixtures.

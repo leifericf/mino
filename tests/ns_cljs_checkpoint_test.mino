@@ -1,0 +1,66 @@
+(require "tests/test")
+
+;; Translated from upstream ClojureScript test suite:
+;;   /tmp/upstream-ns-tests/cljs/ns_test.cljs
+;;
+;; STATUS: parked. The upstream test is built around a single (ns cljs.ns-test
+;; ...) form whose :require, :require-macros, and :use clauses pull in JS-host
+;; fixture modules (cljs.ns-test.foo, cljs.ns-test.bar, fake.ns, goog,
+;; cljs.test) that don't exist in mino. The deftests below all depend on
+;; symbols established by that ns form (baz, quux, itsc, always, core-mapv,
+;; lang/for, the `+` redef, ::fake/foo). Without it, every deftest is
+;; unbound-symbol noise.
+;;
+;; Re-enable plan: after Phase A lands runtime-namespace :require resolution,
+;; either (a) write minimal mino fixture files and translate the ns form,
+;; or (b) restructure the deftests so each one declares its own (ns ...) and
+;; pulls in only what it needs. The CLJS test is the lowest-priority
+;; checkpoint per user direction (Clojure ns_libs.clj is gold standard,
+;; SCI namespaces_test.cljc is the rich runtime checkpoint).
+;;
+;; The full upstream-derived translation lives below in (comment ...) form
+;; for traceability.
+
+(comment
+  ;; --- begin parked CLJS translation ---
+
+  (ns cljs.ns-test
+    (:refer-clojure :exclude [+ for] :rename {mapv core-mapv})
+    (:require [clojure.core :as lang :refer [when when-let] :rename {when always
+                                                                     when-let always-let}]
+              #_[goog :as goog-alias]            ;; JS host only
+              #_[cljs.test]                      ;; JS host only
+              [cljs.ns-test.foo :refer [baz]]
+              [clojure.set :as s :refer [intersection] :rename {intersection itsc}]
+              #_[cljs.analyzer :as ana]          ;; JS-host CLJS analyzer
+              [fake.ns :as-alias fake])
+    (:use [cljs.ns-test.bar :only [quux]]))
+
+  (def + -)
+
+  (deftest test-ns
+    (is (= 4 (clojure.core/+ 2 1 1)))
+    (is (= 0 (cljs.ns-test/+ 2 1 1)))
+    (is (= 0 (+ 2 1 1)))
+    (is (= 123 (baz)))
+    (is (= 123 (quux)))
+    (is (= (range 5) (lang/for [x (range 5)] x)))
+    (is (= #{1 2 3} (s/union #{1} #{2 3}))))
+
+  (deftest test-cljs-1508
+    (is (= (itsc #{1 2 3} #{2}) #{2}))
+    (is (= #'itsc #'clojure.set/intersection))
+    (is (= itsc clojure.set/intersection))
+    (is (= (always true 42) 42))
+    (is (= (core-mapv inc [1 2]) [2 3]))
+    (is (= (always-let [foo 42] foo) 42)))
+
+  ;; test-cljs-1677 — JS host only (#js, js/goog, isArrayLike). Skipped.
+  ;; test-cljs-2292 — JS host only (exists? macro). Skipped.
+
+  (deftest test-cljs-3399
+    (is (= ::fake/foo :fake.ns/foo))
+    (is (= `fake/foo 'fake.ns/foo)))
+
+  ;; --- end parked CLJS translation ---
+  )
