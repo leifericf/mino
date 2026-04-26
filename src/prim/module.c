@@ -340,6 +340,92 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
+/* (use libspec ...) -- like (require ...) but with :refer :all default.
+ * Each arg may be a symbol (refer-all) or a vector libspec. :only acts as
+ * :refer; explicit :refer/:as pass through. Unrecognized options are left
+ * for require to surface. */
+mino_val_t *prim_use(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *arg;
+    mino_val_t *last = mino_nil(S);
+    while (mino_is_cons(args)) {
+        mino_val_t *libspec;
+        size_t      vi, total = 0, j;
+        mino_val_t **tmp;
+        int         has_refer = 0;
+        int         has_only  = 0;
+        mino_val_t *only_v    = NULL;
+        arg = args->as.cons.car;
+        if (arg != NULL && arg->type == MINO_SYMBOL) {
+            /* Symbol form: (use 'foo) -> (require '[foo :refer :all]) */
+            mino_val_t **buf = (mino_val_t **)gc_alloc_typed(
+                S, GC_T_VALARR, 3 * sizeof(*buf));
+            gc_valarr_set(S, buf, 0, arg);
+            gc_valarr_set(S, buf, 1, mino_keyword(S, "refer"));
+            gc_valarr_set(S, buf, 2, mino_keyword(S, "all"));
+            libspec = mino_vector(S, buf, 3);
+        } else if (arg != NULL && arg->type == MINO_VECTOR
+                   && arg->as.vec.len >= 1) {
+            /* Inspect existing options. */
+            for (vi = 1; vi + 1 < arg->as.vec.len; vi += 2) {
+                mino_val_t *k = vec_nth(arg, vi);
+                mino_val_t *v = vec_nth(arg, vi + 1);
+                if (kw_match(k, "refer")) has_refer = 1;
+                if (kw_match(k, "only"))  { has_only = 1; only_v = v; }
+            }
+            if (has_only) {
+                /* Replace :only with :refer; pass everything else through. */
+                total = arg->as.vec.len;
+                tmp   = (mino_val_t **)gc_alloc_typed(
+                    S, GC_T_VALARR, total * sizeof(*tmp));
+                gc_valarr_set(S, tmp, 0, vec_nth(arg, 0));
+                j = 1;
+                for (vi = 1; vi + 1 < arg->as.vec.len; vi += 2) {
+                    mino_val_t *k = vec_nth(arg, vi);
+                    mino_val_t *v = vec_nth(arg, vi + 1);
+                    if (kw_match(k, "only")) {
+                        gc_valarr_set(S, tmp, j++,
+                                      mino_keyword(S, "refer"));
+                        gc_valarr_set(S, tmp, j++, only_v);
+                    } else {
+                        gc_valarr_set(S, tmp, j++, k);
+                        gc_valarr_set(S, tmp, j++, v);
+                    }
+                }
+                libspec = mino_vector(S, tmp, total);
+            } else if (!has_refer) {
+                /* Append :refer :all. */
+                total = arg->as.vec.len + 2;
+                tmp   = (mino_val_t **)gc_alloc_typed(
+                    S, GC_T_VALARR, total * sizeof(*tmp));
+                for (vi = 0; vi < arg->as.vec.len; vi++) {
+                    gc_valarr_set(S, tmp, vi, vec_nth(arg, vi));
+                }
+                gc_valarr_set(S, tmp, arg->as.vec.len,
+                              mino_keyword(S, "refer"));
+                gc_valarr_set(S, tmp, arg->as.vec.len + 1,
+                              mino_keyword(S, "all"));
+                libspec = mino_vector(S, tmp, total);
+            } else {
+                /* Already has :refer; pass through. */
+                libspec = arg;
+            }
+        } else {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "use: arg must be a symbol or vector");
+        }
+        {
+            mino_val_t *call_args = mino_cons(S, libspec, mino_nil(S));
+            gc_pin(call_args);
+            last = prim_require(S, call_args, env);
+            gc_unpin(1);
+            if (last == NULL) return NULL;
+        }
+        args = args->as.cons.cdr;
+    }
+    return last;
+}
+
 /* (doc name) -- print the docstring for a def/defmacro binding. */
 mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
@@ -448,6 +534,8 @@ void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx)
 const mino_prim_def k_prims_module[] = {
     {"require", prim_require,
      "Loads and evaluates a mino source file."},
+    {"use",     prim_use,
+     "Loads a module and refers all of its public names by default."},
     {"doc",     prim_doc,
      "Prints the documentation for the named var."},
     {"source",  prim_source,

@@ -323,6 +323,7 @@ mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args, mino_env_t
 
 /* module.c */
 mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_use(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env);
