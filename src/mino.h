@@ -195,6 +195,7 @@ struct mino_val {
             const char *sym;     /* name (interned) */
             mino_val_t *root;    /* root binding value */
             int         dynamic; /* 1 if ^:dynamic */
+            int         bound;   /* 0 if (def x) with no init; 1 once bound */
         } var;
         struct {          /* MINO_TRANSIENT: batch-mutation wrapper */
             mino_val_t *current; /* current persistent value (vec/map/set) */

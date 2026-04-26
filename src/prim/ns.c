@@ -610,7 +610,23 @@ mino_val_t *prim_var_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "var-get: expected a var");
     }
+    if (!arg->as.var.bound) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "var-get: var is unbound");
+    }
     return arg->as.var.root != NULL ? arg->as.var.root : mino_nil(S);
+}
+
+mino_val_t *prim_bound_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *arg;
+    (void)env;
+    if (!ns_one_arg(S, args, "bound?", &arg)) return NULL;
+    if (arg == NULL || arg->type != MINO_VAR) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "bound?: expected a var");
+    }
+    return arg->as.var.bound ? mino_true(S) : mino_false(S);
 }
 
 /* Mutating a var's root must also update the ns env binding so future
@@ -729,6 +745,8 @@ const mino_prim_def k_prims_ns[] = {
      "Set the root value of a var."},
     {"alter-var-root", prim_alter_var_root,
      "Apply a function to a var's root and store the result."},
+    {"bound?",         prim_bound_p,
+     "Return true if the var has a root binding."},
 };
 
 const size_t k_prims_ns_count =

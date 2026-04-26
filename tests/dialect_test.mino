@@ -163,9 +163,12 @@
 ;; --- def without value ---
 
 (deftest def-declaration
-  (testing "(def name) binds to nil"
+  (testing "(def name) creates an unbound var"
     (def decl-test-var__)
-    (is (nil? decl-test-var__))))
+    (is (false? (bound? #'decl-test-var__)))
+    (def decl-test-var__ 42)
+    (is (true? (bound? #'decl-test-var__)))
+    (is (= 42 decl-test-var__))))
 
 ;; --- Star variants ---
 

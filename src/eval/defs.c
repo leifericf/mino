@@ -357,15 +357,11 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
             mino_val_t *dv = map_get_val(m, dk);
             if (dv != NULL && mino_is_truthy(dv)) is_dynamic = 1;
         }
-        /* (def name) -- declaration only, bind to nil. Returns the var
-         * to match Clojure's def semantics. */
+        /* (def name) -- declaration only. Var stays unbound unless previously
+         * defined; returns the var. */
         if (!mino_is_cons(args->as.cons.cdr)) {
             mino_val_t *var = var_intern(S, S->current_ns, buf);
-            if (var != NULL) {
-                var_set_root(S, var, mino_nil(S));
-                if (is_dynamic) var->as.var.dynamic = 1;
-            }
-            env_bind(S, current_ns_env(S), buf, mino_nil(S));
+            if (var != NULL && is_dynamic) var->as.var.dynamic = 1;
             meta_set(S, buf, NULL, 0, form);
             return var != NULL ? var : mino_nil(S);
         }
