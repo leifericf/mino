@@ -399,6 +399,127 @@ mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_vector(S, pair, 2);
 }
 
+/* (get-thread-bindings) -- snapshot the current dyn_stack into a map
+ * keyed by binding-name symbols. Inner frames shadow outer frames; the
+ * first occurrence walking newest-first wins. Returns nil when the
+ * stack is empty. The returned map is suitable input for
+ * with-bindings*. */
+mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
+                                     mino_env_t *env)
+{
+    dyn_frame_t   *f;
+    dyn_binding_t *b;
+    size_t         cap = 0, len = 0;
+    mino_val_t   **keys = NULL;
+    mino_val_t   **vals = NULL;
+    (void)args;
+    (void)env;
+    if (S->dyn_stack == NULL) return mino_nil(S);
+
+    for (f = S->dyn_stack; f != NULL; f = f->prev) {
+        for (b = f->bindings; b != NULL; b = b->next) {
+            size_t i;
+            int    dup = 0;
+            for (i = 0; i < len; i++) {
+                if (strcmp(keys[i]->as.s.data, b->name) == 0) {
+                    dup = 1;
+                    break;
+                }
+            }
+            if (dup) continue;
+            if (len == cap) {
+                size_t       new_cap = cap == 0 ? 8 : cap * 2;
+                mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(
+                    S, GC_T_VALARR, new_cap * sizeof(*nk));
+                mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(
+                    S, GC_T_VALARR, new_cap * sizeof(*nv));
+                size_t       j;
+                for (j = 0; j < len; j++) {
+                    gc_valarr_set(S, nk, j, keys[j]);
+                    gc_valarr_set(S, nv, j, vals[j]);
+                }
+                keys = nk;
+                vals = nv;
+                cap  = new_cap;
+            }
+            gc_valarr_set(S, keys, len, mino_symbol(S, b->name));
+            gc_valarr_set(S, vals, len, b->val);
+            len++;
+        }
+    }
+    if (len == 0) return mino_nil(S);
+    return mino_map(S, keys, vals, len);
+}
+
+/* (with-bindings* bindings-map fn) -- pushes a fresh dynamic-binding
+ * frame from the map's entries (symbol-or-string keys), invokes fn
+ * with no arguments, pops the frame, and returns the result. Used by
+ * bound-fn* to replay a captured binding context around a thunk. The
+ * malloc'd binding chain is freed on both the success and the
+ * error/longjmp path because this primitive runs inside any active
+ * try frame's setjmp window the caller already established. */
+mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env)
+{
+    mino_val_t    *map_arg;
+    mino_val_t    *fn;
+    mino_val_t    *result;
+    dyn_frame_t    frame;
+    dyn_binding_t *bhead = NULL;
+    dyn_binding_t *b;
+    size_t         i;
+
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "with-bindings* requires two arguments: bindings-map fn");
+    }
+    map_arg = args->as.cons.car;
+    fn      = args->as.cons.cdr->as.cons.car;
+
+    /* nil bindings: just call fn with no extra frame. */
+    if (map_arg == NULL || map_arg->type == MINO_NIL) {
+        return mino_call(S, fn, mino_nil(S), env);
+    }
+    if (map_arg->type != MINO_MAP) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "with-bindings*: bindings argument must be a map or nil");
+    }
+
+    for (i = 0; i < map_arg->as.map.len; i++) {
+        mino_val_t *key = vec_nth(map_arg->as.map.key_order, i);
+        mino_val_t *val = map_get_val(map_arg, key);
+        const char *name_str;
+        if (key == NULL
+            || (key->type != MINO_SYMBOL && key->type != MINO_STRING)) {
+            dyn_binding_list_free(bhead);
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "with-bindings*: keys must be symbols or strings");
+        }
+        /* Intern the name string through mino_symbol so it shares
+         * storage with the binding-form path at bindings.c. */
+        name_str = mino_symbol(S, key->as.s.data)->as.s.data;
+        b = (dyn_binding_t *)malloc(sizeof(*b));
+        if (b == NULL) {
+            dyn_binding_list_free(bhead);
+            return prim_throw_classified(S, "eval/contract", "MIN001",
+                "with-bindings*: out of memory");
+        }
+        b->name = name_str;
+        b->val  = val;
+        b->next = bhead;
+        bhead   = b;
+    }
+
+    frame.bindings = bhead;
+    frame.prev     = S->dyn_stack;
+    S->dyn_stack   = &frame;
+    result         = mino_call(S, fn, mino_nil(S), env);
+    S->dyn_stack   = frame.prev;
+    dyn_binding_list_free(bhead);
+    return result;
+}
+
 /* Fault injection: make the n-th GC allocation fail (simulated OOM).
  * Testing only. Pass 0 to disable. */
 mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args,
@@ -444,6 +565,10 @@ const mino_prim_def k_prims_stateful[] = {
      "Sets the value of an atom and returns [old new]."},
     {"swap-vals!",     prim_swap_vals,
      "Atomically applies f to the atom and returns [old new]."},
+    {"get-thread-bindings", prim_get_thread_bindings,
+     "Returns a map of symbol->value for the active dynamic bindings, or nil if no binding frames are active."},
+    {"with-bindings*", prim_with_bindings_star,
+     "(with-bindings* bindings-map fn) — pushes the bindings as a dynamic frame and invokes fn with no args."},
     {"set-fail-alloc-at!", prim_set_fail_alloc_at,
      "Make the n-th GC allocation fail (simulated OOM). Pass 0 to disable."},
 };

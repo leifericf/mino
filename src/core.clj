@@ -2101,6 +2101,24 @@
   (throw (ex-info "inst-ms is not supported on mino — there is no Inst type"
                   {:mino/unsupported :inst-ms})))
 
+;; bound-fn / bound-fn*: capture the dynamic-binding context active at
+;; capture time and replay it around every invocation of the wrapped fn.
+;; Layered on the C primitives get-thread-bindings + with-bindings*.
+(defn bound-fn*
+  "Returns a function which installs the same bindings in effect as in
+   the thread at the time bound-fn* was called and then invokes f."
+  [f]
+  (let [bindings (get-thread-bindings)]
+    (fn [& args]
+      (with-bindings* bindings (fn [] (apply f args))))))
+
+(defmacro bound-fn
+  "Returns a function defined by the given fntail, which will install
+   the same bindings in effect as in the thread at the time bound-fn
+   was called."
+  [& fntail]
+  `(bound-fn* (fn ~@fntail)))
+
 ;; with-redefs-fn: low-level redef (the macro variant lives above).
 (defn with-redefs-fn
   "Temporarily rebinds the root values of vars to new-values while

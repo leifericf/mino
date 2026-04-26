@@ -530,3 +530,27 @@
                       (fn [] (reset! observed (my-fn-w-redefs-fn_))))
       (is (= :redef    @observed))
       (is (= :original (my-fn-w-redefs-fn_))))))
+
+(def ^:dynamic *bf-x* 1)
+
+(deftest get-thread-bindings-is-nil-without-binding
+  (is (nil? (get-thread-bindings))))
+
+(deftest get-thread-bindings-snapshots-active-frame
+  (binding [*bf-x* 42]
+    (let [m (get-thread-bindings)]
+      (is (= 42 (get m '*bf-x*))))))
+
+(deftest bound-fn-star-replays-captured-bindings
+  (binding [*bf-x* 5]
+    (let [g (bound-fn* (fn [] *bf-x*))]
+      (is (= 5 (g)))
+      (binding [*bf-x* 99]
+        (is (= 5 (g)))))))
+
+(deftest bound-fn-macro-captures-binding-context
+  (binding [*bf-x* 7]
+    (let [g (bound-fn [] *bf-x*)]
+      (is (= 7 (g)))
+      (binding [*bf-x* 99]
+        (is (= 7 (g)))))))
