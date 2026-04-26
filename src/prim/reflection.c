@@ -52,10 +52,20 @@ mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    /* eval evaluates in the current namespace, not the calling fn's
+     * ambient namespace. Clear fn_ambient_ns for the duration of the
+     * eval so the form sees only its own current_ns + lexical chain,
+     * matching Clojure's "*ns* is what counts" semantics. */
+    const char *saved_ambient;
+    mino_val_t *result;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "eval requires one argument");
     }
-    return eval_value(S, args->as.cons.car, env);
+    saved_ambient = S->fn_ambient_ns;
+    S->fn_ambient_ns = NULL;
+    result = eval_value(S, args->as.cons.car, env);
+    S->fn_ambient_ns = saved_ambient;
+    return result;
 }
 
 mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
