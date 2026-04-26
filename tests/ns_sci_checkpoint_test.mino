@@ -355,8 +355,9 @@
 ;; ---- find-var-test ----
 
 (deftest find-var-test
-  (is (eval (read-string "(= #'clojure.core/map (find-var 'clojure.core/map))")))
-  (is (eval (read-string "(nil? (find-var 'clojure.core/no-such-symbol))")))
+  ;; Upstream targets clojure.core; mino's bundled-core ns is mino.core.
+  (is (eval (read-string "(= #'mino.core/map (find-var 'mino.core/map))")))
+  (is (eval (read-string "(nil? (find-var 'mino.core/no-such-symbol))")))
   ;; thrown-with-msg? #"No such namespace: no.such.namespace"
   (is (thrown? (find-var 'no.such.namespace/var)))
   ;; thrown-with-msg? #"Not a qualified symbol: no-namespace"
@@ -379,6 +380,7 @@
 ;; ---- ns-unalias-test ----
 
 (deftest ns-unalias-test
+  ;; Upstream targets clojure.core; mino's bundled-core ns is mino.core.
   (testing "Removing an alias in an unknown namespace throws"
     (is (thrown? (ns-unalias (find-ns 'unknown) 'core))))
 
@@ -387,11 +389,11 @@
 
   (testing "Removing a defined alias -- ns symbol"
     (is (nil?
-         (eval (read-string "(do (alias 'core 'clojure.core) (ns-unalias 'user 'core) (get (ns-aliases *ns*) 'core))")))))
+         (eval (read-string "(do (alias 'core 'mino.core) (ns-unalias 'user 'core) (get (ns-aliases *ns*) 'core))")))))
 
   (testing "Removing a defined alias -- ns object"
     (is (nil?
-         (eval (read-string "(do (alias 'core 'clojure.core) (ns-unalias *ns* 'core) (get (ns-aliases *ns*) 'core))"))))))
+         (eval (read-string "(do (alias 'core 'mino.core) (ns-unalias *ns* 'core) (get (ns-aliases *ns*) 'core))"))))))
 
 ;; ---- ns-syntax-test ----
 
