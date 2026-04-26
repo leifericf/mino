@@ -613,6 +613,19 @@ mino_val_t *prim_var_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return arg->as.var.root != NULL ? arg->as.var.root : mino_nil(S);
 }
 
+/* Mutating a var's root must also update the ns env binding so future
+ * unqualified lookups observe the new value (the env is what callers
+ * actually walk). */
+static void var_sync_env(mino_state_t *S, mino_val_t *var, mino_val_t *val)
+{
+    mino_env_t *e;
+    if (var == NULL || var->type != MINO_VAR) return;
+    e = ns_env_lookup(S, var->as.var.ns);
+    if (e != NULL && var->as.var.sym != NULL) {
+        env_bind(S, e, var->as.var.sym, val);
+    }
+}
+
 mino_val_t *prim_var_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *var_arg;
@@ -630,6 +643,7 @@ mino_val_t *prim_var_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "var-set: expected a var");
     }
     var_set_root(S, var_arg, val_arg);
+    var_sync_env(S, var_arg, val_arg);
     return val_arg;
 }
 
@@ -661,6 +675,7 @@ mino_val_t *prim_alter_var_root(mino_state_t *S, mino_val_t *args,
     gc_unpin(1);
     if (new_val == NULL) return NULL;
     var_set_root(S, var_arg, new_val);
+    var_sync_env(S, var_arg, new_val);
     return new_val;
 }
 
