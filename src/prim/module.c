@@ -452,7 +452,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* If the dotted form of name corresponds to a runtime-only ns
      * (a (ns foo) without a backing file) and the namespace already
      * has substantive bindings, treat it as loaded so (require 'foo)
-     * doesn't go searching for a foo.mino that was never written to
+     * doesn't go searching for a foo.clj that was never written to
      * disk. Bindings that came from C primitive installs (e.g. the
      * clojure.string namespace) don't count -- a wrapper file may
      * exist on disk and still need to load the first time.
@@ -565,7 +565,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * match the requested module name. Files with no `(ns ...)` are
          * accepted as-is so loading utility scripts by path still works.
          * The ns name may use dashes where the path uses underscores
-         * (e.g. ns foo-bar from file foo_bar.mino), so compare in a
+         * (e.g. ns foo-bar from file foo_bar.clj), so compare in a
          * canonicalized form where both use dashes.
          *
          * Skip the check when the require argument is a literal path --
@@ -576,8 +576,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         {
             size_t nl = strlen(name);
             int    is_path = 0;
-            if ((nl >= 5 && (strcmp(name + nl - 5, ".mino") == 0
-                          || strcmp(name + nl - 5, ".cljc") == 0
+            if ((nl >= 5 && (strcmp(name + nl - 5, ".cljc") == 0
                           || strcmp(name + nl - 5, ".cljs") == 0))
              || (nl >= 4 && strcmp(name + nl - 4, ".clj") == 0)) {
                 is_path = 1;

@@ -45,27 +45,27 @@ static char binary_dir[PATH_BUF_CAP] = "";
 
 static int try_resolve(const char *name, size_t nlen, char *buf, size_t bufsz)
 {
-    static const char *exts[] = {".mino", ".cljc", ".clj", ".cljs"};
+    static const char *exts[] = {".cljc", ".clj", ".cljs"};
     size_t i;
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 3; i++) {
         snprintf(buf, bufsz, "%s%s", name, exts[i]);
         if (file_exists(buf)) return 1;
     }
     /* Try lib/ prefix. */
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 3; i++) {
         snprintf(buf, bufsz, "lib/%s%s", name, exts[i]);
         if (file_exists(buf)) return 1;
     }
     /* Try initial dir's lib/ as fallback. */
     if (initial_dir[0] != '\0') {
-        for (i = 0; i < 4; i++) {
+        for (i = 0; i < 3; i++) {
             snprintf(buf, bufsz, "%s/lib/%s%s", initial_dir, name, exts[i]);
             if (file_exists(buf)) return 1;
         }
     }
     /* Try binary dir's lib/ as fallback. */
     if (binary_dir[0] != '\0') {
-        for (i = 0; i < 4; i++) {
+        for (i = 0; i < 3; i++) {
             snprintf(buf, bufsz, "%s/lib/%s%s", binary_dir, name, exts[i]);
             if (file_exists(buf)) return 1;
         }
@@ -84,8 +84,7 @@ static const char *cwd_resolve(const char *name, void *ctx)
     if (nlen + 10 >= sizeof(path_buf)) return NULL;
 
     /* If name already has an extension, use as-is. */
-    if ((nlen >= 5 && (strcmp(name + nlen - 5, ".mino") == 0
-                    || strcmp(name + nlen - 5, ".cljc") == 0
+    if ((nlen >= 5 && (strcmp(name + nlen - 5, ".cljc") == 0
                     || strcmp(name + nlen - 5, ".cljs") == 0))
      || (nlen >= 4 && strcmp(name + nlen - 4, ".clj") == 0)) {
         memcpy(path_buf, name, nlen + 1);
@@ -120,10 +119,10 @@ static size_t project_path_count = 0;
 static int try_resolve_in(const char *dir, const char *name, size_t nlen,
                           char *buf, size_t bufsz)
 {
-    static const char *exts[] = {".mino", ".cljc", ".clj", ".cljs"};
+    static const char *exts[] = {".cljc", ".clj", ".cljs"};
     size_t i;
     (void)nlen;
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 3; i++) {
         snprintf(buf, bufsz, "%s/%s%s", dir, name, exts[i]);
         if (file_exists(buf)) return 1;
     }
