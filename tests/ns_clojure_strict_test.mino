@@ -41,9 +41,10 @@
 ;; absent.
 
 (deftest refer-clojure-only-restricts-imports
-  (is (true?
-       (eval (read-string
-              "(do (ns cs-strict-only.a (:refer-clojure :only [+ -])) (some? +))"))))
+  ;; Names listed in :only are available.
+  (is (= 3
+         (eval (read-string
+                "(do (ns cs-strict-only.a (:refer-clojure :only [+ -])) (+ 1 2))"))))
   ;; Names not in :only are NOT auto-referred.
   (is (thrown?
        (eval (read-string
