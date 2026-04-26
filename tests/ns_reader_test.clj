@@ -107,10 +107,15 @@
   (is (= "foo" (name ::foo))))
 
 (deftest auto-resolved-keyword-pr-str-is-fully-qualified
-  ;; ::foo prints as :<current-ns>/foo, never as ::foo.
+  ;; ::foo prints as :<current-ns>/foo, never as ::foo. Upstream uses
+  ;; (first s) / (second s) which on real Clojure return characters;
+  ;; mino's seq over a string yields one-character substrings (chars
+  ;; are a separate type and are not produced by string seq). The
+  ;; intent — "no leading double colon" — is preserved with explicit
+  ;; string predicates.
   (let [s (pr-str ::foo)]
-    (is (= \: (first s)))
-    (is (not (= \: (second s))))   ; no leading "::"
+    (is (clojure.string/starts-with? s ":"))
+    (is (not (clojure.string/starts-with? s "::")))
     (is (some? (re-find #"/foo$" s)))))
 
 (deftest read-auto-resolved-alias-keyword-no-alias
