@@ -453,11 +453,22 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                         const char *nm = core->bindings[i].name;
                         size_t      nl = strlen(nm);
                         mino_val_t *renamed;
+                        mino_val_t *src_var;
                         if (only_vec != NULL
                             && !sym_vec_contains(only_vec, nm, nl)) {
                             continue;
                         }
                         if (sym_vec_contains(exclude_vec, nm, nl)) {
+                            continue;
+                        }
+                        /* Skip privates so refer-clojure mirrors real
+                         * Clojure semantics — only public vars come
+                         * along. Host-interop stubs like Long/Object
+                         * are marked private so libraries that shadow
+                         * them with their own defprotocol/def don't
+                         * collide with the inherited binding. */
+                        src_var = var_find(S, "clojure.core", nm);
+                        if (src_var != NULL && src_var->as.var.is_private) {
                             continue;
                         }
                         renamed = rename_map_lookup(rename_map, nm, nl);

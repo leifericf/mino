@@ -271,23 +271,32 @@
   (testing "unique on each call"
     (is (not= (random-uuid) (random-uuid)))))
 
-;; --- JVM stubs ---
+;; --- Record-shaped types ---
 
-(deftest jvm-stubs-informative-errors
-  (testing "defrecord throws informative error"
-    (is (thrown? (defrecord Foo [x y])))
-    (is (= "defrecord is not available in mino; use maps and protocols instead"
-           (try (defrecord Foo [x y]) (catch e (ex-message e))))))
+(deftest defrecord-builds-tagged-map
+  (testing "positional and dotted constructors return a tagged map"
+    (defrecord Pair [a b])
+    (let [p (->Pair 1 2)]
+      (is (= 1 (:a p)))
+      (is (= 2 (:b p)))
+      (is (= :Pair (:mino/record-type (meta p))))
+      (is (= p (Pair. 1 2)))))
 
-  (testing "reify throws informative error"
-    (is (thrown? (reify Object (toString [this] "hi"))))
-    (is (= "reify is not available in mino; use maps, protocols, and fn instead"
-           (try (reify Object (toString [this] "hi")) (catch e (ex-message e))))))
+  (testing "map-> builder copies metadata onto a plain map"
+    (defrecord Item [x])
+    (let [i (map->Item {:x 7 :extra "ok"})]
+      (is (= 7 (:x i)))
+      (is (= "ok" (:extra i)))
+      (is (= :Item (:mino/record-type (meta i)))))))
 
-  (testing "import throws informative error"
-    (is (thrown? (import java.util.Date)))
-    (is (= "import is not available in mino; Java classes cannot be imported"
-           (try (import java.util.Date) (catch e (ex-message e)))))))
+(deftest reify-returns-tagged-map
+  (let [r (reify)]
+    (is (map? r))
+    (is (some? (:mino/record-type (meta r))))))
+
+(deftest import-is-noop
+  (is (nil? (import java.util.Date)))
+  (is (nil? (import (java.io PrintWriter StringWriter)))))
 
 ;; --- #?@ splice in maps ---
 

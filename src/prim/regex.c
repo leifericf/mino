@@ -22,7 +22,9 @@ mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (pat_val == NULL || pat_val->type != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-find: first argument must be a pattern string");
     }
-    if (text_val == NULL || text_val->type != MINO_STRING) {
+    /* Real Clojure (re-find re nil) returns nil rather than throwing. */
+    if (text_val == NULL || text_val->type == MINO_NIL) return mino_nil(S);
+    if (text_val->type != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-find: second argument must be a string");
     }
     match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);
@@ -48,7 +50,8 @@ mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (pat_val == NULL || pat_val->type != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: first argument must be a pattern string");
     }
-    if (text_val == NULL || text_val->type != MINO_STRING) {
+    if (text_val == NULL || text_val->type == MINO_NIL) return mino_nil(S);
+    if (text_val->type != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: second argument must be a string");
     }
     match_idx = re_match(pat_val->as.s.data, text_val->as.s.data, &match_len);

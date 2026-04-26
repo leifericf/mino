@@ -1304,7 +1304,12 @@
       (:mino/message ex)
       (:message ex))))
 
-(def agent "Creates an agent wrapping the given initial value." atom)
+(defn agent
+  "Creates an agent wrapping the given initial value. Accepts and
+   ignores the keyword options Clojure's agent constructor takes
+   (:meta, :error-handler, :error-mode, :validator)."
+  [init & _opts]
+  (atom init))
 
 (defn send-to "Applies f to the agent's current value and any args, updating the agent." [ag f & args]
   (apply swap! ag f args))
@@ -1334,7 +1339,12 @@
 
 (defn protocol-dispatch_ [dispatch-atom mname & args]
   (let [target (first args)
-        t (type target)
+        ;; Records carry their type tag in metadata so plain-map dispatch
+        ;; (`extend-type :map ...`) keeps working for non-record maps.
+        rec-type (when (some? target)
+                   (let [m (meta target)]
+                     (when (map? m) (:mino/record-type m))))
+        t (or rec-type (type target))
         dispatch-map @dispatch-atom
         impl (get dispatch-map t)]
     (if impl
@@ -1863,28 +1873,119 @@
   ([x] (list 'when-not x (list 'throw "Assert failed")))
   ([x msg] (list 'when-not x (list 'throw msg))))
 
-;; --- JVM stubs ---
+;; --- Record types ---
+;;
+;; defrecord, deftype, and reify are exposed as map-backed shims rather
+;; than JVM-class generators. A record instance is just a hash-map whose
+;; metadata carries `:mino/record-type` so protocol-dispatch_ routes to
+;; the right method table. Field names destructure into method bodies
+;; via `:keys` so the body can refer to fields without `(:f self)`.
 
-(defmacro defrecord [& _]
-  (throw (ex-info "defrecord is not available in mino; use maps and protocols instead" {})))
+(defn defrecord-wrap-method_ [fields method]
+  ;; (m [self & args] body...) -> (m [self & args] (let [{:keys [f1 f2]} self] body...))
+  (let [mname  (first method)
+        params (second method)
+        body   (drop 2 method)
+        self-sym (first params)]
+    (apply list mname params
+      (list 'let [{:keys (vec fields)} self-sym]
+            (apply list 'do body)))))
 
-(defmacro deftype [& _]
-  (throw (ex-info "deftype is not available in mino; use maps and protocols instead" {})))
+(defmacro defrecord
+  "Map-backed record type. Generates ->Name and Name. positional
+   constructors plus a map->Name builder. Protocol method bodies see
+   field names via destructuring on the first parameter."
+  [type-sym fields & specs]
+  (let [tag         (keyword (name type-sym))
+        ctor-arrow  (symbol (str "->" (name type-sym)))
+        ctor-dot    (symbol (str (name type-sym) "."))
+        ctor-map    (symbol (str "map->" (name type-sym)))
+        field-pairs (reduce (fn [acc f] (conj acc (keyword (name f)) f))
+                            [] fields)
+        record-meta {:mino/record-type tag}
+        groups      (partition-protocol-specs_ specs)
+        wrapped     (mapv (fn [g]
+                            (let [proto (first g)
+                                  ms    (rest g)]
+                              (cons proto
+                                (map #(defrecord-wrap-method_ fields %) ms))))
+                          groups)
+        extends     (apply list (map (fn [g]
+                                       (apply list 'extend-type tag g))
+                                     wrapped))]
+    (apply list 'do
+      (list 'defn ctor-arrow (vec fields)
+            (list 'with-meta (apply hash-map field-pairs) record-meta))
+      (list 'def ctor-dot ctor-arrow)
+      (list 'defn ctor-map [(symbol "m")]
+            (list 'with-meta (symbol "m") record-meta))
+      (list 'def type-sym {:mino/record-type tag :fields (mapv (comp keyword name) fields)})
+      extends)))
 
-(defmacro reify [& _]
-  (throw (ex-info "reify is not available in mino; use maps, protocols, and fn instead" {})))
+(defmacro deftype
+  "Map-backed type, like defrecord but without the map->Name helper.
+   In mino there is no JVM distinction between record and type at
+   runtime; this exists for source compatibility."
+  [type-sym fields & specs]
+  (apply list 'defrecord type-sym fields specs))
 
-(defmacro proxy [& _]
-  (throw (ex-info "proxy is not available in mino; use host/* interop instead" {})))
+(defmacro reify
+  "Anonymous map implementing the given protocols. Methods register on
+   a freshly-generated tag attached to the result via metadata, so the
+   reified value dispatches through the same protocol-dispatch path
+   defrecord uses."
+  [& specs]
+  (let [tag-sym (gensym "reify-tag-")
+        groups  (partition-protocol-specs_ specs)
+        extends (mapv (fn [g] (apply list 'extend-type tag-sym g)) groups)]
+    (apply list 'let [tag-sym (list 'keyword (list 'str (list 'gensym "reify-")))]
+      (concat extends
+              [(list 'with-meta {} {:mino/record-type tag-sym})]))))
 
-(defmacro gen-class [& _]
-  (throw (ex-info "gen-class is not available in mino; use host/* interop instead" {})))
+;; --- Other JVM-only stubs ---
 
-(defmacro definterface [& _]
-  (throw (ex-info "definterface is not available in mino; use defprotocol instead" {})))
+(defmacro proxy
+  "Not supported in mino — left as a no-op so libraries that load proxy
+   forms at top level don't blow up at load time."
+  [& _]
+  nil)
 
-(defmacro import [& _]
-  (throw (ex-info "import is not available in mino; Java classes cannot be imported" {})))
+(defmacro gen-class
+  "Not supported in mino — no-op so loading code that includes
+   `(:gen-class)` in an `ns` form succeeds."
+  [& _]
+  nil)
+
+(defmacro definterface
+  "Not supported in mino — no-op so loading is non-fatal."
+  [& _]
+  nil)
+
+(defmacro import
+  "Java imports are not applicable in mino. Treated as a no-op so
+   `:import` clauses in `ns` forms and bare `(import ...)` calls don't
+   abort loading."
+  [& _]
+  nil)
+
+(defn extend
+  "Lower-level form behind extend-protocol/extend-type. Takes a type
+   marker and one or more `proto method-map` pairs and registers each
+   method in the protocol's dispatch atom."
+  [type & proto+method-maps]
+  (let [pairs (partition 2 proto+method-maps)
+        tag   (cond
+                (keyword? type) type
+                (nil? type)     :nil
+                :else           :default)]
+    (doseq [[proto methods] pairs]
+      (doseq [[mname mfn] methods]
+        (let [pname (name proto)
+              dsym  (symbol (str pname "--" (name mname)))
+              dvar  (find-var (symbol (namespace proto) (str dsym)))
+              datom (when dvar (var-get dvar))]
+          (when datom
+            (swap! datom assoc tag mfn)))))))
 
 (defmacro with-redefs
   "Temporarily rebinds the root bindings of vars while body executes, restoring
