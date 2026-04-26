@@ -1874,3 +1874,26 @@
 
 (defmacro import [& _]
   (throw (ex-info "import is not available in mino; Java classes cannot be imported" {})))
+
+(defmacro with-redefs
+  "Temporarily rebinds the root bindings of vars while body executes, restoring
+   them in a finally clause. Bindings is a vector of var-name/value pairs."
+  [bindings & body]
+  (let [pairs    (partition 2 bindings)
+        var-syms (map first pairs)
+        new-vals (map second pairs)
+        olds     (map (fn [_] (gensym "old")) pairs)
+        sets     (map (fn [v val]
+                        (list 'alter-var-root (list 'var v)
+                              (list 'fn ['_] val)))
+                      var-syms new-vals)
+        restores (map (fn [v old]
+                        (list 'alter-var-root (list 'var v)
+                              (list 'fn ['_] old)))
+                      var-syms olds)
+        finally-form (apply list 'finally restores)
+        try-form     (apply list 'try (concat sets body (list finally-form)))]
+    (list 'let
+          (vec (mapcat (fn [old v] [old (list 'deref (list 'var v))])
+                       olds var-syms))
+          try-form)))

@@ -83,6 +83,8 @@ mino_val_t *prim_find_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     char        buf[256];
     (void)env;
     if (!ns_one_arg(S, args, "find-ns", &arg)) return NULL;
+    /* nil propagates: (find-ns nil) is nil, not a type error. */
+    if (arg == NULL || arg->type == MINO_NIL) return mino_nil(S);
     if (!ns_to_name(S, arg, buf, sizeof(buf), "find-ns")) return NULL;
     if (ns_env_lookup(S, buf) == NULL) return mino_nil(S);
     return mino_symbol(S, buf);

@@ -129,7 +129,14 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a != NULL && a->type == MINO_REDUCED) {
         return a->as.reduced.val;
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom or reduced");
+    if (a != NULL && a->type == MINO_VAR) {
+        if (!a->as.var.bound) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "deref: var is unbound");
+        }
+        return a->as.var.root != NULL ? a->as.var.root : mino_nil(S);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, var, or reduced");
 }
 
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
