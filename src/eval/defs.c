@@ -357,7 +357,8 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
             mino_val_t *dv = map_get_val(m, dk);
             if (dv != NULL && mino_is_truthy(dv)) is_dynamic = 1;
         }
-        /* (def name) -- declaration only, bind to nil. */
+        /* (def name) -- declaration only, bind to nil. Returns the var
+         * to match Clojure's def semantics. */
         if (!mino_is_cons(args->as.cons.cdr)) {
             mino_val_t *var = var_intern(S, S->current_ns, buf);
             if (var != NULL) {
@@ -366,7 +367,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
             }
             env_bind(S, current_ns_env(S), buf, mino_nil(S));
             meta_set(S, buf, NULL, 0, form);
-            return mino_nil(S);
+            return var != NULL ? var : mino_nil(S);
         }
         /* Optional docstring: (def name "doc" value) */
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -392,10 +393,11 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
                 var_set_root(S, var, value);
                 if (is_dynamic) var->as.var.dynamic = 1;
             }
+            env_bind(S, current_ns_env(S), buf, value);
+            gc_unpin(1);
+            meta_set(S, buf, doc, doc_len, form);
+            /* Clojure semantics: def returns the var, not the value. */
+            return var != NULL ? var : value;
         }
-        env_bind(S, current_ns_env(S), buf, value);
-        gc_unpin(1);
-        meta_set(S, buf, doc, doc_len, form);
-        return value;
     }
 }

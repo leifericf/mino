@@ -340,6 +340,7 @@ mino_val_t *prim_ns_refers(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ns_map(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_alias(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ns_unalias(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ns_unmap(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_all_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env);

@@ -235,6 +235,39 @@ mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_map(S, ks, vs, n);
 }
 
+/* --- refer ----------------------------------------------------------------
+ *
+ * (refer 'ns) bring all of ns's publics into the current namespace.
+ * Mirrors Clojure's clojure.core/refer for the bare and :refer :all
+ * forms. Future passes can grow it to honor :only, :exclude, :rename. */
+mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ns_arg;
+    char        ns_buf[256];
+    mino_env_t *src;
+    mino_env_t *dst;
+    size_t      i;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "refer requires a namespace symbol");
+    }
+    ns_arg = args->as.cons.car;
+    if (!ns_to_name(S, ns_arg, ns_buf, sizeof(ns_buf), "refer")) return NULL;
+    src = ns_env_lookup(S, ns_buf);
+    if (src == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg), "refer: no namespace: %s", ns_buf);
+        return prim_throw_classified(S, "name", "MNS001", msg);
+    }
+    dst = current_ns_env(S);
+    if (dst == NULL) return mino_nil(S);
+    for (i = 0; i < src->len; i++) {
+        env_bind(S, dst, src->bindings[i].name, src->bindings[i].val);
+    }
+    return mino_nil(S);
+}
+
 /* --- alias / ns-unalias --------------------------------------------------- */
 mino_val_t *prim_alias(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
@@ -661,6 +694,8 @@ const mino_prim_def k_prims_ns[] = {
      "Remove an alias from a namespace."},
     {"ns-unmap",       prim_ns_unmap,
      "Remove a binding from a namespace."},
+    {"refer",          prim_refer,
+     "Bring all publics of a namespace into the current namespace."},
     {"all-ns",         prim_all_ns,
      "Return a vector of all known namespace symbols."},
     {"loaded-libs",    prim_loaded_libs,

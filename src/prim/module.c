@@ -32,6 +32,86 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     name_val = args->as.cons.car;
 
+    /* Prefix list: '[prefix sub1 sub2 ...] where each sub is either a
+     * bare symbol or a vector libspec. Expands to multiple individual
+     * (require '[prefix.sub ...]) calls. The disambiguator: if the
+     * second element isn't a keyword, the form is a prefix list. */
+    if (name_val != NULL && name_val->type == MINO_VECTOR
+        && name_val->as.vec.len >= 2) {
+        mino_val_t *first  = vec_nth(name_val, 0);
+        mino_val_t *second = vec_nth(name_val, 1);
+        if (first != NULL && first->type == MINO_SYMBOL
+            && second != NULL && second->type != MINO_KEYWORD) {
+            size_t      i;
+            mino_val_t *last_result = mino_nil(S);
+            for (i = 1; i < name_val->as.vec.len; i++) {
+                mino_val_t *sub = vec_nth(name_val, i);
+                mino_val_t *sub_name;
+                mino_val_t *sub_rest = mino_nil(S);
+                char        joined[512];
+                size_t      sn;
+                if (sub == NULL) continue;
+                if (sub->type == MINO_SYMBOL) {
+                    sub_name = sub;
+                } else if (sub->type == MINO_VECTOR
+                           && sub->as.vec.len >= 1) {
+                    sub_name = vec_nth(sub, 0);
+                    if (sub_name == NULL || sub_name->type != MINO_SYMBOL) {
+                        return prim_throw_classified(S,
+                            "eval/type", "MTY001",
+                            "require prefix list: subspec head must be a symbol");
+                    }
+                } else {
+                    return prim_throw_classified(S,
+                        "eval/type", "MTY001",
+                        "require prefix list: subspec must be symbol or vector");
+                }
+                if (memchr(sub_name->as.s.data, '.',
+                           sub_name->as.s.len) != NULL) {
+                    return prim_throw_classified(S,
+                        "name", "MNS001",
+                        "lib names inside prefix lists must not contain periods");
+                }
+                sn = first->as.s.len + 1 + sub_name->as.s.len;
+                if (sn >= sizeof(joined)) {
+                    return prim_throw_classified(S,
+                        "eval/type", "MTY001",
+                        "require: prefix list name too long");
+                }
+                memcpy(joined, first->as.s.data, first->as.s.len);
+                joined[first->as.s.len] = '.';
+                memcpy(joined + first->as.s.len + 1,
+                       sub_name->as.s.data, sub_name->as.s.len);
+                joined[sn] = '\0';
+                /* Build [joined-symbol opt1 v1 opt2 v2 ...] vector. */
+                {
+                    mino_val_t *joined_sym = mino_symbol_n(S, joined, sn);
+                    size_t      tail_len   = (sub->type == MINO_VECTOR)
+                        ? sub->as.vec.len - 1 : 0;
+                    size_t      total      = 1 + tail_len;
+                    mino_val_t **tmp       = (mino_val_t **)gc_alloc_typed(
+                        S, GC_T_VALARR, total * sizeof(*tmp));
+                    size_t      j;
+                    mino_val_t *libspec;
+                    mino_val_t *call_args;
+                    gc_valarr_set(S, tmp, 0, joined_sym);
+                    for (j = 0; j < tail_len; j++) {
+                        gc_valarr_set(S, tmp, 1 + j,
+                                      vec_nth(sub, j + 1));
+                    }
+                    libspec   = mino_vector(S, tmp, total);
+                    call_args = mino_cons(S, libspec, mino_nil(S));
+                    gc_pin(call_args);
+                    last_result = prim_require(S, call_args, env);
+                    gc_unpin(1);
+                    if (last_result == NULL) return NULL;
+                    (void)sub_rest;
+                }
+            }
+            return last_result;
+        }
+    }
+
     /* Symbol form: '(require 'foo.bar) — Clojure's everyday form. */
     if (name_val != NULL && name_val->type == MINO_SYMBOL) {
         char pathbuf[256];
