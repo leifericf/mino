@@ -129,18 +129,36 @@ plain `src/` entry, so a multi-file library can require its sibling
 namespaces by symbol without a manual `:deps/root` override in
 `mino.edn`.
 
-A few small interop affordances landed alongside the namespace
-work to broaden compatibility with pure-Clojure libraries.
-`extend-protocol` now accepts `nil` as a type marker (translated
-to the `:nil` keyword) and accepts bare symbols (`Object`,
-`Exception`, `String`, ...) by mapping them to `:default`, so
-nil-safe and JVM-shaped protocol implementations don't blow up
-the macro expansion. Reader conditionals now treat `:clj` as an
-active dialect alongside `:mino`, so libraries that only have
-`:clj` and `:cljs` branches read correctly under `mino`. The
-stale `clojure.core/blank?` wrapper has been removed; `blank?`
+A few small Clojure-shaped affordances landed alongside the
+namespace work. `extend-protocol` accepts `nil` as a type marker
+(translated to `:nil` so nil-safe protocol implementations match
+what `(type nil)` returns); bare class symbols (`Object`,
+`Pattern`, ...) are rejected with a clear error so silently
+collapsing them to `:default` doesn't mask broken dispatch.
+Reader conditionals now treat `:clj` as an active dialect
+alongside `:mino`, so libraries that only have `:clj`/`:cljs`
+branches read correctly here. `defn` honors a `{:pre [...]
+:post [...]}` map between params and body, threading assertions
+around the body so `%` refers to the return value. `*assert*` is
+bound to true at the clojure.core level. `find` accepts transient
+associatives, mirroring real Clojure semantics. `re-find` and
+`re-matches` return nil for a nil text argument instead of
+throwing. `:refer-clojure` skips bindings whose source var is
+private, matching how Clojure's auto-refer treats private vars.
+The stale `clojure.core/blank?` wrapper has been removed; `blank?`
 lives only in `clojure.string` now, matching the upstream
 contract.
+
+Mino targets pure portable Clojure — there is no JVM and no
+JavaScript runtime — so any form that exists solely to interface
+with one of those platforms throws an `ex-info` carrying
+`:mino/unsupported`. `defrecord`, `deftype`, `reify`, `proxy`,
+`gen-class`, `definterface`, `import`, and `instance?` all error
+at expansion or call time. `agent`, `send-to`, and `agent-error`
+do the same — aliasing them to atoms only pretended the async
+dispatch semantics were honored. The `ns` form rejects `:import`
+and `:gen-class` clauses so files that mix Java interop into
+their namespace declarations fail loud at load time.
 
 ### Breaking Changes
 
