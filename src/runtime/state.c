@@ -107,11 +107,12 @@ static void state_free_refs(mino_state_t *S)
     }
 }
 
-/* Free namespace alias strings (alias + full_name) and the array. */
+/* Free namespace alias strings (owning_ns + alias + full_name) and the array. */
 static void state_free_ns_aliases(mino_state_t *S)
 {
     size_t i;
     for (i = 0; i < S->ns_alias_len; i++) {
+        free(S->ns_aliases[i].owning_ns);
         free(S->ns_aliases[i].alias);
         free(S->ns_aliases[i].full_name);
     }

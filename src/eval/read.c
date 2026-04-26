@@ -698,6 +698,7 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
             if (slash != NULL) {
                 size_t alias_len = (size_t)(slash - body);
                 size_t i;
+                const char *cur = S->current_ns != NULL ? S->current_ns : "user";
                 if (alias_len == 0 || alias_len + 1 == body_len) {
                     set_reader_diag(S, MRE008,
                                     "malformed auto-resolved keyword",
@@ -706,6 +707,8 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
                 }
                 for (i = 0; i < S->ns_alias_len; i++) {
                     const char *a = S->ns_aliases[i].alias;
+                    if (S->ns_aliases[i].owning_ns == NULL
+                        || strcmp(S->ns_aliases[i].owning_ns, cur) != 0) continue;
                     if (strlen(a) == alias_len
                         && memcmp(a, body, alias_len) == 0) {
                         resolved_ns     = S->ns_aliases[i].full_name;
@@ -1453,8 +1456,11 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
                 /* #::alias -- look up alias to a real namespace. */
                 size_t i;
                 const char *resolved = NULL;
+                const char *cur = S->current_ns != NULL ? S->current_ns : "user";
                 for (i = 0; i < S->ns_alias_len; i++) {
                     const char *a = S->ns_aliases[i].alias;
+                    if (S->ns_aliases[i].owning_ns == NULL
+                        || strcmp(S->ns_aliases[i].owning_ns, cur) != 0) continue;
                     if (strlen(a) == tlen && memcmp(a, start, tlen) == 0) {
                         resolved = S->ns_aliases[i].full_name;
                         break;

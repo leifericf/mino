@@ -118,10 +118,13 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
         size_t suffix_len = nlen - prefix_len - 1;
         char   prefix_buf[256];
         size_t i;
+        const char *cur = S->current_ns != NULL ? S->current_ns : "user";
         if (prefix_len == 0 || prefix_len >= sizeof(prefix_buf)) return sym;
         memcpy(prefix_buf, name, prefix_len);
         prefix_buf[prefix_len] = '\0';
         for (i = 0; i < S->ns_alias_len; i++) {
+            if (S->ns_aliases[i].owning_ns == NULL
+                || strcmp(S->ns_aliases[i].owning_ns, cur) != 0) continue;
             if (strcmp(S->ns_aliases[i].alias, prefix_buf) == 0) {
                 const char *full   = S->ns_aliases[i].full_name;
                 size_t      flen   = strlen(full);

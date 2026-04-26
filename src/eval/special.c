@@ -13,14 +13,20 @@
 
 /* --- Evaluator helpers: one per value kind. --- */
 
-/* Look up an alias in the ns_aliases table; returns the full module name
- * or NULL if not found. */
+/* Look up an alias in the current namespace's alias table; returns the
+ * full module name or NULL if not found. Aliases are scoped per-ns:
+ * the same alias name can resolve to different targets in different
+ * namespaces. */
 static const char *alias_resolve(mino_state_t *S, const char *alias)
 {
     size_t i;
+    const char *cur = S->current_ns != NULL ? S->current_ns : "user";
     for (i = 0; i < S->ns_alias_len; i++) {
-        if (strcmp(S->ns_aliases[i].alias, alias) == 0)
+        if (S->ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_aliases[i].owning_ns, cur) == 0
+            && strcmp(S->ns_aliases[i].alias, alias) == 0) {
             return S->ns_aliases[i].full_name;
+        }
     }
     return NULL;
 }

@@ -100,8 +100,11 @@ typedef struct {
     mino_val_t *val;
 } env_binding_t;
 
-/* Namespace alias entry. */
+/* Namespace alias entry. Each alias is owned by the namespace that
+ * declared it via require/use/alias; the same alias name can mean
+ * different targets in different namespaces. */
 typedef struct {
+    char *owning_ns;
     char *alias;
     char *full_name;
 } ns_alias_t;

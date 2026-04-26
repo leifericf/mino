@@ -38,21 +38,27 @@ static char *dup_str(const char *s, size_t n)
     return d;
 }
 
-/* Add or update an ns alias entry: "alias" -> "full.module.name".
- * ALIAS and FULL are NUL-terminated byte strings. If an entry for
- * ALIAS already exists its full_name is replaced. On OOM the call
- * is silently a no-op (matches the prior behavior at both sites). */
+/* Add or update an ns alias entry: "alias" -> "full.module.name" in
+ * the current namespace. ALIAS and FULL are NUL-terminated byte
+ * strings. If an entry for the same (current_ns, alias) already
+ * exists its full_name is replaced. On OOM the call is silently a
+ * no-op (matches the prior behavior at both sites). */
 void runtime_module_add_alias(mino_state_t *S,
                               const char *alias, const char *full)
 {
     size_t i;
     size_t alen = strlen(alias);
     size_t flen = strlen(full);
+    const char *owner = S->current_ns != NULL ? S->current_ns : "user";
+    size_t olen = strlen(owner);
+    char  *o;
     char  *a;
     char  *f;
 
     for (i = 0; i < S->ns_alias_len; i++) {
-        if (strcmp(S->ns_aliases[i].alias, alias) == 0) {
+        if (S->ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_aliases[i].owning_ns, owner) == 0
+            && strcmp(S->ns_aliases[i].alias, alias) == 0) {
             char *replaced = dup_str(full, flen);
             if (replaced == NULL) return;
             free(S->ns_aliases[i].full_name);
@@ -70,13 +76,16 @@ void runtime_module_add_alias(mino_state_t *S,
         S->ns_alias_cap = new_cap;
     }
 
+    o = dup_str(owner, olen);
     a = dup_str(alias, alen);
     f = dup_str(full,  flen);
-    if (a == NULL || f == NULL) {
+    if (o == NULL || a == NULL || f == NULL) {
+        free(o);
         free(a);
         free(f);
         return;
     }
+    S->ns_aliases[S->ns_alias_len].owning_ns = o;
     S->ns_aliases[S->ns_alias_len].alias     = a;
     S->ns_aliases[S->ns_alias_len].full_name = f;
     S->ns_alias_len++;

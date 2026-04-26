@@ -151,6 +151,22 @@ mino_val_t *prim_remove_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!ns_one_arg(S, args, "remove-ns", &arg)) return NULL;
     if (!ns_to_name(S, arg, buf, sizeof(buf), "remove-ns")) return NULL;
+    /* Drop any aliases owned by this ns so they don't outlive it. */
+    {
+        size_t w = 0;
+        for (i = 0; i < S->ns_alias_len; i++) {
+            if (S->ns_aliases[i].owning_ns != NULL
+                && strcmp(S->ns_aliases[i].owning_ns, buf) == 0) {
+                free(S->ns_aliases[i].owning_ns);
+                free(S->ns_aliases[i].alias);
+                free(S->ns_aliases[i].full_name);
+                continue;
+            }
+            if (w != i) S->ns_aliases[w] = S->ns_aliases[i];
+            w++;
+        }
+        S->ns_alias_len = w;
+    }
     for (i = 0; i < S->ns_env_len; i++) {
         if (strcmp(S->ns_env_table[i].name, buf) == 0) {
             size_t j;
@@ -305,17 +321,24 @@ mino_val_t *prim_ns_refers(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                        mino_symbol(S, e->bindings[i].name),
                        binding_as_var(S, buf, &e->bindings[i]))) return NULL;
     }
-    /* Parent walk: bindings inherited from mino.core (and any deeper). */
+    /* Parent walk: bindings inherited from mino.core (and any deeper).
+     * ns-refers returns publics, so skip privates -- matching Clojure
+     * where (refer 'foo) and the auto-refer of clojure.core only bring
+     * in non-private vars. */
     for (p = e->parent; p != NULL; p = p->parent) {
         for (i = 0; i < p->len; i++) {
             const char *nm = p->bindings[i].name;
+            const char *src_ns = p == e ? buf : "mino.core";
+            mino_val_t *src_var;
             if (names_contains(ks, len, nm)) continue;
             /* Skip if the current ns has its own intern shadowing the
              * inherited name. */
             if (var_find(S, buf, nm) != NULL) continue;
+            src_var = var_find(S, src_ns, nm);
+            if (src_var != NULL && src_var->as.var.is_private) continue;
             if (!append_kv(S, &ks, &vs, &len, &cap,
                            mino_symbol(S, nm),
-                           binding_as_var(S, p == e ? buf : "mino.core",
+                           binding_as_var(S, src_ns,
                                           &p->bindings[i]))) return NULL;
         }
     }
@@ -355,8 +378,11 @@ mino_val_t *prim_ns_map(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                           &p->bindings[i]))) return NULL;
         }
     }
-    /* Finally aliases as symbol → ns-symbol entries (ns-aliases shape). */
+    /* Finally aliases as symbol → ns-symbol entries (ns-aliases shape).
+     * Only show aliases declared by the namespace under inspection. */
     for (i = 0; i < S->ns_alias_len; i++) {
+        if (S->ns_aliases[i].owning_ns == NULL
+            || strcmp(S->ns_aliases[i].owning_ns, buf) != 0) continue;
         if (names_contains(ks, len, S->ns_aliases[i].alias)) continue;
         if (!append_kv(S, &ks, &vs, &len, &cap,
                        mino_symbol(S, S->ns_aliases[i].alias),
@@ -377,15 +403,24 @@ mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!ns_one_arg(S, args, "ns-aliases", &arg)) return NULL;
     if (!ns_to_name(S, arg, buf, sizeof(buf), "ns-aliases")) return NULL;
-    /* Aliases are tracked at state level, not per-ns, so every ns sees
-     * the same alias set. Refining this is a follow-up. */
-    n = S->ns_alias_len;
+    /* Count entries owned by the requested namespace. */
+    n = 0;
+    for (i = 0; i < S->ns_alias_len; i++) {
+        if (S->ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_aliases[i].owning_ns, buf) == 0) n++;
+    }
     if (n == 0) return mino_map(S, NULL, NULL, 0);
     ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*ks));
     vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n * sizeof(*vs));
-    for (i = 0; i < n; i++) {
-        gc_valarr_set(S, ks, i, mino_symbol(S, S->ns_aliases[i].alias));
-        gc_valarr_set(S, vs, i, mino_symbol(S, S->ns_aliases[i].full_name));
+    {
+        size_t out = 0;
+        for (i = 0; i < S->ns_alias_len; i++) {
+            if (S->ns_aliases[i].owning_ns == NULL
+                || strcmp(S->ns_aliases[i].owning_ns, buf) != 0) continue;
+            gc_valarr_set(S, ks, out, mino_symbol(S, S->ns_aliases[i].alias));
+            gc_valarr_set(S, vs, out, mino_symbol(S, S->ns_aliases[i].full_name));
+            out++;
+        }
     }
     return mino_map(S, ks, vs, n);
 }
@@ -644,8 +679,11 @@ mino_val_t *prim_ns_unalias(mino_state_t *S, mino_val_t *args,
     if (!ns_to_name(S, alias_arg, a_buf, sizeof(a_buf), "ns-unalias"))
         return NULL;
     for (i = 0; i < S->ns_alias_len; i++) {
-        if (strcmp(S->ns_aliases[i].alias, a_buf) == 0) {
+        if (S->ns_aliases[i].owning_ns != NULL
+            && strcmp(S->ns_aliases[i].owning_ns, ns_buf) == 0
+            && strcmp(S->ns_aliases[i].alias, a_buf) == 0) {
             size_t j;
+            free(S->ns_aliases[i].owning_ns);
             free(S->ns_aliases[i].alias);
             free(S->ns_aliases[i].full_name);
             for (j = i + 1; j < S->ns_alias_len; j++) {
