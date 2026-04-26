@@ -287,6 +287,12 @@ mino_val_t *prim_alias(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     t = args->as.cons.cdr->as.cons.car;
     if (!ns_to_name(S, a, abuf, sizeof(abuf), "alias")) return NULL;
     if (!ns_to_name(S, t, tbuf, sizeof(tbuf), "alias")) return NULL;
+    if (ns_env_lookup(S, tbuf) == NULL) {
+        char msg[300];
+        snprintf(msg, sizeof(msg),
+                 "alias: no such namespace: %s", tbuf);
+        return prim_throw_classified(S, "name", "MNS001", msg);
+    }
     runtime_module_add_alias(S, abuf, tbuf);
     return mino_nil(S);
 }
