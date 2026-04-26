@@ -1507,26 +1507,77 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
             S->reader_line, S->reader_col);
         return NULL;
     }
-    m = read_map_form(S, p);
-    if (m == NULL) return NULL;
-    if (m->type != MINO_MAP) return m;
-    /* Walk the map and rebuild with qualified keys. */
     {
-        size_t       n   = m->as.map.len;
-        mino_val_t **ks  = (mino_val_t **)gc_alloc_typed(S,
-            GC_T_VALARR, n > 0 ? n * sizeof(*ks) : sizeof(*ks));
-        mino_val_t **vs  = (mino_val_t **)gc_alloc_typed(S,
-            GC_T_VALARR, n > 0 ? n * sizeof(*vs) : sizeof(*vs));
-        size_t       i;
-        for (i = 0; i < n; i++) {
-            mino_val_t *k = vec_nth(m->as.map.key_order, i);
-            mino_val_t *v = map_get_val(m, k);
-            mino_val_t *qk = namespaced_map_qualify_key(S, k, prefix,
-                                                       prefix_len);
-            gc_valarr_set(S, ks, i, qk);
-            gc_valarr_set(S, vs, i, v);
+        /* Read the inner map as a flat key/value sequence to catch
+         * duplicate keys; an upstream-visible duplicate (whether bare
+         * or after prefix qualification) is a reader error. */
+        mino_val_t **rk    = NULL;
+        mino_val_t **rv    = NULL;
+        size_t       cap   = 0;
+        size_t       len   = 0;
+        size_t       i, j;
+        mino_val_t **ks;
+        mino_val_t **vs;
+        ADVANCE(S, p); /* skip '{' */
+        for (;;) {
+            mino_val_t *k;
+            mino_val_t *v;
+            skip_ws(S, p);
+            if (**p == '\0') {
+                set_reader_diag(S, MRE003, "unterminated map",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            if (**p == '}') { ADVANCE(S, p); break; }
+            k = read_form(S, p);
+            if (k == NULL) return NULL;
+            skip_ws(S, p);
+            if (**p == '}' || **p == '\0') {
+                set_reader_diag(S, MRE008,
+                                "map literal has odd number of forms",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            v = read_form(S, p);
+            if (v == NULL) return NULL;
+            if (len == cap) {
+                size_t       nc  = cap == 0 ? 8 : cap * 2;
+                mino_val_t **nk  = (mino_val_t **)gc_alloc_typed(S,
+                    GC_T_VALARR, nc * sizeof(*nk));
+                mino_val_t **nv  = (mino_val_t **)gc_alloc_typed(S,
+                    GC_T_VALARR, nc * sizeof(*nv));
+                if (rk != NULL && len > 0) {
+                    for (i = 0; i < len; i++) {
+                        gc_valarr_set(S, nk, i, rk[i]);
+                        gc_valarr_set(S, nv, i, rv[i]);
+                    }
+                }
+                rk = nk; rv = nv; cap = nc;
+            }
+            gc_valarr_set(S, rk, len, k);
+            gc_valarr_set(S, rv, len, v);
+            len++;
         }
-        out = mino_map(S, ks, vs, n);
+        ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+            len > 0 ? len * sizeof(*ks) : sizeof(*ks));
+        vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+            len > 0 ? len * sizeof(*vs) : sizeof(*vs));
+        for (i = 0; i < len; i++) {
+            mino_val_t *qk = namespaced_map_qualify_key(S, rk[i], prefix,
+                                                       prefix_len);
+            if (qk == NULL) return NULL;
+            for (j = 0; j < i; j++) {
+                if (mino_eq(ks[j], qk)) {
+                    set_reader_diag(S, MRE008,
+                        "namespaced map literal contains duplicate key",
+                        S->reader_line, S->reader_col);
+                    return NULL;
+                }
+            }
+            gc_valarr_set(S, ks, i, qk);
+            gc_valarr_set(S, vs, i, rv[i]);
+        }
+        out = mino_map(S, ks, vs, len);
     }
     return out;
 }
