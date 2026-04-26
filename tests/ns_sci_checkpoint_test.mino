@@ -121,13 +121,17 @@
 ;; ---- misc-namespace-test ----
 
 (deftest misc-namespace-test
-  ;; "(alias (symbol \"c\") (symbol \"clojure.core\")) (c/and true 1)"
+  ;; Upstream targets `clojure.core`; in mino the bundled-core ns is
+  ;; `mino.core`, so the test uses that name. Mechanic under test is the
+  ;; alias primitive, not the ns name itself.
   (is (= 1
-         (eval (read-string "(do (alias (symbol \"c\") (symbol \"clojure.core\")) (c/and true 1))"))))
+         (eval (read-string "(do (alias (symbol \"c\") (symbol \"mino.core\")) (c/and true 1))"))))
 
-  ;; mapv alias to set1/set2 then chained difference/union
+  ;; alias set1/set2 then chained difference/union (upstream uses 3-arity
+  ;; mapv to register both aliases at once; mino's mapv is 2-arity).
+  (require '[clojure.set])
   (is (= #{1 3 2}
-         (eval (read-string "(do (mapv alias ['set1 'set2] ['clojure.set 'clojure.set]) (set2/difference (set1/union #{1 2 3} #{4 5 6}) #{4 5 6}))"))))
+         (eval (read-string "(do (alias 'set1 'clojure.set) (alias 'set2 'clojure.set) (set2/difference (set1/union #{1 2 3} #{4 5 6}) #{4 5 6}))"))))
 
   ;; "(ns-name (find-ns 'clojure.set))"
   (is (= 'clojure.set (ns-name (find-ns 'clojure.set))))
@@ -135,18 +139,16 @@
   ;; "(ns-name (the-ns (the-ns 'clojure.set)))"
   (is (= 'clojure.set (ns-name (the-ns (the-ns 'clojure.set)))))
 
-  ;; "(alias 'c 'clojure.core) (ns-name (get (ns-aliases *ns*) 'c))"
-  (alias 'c 'clojure.core)
-  (is (= 'clojure.core (ns-name (get (ns-aliases *ns*) 'c))))
+  ;; "(alias 'c 'mino.core) (ns-name (get (ns-aliases *ns*) 'c))"
+  (alias 'c 'mino.core)
+  (is (= 'mino.core (ns-name (get (ns-aliases *ns*) 'c))))
 
   ;; identical? find-ns vs alias lookup
-  (is (true? (identical? (find-ns 'clojure.core) (get (ns-aliases *ns*) 'c))))
+  (is (true? (identical? (find-ns 'mino.core) (get (ns-aliases *ns*) 'c))))
 
   (testing "alias accepts namespace objects"
-    ;; "(alias 'c (find-ns 'clojure.core)) (ns-name (get (ns-aliases *ns*) 'c))"
-    (alias 'c2 (find-ns 'clojure.core))
-    (is (= 'clojure.core (ns-name (get (ns-aliases *ns*) 'c2))))
-    ;; "(alias 'mns (create-ns 'my.new.ns)) (ns-name (get (ns-aliases *ns*) 'mns))"
+    (alias 'c2 (find-ns 'mino.core))
+    (is (= 'mino.core (ns-name (get (ns-aliases *ns*) 'c2))))
     (alias 'mns (create-ns 'my.new.ns))
     (is (= 'my.new.ns (ns-name (get (ns-aliases *ns*) 'mns)))))
 
