@@ -86,7 +86,30 @@ Syntax-quote (`\``) auto-qualifies bare symbols against the
 current-namespace lexical chain (already true since the cycle
 opened) and now also expands an alias prefix on namespaced
 symbols, so `\`str/x` becomes `clojure.string/x` when `str` is
-aliased.
+aliased. Refer'd entries keep their source-namespace identity:
+after `(refer 'clojure.string)` in a fresh namespace,
+`\`capitalize` resolves to `clojure.string/capitalize` rather than
+the receiving namespace, matching the contract the reflective
+APIs already followed.
+
+Namespace aliases are scoped per-namespace. Setting an alias in
+one namespace no longer leaks into another, so `(require '[a :as
+x])` in one namespace doesn't make `x/y` resolvable from a
+sibling namespace. Vars carry `:ns`, `:name`, `:private`, and
+`:dynamic` metadata synthesized from their intrinsic fields, so
+`(meta #'foo)` returns a useful map. `eval` resets the ambient
+namespace before running the form, so a form passed to `eval`
+sees only its own current-namespace bindings rather than the
+calling function's defining namespace. The `with-local-vars`
+macro lands as a thin wrapper over `intern` and `var-set` for
+lexically-scoped mutable cells.
+
+`ns-unmap` correctly removes large-frame bindings (the previous
+implementation shifted the array in place but left the backing
+hash table pointing at the old slot, so the binding still
+resolved). `resolve` no longer falls back to a global var-registry
+scan when the current namespace doesn't own a name; that fallback
+picked up unrelated names from sibling namespaces.
 
 ### Breaking Changes
 
