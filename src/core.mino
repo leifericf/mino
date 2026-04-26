@@ -1306,12 +1306,13 @@
                    ~coll))))))
 
 ;; ---------------------------------------------------------------------------
-;; Agents: mutable reference cells updated via function application.
+;; Agents: not supported on mino.
 ;;
-;; An agent wraps an atom. (send-to agent f) applies f to the current
-;; value and stores the result.  Within a single runtime this is
-;; synchronous; the API exists so that code written against agents
-;; transfers cleanly to multi-runtime contexts later.
+;; Real Clojure agents have asynchronous send semantics, an error-mode
+;; lifecycle, and a thread-pool dispatcher. Mino has none of those, so
+;; rather than aliasing agent to atom and pretending the API works, the
+;; functions throw with a clear message pointing at atoms or
+;; core.async as the supported alternatives.
 ;; ---------------------------------------------------------------------------
 
 ;; ---------------------------------------------------------------------------
@@ -1346,17 +1347,17 @@
       (:mino/message ex)
       (:message ex))))
 
-(defn agent
-  "Creates an agent wrapping the given initial value. Accepts and
-   ignores the keyword options Clojure's agent constructor takes
-   (:meta, :error-handler, :error-mode, :validator)."
-  [init & _opts]
-  (atom init))
+(defn agent [& _]
+  (throw (ex-info "agent is not supported on mino — use atoms for synchronous mutable state or core.async for async dispatch"
+                  {:mino/unsupported :agent})))
 
-(defn send-to "Applies f to the agent's current value and any args, updating the agent." [ag f & args]
-  (apply swap! ag f args))
+(defn send-to [& _]
+  (throw (ex-info "send-to is not supported on mino — see (atom) and core.async"
+                  {:mino/unsupported :send-to})))
 
-(defn agent-error "Returns the error of the agent, or nil if none." [ag] nil)
+(defn agent-error [& _]
+  (throw (ex-info "agent-error is not supported on mino"
+                  {:mino/unsupported :agent-error})))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocols: polymorphic dispatch on the type of the first argument.
@@ -1381,12 +1382,7 @@
 
 (defn protocol-dispatch_ [dispatch-atom mname & args]
   (let [target (first args)
-        ;; Records carry their type tag in metadata so plain-map dispatch
-        ;; (`extend-type :map ...`) keeps working for non-record maps.
-        rec-type (when (some? target)
-                   (let [m (meta target)]
-                     (when (map? m) (:mino/record-type m))))
-        t (or rec-type (type target))
+        t (type target)
         dispatch-map @dispatch-atom
         impl (get dispatch-map t)]
     (if impl
@@ -1457,17 +1453,21 @@
 
 (defn type-marker-key_
   "Translates an extend-protocol type marker to the keyword key
-   extend-type understands. Keywords pass through; nil maps to :nil so
-   nil-safe protocol implementations work; bare symbols (Object,
-   Exception, String, ...) map to :default since mino has no JVM class
-   types."
+   extend-type understands. Keywords pass through; nil maps to :nil
+   so a `(extend-protocol P nil ...)` clause registers nil-safe
+   implementations against the same key (type nil) returns. Bare
+   symbols are rejected — mino has no JVM classes and silently
+   collapsing every Java-class symbol to :default would mask broken
+   dispatch with a surprising catch-all. Use a keyword tag matching
+   what (type x) returns instead."
   [marker]
   (cond
     (keyword? marker) marker
     (nil? marker)     :nil
-    (symbol? marker)  :default
-    :else (throw (ex-info (str "extend-protocol: unrecognized type marker: " marker)
-                          {:marker marker}))))
+    :else (throw (ex-info (str "extend-protocol: unsupported type marker " (pr-str marker)
+                               " — use a keyword like :string or :vector matching (type x)")
+                          {:marker marker
+                           :mino/unsupported :extend-protocol-type-marker}))))
 
 (defn partition-protocol-specs_ [specs]
   (loop [remaining specs groups [] current nil]
@@ -1915,158 +1915,53 @@
   ([x] (list 'when-not x (list 'throw "Assert failed")))
   ([x msg] (list 'when-not x (list 'throw msg))))
 
-;; --- Record types ---
-;;
-;; defrecord, deftype, and reify are exposed as map-backed shims rather
-;; than JVM-class generators. A record instance is just a hash-map whose
-;; metadata carries `:mino/record-type` so protocol-dispatch_ routes to
-;; the right method table. Field names destructure into method bodies
-;; via `:keys` so the body can refer to fields without `(:f self)`.
-
-(defn defrecord-wrap-method_ [fields method]
-  ;; (m [self & args] body...) -> (m [self & args] (let [{:keys [f1 f2]} self] body...))
-  (let [mname  (first method)
-        params (second method)
-        body   (drop 2 method)
-        self-sym (first params)]
-    (apply list mname params
-      (list 'let [{:keys (vec fields)} self-sym]
-            (apply list 'do body)))))
-
-(defmacro defrecord
-  "Map-backed record type. Generates ->Name and Name. positional
-   constructors plus a map->Name builder. Protocol method bodies see
-   field names via destructuring on the first parameter."
-  [type-sym fields & specs]
-  (let [tag         (keyword (name type-sym))
-        ctor-arrow  (symbol (str "->" (name type-sym)))
-        ctor-dot    (symbol (str (name type-sym) "."))
-        ctor-map    (symbol (str "map->" (name type-sym)))
-        field-pairs (reduce (fn [acc f] (conj acc (keyword (name f)) f))
-                            [] fields)
-        record-meta {:mino/record-type tag}
-        groups      (partition-protocol-specs_ specs)
-        wrapped     (mapv (fn [g]
-                            (let [proto (first g)
-                                  ms    (rest g)]
-                              (cons proto
-                                (map #(defrecord-wrap-method_ fields %) ms))))
-                          groups)
-        extends     (apply list (map (fn [g]
-                                       (apply list 'extend-type tag g))
-                                     wrapped))]
-    (apply list 'do
-      (list 'defn ctor-arrow (vec fields)
-            (list 'with-meta (apply hash-map field-pairs) record-meta))
-      (list 'def ctor-dot ctor-arrow)
-      (list 'defn ctor-map [(symbol "m")]
-            (list 'with-meta (symbol "m") record-meta))
-      (list 'def type-sym {:mino/record-type tag :fields (mapv (comp keyword name) fields)})
-      extends)))
-
-(defmacro deftype
-  "Map-backed type, like defrecord but without the map->Name helper.
-   In mino there is no JVM distinction between record and type at
-   runtime; this exists for source compatibility."
-  [type-sym fields & specs]
-  (apply list 'defrecord type-sym fields specs))
-
 (def ^:dynamic *assert*
   "Controls assertion compilation. When false, `assert` is a no-op.
    Defaults to true."
   true)
 
-(defn record?
-  "Returns true if x is a record value (a map carrying the
-   :mino/record-type metadata that defrecord/deftype/reify attach)."
-  [x]
-  (and (map? x)
-       (let [m (meta x)]
-         (and (map? m) (some? (:mino/record-type m))))))
+;; --- Platform-specific forms (not supported on mino) ---
+;;
+;; Mino is neither a JVM nor a JavaScript runtime, so forms that
+;; generate Java classes (defrecord, deftype, reify, proxy,
+;; gen-class, definterface), import Java packages (import), or
+;; perform Java instance-of checks (instance?) cannot be honored.
+;; Each one throws an informative ex-info at expansion or call time
+;; rather than silently no-op'ing or returning a fake value, so users
+;; learn about the gap immediately and library failures point at the
+;; real cause.
 
-(defn instance-impl_
-  "Implements (instance? class x) on the small set of Clojure-shaped
-   class markers mino can answer for. Everything else returns false."
-  [cname x]
-  (let [n (name cname)]
-    (cond
-      (= n "Number")                            (number? x)
-      (= n "String")                            (string? x)
-      (= n "Character")                         (char? x)
-      (= n "Boolean")                           (boolean? x)
-      (or (= n "Long") (= n "Integer")
-          (= n "Short") (= n "Byte"))           (integer? x)
-      (or (= n "Double") (= n "Float"))         (float? x)
-      :else                                     false)))
+(defmacro defrecord [& _]
+  (throw (ex-info "defrecord is not supported on mino — use maps and protocols instead"
+                  {:mino/unsupported :defrecord})))
 
-(defmacro instance?
-  "Returns true when x is an instance of the named class. The class
-   argument is taken as a symbol literal — mino has no JVM classes to
-   resolve at runtime — and only Clojure-shaped names with a mino
-   equivalent (Number, String, Long, Double, ...) answer truthfully.
-   Unknown class names (Java interfaces, library types) return false
-   so code that conditionally takes a JVM-only fast path falls through
-   to the portable branch."
-  [class x]
-  (list 'instance-impl_ (list 'quote class) x))
+(defmacro deftype [& _]
+  (throw (ex-info "deftype is not supported on mino — use maps and protocols instead"
+                  {:mino/unsupported :deftype})))
 
-(defmacro reify
-  "Anonymous map implementing the given protocols. Methods register on
-   a freshly-generated tag attached to the result via metadata, so the
-   reified value dispatches through the same protocol-dispatch path
-   defrecord uses."
-  [& specs]
-  (let [tag-sym (gensym "reify-tag-")
-        groups  (partition-protocol-specs_ specs)
-        extends (mapv (fn [g] (apply list 'extend-type tag-sym g)) groups)]
-    (apply list 'let [tag-sym (list 'keyword (list 'str (list 'gensym "reify-")))]
-      (concat extends
-              [(list 'with-meta {} {:mino/record-type tag-sym})]))))
+(defmacro reify [& _]
+  (throw (ex-info "reify is not supported on mino — use a fn or a map of methods"
+                  {:mino/unsupported :reify})))
 
-;; --- Other JVM-only stubs ---
+(defmacro proxy [& _]
+  (throw (ex-info "proxy is not supported on mino — there is no JVM to subclass"
+                  {:mino/unsupported :proxy})))
 
-(defmacro proxy
-  "Not supported in mino — left as a no-op so libraries that load proxy
-   forms at top level don't blow up at load time."
-  [& _]
-  nil)
+(defmacro gen-class [& _]
+  (throw (ex-info "gen-class is not supported on mino — there is no JVM to compile against"
+                  {:mino/unsupported :gen-class})))
 
-(defmacro gen-class
-  "Not supported in mino — no-op so loading code that includes
-   `(:gen-class)` in an `ns` form succeeds."
-  [& _]
-  nil)
+(defmacro definterface [& _]
+  (throw (ex-info "definterface is not supported on mino — use defprotocol instead"
+                  {:mino/unsupported :definterface})))
 
-(defmacro definterface
-  "Not supported in mino — no-op so loading is non-fatal."
-  [& _]
-  nil)
+(defmacro import [& _]
+  (throw (ex-info "Java import is not supported on mino — there are no Java classes to import"
+                  {:mino/unsupported :import})))
 
-(defmacro import
-  "Java imports are not applicable in mino. Treated as a no-op so
-   `:import` clauses in `ns` forms and bare `(import ...)` calls don't
-   abort loading."
-  [& _]
-  nil)
-
-(defn extend
-  "Lower-level form behind extend-protocol/extend-type. Takes a type
-   marker and one or more `proto method-map` pairs and registers each
-   method in the protocol's dispatch atom."
-  [type & proto+method-maps]
-  (let [pairs (partition 2 proto+method-maps)
-        tag   (cond
-                (keyword? type) type
-                (nil? type)     :nil
-                :else           :default)]
-    (doseq [[proto methods] pairs]
-      (doseq [[mname mfn] methods]
-        (let [pname (name proto)
-              dsym  (symbol (str pname "--" (name mname)))
-              dvar  (find-var (symbol (namespace proto) (str dsym)))
-              datom (when dvar (var-get dvar))]
-          (when datom
-            (swap! datom assoc tag mfn)))))))
+(defmacro instance? [_class _x]
+  (throw (ex-info "instance? is not supported on mino — there are no Java classes to test against"
+                  {:mino/unsupported :instance?})))
 
 (defmacro with-redefs
   "Temporarily rebinds the root bindings of vars while body executes, restoring

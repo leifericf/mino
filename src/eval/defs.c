@@ -485,7 +485,20 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                     }
                 }
             }
-            /* Silently skip :import, :gen-class, etc. */
+            /* Mino targets pure portable Clojure — :import,
+             * :gen-class, :load, and other JVM-only ns clauses are
+             * not supported. Throw with a clear message so a file
+             * that needs Java interop fails loud at load time. */
+            if (kw_eq(head, "import")) {
+                set_eval_diag(S, form, "name", "MNS001",
+                    "ns: :import is not supported on mino — there are no Java classes to import");
+                return NULL;
+            }
+            if (kw_eq(head, "gen-class")) {
+                set_eval_diag(S, form, "name", "MNS001",
+                    "ns: :gen-class is not supported on mino — there is no JVM to compile against");
+                return NULL;
+            }
         }
         rest = rest->as.cons.cdr;
     }

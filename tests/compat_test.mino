@@ -271,32 +271,27 @@
   (testing "unique on each call"
     (is (not= (random-uuid) (random-uuid)))))
 
-;; --- Record-shaped types ---
+;; --- Platform-specific forms throw ---
 
-(deftest defrecord-builds-tagged-map
-  (testing "positional and dotted constructors return a tagged map"
-    (defrecord Pair [a b])
-    (let [p (->Pair 1 2)]
-      (is (= 1 (:a p)))
-      (is (= 2 (:b p)))
-      (is (= :Pair (:mino/record-type (meta p))))
-      (is (= p (Pair. 1 2)))))
+(deftest jvm-forms-throw-with-clear-message
+  (testing "defrecord throws because mino has no JVM classes"
+    (is (thrown? (defrecord Foo [x y])))
+    (is (= :defrecord
+           (:mino/unsupported
+            (try (defrecord Foo [x y]) nil
+                 (catch e (ex-data e)))))))
 
-  (testing "map-> builder copies metadata onto a plain map"
-    (defrecord Item [x])
-    (let [i (map->Item {:x 7 :extra "ok"})]
-      (is (= 7 (:x i)))
-      (is (= "ok" (:extra i)))
-      (is (= :Item (:mino/record-type (meta i)))))))
+  (testing "deftype throws"
+    (is (thrown? (deftype Bar [x]))))
 
-(deftest reify-returns-tagged-map
-  (let [r (reify)]
-    (is (map? r))
-    (is (some? (:mino/record-type (meta r))))))
+  (testing "reify throws"
+    (is (thrown? (reify Object (toString [this] "hi")))))
 
-(deftest import-is-noop
-  (is (nil? (import java.util.Date)))
-  (is (nil? (import (java.io PrintWriter StringWriter)))))
+  (testing "import throws as a top-level form"
+    (is (thrown? (import java.util.Date))))
+
+  (testing "instance? throws"
+    (is (thrown? (instance? String "abc")))))
 
 ;; --- #?@ splice in maps ---
 
