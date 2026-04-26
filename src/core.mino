@@ -790,9 +790,6 @@
 
 ;; --- Misc utilities ---
 
-(def blank? "Returns true if s is nil or contains only whitespace." (fn [s]
-  (or (nil? s) (= (trim s) ""))))
-
 (def comparator "Returns a comparator function from a two-arg predicate." (fn [pred]
   (fn [a b] (cond (pred a b) -1 (pred b a) 1 true 0))))
 
