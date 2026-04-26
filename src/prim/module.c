@@ -524,36 +524,51 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * accepted as-is so loading utility scripts by path still works.
          * The ns name may use dashes where the path uses underscores
          * (e.g. ns foo-bar from file foo_bar.mino), so compare in a
-         * canonicalized form where both use dashes. */
-        if (post_ns != NULL && saved_ns != NULL
-            && strcmp(post_ns, saved_ns) != 0) {
-            char        expected[256];
-            char        post_canon[256];
-            size_t      nl = strlen(name);
-            size_t      pl = strlen(post_ns);
-            size_t      k;
-            if (nl < sizeof(expected) && pl < sizeof(post_canon)) {
-                for (k = 0; k < nl; k++) {
-                    char c = name[k];
-                    if (c == '/') c = '.';
-                    else if (c == '_') c = '-';
-                    expected[k] = c;
-                }
-                expected[nl] = '\0';
-                for (k = 0; k < pl; k++) {
-                    char c = post_ns[k];
-                    if (c == '_') c = '-';
-                    post_canon[k] = c;
-                }
-                post_canon[pl] = '\0';
-                if (strcmp(post_canon, expected) != 0) {
-                    char msg[512];
-                    snprintf(msg, sizeof(msg),
-                        "require: file %s declared namespace %s, expected %s",
-                        path, post_ns, expected);
-                    set_eval_diag(S, S->eval_current_form,
-                        "name", "MNS001", msg);
-                    return NULL;
+         * canonicalized form where both use dashes.
+         *
+         * Skip the check when the require argument is a literal path --
+         * one ending in a known source extension. (require '[foo.bar])
+         * passes a dotted module name, so validation runs; a (require
+         * "deps/foo/src/foo/bar.cljc") path-load is a deliberate "load
+         * this file" that shouldn't impose a name match. */
+        {
+            size_t nl = strlen(name);
+            int    is_path = 0;
+            if ((nl >= 5 && (strcmp(name + nl - 5, ".mino") == 0
+                          || strcmp(name + nl - 5, ".cljc") == 0
+                          || strcmp(name + nl - 5, ".cljs") == 0))
+             || (nl >= 4 && strcmp(name + nl - 4, ".clj") == 0)) {
+                is_path = 1;
+            }
+            if (!is_path && post_ns != NULL && saved_ns != NULL
+                && strcmp(post_ns, saved_ns) != 0) {
+                char        expected[256];
+                char        post_canon[256];
+                size_t      pl = strlen(post_ns);
+                size_t      k;
+                if (nl < sizeof(expected) && pl < sizeof(post_canon)) {
+                    for (k = 0; k < nl; k++) {
+                        char c = name[k];
+                        if (c == '/') c = '.';
+                        else if (c == '_') c = '-';
+                        expected[k] = c;
+                    }
+                    expected[nl] = '\0';
+                    for (k = 0; k < pl; k++) {
+                        char c = post_ns[k];
+                        if (c == '_') c = '-';
+                        post_canon[k] = c;
+                    }
+                    post_canon[pl] = '\0';
+                    if (strcmp(post_canon, expected) != 0) {
+                        char msg[512];
+                        snprintf(msg, sizeof(msg),
+                            "require: file %s declared namespace %s, expected %s",
+                            path, post_ns, expected);
+                        set_eval_diag(S, S->eval_current_form,
+                            "name", "MNS001", msg);
+                        return NULL;
+                    }
                 }
             }
         }
