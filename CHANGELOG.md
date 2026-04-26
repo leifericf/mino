@@ -160,6 +160,68 @@ dispatch semantics were honored. The `ns` form rejects `:import`
 and `:gen-class` clauses so files that mix Java interop into
 their namespace declarations fail loud at load time.
 
+Source files have moved from `.mino` to `.clj`. Mino sources are a
+host-targeted Clojure dialect (the same `defn` / macro system /
+sequence semantics, with the JVM-only forms above swapped for
+`:mino/unsupported` errors), and the new extension lets editors,
+formatters, language servers, and tree-sitter grammars recognize
+mino code out of the box. The require resolver searches `.cljc`,
+`.clj`, and `.cljs` in that order; `.mino` is gone. External
+libraries that ship as portable Clojure continue to load as
+`.cljc`. Sibling repositories (`mino-bench`, `mino-examples`,
+`mino-lsp`, `tree-sitter-mino`) follow the same rename on local
+branches.
+
+C primitives are now interned as vars in their install-time
+namespace. `(find-var 'clojure.core/inc)` returns
+`#'clojure.core/inc`, `(resolve 'inc)` returns the var,
+`(meta #'inc)` returns `{:ns clojure.core :name inc}`, and
+`(deref (resolve 'inc))` invokes the primitive. `clojure.string`
+primitives like `split` and `join` resolve through their own
+namespace var. Refer-collision detection no longer exempts
+primitive bindings unconditionally — a primitive that has been
+refer'd into another namespace and then re-defined surfaces the
+same "already refers to a var from another namespace" diagnostic
+as a mino-side defn would.
+
+The pure-Clojure surface gained the names that portable libraries
+expected to find: identifier predicates `ident?`, `simple-ident?`,
+`qualified-ident?`, `special-symbol?`, `map-entry?`, the no-op-on-
+mino predicates `bytes?`, `inst?`, `uri?`, plus `uuid?` /
+`parse-uuid` (string-shaped, since mino has no Java UUID type).
+Parsing helpers `parse-boolean` and `find-keyword` round out the
+1.11 set alongside the existing `parse-long` / `parse-double`.
+Collection helpers `partitionv`, `partitionv-all`, `splitv-at`,
+and `replicate` build on `partition`/`partition-all` (which now
+also accepts the four-argument `(partition n step pad coll)` form
+real Clojure exposes). Hash-combining helpers `hash-ordered-coll`,
+`hash-unordered-coll`, and `mix-collection-hash` produce
+mino-internal-consistent hashes (not bit-equal to Clojure's
+Murmur3, but stable across runs). `ex-cause` reads from
+`ex-data :cause` or attached metadata. `with-redefs-fn` is the
+function counterpart to the existing `with-redefs` macro. `inst-ms`
+throws `:mino/unsupported`. The tap mechanism — `add-tap`,
+`remove-tap`, `tap>` — is implemented over an atom of subscribers
+that swallows tap-fn exceptions so a misbehaving subscriber does
+not poison the stream. `tagged-literal` and `reader-conditional`
+constructors and the `tagged-literal?` / `reader-conditional?`
+predicates round out the reader-record surface; `list*` and
+`reset-meta!` close two long-standing gaps. `walk`, `postwalk`,
+`prewalk`, `postwalk-replace`, and `prewalk-replace` are
+re-exported from `clojure.walk` (the implementations live in
+`clojure.core` because the bundled-core organization needs them
+across the standard library).
+
+A new `clojure.* coverage` test reports the breadth of Clojure-
+core-namespace surface mino exposes against a manifest of
+canonical 1.11 names. The current snapshot: `clojure.core` 402/411
+portable names (97%), `clojure.string` 17/21 (80%), `clojure.set`
+12/12 (100%), `clojure.walk` 8/8 (100%), `clojure.edn` 1/2 (50%),
+`clojure.zip` 26/28 (92%). JVM-only names and special forms are
+excluded from the percentages and accounted separately. Missing
+names are printed by namespace so the gap is visible without
+grep'ing the source.
+
 ### Breaking Changes
 
 The single shared global env that previously masqueraded as many
@@ -186,6 +248,14 @@ Reader conditionals now match `:clj` as an active dialect. Tests
 or code that asserted `#?(:clj X)` would be skipped under `mino`
 must use `:cljs` (or any other inactive tag) to drive elimination
 behavior.
+
+Source files now use `.clj` instead of `.mino`. The `.mino`
+extension is removed from the require resolver. Embedders calling
+`mino_load_file` with an explicit path are unaffected — the C API
+opens whatever path is passed in regardless of extension. Code
+that hard-coded `src/core.mino` in a build pipeline must update
+to `src/core.clj`; the bootstrap recipe in `README.md` and
+`mino.edn` shows the new form.
 
 ## v0.72.0 — Release Pipeline & Build Polish
 
