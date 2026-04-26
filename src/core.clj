@@ -2046,6 +2046,22 @@
    (take n (repeat x))."
   [n x] (take n (repeat x)))
 
+(defn list*
+  "Creates a new list containing the items prepended to the rest, the
+   last of which will be treated as a sequence."
+  ([args] (seq args))
+  ([a args] (cons a args))
+  ([a b args] (cons a (cons b args)))
+  ([a b c args] (cons a (cons b (cons c args))))
+  ([a b c d & more] (cons a (cons b (cons c (cons d (apply list* more)))))))
+
+(defn reset-meta!
+  "Atomically resets the metadata for a reference type to meta-map.
+   Returns meta-map."
+  [ref meta-map]
+  (alter-meta! ref (constantly meta-map))
+  meta-map)
+
 ;; Collection-hash helpers. Real Clojure mixes via Murmur3; mino uses
 ;; a simpler combiner that is consistent across runs but does not
 ;; match Clojure's exact bit pattern. Suitable for in-process equality
