@@ -122,6 +122,13 @@ binding table doesn't have an entry, so namespaces declared with
 primitive that surfaces `defn` docs. `(doc 'clojure.core/inc)` also
 finds the docstring registered under the bare name.
 
+`mino.deps` now probes a fetched dependency directory for common
+source-root conventions. If the lib follows the Maven layout
+(`src/main/clojure/`) the root is added automatically alongside a
+plain `src/` entry, so a multi-file library can require its sibling
+namespaces by symbol without a manual `:deps/root` override in
+`mino.edn`.
+
 A few small interop affordances landed alongside the namespace
 work to broaden compatibility with pure-Clojure libraries.
 `extend-protocol` now accepts `nil` as a type marker (translated
