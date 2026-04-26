@@ -718,6 +718,19 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (e != NULL && e->docstring != NULL) {
         return mino_string(S, e->docstring);
     }
+    /* Fall back to namespace metadata: (ns foo "docstring" ...) puts
+     * {:doc "..."} on the namespace; surface it through doc when no
+     * named-binding docstring is registered. */
+    if (ns_env_lookup(S, buf) != NULL) {
+        mino_val_t *meta = ns_env_get_meta(S, buf);
+        if (meta != NULL && meta->type == MINO_MAP) {
+            mino_val_t *doc_kw = mino_keyword(S, "doc");
+            mino_val_t *doc    = map_get_val(meta, doc_kw);
+            if (doc != NULL && doc->type == MINO_STRING) {
+                return doc;
+            }
+        }
+    }
     return mino_nil(S);
 }
 
