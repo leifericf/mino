@@ -583,3 +583,32 @@
   (let [r (clojure.edn/read "#?(:clj 1 :mino 2)")]
     (is (reader-conditional? r))
     (is (= '(:clj 1 :mino 2) (:form r)))))
+
+(defn destructure-eval_ [pairs body]
+  ;; Build a let form whose binding vector is the destructured pairs and
+  ;; whose body is the supplied form. eval'd to verify the bindings work.
+  (eval (list 'let (destructure pairs) body)))
+
+(deftest destructure-symbol-passthrough
+  (let [bs (destructure '[a 1])]
+    (is (= '[a 1] bs))
+    (is (= 1 (destructure-eval_ '[a 1] 'a)))))
+
+(deftest destructure-vector-positional
+  (is (= [1 2 3] (destructure-eval_ '[[a b c] [1 2 3]]
+                                    '[a b c]))))
+
+(deftest destructure-vector-rest-and-as
+  (is (= [1 '(2 3) [1 2 3]]
+         (destructure-eval_ '[[a & rest :as v] [1 2 3]]
+                            '[a rest v]))))
+
+(deftest destructure-map-keys-and-as
+  (is (= [1 2 {:x 1 :y 2}]
+         (destructure-eval_ '[{:keys [x y] :as m} {:x 1 :y 2}]
+                            '[x y m]))))
+
+(deftest destructure-map-or-defaults
+  (is (= [1 99]
+         (destructure-eval_ '[{:keys [x y] :or {y 99}} {:x 1}]
+                            '[x y]))))

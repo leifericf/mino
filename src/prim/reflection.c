@@ -790,6 +790,8 @@ const mino_prim_def k_prims_reflection[] = {
      "Repeatedly expands a macro form until it is no longer a macro call."},
     {"gensym",    prim_gensym,
      "Returns a new symbol with a unique name."},
+    {"destructure", prim_destructure,
+     "Takes a binding-pairs vector [lhs1 rhs1 lhs2 rhs2 ...] and returns a flat vector of [name init ...] suitable as a let binding form."},
     {"throw",     prim_throw,
      "Throws an exception with the given value."},
     {"last-error", prim_last_error,

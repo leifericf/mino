@@ -295,6 +295,7 @@ mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_macroexpand(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_destructure(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_last_error(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_error_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
