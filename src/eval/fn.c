@@ -218,6 +218,22 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         set_eval_diag(S, S->eval_current_form, "eval/type", "MTY002", "cannot apply null");
         return NULL;
     }
+    if (fn->type == MINO_VAR) {
+        if (!fn->as.var.bound) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "var is unbound: %s/%s",
+                     fn->as.var.ns ? fn->as.var.ns : "?",
+                     fn->as.var.sym ? fn->as.var.sym : "?");
+            set_eval_diag(S, S->eval_current_form, "eval/type", "MTY002", msg);
+            return NULL;
+        }
+        fn = fn->as.var.root;
+        if (fn == NULL) {
+            set_eval_diag(S, S->eval_current_form, "eval/type", "MTY002",
+                "var has nil root");
+            return NULL;
+        }
+    }
     if (fn->type == MINO_PRIM) {
         const char *file = NULL;
         int         line = 0;
