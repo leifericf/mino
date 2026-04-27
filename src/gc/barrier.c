@@ -1,5 +1,6 @@
 /*
- * barrier.c -- write barrier, remembered set, and SATB push.
+ * barrier.c -- write barrier, remembered set, and incremental-major
+ * snapshot push.
  *
  * The barrier handles two tasks at every mutation of a GC-managed slot:
  *
@@ -9,11 +10,18 @@
  *     gc_hdr_t::dirty; the remset never grows past one entry per live
  *     OLD container per epoch. This runs in every phase.
  *
- *  2. SATB push. While the major collector is in MAJOR_MARK, the
- *     value being overwritten (old_value) must survive this cycle
- *     even if the mutator breaks its only surviving link. The barrier
- *     pushes old_value onto the mark stack; gc_major_step will trace
- *     it on the next slice.
+ *  2. Incremental-major snapshot push (Yuasa SATB plus Dijkstra
+ *     insertion). While the major collector is in MAJOR_MARK, two
+ *     pointers ride along onto the mark stack:
+ *       - old_value (SATB): the previous slot contents. Any object
+ *         reachable at snapshot time survives this cycle even if the
+ *         mutator unlinks it before the mark frontier reaches it.
+ *       - new_value (insertion barrier): the just-installed pointer.
+ *         Catches the case where the snapshot path that used to keep
+ *         an OLD reachable has been overwritten in this same store,
+ *         and the only surviving path runs through the new edge.
+ *     gc_mark_push deduplicates against h->mark, so the second push
+ *     is free when the value was already in the snapshot.
  *
  * Singletons -- nil, true, false, small-int cache, recur/tail-call
  * sentinels -- live inside mino_state_t and are not GC-managed. The
@@ -118,14 +126,36 @@ void gc_write_barrier(mino_state_t *S, void *container,
            || ((((gc_hdr_t *)container) - 1)->gen == GC_GEN_YOUNG
                || (((gc_hdr_t *)container) - 1)->gen == GC_GEN_OLD));
     gc_evt_record(S, GC_EVT_WB, container, old_value, new_value, 0, 0);
-    /* SATB: during active major marking, enqueue the previous slot
-     * value so it is visited before sweep. Skip singletons (not
-     * GC-managed) and NULL (empty slot). */
+    /* During active major marking, the slot store needs both halves of
+     * a hybrid Yuasa-plus-Dijkstra barrier:
+     *
+     *   old_value -- pure SATB. Enqueue the previous slot contents so
+     *     anything reachable at snapshot time survives the cycle even
+     *     if the mutator unlinks it before the mark frontier reaches
+     *     container.
+     *
+     *   new_value -- insertion barrier. Enqueue the just-installed
+     *     value so any OLD it transitively points at gets marked even
+     *     if the snapshot path that used to reach those OLDs has been
+     *     overwritten in the same write. Pure SATB does not cover
+     *     this: the snapshot value going onto the mark stack is the
+     *     OLD that is being dropped, not the OLD that is being kept
+     *     reachable through new_value.
+     *
+     * Both halves skip singletons (not GC-managed) and NULL (empty
+     * slot). gc_mark_push deduplicates against h->mark, so the second
+     * push is free when the value was already in the snapshot. */
     if (S->gc_phase == GC_PHASE_MAJOR_MARK
         && old_value != NULL
         && !gc_ptr_is_state_embedded(S, old_value)) {
         gc_hdr_t *h_old = ((gc_hdr_t *)old_value) - 1;
         gc_mark_push(S, h_old);
+    }
+    if (S->gc_phase == GC_PHASE_MAJOR_MARK
+        && new_value != NULL
+        && !gc_ptr_is_state_embedded(S, new_value)) {
+        gc_hdr_t *h_new_satb = ((gc_hdr_t *)new_value) - 1;
+        gc_mark_push(S, h_new_satb);
     }
     if (container == NULL) {
         return;

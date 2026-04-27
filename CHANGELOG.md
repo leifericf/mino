@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.76.2 — Insertion Barrier For Incremental Major
+
+The mutator write barrier now also pushes the just-installed
+`new_value` onto the major mark stack while a major collection
+is in MAJOR_MARK. Pure SATB captures the previous slot contents,
+which is correct for objects already reachable from the snapshot,
+but does not protect an OLD whose only surviving root path runs
+through the new edge of this very write. Combining the Yuasa
+SATB push with a Dijkstra insertion push closes that window:
+either pre-existing snapshot reachability or post-update
+reachability is sufficient to keep an OLD alive across the
+cycle. `gc_mark_push` deduplicates against the mark bit, so the
+extra push is a no-op for values already in the snapshot.
+
+The bug surfaced as a heisenbug whose footprint depended on the
+exact size of `src/core.clj`: past a threshold (Cycle B's print-
+pipeline additions plus one more defn), the test suite would
+fail in `tests/compat_test.clj :: multimethod-with-docstring`
+with shifting error shapes (`fn arity mismatch`, `unsupported
+binding form`, `map as function takes 1 or 2 arguments`). ASan
+was clean because the freed OLDs were recycled through the GC's
+internal freelist rather than `free()`. `MINO_GC_VERIFY=1`
+showed no remset gap. Forcing every major to run STW
+(`MINO_GC_STRESS=1` or disabling slicing in the driver) hid the
+bug, which localized the problem to the incremental mark path.
+
 ## v0.76.1 — GC Defensive Fixes On Alloc-Pair Patterns
 
 Two intern and trie-build paths that allocate one GC object,
