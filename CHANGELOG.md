@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.76.0 — Print Pipeline And `*out*` / `*err*` / `*in*`
+
+The print and read primitives now route through configurable
+sinks resolved from `*out*`, `*err*`, and `*in*`. The three
+names are interned as dynamic vars in `clojure.core` holding
+the sentinel keywords `:mino/stdout`, `:mino/stderr`, and
+`:mino/stdin`; binding `*out*` or `*err*` to a string-
+collecting atom captures the output bytes into the atom's
+value instead of the default `FILE*`, and binding `*in*` to a
+string-cursor atom feeds reads from the string. The dyn-stack
+lookup matches both the bare and `clojure.core/`-qualified
+symbol forms so syntax-quote-expanded bindings work without
+ceremony.
+
+The print family (`println`, `prn`, `print`, `pr`, `newline`,
+`pr-builtin`) now consults `*out*` before deciding the sink,
+falling back to stdout when bound to `:mino/stdout` or stderr
+when bound to `:mino/stderr`. `(binding [*out* *err*] ...)`
+routes output through stderr because the dyn-bound `:mino/
+stderr` keyword identifies the FILE\* fallback.
+
+`with-out-str`, `with-in-str`, `print-str`, `prn-str`,
+`println-str`, `printf`, `flush`, `read-line`, and `read*` are
+new. `with-out-str` allocates a fresh string-atom, binds
+`*out*` to it for the body, and returns the accumulated text.
+`with-in-str` binds `*in*` to a string-cursor atom holding the
+given text. `read-line` reads one line from `*in*` (atom-bound
+or stdin), returning the line or nil on EOF. `read*` is the
+zero-arity primitive that the user-facing `clojure.core/read`
+dispatches to: a fresh `(read)` consumes the next form from an
+atom-bound `*in*` (the stdin path raises an unsupported error,
+since stream-fed read needs reader-side plumbing that lands in
+a follow-up). The `*-str` companions wrap their print
+counterparts; `printf` formats then prints; `flush` calls
+`fflush` on stdout and stderr (a no-op for atom-bound sinks).
+
+Internally the print primitives moved from the optional
+`mino_install_io` table to `k_prims_io_core`, which runs before
+`core.clj` evaluates so the bundled `print-str`/`prn-str`/
+`println-str` definitions can reference them. Sandboxed
+embedders that called `mino_install_core` without
+`mino_install_io` already had `pr-builtin`; they now also see
+the print family plus `read-line`, `read*`, and `printf`.
+Filesystem and process I/O (`slurp`, `spit`, `exit`, `file-
+seq`, `getenv`, `getcwd`, `chdir`) stay in `k_prims_io` for
+capability-gated installation.
+
+The `print-method` multimethod still dispatches readable
+formatting per type. When the hook is installed and a user
+method is called, the print primitive runs the hook under a
+nested `*out*` rebinding that captures the hook's output to a
+temporary string-atom, then emits the captured bytes through
+the outer sink — so user-defined methods that call `pr-
+builtin` or other print fns flow correctly into `with-out-
+str`.
+
 ## v0.75.0 — Surface Honesty
 
 Three small but visible gaps closed against the canon surface,
