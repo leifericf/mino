@@ -1545,20 +1545,20 @@
     (apply list 'do (vec swaps))))
 
 (defn type-marker-key_
-  "Translates an extend-protocol type marker to the keyword key
-   extend-type understands. Keywords pass through; nil maps to :nil
-   so a `(extend-protocol P nil ...)` clause registers nil-safe
-   implementations against the same key (type nil) returns. Bare
-   symbols are rejected — mino has no JVM classes and silently
-   collapsing every Java-class symbol to :default would mask broken
-   dispatch with a surprising catch-all. Use a keyword tag matching
-   what (type x) returns instead."
+  "Translates an extend-protocol type marker to the dispatch key
+   extend-type understands. Keywords pass through (used for built-in
+   types and ad-hoc tags via :type metadata). Symbols pass through
+   too: at runtime they evaluate to a MINO_TYPE value so
+   (extend-protocol P Point ...) places its impls under that type's
+   pointer in the dispatch atom. Nil maps to :nil so a
+   (extend-protocol P nil ...) clause registers against (type nil)."
   [marker]
   (cond
     (keyword? marker) marker
     (nil? marker)     :nil
+    (symbol? marker)  marker
     :else (throw (ex-info (str "extend-protocol: unsupported type marker " (pr-str marker)
-                               " — use a keyword like :string or :vector matching (type x)")
+                               " — use a keyword, a record-type symbol, or nil")
                           {:marker marker
                            :mino/unsupported :extend-protocol-type-marker}))))
 
@@ -2424,9 +2424,13 @@
   (throw (ex-info "Java import is not supported on mino — there are no Java classes to import"
                   {:mino/unsupported :import})))
 
-(defmacro instance? [_class _x]
-  (throw (ex-info "instance? is not supported on mino — there are no Java classes to test against"
-                  {:mino/unsupported :instance?})))
+(defn instance?
+  "Returns true if x is an instance of t. For record types defined
+   with defrecord, t is the type value and the test is type-pointer
+   identity. For built-in types or ad-hoc :type-tagged values, t may
+   be the keyword (type x) returns and the test is keyword equality."
+  [t x]
+  (= t (type x)))
 
 (defmacro with-redefs
   "Temporarily rebinds the root bindings of vars while body executes, restoring
