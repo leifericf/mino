@@ -283,8 +283,12 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
     tail = vnode_new(S, tail_len, 1);
     memcpy(tail->slots, items + trie_count, tail_len * sizeof(*items));
     if (trie_count == 0) {
+        /* Keep gc_depth raised through vec_assemble: tail is GC-
+         * allocated but the only reference to it lives in C locals
+         * the optimizer may keep in registers. */
+        mino_val_t *result = vec_assemble(S, NULL, NULL, tail, tail_len, 0u, len);
         S->gc_depth--;
-        return vec_assemble(S, NULL, NULL, tail, tail_len, 0u, len);
+        return result;
     }
     num_leaves = trie_count / MINO_VEC_WIDTH;
     layer = (mino_vec_node_t **)malloc(num_leaves * sizeof(*layer));
@@ -328,10 +332,14 @@ mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items, size_t len)
         shift  += MINO_VEC_B;
     }
     {
-        mino_vec_node_t *root = layer[0];
+        /* Keep gc_depth raised through vec_assemble: root and tail
+         * are GC-allocated but only referenced from C locals. */
+        mino_vec_node_t *root   = layer[0];
+        mino_val_t      *result;
         free(layer);
+        result = vec_assemble(S, NULL, root, tail, tail_len, shift, len);
         S->gc_depth--;
-        return vec_assemble(S, NULL, root, tail, tail_len, shift, len);
+        return result;
     }
 }
 

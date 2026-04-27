@@ -148,13 +148,22 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
      * for v runs last. If v were allocated first, a collection
      * triggered by dup_n's alloc could promote v to OLD before data
      * exists, turning the data-store below into an unbarriered
-     * OLD-to-YOUNG write that minor would not see. */
+     * OLD-to-YOUNG write that minor would not see.
+     *
+     * Suppress collection across the alloc pair: data is GC-
+     * allocated by dup_n but not yet referenced from a rooted val,
+     * and the conservative stack scan can miss the local `data`
+     * variable when the optimizer keeps it in a register. ASan
+     * caught this freed under load; gc_depth is the reliable
+     * protection. */
+    S->gc_depth++;
     {
         char *data = dup_n(S, s, len);
         v = alloc_val(S, type);
         v->as.s.data = data;
         v->as.s.len  = len;
     }
+    S->gc_depth--;
     tbl->entries[tbl->len] = v;
 
     /* Insert index into hash table. */
