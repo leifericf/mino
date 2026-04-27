@@ -1,6 +1,27 @@
 # Changelog
 
-## v0.82.0 — Clojure.instant And Clojure.template
+## v0.82.0 — Clojure.instant, Clojure.template, And Tagged-Literal Reader Hook
+
+Three small fills accumulating under the bundled-stdlib registry
+established in v0.81.0.
+
+The reader now resolves `#tag form` at read time. Resolution
+order: `(get *data-readers* 'tag)` -> `*default-data-reader-fn*`
+-> `tagged-literal` record fallback. Both vars are interned as
+dynamic vars in `clojure.core` with empty-map and nil defaults.
+The reader's tag is emitted as a symbol now (not a keyword), per
+canonical Clojure; calling `tagged-literal` directly still
+accepts any tag value. The fallback record is built at read time
+so `(read-string "#foo bar")` returns a `{:tag foo :form bar}`
+tagged-literal record directly instead of a deferred
+`(tagged-literal ...)` call form.
+
+`*data-readers*` follows read/eval separation: the binding
+visible at the read-string call site decides the reader fn, and
+a later rebind does not retroactively change a value already
+produced. With `clojure.instant` required, a one-line
+`(binding [*data-readers* {'inst clojure.instant/read-instant-date}] ...)`
+makes `#inst "2026-04-27"` parse to the component map.
 
 Two small bundled namespaces drop into the registry established
 in v0.81.0.

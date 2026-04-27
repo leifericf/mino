@@ -257,4 +257,28 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
             mino_env_set(S, core_env, "*in*", in_var->as.var.root);
         }
     }
+
+    /* Intern *data-readers* and *default-data-reader-fn* as dynamic
+     * vars consulted by the reader for #tag forms. Defaults are an
+     * empty map and nil, respectively, mirroring Clojure-canon. Tag
+     * lookup is by symbol; users register entries via
+     * (binding [*data-readers* {'inst clojure.instant/read-instant-date}]
+     *   (read-string "#inst \"2026-04-27\"")) or by altering the
+     * var root for process-wide defaults. */
+    {
+        mino_val_t *dr_var  = var_intern(S, "clojure.core", "*data-readers*");
+        mino_val_t *def_var = var_intern(S, "clojure.core",
+                                          "*default-data-reader-fn*");
+        if (dr_var != NULL) {
+            dr_var->as.var.dynamic = 1;
+            var_set_root(S, dr_var, mino_map(S, NULL, NULL, 0));
+            mino_env_set(S, core_env, "*data-readers*", dr_var->as.var.root);
+        }
+        if (def_var != NULL) {
+            def_var->as.var.dynamic = 1;
+            var_set_root(S, def_var, mino_nil(S));
+            mino_env_set(S, core_env, "*default-data-reader-fn*",
+                         def_var->as.var.root);
+        }
+    }
 }

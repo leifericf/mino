@@ -1883,12 +1883,25 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         return NULL;
     }
     if (isalpha((unsigned char)next)) {
-        /* Tagged literals: #tag form -- wrap as (tagged-literal :tag form).
-         * Handles unknown tags like #js, #inst, #uuid gracefully. */
+        /* Tagged literals: #tag form. Resolution order at read time:
+         *
+         *   1. (get *data-readers* 'tag)        -- per-tag reader fn,
+         *                                          called as (fn body)
+         *   2. *default-data-reader-fn*          -- catch-all reader,
+         *                                          called as (fn 'tag body)
+         *   3. tagged-literal record fallback    -- (tagged-literal 'tag body)
+         *
+         * Resolution happens in the reader so the binding visible at
+         * read time decides the reader fn (preserves read/eval
+         * separation: the eval-time binding doesn't affect a value
+         * already produced by read-string). */
         const char *tag_start;
         size_t      tag_len;
-        mino_val_t *tag_val;
+        mino_val_t *tag_sym;
         mino_val_t *body;
+        mino_val_t *readers;
+        mino_val_t *fn;
+        mino_env_t *call_env;
         ADVANCE(S, p);
         tag_start = *p;
         tag_len = 0;
@@ -1897,9 +1910,55 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         skip_ws(S, p);
         body = read_form(S, p);
         if (body == NULL && mino_last_error(S) != NULL) return NULL;
-        tag_val = mino_keyword_n(S, tag_start, tag_len);
+        tag_sym  = mino_symbol_n(S, tag_start, tag_len);
+        call_env = current_ns_env(S);
+
+        /* (1) per-tag reader from *data-readers*. */
+        readers = (S->dyn_stack != NULL)
+                    ? dyn_lookup(S, "*data-readers*") : NULL;
+        if (readers == NULL) {
+            mino_val_t *var = var_find(S, "clojure.core", "*data-readers*");
+            if (var != NULL && var->as.var.bound) readers = var->as.var.root;
+        }
+        if (readers != NULL && readers->type == MINO_MAP) {
+            fn = map_get_val(readers, tag_sym);
+            if (fn != NULL && call_env != NULL) {
+                mino_val_t *args = mino_cons(S, body, mino_nil(S));
+                return mino_call(S, fn, args, call_env);
+            }
+        }
+
+        /* (2) *default-data-reader-fn*. */
+        fn = (S->dyn_stack != NULL)
+                ? dyn_lookup(S, "*default-data-reader-fn*") : NULL;
+        if (fn == NULL) {
+            mino_val_t *var = var_find(S, "clojure.core",
+                                       "*default-data-reader-fn*");
+            if (var != NULL && var->as.var.bound) fn = var->as.var.root;
+        }
+        if (fn != NULL && fn->type != MINO_NIL && call_env != NULL) {
+            mino_val_t *args = mino_cons(S, tag_sym,
+                                         mino_cons(S, body, mino_nil(S)));
+            return mino_call(S, fn, args, call_env);
+        }
+
+        /* (3) tagged-literal record fallback: build at read time so a
+         * read result is a value (matching canonical Clojure), not a
+         * deferred (tagged-literal ...) call form. */
+        {
+            mino_val_t *tl_var = var_find(S, "clojure.core",
+                                          "tagged-literal");
+            if (tl_var != NULL && tl_var->as.var.bound && call_env != NULL) {
+                mino_val_t *args = mino_cons(S, tag_sym,
+                                             mino_cons(S, body, mino_nil(S)));
+                return mino_call(S, tl_var->as.var.root, args, call_env);
+            }
+        }
+
+        /* Last-resort: emit the form. Reachable only during very early
+         * bootstrap before clojure.core/tagged-literal exists. */
         return mino_cons(S, mino_symbol(S, "tagged-literal"),
-                         mino_cons(S, tag_val,
+                         mino_cons(S, tag_sym,
                                    mino_cons(S, body, mino_nil(S))));
     }
     set_reader_diag(S, MRE008, "unknown reader dispatch macro",
