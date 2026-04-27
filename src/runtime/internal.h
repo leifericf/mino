@@ -474,6 +474,27 @@ struct mino_state {
      * clone serialization buffer. Same semantics as above. */
     long            fi_raw_countdown;
 
+    /* Host-thread grant (Cycle G4 foundation).
+     *
+     * thread_limit is the host-granted ceiling on concurrent host
+     * threads. Default 1 (single-threaded; future/promise/etc. throw
+     * :mino/unsupported with a message naming the grant API). Set via
+     * mino_set_thread_limit. Standalone `./mino` grants cpu_count right
+     * after mino_install_all so REPL users get the canonical surface
+     * by default; embedders opt in per state.
+     *
+     * thread_count is the live worker count, incremented at spawn,
+     * decremented at join. multi_threaded flips to 1 the first time a
+     * spawn actually runs; single-threaded states pay none of the
+     * inter-thread coordination cost. The full implementation
+     * (per-thread context refactor, GC STW machinery, atom CAS upgrade)
+     * lands across upcoming versions; v0.84.x is the API surface plus
+     * thrown stubs that distinguish "host has not granted threads"
+     * from "host granted but runtime impl is in flight." */
+    int             thread_limit;
+    int             thread_count;
+    int             multi_threaded;
+
     /* Async scheduler run queue. */
     sched_entry_t  *async_run_head;
     sched_entry_t  *async_run_tail;

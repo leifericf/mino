@@ -552,6 +552,37 @@ mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args,
     return mino_nil(S);
 }
 
+/* (mino-thread-limit) — return the host-granted thread limit for this
+ * state. Default is 1 (single-threaded); embedders raise this via
+ * mino_set_thread_limit and standalone main.c grants cpu_count after
+ * mino_install_all. The script-side future/promise/thread stubs in
+ * core.clj consult this to distinguish "host has not granted threads"
+ * from "host granted, runtime impl in flight." */
+mino_val_t *prim_mino_thread_limit(mino_state_t *S, mino_val_t *args,
+                                   mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "mino-thread-limit takes no arguments");
+    }
+    return mino_int(S, mino_get_thread_limit(S));
+}
+
+/* (mino-thread-count) — return the live worker count for this state.
+ * Always 0 in the v0.84.0 foundation slice; the throw stubs reject
+ * every spawn entry point. */
+mino_val_t *prim_mino_thread_count(mino_state_t *S, mino_val_t *args,
+                                   mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "mino-thread-count takes no arguments");
+    }
+    return mino_int(S, mino_thread_count(S));
+}
+
 const mino_prim_def k_prims_stateful[] = {
     {"atom",           prim_atom,
      "Creates an atom with the given initial value."},
@@ -583,6 +614,10 @@ const mino_prim_def k_prims_stateful[] = {
      "(with-bindings* bindings-map fn) — pushes the bindings as a dynamic frame and invokes fn with no args."},
     {"set-fail-alloc-at!", prim_set_fail_alloc_at,
      "Make the n-th GC allocation fail (simulated OOM). Pass 0 to disable."},
+    {"mino-thread-limit", prim_mino_thread_limit,
+     "Return the host-granted thread limit for this state. 1 means single-threaded; >1 means the host has granted that many concurrent worker threads."},
+    {"mino-thread-count", prim_mino_thread_count,
+     "Return the live host-thread count for this state. Always 0 until host threads spawn."},
 };
 
 const size_t k_prims_stateful_count =

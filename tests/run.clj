@@ -75,6 +75,7 @@
 (require "tests/instant_template_test")
 (require "tests/data_readers_test")
 (require "tests/spec_test")
+(require "tests/host_threads_foundation_test")
 (require "tests/async_buffer_test")
 (require "tests/async_api_test")
 (require "tests/async_alts_test")

@@ -70,6 +70,12 @@ static void state_init(mino_state_t *S)
     S->reader_col          = 1;
     S->reader_dialect      = "mino";
     S->current_ns          = "user";
+    /* Host-thread grant defaults to single-threaded. Standalone `./mino`
+     * raises this to cpu_count after mino_install_all; embedders opt
+     * in per state via mino_set_thread_limit. */
+    S->thread_limit        = 1;
+    S->thread_count        = 0;
+    S->multi_threaded      = 0;
     gc_evt_init(S);
 }
 
@@ -737,6 +743,38 @@ int mino_fi_should_fail_raw(mino_state_t *S)
 void mino_interrupt(mino_state_t *S)
 {
     S->interrupted = 1;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Host-thread grant (Cycle G4 foundation)                                   */
+/* ------------------------------------------------------------------------- */
+
+void mino_set_thread_limit(mino_state_t *S, int n)
+{
+    if (S == NULL) { return; }
+    if (n < 0) { n = 0; }
+    S->thread_limit = n;
+}
+
+int mino_get_thread_limit(mino_state_t *S)
+{
+    if (S == NULL) { return 1; }
+    return S->thread_limit;
+}
+
+int mino_thread_count(mino_state_t *S)
+{
+    if (S == NULL) { return 0; }
+    return S->thread_count;
+}
+
+void mino_quiesce_threads(mino_state_t *S)
+{
+    /* In the v0.84.0 foundation slice no host threads can spawn yet
+     * (the thrown stubs in core.clj reject every entry point), so
+     * thread_count is always 0 here and the wait is a no-op. The full
+     * impl will join every entry in S's thread set before returning. */
+    (void)S;
 }
 
 /* ------------------------------------------------------------------------- */

@@ -1,5 +1,78 @@
 # Changelog
 
+## v0.84.0 — Host Threads — Foundation Slice
+
+Lays the API surface for host-grant-gated host threads (cycle G4)
+without yet shipping the runtime that backs them. The
+`mino_set_thread_limit` / `mino_get_thread_limit` /
+`mino_thread_count` / `mino_quiesce_threads` C surface is final
+and embedders can code against it now; `(future ...)`,
+`(thread ...)`, `(promise)`, `deliver`, `realized?`,
+`future-cancel`, `future-done?`, `future-cancelled?` are
+defined and throw `:mino/unsupported` with a message that
+distinguishes two failure modes:
+
+- `thread_limit <= 1` (embedded default): the host has not
+  granted threads. The message names `mino_set_thread_limit`
+  and points at this changelog.
+- `thread_limit > 1` (standalone or grant-on): the host has
+  granted permission, but the runtime implementation is in
+  flight. The message reflects that the API surface is stable
+  and the implementation lands across upcoming versions.
+
+`future?` returns false for everything (no future value can be
+constructed yet) so callers that branch on it pick the
+non-future arm without surprise.
+
+Standalone `./mino` calls `mino_set_thread_limit` with the host
+CPU count (via `sysctlbyname` on Darwin, `sysconf` elsewhere,
+`GetSystemInfo` on Windows) right after `mino_install_all`, so
+REPL/script users see the "in flight" message while embedders
+that haven't opted in see the "not granted" message. Once the
+runtime ships, the same call grants Clojure-canon `(future ...)`
+semantics by default in standalone mode.
+
+Two new primitives expose the per-state knobs to the script
+side for diagnostics and tests: `(mino-thread-limit)` returns
+the int and `(mino-thread-count)` returns the live worker count
+(always 0 in this slice). The `:mino/thread-limit` key in the
+thrown ex-info map carries the same value.
+
+Tests: 11 new tests, 22 assertions in
+`tests/host_threads_foundation_test.clj` plus a C smoke program
+in `examples/embed_host_threads.c` that exercises both grant
+states from the embedder side. Total suite: 1199 tests, 6590
+assertions, all green.
+
+Six open questions for cycle G4 are settled and locked for the
+incoming runtime work:
+
+- **Thread pool model:** spawn-per-future by default; if the
+  host calls `mino_set_thread_pool` the worker thread comes
+  from that pool instead. Hosts that want internal pooling
+  build it themselves around the same hook.
+- **`thread_limit` enforcement when reached:** throw
+  `:mino/thread-limit-exceeded`. Block-by-default risks
+  deadlock when the saturating caller holds resources the
+  worker needs; queue-indefinitely silently grows memory. Throw
+  is honest and makes the limit visible.
+- **Dynamic var conveyance:** snapshot the entire dyn-stack at
+  spawn and install verbatim on the worker, matching JVM
+  Clojure's `binding-conveyor-fn` shape.
+- **Safepoint placement strategy:** eval_impl entry +
+  allocation sites + backward branches (loop/recur). Catches
+  every loop iteration, every allocation, and every Clojure
+  call boundary.
+- **Cancellation interrupt flag granularity:** both. A
+  per-thread `should_yield` flag for state-wide quiesce, and a
+  per-future flag for `future-cancel`. The two are distinct
+  concerns and conflating them couples cancellation to
+  threading.
+- **`core.async/thread` unification with `future`:** same
+  pool. `(thread ...)` and `(future ...)` share the worker set;
+  the macros stay separate to document intent (thread for
+  blocking work, future for parallel computation).
+
 ## v0.83.0 — Clojure.spec.alpha And Clojure.core.specs.alpha
 
 Substantial port of `clojure.spec.alpha` and the destructure-form

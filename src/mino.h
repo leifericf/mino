@@ -26,7 +26,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 83
+#define MINO_VERSION_MINOR 84
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -892,6 +892,60 @@ void mino_set_fail_raw_at(mino_state_t *S, long n);
  * Internal helper exposed for clone.c; not intended for embedder use.
  */
 int mino_fi_should_fail_raw(mino_state_t *S);
+
+/* ------------------------------------------------------------------------- */
+/* Host thread grant                                                         */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Threading is a per-state runtime capability, not a build-time toggle.
+ * Each `mino_state_t` starts with `thread_limit = 1`; while the limit is
+ * <= 1, `(future ...)`, `(promise)` / `deliver` / `realized?`,
+ * `(thread ...)`, and the blocking core.async ops `<!!` / `>!!` /
+ * `alts!!` throw `:mino/unsupported` with a message that names the policy
+ * and points the host at this surface.
+ *
+ * Standalone `./mino` grants `thread_limit = <cpu_count>` right after
+ * `mino_install_all`, so REPL/script users get the canonical surface
+ * working out of the box. Embedders opt in per state by calling
+ * `mino_set_thread_limit` with a value > 1.
+ *
+ * The actual host-thread implementation lands across upcoming versions;
+ * v0.84.x ships the API surface and the throw-stub bodies so
+ * embedders can code against the contract while the runtime catches up.
+ * Status of each cycle is tracked in CHANGELOG.md.
+ */
+
+/*
+ * Set the per-state thread limit. n=0 or n=1 disables host threads;
+ * n>1 grants the runtime permission to spawn that many concurrent
+ * worker threads. Calling with the same value twice is a no-op.
+ *
+ * Calling with n>1 BEFORE any `(future ...)` is in flight is the
+ * supported sequence; lowering the limit while threads are running
+ * does not interrupt them, but new spawns will respect the new ceiling.
+ */
+void mino_set_thread_limit(mino_state_t *S, int n);
+
+/*
+ * Read the current thread limit. Returns 1 by default (single-threaded).
+ */
+int  mino_get_thread_limit(mino_state_t *S);
+
+/*
+ * Return the count of host threads currently spawned by this state.
+ * Decremented as threads complete and join. Returns 0 in single-
+ * threaded mode.
+ */
+int  mino_thread_count(mino_state_t *S);
+
+/*
+ * Wait for all in-flight host threads to finish. Intended to be called
+ * by the embedder before `mino_state_free`; calling it from a worker
+ * thread that this state spawned is undefined behaviour. Safe to call
+ * when no threads are in flight (returns immediately).
+ */
+void mino_quiesce_threads(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* Garbage collector control                                                 */

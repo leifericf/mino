@@ -8,6 +8,11 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
+/* Darwin's <sys/sysctl.h> needs the BSD names (u_int, etc.) which
+ * strict _POSIX_C_SOURCE hides; _DARWIN_C_SOURCE re-exposes them. */
+#if defined(__APPLE__)
+#  define _DARWIN_C_SOURCE
+#endif
 
 #include "runtime/internal.h"
 #include "path_buf.h"
@@ -21,6 +26,14 @@
 
 #ifndef _WIN32
 #include <execinfo.h>
+#else
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#endif
+
+#if defined(__APPLE__)
+#  include <sys/sysctl.h>
+#  include <sys/types.h>
 #endif
 
 #define MINO_LINE_MAX PATH_BUF_CAP
@@ -743,6 +756,40 @@ int main(int argc, char **argv)
 
     mino_install_all(S, env);
     mino_set_resolver(S, cwd_resolve, NULL);
+
+    /* Standalone mode: grant the runtime permission to spawn cpu_count
+     * host threads. Embedded users start at thread_limit=1 and opt in
+     * via mino_set_thread_limit. The actual host-thread implementation
+     * lands across upcoming versions; until it does, future/promise/
+     * thread/blocking core.async ops throw :mino/unsupported with a
+     * message naming the cycle.
+     *
+     * _SC_NPROCESSORS_ONLN is hidden under strict _POSIX_C_SOURCE on
+     * Darwin (Linux glibc exposes it). Use sysctlbyname on Darwin,
+     * sysconf on other POSIX, GetSystemInfo on Windows. */
+    {
+        int n = 1;
+#if defined(_WIN32)
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        if (si.dwNumberOfProcessors > 0) {
+            n = (int)si.dwNumberOfProcessors;
+        }
+#elif defined(__APPLE__)
+        int    hw = 0;
+        size_t sz = sizeof(hw);
+        if (sysctlbyname("hw.activecpu", &hw, &sz, NULL, 0) == 0 && hw > 0) {
+            n = hw;
+        } else if (sysctlbyname("hw.ncpu", &hw, &sz, NULL, 0) == 0 && hw > 0) {
+            n = hw;
+        }
+#elif defined(_SC_NPROCESSORS_ONLN)
+        long sc = sysconf(_SC_NPROCESSORS_ONLN);
+        if (sc > 0) { n = (int)sc; }
+#endif
+        if (n < 1) { n = 1; }
+        mino_set_thread_limit(S, n);
+    }
 
     repl_specials_t specials;
     repl_specials_init(S, &specials, argc, argv, first);
