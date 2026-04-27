@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.78.0 — `clojure.core.protocols` And Cross-Namespace Protocol Extension
+
+The four canonical protocols `CollReduce`, `IKVReduce`,
+`Datafiable`, and `Navigable` are now first-class in mino. They
+are interned at boot time in `clojure.core` and re-exported under
+the `clojure.core.protocols` namespace, so user code can write
+`(extend-protocol clojure.core.protocols/CollReduce SomeType
+...)` and have the override consulted by `reduce`. The
+`clojure.datafy` namespace ships as a thin wrapper that surfaces
+`datafy` and `nav` at the canonical home expected by code ported
+from canonical Clojure.
+
+`reduce`, `reduce-kv`, `datafy`, and `nav` now consult the
+protocol dispatch table on every call. When no per-type or
+`:default` override is registered, `reduce` and `reduce-kv` fall
+through to the existing internal seq-driven walk; the override
+only kicks in when a user has extended the protocol for the
+value's type. `Datafiable` and `Navigable` are seeded with
+identity-shaped `:default` impls so `(datafy x)` and `(nav coll
+k v)` are well-defined for built-in types.
+
+The `extend-type` and `extend-protocol` macros now preserve the
+namespace prefix on the protocol symbol when emitting the
+underlying `(swap! Proto--method ...)` form. Before this fix
+`(extend-protocol some.lib/SomeProto ...)` silently looked up
+the dispatch atom in the calling namespace and failed with an
+unbound-symbol error. Cross-namespace protocol extension is the
+standard usage pattern, so what was previously a quiet breakage
+is now part of the supported surface.
+
+Two new private vars are exposed in `clojure.core` for the
+protocol wiring: `internal-reduce_` and `internal-reduce-kv_`
+hold references to the pre-protocol implementations and serve as
+the fall-through when no override applies. Both are
+underscore-suffixed by mino's existing convention for
+implementation-detail names.
+
 ## v0.77.0 — REPL Specials And `clojure.repl` / `clojure.stacktrace`
 
 The interactive REPL now binds the standard introspection vars
