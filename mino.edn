@@ -17,8 +17,10 @@
  :tasks
  {gen-core-header {:doc  "Escape src/core.clj into src/core_mino.h"
                    :task mino.tasks.builtin/gen-core-header}
+  gen-stdlib-headers {:doc  "Escape lib/clojure/*.clj into per-ns headers"
+                      :task mino.tasks.builtin/gen-stdlib-headers}
   build           {:doc  "Compile and link the mino binary"
-                   :deps [gen-core-header]
+                   :deps [gen-core-header gen-stdlib-headers]
                    :task mino.tasks.builtin/build}
   build-asan      {:doc  "Build mino_asan with AddressSanitizer"
                    :task mino.tasks.builtin/build-asan}

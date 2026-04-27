@@ -14,6 +14,7 @@ bin/
 /mino_tsan
 /mino_ubsan
 src/core_mino.h
+src/lib_clojure_*.h
 
 # Test artifacts
 *.gcda

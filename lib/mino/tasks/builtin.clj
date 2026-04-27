@@ -109,6 +109,70 @@
                  body "\\n\"\n    ;\n")))
     (println "gen-core-header: src/core_mino.h updated")))
 
+;; The bundled-stdlib namespace set baked into the binary alongside
+;; src/core.clj. Each entry is [src-path ns-name c-symbol], where
+;; c-symbol is the basis for the generated header file name and the
+;; static-source variable.  Test-fixture .clj files under lib/clojure/
+;; (e.g. lib/clojure/test_clojure/, lib/clojure/core_test/) are not
+;; bundled -- they exist on disk so the require/resolve test surface
+;; can verify file-loading behaviour.
+(def ^:private bundled-stdlib
+  [["lib/clojure/string.clj"          "clojure.string"          "lib_clojure_string"]
+   ["lib/clojure/set.clj"             "clojure.set"             "lib_clojure_set"]
+   ["lib/clojure/walk.clj"            "clojure.walk"            "lib_clojure_walk"]
+   ["lib/clojure/edn.clj"             "clojure.edn"             "lib_clojure_edn"]
+   ["lib/clojure/pprint.clj"          "clojure.pprint"          "lib_clojure_pprint"]
+   ["lib/clojure/zip.clj"             "clojure.zip"             "lib_clojure_zip"]
+   ["lib/clojure/data.clj"            "clojure.data"            "lib_clojure_data"]
+   ["lib/clojure/test.clj"            "clojure.test"            "lib_clojure_test"]
+   ["lib/clojure/repl.clj"            "clojure.repl"            "lib_clojure_repl"]
+   ["lib/clojure/stacktrace.clj"      "clojure.stacktrace"      "lib_clojure_stacktrace"]
+   ["lib/clojure/datafy.clj"          "clojure.datafy"          "lib_clojure_datafy"]
+   ["lib/clojure/core/protocols.clj"  "clojure.core.protocols"  "lib_clojure_core_protocols"]])
+
+(defn- escape-source-as-c-string-literal
+  "Returns the body of a C string literal: backslash-escaped quotes
+   and backslashes, with newlines turned into \\n\" + indent + \" so
+   the literal stays readable when printed."
+  [src]
+  (let [src     (if (str/ends-with? src "\n")
+                  (subs src 0 (- (count src) 1))
+                  src)
+        escaped (-> src
+                    (str/replace "\\" "\\\\")
+                    (str/replace "\"" "\\\""))]
+    (str/replace escaped "\n" "\\n\"\n    \"")))
+
+(defn gen-stdlib-headers
+  "Escape each lib/clojure/*.clj listed in bundled-stdlib into its
+   own src/<symbol>.h header, parallel to gen-core-header. Each file
+   defines a single static const char *<symbol>_src so the bundled
+   per-namespace install hooks can register the source pointer
+   without touching the disk."
+  []
+  (let [updated (atom 0)]
+    (doseq [[src-path ns-name c-symbol] bundled-stdlib]
+      (let [out-path (str "src/" c-symbol ".h")]
+        (when (stale? [src-path] out-path)
+          (let [src  (slurp src-path)
+                body (escape-source-as-c-string-literal src)]
+            (spit out-path
+                  (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
+                       " *\n"
+                       " * Produced by `gen-stdlib-headers` from " src-path ".\n"
+                       " * Embeds the bundled mino-side " ns-name " namespace\n"
+                       " * source as a C string literal so the runtime can\n"
+                       " * register it without needing the file on disk.\n"
+                       " *\n"
+                       " * Edit " src-path ", then `./mino task build`\n"
+                       " * (which regenerates this file). Gitignored.\n"
+                       " */\n"
+                       "static const char *" c-symbol "_src =\n    \""
+                       body "\\n\"\n    ;\n"))
+            (swap! updated inc)))))
+    (when (> @updated 0)
+      (println (str "gen-stdlib-headers: " @updated " header(s) updated")))))
+
 (defn build
   "Compile all .c sources and link the mino binary."
   []
@@ -150,6 +214,9 @@
   (when (file-exists? "mino_tsan")  (rm-rf "mino_tsan"))
   (when (file-exists? "src/core_mino.h")
     (rm-rf "src/core_mino.h"))
+  (doseq [[_ _ c-symbol] bundled-stdlib]
+    (let [hpath (str "src/" c-symbol ".h")]
+      (when (file-exists? hpath) (rm-rf hpath))))
   (println "  cleaned"))
 
 ;; ---- Sanitizer dev builds -----------------------------------------------
