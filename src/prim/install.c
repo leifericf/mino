@@ -191,6 +191,19 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
         }
     }
 
+    /* Install REPL helpers (`doc`, `source`, `apropos`) into the
+     * clojure.repl namespace. Users opt in via
+     * (require '[clojure.repl :refer [doc apropos source]]); a fresh
+     * user namespace doesn't see them by default, matching canon. */
+    {
+        mino_env_t *cr_env = ns_env_ensure(S, "clojure.repl");
+        if (cr_env != NULL) {
+            prim_install_table(S, cr_env, "clojure.repl",
+                               k_prims_clojure_repl,
+                               k_prims_clojure_repl_count);
+        }
+    }
+
     /* The embedder's env stays parent-less. eval_symbol falls back to
      * current_ns_env after the lexical chain runs out, and per-ns envs
      * chain to clojure.core themselves -- so a namespace that detaches

@@ -1,22 +1,23 @@
 (require "tests/test")
+(require '[clojure.repl :refer [doc-string source-form apropos]])
 
-;; doc, source, apropos.
+;; doc-string, source-form, apropos under clojure.repl.
 
 (deftest doc-with-docstring
   (def inc-doc__rt "increment by one" (fn [x] (+ x 1)))
-  (is (= "increment by one" (doc 'inc-doc__rt))))
+  (is (= "increment by one" (doc-string 'inc-doc__rt))))
 
 (deftest doc-no-docstring
   (def y__rt 42)
-  (is (= nil (doc 'y__rt))))
+  (is (= nil (doc-string 'y__rt))))
 
 (deftest source-returns-form
   (def sq-src__rt "square" (fn [x] (* x x)))
-  (is (= 'def (car (source 'sq-src__rt)))))
+  (is (= 'def (car (source-form 'sq-src__rt)))))
 
 (deftest defmacro-docstring
   (defmacro my-id__rt "identity macro" (x) x)
-  (is (= "identity macro" (doc 'my-id__rt))))
+  (is (= "identity macro" (doc-string 'my-id__rt))))
 
 (deftest apropos-finds
   (let [results (apropos "cons")]

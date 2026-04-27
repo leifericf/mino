@@ -325,10 +325,12 @@
   (is (= '(1 2 3) '(1 2 3))))
 
 (deftest doc
-  (is (= true (string? (doc 'map)))))
+  (require '[clojure.repl :refer [doc-string]])
+  (is (= true (string? (doc-string 'map)))))
 
 (deftest source
-  (is (= true (cons? (source 'when)))))
+  (require '[clojure.repl :refer [source-form]])
+  (is (= true (cons? (source-form 'when)))))
 
 ;; --- Strings ---
 

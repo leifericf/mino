@@ -420,6 +420,9 @@ extern const size_t        k_prims_stateful_count;
 extern const mino_prim_def k_prims_module[];
 extern const size_t        k_prims_module_count;
 
+extern const mino_prim_def k_prims_clojure_repl[];
+extern const size_t        k_prims_clojure_repl_count;
+
 extern const mino_prim_def k_prims_bignum[];
 extern const size_t        k_prims_bignum_count;
 

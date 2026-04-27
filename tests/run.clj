@@ -18,6 +18,7 @@
 (require "tests/predicate_test")
 (require "tests/io_test")
 (require "tests/reflection_test")
+(require "tests/repl_test")
 (require "tests/gc_test")
 (require "tests/regression_hamt_str_churn")
 (require "tests/gc_generational_test")

@@ -895,13 +895,26 @@ const mino_prim_def k_prims_module[] = {
      "Loads and evaluates a mino source file."},
     {"use",     prim_use,
      "Loads a module and refers all of its public names by default."},
-    {"doc",     prim_doc,
-     "Prints the documentation for the named var."},
-    {"source",  prim_source,
-     "Prints the source code of the named var."},
-    {"apropos", prim_apropos,
-     "Returns a list of vars whose names match the given pattern."},
 };
 
 const size_t k_prims_module_count =
     sizeof(k_prims_module) / sizeof(k_prims_module[0]);
+
+/* clojure.repl primitives. Installed into the clojure.repl ns env, not
+ * clojure.core, so a fresh user namespace gets these only after an
+ * explicit (require '[clojure.repl :refer [doc apropos source]]).
+ *
+ * The C primitives expose the data accessors (`doc-string`, `source-form`,
+ * `apropos`); the user-facing `doc` / `source` macros and the higher-level
+ * `dir`, `find-doc`, `pst` live in lib/clojure/repl.clj on top of these. */
+const mino_prim_def k_prims_clojure_repl[] = {
+    {"doc-string",  prim_doc,
+     "Returns the documentation string for the named var, or nil."},
+    {"source-form", prim_source,
+     "Returns the source form for the named var, or nil."},
+    {"apropos",     prim_apropos,
+     "Returns a list of vars whose names contain the given substring."},
+};
+
+const size_t k_prims_clojure_repl_count =
+    sizeof(k_prims_clojure_repl) / sizeof(k_prims_clojure_repl[0]);
