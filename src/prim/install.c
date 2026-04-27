@@ -200,10 +200,11 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
     (void)core_env;
     (void)env;
 
-    /* Intern *ns* as a dynamic var so (find-var 'clojure.core/*ns*)
-     * resolves and (deref ...) tracks the user-visible namespace.
-     * The bare-symbol fast path in eval/special.c stays as a fallback
-     * for embedders that look up *ns* before the var is interned. */
+    /* Intern *ns* as a dynamic var so find-var on the qualified name
+     * clojure.core followed by /-star-ns-star resolves and (deref ...)
+     * tracks the user-visible namespace. The bare-symbol fast path in
+     * eval/special.c stays as a fallback for embedders that look up
+     * *ns* before the var is interned. */
     {
         mino_val_t *var = var_intern(S, "clojure.core", "*ns*");
         if (var != NULL) {
