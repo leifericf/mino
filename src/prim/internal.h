@@ -228,6 +228,9 @@ mino_val_t *prim_print(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_pr(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_flush(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_read(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_printf(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_pr_builtin(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 

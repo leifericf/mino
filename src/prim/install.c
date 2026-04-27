@@ -217,15 +217,17 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
         }
     }
 
-    /* Intern *out* and *err* as dynamic vars holding sentinel
-     * keywords (:mino/stdout, :mino/stderr). The print primitives in
-     * src/prim/io.c consult these via dyn_lookup first, so a
+    /* Intern *out*, *err*, and *in* as dynamic vars holding sentinel
+     * keywords (:mino/stdout, :mino/stderr, :mino/stdin). The print
+     * and read primitives consult these via dyn_lookup first, so a
      * (binding [*out* (atom "")] ...) wrap captures output into the
-     * atom. Without a binding, the sentinel keyword identifies the
-     * default FILE* sink. */
+     * atom and a (binding [*in* (atom "1 2\n")] ...) wrap feeds
+     * input from a string. Without a binding, the sentinel keyword
+     * identifies the default FILE* source. */
     {
         mino_val_t *out_var = var_intern(S, "clojure.core", "*out*");
         mino_val_t *err_var = var_intern(S, "clojure.core", "*err*");
+        mino_val_t *in_var  = var_intern(S, "clojure.core", "*in*");
         if (out_var != NULL) {
             out_var->as.var.dynamic = 1;
             var_set_root(S, out_var, mino_keyword(S, "mino/stdout"));
@@ -235,6 +237,11 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
             err_var->as.var.dynamic = 1;
             var_set_root(S, err_var, mino_keyword(S, "mino/stderr"));
             mino_env_set(S, core_env, "*err*", err_var->as.var.root);
+        }
+        if (in_var != NULL) {
+            in_var->as.var.dynamic = 1;
+            var_set_root(S, in_var, mino_keyword(S, "mino/stdin"));
+            mino_env_set(S, core_env, "*in*", in_var->as.var.root);
         }
     }
 }

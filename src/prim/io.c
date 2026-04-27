@@ -86,8 +86,14 @@ static int try_capture_to_atom(mino_state_t *S, mino_val_t *sink,
 }
 
 /* Emit `buf` to the sink named by `out_var_name` (`*out*` or `*err*`).
- * If the sink is a string-atom, append; otherwise write to the FILE*
- * default for that variable (stdout for *out*, stderr for *err*).
+ * Routing:
+ *   atom holding string  → append to atom
+ *   :mino/stdout         → write to stdout
+ *   :mino/stderr         → write to stderr
+ *   other / unbound      → write to the default FILE* for the named
+ *                          variable (stdout for *out*, stderr for *err*)
+ * This means (binding [*out* *err*] (println "x")) routes through
+ * stderr because *out* resolves to :mino/stderr.
  * Returns 0 on success, -1 on error. */
 static int io_emit(mino_state_t *S, const char *out_var_name,
                    const char *buf, size_t len)
@@ -100,6 +106,15 @@ static int io_emit(mino_state_t *S, const char *out_var_name,
     if (captured < 0) return -1;
     if (captured == 1) return 0;
     fallback = (strcmp(out_var_name, "*err*") == 0) ? stderr : stdout;
+    if (sink != NULL && sink->type == MINO_KEYWORD) {
+        if (sink->as.s.len == 11
+            && memcmp(sink->as.s.data, "mino/stdout", 11) == 0) {
+            fallback = stdout;
+        } else if (sink->as.s.len == 11
+                   && memcmp(sink->as.s.data, "mino/stderr", 11) == 0) {
+            fallback = stderr;
+        }
+    }
     fwrite(buf, 1, len, fallback);
     fflush(fallback);
     return 0;
@@ -352,6 +367,152 @@ mino_val_t *prim_newline(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "newline takes no arguments");
     }
     if (io_emit(S, "*out*", "\n", 1) < 0) return NULL;
+    return mino_nil(S);
+}
+
+/* (read-line) reads one line from *in*. Routing matches *out*:
+ *   atom holding string  → consume up to next \n; update atom to
+ *                          the remainder; return the line text
+ *                          without the trailing \n
+ *   :mino/stdin / unbound → read a line from stdin via fgets,
+ *                           growing as needed for long lines
+ * Returns nil on EOF. */
+mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *src;
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "read-line takes no arguments");
+    }
+    src = resolve_io_sink(S, "*in*");
+    if (src != NULL && src->type == MINO_ATOM) {
+        mino_val_t *cur = src->as.atom.val;
+        size_t      i;
+        size_t      llen;
+        size_t      rstart;
+        mino_val_t *line;
+        mino_val_t *rem;
+        if (cur == NULL || cur->type != MINO_STRING
+            || cur->as.s.len == 0) {
+            return mino_nil(S);
+        }
+        for (i = 0; i < cur->as.s.len; i++) {
+            if (cur->as.s.data[i] == '\n') break;
+        }
+        llen   = i;
+        rstart = (i < cur->as.s.len) ? i + 1 : i;
+        line   = mino_string_n(S, cur->as.s.data, llen);
+        rem    = mino_string_n(S, cur->as.s.data + rstart,
+                               cur->as.s.len - rstart);
+        gc_write_barrier(S, src, src->as.atom.val, rem);
+        src->as.atom.val = rem;
+        return line;
+    }
+    {
+        char  *buf = NULL;
+        size_t len = 0;
+        size_t cap = 0;
+        char   chunk[256];
+        int    saw_any = 0;
+        while (fgets(chunk, sizeof(chunk), stdin) != NULL) {
+            size_t cl = strlen(chunk);
+            int    has_nl = cl > 0 && chunk[cl - 1] == '\n';
+            saw_any = 1;
+            if (has_nl) cl -= 1;
+            if (len + cl + 1 > cap) {
+                size_t nc = cap == 0 ? 256 : cap;
+                char  *nb;
+                while (nc < len + cl + 1) nc *= 2;
+                nb = (char *)realloc(buf, nc);
+                if (nb == NULL) {
+                    free(buf);
+                    return prim_throw_classified(S, "internal", "MIN001",
+                        "read-line: out of memory");
+                }
+                buf = nb;
+                cap = nc;
+            }
+            memcpy(buf + len, chunk, cl);
+            len += cl;
+            if (has_nl) break;
+        }
+        if (!saw_any) {
+            free(buf);
+            return mino_nil(S);
+        }
+        {
+            mino_val_t *result = mino_string_n(S, buf == NULL ? "" : buf, len);
+            free(buf);
+            return result;
+        }
+    }
+}
+
+/* (read) reads one form from *in*. Atom-bound *in* is a string
+ * cursor: the form is parsed from the head, the atom is updated to
+ * the unread tail. Stdin-backed *in* (default) is not supported;
+ * use (read-string ...) on a captured input or with-in-str instead. */
+mino_val_t *prim_read(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *src;
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "read takes no arguments in this build");
+    }
+    src = resolve_io_sink(S, "*in*");
+    if (src != NULL && src->type == MINO_ATOM) {
+        mino_val_t *cur = src->as.atom.val;
+        const char *end = NULL;
+        mino_val_t *form;
+        mino_val_t *rem;
+        size_t      consumed;
+        if (cur == NULL || cur->type != MINO_STRING
+            || cur->as.s.len == 0) {
+            return mino_nil(S);
+        }
+        form = mino_read(S, cur->as.s.data, &end);
+        if (form == NULL) {
+            if (mino_last_error(S) != NULL) return NULL;
+            /* Empty input or whitespace-only. */
+            return mino_nil(S);
+        }
+        consumed = (end != NULL && end >= cur->as.s.data)
+                 ? (size_t)(end - cur->as.s.data) : cur->as.s.len;
+        if (consumed > cur->as.s.len) consumed = cur->as.s.len;
+        rem = mino_string_n(S, cur->as.s.data + consumed,
+                            cur->as.s.len - consumed);
+        gc_write_barrier(S, src, src->as.atom.val, rem);
+        src->as.atom.val = rem;
+        return form;
+    }
+    return prim_throw_classified(S, "mino/unsupported", "MIO002",
+        "read: stdin-backed *in* is not supported; use with-in-str or read-string");
+}
+
+/* (printf fmt & args) formats via the standard format primitive and
+ * writes the resulting string to *out*. Equivalent to
+ * (print (apply format fmt args)) but lives in C to keep the
+ * boot-time core.clj footprint small. */
+mino_val_t *prim_printf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *formatted;
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "printf requires at least a format string");
+    }
+    formatted = prim_format(S, args, env);
+    if (formatted == NULL) return NULL;
+    if (formatted->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "printf: format did not produce a string");
+    }
+    if (io_emit(S, "*out*", formatted->as.s.data,
+                formatted->as.s.len) < 0) {
+        return NULL;
+    }
     return mino_nil(S);
 }
 
@@ -625,6 +786,12 @@ const mino_prim_def k_prims_io_core[] = {
      "Writes a line separator to *out*."},
     {"flush",             prim_flush,
      "Flushes pending output on *out* and *err*. No-op for string-atom bindings."},
+    {"read-line",         prim_read_line,
+     "Reads one line from *in*. Returns the line without trailing newline, or nil at EOF."},
+    {"read*",             prim_read,
+     "Reads one form from *in*. Atom-bound *in* consumes from the head; stdin-backed *in* is unsupported. The user-facing `read` in core.clj dispatches on arity."},
+    {"printf",            prim_printf,
+     "Formats and prints to *out*: equivalent to (print (apply format fmt args))."},
 };
 
 const size_t k_prims_io_core_count =
