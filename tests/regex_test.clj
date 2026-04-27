@@ -1,10 +1,19 @@
 (require "tests/test")
 
-;; mino's #"..." reader runs through the regular string-escape path,
-;; so \d / \s / \w lose their backslash before reaching the regex
-;; engine. Tests that rely on those escapes pass the pattern as a
-;; literal string ("\\d+" → \d+) until the reader gains a regex-aware
-;; escape mode.
+;; Regex literal `#"..."` body bytes pass to the regex engine
+;; verbatim — backslashes are not consumed by string-escape, so
+;; `\d` / `\s` / `\w` reach the engine as the two-character
+;; sequences `\d`, `\s`, `\w`. The string-form `"\\d+"` path
+;; remains supported and equivalent.
+
+(deftest re-find-literal-class-escapes
+  (is (= "42" (re-find #"\d+" "abc 42")))
+  (is (= "  " (re-find #"\s+" "a  b")))
+  (is (= "abc" (re-find #"\w+" "abc 42"))))
+
+(deftest re-seq-literal-class-escapes
+  (is (= 4 (count (re-seq #"\d+" "1 2 33 444")))))
+
 (deftest re-find-groups-vector
   (is (= ["12-34" "12" "34"] (re-find "(\\d+)-(\\d+)" "12-34")))
   (is (= ["a/b" "a" "b"]     (re-matches "(.+)/(.+)" "a/b"))))

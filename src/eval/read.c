@@ -119,6 +119,90 @@ static void skip_ws(mino_state_t *S, const char **p)
 
 static mino_val_t *read_form(mino_state_t *S, const char **p);
 
+static mino_val_t *read_regex_string(mino_state_t *S, const char **p)
+{
+    /* Caller has positioned *p on the opening '"'. Reads a regex
+     * literal body verbatim: backslashes pass through to the regex
+     * engine without string-escape processing, and `\"` is preserved
+     * as the two-character sequence backslash-quote (it does not
+     * terminate the literal). */
+    int    str_line = S->reader_line;
+    int    str_col  = S->reader_col;
+    char  *buf;
+    size_t cap = 16;
+    size_t len = 0;
+    ADVANCE(S, p); /* skip opening quote */
+    buf = (char *)malloc(cap);
+    if (buf == NULL) {
+        set_reader_diag(S, MRE004, "out of memory reading regex",
+                        str_line, str_col);
+        return NULL;
+    }
+    while (**p && **p != '"') {
+        char c = **p;
+        if (c == '\n') {
+            S->reader_line++;
+            S->reader_col = 1;
+        }
+        if (c == '\\') {
+            /* Pass backslash and the next char through verbatim. */
+            if (len + 2 >= cap) {
+                cap *= 2;
+                {
+                    char *nb = (char *)realloc(buf, cap);
+                    if (nb == NULL) {
+                        free(buf);
+                        set_reader_diag(S, MRE004,
+                                        "out of memory reading regex",
+                                        str_line, str_col);
+                        return NULL;
+                    }
+                    buf = nb;
+                }
+            }
+            buf[len++] = '\\';
+            ADVANCE(S, p);
+            if (**p == '\0') {
+                free(buf);
+                set_reader_diag(S, MRE001, "unterminated regex literal",
+                                str_line, str_col);
+                return NULL;
+            }
+            buf[len++] = **p;
+            ADVANCE(S, p);
+            continue;
+        }
+        if (len + 1 >= cap) {
+            cap *= 2;
+            {
+                char *nb = (char *)realloc(buf, cap);
+                if (nb == NULL) {
+                    free(buf);
+                    set_reader_diag(S, MRE004,
+                                    "out of memory reading regex",
+                                    str_line, str_col);
+                    return NULL;
+                }
+                buf = nb;
+            }
+        }
+        buf[len++] = c;
+        ADVANCE(S, p);
+    }
+    if (**p != '"') {
+        free(buf);
+        set_reader_diag(S, MRE001, "unterminated regex literal",
+                        str_line, str_col);
+        return NULL;
+    }
+    ADVANCE(S, p); /* skip closing quote */
+    {
+        mino_val_t *v = mino_string_n(S, buf, len);
+        free(buf);
+        return v;
+    }
+}
+
 static mino_val_t *read_string_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '"'. */
@@ -1730,13 +1814,16 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         return NULL;
     }
     if (next == '"') {
-        /* Regex literal: #"pattern" -- wrap as (re-pattern "pattern"). */
+        /* Regex literal: #"pattern" -- wrap as (re-pattern "pattern").
+         * Body bytes pass through to the regex engine verbatim — no
+         * string-escape processing — so `\d` reaches the engine as
+         * the two characters backslash and d. */
         int         rx_line = S->reader_line;
         int         rx_col  = S->reader_col;
         mino_val_t *str;
         mino_val_t *outer;
         ADVANCE(S, p); /* skip '#', now *p points at '"' */
-        str = read_string_form(S, p);
+        str = read_regex_string(S, p);
         if (str == NULL) return NULL;
         outer = mino_cons(S, mino_symbol(S, "re-pattern"),
                           mino_cons(S, str, mino_nil(S)));
