@@ -263,6 +263,8 @@ mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_load_string(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_load_file(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_hash(mino_state_t *S, mino_val_t *args, mino_env_t *env);

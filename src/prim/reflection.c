@@ -68,6 +68,61 @@ mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
+mino_val_t *prim_load_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    /* Read and eval all forms in the given source string; return the
+     * last form's value. Evaluates in the current namespace with
+     * ambient ns cleared, matching `eval` semantics. */
+    const char *saved_ambient;
+    mino_val_t *src;
+    mino_val_t *result;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "load-string requires one string argument");
+    }
+    src = args->as.cons.car;
+    if (src == NULL || src->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "load-string: argument must be a string");
+    }
+    saved_ambient = S->fn_ambient_ns;
+    S->fn_ambient_ns = NULL;
+    result = mino_eval_string(S, src->as.s.data, env);
+    S->fn_ambient_ns = saved_ambient;
+    return result;
+}
+
+mino_val_t *prim_load_file(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    /* Read and eval all forms in the file at `path`; return the last
+     * form's value. Evaluates in the current namespace with ambient
+     * ns cleared, matching `eval` and `load-string`. */
+    const char *saved_ambient;
+    mino_val_t *path;
+    mino_val_t *result;
+    char        cpath[1024];
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "load-file requires one string argument");
+    }
+    path = args->as.cons.car;
+    if (path == NULL || path->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "load-file: argument must be a string");
+    }
+    if (path->as.s.len >= sizeof(cpath)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "load-file: path too long");
+    }
+    memcpy(cpath, path->as.s.data, path->as.s.len);
+    cpath[path->as.s.len] = '\0';
+    saved_ambient = S->fn_ambient_ns;
+    S->fn_ambient_ns = NULL;
+    result = mino_load_file(S, cpath, env);
+    S->fn_ambient_ns = saved_ambient;
+    return result;
+}
+
 mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -778,6 +833,10 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns a random float between 0 inclusive and 1 exclusive, or between 0 and n."},
     {"eval",      prim_eval,
      "Evaluates the given form."},
+    {"load-string", prim_load_string,
+     "Reads and evaluates all forms in the given source string. Returns the value of the last form."},
+    {"load-file",   prim_load_file,
+     "Reads and evaluates all forms in the file at the given path. Returns the value of the last form."},
     {"symbol",    prim_symbol,
      "Returns a symbol with the given name."},
     {"keyword",   prim_keyword,

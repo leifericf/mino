@@ -25,3 +25,20 @@
 
 (deftest apropos-empty
   (is (= nil (apropos "zzzznotfound"))))
+
+;; load-string and load-file: read+eval all forms; return last value.
+
+(deftest load-string-single-form
+  (is (= 2 (load-string "(+ 1 1)"))))
+
+(deftest load-string-multiple-forms
+  (is (= 84 (load-string "(def __ls_x 42) (* __ls_x 2)"))))
+
+(deftest load-string-define-then-call
+  (is (= 25 (load-string "(defn __ls_sq [x] (* x x)) (__ls_sq 5)"))))
+
+(deftest load-string-empty-returns-nil
+  (is (= nil (load-string ""))))
+
+(deftest load-string-rejects-non-string
+  (is (thrown? (load-string 42))))
