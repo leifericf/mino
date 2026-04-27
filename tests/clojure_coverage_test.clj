@@ -154,8 +154,8 @@
 ;; without a Java host. mino throws :mino/unsupported on each.
 (def jvm-only
   '#{;; class generation / object system
-     defrecord deftype reify proxy gen-class gen-interface definterface
-     instance? bean class supers ancestors-class
+     proxy gen-class gen-interface definterface
+     bean class supers ancestors-class
      ;; Java-import surface
      import construct-proxy proxy-mappings proxy-name proxy-super
      update-proxy init-proxy get-proxy-class

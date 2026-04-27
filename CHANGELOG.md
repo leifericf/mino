@@ -1,5 +1,78 @@
 # Changelog
 
+## v0.80.0 — Real Records And Embed-Distinctive Type Construction
+
+Records are now first-class value types in mino. `(defrecord
+Point [x y])` defines `Point` as a real type (not a tagged map),
+`->Point` as the positional constructor, and `map->Point` as the
+constructor that splits declared fields from extension keys.
+Field access via `(:x p)`, `(get p :y)`, and `(p :z :missing)`
+all resolve through the same primitive path; `assoc` keeps the
+record type when the key is declared or new (ext); `dissoc` on a
+declared field degrades the record to a plain map (canonical
+Clojure semantics). `seq`, `keys`, `vals`, `count`, `contains?`,
+and `find` cover the rest of the map-isomorphic surface.
+
+Records are not maps with type tags. Storage is field slots, not
+a backing map; the slot array is malloc-owned and freed during
+GC sweep. Equality requires type-pointer identity plus per-field
+value equality plus extension map equality; `(= (->Point 1 2)
+{:x 1 :y 2})` is false, and the two values hash differently.
+This is the `(= record map-with-same-content)` litmus that
+distinguishes a real record from a tagged-map wrapper.
+
+`deftype` is an alias for `defrecord`. mino has no separate
+JVM-class layer to expose, so the deftype/defrecord distinction
+collapses; values created either way are real types with
+map-isomorphic behaviour. `reify` creates a fresh anonymous type
+at expansion time and returns a single instance with the named
+protocols extended onto it; repeated invocations of the same
+reify form share the type pointer because record types intern
+by `(ns, name)`.
+
+`(instance? T x)` is now meaningful: it compares `t` against
+`(type x)`, which is type-pointer identity for records and
+keyword equality for built-in types and ad-hoc `:type`-tagged
+values. The previous throw-stub macro is gone.
+
+Protocol dispatch atoms hold mixed keyword and type-pointer
+keys: built-in types continue to dispatch via keywords like
+`:string`, `:vector`, and `:map`, while record types dispatch
+via the `MINO_TYPE` value `defrecord` produces. `extend-type`
+and `extend-protocol` accept type symbols that resolve at
+runtime to the type pointer, so `(extend-type Point IFoo (foo
+[this] body))` registers under the type's pointer and
+`(get @IFoo--foo (type p))` finds the impl. The dispatch path
+does not distinguish C from script: a host that wants its own
+impl interns an ordinary primitive and uses `extend-type` from
+mino code, the same way every other protocol method does.
+
+The `(with-meta x {:type :tag})` keyword-tag dispatch path is
+unchanged. `defrecord` is the canonical path for new code; the
+metadata path remains for ad-hoc tagging and is still used by
+mino's own multimethod implementation.
+
+The C embed surface gains `mino_defrecord`, `mino_record`,
+`mino_record_field`, `mino_is_record`, and `mino_is_record_type`
+in `src/mino.h`. A host can define a record type from C, build
+instances directly, and read declared field values back without
+going through map-key lookups. The constructor is idempotent by
+`(ns, name)`, so re-calling it from a script reload returns the
+existing type and existing record values keep
+`(instance? T r)` true. The new `examples/embed_record.c`
+exercises the full round trip: defines a `Vec3` type from C,
+builds an instance with `mino_int` field values, hands it to
+script that extends a magnitude-squared protocol on the type and
+calls it on the C-built value, then reads field values back via
+`mino_record_field`.
+
+Migration: code that called the throw-stubbed `defrecord`,
+`deftype`, `reify`, or `instance?` will now succeed instead of
+throwing. The `tests/compat_test.clj` block asserting they throw
+has been pruned to keep only the still-unsupported `:import`
+case. Code that relied on the throw stubs to gate platform
+detection should switch to a different shibboleth.
+
 ## v0.79.0 — Auto-Promoting Arithmetic And `unchecked-*` Opt-In
 
 Plain `+`, `-`, `*`, `inc`, and `dec` now auto-promote to bigint
