@@ -254,32 +254,46 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             runtime_module_add_alias(S, abuf, fbuf);
             return mino_nil(S);
         }
-        /* Runtime-ns shortcut: skip the file load only when the
-         * namespace already has user-defined vars (someone ran
-         * (ns foo) (def ...) at runtime). Empty alias-only
-         * placeholders and primitive-only env entries (e.g.
-         * clojure.string after install dumped its primitives in)
-         * don't count. */
+        /* Skip the file load only when the file's already in
+         * module_cache (loaded earlier in this state) or when no file
+         * backs the namespace (caller built it at runtime via
+         * (ns foo) (def ...) ). Pre-installed C primitives populate
+         * the env and the var registry at install time, but the
+         * wrapper .clj still has to run on first require so its
+         * defs/macros become visible to :refer. Mirrors the
+         * symbol-form check above. */
         {
-            int runtime_hit = 0;
+            int skip_load = 0;
             if (mod_sym->as.s.len < 256) {
                 char dotbuf[256];
+                char shortcut_path[256];
                 mino_env_t *e;
+                int         path_ok;
                 memcpy(dotbuf, mod_sym->as.s.data, mod_sym->as.s.len);
                 dotbuf[mod_sym->as.s.len] = '\0';
                 e = ns_env_lookup(S, dotbuf);
+                path_ok = runtime_module_dotted_to_path(
+                              mod_sym->as.s.data, mod_sym->as.s.len,
+                              shortcut_path, sizeof(shortcut_path)) == 0;
                 if (e != NULL && e->len > 0) {
-                    size_t vi;
-                    for (vi = 0; vi < S->var_registry_len; vi++) {
-                        if (strcmp(S->var_registry[vi].ns, dotbuf) == 0) {
-                            runtime_hit = 1;
-                            result      = mino_nil(S);
-                            break;
+                    if (path_ok) {
+                        size_t ci;
+                        for (ci = 0; ci < S->module_cache_len; ci++) {
+                            if (strcmp(S->module_cache[ci].name,
+                                       shortcut_path) == 0) {
+                                skip_load = 1;
+                                result    = mino_nil(S);
+                                break;
+                            }
                         }
+                    } else {
+                        /* No filesystem path -- runtime-only namespace. */
+                        skip_load = 1;
+                        result    = mino_nil(S);
                     }
                 }
             }
-            if (!runtime_hit) {
+            if (!skip_load) {
                 /* Convert dotted name and load. */
                 if (runtime_module_dotted_to_path(mod_sym->as.s.data,
                                                   mod_sym->as.s.len,
