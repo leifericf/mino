@@ -5,14 +5,14 @@
 (def test-dir "/tmp/mino-fs-test")
 
 (deftest file-exists?-known-file
-  (is (file-exists? "Makefile"))
+  (is (file-exists? "CHANGELOG.md"))
   (is (file-exists? "src"))
   (is (not (file-exists? "nonexistent-path-xyz"))))
 
 (deftest directory?-basics
   (is (directory? "src"))
   (is (directory? "tests"))
-  (is (not (directory? "Makefile")))
+  (is (not (directory? "CHANGELOG.md")))
   (is (not (directory? "nonexistent-path-xyz"))))
 
 (deftest mkdir-p-and-rm-rf

@@ -39,8 +39,9 @@
     (sh! "git" "-C" dest "checkout" "--quiet" (:rev spec))
     dest))
 
-(defn- validate-dep-spec
-  "Validate a single dependency spec."
+(defn validate-dep-spec
+  "Validate a single dependency spec. Returns nil on success; throws
+  ex-info with the offending spec when the spec is malformed."
   [dep-name spec]
   (when-not (map? spec)
     (throw (ex-info (str "dep spec for " dep-name " must be a map")

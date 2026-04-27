@@ -1,7 +1,15 @@
 ;; Test runner: loads all test files and runs them.
 ;; Usage: ./mino tests/run.clj
+;;
+;; suite-mode suppresses each per-file (run-tests) call at the
+;; bottom of individual test files; without it the first file to
+;; reach (run-tests) would call (exit ...) and drop every file
+;; required after. The final (run-tests) at the bottom of this
+;; file runs the accumulated registry once, end-to-end.
 
 (require "tests/test")
+
+(reset! clojure.test/*suite-mode* true)
 (require "tests/compat_test")
 (require "tests/doc_examples_test")
 (require "tests/arithmetic_test")
@@ -90,4 +98,5 @@
 (require "tests/proc_test")
 (require "tests/deps_test")
 
+(reset! clojure.test/*suite-mode* false)
 (run-tests)

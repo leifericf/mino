@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.86.0 — Test Harness Suite Mode
+
+Fixes a long-standing quirk where `tests/run.clj` silently
+dropped the test files required after the first one whose
+bottom-of-file `(run-tests)` call reached completion. The
+runner's `(exit ...)` short-circuited the suite, so 246 tests
+across 11 files (most of `tests/async_*`, plus `fs_test`,
+`proc_test`, `deps_test`) were never executed under the
+combined runner — they ran only when invoked individually.
+
+`clojure.test/*suite-mode*` now gates the per-file
+`(run-tests)`. When `*suite-mode*` is true, individual calls
+are no-ops; the suite driver flips it back to false at the
+end and runs the accumulated registry once. `tests/run.clj`
+sets the flag before the require list and clears it for the
+final call.
+
+Three pre-existing test bugs surfaced by the now-running
+files are fixed alongside:
+
+- `tests/async_conformance_test.clj` — six `go-try-*`
+  exception tests compared the catch binding directly to a
+  bare-string expected value; the binding receives the
+  diagnostic record now, so the comparison goes through
+  `(ex-data e)`. Same shape as the rest of the catch tests
+  in `tests/error_test.clj`.
+- `tests/fs_test.clj` — `file-exists?` and `directory?`
+  cases referenced `Makefile`, which the project no longer
+  has (mino bootstraps via `./mino task build`). Replaced
+  with `CHANGELOG.md`.
+- `lib/mino/deps.clj` — `validate-dep-spec` was `defn-`
+  while the test calls it directly. Promoted to `defn` since
+  the function is genuinely useful for testing dep specs and
+  has no internal-only invariants.
+
+Suite count: 1452 tests, 6983 assertions, all green —
+246 tests / 371 assertions previously hidden are now
+counted.
+
 ## v0.85.0 — Capability Metadata As Documentation
 
 Each non-core install group tags its primitives with a per-state

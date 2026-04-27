@@ -8,6 +8,14 @@
 (def *testing-context* (atom ()))
 (def *current-test* (atom nil))
 
+;; When true, calls to (run-tests) are no-ops — used by suite drivers
+;; (e.g. tests/run.clj) that load many test files in sequence and run
+;; everything once at the end. Without this guard the per-file
+;; (run-tests) at the bottom of each test file would short-circuit
+;; the suite by calling (exit ...) on completion of the first file
+;; that reached it, dropping every file required after.
+(def *suite-mode* (atom false))
+
 ;; --- Internal helpers ---
 
 (defn assert-pass! []
@@ -80,53 +88,60 @@
 ;; --- Runner ---
 
 (defn run-tests []
-  (let [tests @*tests*
-        n     (count tests)]
-    (reset! *test-state* {:pass 0 :fail 0 :error 0 :failures []})
-    (loop [i 0]
-      (when (< i n)
-        (let [t     (nth tests i)
-              tname (get t :name)
-              tfn   (get t :fn)]
-          (reset! *current-test* tname)
-          (reset! *testing-context* ())
-          (try
-            (tfn)
-            (catch e
-              (do
-                (swap! *test-state* update :error inc)
-                (swap! *test-state* update :failures conj
-                  {:test tname :error (str e)})))))
-        (recur (+ i 1))))
-    ;; Report
-    (let [state    @*test-state*
-          passes   (get state :pass)
-          fails    (get state :fail)
-          errors   (get state :error)
-          total    (+ passes fails errors)
-          failures (get state :failures)]
-      ;; Print failures
-      (when (seq failures)
-        (println "")
-        (println "Failures:")
-        (loop [fs failures]
-          (when (seq fs)
-            (let [f (first fs)]
-              (when (get f :test)
-                (println (str "  in " (get f :test))))
-              (when (seq (get f :context))
-                (println (str "    " (join " > " (get f :context)))))
-              (when (get f :form)
-                (println (str "    " (get f :form))))
-              (when (get f :message)
-                (println (str "    " (get f :message))))
-              (when (get f :detail)
-                (println (str "    " (get f :detail))))
-              (when (get f :error)
-                (println (str "    ERROR: " (get f :error))))
-              (println ""))
-            (recur (rest fs)))))
-      ;; Summary
-      (println (str n " tests, " total " assertions: "
-                    passes " passed, " fails " failed, " errors " errors"))
-      (exit (if (and (= fails 0) (= errors 0)) 0 1)))))
+  ;; When suite-mode is active, defer to the suite driver's final
+  ;; run-tests call. Without this guard the per-file (run-tests) at
+  ;; the bottom of each test file would short-circuit the suite by
+  ;; calling (exit ...) on completion of the first file that reached
+  ;; it, dropping every file required after.
+  (if @*suite-mode*
+    nil
+    (let [tests @*tests*
+          n     (count tests)]
+      (reset! *test-state* {:pass 0 :fail 0 :error 0 :failures []})
+      (loop [i 0]
+        (when (< i n)
+          (let [t     (nth tests i)
+                tname (get t :name)
+                tfn   (get t :fn)]
+            (reset! *current-test* tname)
+            (reset! *testing-context* ())
+            (try
+              (tfn)
+              (catch e
+                (do
+                  (swap! *test-state* update :error inc)
+                  (swap! *test-state* update :failures conj
+                    {:test tname :error (str e)})))))
+          (recur (+ i 1))))
+      ;; Report
+      (let [state    @*test-state*
+            passes   (get state :pass)
+            fails    (get state :fail)
+            errors   (get state :error)
+            total    (+ passes fails errors)
+            failures (get state :failures)]
+        ;; Print failures
+        (when (seq failures)
+          (println "")
+          (println "Failures:")
+          (loop [fs failures]
+            (when (seq fs)
+              (let [f (first fs)]
+                (when (get f :test)
+                  (println (str "  in " (get f :test))))
+                (when (seq (get f :context))
+                  (println (str "    " (join " > " (get f :context)))))
+                (when (get f :form)
+                  (println (str "    " (get f :form))))
+                (when (get f :message)
+                  (println (str "    " (get f :message))))
+                (when (get f :detail)
+                  (println (str "    " (get f :detail))))
+                (when (get f :error)
+                  (println (str "    ERROR: " (get f :error))))
+                (println ""))
+              (recur (rest fs)))))
+        ;; Summary
+        (println (str n " tests, " total " assertions: "
+                      passes " passed, " fails " failed, " errors " errors"))
+        (exit (if (and (= fails 0) (= errors 0)) 0 1))))))

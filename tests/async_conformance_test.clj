@@ -617,13 +617,13 @@
   (let [ch (chan 1)]
     (>!! ch 42)
     (is (= "early" (<!! (go (try (do (throw "early") (<! ch))
-                              (catch e e))))))))
+                              (catch e (ex-data e)))))))))
 
 (deftest go-try-exception-after-park
   (let [ch (chan 1)]
     (>!! ch 42)
     (is (= "oops" (<!! (go (try (do (<! ch) (throw "oops"))
-                             (catch e e))))))))
+                             (catch e (ex-data e)))))))))
 
 (deftest go-try-let-park-normal
   (let [ch (chan 1)]
@@ -635,7 +635,7 @@
   (let [ch (chan 1)]
     (>!! ch 10)
     (is (= "got:10" (<!! (go (try (let [v (<! ch)] (throw (str "got:" v)))
-                               (catch e e))))))))
+                               (catch e (ex-data e)))))))))
 
 (deftest go-try-finally-on-success
   (let [ch (chan 1)
@@ -651,7 +651,7 @@
         log (atom [])]
     (>!! ch 42)
     (let [result (<!! (go (try (do (<! ch) (throw "boom"))
-                            (catch e (do (swap! log conj :caught) e))
+                            (catch e (do (swap! log conj :caught) (ex-data e)))
                             (finally (swap! log conj :finally)))))]
       (is (= "boom" result))
       (is (= [:caught :finally] @log)))))
@@ -678,7 +678,7 @@
                         (let [v (<! ch)]
                           (when (= v 99) (throw (str "bad:" v)))
                           (when v (recur))))
-                      (catch e e))))))))
+                      (catch e (ex-data e)))))))))
 
 (deftest go-try-catch-nil-result
   (let [ch (chan 1)]
@@ -701,7 +701,7 @@
            (<!! (go (try (let [a (<! ch1)
                                 b (<! ch2)]
                             (throw "after-b"))
-                      (catch e e))))))))
+                      (catch e (ex-data e)))))))))
 
 (deftest go-try-if-park-in-try
   (let [ch1 (chan 1) ch2 (chan 1)]
