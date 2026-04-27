@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.83.0 — Clojure.spec.alpha And Clojure.core.specs.alpha
+
+Substantial port of `clojure.spec.alpha` and the destructure-form
+specs in `clojure.core.specs.alpha`. Both ship in the bundled
+stdlib under a new `mino_install_clojure_spec` hook.
+
+`clojure.spec.alpha` provides the canonical surface: `s/def`,
+`s/valid?`, `s/conform`, `s/explain`, `s/explain-data`,
+`s/explain-str`, `s/and`, `s/or`, `s/keys`, `s/coll-of`,
+`s/map-of`, `s/tuple`, `s/nilable`, `s/spec`, `s/cat`, `s/*`,
+`s/+`, `s/?`, `s/alt`, `s/fdef`, `s/instrument`, `s/unstrument`,
+`s/registry`, `s/get-spec`, `s/form`, and `s/assert`. Spec values
+are tagged maps keyed by `::s/kind` and dispatched through
+multimethods. `s/instrument` wraps the named var via
+`alter-var-root` and validates `:args` on every call;
+`s/unstrument` restores. Registered keys are reachable through
+`s/get-spec`; `s/registry` returns the full map.
+
+`s/gen` and `s/exercise` throw `:mino/unsupported`. A
+`clojure.test.check` port is deferred until a concrete user need
+lands. The error names the missing dependency so onboarders see
+exactly what is absent.
+
+`clojure.core.specs.alpha` ships destructure-form specs for
+`defn`, `fn`, `let`, `binding`, and the binding-form sub-shapes
+(`::seq-binding-form`, `::map-binding-form`, `::local-name`,
+`::params+body`, `::defn-args`). Tools that want to validate
+macro forms call `(s/conform
+:clojure.core.specs.alpha/defn-args ...)` directly. Validation
+is opt-in; the core compiler does not consult the specs.
+
+Two evaluator fixes ship alongside the spec port because the
+port surfaced them:
+
+- `defmacro` now records the macro's defining namespace so that
+  symbols inside the macro body resolve against the macro's own
+  namespace when called from another. Without this, helper fns
+  and internal `def`s referenced by the macro body raised
+  `unbound symbol` from the caller's perspective.
+- Macros set `fn_ambient_ns` only (not `current_ns`) when
+  invoked, so `*ns*` and `(resolve ...)` inside the macro body
+  still see the caller's namespace, matching canonical Clojure
+  semantics.
+
+The two changes are observable only when a namespace's macro
+body references its own helpers or internal defs; bare-symbol
+macros (none in `core.clj`) are unaffected.
+
+`s/cat` and the regex repetition operators (`s/*`, `s/+`,
+`s/?`, `s/alt`) interpret nested specs and registered regex
+keys uniformly: the cat helper resolves keyword refs to their
+registered spec, so `(s/* (s/cat :k keyword? :v any?))` over
+`[:a 1 :b 2]` greedily consumes pairs and returns `[{:k :a :v
+1} {:k :b :v 2}]`. `s/spec` wraps a regex into an element-level
+spec so multi-arity `defn` bodies match the canonical shape
+`(s/+ (s/spec ::params+body))`.
+
+Test surface: 37 new tests, 86 assertions in
+`tests/spec_test.clj` covering def/valid?/conform/explain,
+and/or/nilable/tuple, keys required and optional,
+coll-of/map-of, cat/*/+/?/alt, spec wrap, gen stub, assert,
+fdef + instrument/unstrument, and the core.specs.alpha
+destructure forms. Total suite: 1188 tests, 6568 assertions, all
+green. ASan + GC stress smoke clean on the spec load + conform
+path.
+
 ## v0.82.0 — Clojure.instant, Clojure.template, And Tagged-Literal Reader Hook
 
 Three small fills accumulating under the bundled-stdlib registry
