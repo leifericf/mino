@@ -295,6 +295,7 @@ static void print_usage(FILE *out)
         "\n"
         "USAGE:\n"
         "    mino [OPTIONS] [FILE]\n"
+        "    mino [OPTIONS] EXPR             # EXPR starts with ( [ { # @ '\n"
         "    mino [OPTIONS] -e EXPR\n"
         "    mino <SUBCOMMAND> [ARGS...]\n"
         "\n"
@@ -674,6 +675,23 @@ int main(int argc, char **argv)
      * fall through to the REPL block. Extra positional args are ignored. */
     if (!dash_dash && first < argc && strcmp(argv[first], "repl") == 0) {
         first = argc;
+    }
+
+    /* When the first positional argument starts with a character that
+     * unambiguously begins a Lisp form, evaluate it as an expression
+     * instead of treating it as a file path. Matches the convenience
+     * shape other Lisp CLIs offer for `mino "(+ 1 2)"`. The `--`
+     * separator forces file-or-task interpretation; the explicit
+     * `-e EXPR` flag still works either way. */
+    if (!dash_dash && first < argc) {
+        char c = argv[first][0];
+        if (c == '(' || c == '[' || c == '{'
+            || c == '#' || c == '@' || c == '\'') {
+            exit_code = run_eval_expr(S, env, argv[first]);
+            mino_env_free(S, env);
+            mino_state_free(S);
+            return exit_code;
+        }
     }
 
     /* File mode: evaluate a script and exit. */

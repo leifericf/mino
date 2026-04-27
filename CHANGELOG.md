@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.74.3 — One-Shot Expression CLI
+
+The standalone `mino` binary now treats a positional argument
+that begins with a Lisp form character as an inline expression,
+matching the convenience shape other Lisp CLIs offer:
+
+```
+mino "(+ 1 2)"          # 3
+mino "[1 2 3]"          # [1 2 3]
+mino "{:a 1}"           # {:a 1}
+mino "(println :hi)"    # :hi  /  nil
+```
+
+Form characters that trigger expression mode: `(`, `[`, `{`,
+`#`, `@`, `'`. A leading `--` separator forces file-or-task
+interpretation; the explicit `-e EXPR` flag still works either
+way; everything else continues to be treated as a file path.
+File names that happen to start with one of those characters
+need an explicit `--` or path prefix (e.g. `mino ./(name).clj`),
+but that's a vanishingly rare case in practice.
+
+`--help` documents the new shape on its own line under USAGE.
+
 ## v0.74.2 — Heap-Allocated Dynamic Binding Frames
 
 Fixes the v0.74.1 known-issue Windows SIGSEGV during
