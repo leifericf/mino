@@ -792,6 +792,36 @@ void mino_register_bundled_lib(mino_state_t *S, const char *name,
                                 const char *source);
 
 /* ------------------------------------------------------------------------- */
+/* Bundled clojure.* stdlib install hooks                                    */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Per-namespace install hooks for the bundled clojure.* stdlib. Each
+ * call registers the in-binary source for its namespace so a
+ * subsequent (require '[<ns>]) loads it from memory instead of
+ * looking on disk. The C primitives that some of these namespaces
+ * layer over are installed by `mino_install_core`; these hooks add
+ * the wrapper sources only.
+ *
+ * Pairs that depend on each other ship as a single hook:
+ *   - clojure.repl + clojure.stacktrace
+ *   - clojure.datafy + clojure.core.protocols
+ *
+ * Standalone builds and embedders that want everything can call
+ * `mino_install_all` instead of this surface.
+ */
+void mino_install_clojure_string(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_set(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_walk(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_edn(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_pprint(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_zip(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_data(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_test(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_repl(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env);
+
+/* ------------------------------------------------------------------------- */
 /* Execution limits                                                          */
 /* ------------------------------------------------------------------------- */
 
