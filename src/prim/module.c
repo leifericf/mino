@@ -783,6 +783,42 @@ mino_val_t *prim_use(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return last;
 }
 
+/* Render `e->docstring` plus a trailing capability line when set. The
+ * capability surfaces the install-group label the binding belongs to
+ * (e.g. "fs", "proc"). User-visible via (doc name) and (apropos). */
+static mino_val_t *doc_render_with_capability(mino_state_t *S,
+                                              const meta_entry_t *e)
+{
+    if (e->capability == NULL || e->capability[0] == '\0') {
+        if (e->docstring != NULL && e->docstring[0] != '\0') {
+            return mino_string(S, e->docstring);
+        }
+        return mino_nil(S);
+    }
+    {
+        size_t doclen = e->docstring != NULL ? strlen(e->docstring) : 0;
+        size_t caplen = strlen(e->capability);
+        const char *prefix = "\n  Capability: :";
+        size_t plen = strlen(prefix);
+        size_t total = doclen + plen + caplen;
+        char  *buf = (char *)malloc(total + 1);
+        mino_val_t *out;
+        if (buf == NULL) {
+            return e->docstring != NULL ? mino_string(S, e->docstring)
+                                        : mino_nil(S);
+        }
+        if (doclen > 0) {
+            memcpy(buf, e->docstring, doclen);
+        }
+        memcpy(buf + doclen, prefix, plen);
+        memcpy(buf + doclen + plen, e->capability, caplen);
+        buf[total] = '\0';
+        out = mino_string_n(S, buf, total);
+        free(buf);
+        return out;
+    }
+}
+
 /* (doc name) -- print the docstring for a def/defmacro binding. */
 mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
@@ -808,8 +844,8 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     memcpy(buf, name_val->as.s.data, n);
     buf[n] = '\0';
     e = meta_find(S, buf);
-    if (e != NULL && e->docstring != NULL) {
-        return mino_string(S, e->docstring);
+    if (e != NULL && (e->docstring != NULL || e->capability != NULL)) {
+        return doc_render_with_capability(S, e);
     }
     /* Qualified-name fallback: docstrings register under the bare name,
      * so ns/sym lookups should also try the part after the slash. */
@@ -817,8 +853,8 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         const char *slash = (n > 1) ? memchr(buf, '/', n) : NULL;
         if (slash != NULL && slash[1] != '\0') {
             e = meta_find(S, slash + 1);
-            if (e != NULL && e->docstring != NULL) {
-                return mino_string(S, e->docstring);
+            if (e != NULL && (e->docstring != NULL || e->capability != NULL)) {
+                return doc_render_with_capability(S, e);
             }
         }
     }
@@ -984,11 +1020,57 @@ static const char *bundled_lib_lookup(mino_state_t *S, const char *name)
     return NULL;
 }
 
+/* (mino-capability sym) -- return the install-group capability label
+ * for the named binding as a keyword (e.g. :fs), or nil when the
+ * binding is part of the always-installed core. The label is set at
+ * install time by the prim_install_table_with_capability path used by
+ * mino_install_io / mino_install_fs / mino_install_proc /
+ * mino_install_host / mino_install_async. */
+mino_val_t *prim_mino_capability(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env)
+{
+    mino_val_t   *name_val;
+    char          buf[256];
+    size_t        n;
+    meta_entry_t *e;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "mino-capability requires one argument");
+    }
+    name_val = args->as.cons.car;
+    if (name_val == NULL || name_val->type != MINO_SYMBOL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino-capability: argument must be a symbol");
+    }
+    n = name_val->as.s.len;
+    if (n >= sizeof(buf)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino-capability: name too long");
+    }
+    memcpy(buf, name_val->as.s.data, n);
+    buf[n] = '\0';
+    e = meta_find(S, buf);
+    if (e == NULL || e->capability == NULL) {
+        /* Qualified-name fallback. */
+        const char *slash = (n > 1) ? memchr(buf, '/', n) : NULL;
+        if (slash != NULL && slash[1] != '\0') {
+            e = meta_find(S, slash + 1);
+        }
+    }
+    if (e != NULL && e->capability != NULL && e->capability[0] != '\0') {
+        return mino_keyword(S, e->capability);
+    }
+    return mino_nil(S);
+}
+
 const mino_prim_def k_prims_module[] = {
     {"require", prim_require,
      "Loads and evaluates a mino source file."},
     {"use",     prim_use,
      "Loads a module and refers all of its public names by default."},
+    {"mino-capability", prim_mino_capability,
+     "Return the install-group capability label for the named binding as a keyword, or nil when the binding is part of the always-installed core."},
 };
 
 const size_t k_prims_module_count =

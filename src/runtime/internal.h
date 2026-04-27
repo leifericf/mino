@@ -60,10 +60,14 @@ typedef struct {
     const char *source;
 } bundled_lib_entry_t;
 
-/* Metadata table entry. */
+/* Metadata table entry. The capability is the install-group label
+ * (e.g. "fs", "proc", "io", "host", "async") used by the doc and
+ * mino-capability primitives. NULL means the binding is part of the
+ * always-installed core and carries no capability gate. */
 typedef struct {
     char       *name;
     char       *docstring;
+    char       *capability;
     mino_val_t *source;
 } meta_entry_t;
 
@@ -530,6 +534,10 @@ meta_entry_t *meta_find(mino_state_t *S, const char *name);   /* borrowed into m
 void meta_set(mino_state_t *S, const char *name,              /* name: borrowed (copied) */
               const char *doc, size_t doc_len,                 /* doc: borrowed (copied) */
               mino_val_t *source);                             /* source: GC-owned, retained */
+/* meta_set_capability tags a registered binding with its install-group
+ * label. Borrows; copies. NULL clears. */
+void meta_set_capability(mino_state_t *S, const char *name,
+                         const char *capability);
 
 /* ------------------------------------------------------------------------- */
 /* env.c: environment and dynamic bindings                                   */

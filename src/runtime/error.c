@@ -252,6 +252,23 @@ void meta_set(mino_state_t *S, const char *name, const char *doc,
             S->meta_table[S->meta_table_len].docstring[doc_len] = '\0';
         }
     }
+    S->meta_table[S->meta_table_len].capability = NULL;
     S->meta_table[S->meta_table_len].source = source;
     S->meta_table_len++;
+}
+
+void meta_set_capability(mino_state_t *S, const char *name,
+                         const char *capability)
+{
+    meta_entry_t *e = meta_find(S, name);
+    if (e == NULL) { return; }
+    free(e->capability);
+    e->capability = NULL;
+    if (capability != NULL) {
+        size_t cl = strlen(capability);
+        e->capability = (char *)malloc(cl + 1);
+        if (e->capability != NULL) {
+            memcpy(e->capability, capability, cl + 1);
+        }
+    }
 }

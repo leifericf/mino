@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.85.0 — Capability Metadata As Documentation
+
+Each non-core install group tags its primitives with a per-state
+capability label so users can discover at a glance which group
+their code requires. Capability is descriptive, not prescriptive
+— the gate lives at install time in C, not at call time. User
+code can't strip the metadata to gain access because the fn
+either exists in the env or doesn't.
+
+The labels match the existing install hooks one-for-one:
+
+- `mino_install_io` -> `:io` (`slurp`, `spit`, `exit`,
+  `time-ms`, `nano-time`, `file-seq`, `getenv`, `getcwd`,
+  `chdir`, `gc-stats`, ...).
+- `mino_install_fs` -> `:fs` (`mkdir-p`, `file-exists?`,
+  `directory?`, `rm-rf`, ...).
+- `mino_install_proc` -> `:proc` (`sh`, `sh!`, ...).
+- `mino_install_host` -> `:host` (host interop dispatch).
+- `mino_install_async` -> `:async` (channel/go/timeout
+  primitives that core.async layers over).
+
+Always-installed core primitives (`inc`, `+`, `println`,
+`prn`, `conj`, etc.) carry no capability label; the
+`io_core` table that ships printable I/O without filesystem
+or process access stays unlabelled.
+
+Two surfaces expose the label:
+
+- `(mino-capability 'sym)` — returns the keyword (e.g. `:fs`)
+  or `nil`. New primitive in `clojure.core`.
+- `(clojure.repl/doc sym)` — appends a "Capability: :group"
+  line to the docstring when the binding has a label.
+  Existing user-facing API; no breaking change.
+
+A new `meta_set_capability` C helper attaches the label to
+the existing `meta_entry_t` (`docstring` + `capability` +
+`source`); the meta-table teardown frees it. The
+`prim_install_table_with_capability` helper lets each install
+hook tag its whole table in one call without touching the
+underlying `mino_prim_def` shape, so the ~150 prim defs across
+the core/numeric/sequences/etc. tables stay untouched.
+
+Tests: 7 new tests, 22 assertions in
+`tests/capability_metadata_test.clj`. Total: 1206 tests, 6612
+assertions, all green.
+
+The naming "G0.5" reflects the cycle's heritage — the install
+groups landed in cycle G0 (v0.81.0) and the capability metadata
+was always queued as a small follow-up; this ships it.
+
 ## v0.84.0 — Host Threads — Foundation Slice
 
 Lays the API surface for host-grant-gated host threads (cycle G4)

@@ -179,13 +179,15 @@ static void state_free_host_types(mino_state_t *S)
     free(S->host_types);
 }
 
-/* Free the metadata table: per-entry name + docstring, then array. */
+/* Free the metadata table: per-entry name + docstring + capability,
+ * then array. */
 static void state_free_meta_table(mino_state_t *S)
 {
     size_t i;
     for (i = 0; i < S->meta_table_len; i++) {
         free(S->meta_table[i].name);
         free(S->meta_table[i].docstring);
+        free(S->meta_table[i].capability);
     }
     free(S->meta_table);
 }

@@ -16,7 +16,17 @@
 void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
                         const mino_prim_def *defs, size_t count)
 {
+    prim_install_table_with_capability(S, env, ns_name, defs, count, NULL);
+}
+
+void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
+                                        const char *ns_name,
+                                        const mino_prim_def *defs,
+                                        size_t count,
+                                        const char *capability)
+{
     size_t i;
+    int has_cap = capability != NULL && capability[0] != '\0';
     for (i = 0; i < count; i++) {
         mino_val_t *pv = mino_prim(S, defs[i].name, defs[i].fn);
         mino_env_set(S, env, defs[i].name, pv);
@@ -27,6 +37,13 @@ void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
         if (defs[i].doc != NULL) {
             meta_set(S, defs[i].name,
                      defs[i].doc, strlen(defs[i].doc), NULL);
+        } else if (has_cap) {
+            /* Tagging requires a meta entry; create a stub one so the
+             * capability label is reachable via meta_find. */
+            meta_set(S, defs[i].name, "", 0, NULL);
+        }
+        if (has_cap) {
+            meta_set_capability(S, defs[i].name, capability);
         }
     }
 }

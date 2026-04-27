@@ -83,6 +83,17 @@ typedef struct {
 void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
                         const mino_prim_def *defs, size_t count);
 
+/* Same as prim_install_table but also tags each registered binding's
+ * meta_entry with `capability` (the install-group label). User-visible
+ * via (doc fn) and (mino-capability 'fn) so script writers see which
+ * group their code requires. NULL or "" capability falls back to the
+ * unlabelled install. */
+void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
+                                        const char *ns_name,
+                                        const mino_prim_def *defs,
+                                        size_t count,
+                                        const char *capability);
+
 /* Primitives declared per domain (each prim_*.c defines these).
  * All follow the standard primitive signature: args are borrowed,
  * return value is GC-owned (NULL on error via set_error). */
