@@ -955,12 +955,29 @@ void mino_register_bundled_lib(mino_state_t *S, const char *name,
     S->bundled_libs_len++;
 }
 
+/* Compare two namespace names for equality, treating '.' and '/' as
+ * the same separator. The symbol form of (require ...) converts the
+ * user-facing dotted name to path-style with slashes before reaching
+ * the string-form lookup, so bundled libs registered as
+ * "clojure.string" still match a "clojure/string" lookup. */
+static int ns_name_eq(const char *a, const char *b)
+{
+    while (*a != '\0' && *b != '\0') {
+        char ca = *a, cb = *b;
+        if (ca == '/') ca = '.';
+        if (cb == '/') cb = '.';
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == '\0' && *b == '\0';
+}
+
 /* Returns the bundled source for `name`, or NULL if not registered. */
 static const char *bundled_lib_lookup(mino_state_t *S, const char *name)
 {
     size_t i;
     for (i = 0; i < S->bundled_libs_len; i++) {
-        if (strcmp(S->bundled_libs[i].name, name) == 0) {
+        if (ns_name_eq(S->bundled_libs[i].name, name)) {
             return S->bundled_libs[i].source;
         }
     }

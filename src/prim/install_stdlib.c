@@ -110,3 +110,21 @@ void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env)
     mino_register_bundled_lib(S, "clojure.datafy",          lib_clojure_datafy_src);
     mino_register_bundled_lib(S, "clojure.core.protocols",  lib_clojure_core_protocols_src);
 }
+
+void mino_install_all(mino_state_t *S, mino_env_t *env)
+{
+    mino_install_core(S, env);
+    mino_install_io(S, env);
+    mino_install_fs(S, env);
+    mino_install_proc(S, env);
+    mino_install_clojure_string(S, env);
+    mino_install_clojure_set(S, env);
+    mino_install_clojure_walk(S, env);
+    mino_install_clojure_edn(S, env);
+    mino_install_clojure_pprint(S, env);
+    mino_install_clojure_zip(S, env);
+    mino_install_clojure_data(S, env);
+    mino_install_clojure_test(S, env);
+    mino_install_clojure_repl(S, env);
+    mino_install_clojure_datafy(S, env);
+}

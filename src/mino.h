@@ -821,6 +821,31 @@ void mino_install_clojure_test(mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_repl(mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env);
 
+/*
+ * Register the every-bundled-namespace + every-primitive-group set
+ * the standalone binary ships with. Equivalent to the sequence:
+ *
+ *   mino_install_core(S, env);
+ *   mino_install_io(S, env);
+ *   mino_install_fs(S, env);
+ *   mino_install_proc(S, env);
+ *   mino_install_clojure_string(S, env);
+ *   mino_install_clojure_set(S, env);
+ *   mino_install_clojure_walk(S, env);
+ *   mino_install_clojure_edn(S, env);
+ *   mino_install_clojure_pprint(S, env);
+ *   mino_install_clojure_zip(S, env);
+ *   mino_install_clojure_data(S, env);
+ *   mino_install_clojure_test(S, env);
+ *   mino_install_clojure_repl(S, env);
+ *   mino_install_clojure_datafy(S, env);
+ *
+ * Use this when you want the same surface a brew/scoop install
+ * would provide. Embedders that need a tighter footprint pick the
+ * subset they care about explicitly.
+ */
+void mino_install_all(mino_state_t *S, mino_env_t *env);
+
 /* ------------------------------------------------------------------------- */
 /* Execution limits                                                          */
 /* ------------------------------------------------------------------------- */
