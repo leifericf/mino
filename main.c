@@ -413,6 +413,112 @@ static int parse_cli_flags(int argc, char **argv,
     return 0;
 }
 
+/* ---- REPL specials (`*1` / `*2` / `*3` / `*e` / `*command-line-args*` /
+ * `*file*`) ----
+ *
+ * Interned in clojure.core from main.c rather than mino_install_core so that
+ * embedders without a REPL or CLI front-end pay nothing. The vars are set up
+ * before file/eval/REPL dispatch so a script reading *command-line-args* or
+ * *file* sees them too. *1/*2/*3/*e are only mutated by the REPL loop, but
+ * interning them up-front keeps unqualified lookup honest in either mode. */
+typedef struct {
+    mino_val_t *star1;
+    mino_val_t *star2;
+    mino_val_t *star3;
+    mino_val_t *stare;
+    mino_val_t *cmdargs;
+    mino_val_t *file;
+    mino_env_t *core_env;
+} repl_specials_t;
+
+static void repl_set_special(mino_state_t *S, mino_env_t *core_env,
+                             mino_val_t *var, const char *name,
+                             mino_val_t *val)
+{
+    if (val == NULL) val = mino_nil(S);
+    if (var != NULL) {
+        var_set_root(S, var, val);
+    }
+    if (core_env != NULL) {
+        mino_env_set(S, core_env, name, val);
+    }
+}
+
+static mino_val_t *repl_intern_special(mino_state_t *S, mino_env_t *core_env,
+                                       const char *name)
+{
+    mino_val_t *var = var_intern(S, "clojure.core", name);
+    if (var != NULL) {
+        var->as.var.dynamic = 1;
+    }
+    repl_set_special(S, core_env, var, name, mino_nil(S));
+    return var;
+}
+
+/* Build a cons-list of remaining argv entries as mino strings. Returns nil
+ * (the canon empty value for *command-line-args*) when start >= argc. */
+static mino_val_t *build_cmd_args(mino_state_t *S, int argc, char **argv,
+                                  int start)
+{
+    mino_val_t *head = mino_nil(S);
+    int i;
+    for (i = argc - 1; i >= start; i--) {
+        mino_val_t *str = mino_string(S, argv[i]);
+        head = mino_cons(S, str, head);
+    }
+    return head;
+}
+
+static void repl_specials_init(mino_state_t *S, repl_specials_t *r,
+                               int argc, char **argv, int first)
+{
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    r->core_env = core_env;
+    r->star1   = repl_intern_special(S, core_env, "*1");
+    r->star2   = repl_intern_special(S, core_env, "*2");
+    r->star3   = repl_intern_special(S, core_env, "*3");
+    r->stare   = repl_intern_special(S, core_env, "*e");
+    r->cmdargs = repl_intern_special(S, core_env, "*command-line-args*");
+    r->file    = repl_intern_special(S, core_env, "*file*");
+
+    /* *command-line-args*: skip past the script path / -e expression so the
+     * first entry the script sees is the first argument *after* itself. In
+     * REPL mode (no file, no -e) this is the empty list. */
+    {
+        int args_start = (first < argc) ? first + 1 : argc;
+        repl_set_special(S, core_env, r->cmdargs, "*command-line-args*",
+                         build_cmd_args(S, argc, argv, args_start));
+    }
+    /* *file*: filled in later when entering file mode; stays
+     * "NO_SOURCE_PATH" for the REPL and -e modes, matching the canon
+     * convention. */
+    repl_set_special(S, core_env, r->file, "*file*",
+                     mino_string(S, "NO_SOURCE_PATH"));
+}
+
+/* Rotate *1 → *2 → *3 and install `result` as the new *1. Called after each
+ * successful REPL eval, including when result is nil. */
+static void repl_specials_rotate(mino_state_t *S, repl_specials_t *r,
+                                 mino_val_t *result)
+{
+    mino_val_t *prev1 = (r->star1 != NULL) ? r->star1->as.var.root
+                                           : mino_nil(S);
+    mino_val_t *prev2 = (r->star2 != NULL) ? r->star2->as.var.root
+                                           : mino_nil(S);
+    repl_set_special(S, r->core_env, r->star3, "*3", prev2);
+    repl_set_special(S, r->core_env, r->star2, "*2", prev1);
+    repl_set_special(S, r->core_env, r->star1, "*1", result);
+}
+
+/* Capture the current diagnostic into *e as a structured map.
+ * mino_last_error_map() materializes the map representation of the
+ * pending diagnostic, which becomes *e for the next user-side query. */
+static void repl_specials_capture_error(mino_state_t *S, repl_specials_t *r)
+{
+    mino_val_t *err = mino_last_error_map(S);
+    repl_set_special(S, r->core_env, r->stare, "*e", err);
+}
+
 /* ---- helpers ---- */
 
 static int is_unterminated_error(const char *msg)
@@ -641,6 +747,9 @@ int main(int argc, char **argv)
     mino_install_proc(S, env);
     mino_set_resolver(S, cwd_resolve, NULL);
 
+    repl_specials_t specials;
+    repl_specials_init(S, &specials, argc, argv, first);
+
     /* Subcommand: mino deps */
     if (!dash_dash && first < argc && strcmp(argv[first], "deps") == 0) {
         exit_code = run_deps(S, env);
@@ -696,7 +805,10 @@ int main(int argc, char **argv)
 
     /* File mode: evaluate a script and exit. */
     if (first < argc) {
-        mino_val_t *result = mino_load_file(S, argv[first], env);
+        mino_val_t *result;
+        repl_set_special(S, specials.core_env, specials.file, "*file*",
+                         mino_string(S, argv[first]));
+        result = mino_load_file(S, argv[first], env);
         if (result == NULL) {
             const mino_diag_t *d = mino_last_diag(S);
             if (d != NULL) {
@@ -818,7 +930,9 @@ int main(int argc, char **argv)
                     fprintf(stderr, "eval error: %s\n",
                             err ? err : "unknown");
                 }
+                repl_specials_capture_error(S, &specials);
             } else {
+                repl_specials_rotate(S, &specials, result);
                 mino_println(S, result);
             }
 
