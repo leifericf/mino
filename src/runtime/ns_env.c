@@ -129,11 +129,11 @@ mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
     return sym;
 }
 
-/* Update clojure.core/*ns*'s root binding to a fresh symbol naming the
- * current namespace, so (deref (find-var 'clojure.core/*ns*)) tracks
- * user-visible namespace switches. No-op when the var has not yet been
- * interned (init order: install.c interns it after the primitives are
- * registered). */
+/* Update the clojure.core *ns* var's root binding to a fresh symbol
+ * naming the current namespace, so deref of (find-var) on the qualified
+ * name tracks user-visible namespace switches. No-op when the var has
+ * not yet been interned (init order: install.c interns it after the
+ * primitives are registered). */
 void mino_publish_current_ns(mino_state_t *S)
 {
     mino_val_t *var;

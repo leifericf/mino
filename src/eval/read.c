@@ -1505,7 +1505,6 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
     char        prefix[256];
     size_t      prefix_len = 0;
     int         saw_double_colon = 0;
-    mino_val_t *m;
     mino_val_t *out;
     int         line = S->reader_line;
     int         col  = S->reader_col;

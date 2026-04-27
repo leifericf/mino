@@ -595,6 +595,7 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
                          mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *rest = args;
+    (void)env;
     (void)tail;
     while (mino_is_cons(rest)) {
         mino_val_t *sym = rest->as.cons.car;
