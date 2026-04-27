@@ -34,6 +34,7 @@
 (require "tests/phase3_test")
 (require "tests/finally_test")
 (require "tests/protocol_test")
+(require "tests/core_protocols_test")
 (require "tests/iteration_test")
 (require "tests/metadata_test")
 (require "tests/transducer_test")
