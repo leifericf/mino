@@ -71,6 +71,7 @@
 (require "tests/clojure_string_test")
 (require "tests/spawn_stress_regression")
 (require "tests/tasks_test")
+(require "tests/records_test")
 (require "tests/async_buffer_test")
 (require "tests/async_api_test")
 (require "tests/async_alts_test")

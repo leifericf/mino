@@ -433,6 +433,30 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return v == NULL ? def_val : v;
         }
     }
+    if (fn->type == MINO_RECORD) {
+        /* (record :key) and (record :key default) -- same lookup
+         * surface as map. Goes through record_field_index (declared
+         * fields) and falls back to ext lookup before returning the
+         * default. */
+        if (nargs < 1 || nargs > 2) {
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "record as function takes 1 or 2 arguments");
+            return NULL;
+        }
+        {
+            mino_val_t *key     = args->as.cons.car;
+            mino_val_t *def_val = nargs == 2
+                ? args->as.cons.cdr->as.cons.car
+                : mino_nil(S);
+            int idx = record_field_index(fn, key);
+            if (idx >= 0) return fn->as.record.vals[idx];
+            if (fn->as.record.ext != NULL) {
+                mino_val_t *v = map_get_val(fn->as.record.ext, key);
+                if (v != NULL) return v;
+            }
+            return def_val;
+        }
+    }
     if (fn->type == MINO_VECTOR) {
         /* ([1 2 3] 0) => (nth [1 2 3] 0). */
         if (nargs != 1) {

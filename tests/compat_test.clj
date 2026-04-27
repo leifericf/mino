@@ -274,24 +274,8 @@
 ;; --- Platform-specific forms throw ---
 
 (deftest jvm-forms-throw-with-clear-message
-  (testing "defrecord throws because mino has no JVM classes"
-    (is (thrown? (defrecord Foo [x y])))
-    (is (= :defrecord
-           (:mino/unsupported
-            (try (defrecord Foo [x y]) nil
-                 (catch e (ex-data e)))))))
-
-  (testing "deftype throws"
-    (is (thrown? (deftype Bar [x]))))
-
-  (testing "reify throws"
-    (is (thrown? (reify Object (toString [this] "hi")))))
-
   (testing "import throws as a top-level form"
-    (is (thrown? (import java.util.Date))))
-
-  (testing "instance? throws"
-    (is (thrown? (instance? String "abc")))))
+    (is (thrown? (import java.util.Date)))))
 
 ;; --- #?@ splice in maps ---
 

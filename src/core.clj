@@ -2396,17 +2396,56 @@
 ;; learn about the gap immediately and library failures point at the
 ;; real cause.
 
-(defmacro defrecord [& _]
-  (throw (ex-info "defrecord is not supported on mino — use maps and protocols instead"
-                  {:mino/unsupported :defrecord})))
+(defmacro defrecord
+  "Defines a record type Name with the given fields and optional
+   inline protocol specs. Establishes:
+     Name       — the MINO_TYPE value (used by extend-type and
+                  instance? as the dispatch key)
+     ->Name     — positional constructor: (->Name f1 f2 ...) returns
+                  a record value
+     map->Name  — map constructor: (map->Name {:f1 v1 :f2 v2}) reads
+                  declared fields from the map; non-field keys land
+                  in ext.
 
-(defmacro deftype [& _]
-  (throw (ex-info "deftype is not supported on mino — use maps and protocols instead"
-                  {:mino/unsupported :deftype})))
+   Fields must be a vector of symbols; they are stored as keywords
+   on the type. Specs follow the same shape as extend-type:
+   protocol-name followed by one or more (method [args] body) forms."
+  [name fields & specs]
+  (let [ns-str    (str (ns-name *ns*))
+        name-str  (str name)
+        ctor      (symbol (str "->" name))
+        map-ctor  (symbol (str "map->" name))
+        field-kws (mapv (fn [f] (keyword (str f))) fields)
+        forms     [(list 'def name (list 'defrecord* ns-str name-str field-kws))
+                   (list 'defn ctor fields
+                         (list 'record* name (vec fields)))
+                   (list 'defn map-ctor ['m]
+                         (list 'record-from-map name 'm))]]
+    (apply list 'do (if (seq specs)
+                      (conj forms (apply list 'extend-type name specs))
+                      forms))))
 
-(defmacro reify [& _]
-  (throw (ex-info "reify is not supported on mino — use a fn or a map of methods"
-                  {:mino/unsupported :reify})))
+(defmacro deftype
+  "Alias for defrecord. mino has no separate JVM-class layer to
+   expose, so the deftype/defrecord distinction collapses; values
+   created either way are real types with map-isomorphic behaviour."
+  [name fields & specs]
+  (apply list 'defrecord name fields specs))
+
+(defmacro reify
+  "Returns an instance of a fresh anonymous record type that
+   satisfies the named protocols. Each reify form generates one
+   type at expansion time; repeated invocations of the form share
+   that type, so (= (type r1) (type r2)) is true for two values
+   produced by the same reify form."
+  [& specs]
+  (let [ns-str   (str (ns-name *ns*))
+        sym      (gensym "reify_T_")
+        name-str (str sym)
+        T        (gensym "T")]
+    (list 'let [T (list 'defrecord* ns-str name-str [])]
+          (apply list 'extend-type T specs)
+          (list 'record* T []))))
 
 (defmacro proxy [& _]
   (throw (ex-info "proxy is not supported on mino — there is no JVM to subclass"
