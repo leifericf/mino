@@ -4,6 +4,8 @@
 
 #include "prim/internal.h"
 
+static const char *bundled_lib_lookup(mino_state_t *S, const char *name);
+
 static int kw_match(const mino_val_t *v, const char *s)
 {
     size_t n;
@@ -24,6 +26,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *name_val;
     const char *name;
     const char *path;
+    const char *bundled_source = NULL;
     size_t      i;
     mino_val_t *result;
     if (!mino_is_cons(args)) {
@@ -488,6 +491,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                           S->module_resolver_ctx);
                 if (resolved != NULL) has_file = 1;
             }
+            /* A bundled lib is "loadable" too -- treat the same as
+             * disk presence so we don't short-circuit to nil based on
+             * already-installed C primitives in the ns env. */
+            if (!has_file && bundled_lib_lookup(S, name) != NULL) {
+                has_file = 1;
+            }
             if (!has_file) {
                 for (k = 0; k < nl; k++) dotted[k] = (name[k] == '/') ? '.' : name[k];
                 dotted[nl] = '\0';
@@ -524,17 +533,26 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return NULL;
         }
     }
-    /* Resolve. */
-    if (S->module_resolver == NULL) {
-        set_eval_diag(S, S->eval_current_form, "name", "MNS001", "require: no module resolver configured");
-        return NULL;
-    }
-    path = S->module_resolver(name, S->module_resolver_ctx);
-    if (path == NULL) {
-        char msg[300];
-        snprintf(msg, sizeof(msg), "require: cannot resolve module: %s", name);
-        set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
-        return NULL;
+    /* Resolve. The bundled-stdlib registry wins over the disk resolver
+     * so brew/scoop installs without a lib/ directory still load
+     * (require '[clojure.string]) cleanly. A name registered as a
+     * bundled lib stays bundled regardless of resolver state, since
+     * the embed-time install hook is the explicit opt-in. */
+    bundled_source = bundled_lib_lookup(S, name);
+    if (bundled_source != NULL) {
+        path = NULL;
+    } else {
+        if (S->module_resolver == NULL) {
+            set_eval_diag(S, S->eval_current_form, "name", "MNS001", "require: no module resolver configured");
+            return NULL;
+        }
+        path = S->module_resolver(name, S->module_resolver_ctx);
+        if (path == NULL) {
+            char msg[300];
+            snprintf(msg, sizeof(msg), "require: cannot resolve module: %s", name);
+            set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
+            return NULL;
+        }
     }
     /* Push name onto load stack before loading; pop after. */
     if (S->load_stack_len == S->load_stack_cap) {
@@ -564,7 +582,20 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     {
         const char *saved_ns = S->current_ns;
         const char *post_ns;
-        result  = mino_load_file(S, path, env);
+        if (bundled_source != NULL) {
+            /* Bundled load: eval the in-memory source directly. Set
+             * reader_file to a synthetic <bundled name> path so any
+             * diagnostics produced during eval point at something
+             * meaningful instead of inheriting the caller's file. */
+            const char *saved_file = S->reader_file;
+            char        synth[256];
+            snprintf(synth, sizeof(synth), "<bundled %s>", name);
+            S->reader_file = intern_filename(S, synth);
+            result         = mino_eval_string(S, bundled_source, env);
+            S->reader_file = saved_file;
+        } else {
+            result = mino_load_file(S, path, env);
+        }
         post_ns = S->current_ns;
         S->current_ns = saved_ns;
         /* Re-publish *ns* to track the restored ns. Inside the loaded
@@ -623,8 +654,10 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     if (strcmp(post_canon, expected) != 0) {
                         char msg[512];
                         snprintf(msg, sizeof(msg),
-                            "require: file %s declared namespace %s, expected %s",
-                            path, post_ns, expected);
+                            "require: %s %s declared namespace %s, expected %s",
+                            (path != NULL ? "file" : "bundled"),
+                            (path != NULL ? path  : name),
+                            post_ns, expected);
                         set_eval_diag(S, S->eval_current_form,
                             "name", "MNS001", msg);
                         return NULL;
@@ -888,6 +921,50 @@ void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx)
 {
     S->module_resolver     = fn;
     S->module_resolver_ctx = ctx;
+}
+
+void mino_register_bundled_lib(mino_state_t *S, const char *name,
+                                const char *source)
+{
+    size_t i;
+    size_t nlen;
+    char  *dup;
+    if (S == NULL || name == NULL || source == NULL) return;
+    /* Replace if already present. */
+    for (i = 0; i < S->bundled_libs_len; i++) {
+        if (strcmp(S->bundled_libs[i].name, name) == 0) {
+            S->bundled_libs[i].source = source;
+            return;
+        }
+    }
+    if (S->bundled_libs_len == S->bundled_libs_cap) {
+        size_t new_cap = S->bundled_libs_cap == 0 ? 8
+                       : S->bundled_libs_cap * 2;
+        bundled_lib_entry_t *nb = (bundled_lib_entry_t *)realloc(
+            S->bundled_libs, new_cap * sizeof(*nb));
+        if (nb == NULL) return; /* silent: best-effort, caller can re-try */
+        S->bundled_libs     = nb;
+        S->bundled_libs_cap = new_cap;
+    }
+    nlen = strlen(name);
+    dup  = (char *)malloc(nlen + 1);
+    if (dup == NULL) return;
+    memcpy(dup, name, nlen + 1);
+    S->bundled_libs[S->bundled_libs_len].name   = dup;
+    S->bundled_libs[S->bundled_libs_len].source = source;
+    S->bundled_libs_len++;
+}
+
+/* Returns the bundled source for `name`, or NULL if not registered. */
+static const char *bundled_lib_lookup(mino_state_t *S, const char *name)
+{
+    size_t i;
+    for (i = 0; i < S->bundled_libs_len; i++) {
+        if (strcmp(S->bundled_libs[i].name, name) == 0) {
+            return S->bundled_libs[i].source;
+        }
+    }
+    return NULL;
 }
 
 const mino_prim_def k_prims_module[] = {

@@ -141,6 +141,17 @@ static void state_free_module_cache(mino_state_t *S)
     free(S->load_stack);
 }
 
+/* Free the bundled-stdlib registry: per-entry names, then the array.
+ * Source pointers are static literals and not freed. */
+static void state_free_bundled_libs(mino_state_t *S)
+{
+    size_t i;
+    for (i = 0; i < S->bundled_libs_len; i++) {
+        free(S->bundled_libs[i].name);
+    }
+    free(S->bundled_libs);
+}
+
 /* Truncate the load stack back to LEN, freeing any entries pushed past
  * that point. Used when a throw unwinds out of a require call before its
  * normal cleanup runs. */
@@ -304,6 +315,7 @@ void mino_state_free(mino_state_t *S)
     free(S->var_registry);
     state_free_host_types(S);
     state_free_module_cache(S);
+    state_free_bundled_libs(S);
     state_free_meta_table(S);
     state_free_intern_tables(S);
     state_free_record_types(S);

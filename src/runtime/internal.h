@@ -52,6 +52,14 @@ typedef struct {
     mino_val_t *value;
 } module_entry_t;
 
+/* Bundled-stdlib registry entry. Source pointer is a static C-string
+ * literal in a generated header (e.g. lib_clojure_string.h); never
+ * freed. Name is malloc-owned (copied in mino_register_bundled_lib). */
+typedef struct {
+    char       *name;
+    const char *source;
+} bundled_lib_entry_t;
+
 /* Metadata table entry. */
 typedef struct {
     char       *name;
@@ -329,6 +337,15 @@ struct mino_state {
     char          **load_stack;
     size_t          load_stack_len;
     size_t          load_stack_cap;
+    /* Bundled-stdlib registry: name -> static C-string source pointer.
+     * Populated by mino_install_clojure_<name> hooks. Consulted by
+     * (require ...) before the disk resolver, so brew/scoop installs
+     * with no lib/ on disk still load the bundled namespaces. The
+     * source pointers are static literals in generated headers and
+     * are never freed; only the array storage is malloc-owned. */
+    bundled_lib_entry_t *bundled_libs;
+    size_t               bundled_libs_len;
+    size_t               bundled_libs_cap;
 
     /* Metadata */
     meta_entry_t   *meta_table;

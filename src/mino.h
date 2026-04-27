@@ -772,6 +772,25 @@ typedef const char *(*mino_resolve_fn)(const char *name, void *ctx);
  */
 void mino_set_resolver(mino_state_t *S, mino_resolve_fn fn, void *ctx);
 
+/*
+ * Register a bundled-stdlib source under `name`. Subsequent calls to
+ * (require '<name>) load this in-memory source instead of going to the
+ * disk resolver, so embeds and brew/scoop installs without a lib/
+ * directory still resolve their bundled namespaces.
+ *
+ * The source pointer must outlive the state -- typically a static
+ * C-string literal in a generated header (e.g. lib_clojure_string.h).
+ * The name is copied and freed at state teardown. Re-registering the
+ * same name silently replaces the previous source.
+ *
+ * Use mino_install_clojure_<name> wrappers (declared below) when an
+ * install hook fits the embedder's group; this raw API is exposed for
+ * embedders that bundle their own non-clojure namespaces (mirroring
+ * mino_set_resolver for the disk path).
+ */
+void mino_register_bundled_lib(mino_state_t *S, const char *name,
+                                const char *source);
+
 /* ------------------------------------------------------------------------- */
 /* Execution limits                                                          */
 /* ------------------------------------------------------------------------- */
