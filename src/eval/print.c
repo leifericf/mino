@@ -298,6 +298,48 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
             fputs(v->as.record_type.name, out);
         }
         return;
+    case MINO_RECORD: {
+        /* #ns.Name{:f1 v1, :f2 v2, ...[ext...]} -- declared fields
+         * first in declared order, then ext entries in insertion
+         * order. */
+        const mino_val_t *t      = v->as.record.type;
+        mino_val_t       *fields = t->as.record_type.fields;
+        size_t            i, n_fields;
+        int               first  = 1;
+        fputc('#', out);
+        if (t->as.record_type.ns != NULL) {
+            fputs(t->as.record_type.ns, out);
+            fputc('.', out);
+        }
+        if (t->as.record_type.name != NULL) {
+            fputs(t->as.record_type.name, out);
+        }
+        fputc('{', out);
+        S->print_depth++;
+        n_fields = (fields != NULL) ? fields->as.vec.len : 0;
+        for (i = 0; i < n_fields; i++) {
+            if (!first) fputs(", ", out);
+            first = 0;
+            mino_print_to(S, out, vec_nth(fields, i));
+            fputc(' ', out);
+            mino_print_to(S, out, v->as.record.vals[i]);
+        }
+        if (v->as.record.ext != NULL) {
+            const mino_val_t *e = v->as.record.ext;
+            size_t k;
+            for (k = 0; k < e->as.map.len; k++) {
+                mino_val_t *key = vec_nth(e->as.map.key_order, k);
+                if (!first) fputs(", ", out);
+                first = 0;
+                mino_print_to(S, out, key);
+                fputc(' ', out);
+                mino_print_to(S, out, map_get_val(e, key));
+            }
+        }
+        S->print_depth--;
+        fputc('}', out);
+        return;
+    }
     }
 }
 

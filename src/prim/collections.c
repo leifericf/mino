@@ -172,6 +172,12 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET: return mino_int(S, (long long)coll->as.sorted.len);
     case MINO_STRING: return mino_int(S, (long long)coll->as.s.len);
+    case MINO_RECORD: {
+        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        size_t n = (fields != NULL) ? fields->as.vec.len : 0;
+        if (coll->as.record.ext != NULL) n += coll->as.record.ext->as.map.len;
+        return mino_int(S, (long long)n);
+    }
     case MINO_LAZY: {
         /* Force the entire lazy seq and count it. */
         mino_val_t *forced = lazy_force(S, coll);
@@ -595,6 +601,61 @@ mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
+    if (coll->type == MINO_RECORD) {
+        /* Each pair: declared field => copy vals, update slot. Ext
+         * key => share vals, update ext map (allocating one if
+         * needed). The new record keeps its type, so (record? r')
+         * stays true and dispatch on (type r') is unchanged. */
+        mino_val_t *acc = coll;
+        p = args->as.cons.cdr;
+        for (i = 0; i < extra_pairs; i++) {
+            mino_val_t *k = p->as.cons.car;
+            mino_val_t *v = p->as.cons.cdr->as.cons.car;
+            int         idx;
+            mino_val_t *new_rec;
+            mino_val_t *fields = acc->as.record.type->as.record_type.fields;
+            size_t      n_fields = (fields != NULL) ? fields->as.vec.len : 0;
+            idx = record_field_index(acc, k);
+            new_rec = alloc_val(S, MINO_RECORD);
+            if (new_rec == NULL) {
+                return prim_throw_classified(S, "internal", "MIN001",
+                    "assoc: failed to allocate record");
+            }
+            new_rec->as.record.type = acc->as.record.type;
+            if (n_fields > 0) {
+                size_t j;
+                mino_val_t **slots = (mino_val_t **)malloc(
+                    n_fields * sizeof(*slots));
+                if (slots == NULL) {
+                    return prim_throw_classified(S, "internal", "MIN001",
+                        "assoc: out of memory");
+                }
+                for (j = 0; j < n_fields; j++) slots[j] = acc->as.record.vals[j];
+                if (idx >= 0) slots[idx] = v;
+                new_rec->as.record.vals = slots;
+            }
+            if (idx < 0) {
+                /* Ext key: build/extend the ext map. */
+                mino_val_t *ext = acc->as.record.ext;
+                mino_val_t *new_ext;
+                mino_val_t *kv_args = mino_cons(S, k,
+                                       mino_cons(S, v, mino_nil(S)));
+                if (ext == NULL) {
+                    new_ext = mino_map(S, NULL, NULL, 0);
+                } else {
+                    new_ext = ext;
+                }
+                new_ext = map_assoc_pairs(S, new_ext, kv_args, 1);
+                new_rec->as.record.ext = new_ext;
+            } else {
+                new_rec->as.record.ext = acc->as.record.ext;
+            }
+            new_rec->meta = acc->meta;
+            acc = new_rec;
+            p = p->as.cons.cdr->as.cons.cdr;
+        }
+        return acc;
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "assoc: expected a map or vector, got %s",
@@ -660,6 +721,15 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return def_val;
         }
         return mino_string_n(S, coll->as.s.data + idx, 1);
+    }
+    if (coll->type == MINO_RECORD) {
+        int idx = record_field_index(coll, key);
+        if (idx >= 0) return coll->as.record.vals[idx];
+        if (coll->as.record.ext != NULL) {
+            mino_val_t *v = map_get_val(coll->as.record.ext, key);
+            if (v != NULL) return v;
+        }
+        return def_val;
     }
     return def_val;
 }
@@ -790,6 +860,30 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_SET    && coll->as.set.len == 0) return mino_nil(S);
     if (coll->type == MINO_SORTED_SET)                      return mino_nil(S);
     if (coll->type == MINO_STRING && coll->as.s.len == 0) return mino_nil(S);
+    if (coll->type == MINO_RECORD) {
+        /* Declared field keywords first in declared order, then ext
+         * keys in insertion order. */
+        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
+        for (i = 0; i < n_fields; i++) {
+            mino_val_t *cell = mino_cons(S, vec_nth(fields, i), mino_nil(S));
+            if (tail == NULL) head = cell;
+            else mino_cons_cdr_set(S, tail, cell);
+            tail = cell;
+        }
+        if (coll->as.record.ext != NULL) {
+            const mino_val_t *e = coll->as.record.ext;
+            size_t k;
+            for (k = 0; k < e->as.map.len; k++) {
+                mino_val_t *cell = mino_cons(S,
+                    vec_nth(e->as.map.key_order, k), mino_nil(S));
+                if (tail == NULL) head = cell;
+                else mino_cons_cdr_set(S, tail, cell);
+                tail = cell;
+            }
+        }
+        return head;
+    }
     if (coll->type != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "keys: argument must be a map");
     }
@@ -838,6 +932,30 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_SET    && coll->as.set.len == 0) return mino_nil(S);
     if (coll->type == MINO_SORTED_SET)                      return mino_nil(S);
     if (coll->type == MINO_STRING && coll->as.s.len == 0)   return mino_nil(S);
+    if (coll->type == MINO_RECORD) {
+        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
+        for (i = 0; i < n_fields; i++) {
+            mino_val_t *cell = mino_cons(S, coll->as.record.vals[i],
+                                          mino_nil(S));
+            if (tail == NULL) head = cell;
+            else mino_cons_cdr_set(S, tail, cell);
+            tail = cell;
+        }
+        if (coll->as.record.ext != NULL) {
+            const mino_val_t *e = coll->as.record.ext;
+            size_t k;
+            for (k = 0; k < e->as.map.len; k++) {
+                mino_val_t *ek = vec_nth(e->as.map.key_order, k);
+                mino_val_t *cell = mino_cons(S, map_get_val(e, ek),
+                                              mino_nil(S));
+                if (tail == NULL) head = cell;
+                else mino_cons_cdr_set(S, tail, cell);
+                tail = cell;
+            }
+        }
+        return head;
+    }
     if (coll->type != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "vals: argument must be a map");
     }
@@ -940,6 +1058,14 @@ mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "contains?: string key must be an integer");
     }
+    if (coll->type == MINO_RECORD) {
+        if (record_field_index(coll, key) >= 0) return mino_true(S);
+        if (coll->as.record.ext != NULL
+            && map_get_val(coll->as.record.ext, key) != NULL) {
+            return mino_true(S);
+        }
+        return mino_false(S);
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg),
@@ -1030,6 +1156,138 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             p = p->as.cons.cdr;
         }
         return coll;
+    }
+    if (coll->type == MINO_RECORD) {
+        /* Record dissoc: dropping a declared field degrades to a
+         * plain map (canonical Clojure behaviour); dropping an ext
+         * key returns a new record with the ext map updated. Each
+         * key is processed in order against the running accumulator,
+         * which may flip from RECORD to MAP partway through. */
+        mino_val_t *acc = coll;
+        p = args->as.cons.cdr;
+        while (mino_is_cons(p)) {
+            mino_val_t *key = p->as.cons.car;
+            if (acc->type == MINO_RECORD) {
+                int idx = record_field_index(acc, key);
+                if (idx >= 0) {
+                    /* Degrade: build a plain map from declared fields
+                     * (skipping the dissoc'd one) and the ext entries. */
+                    mino_val_t *fields = acc->as.record.type
+                        ->as.record_type.fields;
+                    size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
+                    size_t cap = n_fields - 1;
+                    size_t mi  = 0;
+                    size_t j;
+                    mino_val_t **mk;
+                    mino_val_t **mv;
+                    if (acc->as.record.ext != NULL) {
+                        cap += acc->as.record.ext->as.map.len;
+                    }
+                    mk = (cap > 0) ? (mino_val_t **)gc_alloc_typed(S,
+                        GC_T_VALARR, cap * sizeof(*mk)) : NULL;
+                    mv = (cap > 0) ? (mino_val_t **)gc_alloc_typed(S,
+                        GC_T_VALARR, cap * sizeof(*mv)) : NULL;
+                    for (j = 0; j < n_fields; j++) {
+                        if ((int)j == idx) continue;
+                        mk[mi] = vec_nth(fields, j);
+                        mv[mi] = acc->as.record.vals[j];
+                        mi++;
+                    }
+                    if (acc->as.record.ext != NULL) {
+                        const mino_val_t *e = acc->as.record.ext;
+                        size_t k;
+                        for (k = 0; k < e->as.map.len; k++) {
+                            mino_val_t *ek = vec_nth(e->as.map.key_order, k);
+                            mk[mi] = ek;
+                            mv[mi] = map_get_val(e, ek);
+                            mi++;
+                        }
+                    }
+                    acc = mino_map(S, mk, mv, mi);
+                } else if (acc->as.record.ext != NULL
+                           && map_get_val(acc->as.record.ext, key) != NULL) {
+                    /* Ext key drop: rebuild ext without it, keep
+                     * record. */
+                    const mino_val_t *e   = acc->as.record.ext;
+                    size_t            len = e->as.map.len;
+                    mino_val_t      **ek  = (mino_val_t **)gc_alloc_typed(S,
+                        GC_T_VALARR, (len > 0 ? len : 1) * sizeof(*ek));
+                    mino_val_t      **ev  = (mino_val_t **)gc_alloc_typed(S,
+                        GC_T_VALARR, (len > 0 ? len : 1) * sizeof(*ev));
+                    size_t  ext_n  = 0;
+                    size_t  k, n_fields_acc;
+                    mino_val_t  *new_rec, *new_ext;
+                    mino_val_t **slots;
+                    mino_val_t  *fields_acc;
+                    for (k = 0; k < len; k++) {
+                        mino_val_t *kk = vec_nth(e->as.map.key_order, k);
+                        if (!mino_eq(kk, key)) {
+                            ek[ext_n] = kk;
+                            ev[ext_n] = map_get_val(e, kk);
+                            ext_n++;
+                        }
+                    }
+                    new_ext = (ext_n > 0)
+                        ? mino_map(S, ek, ev, ext_n) : NULL;
+                    new_rec = alloc_val(S, MINO_RECORD);
+                    if (new_rec == NULL) {
+                        return prim_throw_classified(S, "internal", "MIN001",
+                            "dissoc: failed to allocate record");
+                    }
+                    new_rec->as.record.type = acc->as.record.type;
+                    fields_acc = acc->as.record.type->as.record_type.fields;
+                    n_fields_acc = (fields_acc != NULL)
+                        ? fields_acc->as.vec.len : 0;
+                    if (n_fields_acc > 0) {
+                        slots = (mino_val_t **)malloc(
+                            n_fields_acc * sizeof(*slots));
+                        if (slots == NULL) {
+                            return prim_throw_classified(S, "internal",
+                                "MIN001", "dissoc: out of memory");
+                        }
+                        for (k = 0; k < n_fields_acc; k++) {
+                            slots[k] = acc->as.record.vals[k];
+                        }
+                        new_rec->as.record.vals = slots;
+                    }
+                    new_rec->as.record.ext = new_ext;
+                    new_rec->meta          = acc->meta;
+                    acc = new_rec;
+                }
+                /* else: key not in declared fields and not in ext;
+                 * dissoc is a no-op (matches map dissoc semantics). */
+            } else {
+                /* acc is already a plain map (degraded earlier); drop
+                 * the key the normal way. */
+                uint32_t h = hash_val(key);
+                if (hamt_get(acc->as.map.root, key, h, 0u) != NULL) {
+                    mino_val_t *new_map = alloc_val(S, MINO_MAP);
+                    mino_val_t *order   = mino_vector(S, NULL, 0);
+                    mino_hamt_node_t *root = NULL;
+                    size_t mi;
+                    size_t new_len = 0;
+                    for (mi = 0; mi < acc->as.map.len; mi++) {
+                        mino_val_t *k = vec_nth(acc->as.map.key_order, mi);
+                        if (!mino_eq(k, key)) {
+                            mino_val_t   *v  = map_get_val(acc, k);
+                            hamt_entry_t *e2 = hamt_entry_new(S, k, v);
+                            uint32_t      h2 = hash_val(k);
+                            int rep = 0;
+                            root = hamt_assoc(S, root, e2, h2, 0u, &rep);
+                            order = vec_conj1(S, order, k);
+                            new_len++;
+                        }
+                    }
+                    new_map->as.map.root      = root;
+                    new_map->as.map.key_order = order;
+                    new_map->as.map.len       = new_len;
+                    new_map->meta             = acc->meta;
+                    acc = new_map;
+                }
+            }
+            p = p->as.cons.cdr;
+        }
+        return acc;
     }
     if (coll->type != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "dissoc: first argument must be a map");

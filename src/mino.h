@@ -89,13 +89,20 @@ typedef enum {
                      * unscaled bigint plus a non-negative integer
                      * scale: value = unscaled * 10^-scale. Constructed
                      * from `1.5M` / `1M` literals or via `(bigdec x)`. */
-    MINO_TYPE       /* first-class record type. Carries identity (ptr),
+    MINO_TYPE,      /* first-class record type. Carries identity (ptr),
                      * defining namespace, unqualified name, and an
                      * ordered vector of declared field-name keywords.
                      * Method tables are not stored here; protocol
                      * dispatch lives in the protocol's namespace,
                      * keyed by what (type x) returns. Construct via
                      * mino_defrecord. */
+    MINO_RECORD     /* record value: pointer to its MINO_TYPE plus a
+                     * malloc-owned array of field-value slots and an
+                     * optional MINO_MAP for extension keys. Storage
+                     * is field slots, not a backing map; map-iso
+                     * behaviour (get, assoc, seq, count, ...) is a
+                     * contract layered on top via primitive dispatch
+                     * on this tag. Construct via mino_record. */
 } mino_type_t;
 
 typedef struct mino_val   mino_val_t;
@@ -225,6 +232,11 @@ struct mino_val {
             const char *name;    /* unqualified type name (interned) */
             mino_val_t *fields;  /* MINO_VECTOR of field-name keywords */
         } record_type;
+        struct {          /* MINO_RECORD: record value */
+            mino_val_t  *type;   /* MINO_TYPE (never NULL) */
+            mino_val_t **vals;   /* malloc-owned; len == type's field count */
+            mino_val_t  *ext;    /* MINO_MAP for ext keys, or NULL */
+        } record;
     } as;
 };
 
@@ -359,6 +371,31 @@ mino_val_t *mino_defrecord(mino_state_t *S,
 
 /* Return 1 if v is a record type (MINO_TYPE), 0 otherwise. */
 int mino_is_record_type(const mino_val_t *v);
+
+/*
+ * Build a record. type must be a MINO_TYPE returned by
+ * mino_defrecord; n_vals must equal the type's declared field count;
+ * vals[i] gives the value for the i-th declared field. The vals
+ * array is copied into a fresh malloc-owned slot vector owned by the
+ * returned record. Returns NULL on type mismatch or arity mismatch
+ * (the caller should treat NULL as a runtime error).
+ *
+ * The new record has no extension keys; assoc with an undeclared key
+ * lazily allocates the ext map.
+ */
+mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
+                        mino_val_t **vals, size_t n_vals);
+
+/*
+ * Read a declared field by name. Returns the field value (borrowed)
+ * or NULL if name is not a declared field of record's type.
+ * Extension keys are not read by this entry point; embedders can
+ * reach them via the script-level (get r :ext-key) path.
+ */
+mino_val_t *mino_record_field(const mino_val_t *record, const char *name);
+
+/* Return 1 if v is a record (MINO_RECORD), 0 otherwise. */
+int mino_is_record(const mino_val_t *v);
 
 /* ------------------------------------------------------------------------- */
 /* Transient (batch-mutation) API                                            */

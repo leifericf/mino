@@ -405,6 +405,15 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                                         coll->as.sorted.comparator);
                 return v == NULL ? def_val : v;
             }
+            if (coll != NULL && coll->type == MINO_RECORD) {
+                int idx = record_field_index(coll, fn);
+                if (idx >= 0) return coll->as.record.vals[idx];
+                if (coll->as.record.ext != NULL) {
+                    mino_val_t *v = map_get_val(coll->as.record.ext, fn);
+                    if (v != NULL) return v;
+                }
+                return def_val;
+            }
             return def_val;
         }
     }

@@ -79,6 +79,42 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return head;
     }
+    if (coll->type == MINO_RECORD) {
+        /* Declared field [k v] pairs first in declared order, then
+         * ext entries in insertion order. Returns nil for an empty
+         * record (no fields and no ext entries). */
+        mino_val_t *fields = coll->as.record.type->as.record_type.fields;
+        size_t n_fields = (fields != NULL) ? fields->as.vec.len : 0;
+        size_t ext_n = (coll->as.record.ext != NULL)
+            ? coll->as.record.ext->as.map.len : 0;
+        mino_val_t *head = mino_nil(S), *tail = NULL;
+        size_t i;
+        if (n_fields == 0 && ext_n == 0) return mino_nil(S);
+        for (i = 0; i < n_fields; i++) {
+            mino_val_t *kv[2], *cell;
+            kv[0] = vec_nth(fields, i);
+            kv[1] = coll->as.record.vals[i];
+            cell  = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
+            if (tail == NULL) head = cell;
+            else mino_cons_cdr_set(S, tail, cell);
+            tail = cell;
+        }
+        if (ext_n > 0) {
+            const mino_val_t *e = coll->as.record.ext;
+            size_t k;
+            for (k = 0; k < e->as.map.len; k++) {
+                mino_val_t *ek = vec_nth(e->as.map.key_order, k);
+                mino_val_t *kv[2], *cell;
+                kv[0] = ek;
+                kv[1] = map_get_val(e, ek);
+                cell  = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
+                if (tail == NULL) head = cell;
+                else mino_cons_cdr_set(S, tail, cell);
+                tail = cell;
+            }
+        }
+        return head;
+    }
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "seq: cannot coerce %s to a sequence",
@@ -856,6 +892,24 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         kv[0] = k;
         kv[1] = vec_nth(m, (size_t)idx);
         return mino_vector(S, kv, 2);
+    }
+    if (m->type == MINO_RECORD) {
+        int idx = record_field_index(m, k);
+        if (idx >= 0) {
+            mino_val_t *fields = m->as.record.type->as.record_type.fields;
+            kv[0] = vec_nth(fields, idx);
+            kv[1] = m->as.record.vals[idx];
+            return mino_vector(S, kv, 2);
+        }
+        if (m->as.record.ext != NULL) {
+            v = map_get_val(m->as.record.ext, k);
+            if (v != NULL) {
+                kv[0] = k;
+                kv[1] = v;
+                return mino_vector(S, kv, 2);
+            }
+        }
+        return mino_nil(S);
     }
     if (m->type != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "find: first argument must be an associative collection");

@@ -231,6 +231,13 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL)  return mino_keyword(S, "nil");
+    /* Records return their MINO_TYPE value directly so protocol
+     * dispatch keys for built-ins (keywords) and user types (type
+     * pointers) live in the same atom-keyed table. The :type
+     * metadata path runs for non-records only, keeping the keyword
+     * tagging mechanism (used by mino's multimethods and print
+     * surface) unchanged. */
+    if (v->type == MINO_RECORD) return v->as.record.type;
     /* Honor :type metadata (Clojure semantics). Enables print-method
      * dispatch for user types via (with-meta obj {:type :my-type}). */
     if (v->meta != NULL && v->meta->type == MINO_MAP) {
@@ -268,6 +275,11 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_RATIO:     return mino_keyword(S, "ratio");
     case MINO_BIGDEC:    return mino_keyword(S, "bigdec");
     case MINO_TYPE:      return mino_keyword(S, "record-type");
+    case MINO_RECORD:
+        /* Unreachable: handled above so dispatch sees the type
+         * pointer. Returning a keyword here would be a leak in the
+         * protocol-dispatch story. */
+        return v->as.record.type;
     }
     return mino_keyword(S, "unknown");
 }
@@ -307,6 +319,7 @@ DEFINE_TYPE_PRED(prim_boolean_p, (v != NULL && v->type == MINO_BOOL),          "
 DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && v->type == MINO_BOOL && v->as.b != 0),  "true?")
 DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b == 0),  "false?")
 DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && v->type == MINO_TYPE), "record-type?")
+DEFINE_TYPE_PRED(prim_record_p,      (v != NULL && v->type == MINO_RECORD), "record?")
 
 #undef DEFINE_TYPE_PRED
 
@@ -575,6 +588,164 @@ mino_val_t *prim_defrecord_star(mino_state_t *S, mino_val_t *args,
             "defrecord*: failed to construct record type");
     }
     return result;
+}
+
+/*
+ * (record* type vals-vector) -- build a record value from positional
+ * field values. Runtime helper for the script-side ->Type
+ * constructor function. n_vals must equal the type's declared field
+ * count.
+ */
+mino_val_t *prim_record_star(mino_state_t *S, mino_val_t *args,
+                             mino_env_t *env)
+{
+    mino_val_t  *type_arg, *vals_arg, *result;
+    mino_val_t **slots;
+    size_t       n, i;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "record* requires two arguments: type vals-vector");
+    }
+    type_arg = args->as.cons.car;
+    vals_arg = args->as.cons.cdr->as.cons.car;
+    if (type_arg == NULL || type_arg->type != MINO_TYPE) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "record*: first argument must be a record type");
+    }
+    if (vals_arg == NULL || vals_arg->type != MINO_VECTOR) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "record*: second argument must be a vector of field values");
+    }
+    n = vals_arg->as.vec.len;
+    slots = NULL;
+    if (n > 0) {
+        slots = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+                                              n * sizeof(*slots));
+        if (slots == NULL) {
+            return prim_throw_classified(S, "internal", "MIN001",
+                "record*: out of memory");
+        }
+        for (i = 0; i < n; i++) slots[i] = vec_nth(vals_arg, i);
+    }
+    result = mino_record(S, type_arg, slots, n);
+    if (result == NULL) {
+        char msg[160];
+        size_t expected = (type_arg->as.record_type.fields != NULL)
+            ? type_arg->as.record_type.fields->as.vec.len : 0;
+        snprintf(msg, sizeof(msg),
+            "record*: type %s.%s expects %zu field values, got %zu",
+            type_arg->as.record_type.ns ? type_arg->as.record_type.ns : "",
+            type_arg->as.record_type.name ? type_arg->as.record_type.name : "",
+            expected, n);
+        return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+    }
+    return result;
+}
+
+/*
+ * (record-from-map type m) -- build a record by reading declared
+ * fields from m by keyword; non-field keys land in ext. Runtime
+ * helper for the script-side map->Type constructor function.
+ */
+mino_val_t *prim_record_from_map(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env)
+{
+    mino_val_t  *type_arg, *map_arg, *result, *fields;
+    mino_val_t **slots;
+    size_t       n_fields, i;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "record-from-map requires two arguments: type map");
+    }
+    type_arg = args->as.cons.car;
+    map_arg  = args->as.cons.cdr->as.cons.car;
+    if (type_arg == NULL || type_arg->type != MINO_TYPE) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "record-from-map: first argument must be a record type");
+    }
+    if (map_arg == NULL || map_arg->type != MINO_MAP) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "record-from-map: second argument must be a map");
+    }
+    fields   = type_arg->as.record_type.fields;
+    n_fields = (fields != NULL) ? fields->as.vec.len : 0;
+
+    slots = NULL;
+    if (n_fields > 0) {
+        slots = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+                                              n_fields * sizeof(*slots));
+        if (slots == NULL) {
+            return prim_throw_classified(S, "internal", "MIN001",
+                "record-from-map: out of memory");
+        }
+        for (i = 0; i < n_fields; i++) {
+            mino_val_t *fk = vec_nth(fields, i);
+            mino_val_t *v  = map_get_val(map_arg, fk);
+            slots[i] = (v != NULL) ? v : mino_nil(S);
+        }
+    }
+    result = mino_record(S, type_arg, slots, n_fields);
+    if (result == NULL) {
+        return prim_throw_classified(S, "internal", "MIN001",
+            "record-from-map: failed to construct record");
+    }
+
+    /* Any keys in the source map that are not declared fields go
+     * into ext, preserving insertion order. */
+    {
+        mino_val_t **ext_keys = NULL;
+        mino_val_t **ext_vals = NULL;
+        size_t       ext_n    = 0;
+        size_t       j;
+        if (map_arg->as.map.len > 0) {
+            ext_keys = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+                map_arg->as.map.len * sizeof(*ext_keys));
+            ext_vals = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+                map_arg->as.map.len * sizeof(*ext_vals));
+            if (ext_keys == NULL || ext_vals == NULL) {
+                return prim_throw_classified(S, "internal", "MIN001",
+                    "record-from-map: out of memory");
+            }
+        }
+        for (j = 0; j < map_arg->as.map.len; j++) {
+            mino_val_t *k = vec_nth(map_arg->as.map.key_order, j);
+            if (record_field_index(result, k) < 0) {
+                ext_keys[ext_n] = k;
+                ext_vals[ext_n] = map_get_val(map_arg, k);
+                ext_n++;
+            }
+        }
+        if (ext_n > 0) {
+            result->as.record.ext = mino_map(S, ext_keys, ext_vals, ext_n);
+        }
+    }
+    return result;
+}
+
+/*
+ * (record-fields type) -- returns the declared field-name vector
+ * (keywords) for a record type. Useful for tooling and reflection.
+ */
+mino_val_t *prim_record_fields(mino_state_t *S, mino_val_t *args,
+                               mino_env_t *env)
+{
+    mino_val_t *t;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "record-fields requires one argument");
+    }
+    t = args->as.cons.car;
+    if (t == NULL || t->type != MINO_TYPE) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "record-fields: argument must be a record type");
+    }
+    return t->as.record_type.fields != NULL
+        ? t->as.record_type.fields : mino_vector(S, NULL, 0);
 }
 
 /* (throw value) -- raise a script exception. */
@@ -936,6 +1107,14 @@ const mino_prim_def k_prims_reflection[] = {
      "Runtime constructor for record types. Takes ns name fields-vector and returns the MINO_TYPE value, idempotent across calls."},
     {"record-type?", prim_record_type_p,
      "Returns true if x is a record type (the value defrecord defines)."},
+    {"record*",    prim_record_star,
+     "Runtime constructor for record values. Takes a record type and a vector of declared field values. Used by the ->Type macro expansion."},
+    {"record-from-map", prim_record_from_map,
+     "Builds a record by reading declared fields from a map; non-field keys land in ext. Used by the map->Type macro expansion."},
+    {"record-fields", prim_record_fields,
+     "Returns the declared field-name vector for a record type."},
+    {"record?",    prim_record_p,
+     "Returns true if x is a record value."},
 };
 
 const size_t k_prims_reflection_count =

@@ -416,6 +416,17 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         case MINO_TYPE:
             gc_mark_child_push(S, v->as.record_type.fields);
             break;
+        case MINO_RECORD: {
+            size_t i, n;
+            gc_mark_child_push(S, v->as.record.type);
+            gc_mark_child_push(S, v->as.record.ext);
+            n = (v->as.record.type->as.record_type.fields != NULL)
+                ? v->as.record.type->as.record_type.fields->as.vec.len : 0;
+            for (i = 0; i < n; i++) {
+                gc_mark_child_push(S, v->as.record.vals[i]);
+            }
+            break;
+        }
         default:
             break;
         }

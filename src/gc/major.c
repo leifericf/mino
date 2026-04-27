@@ -194,6 +194,9 @@ void gc_sweep(mino_state_t *S)
                                        v->as.handle.tag);
             } else if (v->type == MINO_BIGINT) {
                 mino_bigint_free(v);
+            } else if (v->type == MINO_RECORD) {
+                free(v->as.record.vals);
+                v->as.record.vals = NULL;
             }
         }
         freed_old += h->size;

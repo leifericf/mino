@@ -312,6 +312,92 @@ int mino_is_record_type(const mino_val_t *v)
     return v != NULL && v->type == MINO_TYPE;
 }
 
+mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
+                        mino_val_t **vals, size_t n_vals)
+{
+    mino_val_t  *v;
+    mino_val_t **slots;
+    size_t       expected;
+    size_t       i;
+
+    if (S == NULL || type == NULL || type->type != MINO_TYPE) {
+        return NULL;
+    }
+    expected = (type->as.record_type.fields != NULL)
+        ? type->as.record_type.fields->as.vec.len : 0;
+    if (n_vals != expected) {
+        return NULL;
+    }
+
+    slots = NULL;
+    if (n_vals > 0) {
+        slots = (mino_val_t **)malloc(n_vals * sizeof(*slots));
+        if (slots == NULL) return NULL;
+        for (i = 0; i < n_vals; i++) slots[i] = vals[i];
+    }
+    v = alloc_val(S, MINO_RECORD);
+    if (v == NULL) {
+        free(slots);
+        return NULL;
+    }
+    v->as.record.type = type;
+    v->as.record.vals = slots;
+    v->as.record.ext  = NULL;
+    return v;
+}
+
+/* Look up a declared field by index, by walking the type's fields
+ * vector and comparing keyword names. Returns the index in [0, n)
+ * or -1 if not found. Used by mino_record_field and the map-iso
+ * primitives. */
+int record_field_index(const mino_val_t *r, const mino_val_t *key)
+{
+    mino_val_t *fields;
+    size_t      i, n;
+    if (r == NULL || r->type != MINO_RECORD) return -1;
+    if (key == NULL || key->type != MINO_KEYWORD) return -1;
+    fields = r->as.record.type->as.record_type.fields;
+    if (fields == NULL) return -1;
+    n = fields->as.vec.len;
+    for (i = 0; i < n; i++) {
+        mino_val_t *fk = vec_nth(fields, i);
+        if (fk == NULL) continue;
+        if (fk->type == key->type
+            && fk->as.s.len == key->as.s.len
+            && memcmp(fk->as.s.data, key->as.s.data, key->as.s.len) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+mino_val_t *mino_record_field(const mino_val_t *record, const char *name)
+{
+    mino_val_t *fields;
+    size_t      i, n, name_len;
+    if (record == NULL || record->type != MINO_RECORD || name == NULL) {
+        return NULL;
+    }
+    fields = record->as.record.type->as.record_type.fields;
+    if (fields == NULL) return NULL;
+    n = fields->as.vec.len;
+    name_len = strlen(name);
+    for (i = 0; i < n; i++) {
+        mino_val_t *fk = vec_nth(fields, i);
+        if (fk == NULL) continue;
+        if (fk->as.s.len == name_len
+            && memcmp(fk->as.s.data, name, name_len) == 0) {
+            return record->as.record.vals[i];
+        }
+    }
+    return NULL;
+}
+
+int mino_is_record(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_RECORD;
+}
+
 
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */
@@ -722,6 +808,22 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         /* Record-type identity is pointer equality: defrecord interns
          * by (ns, name), so two equal types are the same allocation. */
         return a == b;
+    case MINO_RECORD: {
+        /* Records are equal iff their types are pointer-identical AND
+         * each declared field value is mino_eq AND the ext maps are
+         * mino_eq. Records are never equal to plain maps with the
+         * same content — type identity is part of the contract. */
+        size_t i, n;
+        if (a->as.record.type != b->as.record.type) return 0;
+        n = (a->as.record.type->as.record_type.fields != NULL)
+            ? a->as.record.type->as.record_type.fields->as.vec.len : 0;
+        for (i = 0; i < n; i++) {
+            if (!mino_eq(a->as.record.vals[i], b->as.record.vals[i])) return 0;
+        }
+        if (a->as.record.ext == NULL && b->as.record.ext == NULL) return 1;
+        if (a->as.record.ext == NULL || b->as.record.ext == NULL) return 0;
+        return mino_eq(a->as.record.ext, b->as.record.ext);
+    }
     }
     return 0;
 }

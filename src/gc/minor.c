@@ -94,6 +94,9 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
                                        v->as.handle.tag);
             } else if (v->type == MINO_BIGINT) {
                 mino_bigint_free(v);
+            } else if (v->type == MINO_RECORD) {
+                free(v->as.record.vals);
+                v->as.record.vals = NULL;
             }
         }
         freed_bytes += h->size;
@@ -261,6 +264,17 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 gc_verify_check(S, h, v->as.transient.current); break;
             case MINO_TYPE:
                 gc_verify_check(S, h, v->as.record_type.fields); break;
+            case MINO_RECORD: {
+                size_t k, kn;
+                gc_verify_check(S, h, v->as.record.type);
+                gc_verify_check(S, h, v->as.record.ext);
+                kn = (v->as.record.type->as.record_type.fields != NULL)
+                    ? v->as.record.type->as.record_type.fields->as.vec.len : 0;
+                for (k = 0; k < kn; k++) {
+                    gc_verify_check(S, h, v->as.record.vals[k]);
+                }
+                break;
+            }
             default: break;
             }
             break;

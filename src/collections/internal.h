@@ -142,6 +142,17 @@ mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
 mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key); /* borrowed */
 
 /* ------------------------------------------------------------------------- */
+/* val.c: record helpers                                                     */
+/* ------------------------------------------------------------------------- */
+
+/* Return the index of a declared field by keyword, or -1 if not found.
+ * Caller must pass a MINO_RECORD and a MINO_KEYWORD; behavior is
+ * defined to return -1 on any other input shape (used directly by
+ * the map-iso primitives so they can fall through to ext lookup or
+ * the default-value branch on type mismatch). */
+int record_field_index(const mino_val_t *r, const mino_val_t *key);
+
+/* ------------------------------------------------------------------------- */
 /* rbtree.c: persistent red-black tree operations for sorted map/set         */
 /* ------------------------------------------------------------------------- */
 

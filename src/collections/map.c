@@ -236,6 +236,24 @@ uint32_t hash_val(const mino_val_t *v)
     case MINO_TYPE:
         h = fnv_mix(h, 0x13);
         return hash_pointer_bytes(h, (uintptr_t)v);
+    case MINO_RECORD: {
+        /* Records hash by combining the type-pointer hash with each
+         * declared field's hash and the ext map's hash. Equal
+         * records hash the same; records and plain maps with the
+         * same content do not. */
+        size_t i, n;
+        h = fnv_mix(h, 0x14);
+        h = hash_pointer_bytes(h, (uintptr_t)v->as.record.type);
+        n = (v->as.record.type->as.record_type.fields != NULL)
+            ? v->as.record.type->as.record_type.fields->as.vec.len : 0;
+        for (i = 0; i < n; i++) {
+            h = hash_uint32_bytes(h, hash_val(v->as.record.vals[i]));
+        }
+        if (v->as.record.ext != NULL) {
+            h = hash_uint32_bytes(h, hash_val(v->as.record.ext));
+        }
+        return h;
+    }
     default:
         /* PRIM, FN, RECUR: identity-based. */
         h = fnv_mix(h, 0x0b);

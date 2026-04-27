@@ -206,6 +206,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     case MINO_REDUCED:
     case MINO_VAR:
     case MINO_TYPE:
+    case MINO_RECORD:
         return NULL;
     case MINO_BIGINT: {
         /* Round-trip through the base-10 string form so the destination
