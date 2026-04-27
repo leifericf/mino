@@ -1,17 +1,17 @@
 (require "tests/test")
 
-;; Numeric tower — Phase C.1 (v0.53.0) + C.2 (v0.54.0) + C.3 (v0.55.0):
-;;   Phase C.1 — MINO_BIGINT type, `1N` literal reader, `bigint` /
-;;   `biginteger` / `bigint?` constructors, cross-tier `=` and `hash`
-;;   for int/bigint, readable printer via `print-method` default.
+;; Numeric tower:
+;;   MINO_BIGINT type, `1N` literal reader, `bigint` / `biginteger` /
+;;   `bigint?` constructors, cross-tier `=` and `hash` for int/bigint,
+;;   readable printer via `print-method` default; MINO_RATIO and
+;;   MINO_BIGDEC types, `1/2` / `1M` literal readers, full tower
+;;   dispatch across the five tiers in `+/-/*/`, `<`/`<=`/`>`/`>=`, and
+;;   a `==` numeric-equality primitive. Strict `=` (no cross-tier
+;;   int/float equality) follows.
 ;;
-;;   Phase C.2 — Auto-promoting `+'` / `-'` / `*'` / `inc'` / `dec'`.
-;;   Plain `+` / `-` / `*` / `inc` / `dec` keep throwing on overflow.
-;;
-;;   Phase C.3 — MINO_RATIO and MINO_BIGDEC types, `1/2` / `1M` literal
-;;   readers, full tower dispatch across the five tiers in `+/-/*/`,
-;;   `<`/`<=`/`>`/`>=`, and a new `==` numeric-equality primitive.
-;;   Strict `=` (no cross-tier int/float equality) lands here too.
+;;   Plain `+` / `-` / `*` / `inc` / `dec` auto-promote on long
+;;   overflow; the `unchecked-+/-/*\inc\dec` family is the named
+;;   opt-in for two's-complement-wraparound int64 semantics.
 
 ;; --- reader: 1N literals produce real bigints ---
 
@@ -106,7 +106,7 @@
   (is (= :bigint (type 1N)))
   (is (= :bigint (type (bigint "12345678901234567890")))))
 
-;; --- plain arithmetic: tower-dispatched, with int overflow still throwing ---
+;; --- plain arithmetic: tower-dispatched, with auto-promote on overflow ---
 
 (deftest nt-arithmetic-plain-tower
   ;; Plain +/-/* tier-dispatch when given non-int operands. Mixed-type
@@ -120,108 +120,101 @@
   ;; their sum is `3M`. `1.0M + 2.0M` would be `3.0M`.
   (is (= 3M (+ 1M 2M)))
   (is (= 3.0M (+ 1.0M 2.0M)))
-  ;; Long overflow on homogeneous-int arithmetic keeps its throw
-  ;; semantic; use `+'` / `*'` etc. to auto-promote instead.
-  (is (thrown? (+ 9223372036854775807 1)))
-  (is (thrown? (* 1000000000 1000000000 1000000000)))
-  (is (thrown? (inc 9223372036854775807)))
-  (is (thrown? (dec -9223372036854775808))))
+  ;; Long overflow on homogeneous-int arithmetic auto-promotes to
+  ;; bigint instead of throwing.
+  (is (= 9223372036854775808N (+ 9223372036854775807 1)))
+  (is (= :bigint (type (+ 9223372036854775807 1))))
+  (is (= 1000000000000000000000000000N
+         (* 1000000000 1000000000 1000000000)))
+  (is (= 9223372036854775808N (inc 9223372036854775807)))
+  (is (= -9223372036854775809N (dec -9223372036854775808)))
+  ;; Unary - on LLONG_MIN promotes.
+  (is (= 9223372036854775808N (- -9223372036854775808)))
+  ;; Binary - that crosses LLONG_MIN promotes.
+  (is (= -9223372036854775809N (- -9223372036854775808 1))))
 
-;; --- auto-promoting +' ---
+;; --- ratio / bigdec / float in plain arithmetic ---
 
-(deftest nt-addq-basics
-  (is (= 0 (+')))
-  (is (= 5 (+' 5)))
-  (is (= 3 (+' 1 2)))
-  (is (= 10 (+' 1 2 3 4)))
-  ;; same-type bigint arithmetic
-  (is (= 6N (+' 1N 2N 3N)))
-  ;; mixed int/bigint
-  (is (= 3N (+' 1 2N)))
-  (is (= 3N (+' 1N 2)))
-  ;; overflow promotes to bigint
-  (is (= 9223372036854775808N (+' 9223372036854775807 1)))
-  (is (= :bigint (type (+' 9223372036854775807 1))))
-  ;; float anywhere collapses the tier to float
-  (is (= 2.5 (+' 1 1.5)))
-  (is (= 2.5 (+' 1.5 1)))
-  ;; float + bigint -> float (with possible precision loss for huge bigints)
-  (is (= :float (type (+' 1N 2.0)))))
+(deftest nt-arithmetic-mixed-tower
+  (is (= 0 (+)))
+  (is (= 5 (+ 5)))
+  (is (= 3 (+ 1 2)))
+  (is (= 10 (+ 1 2 3 4)))
+  (is (= 6N (+ 1N 2N 3N)))
+  (is (= 3N (+ 1 2N)))
+  (is (= 3N (+ 1N 2)))
+  (is (= 2.5 (+ 1 1.5)))
+  (is (= 2.5 (+ 1.5 1)))
+  (is (= :float (type (+ 1N 2.0))))
+  (is (= 1 (*)))
+  (is (= 5 (* 5)))
+  (is (= 12 (* 3 4)))
+  (is (= 24 (* 1 2 3 4)))
+  (is (= 6N (* 1N 2N 3N)))
+  (is (= 10000000000000000000000N (* 100000000000 100000000000)))
+  (is (= :bigint (type (* 100000000000 100000000000))))
+  (is (= 6.0 (* 2 3.0))))
 
-;; --- auto-promoting -' ---
+;; --- inc / dec on the full tower ---
 
-(deftest nt-subq-basics
-  (is (thrown? (-')))
-  (is (= -5 (-' 5)))
-  (is (= 2 (-' 5 3)))
-  (is (= -4 (-' 1 2 3)))
-  ;; bigint operands
-  (is (= 1N (-' 3N 2N)))
-  (is (= -18446744073709551613N
-         (-' -9223372036854775808N 9223372036854775805N)))
-  ;; overflow on unary negation (LLONG_MIN)
-  (is (= 9223372036854775808N (-' -9223372036854775808)))
-  ;; overflow on binary sub
-  (is (= -9223372036854775809N (-' -9223372036854775808 1)))
-  ;; float tier
-  (is (= 0.5 (-' 2 1.5)))
-  (is (= :float (type (-' 1N 0.5)))))
+(deftest nt-inc-dec-tower
+  (is (= 2 (inc 1)))
+  (is (= 0 (dec 1)))
+  (is (= 2N (inc 1N)))
+  (is (= -1N (dec 0N)))
+  (is (= 100000000000000000000N (inc 99999999999999999999N)))
+  (is (= 2.5 (inc 1.5)))
+  (is (= 0.5 (dec 1.5)))
+  (is (thrown? (inc)))
+  (is (thrown? (dec)))
+  (is (thrown? (inc 1 2)))
+  (is (thrown? (inc "x")))
+  (is (thrown? (dec nil))))
 
-;; --- auto-promoting *' ---
-
-(deftest nt-mulq-basics
-  (is (= 1 (*')))
-  (is (= 5 (*' 5)))
-  (is (= 12 (*' 3 4)))
-  (is (= 24 (*' 1 2 3 4)))
-  (is (= 6N (*' 1N 2N 3N)))
-  ;; overflow promotes to bigint
-  (is (= :bigint (type (*' 100000000000 100000000000))))
-  (is (= 10000000000000000000000N (*' 100000000000 100000000000)))
-  ;; large mixed
-  (is (= 2N (*' 2 1N)))
-  ;; float
-  (is (= 6.0 (*' 2 3.0))))
-
-;; --- auto-promoting inc' / dec' ---
-
-(deftest nt-incq-decq
-  (is (= 2 (inc' 1)))
-  (is (= 0 (dec' 1)))
-  ;; overflow promotes
-  (is (= 9223372036854775808N (inc' 9223372036854775807)))
-  (is (= -9223372036854775809N (dec' -9223372036854775808)))
-  (is (= :bigint (type (inc' 9223372036854775807))))
-  (is (= :bigint (type (dec' -9223372036854775808))))
-  ;; bigint in -> bigint out
-  (is (= 2N (inc' 1N)))
-  (is (= -1N (dec' 0N)))
-  (is (= 100000000000000000000N (inc' 99999999999999999999N)))
-  ;; float passes through
-  (is (= 2.5 (inc' 1.5)))
-  (is (= 0.5 (dec' 1.5)))
-  ;; errors
-  (is (thrown? (inc')))
-  (is (thrown? (dec')))
-  (is (thrown? (inc' 1 2)))
-  (is (thrown? (inc' "x")))
-  (is (thrown? (dec' nil))))
-
-;; --- promotion boundary: iterated inc' crosses long/bigint seam cleanly ---
+;; --- promotion boundary: iterated inc crosses long/bigint seam cleanly ---
 
 (deftest nt-iterated-promotion
-  ;; inc' applied twice across the Long max boundary stays correct.
   (let [max-long 9223372036854775807
-        over (inc' max-long)]
+        over (inc max-long)]
     (is (= :bigint (type over)))
     (is (= over 9223372036854775808N))
-    (is (= (inc' over) 9223372036854775809N)))
-  ;; dec' applied twice across the Long min boundary stays correct.
+    (is (= (inc over) 9223372036854775809N)))
   (let [min-long -9223372036854775808
-        under (dec' min-long)]
+        under (dec min-long)]
     (is (= :bigint (type under)))
     (is (= under -9223372036854775809N))
-    (is (= (dec' under) -9223372036854775810N))))
+    (is (= (dec under) -9223372036854775810N))))
+
+;; --- unchecked-* family: int64 wraparound, no promotion ---
+
+(deftest nt-unchecked-arithmetic
+  ;; Wraparound semantics. LLONG_MAX + 1 wraps to LLONG_MIN.
+  (is (= -9223372036854775808 (unchecked-add 9223372036854775807 1)))
+  (is (= -9223372036854775808 (unchecked-inc 9223372036854775807)))
+  ;; LLONG_MIN - 1 wraps to LLONG_MAX.
+  (is (= 9223372036854775807 (unchecked-subtract -9223372036854775808 1)))
+  (is (= 9223372036854775807 (unchecked-dec -9223372036854775808)))
+  ;; Multiply wraparound.
+  (is (= -9223372036854775808 (unchecked-multiply 2 4611686018427387904)))
+  ;; Negate at LLONG_MIN wraps back to itself.
+  (is (= -9223372036854775808 (unchecked-negate -9223372036854775808)))
+  (is (= -5 (unchecked-negate 5)))
+  ;; Normal arithmetic in-range.
+  (is (= 3 (unchecked-add 1 2)))
+  (is (= 2 (unchecked-subtract 5 3)))
+  (is (= 6 (unchecked-multiply 2 3)))
+  (is (= 6 (unchecked-inc 5)))
+  (is (= 4 (unchecked-dec 5)))
+  ;; Arity errors: each unchecked op is fixed-arity.
+  (is (thrown? (unchecked-add 1)))
+  (is (thrown? (unchecked-add 1 2 3)))
+  (is (thrown? (unchecked-inc 1 2)))
+  ;; Type errors: non-int operands.
+  (is (thrown? (unchecked-add 1.0 2)))
+  (is (thrown? (unchecked-multiply 1N 2)))
+  (is (thrown? (unchecked-inc "x")))
+  (is (thrown? (unchecked-dec nil)))
+  (is (thrown? (unchecked-negate nil))))
 
 ;; --- constructor edge cases ---
 
@@ -377,14 +370,14 @@
   ;; ratio? on the result.
   (is (ratio? (rationalize 0.5))))
 
-;; --- Phase C.3: tower-aware `'` siblings (also handle ratio / bigdec) ---
+;; --- Plain ops on the full tower (ratio / bigdec / inc / dec) ---
 
-(deftest nt-q-ops-tower
-  (is (= 5/6 (+' 1/2 1/3)))
-  (is (= 1/6 (-' 1/2 1/3)))
-  (is (= 1/6 (*' 1/2 1/3)))
-  (is (= 3M (+' 1M 2M)))
-  (is (= -1M (-' 1M 2M)))
-  ;; inc'/dec' on ratio.
-  (is (= 3/2 (inc' 1/2)))
-  (is (= -1/2 (dec' 1/2))))
+(deftest nt-tower-ops-mixed
+  (is (= 5/6 (+ 1/2 1/3)))
+  (is (= 1/6 (- 1/2 1/3)))
+  (is (= 1/6 (* 1/2 1/3)))
+  (is (= 3M (+ 1M 2M)))
+  (is (= -1M (- 1M 2M)))
+  ;; inc/dec on ratio.
+  (is (= 3/2 (inc 1/2)))
+  (is (= -1/2 (dec 1/2))))

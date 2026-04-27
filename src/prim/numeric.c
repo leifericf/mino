@@ -320,10 +320,11 @@ static mino_val_t *coerce_at_tier(mino_state_t *S, mino_val_t *v, int tier,
 }
 
 /* Driver. Walks args, classifies each, promotes accumulator on tier
- * increase, and applies the per-tier op. Returns the final value. */
+ * increase, and applies the per-tier op. Long-overflow on int-tier
+ * arithmetic auto-promotes the accumulator to bigint. Returns the
+ * final value. */
 static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
-                                tower_op_t op, int promote_long_overflow,
-                                const char *opname)
+                                tower_op_t op, const char *opname)
 {
     tower_acc_t acc;
     int seeded = 0;
@@ -373,19 +374,13 @@ static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
             long long out;
             if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
                 if (overflow_op(acc.iacc, x, &out)) {
-                    if (promote_long_overflow) {
-                        mino_val_t *la = mino_bigint_from_ll(S, acc.iacc);
-                        mino_val_t *lb = mino_bigint_from_ll(S, x);
-                        if (la == NULL || lb == NULL) return NULL;
-                        acc.vacc = tower_op_at_tier(S, op, TT_BIGINT, la, lb, opname);
-                        if (acc.vacc == NULL) return NULL;
-                        acc.tier = TT_BIGINT;
-                        break;
-                    }
-                    return prim_throw_classified(S, "eval/overflow", "MOV001",
-                        op == OP_ADD ? "integer overflow in +"
-                        : op == OP_SUB ? "integer overflow in -"
-                        : "integer overflow in *");
+                    mino_val_t *la = mino_bigint_from_ll(S, acc.iacc);
+                    mino_val_t *lb = mino_bigint_from_ll(S, x);
+                    if (la == NULL || lb == NULL) return NULL;
+                    acc.vacc = tower_op_at_tier(S, op, TT_BIGINT, la, lb, opname);
+                    if (acc.vacc == NULL) return NULL;
+                    acc.tier = TT_BIGINT;
+                    break;
                 }
                 acc.iacc = out;
             } else { /* OP_DIV */
@@ -475,11 +470,12 @@ static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
-    return tower_reduce(S, args, OP_ADD, 0, "+");
+    return tower_reduce(S, args, OP_ADD, "+");
 }
 
-/* (inc x) -- x + 1. Fast path for the dominant integer case; falls back
- * to the generic + primitive for non-ints so semantics stay identical. */
+/* (inc x) -- x + 1. Fast path for the dominant integer case; long
+ * overflow at LLONG_MAX promotes to bigint. Non-int operands defer to
+ * the generic + primitive so tier semantics stay identical. */
 mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *x;
@@ -491,8 +487,11 @@ mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
         if (x->as.i == LLONG_MAX) {
-            return prim_throw_classified(S, "eval/overflow", "MOV001",
-                "integer overflow in inc");
+            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+            mino_val_t *one;
+            if (lhs == NULL) return NULL;
+            one = mino_int(S, 1);
+            return mino_bigint_add(S, lhs, one);
         }
         return mino_int(S, x->as.i + 1);
     }
@@ -521,8 +520,11 @@ mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
         if (x->as.i == LLONG_MIN) {
-            return prim_throw_classified(S, "eval/overflow", "MOV001",
-                "integer overflow in dec");
+            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+            mino_val_t *one;
+            if (lhs == NULL) return NULL;
+            one = mino_int(S, 1);
+            return mino_bigint_sub(S, lhs, one);
         }
         return mino_int(S, x->as.i - 1);
     }
@@ -540,12 +542,10 @@ mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* Apply the n-ary subtract/divide step starting from a seeded acc and
- * walking the rest. Reused by prim_sub / prim_div / prim_subq.
- * promote_long_overflow=1 promotes int-overflow to bigint instead of
- * throwing (used by `-'`); 0 throws (used by `-`). */
+ * walking the rest. Long-overflow on int-tier arithmetic auto-promotes
+ * the accumulator to bigint. Reused by prim_sub and prim_div. */
 static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
                                        mino_val_t *rest, tower_op_t op,
-                                       int promote_long_overflow,
                                        const char *opname)
 {
     tower_acc_t a;
@@ -577,17 +577,13 @@ static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
             long long out;
             if (op == OP_SUB) {
                 if (isub_overflow(a.iacc, x->as.i, &out)) {
-                    if (promote_long_overflow) {
-                        mino_val_t *la = mino_bigint_from_ll(S, a.iacc);
-                        mino_val_t *lb = mino_bigint_from_ll(S, x->as.i);
-                        if (la == NULL || lb == NULL) return NULL;
-                        a.vacc = mino_bigint_sub(S, la, lb);
-                        if (a.vacc == NULL) return NULL;
-                        a.tier = TT_BIGINT;
-                        break;
-                    }
-                    return prim_throw_classified(S, "eval/overflow", "MOV001",
-                                                 "integer overflow in -");
+                    mino_val_t *la = mino_bigint_from_ll(S, a.iacc);
+                    mino_val_t *lb = mino_bigint_from_ll(S, x->as.i);
+                    if (la == NULL || lb == NULL) return NULL;
+                    a.vacc = mino_bigint_sub(S, la, lb);
+                    if (a.vacc == NULL) return NULL;
+                    a.tier = TT_BIGINT;
+                    break;
                 }
                 a.iacc = out;
             } else { /* OP_DIV */
@@ -696,71 +692,8 @@ mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                          "- expects numbers");
         if (first->type == MINO_INT) {
             long long neg;
-            if (ineg_overflow(first->as.i, &neg))
-                return prim_throw_classified(S, "eval/overflow", "MOV001",
-                                             "integer overflow in -");
-            return mino_int(S, neg);
-        }
-        if (first->type == MINO_FLOAT)  return mino_float(S, -first->as.f);
-        if (first->type == MINO_BIGINT) return mino_bigint_neg(S, first);
-        if (first->type == MINO_RATIO) {
-            mino_val_t *zero_n = mino_bigint_from_ll(S, 0);
-            mino_val_t *zero_d = mino_bigint_from_ll(S, 1);
-            mino_val_t *zero;
-            if (zero_n == NULL || zero_d == NULL) return NULL;
-            zero = mino_ratio_make_unchecked(S, zero_n, zero_d);
-            if (zero == NULL) return NULL;
-            return mino_ratio_sub(S, zero, first);
-        }
-        if (first->type == MINO_BIGDEC) return mino_bigdec_neg(S, first);
-        return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "- expects numbers");
-    }
-    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_SUB, 0, "-");
-}
-
-mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    return tower_reduce(S, args, OP_MUL, 0, "*");
-}
-
-/* ------------------------------------------------------------------------- */
-/* Auto-promoting arithmetic (+' -' *' inc' dec')                            */
-/*                                                                           */
-/* Same shape as +, -, *, inc, dec, but a long-overflow promotes the         */
-/* running accumulator to bigint instead of throwing. The implementations    */
-/* delegate to the shared tower-dispatch core (tower_reduce /                */
-/* tower_reduce_seeded) with the promote_long_overflow flag set, so          */
-/* ratio / bigdec / float operands work identically to plain +, -, *, /.    */
-/* ------------------------------------------------------------------------- */
-
-/* (+' & args) — tower-aware add with long overflow promoting to bigint
- * instead of throwing. */
-mino_val_t *prim_addq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    (void)env;
-    return tower_reduce(S, args, OP_ADD, 1, "+'");
-}
-
-/* (-' x) -> negation; (-' x y ...) -> successive subtraction with
- * long overflow promoting to bigint. */
-mino_val_t *prim_subq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *first;
-    (void)env;
-    if (!mino_is_cons(args))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-                                     "-' requires at least one argument");
-    first = args->as.cons.car;
-    /* Unary: negate (overflow at LLONG_MIN promotes to bigint). */
-    if (!mino_is_cons(args->as.cons.cdr)) {
-        if (first == NULL)
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                                         "-' expects numbers");
-        if (first->type == MINO_INT) {
-            long long neg;
             if (ineg_overflow(first->as.i, &neg)) {
+                /* Negating LLONG_MIN doesn't fit in long; promote. */
                 mino_val_t *bi = mino_bigint_from_ll(S, first->as.i);
                 if (bi == NULL) return NULL;
                 return mino_bigint_neg(S, bi);
@@ -780,80 +713,134 @@ mino_val_t *prim_subq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         if (first->type == MINO_BIGDEC) return mino_bigdec_neg(S, first);
         return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "-' expects numbers");
+                                     "- expects numbers");
     }
-    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_SUB, 1, "-'");
+    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_SUB, "-");
 }
 
-/* (*' & args) — tower-aware multiply with long-overflow promotion. */
-mino_val_t *prim_mulq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
-    return tower_reduce(S, args, OP_MUL, 1, "*'");
+    return tower_reduce(S, args, OP_MUL, "*");
 }
 
-/* (inc' x) — overflow at LLONG_MAX promotes to bigint. */
-mino_val_t *prim_incq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+/* ------------------------------------------------------------------------- */
+/* unchecked-* family - fast int64 with two's-complement wraparound.         */
+/*                                                                           */
+/* These ops opt out of the tower / overflow path entirely. Operands must   */
+/* be ints; non-int operands throw eval/type. Wraparound is computed via    */
+/* unsigned arithmetic (well-defined in C) and the result is cast back to   */
+/* long long. Names match Clojure's surface: unchecked-add /                 */
+/* unchecked-subtract / unchecked-multiply are binary, unchecked-inc /       */
+/* unchecked-dec / unchecked-negate are unary.                              */
+/* ------------------------------------------------------------------------- */
+
+static int unchecked_grab_long(mino_val_t *v, long long *out)
 {
-    mino_val_t *x;
+    if (v == NULL || v->type != MINO_INT) return 0;
+    *out = v->as.i;
+    return 1;
+}
+
+static long long uwrap_add(long long a, long long b)
+{
+    return (long long)((unsigned long long)a + (unsigned long long)b);
+}
+
+static long long uwrap_sub(long long a, long long b)
+{
+    return (long long)((unsigned long long)a - (unsigned long long)b);
+}
+
+static long long uwrap_mul(long long a, long long b)
+{
+    return (long long)((unsigned long long)a * (unsigned long long)b);
+}
+
+static int unchecked_two_int(mino_state_t *S, mino_val_t *args,
+                             const char *opname,
+                             long long *a, long long *b)
+{
+    char msg[80];
+    mino_val_t *xa;
+    mino_val_t *xb;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
+        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        snprintf(msg, sizeof(msg), "%s requires exactly 2 arguments", opname);
+        prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        return 0;
+    }
+    xa = args->as.cons.car;
+    xb = args->as.cons.cdr->as.cons.car;
+    if (!unchecked_grab_long(xa, a) || !unchecked_grab_long(xb, b)) {
+        snprintf(msg, sizeof(msg), "%s expects ints", opname);
+        prim_throw_classified(S, "eval/type", "MTY001", msg);
+        return 0;
+    }
+    return 1;
+}
+
+mino_val_t *prim_unchecked_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+    if (!unchecked_two_int(S, args, "unchecked-add", &a, &b)) return NULL;
+    return mino_int(S, uwrap_add(a, b));
+}
+
+mino_val_t *prim_unchecked_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!unchecked_two_int(S, args, "unchecked-subtract", &a, &b)) return NULL;
+    return mino_int(S, uwrap_sub(a, b));
+}
+
+mino_val_t *prim_unchecked_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long a, b;
+    (void)env;
+    if (!unchecked_two_int(S, args, "unchecked-multiply", &a, &b)) return NULL;
+    return mino_int(S, uwrap_mul(a, b));
+}
+
+mino_val_t *prim_unchecked_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
         return prim_throw_classified(S, "eval/arity", "MAR001",
-                                     "inc' requires exactly 1 argument");
-    }
-    x = args->as.cons.car;
-    if (x == NULL)
+            "unchecked-inc requires exactly 1 argument");
+    if (!unchecked_grab_long(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "inc' expects a number");
-    if (x->type == MINO_INT) {
-        if (x->as.i == LLONG_MAX) {
-            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
-            mino_val_t *one;
-            if (lhs == NULL) return NULL;
-            one = mino_int(S, 1);
-            return mino_bigint_add(S, lhs, one);
-        }
-        return mino_int(S, x->as.i + 1);
-    }
-    if (x->type == MINO_FLOAT) return mino_float(S, x->as.f + 1.0);
-    /* For bigint / ratio / bigdec, route through (+' x 1) which handles
-     * tier promotion correctly. */
-    {
-        mino_val_t *one = mino_int(S, 1);
-        mino_val_t *pair = mino_cons(S, x, mino_cons(S, one, mino_nil(S)));
-        return prim_addq(S, pair, env);
-    }
+            "unchecked-inc expects an int");
+    return mino_int(S, uwrap_add(x, 1));
 }
 
-/* (dec' x) — overflow at LLONG_MIN promotes to bigint. */
-mino_val_t *prim_decq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_unchecked_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *x;
+    long long x;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
         return prim_throw_classified(S, "eval/arity", "MAR001",
-                                     "dec' requires exactly 1 argument");
-    }
-    x = args->as.cons.car;
-    if (x == NULL)
+            "unchecked-dec requires exactly 1 argument");
+    if (!unchecked_grab_long(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "dec' expects a number");
-    if (x->type == MINO_INT) {
-        if (x->as.i == LLONG_MIN) {
-            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
-            mino_val_t *one;
-            if (lhs == NULL) return NULL;
-            one = mino_int(S, 1);
-            return mino_bigint_sub(S, lhs, one);
-        }
-        return mino_int(S, x->as.i - 1);
-    }
-    if (x->type == MINO_FLOAT) return mino_float(S, x->as.f - 1.0);
-    {
-        mino_val_t *one = mino_int(S, 1);
-        mino_val_t *pair = mino_cons(S, x, mino_cons(S, one, mino_nil(S)));
-        return prim_subq(S, pair, env);
-    }
+            "unchecked-dec expects an int");
+    return mino_int(S, uwrap_sub(x, 1));
+}
+
+mino_val_t *prim_unchecked_negate(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    long long x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "unchecked-negate requires exactly 1 argument");
+    if (!unchecked_grab_long(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "unchecked-negate expects an int");
+    return mino_int(S, uwrap_sub(0, x));
 }
 
 mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -869,9 +856,9 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!mino_is_cons(args->as.cons.cdr)) {
         mino_val_t *one  = mino_int(S, 1);
         if (one == NULL) return NULL;
-        return tower_reduce_seeded(S, one, args, OP_DIV, 0, "/");
+        return tower_reduce_seeded(S, one, args, OP_DIV, "/");
     }
-    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_DIV, 0, "/");
+    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_DIV, "/");
 }
 
 mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1191,7 +1178,7 @@ mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (v != NULL && v->type == MINO_BIGINT) {
         long long ll;
         if (mino_as_ll(v, &ll)) return mino_int(S, ll);
-        return prim_throw_classified(S, "eval/overflow", "MOV001",
+        return prim_throw_classified(S, "eval/type", "MTY001",
                                      "int: bigint value out of long range");
     }
     if (v != NULL && v->type == MINO_RATIO) {
@@ -1623,16 +1610,25 @@ const mino_prim_def k_prims_numeric[] = {
      "Parses a string into a long integer, or returns nil on failure."},
     {"parse-double", prim_parse_double,
      "Parses a string into a double, or returns nil on failure."},
-    {"+'",   prim_addq,
-     "Like +, but promotes to bigint on overflow rather than throwing."},
-    {"-'",   prim_subq,
-     "Like -, but promotes to bigint on overflow rather than throwing."},
-    {"*'",   prim_mulq,
-     "Like *, but promotes to bigint on overflow rather than throwing."},
-    {"inc'", prim_incq,
-     "Like inc, but promotes to bigint on overflow rather than throwing."},
-    {"dec'", prim_decq,
-     "Like dec, but promotes to bigint on overflow rather than throwing."},
+    {"unchecked-add",      prim_unchecked_add,
+     "Returns x + y as a long with two's-complement wraparound. "
+     "Operands must be ints. Opt-in fast path for code that knows "
+     "overflow can't occur or wants wraparound semantics."},
+    {"unchecked-subtract", prim_unchecked_sub,
+     "Returns x - y as a long with two's-complement wraparound. "
+     "Operands must be ints."},
+    {"unchecked-multiply", prim_unchecked_mul,
+     "Returns x * y as a long with two's-complement wraparound. "
+     "Operands must be ints."},
+    {"unchecked-inc",      prim_unchecked_inc,
+     "Returns x + 1 as a long with two's-complement wraparound. "
+     "Argument must be an int."},
+    {"unchecked-dec",      prim_unchecked_dec,
+     "Returns x - 1 as a long with two's-complement wraparound. "
+     "Argument must be an int."},
+    {"unchecked-negate",   prim_unchecked_negate,
+     "Returns -x as a long with two's-complement wraparound. "
+     "Argument must be an int."},
 };
 
 const size_t k_prims_numeric_count =

@@ -102,31 +102,41 @@
   (is (= 5.0 (float 5)))
   (is (= 3.14 (float 3.14))))
 
-(deftest integer-overflow-throws
-  ;; 64-bit signed arithmetic wraps silently in C; we surface the wrap as
-  ;; a classified arithmetic overflow so programs cannot silently drift
-  ;; across the int boundary.
+(deftest integer-overflow-promotes
+  ;; Plain +/-/*/inc/dec auto-promote to bigint on long overflow rather
+  ;; than wrap silently or throw. The unchecked-* family is the named
+  ;; opt-in for two's-complement-wraparound int64 semantics.
   (let [max-int 9223372036854775807
         min-int -9223372036854775808]
-    (is (thrown? (+ max-int 1)))
-    (is (thrown? (+ 1 max-int)))
-    (is (thrown? (+ min-int -1)))
-    (is (thrown? (+ 1 2 max-int)))
-    (is (thrown? (- min-int 1)))
-    (is (thrown? (- max-int -1)))
-    (is (thrown? (- min-int)))
-    (is (thrown? (* max-int 2)))
-    (is (thrown? (* -1 min-int)))
-    (is (thrown? (* min-int -1)))
-    (is (thrown? (inc max-int)))
-    (is (thrown? (dec min-int)))
-    ;; In-range arithmetic still works.
+    (is (= 9223372036854775808N (+ max-int 1)))
+    (is (= 9223372036854775808N (+ 1 max-int)))
+    (is (= -9223372036854775809N (+ min-int -1)))
+    (is (= 9223372036854775810N (+ 1 2 max-int)))
+    (is (= -9223372036854775809N (- min-int 1)))
+    (is (= 9223372036854775808N (- max-int -1)))
+    (is (= 9223372036854775808N (- min-int)))
+    (is (= 18446744073709551614N (* max-int 2)))
+    (is (= 9223372036854775808N (* -1 min-int)))
+    (is (= 9223372036854775808N (* min-int -1)))
+    (is (= 9223372036854775808N (inc max-int)))
+    (is (= -9223372036854775809N (dec min-int)))
+    ;; Each promoted result is a bigint.
+    (is (= :bigint (type (+ max-int 1))))
+    (is (= :bigint (type (* max-int 2))))
+    ;; In-range arithmetic still works and stays in long.
     (is (= max-int (+ (dec max-int) 1)))
     (is (= (- max-int 1) (+ max-int -1)))
     (is (= -1 (+ max-int min-int)))
     (is (= max-int (* max-int 1)))
+    (is (= :int (type (+ 1 2))))
     ;; Float arithmetic is not range-checked; IEEE 754 handles it.
-    (is (float? (+ max-int 1.0)))))
+    (is (float? (+ max-int 1.0)))
+    ;; unchecked-* wraps without promoting.
+    (is (= min-int (unchecked-add max-int 1)))
+    (is (= max-int (unchecked-subtract min-int 1)))
+    (is (= min-int (unchecked-inc max-int)))
+    (is (= max-int (unchecked-dec min-int)))
+    (is (= min-int (unchecked-multiply 2 4611686018427387904)))))
 
 (deftest scientific-notation-signed-exponents
   (is (float? 1e10))

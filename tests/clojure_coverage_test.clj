@@ -208,11 +208,14 @@
      ;; print machinery (depends on *out*)
      pr prn pr-str print print-str println println-str prn-str
      print-ctor print-simple print-dup print-method newline flush printf
-     ;; with-precision / numeric coercion to JVM types
-     unchecked-add unchecked-byte unchecked-char unchecked-dec
-     unchecked-divide-int unchecked-double unchecked-float unchecked-inc
-     unchecked-int unchecked-long unchecked-multiply unchecked-negate
-     unchecked-short unchecked-subtract unsigned-bit-shift-right
+     ;; numeric coercion to JVM types (unchecked-byte, unchecked-int,
+     ;; etc.) — these only matter on a runtime that distinguishes
+     ;; primitive int from long. mino has unchecked-add / unchecked-
+     ;; subtract / unchecked-multiply / unchecked-inc / unchecked-dec
+     ;; / unchecked-negate as the int64-wraparound family.
+     unchecked-byte unchecked-char unchecked-divide-int
+     unchecked-double unchecked-float unchecked-int unchecked-long
+     unchecked-short unsigned-bit-shift-right
      ;; chunked seqs (JVM-only optimization)
      chunk chunk-append chunk-buffer chunk-cons chunk-first chunk-next
      chunk-rest chunked-seq?
@@ -223,7 +226,13 @@
      ;; JVM class introspection / name surface
      bases ns-imports record? long?
      ;; char-name / char-escape lookup tables (Java-side, low-priority)
-     char-escape-string char-name-string})
+     char-escape-string char-name-string
+     ;; Auto-promoting +' -' *' inc' dec' siblings: in mino the plain
+     ;; +/-/*/inc/dec auto-promote on long overflow, so a separate
+     ;; quote-suffix variant is redundant and was removed in v0.78.0.
+     ;; The fast int64 wraparound path is unchecked-+ / unchecked--
+     ;; / unchecked-* / unchecked-inc / unchecked-dec.
+     +' -' *' inc' dec'})
 
 ;; Names that are special forms in Clojure (and mino). They are not
 ;; interned as vars in either runtime — find-var will not see them —
