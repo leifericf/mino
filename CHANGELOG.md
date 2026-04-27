@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.75.0 — Surface Honesty
+
+Three small but visible gaps closed against the canon surface,
+under the principle that silent divergences cost more than loud
+ones.
+
+The reader's `#"..."` regex literals now pass body bytes to the
+regex engine verbatim. Previously the body ran through the same
+string-escape pass that ordinary strings do, so `\d` lost its
+backslash before the engine saw it; `(re-find #"\d+" s)` would
+silently match `d+` instead of digits. The literal path now
+preserves backslashes (and `\"` is a literal two-character
+sequence rather than a string terminator), matching how regex
+literals work elsewhere. The string-form `"\\d+"` workaround
+keeps working unchanged.
+
+`load-string` and `load-file` are now exposed as primitives.
+The runtime already had `mino_eval_string` and `mino_load_file`
+as embedder-facing C functions; these primitives surface the
+same machinery to the language. `(load-string "(+ 1 1)")`
+returns `2`; `(load-file "path/to/file.clj")` reads, evaluates,
+and returns the last form's value. Both clear the ambient
+namespace for the duration so forms see the current namespace
+plus their lexical chain, matching `eval`.
+
+Documentation reflects the new state. The Intentional
+Divergences page no longer carries the regex-escape entry, and
+the Coming-from-Clojure quick-reference table marks `#"regex"`
+as Same.
+
 ## v0.74.3 — One-Shot Expression CLI
 
 The standalone `mino` binary now treats a positional argument
