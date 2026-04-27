@@ -1590,6 +1590,87 @@
             methods)))
 
 ;; ---------------------------------------------------------------------------
+;; Core protocols: extension points wired into reduce / reduce-kv / datafy / nav.
+;;
+;; CollReduce  - per-type reduction strategy. The 3-arg form (coll-reduce
+;;               coll f init) is the workhorse; user types extend this and
+;;               reduce dispatches through it.
+;; IKVReduce   - associative kv-reduce dispatch. Defaults walk seq pairs.
+;; Datafiable  - per-type datafy hook; default returns the value unchanged.
+;; Navigable   - per-coll/key/value nav hook; default returns v unchanged.
+;;
+;; Built-in collection types do not extend these; reduce / reduce-kv keep
+;; the existing fast paths and consult the protocol only when a user has
+;; registered a per-type override (or a :default catch-all).
+;; ---------------------------------------------------------------------------
+
+(def internal-reduce_ reduce)
+(def internal-reduce-kv_ reduce-kv)
+
+(defprotocol CollReduce
+  "Protocol for collection types that can reduce themselves. User types
+  extend coll-reduce to provide a custom traversal; mino's reduce
+  consults the registry before falling back to its built-in seq-driven
+  reduction."
+  (coll-reduce [coll f init]))
+
+(defprotocol IKVReduce
+  "Protocol for associative collections that can kv-reduce directly,
+  rather than walk a seq of [k v] pairs."
+  (kv-reduce [coll f init]))
+
+(defprotocol Datafiable
+  "Protocol for things that can present a data view of themselves.
+  The default impl is identity; user types may override."
+  (datafy [o]))
+
+(extend-type :default Datafiable (datafy [o] o))
+
+(defprotocol Navigable
+  "Protocol for navigating from a (k v) pair in coll into a related
+  value. The default impl returns v unchanged."
+  (nav [coll k v]))
+
+(extend-type :default Navigable (nav [_coll _k v] v))
+
+(def reduce
+  "Reduces coll using f. With 2 args, uses the first element as init.
+  With 3 args, uses init explicitly. Consults CollReduce: a user
+  type or :default override on coll-reduce takes precedence over the
+  built-in seq-driven reduction."
+  (fn
+    ([f coll]
+     (let [s (seq coll)]
+       (if (nil? s)
+         (f)
+         (let [init  (first s)
+               rs    (rest s)
+               table @CollReduce--coll-reduce
+               impl  (or (get table (type rs))
+                         (get table :default))]
+           (if impl
+             (impl rs f init)
+             (internal-reduce_ f init rs))))))
+    ([f init coll]
+     (let [table @CollReduce--coll-reduce
+           impl  (or (get table (type coll))
+                     (get table :default))]
+       (if impl
+         (impl coll f init)
+         (internal-reduce_ f init coll))))))
+
+(def reduce-kv
+  "Reduces a map (or any associative source) with f taking accumulator,
+  key, and value. Consults IKVReduce; falls back to walking the seq."
+  (fn [f init m]
+    (let [table @IKVReduce--kv-reduce
+          impl  (or (get table (type m))
+                    (get table :default))]
+      (if impl
+        (impl m f init)
+        (internal-reduce-kv_ f init m)))))
+
+;; ---------------------------------------------------------------------------
 ;; Hierarchies: immutable parent/child/ancestor/descendant relationships.
 ;;
 ;; A hierarchy is a map with :parents, :ancestors, and :descendants keys.
