@@ -112,7 +112,7 @@ chains now throw with the load chain in the message rather than
 recursing into a stack overflow. A loaded file whose first
 `(ns ...)` form disagrees with the requested module name is
 rejected; the comparison treats dashes and underscores as
-equivalent so `(ns foo-bar)` in `foo_bar.mino` is fine. `def`,
+equivalent so `(ns foo-bar)` in `foo_bar.clj` is fine. `def`,
 `declare`, and `defmacro` refuse to shadow a name brought in by
 `:refer` from another namespace, so accidental collisions surface
 immediately. The "unbound" diagnostic for qualified symbols

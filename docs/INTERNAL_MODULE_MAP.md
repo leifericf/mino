@@ -47,7 +47,9 @@ src/
 | `src/runtime/env.c` | Internal environment ops (`env_alloc`, `env_child`, `env_root`, `env_bind`, `env_find_here`), root-env registry, dynamic binding lookup |
 | `src/runtime/error.c` | Error reporting (`set_error`, `set_error_at`, `clear_error`), call stack (`push_frame`, `pop_frame`, `append_trace`), `type_tag_str`, metadata table |
 | `src/runtime/var.c` | Var registry (`var_intern`, `var_find`, `var_set_root`) |
-| `src/runtime/module.c` | Module/namespace machinery |
+| `src/runtime/ns_env.c` | Per-namespace root env table (`ns_env_lookup`, `ns_env_ensure`, `current_ns_env`, `ns_env_get_meta`, `ns_env_set_meta`, `mino_publish_current_ns`) |
+| `src/runtime/module.c` | Module/namespace machinery (`require`, save/restore of `current_ns`) |
+| `src/runtime/path_buf.c` | Bounded-buffer path helper used by the resolver |
 
 ## Primitives
 
@@ -62,10 +64,10 @@ src/
 | `src/prim/string.c` | String primitives (`str`, `pr-str`, `format`, `read-string`, `subs`, `split`, `join`, `starts-with?`, `ends-with?`, `includes?`, `upper-case`, `lower-case`, `trim`, `char-at`) |
 | `src/prim/io.c` | I/O primitives (`println`, `prn`, `slurp`, `spit`, `exit`, `time-ms`, `getenv`) |
 | `src/prim/lazy.c` | Lazy sequence primitives implemented as C thunks (`range`, `lazy-map-1`, `lazy-filter`, `lazy-take`, `drop-seq`, `doall`, `dorun`) |
-| `src/prim/reflection.c` | Reflection/utility (`type`, `name`, `eval`, `symbol`, `keyword`, `hash`, `gensym`, `macroexpand`, `throw`, `rand`, `resolve`, `namespace`, `var?`), `gc-stats`, `nano-time` |
+| `src/prim/reflection.c` | Reflection/utility (`type`, `name`, `eval`, `symbol`, `keyword`, `hash`, `gensym`, `macroexpand`, `throw`, `rand`, `resolve`, `namespace`, `var?`, `destructure`), `gc-stats`, `nano-time` |
 | `src/prim/meta.c` | Metadata (`meta`, `with-meta`, `vary-meta`, `alter-meta!`) |
-| `src/prim/regex.c` | Regex (`re-find`, `re-matches`) |
-| `src/prim/stateful.c` | Atoms (`atom`, `deref`, `reset!`, `swap!`, `atom?`, `add-watch`, `remove-watch`, `set-validator!`, `get-validator`, `swap-vals!`, `reset-vals!`) |
+| `src/prim/regex.c` | Regex (`re-find`, `re-matches`); returns `[whole g1 g2 ...]` vectors for grouped patterns. `re-matcher` and `re-groups` are mino-side wrappers in `src/core.clj`. |
+| `src/prim/stateful.c` | Atoms (`atom`, `deref`, `reset!`, `swap!`, `atom?`, `add-watch`, `remove-watch`, `set-validator!`, `get-validator`, `swap-vals!`, `reset-vals!`, `compare-and-set!`); dynamic-binding capture (`get-thread-bindings`, `with-bindings*`) |
 | `src/prim/module.c` | Module system (`require`, `doc`, `source`, `apropos`, `mino_set_resolver`) |
 | `src/prim/fs.c` | Filesystem primitives |
 | `src/prim/proc.c` | Process / subprocess primitives |
@@ -128,7 +130,7 @@ and a four-primitive bridge.
 | File | Contents |
 |------|----------|
 | `src/mino.h` | Public embedding API (stable surface) |
-| `src/runtime/internal.h` | `mino_state` and `mino_env` structs, runtime-support types (`module_entry_t`, `meta_entry_t`, `call_frame_t`, `root_env_t`, `mino_ref`, `dyn_frame_t`, `dyn_binding_t`, `ns_alias_t`, `var_entry_t`, `env_binding_t`), runtime function declarations, ownership annotations. Includes the per-subsystem internal headers below. |
+| `src/runtime/internal.h` | `mino_state` and `mino_env` structs, runtime-support types (`module_entry_t`, `meta_entry_t`, `call_frame_t`, `root_env_t`, `mino_ref`, `dyn_frame_t`, `dyn_binding_t`, `ns_alias_t`, `ns_env_entry_t`, `var_entry_t`, `env_binding_t`), runtime function declarations, ownership annotations. Includes the per-subsystem internal headers below. |
 | `src/gc/internal.h` | GC types (`gc_hdr_t`, `gc_evt_t`, `gc_range_t`), enums (`GC_T_*`, `GC_GEN_*`, `GC_PHASE_*`, `GC_EVT_*`), `gc_pin`/`gc_unpin` macros, GC function declarations |
 | `src/collections/internal.h` | Persistent collection types (`mino_vec_node`, `mino_hamt_node`, `mino_rb_node`, `hamt_entry_t`), `intern_table_t`, val.c constructors and equality, vec/HAMT/rbtree declarations, bignum/ratio/bigdec value support |
 | `src/eval/internal.h` | `try_frame_t` + `MAX_TRY_DEPTH`, evaluator core helpers, macroexpand, quasiquote, `print_val`, `intern_filename` |

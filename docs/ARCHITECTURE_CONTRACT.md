@@ -194,12 +194,26 @@ justification. Special forms cannot be shadowed by environment bindings
 - `gc_depth` prevents recursive collection. Allocations during GC use a
   pending-range buffer flushed after collection completes.
 
-## 8. Module System
+## 8. Namespaces and Module System
 
-- `require` loads a file once and caches the result per-state.
-- The host registers a resolver via `mino_set_resolver` to map module names
-  to file paths.
-- Module loading evaluates forms in the caller's environment.
+- Each namespace owns a root binding table. `(def x ...)` writes only into
+  the current namespace's env, and unqualified lookup walks lexical, then
+  current-namespace, then `clojure.core` parent.
+- `clojure.core` is the bundled-core namespace. Every other namespace's
+  root env chains to it via a parent pointer, so unqualified references
+  to `if`, `map`, and friends resolve without an explicit refer.
+- `require` loads a file once and caches the result per-state. A loaded
+  file's first `(ns ...)` form must declare the requested module name
+  (dash/underscore equivalent); a path-style `(require "path/to/file.cljc")`
+  argument bypasses that check.
+- The host registers a resolver via `mino_set_resolver` to map module
+  names to file paths. The resolver consults the in-memory namespace
+  registry first, then the filesystem.
+- Module loading installs bindings into the file's declared namespace,
+  not the caller's. The caller surfaces them via qualified names or
+  `:require`/`:use`/`:refer` clauses.
+- `^:private` is enforced on cross-namespace qualified access; `:refer
+  :all` skips privates.
 
 ## 9. ANSI C Portability
 

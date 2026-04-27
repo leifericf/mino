@@ -7,7 +7,7 @@ below.
 ## imath
 
 Vendored arbitrary-precision integer arithmetic library. Source at
-`src/vendor/imath.h` and `src/vendor/imath.c`, fetched from
+`src/vendor/imath/imath.h` and `src/vendor/imath/imath.c`, fetched from
 <https://github.com/creachadair/imath>.
 
 ```
@@ -32,7 +32,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-The vendored `src/vendor/imath.c` contains two narrow changes, each
+The vendored `src/vendor/imath/imath.c` contains two narrow changes, each
 marked with a `mino:` comment for audit on upstream sync:
 
 - `s_realloc` casts the unused `osize` parameter to void to silence
