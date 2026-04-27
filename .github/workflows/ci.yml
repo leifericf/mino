@@ -13,11 +13,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # The Windows job currently SIGSEGVs partway through tests/run.clj
-    # after the v0.73.0 first-class-namespace cycle. Track until a Windows
-    # repro env is set up; until then the job runs informationally so the
-    # rest of the matrix can gate.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     defaults:
       run:
         shell: bash

@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.74.2 — Heap-Allocated Dynamic Binding Frames
+
+Fixes the v0.74.1 known-issue Windows SIGSEGV during
+`tests/run.clj`. The `binding` special form and the new
+`with-bindings*` primitive both pushed a stack-local
+`dyn_frame_t` onto `S->dyn_stack` and only popped it on the
+success path. When a `throw` inside the body unwound the C stack
+through `longjmp` to a containing `try`, the popped function's
+stack memory still held the frame, and the longjmp handler in
+`eval/control.c` walked `S->dyn_stack` and read `frame->prev` /
+`frame->bindings` from that now-stale stack region. Linux happens
+to leave popped stack memory readable for long enough that the
+walk succeeds; the Windows runner's stack handling makes the same
+read fault.
+
+The fix is to heap-allocate the frame so the pointer remains
+valid even after the C frame is unwound. The success path frees
+the frame; the longjmp handler in `eval/control.c` already frees
+the malloc'd binding chain on each unwound frame and now sees a
+stable parent pointer too.
+
+The Windows job in `ci.yml` returns to the blocking matrix; the
+informational marker added in v0.74.1 is no longer needed.
+
 ## v0.74.1 — CI Hygiene
 
 The v0.74.0 push surfaced two CI signals that needed

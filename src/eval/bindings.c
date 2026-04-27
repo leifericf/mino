@@ -410,7 +410,12 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
                          mino_val_t *args, mino_env_t *env, int tail)
 {
     mino_val_t *pairs, *body, *result;
-    dyn_frame_t frame;
+    /* Frame is heap-allocated so the pointer remains valid even if a
+     * throw inside body unwinds this C frame past the cleanup at the
+     * end. The control.c longjmp handler walks S->dyn_stack and frees
+     * each frame's bindings; if frame were stack-local, that walk
+     * would read popped stack memory. */
+    dyn_frame_t   *frame;
     dyn_binding_t *bhead = NULL;
     (void)tail;
     if (!mino_is_cons(args)) {
@@ -513,13 +518,20 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
     /* Push frame. */
-    frame.bindings = bhead;
-    frame.prev     = S->dyn_stack;
-    S->dyn_stack      = &frame;
+    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    if (frame == NULL) {
+        set_eval_diag(S, form, "internal", "MIN001", "binding: out of memory");
+        dyn_binding_list_free(bhead);
+        return NULL;
+    }
+    frame->bindings = bhead;
+    frame->prev     = S->dyn_stack;
+    S->dyn_stack    = frame;
     result = eval_implicit_do(S, body, env);
     /* Pop frame. */
-    S->dyn_stack = frame.prev;
+    S->dyn_stack = frame->prev;
     dyn_binding_list_free(bhead);
+    free(frame);
     return result;
 }
 

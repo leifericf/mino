@@ -464,7 +464,12 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
     mino_val_t    *map_arg;
     mino_val_t    *fn;
     mino_val_t    *result;
-    dyn_frame_t    frame;
+    /* Heap-allocated so the pointer remains valid if a throw inside
+     * fn unwinds past the cleanup. control.c's longjmp handler walks
+     * S->dyn_stack to free each frame; a stack-local frame would
+     * leave a dangling read on Windows where popped stack memory is
+     * not preserved as eagerly as on POSIX. */
+    dyn_frame_t   *frame;
     dyn_binding_t *bhead = NULL;
     dyn_binding_t *b;
     size_t         i;
@@ -511,12 +516,19 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
         bhead   = b;
     }
 
-    frame.bindings = bhead;
-    frame.prev     = S->dyn_stack;
-    S->dyn_stack   = &frame;
-    result         = mino_call(S, fn, mino_nil(S), env);
-    S->dyn_stack   = frame.prev;
+    frame = (dyn_frame_t *)malloc(sizeof(*frame));
+    if (frame == NULL) {
+        dyn_binding_list_free(bhead);
+        return prim_throw_classified(S, "eval/contract", "MIN001",
+            "with-bindings*: out of memory");
+    }
+    frame->bindings = bhead;
+    frame->prev     = S->dyn_stack;
+    S->dyn_stack    = frame;
+    result          = mino_call(S, fn, mino_nil(S), env);
+    S->dyn_stack    = frame->prev;
     dyn_binding_list_free(bhead);
+    free(frame);
     return result;
 }
 
