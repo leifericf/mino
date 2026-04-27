@@ -40,6 +40,8 @@
 #include "lib_clojure_datafy.h"
 #include "lib_clojure_core_protocols.h"
 #include "lib_clojure_instant.h"
+#include "lib_clojure_spec_alpha.h"
+#include "lib_clojure_core_specs_alpha.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -124,6 +126,19 @@ void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env)
     mino_register_bundled_lib(S, "clojure.instant", lib_clojure_instant_src);
 }
 
+/* clojure.spec.alpha + clojure.core.specs.alpha: spec.alpha is the
+ * predicate-and-data spec engine; core.specs.alpha holds the specs
+ * for core macro forms (defn-args, binding-form). The latter requires
+ * spec.alpha at load time, so the pair ships together. */
+void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.spec.alpha",
+                              lib_clojure_spec_alpha_src);
+    mino_register_bundled_lib(S, "clojure.core.specs.alpha",
+                              lib_clojure_core_specs_alpha_src);
+}
+
 void mino_install_all(mino_state_t *S, mino_env_t *env)
 {
     mino_install_core(S, env);
@@ -141,4 +156,5 @@ void mino_install_all(mino_state_t *S, mino_env_t *env)
     mino_install_clojure_repl(S, env);
     mino_install_clojure_datafy(S, env);
     mino_install_clojure_instant(S, env);
+    mino_install_clojure_spec(S, env);
 }

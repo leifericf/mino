@@ -26,7 +26,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 82
+#define MINO_VERSION_MINOR 83
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -821,6 +821,7 @@ void mino_install_clojure_test(mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_repl(mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env);
 
 /*
  * Register the every-bundled-namespace + every-primitive-group set
@@ -840,6 +841,8 @@ void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env);
  *   mino_install_clojure_test(S, env);
  *   mino_install_clojure_repl(S, env);
  *   mino_install_clojure_datafy(S, env);
+ *   mino_install_clojure_instant(S, env);
+ *   mino_install_clojure_spec(S, env);
  *
  * Use this when you want the same surface a brew/scoop install
  * would provide. Embedders that need a tighter footprint pick the
