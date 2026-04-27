@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.76.1 — GC Defensive Fixes On Alloc-Pair Patterns
+
+Two intern and trie-build paths that allocate one GC object,
+hold its only reference in a C local, then call back into the
+allocator are now wrapped in a gc_depth raise so a collection
+cannot fire between the two allocs. Both ASan and load-time
+stress had been catching this under specific layouts; the
+conservative stack scan misses locals the optimizer keeps in
+registers, which is what made the symptoms heisenbug-shaped
+(error messages shifted between runs even with the same
+inputs).
+
+`intern_lookup_or_create` in `src/collections/val.c` now keeps
+the freshly `dup_n`'d character buffer protected across the
+following `alloc_val`. Without the raise the buffer could be
+swept by a sweep triggered by `alloc_val`'s own driver tick,
+which surfaced as use-after-free reads in `gc_mark_push` later
+on.
+
+`vec_from_array` in `src/collections/vec.c` already raised
+`gc_depth` for the trie-build phase but lowered it before
+`vec_assemble`. The lowered window is now closed: gc_depth
+stays raised through `vec_assemble` in both the tail-only and
+full-trie paths so the just-built tail and root nodes (held
+only in C locals at that point) are not swept while
+`alloc_val` runs.
+
+Both changes are localized: existing call sites are unchanged
+and the test suite continues to pass under both the normal
+incremental schedule and `MINO_GC_STRESS=1` full-STW majors.
+
 ## v0.76.0 — Print Pipeline And `*out*` / `*err*` / `*in*`
 
 The print and read primitives now route through configurable
