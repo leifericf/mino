@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.82.0 — Clojure.instant And Clojure.template
+
+Two small bundled namespaces drop into the registry established
+in v0.81.0.
+
+`clojure.template` ports the `apply-template` and `do-template`
+substitution macros that user code historically reaches for when
+generating repeated test cases or shape variants. mino's own
+`clojure.test/are` macro is self-contained (it uses
+`postwalk-replace` directly), so the namespace exists for
+parity with user code that references it. Ships under the
+`mino_install_clojure_test` install hook -- the test/template
+pair installs together since `are` is the historical caller.
+
+`clojure.instant` parses ISO 8601 timestamp strings into a
+component map. mino does not have a host Date / Timestamp /
+Calendar type, so the parse fns return a map with the keys
+`:years`, `:months`, `:days`, `:hours`, `:minutes`, `:seconds`,
+`:nanoseconds`, `:offset-sign`, `:offset-hours`, and
+`:offset-minutes`. This is a deliberate divergence from JVM
+Clojure: callers that wrap `read-instant-date` in
+`(java.util.Date.)` need to consume the map directly. The
+parser accepts every ISO 8601 shape the canonical regex
+matches (year-only through nanosecond precision with optional
+zone offset) and validates each component before returning.
+
+The new namespace ships under its own install hook,
+`mino_install_clojure_instant`. `mino_install_all` calls it
+along with the rest, so the standalone build picks it up
+without further wiring.
+
 ## v0.81.0 — Bundled Stdlib And Per-Group Install Hooks
 
 The clojure.* namespaces that ship with mino (string, set, walk,

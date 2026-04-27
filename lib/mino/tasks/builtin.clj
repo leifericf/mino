@@ -126,10 +126,12 @@
    ["lib/clojure/zip.clj"             "clojure.zip"             "lib_clojure_zip"]
    ["lib/clojure/data.clj"            "clojure.data"            "lib_clojure_data"]
    ["lib/clojure/test.clj"            "clojure.test"            "lib_clojure_test"]
+   ["lib/clojure/template.clj"        "clojure.template"        "lib_clojure_template"]
    ["lib/clojure/repl.clj"            "clojure.repl"            "lib_clojure_repl"]
    ["lib/clojure/stacktrace.clj"      "clojure.stacktrace"      "lib_clojure_stacktrace"]
    ["lib/clojure/datafy.clj"          "clojure.datafy"          "lib_clojure_datafy"]
-   ["lib/clojure/core/protocols.clj"  "clojure.core.protocols"  "lib_clojure_core_protocols"]])
+   ["lib/clojure/core/protocols.clj"  "clojure.core.protocols"  "lib_clojure_core_protocols"]
+   ["lib/clojure/instant.clj"         "clojure.instant"         "lib_clojure_instant"]])
 
 (defn- escape-source-as-c-string-literal
   "Returns the body of a C string literal: backslash-escaped quotes

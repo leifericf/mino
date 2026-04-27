@@ -34,10 +34,12 @@
 #include "lib_clojure_zip.h"
 #include "lib_clojure_data.h"
 #include "lib_clojure_test.h"
+#include "lib_clojure_template.h"
 #include "lib_clojure_repl.h"
 #include "lib_clojure_stacktrace.h"
 #include "lib_clojure_datafy.h"
 #include "lib_clojure_core_protocols.h"
+#include "lib_clojure_instant.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -86,10 +88,15 @@ void mino_install_clojure_data(mino_state_t *S, mino_env_t *env)
     mino_register_bundled_lib(S, "clojure.data", lib_clojure_data_src);
 }
 
+/* clojure.test + clojure.template install together. clojure.template
+ * is the substitution primitive historically used by `are`; mino's
+ * own `are` is self-contained but user code that references
+ * clojure.template directly expects it alongside clojure.test. */
 void mino_install_clojure_test(mino_state_t *S, mino_env_t *env)
 {
     (void)env;
-    mino_register_bundled_lib(S, "clojure.test", lib_clojure_test_src);
+    mino_register_bundled_lib(S, "clojure.test",     lib_clojure_test_src);
+    mino_register_bundled_lib(S, "clojure.template", lib_clojure_template_src);
 }
 
 /* clojure.repl + clojure.stacktrace install together: the REPL pair
@@ -111,6 +118,12 @@ void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env)
     mino_register_bundled_lib(S, "clojure.core.protocols",  lib_clojure_core_protocols_src);
 }
 
+void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.instant", lib_clojure_instant_src);
+}
+
 void mino_install_all(mino_state_t *S, mino_env_t *env)
 {
     mino_install_core(S, env);
@@ -127,4 +140,5 @@ void mino_install_all(mino_state_t *S, mino_env_t *env)
     mino_install_clojure_test(S, env);
     mino_install_clojure_repl(S, env);
     mino_install_clojure_datafy(S, env);
+    mino_install_clojure_instant(S, env);
 }
