@@ -289,6 +289,15 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         if (!v->as.transient.valid) fputs(" sealed", out);
         fputc('>', out);
         return;
+    case MINO_TYPE:
+        if (v->as.record_type.ns != NULL) {
+            fputs(v->as.record_type.ns, out);
+            fputc('.', out);
+        }
+        if (v->as.record_type.name != NULL) {
+            fputs(v->as.record_type.name, out);
+        }
+        return;
     }
 }
 

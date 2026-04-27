@@ -183,6 +183,20 @@ static void state_free_intern_tables(mino_state_t *S)
     free(S->kw_intern.ht_buckets);
 }
 
+/* Free the record-type registry chain. Type values themselves are
+ * GC-owned and reclaimed by state_free_heap below; we only release
+ * the malloc'd link nodes here. */
+static void state_free_record_types(mino_state_t *S)
+{
+    record_type_entry_t *e = S->record_types;
+    while (e != NULL) {
+        record_type_entry_t *next = e->next;
+        free(e);
+        e = next;
+    }
+    S->record_types = NULL;
+}
+
 /* Free the filename and var-name interning tables (string copies plus
  * the pointer arrays). */
 static void state_free_string_interns(mino_state_t *S)
@@ -292,6 +306,7 @@ void mino_state_free(mino_state_t *S)
     state_free_module_cache(S);
     state_free_meta_table(S);
     state_free_intern_tables(S);
+    state_free_record_types(S);
     state_free_gc_aux(S);
     state_free_diag_state(S);
     state_free_string_interns(S);

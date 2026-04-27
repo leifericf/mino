@@ -147,6 +147,7 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_BIGINT:    return "bigint";
     case MINO_RATIO:     return "ratio";
     case MINO_BIGDEC:    return "bigdec";
+    case MINO_TYPE:      return "record-type";
     }
     return "unknown";
 }

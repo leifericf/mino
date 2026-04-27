@@ -219,6 +219,99 @@ mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
     return v;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Record types                                                              */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * mino_defrecord interns a record type by (ns, name). On re-eval the
+ * existing MINO_TYPE pointer is returned so already-built record
+ * instances stay (instance? T r) true across script reloads.
+ *
+ * The registry is a singly-linked list: defrecord is rare on the
+ * timescale of script execution, the list stays short in practice
+ * (one entry per defrecord form), and walking it is faster than the
+ * cache misses a hash table introduces at this scale. If a host
+ * registers thousands of types, we revisit.
+ */
+mino_val_t *mino_defrecord(mino_state_t *S,
+                           const char *ns,
+                           const char *name,
+                           const char *const *field_names,
+                           size_t n_fields)
+{
+    record_type_entry_t *e;
+    mino_val_t          *fields_vec;
+    mino_val_t          *type_val;
+    const char          *ns_interned;
+    const char          *name_interned;
+    mino_val_t          *ns_sym;
+    mino_val_t          *name_sym;
+
+    if (S == NULL || ns == NULL || name == NULL) {
+        return NULL;
+    }
+
+    /* Intern ns and name strings via the symbol table so we can compare
+     * with pointer equality and the storage outlives any caller-owned
+     * buffer. */
+    ns_sym         = mino_symbol(S, ns);
+    name_sym       = mino_symbol(S, name);
+    if (ns_sym == NULL || name_sym == NULL) return NULL;
+    ns_interned    = ns_sym->as.s.data;
+    name_interned  = name_sym->as.s.data;
+
+    for (e = S->record_types; e != NULL; e = e->next) {
+        if (e->ns == ns_interned && e->name == name_interned) {
+            return e->type;
+        }
+    }
+
+    /* Build the fields vector first, then the type cell, then the
+     * registry entry. Allocator order is YOUNG-front so a minor
+     * collection mid-build cannot drop the fields vector before the
+     * type points at it. */
+    {
+        mino_val_t **field_kws = NULL;
+        size_t       i;
+        if (n_fields > 0) {
+            field_kws = (mino_val_t **)malloc(n_fields * sizeof(*field_kws));
+            if (field_kws == NULL) return NULL;
+            for (i = 0; i < n_fields; i++) {
+                field_kws[i] = mino_keyword(S, field_names[i]);
+                if (field_kws[i] == NULL) {
+                    free(field_kws);
+                    return NULL;
+                }
+            }
+        }
+        fields_vec = mino_vector(S, field_kws, n_fields);
+        free(field_kws);
+        if (fields_vec == NULL) return NULL;
+    }
+
+    type_val = alloc_val(S, MINO_TYPE);
+    if (type_val == NULL) return NULL;
+    type_val->as.record_type.ns     = ns_interned;
+    type_val->as.record_type.name   = name_interned;
+    type_val->as.record_type.fields = fields_vec;
+
+    e = (record_type_entry_t *)malloc(sizeof(*e));
+    if (e == NULL) return NULL;
+    e->ns   = ns_interned;
+    e->name = name_interned;
+    e->type = type_val;
+    e->next = S->record_types;
+    S->record_types = e;
+
+    return type_val;
+}
+
+int mino_is_record_type(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_TYPE;
+}
+
 
 /* ------------------------------------------------------------------------- */
 /* Predicates and accessors                                                  */
@@ -625,6 +718,10 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return mino_ratio_equals(a, b);
     case MINO_BIGDEC:
         return mino_bigdec_equals(a, b);
+    case MINO_TYPE:
+        /* Record-type identity is pointer equality: defrecord interns
+         * by (ns, name), so two equal types are the same allocation. */
+        return a == b;
     }
     return 0;
 }

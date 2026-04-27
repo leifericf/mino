@@ -267,6 +267,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_BIGINT:    return mino_keyword(S, "bigint");
     case MINO_RATIO:     return mino_keyword(S, "ratio");
     case MINO_BIGDEC:    return mino_keyword(S, "bigdec");
+    case MINO_TYPE:      return mino_keyword(S, "record-type");
     }
     return mino_keyword(S, "unknown");
 }
@@ -305,6 +306,7 @@ DEFINE_TYPE_PRED(prim_seq_p,     (v != NULL && (v->type == MINO_CONS || v->type 
 DEFINE_TYPE_PRED(prim_boolean_p, (v != NULL && v->type == MINO_BOOL),          "boolean?")
 DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && v->type == MINO_BOOL && v->as.b != 0),  "true?")
 DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b == 0),  "false?")
+DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && v->type == MINO_TYPE), "record-type?")
 
 #undef DEFINE_TYPE_PRED
 
@@ -500,6 +502,79 @@ mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return v;
         }
     }
+}
+
+/*
+ * (defrecord* ns-string name-string fields-vector) -- runtime fn that
+ * the script-side defrecord macro expands into. Returns the MINO_TYPE
+ * value for that (ns, name) pair, idempotent across calls.
+ *
+ * Field-vector entries may be keywords (preferred) or symbols; both
+ * resolve to keywords in the type's stored fields.
+ */
+mino_val_t *prim_defrecord_star(mino_state_t *S, mino_val_t *args,
+                                mino_env_t *env)
+{
+    mino_val_t  *ns_arg, *name_arg, *fields_arg;
+    const char  *ns_str, *name_str;
+    const char **field_names;
+    size_t       n_fields, i;
+    mino_val_t  *result;
+    (void)env;
+
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "defrecord* requires three arguments: ns name fields");
+    }
+    ns_arg     = args->as.cons.car;
+    name_arg   = args->as.cons.cdr->as.cons.car;
+    fields_arg = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+
+    if (ns_arg == NULL || ns_arg->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "defrecord*: ns must be a string");
+    }
+    if (name_arg == NULL || name_arg->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "defrecord*: name must be a string");
+    }
+    if (fields_arg == NULL || fields_arg->type != MINO_VECTOR) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "defrecord*: fields must be a vector");
+    }
+
+    ns_str   = ns_arg->as.s.data;
+    name_str = name_arg->as.s.data;
+    n_fields = fields_arg->as.vec.len;
+
+    field_names = NULL;
+    if (n_fields > 0) {
+        field_names = (const char **)malloc(n_fields * sizeof(*field_names));
+        if (field_names == NULL) {
+            return prim_throw_classified(S, "internal", "MIN001",
+                "defrecord*: out of memory");
+        }
+        for (i = 0; i < n_fields; i++) {
+            mino_val_t *f = vec_nth(fields_arg, i);
+            if (f == NULL || (f->type != MINO_KEYWORD
+                              && f->type != MINO_SYMBOL
+                              && f->type != MINO_STRING)) {
+                free(field_names);
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "defrecord*: field names must be keywords, symbols, or strings");
+            }
+            field_names[i] = f->as.s.data;
+        }
+    }
+    result = mino_defrecord(S, ns_str, name_str, field_names, n_fields);
+    free(field_names);
+    if (result == NULL) {
+        return prim_throw_classified(S, "internal", "MIN001",
+            "defrecord*: failed to construct record type");
+    }
+    return result;
 }
 
 /* (throw value) -- raise a script exception. */
@@ -857,6 +932,10 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns the last error as a diagnostic map, or nil."},
     {"error?",    prim_error_p,
      "Returns true if the value is a diagnostic map."},
+    {"defrecord*", prim_defrecord_star,
+     "Runtime constructor for record types. Takes ns name fields-vector and returns the MINO_TYPE value, idempotent across calls."},
+    {"record-type?", prim_record_type_p,
+     "Returns true if x is a record type (the value defrecord defines)."},
 };
 
 const size_t k_prims_reflection_count =

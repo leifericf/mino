@@ -413,6 +413,9 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         case MINO_BIGDEC:
             gc_mark_child_push(S, v->as.bigdec.unscaled);
             break;
+        case MINO_TYPE:
+            gc_mark_child_push(S, v->as.record_type.fields);
+            break;
         default:
             break;
         }

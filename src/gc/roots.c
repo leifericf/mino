@@ -370,6 +370,15 @@ void gc_mark_roots(mino_state_t *S)
     gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.args);
     /* Pin async timer channel values. */
     async_timers_mark(S);
+    /* Pin record-type registry entries. Record types are interned per
+     * (ns, name) and live for the state's lifetime so re-eval'd
+     * defrecord forms keep the same MINO_TYPE pointer identity. */
+    {
+        record_type_entry_t *rt;
+        for (rt = S->record_types; rt != NULL; rt = rt->next) {
+            gc_mark_interior(S, rt->type);
+        }
+    }
 }
 
 /*

@@ -123,6 +123,17 @@ typedef struct {
     mino_val_t *var;     /* the MINO_VAR value */
 } var_entry_t;
 
+/* Record-type registry entry. Pinned for the life of the state so
+ * MINO_TYPE values keep stable pointer identity across re-evaluation
+ * of the same defrecord form. The fields vector is GC-owned and
+ * traced via the registry walk in gc_mark_roots. */
+typedef struct record_type_entry {
+    const char               *ns;    /* interned ns */
+    const char               *name;  /* interned name */
+    mino_val_t               *type;  /* the MINO_TYPE value */
+    struct record_type_entry *next;
+} record_type_entry_t;
+
 /* Full environment definition.
  * Large frames (>= ENV_HASH_THRESHOLD bindings) get a hash index for O(1)
  * lookup; small frames use linear scan (faster for typical let/fn sizes). */
@@ -261,6 +272,11 @@ struct mino_state {
     /* Intern tables */
     intern_table_t  sym_intern;
     intern_table_t  kw_intern;
+
+    /* Record-type registry. Singly-linked list of MINO_TYPE values
+     * keyed by interned ns/name, so re-eval of (defrecord Point ...)
+     * returns the same type pointer. Pinned for state lifetime. */
+    record_type_entry_t *record_types;
 
     /* Cached interned special-form symbols for O(1) pointer-eq dispatch.
      * Populated lazily on first eval_impl call. */

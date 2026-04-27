@@ -85,10 +85,17 @@ typedef enum {
                      * the denominator is always positive (sign lives
                      * on the numerator). See also `1/2` literals and
                      * the `numerator` / `denominator` primitives. */
-    MINO_BIGDEC     /* arbitrary-precision decimal, stored as an
+    MINO_BIGDEC,    /* arbitrary-precision decimal, stored as an
                      * unscaled bigint plus a non-negative integer
                      * scale: value = unscaled * 10^-scale. Constructed
                      * from `1.5M` / `1M` literals or via `(bigdec x)`. */
+    MINO_TYPE       /* first-class record type. Carries identity (ptr),
+                     * defining namespace, unqualified name, and an
+                     * ordered vector of declared field-name keywords.
+                     * Method tables are not stored here; protocol
+                     * dispatch lives in the protocol's namespace,
+                     * keyed by what (type x) returns. Construct via
+                     * mino_defrecord. */
 } mino_type_t;
 
 typedef struct mino_val   mino_val_t;
@@ -213,6 +220,11 @@ struct mino_val {
             mino_val_t *unscaled; /* MINO_BIGINT */
             int         scale;    /* value = unscaled * 10^-scale */
         } bigdec;
+        struct {          /* MINO_TYPE: first-class record type */
+            const char *ns;      /* defining namespace (interned) */
+            const char *name;    /* unqualified type name (interned) */
+            mino_val_t *fields;  /* MINO_VECTOR of field-name keywords */
+        } record_type;
     } as;
 };
 
@@ -317,6 +329,36 @@ mino_val_t *mino_atom_deref(const mino_val_t *a);
 
 /* Set the value of an atom. */
 void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
+
+/* ------------------------------------------------------------------------- */
+/* Record types                                                              */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Define a record type. Returns the MINO_TYPE value. The pointer is
+ * stable for the life of the state (record types are pinned), so type
+ * identity is pointer equality.
+ *
+ * Idempotent: subsequent calls with the same ns/name return the
+ * existing type so re-loading scripts is safe. Field shape on a
+ * re-call is ignored (the existing type wins) — F.4 macros validate
+ * shape changes at the script layer when defrecord re-evaluates.
+ *
+ * The strings are copied into the state's intern table on first use,
+ * so callers may pass stack-allocated names. Field names are
+ * converted to keywords and stored in declared order.
+ *
+ * Mirrors the Clojure `defrecord` macro name to make the C/script
+ * analogy obvious to a C/C++/Rust embedder.
+ */
+mino_val_t *mino_defrecord(mino_state_t *S,
+                           const char *ns,
+                           const char *name,
+                           const char *const *field_names,
+                           size_t n_fields);
+
+/* Return 1 if v is a record type (MINO_TYPE), 0 otherwise. */
+int mino_is_record_type(const mino_val_t *v);
 
 /* ------------------------------------------------------------------------- */
 /* Transient (batch-mutation) API                                            */
