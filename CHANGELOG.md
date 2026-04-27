@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.81.0 — Bundled Stdlib And Per-Group Install Hooks
+
+The clojure.* namespaces that ship with mino (string, set, walk,
+edn, pprint, zip, data, test, repl, stacktrace, datafy, and
+core.protocols) are now baked into the binary alongside the core
+library. A standalone install with no `lib/` directory on disk
+still loads `(require '[clojure.string])` and the rest of the
+bundled set, closing the brew/scoop bundling gap that previously
+required users to colocate `lib/clojure/` next to the binary.
+
+Each bundled namespace gets a per-state install hook on the
+public C API: `mino_install_clojure_string`,
+`mino_install_clojure_set`, `mino_install_clojure_walk`,
+`mino_install_clojure_edn`, `mino_install_clojure_pprint`,
+`mino_install_clojure_zip`, `mino_install_clojure_data`,
+`mino_install_clojure_test`, `mino_install_clojure_repl`,
+and `mino_install_clojure_datafy`. Pairs that depend on each
+other ship together: `clojure.repl` brings `clojure.stacktrace`,
+and `clojure.datafy` brings `clojure.core.protocols`. Each hook
+registers its in-binary source into a per-state stdlib registry
+that the require system consults before the disk resolver, so a
+`(require '[clojure.string])` from script side loads the bundled
+source from memory.
+
+`mino_install_all(S, env)` is the new "give me everything"
+convenience for the standalone build: it calls `mino_install_core`
+plus the I/O / fs / proc groups plus every bundled clojure
+namespace hook, mirroring what a full link from `./mino` provides.
+Embedders that want a tighter footprint pick the subset they
+need explicitly; `mino_register_bundled_lib(S, name, source)`
+exposes the underlying registry so a host can bundle its own
+non-clojure namespaces with the same mechanism.
+
+The `gen-stdlib-headers` build task escapes each bundled
+`lib/clojure/*.clj` into a per-namespace header
+(`src/lib_clojure_<name>.h`) parallel to how `gen-core-header`
+handles `src/core.clj`. The headers are gitignored and
+regenerated on every build, so editing a bundled wrapper picks
+up automatically. Test-fixture `.clj` files under
+`lib/clojure/test_clojure/` and `lib/clojure/core_test/` are not
+bundled -- they exist on disk so the require/resolve test
+surface can verify file-loading behaviour.
+
+Bundled-lib lookup treats `.` and `/` as the same separator so a
+hook registered under `clojure.string` still matches the
+`clojure/string` path-style name produced when the symbol form
+of `require` recurses with the path-converted name.
+
 ## v0.80.0 — Real Records And Embed-Distinctive Type Construction
 
 Records are now first-class value types in mino. `(defrecord
