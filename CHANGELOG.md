@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.77.0 — REPL Specials And `clojure.repl` / `clojure.stacktrace`
+
+The interactive REPL now binds the standard introspection vars
+after each form: `*1`, `*2`, `*3` rotate to hold the three most
+recent results, `*e` captures the most recent error as a
+structured diagnostic map, `*command-line-args*` exposes any
+positional arguments past the script path, and `*file*` is
+bound to the script path during file-mode load (or
+`"NO_SOURCE_PATH"` in the REPL). The vars are interned from
+`main.c` rather than `mino_install_core`, so embedders that
+don't ship a REPL pay nothing for these.
+
+Two new bundled namespaces ship under `lib/clojure/`. The
+`clojure.repl` namespace wraps the existing introspection
+primitives in print-shaped helpers: the `doc` and `source`
+macros print, the `dir` macro lists a namespace's public names,
+`find-doc` searches docstrings for a substring or regex, and
+`pst` prints `*e` as a formatted summary. The C primitives that
+return raw data are exposed as `clojure.repl/doc-string`,
+`clojure.repl/source-form`, and `clojure.repl/apropos`. The
+`clojure.stacktrace` namespace provides `print-throwable`,
+`print-stack-trace`, `print-cause-trace`, and `root-cause` for
+walking mino's diagnostic-map exception representation.
+
+Per the alpha-no-backcompat policy, the previously-exposed
+`doc`, `source`, and `apropos` names in `clojure.core` have
+been removed. Code that called them as data accessors should
+require `clojure.repl` and use the renamed names; code that
+wanted print behavior gets it via the `clojure.repl/doc` and
+`clojure.repl/source` macros.
+
+The require machinery's runtime-namespace shortcut had a
+pre-existing bug that this cycle exposed: namespaces with
+both pre-installed C primitives and a backing `.clj` file
+would skip loading the file, since the var registry already
+held entries from install time. The check now consults
+`module_cache` (which records actually-loaded files) instead,
+so `(require '[clojure.repl :refer [doc]])` and
+`(require '[clojure.string :refer [capitalize]])` correctly
+load the wrapper and bind the `:refer`'d names.
+
 ## v0.76.2 — Insertion Barrier For Incremental Major
 
 The mutator write barrier now also pushes the just-installed
