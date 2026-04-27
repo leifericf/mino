@@ -1531,12 +1531,13 @@
                        (recur (rest remaining) result cur-proto
                               (conj cur-methods item))))))
         swaps (mapcat (fn [[proto methods]]
-                (let [pname (name proto)]
+                (let [pname (name proto)
+                      pns   (namespace proto)]
                   (map (fn [m]
                     (let [mname (first m)
                           params (second m)
                           body (drop 2 m)
-                          dsym (symbol (str pname "--" (name mname)))]
+                          dsym (symbol pns (str pname "--" (name mname)))]
                       (list 'swap! dsym 'assoc type-kw
                             (apply list 'fn params body))))
                    methods)))

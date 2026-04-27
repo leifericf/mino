@@ -95,3 +95,20 @@
     (is (map? (:methods Greetable)))
     (is (contains? (:methods Greetable) :greet))
     (is (contains? (:methods Greetable) :farewell))))
+
+;; --- cross-namespace extension via the protocol's full ns prefix ---
+
+(ns proto-test-source-ns)
+(defprotocol Frobbable (frob [x]))
+
+(ns proto-test-extender-ns)
+(require '[proto-test-source-ns :as src])
+(extend-type :string src/Frobbable
+  (frob [x] (str "frob:" x)))
+
+(ns user)
+
+(deftest cross-namespace-extend-type
+  (testing "extend-type preserves the protocol's namespace prefix"
+    (require '[proto-test-source-ns :as src])
+    (is (= "frob:hi" (src/frob "hi")))))
