@@ -1838,6 +1838,39 @@
 
 (set-print-method! print-method)
 
+(defmacro with-out-str
+  "Evaluates body with *out* bound to a fresh string-collecting atom,
+  and returns the accumulated string."
+  [& body]
+  `(let [a# (atom "")]
+     (binding [*out* a#]
+       ~@body)
+     (deref a#)))
+
+(defmacro with-in-str
+  "Evaluates body with *in* bound to a string-cursor atom holding
+  s. read and read-line consume from the cursor as forms or lines
+  are taken; the body's value is returned."
+  [s & body]
+  `(let [a# (atom ~s)]
+     (binding [*in* a#]
+       ~@body)))
+
+(defn print-str
+  "Returns the print-string of args, space-separated, no trailing newline."
+  [& args]
+  (with-out-str (apply print args)))
+
+(defn prn-str
+  "Returns the readable-string of args followed by a newline."
+  [& args]
+  (with-out-str (apply prn args)))
+
+(defn println-str
+  "Returns the print-string of args followed by a newline."
+  [& args]
+  (with-out-str (apply println args)))
+
 (defmacro with-open "Binds resources, evaluates body, then closes each resource." [bindings & body]
   (if (empty? bindings)
     `(do ~@body)
@@ -2183,11 +2216,15 @@
   (throw (ex-info "inst-ms is not supported on mino — there is no Inst type"
                   {:mino/unsupported :inst-ms})))
 
-;; read: Clojure-compatible alias of read-string. Real Clojure's read
-;; accepts a PushbackReader; mino has no stream type, so the string
-;; form is the only shape. The opts map is forwarded so callers can
-;; pass {:read-cond :preserve} to retain reader conditionals.
+;; read: Clojure-compatible reader entry point.
+;;   (read)        — reads one form from *in*. Atom-bound *in*
+;;                   consumes from the head; the default stdin
+;;                   sentinel raises an unsupported error (use
+;;                   with-in-str or read-string instead).
+;;   (read s)      — reads from the given string.
+;;   (read opts s) — reads from the string with the given options.
 (defn read
+  ([]       (read*))
   ([s]      (read-string s))
   ([opts s] (read-string opts s)))
 
@@ -2347,3 +2384,4 @@
                                        init)]))
                           pairs)]
     (apply list 'let (vec let-pairs) body)))
+
