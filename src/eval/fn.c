@@ -273,10 +273,20 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
          * in the right place by default; record the same ns as the
          * "ambient" so eval_symbol can still find these bindings even
          * after the body itself mutates current_ns via (ns ...) or
-         * (in-ns ...). */
+         * (in-ns ...).
+         *
+         * Macros are different: their body runs at the *caller's*
+         * macroexpansion context, so *ns* and (resolve ...) must see
+         * the caller's namespace. Set only fn_ambient_ns for macros so
+         * helper-symbol lookups fall back to the defining ns without
+         * shifting current_ns. */
         if (fn->as.fn.defining_ns != NULL) {
-            S->current_ns    = fn->as.fn.defining_ns;
-            S->fn_ambient_ns = fn->as.fn.defining_ns;
+            if (fn->type == MINO_MACRO) {
+                S->fn_ambient_ns = fn->as.fn.defining_ns;
+            } else {
+                S->current_ns    = fn->as.fn.defining_ns;
+                S->fn_ambient_ns = fn->as.fn.defining_ns;
+            }
         }
         if (S->eval_current_form != NULL
             && S->eval_current_form->type == MINO_CONS) {
