@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.79.0 — Auto-Promoting Arithmetic And `unchecked-*` Opt-In
+
+Plain `+`, `-`, `*`, `inc`, and `dec` now auto-promote to bigint
+on long overflow rather than throwing. The expression
+`(+ 9223372036854775807 1)` returns `9223372036854775808N`
+instead of raising `:eval/overflow`; the same applies to
+unary `(- LLONG_MIN)`, `(- LLONG_MIN 1)`, `(* big big big)`,
+`(inc LLONG_MAX)`, and `(dec LLONG_MIN)`. The previous
+loud-throw default was the silent-surprise cousin of canonical
+Clojure: working code that ran on a JVM raised an unfamiliar
+classified error here. The new default matches what Clojure
+programs assume, while the named opt-in below preserves the
+fast int64 path for code that needs it.
+
+The `unchecked-add`, `unchecked-subtract`, `unchecked-multiply`,
+`unchecked-inc`, `unchecked-dec`, and `unchecked-negate`
+primitives ship as the named opt-in for two's-complement
+wraparound int64 arithmetic. `(unchecked-add 9223372036854775807
+1)` returns `-9223372036854775808` (LLONG_MAX wraps to
+LLONG_MIN); operands must be ints, non-int operands throw
+`:eval/type`. The names match canonical Clojure surface and
+pair fixed-arity calls (`unchecked-add` is binary,
+`unchecked-inc` is unary), matching the JVM signatures.
+
+Per the alpha-no-backcompat policy, the auto-promoting
+quote-suffix siblings `+'`, `-'`, `*'`, `inc'`, and `dec'` have
+been removed entirely. Code that called them now resolves
+through plain `+`/`-`/`*`/`inc`/`dec`, which auto-promote with
+the same semantics. The `clojure_coverage_test` lists the
+quote-suffix names alongside JVM-only names: present in
+canonical Clojure but intentionally absent in mino because the
+plain forms now do the same job.
+
+The `:eval/overflow` MOV001 error code is retired. The single
+remaining caller, `(int huge-bigint)` for a value out of long
+range, now reports `:eval/type` MTY001 since the conversion is
+a type/range error rather than an arithmetic overflow.
+
+Internally, the `tower_reduce` and `tower_reduce_seeded`
+helpers shed the `promote_long_overflow` flag they took to
+distinguish `+` from `+'`; they now always promote. The 6
+throw sites in `src/prim/numeric.c` for `:eval/overflow` MOV001
+are gone.
+
 ## v0.78.0 — `clojure.core.protocols` And Cross-Namespace Protocol Extension
 
 The four canonical protocols `CollReduce`, `IKVReduce`,
