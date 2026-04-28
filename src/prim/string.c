@@ -13,11 +13,29 @@
 static inline char *fmt_ensure(mino_state_t *S, char *buf,
                                size_t len, size_t *cap_ptr, size_t extra)
 {
-    size_t need = len + extra + 1;
+    size_t need;
+    /* len + extra + 1 must not wrap. */
+    if (extra > SIZE_MAX - len - 1) {
+        free(buf);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001",
+                      "format: result size overflow");
+        return NULL;
+    }
+    need = len + extra + 1;
     if (need > *cap_ptr) {
         size_t newcap = *cap_ptr == 0 ? 128 : *cap_ptr;
         char  *newbuf;
-        while (newcap < need) newcap *= 2;
+        while (newcap < need) {
+            if (newcap > SIZE_MAX / 2) {
+                free(buf);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "format: result size overflow");
+                return NULL;
+            }
+            newcap *= 2;
+        }
         newbuf = (char *)realloc(buf, newcap);
         if (newbuf == NULL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001",
