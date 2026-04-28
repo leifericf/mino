@@ -26,9 +26,31 @@ jobs:
 
       - name: Bootstrap mino
         run: |
-          printf 'static const char *core_mino_src =\n' > src/core_mino.h
-          sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.clj >> src/core_mino.h
-          printf '    ;\n' >> src/core_mino.h
+          gen_header() {
+            local src="$1"
+            local sym="$2"
+            local out="src/$sym.h"
+            printf 'static const char *%s_src =\n' "$sym" > "$out"
+            sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' "$src" >> "$out"
+            printf '    ;\n' >> "$out"
+          }
+          gen_header src/core.clj                     core_mino
+          gen_header lib/clojure/string.clj           lib_clojure_string
+          gen_header lib/clojure/set.clj              lib_clojure_set
+          gen_header lib/clojure/walk.clj             lib_clojure_walk
+          gen_header lib/clojure/edn.clj              lib_clojure_edn
+          gen_header lib/clojure/pprint.clj           lib_clojure_pprint
+          gen_header lib/clojure/zip.clj              lib_clojure_zip
+          gen_header lib/clojure/data.clj             lib_clojure_data
+          gen_header lib/clojure/test.clj             lib_clojure_test
+          gen_header lib/clojure/template.clj         lib_clojure_template
+          gen_header lib/clojure/repl.clj             lib_clojure_repl
+          gen_header lib/clojure/stacktrace.clj       lib_clojure_stacktrace
+          gen_header lib/clojure/datafy.clj           lib_clojure_datafy
+          gen_header lib/clojure/core/protocols.clj   lib_clojure_core_protocols
+          gen_header lib/clojure/instant.clj          lib_clojure_instant
+          gen_header lib/clojure/spec/alpha.clj       lib_clojure_spec_alpha
+          gen_header lib/clojure/core/specs/alpha.clj lib_clojure_core_specs_alpha
           $CC -std=c99 -O2 \
             -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
             -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
@@ -76,9 +98,31 @@ jobs:
       - name: Bootstrap mino
         working-directory: mino-bench/mino
         run: |
-          printf 'static const char *core_mino_src =\n' > src/core_mino.h
-          sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' src/core.clj >> src/core_mino.h
-          printf '    ;\n' >> src/core_mino.h
+          gen_header() {
+            local src="$1"
+            local sym="$2"
+            local out="src/$sym.h"
+            printf 'static const char *%s_src =\n' "$sym" > "$out"
+            sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$/\\n"/' "$src" >> "$out"
+            printf '    ;\n' >> "$out"
+          }
+          gen_header src/core.clj                     core_mino
+          gen_header lib/clojure/string.clj           lib_clojure_string
+          gen_header lib/clojure/set.clj              lib_clojure_set
+          gen_header lib/clojure/walk.clj             lib_clojure_walk
+          gen_header lib/clojure/edn.clj              lib_clojure_edn
+          gen_header lib/clojure/pprint.clj           lib_clojure_pprint
+          gen_header lib/clojure/zip.clj              lib_clojure_zip
+          gen_header lib/clojure/data.clj             lib_clojure_data
+          gen_header lib/clojure/test.clj             lib_clojure_test
+          gen_header lib/clojure/template.clj         lib_clojure_template
+          gen_header lib/clojure/repl.clj             lib_clojure_repl
+          gen_header lib/clojure/stacktrace.clj       lib_clojure_stacktrace
+          gen_header lib/clojure/datafy.clj           lib_clojure_datafy
+          gen_header lib/clojure/core/protocols.clj   lib_clojure_core_protocols
+          gen_header lib/clojure/instant.clj          lib_clojure_instant
+          gen_header lib/clojure/spec/alpha.clj       lib_clojure_spec_alpha
+          gen_header lib/clojure/core/specs/alpha.clj lib_clojure_core_specs_alpha
           cc -std=c99 -O2 \
             -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
             -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
