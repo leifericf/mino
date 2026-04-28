@@ -434,14 +434,36 @@ void mino_future_gc_trace(mino_val_t *fut)
 void mino_future_gc_sweep(mino_val_t *fut)
 {
     mino_future_t *impl;
+    mino_state_t *S;
     if (fut == NULL || fut->type != MINO_FUTURE) { return; }
     impl = fut->as.future.impl;
     if (impl == NULL) { return; }
 
-    /* If the worker is still running, joining here would deadlock
-     * (worker needs state_lock; sweep holds the mutator). We rely
-     * on quiesce having joined every worker before state_free
-     * tears down the heap. */
+    /* GC is suppressed while thread_count > 0, so any worker for this
+     * future has decremented S->thread_count and is on its way out of
+     * worker_entry. Join here so the pthread is fully reaped before
+     * we destroy mu/cv -- otherwise the worker's final mu_unlock can
+     * touch destroyed mutex memory. pthread_join on an already-exited
+     * joinable thread returns immediately. */
+    S = impl->state;
+    if (impl->thread_started && !impl->thread_joined) {
+#if defined(_WIN32) && defined(_MSC_VER)
+        WaitForSingleObject(impl->thread, INFINITE);
+        CloseHandle(impl->thread);
+#else
+        pthread_join(impl->thread, NULL);
+#endif
+        impl->thread_joined = 1;
+    }
+
+    /* Detach from S->future_list_head before freeing so quiesce
+     * never walks into a dangling impl. */
+    if (S != NULL) {
+        mino_future_t **pp = &S->future_list_head;
+        while (*pp != NULL && *pp != impl) { pp = &(*pp)->next_in_state; }
+        if (*pp == impl) { *pp = impl->next_in_state; }
+    }
+
     cv_destroy(&impl->cv);
     mu_destroy(&impl->mu);
     free(impl);
