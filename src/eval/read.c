@@ -843,6 +843,189 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
     return mino_set(S, buf, len);
 }
 
+/* try_parse_numeric -- attempt to parse start[0..len) as one of the
+ * supported numeric literal forms (hex, radix Nr, ratio, bigint N
+ * suffix, bigdec M suffix, decimal int or float). On success, returns
+ * the parsed value. On a malformed-but-clearly-numeric input (e.g. a
+ * bad ratio literal), sets *err to 1 with the reader diag already set
+ * and returns NULL. On not-numeric (caller should fall through to
+ * symbol), returns NULL with *err 0. */
+static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
+                                     size_t len, int *err)
+{
+    *err = 0;
+    char        buf[64];
+    char       *endp           = NULL;
+    size_t      scan_start     = 0;
+    size_t      num_len        = len;
+    int         has_dot_or_exp = 0;
+    int         looks_numeric  = 1;
+    size_t      i;
+
+    if (len >= sizeof(buf)) return NULL;
+    memcpy(buf, start, len);
+    buf[len] = '\0';
+
+    /* Sign prefix. */
+    if (buf[0] == '+' || buf[0] == '-') scan_start = 1;
+    if (scan_start == len) looks_numeric = 0;
+
+    /* Hex: 0x... or [+-]0x... */
+    if (looks_numeric && scan_start + 2 < len
+        && buf[scan_start] == '0'
+        && (buf[scan_start + 1] == 'x' || buf[scan_start + 1] == 'X')) {
+        long long n = strtoll(buf, &endp, 16);
+        if (endp == buf + len)
+            return mino_int(S, n);
+        looks_numeric = 0;
+    }
+
+    /* Radix: [+-]?NrDIGITS where N is base 2-36 (e.g. 2r1010, 16rFF) */
+    if (looks_numeric) {
+        const char *r_pos = NULL;
+        for (i = scan_start; i < len; i++) {
+            if (buf[i] == 'r' || buf[i] == 'R') { r_pos = buf + i; break; }
+        }
+        if (r_pos != NULL && r_pos > buf + scan_start && r_pos < buf + len - 1) {
+            int all_base_digits = 1;
+            for (i = scan_start; i < (size_t)(r_pos - buf); i++) {
+                if (!isdigit((unsigned char)buf[i])) { all_base_digits = 0; break; }
+            }
+            if (all_base_digits) {
+                long base = strtol(buf + scan_start, NULL, 10);
+                if (base >= 2 && base <= 36) {
+                    /* Parse the digits after 'r' in the given base. */
+                    char radix_buf[64];
+                    size_t radix_len = len - (size_t)(r_pos - buf) - 1;
+                    int sign = 1;
+                    if (scan_start > 0 && buf[0] == '-') sign = -1;
+                    if (radix_len > 0 && radix_len < sizeof(radix_buf)) {
+                        memcpy(radix_buf, r_pos + 1, radix_len);
+                        radix_buf[radix_len] = '\0';
+                        {
+                            long long n = strtoll(radix_buf, &endp, (int)base);
+                            if (endp == radix_buf + radix_len)
+                                return mino_int(S, sign * n);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* Ratio: digits/digits with optional sign prefix.
+     * Must not match namespace-qualified symbols (alpha/alpha). */
+    if (looks_numeric) {
+        const char *slash = NULL;
+        for (i = scan_start; i < len; i++) {
+            if (buf[i] == '/') { slash = buf + i; break; }
+        }
+        if (slash != NULL && slash > buf + scan_start && slash < buf + len - 1) {
+            int all_digits = 1;
+            for (i = scan_start; i < (size_t)(slash - buf); i++) {
+                if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
+            }
+            if (all_digits) {
+                for (i = (size_t)(slash - buf) + 1; i < len; i++) {
+                    if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
+                }
+            }
+            if (all_digits) {
+                /* Parse numerator and denominator as bigints so
+                 * arbitrary magnitudes are supported, then build the
+                 * canonical ratio. mino_ratio_make handles gcd-
+                 * reduction and integer narrowing (e.g. `4/2` reads
+                 * back as `2`). */
+                size_t      num_str_len = (size_t)(slash - buf);
+                size_t      den_str_len = len - num_str_len - 1;
+                mino_val_t *num_bi = mino_bigint_from_string_n(
+                    S, buf, num_str_len);
+                mino_val_t *den_bi;
+                if (num_bi == NULL) {
+                    set_reader_diag(S, MRE008,
+                                    "invalid ratio literal",
+                                    S->reader_line, S->reader_col);
+                    *err = 1;
+                    return NULL;
+                }
+                den_bi = mino_bigint_from_string_n(
+                    S, slash + 1, den_str_len);
+                if (den_bi == NULL) {
+                    set_reader_diag(S, MRE008,
+                                    "invalid ratio literal",
+                                    S->reader_line, S->reader_col);
+                    *err = 1;
+                    return NULL;
+                }
+                return mino_ratio_make(S, num_bi, den_bi);
+            }
+        }
+    }
+
+    /* Bigint N suffix: 42N -> (bigint 42). Always produces MINO_BIGINT,
+     * even for values that would fit in a long long. Clojure parity:
+     * `(type 1N)` returns clojure.lang.BigInt regardless of magnitude. */
+    if (looks_numeric && len > 1 && buf[len - 1] == 'N') {
+        size_t       digit_start = scan_start;
+        int          all_digits  = 1;
+        num_len = len - 1;
+        /* Require digits before N (possibly after a sign prefix). */
+        if (num_len <= digit_start) {
+            all_digits = 0;
+        } else {
+            for (i = digit_start; i < num_len; i++) {
+                if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
+            }
+        }
+        if (all_digits) {
+            mino_val_t *bi;
+            buf[num_len] = '\0';
+            bi = mino_bigint_from_string_n(S, buf, num_len);
+            buf[num_len] = 'N';
+            if (bi != NULL) return bi;
+        }
+        num_len = len;
+    }
+
+    /* Bigdec M suffix: 1.5M -> arbitrary-precision decimal. */
+    if (looks_numeric && len > 1 && buf[len - 1] == 'M') {
+        mino_val_t *bd;
+        num_len = len - 1;
+        buf[num_len] = '\0';
+        bd = mino_bigdec_from_string(S, buf);
+        buf[num_len] = 'M';
+        num_len = len;
+        if (bd != NULL) return bd;
+    }
+
+    /* Standard decimal. */
+    for (i = scan_start; i < len; i++) {
+        char c = buf[i];
+        if (c == '.' || c == 'e' || c == 'E') {
+            has_dot_or_exp = 1;
+            if ((c == 'e' || c == 'E') && i + 1 < len &&
+                (buf[i + 1] == '+' || buf[i + 1] == '-')) {
+                i++;
+            }
+        } else if (!isdigit((unsigned char)c)) {
+            looks_numeric = 0;
+            break;
+        }
+    }
+    if (looks_numeric) {
+        if (has_dot_or_exp) {
+            double d = strtod(buf, &endp);
+            if (endp == buf + len)
+                return mino_float(S, d);
+        } else {
+            long long n = strtoll(buf, &endp, 10);
+            if (endp == buf + len)
+                return mino_int(S, n);
+        }
+    }
+    return NULL;
+}
+
 static mino_val_t *read_atom(mino_state_t *S, const char **p)
 {
     const char *start = *p;
@@ -947,172 +1130,11 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
     }
 
     /* Try numeric. */
-    if (len < sizeof(((struct { char b[64]; } *)0)->b)) {
-        char buf[64];
-        char *endp = NULL;
-        size_t scan_start = 0;
-        size_t num_len = len;
-        int has_dot_or_exp = 0;
-        int looks_numeric = 1;
-        size_t i;
-        memcpy(buf, start, len);
-        buf[len] = '\0';
-
-        /* Sign prefix. */
-        if (buf[0] == '+' || buf[0] == '-') scan_start = 1;
-        if (scan_start == len) looks_numeric = 0;
-
-        /* Hex: 0x... or [+-]0x... */
-        if (looks_numeric && scan_start + 2 < len
-            && buf[scan_start] == '0'
-            && (buf[scan_start + 1] == 'x' || buf[scan_start + 1] == 'X')) {
-            long long n = strtoll(buf, &endp, 16);
-            if (endp == buf + len)
-                return mino_int(S, n);
-            looks_numeric = 0;
-        }
-
-        /* Radix: [+-]?NrDIGITS where N is base 2-36 (e.g. 2r1010, 16rFF) */
-        if (looks_numeric) {
-            const char *r_pos = NULL;
-            for (i = scan_start; i < len; i++) {
-                if (buf[i] == 'r' || buf[i] == 'R') { r_pos = buf + i; break; }
-            }
-            if (r_pos != NULL && r_pos > buf + scan_start && r_pos < buf + len - 1) {
-                int all_base_digits = 1;
-                for (i = scan_start; i < (size_t)(r_pos - buf); i++) {
-                    if (!isdigit((unsigned char)buf[i])) { all_base_digits = 0; break; }
-                }
-                if (all_base_digits) {
-                    long base = strtol(buf + scan_start, NULL, 10);
-                    if (base >= 2 && base <= 36) {
-                        /* Parse the digits after 'r' in the given base. */
-                        char radix_buf[64];
-                        size_t radix_len = len - (size_t)(r_pos - buf) - 1;
-                        int sign = 1;
-                        if (scan_start > 0 && buf[0] == '-') sign = -1;
-                        if (radix_len > 0 && radix_len < sizeof(radix_buf)) {
-                            memcpy(radix_buf, r_pos + 1, radix_len);
-                            radix_buf[radix_len] = '\0';
-                            {
-                                long long n = strtoll(radix_buf, &endp, (int)base);
-                                if (endp == radix_buf + radix_len)
-                                    return mino_int(S, sign * n);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        /* Ratio: digits/digits with optional sign prefix.
-         * Must not match namespace-qualified symbols (alpha/alpha). */
-        if (looks_numeric) {
-            const char *slash = NULL;
-            for (i = scan_start; i < len; i++) {
-                if (buf[i] == '/') { slash = buf + i; break; }
-            }
-            if (slash != NULL && slash > buf + scan_start && slash < buf + len - 1) {
-                int all_digits = 1;
-                for (i = scan_start; i < (size_t)(slash - buf); i++) {
-                    if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
-                }
-                if (all_digits) {
-                    for (i = (size_t)(slash - buf) + 1; i < len; i++) {
-                        if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
-                    }
-                }
-                if (all_digits) {
-                    /* Parse numerator and denominator as bigints so
-                     * arbitrary magnitudes are supported, then build the
-                     * canonical ratio. mino_ratio_make handles gcd-
-                     * reduction and integer narrowing (e.g. `4/2` reads
-                     * back as `2`). */
-                    size_t      num_str_len = (size_t)(slash - buf);
-                    size_t      den_str_len = len - num_str_len - 1;
-                    mino_val_t *num_bi = mino_bigint_from_string_n(
-                        S, buf, num_str_len);
-                    mino_val_t *den_bi;
-                    if (num_bi == NULL) {
-                        set_reader_diag(S, MRE008,
-                                        "invalid ratio literal",
-                                        S->reader_line, S->reader_col);
-                        return NULL;
-                    }
-                    den_bi = mino_bigint_from_string_n(
-                        S, slash + 1, den_str_len);
-                    if (den_bi == NULL) {
-                        set_reader_diag(S, MRE008,
-                                        "invalid ratio literal",
-                                        S->reader_line, S->reader_col);
-                        return NULL;
-                    }
-                    return mino_ratio_make(S, num_bi, den_bi);
-                }
-            }
-        }
-
-        /* Bigint N suffix: 42N -> (bigint 42). Always produces MINO_BIGINT,
-         * even for values that would fit in a long long. Clojure parity:
-         * `(type 1N)` returns clojure.lang.BigInt regardless of magnitude. */
-        if (looks_numeric && len > 1 && buf[len - 1] == 'N') {
-            size_t       digit_start = scan_start;
-            int          all_digits  = 1;
-            num_len = len - 1;
-            /* Require digits before N (possibly after a sign prefix). */
-            if (num_len <= digit_start) {
-                all_digits = 0;
-            } else {
-                for (i = digit_start; i < num_len; i++) {
-                    if (!isdigit((unsigned char)buf[i])) { all_digits = 0; break; }
-                }
-            }
-            if (all_digits) {
-                mino_val_t *bi;
-                buf[num_len] = '\0';
-                bi = mino_bigint_from_string_n(S, buf, num_len);
-                buf[num_len] = 'N';
-                if (bi != NULL) return bi;
-            }
-            num_len = len;
-        }
-
-        /* Bigdec M suffix: 1.5M -> arbitrary-precision decimal. */
-        if (looks_numeric && len > 1 && buf[len - 1] == 'M') {
-            mino_val_t *bd;
-            num_len = len - 1;
-            buf[num_len] = '\0';
-            bd = mino_bigdec_from_string(S, buf);
-            buf[num_len] = 'M';
-            num_len = len;
-            if (bd != NULL) return bd;
-        }
-
-        /* Standard decimal. */
-        for (i = scan_start; i < len; i++) {
-            char c = buf[i];
-            if (c == '.' || c == 'e' || c == 'E') {
-                has_dot_or_exp = 1;
-                if ((c == 'e' || c == 'E') && i + 1 < len &&
-                    (buf[i + 1] == '+' || buf[i + 1] == '-')) {
-                    i++;
-                }
-            } else if (!isdigit((unsigned char)c)) {
-                looks_numeric = 0;
-                break;
-            }
-        }
-        if (looks_numeric) {
-            if (has_dot_or_exp) {
-                double d = strtod(buf, &endp);
-                if (endp == buf + len)
-                    return mino_float(S, d);
-            } else {
-                long long n = strtoll(buf, &endp, 10);
-                if (endp == buf + len)
-                    return mino_int(S, n);
-            }
-        }
+    {
+        int         err = 0;
+        mino_val_t *num = try_parse_numeric(S, start, len, &err);
+        if (num != NULL) return num;
+        if (err) return NULL;
     }
 
     /* Symbols must not end with a colon (foo: is rejected by upstream
