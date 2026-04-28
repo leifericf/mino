@@ -84,6 +84,41 @@ static int atom_set(mino_state_t *S, mino_val_t *atom,
     return 0;
 }
 
+/* Atomic load of an atom's current value.  In single-threaded mode this
+ * is a plain pointer read; once S->multi_threaded flips (Cycle G4 later
+ * sub-cycles) the read goes through __atomic_load_n with acquire ordering
+ * so swap! sees a coherent snapshot of writes from other workers. */
+static mino_val_t *atom_load(mino_state_t *S, mino_val_t *atom)
+{
+    if (S->multi_threaded) {
+        return __atomic_load_n(&atom->as.atom.val, __ATOMIC_ACQUIRE);
+    }
+    return atom->as.atom.val;
+}
+
+/* Compare-and-exchange the atom's value pointer.  Returns 1 on success
+ * (current value matched expected and was replaced with new_val), 0 on
+ * failure.  In single-threaded mode this is a pointer-compare + plain
+ * write; in multi-threaded mode it goes through __atomic_compare_exchange_n
+ * with release/relaxed ordering so a successful winner publishes new_val
+ * before any other worker can observe it. The GC write barrier and watch
+ * notification are the caller's responsibility — atom_cas is the raw
+ * publish step only. */
+static int atom_cas_ptr(mino_state_t *S, mino_val_t *atom,
+                        mino_val_t *expected, mino_val_t *new_val)
+{
+    if (S->multi_threaded) {
+        return __atomic_compare_exchange_n(&atom->as.atom.val,
+                                           &expected, new_val,
+                                           0,  /* not weak */
+                                           __ATOMIC_RELEASE,
+                                           __ATOMIC_RELAXED) ? 1 : 0;
+    }
+    if (atom->as.atom.val != expected) return 0;
+    atom->as.atom.val = new_val;
+    return 1;
+}
+
 /* Build the call-args list for swap: (cur extra1 extra2 ...). */
 static mino_val_t *swap_build_args(mino_state_t *S, mino_val_t *cur,
                                    mino_val_t *extra)
@@ -156,10 +191,16 @@ mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return val;
 }
 
-/* (swap! atom f & args) -- applies (f current-val args...) and sets result. */
+/* (swap! atom f & args) -- applies (f current-val args...) and sets result.
+ *
+ * Single-threaded path is a straight read-compute-publish.  Multi-threaded
+ * path runs the canonical retry loop: load, compute, CAS, retry on loss.
+ * The retry path is dormant in v0.87.x (S->multi_threaded never flips)
+ * and lights up when Cycle G4 later sub-cycles introduce real host
+ * threads. */
 mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *a, *fn, *cur, *call_args, *result;
+    mino_val_t *a, *fn, *cur, *call_args, *result, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "swap! requires at least 2 arguments: atom and function");
     }
@@ -168,14 +209,48 @@ mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a == NULL || a->type != MINO_ATOM) {
         return prim_throw_classified(S, "eval/type", "MTY001", "swap!: first argument must be an atom");
     }
-    cur = a->as.atom.val;
-    call_args = swap_build_args(S, cur, args->as.cons.cdr->as.cons.cdr);
-    result = mino_call(S, fn, call_args, env);
-    if (result == NULL) return NULL;
-    if (atom_set(S, a, cur, result, env) != 0) return NULL;
-    return result;
+    extra = args->as.cons.cdr->as.cons.cdr;
+    if (!S->multi_threaded) {
+        cur = a->as.atom.val;
+        call_args = swap_build_args(S, cur, extra);
+        result = mino_call(S, fn, call_args, env);
+        if (result == NULL) return NULL;
+        if (atom_set(S, a, cur, result, env) != 0) return NULL;
+        return result;
+    }
+    /* Multi-threaded retry loop. */
+    for (;;) {
+        cur = atom_load(S, a);
+        call_args = swap_build_args(S, cur, extra);
+        result = mino_call(S, fn, call_args, env);
+        if (result == NULL) return NULL;
+        if (atom_validate(S, a, result, env) != 0) return NULL;
+        gc_write_barrier(S, a, cur, result);
+        if (atom_cas_ptr(S, a, cur, result)) {
+            atom_notify_watches(S, a, cur, result, env);
+            return result;
+        }
+        /* Lost the race; another worker won.  Try again with the new
+         * current value.  Watches do not fire for losers; the winner
+         * publishes the user-visible state change. */
+    }
 }
 
+/* (compare-and-set! atom expected new-val) -- single CAS attempt.
+ *
+ * Compares the current value with `expected` by pointer identity (matching
+ * canon Clojure semantics for atom CAS, which uses .equals on the JVM but
+ * pointer-eq is the ground truth here).  On match, the value is replaced
+ * with new-val and watches fire; otherwise the atom is left alone and
+ * false is returned.  Single-threaded mode short-circuits via plain read
+ * + write; multi-threaded mode goes through __atomic_compare_exchange_n.
+ *
+ * Note: Clojure's compare-and-set! actually uses identical? semantics
+ * (pointer eq) for the comparison, not value-equality, because that is
+ * what a CAS instruction can express.  Older mino used mino_eq here,
+ * which is value-equality and surprised users hitting the multi-threaded
+ * path; aligning with canon both fixes that and matches what the CAS
+ * primitive can deliver. */
 mino_val_t *prim_compare_and_set_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a, *expected, *new_val;
@@ -192,10 +267,12 @@ mino_val_t *prim_compare_and_set_bang(mino_state_t *S, mino_val_t *args, mino_en
         return prim_throw_classified(S, "eval/type", "MTY001",
             "compare-and-set!: first argument must be an atom");
     }
-    if (!mino_eq(a->as.atom.val, expected)) {
+    if (atom_validate(S, a, new_val, env) != 0) return NULL;
+    gc_write_barrier(S, a, expected, new_val);
+    if (!atom_cas_ptr(S, a, expected, new_val)) {
         return mino_false(S);
     }
-    if (atom_set(S, a, a->as.atom.val, new_val, env) != 0) return NULL;
+    atom_notify_watches(S, a, expected, new_val, env);
     return mino_true(S);
 }
 
