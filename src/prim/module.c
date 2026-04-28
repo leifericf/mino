@@ -272,6 +272,133 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
     return result;
 }
 
+/* apply_refer_options -- bind referred names from mod_sym's ns env into
+ * the current ns env. refer_vec (or NULL) lists explicit symbols to
+ * bind; refer_all (mutually exclusive with a non-NULL refer_vec) means
+ * all publics. exclude_vec and rename_map shape the :refer :all path
+ * (rename_map also applies to the explicit-list path). Returns 0 on
+ * success, -1 on error with the diagnostic already set. */
+static int apply_refer_options(mino_state_t *S, mino_val_t *mod_sym,
+                               mino_val_t *refer_vec, int refer_all,
+                               mino_val_t *exclude_vec,
+                               mino_val_t *rename_map)
+{
+    char        modbuf[256];
+    mino_env_t *target;
+    mino_env_t *src;
+
+    if (mod_sym->as.s.len >= sizeof(modbuf)) {
+        return 0;
+    }
+    target = current_ns_env(S);
+    memcpy(modbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+    modbuf[mod_sym->as.s.len] = '\0';
+    src = ns_env_lookup(S, modbuf);
+
+    if (refer_vec != NULL) {
+        size_t ri;
+        for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
+            mino_val_t *rsym = vec_nth(refer_vec, ri);
+            if (rsym != NULL && rsym->type == MINO_SYMBOL
+                && rsym->as.s.len < 256) {
+                char rbuf[256];
+                size_t rn = rsym->as.s.len;
+                mino_val_t *val = NULL;
+                const char *bind_name = rbuf;
+                size_t      bind_len  = rn;
+                memcpy(rbuf, rsym->as.s.data, rn);
+                rbuf[rn] = '\0';
+                if (src != NULL) {
+                    env_binding_t *b = env_find_here(src, rbuf);
+                    if (b != NULL) val = b->val;
+                }
+                if (val == NULL) {
+                    mino_val_t *var = var_find(S, modbuf, rbuf);
+                    if (var != NULL) val = var->as.var.root;
+                }
+                if (val == NULL) {
+                    char msg[300];
+                    snprintf(msg, sizeof(msg),
+                        "require: %s does not refer var %s",
+                        modbuf, rbuf);
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                        "name", "MNS001", msg);
+                    return -1;
+                }
+                if (rename_map != NULL && rename_map->type == MINO_MAP) {
+                    size_t mi;
+                    for (mi = 0; mi < rename_map->as.map.len; mi++) {
+                        mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
+                        if (k != NULL && k->type == MINO_SYMBOL
+                            && k->as.s.len == rn
+                            && memcmp(k->as.s.data, rbuf, rn) == 0) {
+                            mino_val_t *renamed = map_get_val(rename_map, k);
+                            if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                                bind_name = renamed->as.s.data;
+                                bind_len  = renamed->as.s.len;
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (bind_len < sizeof(rbuf)) {
+                    char nbuf[256];
+                    memcpy(nbuf, bind_name, bind_len);
+                    nbuf[bind_len] = '\0';
+                    env_bind(S, target, nbuf, val);
+                }
+            }
+        }
+    }
+    if (refer_all && src != NULL) {
+        size_t ri;
+        for (ri = 0; ri < src->len; ri++) {
+            const char *bname = src->bindings[ri].name;
+            size_t       blen  = strlen(bname);
+            const char *bind_name = bname;
+            size_t      bind_len  = blen;
+            /* Honor :exclude when paired with :refer :all. */
+            if (exclude_vec != NULL) {
+                size_t  ei;
+                int     skip = 0;
+                for (ei = 0; ei < exclude_vec->as.vec.len; ei++) {
+                    mino_val_t *e = vec_nth(exclude_vec, ei);
+                    if (e != NULL && e->type == MINO_SYMBOL
+                        && e->as.s.len == blen
+                        && memcmp(e->as.s.data, bname, blen) == 0) {
+                        skip = 1;
+                        break;
+                    }
+                }
+                if (skip) continue;
+            }
+            if (rename_map != NULL && rename_map->type == MINO_MAP) {
+                size_t mi;
+                for (mi = 0; mi < rename_map->as.map.len; mi++) {
+                    mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
+                    if (k != NULL && k->type == MINO_SYMBOL
+                        && k->as.s.len == blen
+                        && memcmp(k->as.s.data, bname, blen) == 0) {
+                        mino_val_t *renamed = map_get_val(rename_map, k);
+                        if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                            bind_name = renamed->as.s.data;
+                            bind_len  = renamed->as.s.len;
+                        }
+                        break;
+                    }
+                }
+            }
+            if (bind_len < 256) {
+                char nbuf[256];
+                memcpy(nbuf, bind_name, bind_len);
+                nbuf[bind_len] = '\0';
+                env_bind(S, target, nbuf, src->bindings[ri].val);
+            }
+        }
+    }
+    return 0;
+}
+
 /* (require name) -- load a module by name using the host-supplied resolver.
  * name can be a string ("path/to/mod") or a quoted vector
  * '[mod.name :as alias :refer [syms]]. */
@@ -578,115 +705,13 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             runtime_module_add_alias(S, abuf, fbuf);
         }
         /* Process :refer — bind referred names into current ns env.
-         * Iterate the source ns env directly so macros (which live in
-         * the env without a var registry entry) come through too. */
-        if (mod_sym->as.s.len < 256 && (refer_vec != NULL || refer_all)) {
-            char modbuf[256];
-            mino_env_t *target = current_ns_env(S);
-            mino_env_t *src;
-            memcpy(modbuf, mod_sym->as.s.data, mod_sym->as.s.len);
-            modbuf[mod_sym->as.s.len] = '\0';
-            src = ns_env_lookup(S, modbuf);
-            if (refer_vec != NULL) {
-                size_t ri;
-                for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
-                    mino_val_t *rsym = vec_nth(refer_vec, ri);
-                    if (rsym != NULL && rsym->type == MINO_SYMBOL
-                        && rsym->as.s.len < 256) {
-                        char rbuf[256];
-                        size_t rn = rsym->as.s.len;
-                        mino_val_t *val = NULL;
-                        const char *bind_name = rbuf;
-                        size_t      bind_len  = rn;
-                        memcpy(rbuf, rsym->as.s.data, rn);
-                        rbuf[rn] = '\0';
-                        if (src != NULL) {
-                            env_binding_t *b = env_find_here(src, rbuf);
-                            if (b != NULL) val = b->val;
-                        }
-                        if (val == NULL) {
-                            mino_val_t *var = var_find(S, modbuf, rbuf);
-                            if (var != NULL) val = var->as.var.root;
-                        }
-                        if (val == NULL) {
-                            char msg[300];
-                            snprintf(msg, sizeof(msg),
-                                "require: %s does not refer var %s",
-                                modbuf, rbuf);
-                            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                                "name", "MNS001", msg);
-                            return NULL;
-                        }
-                        if (rename_map != NULL && rename_map->type == MINO_MAP) {
-                            size_t mi;
-                            for (mi = 0; mi < rename_map->as.map.len; mi++) {
-                                mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
-                                if (k != NULL && k->type == MINO_SYMBOL
-                                    && k->as.s.len == rn
-                                    && memcmp(k->as.s.data, rbuf, rn) == 0) {
-                                    mino_val_t *renamed = map_get_val(rename_map, k);
-                                    if (renamed != NULL && renamed->type == MINO_SYMBOL) {
-                                        bind_name = renamed->as.s.data;
-                                        bind_len  = renamed->as.s.len;
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        if (bind_len < sizeof(rbuf)) {
-                            char nbuf[256];
-                            memcpy(nbuf, bind_name, bind_len);
-                            nbuf[bind_len] = '\0';
-                            env_bind(S, target, nbuf, val);
-                        }
-                    }
-                }
-            }
-            if (refer_all && src != NULL) {
-                size_t ri;
-                for (ri = 0; ri < src->len; ri++) {
-                    const char *bname = src->bindings[ri].name;
-                    size_t       blen  = strlen(bname);
-                    const char *bind_name = bname;
-                    size_t      bind_len  = blen;
-                    /* Honor :exclude when paired with :refer :all. */
-                    if (exclude_vec != NULL) {
-                        size_t  ei;
-                        int     skip = 0;
-                        for (ei = 0; ei < exclude_vec->as.vec.len; ei++) {
-                            mino_val_t *e = vec_nth(exclude_vec, ei);
-                            if (e != NULL && e->type == MINO_SYMBOL
-                                && e->as.s.len == blen
-                                && memcmp(e->as.s.data, bname, blen) == 0) {
-                                skip = 1;
-                                break;
-                            }
-                        }
-                        if (skip) continue;
-                    }
-                    if (rename_map != NULL && rename_map->type == MINO_MAP) {
-                        size_t mi;
-                        for (mi = 0; mi < rename_map->as.map.len; mi++) {
-                            mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
-                            if (k != NULL && k->type == MINO_SYMBOL
-                                && k->as.s.len == blen
-                                && memcmp(k->as.s.data, bname, blen) == 0) {
-                                mino_val_t *renamed = map_get_val(rename_map, k);
-                                if (renamed != NULL && renamed->type == MINO_SYMBOL) {
-                                    bind_name = renamed->as.s.data;
-                                    bind_len  = renamed->as.s.len;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    if (bind_len < 256) {
-                        char nbuf[256];
-                        memcpy(nbuf, bind_name, bind_len);
-                        nbuf[bind_len] = '\0';
-                        env_bind(S, target, nbuf, src->bindings[ri].val);
-                    }
-                }
+         * apply_refer_options iterates the source ns env directly so
+         * macros (which live in the env without a var registry entry)
+         * come through too. */
+        if (refer_vec != NULL || refer_all) {
+            if (apply_refer_options(S, mod_sym, refer_vec, refer_all,
+                                    exclude_vec, rename_map) != 0) {
+                return NULL;
             }
         }
         return result;
