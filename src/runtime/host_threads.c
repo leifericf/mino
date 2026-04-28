@@ -128,6 +128,10 @@ mino_val_t *mino_promise_new(mino_state_t *S)
     /* No worker spawned; thread_started stays 0. */
 }
 
+/* Lock invariant: takes only impl->mu (the per-future mutex). State_lock
+ * is not required and may be held or not by the caller; deliver never
+ * touches mino_state_t fields. Idempotent — second deliver on a non-pending
+ * promise is a no-op. */
 int mino_promise_deliver(mino_state_t *S, mino_val_t *promise,
                          mino_val_t *value)
 {
@@ -185,6 +189,11 @@ int mino_future_cancelled_p(mino_val_t *fut)
     return cancelled;
 }
 
+/* Lock invariant: takes only impl->mu. State_lock is not required.
+ * Cancel sets state_tag = CANCELLED and broadcasts the cv; in-flight
+ * worker_run may publish a result that races with the cancel — that's
+ * fine, worker_run notices state_tag != PENDING under impl->mu and drops
+ * its result. */
 int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
 {
     mino_future_t *impl;
@@ -210,6 +219,13 @@ int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
 /* Worker entry                                                              */
 /* ------------------------------------------------------------------------- */
 
+/* Lock invariant: enters with no locks held — this thread did not pass
+ * through mino_call. Acquires state_lock explicitly twice: once briefly
+ * to attach ctx to S->worker_ctxs_head before running the body, and once
+ * at exit to detach ctx and decrement S->thread_count atomically. The
+ * mino_call inside the body acquires state_lock recursively for the
+ * duration of the user thunk. impl->mu is taken only to publish the
+ * result and broadcast the cv. */
 static void worker_run(mino_future_t *impl, char *stack_anchor)
 {
     mino_state_t       *S    = impl->state;
@@ -328,6 +344,11 @@ static void worker_pool_entry(void *arg)
 /* Spawn                                                                     */
 /* ------------------------------------------------------------------------- */
 
+/* Lock invariant: caller is the apply path from mino_call, which holds
+ * state_lock recursively for the entire call. The multi_threaded and
+ * thread_count writes here therefore execute under the caller-held
+ * lock. The lock is not released before this function returns; the
+ * worker thread takes its own lock acquisitions later. */
 mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
                               mino_env_t *env)
 {
@@ -457,6 +478,12 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
 /* Quiesce                                                                   */
 /* ------------------------------------------------------------------------- */
 
+/* Lock invariant: caller may hold state_lock recursively (typical: from
+ * prim_exit during eval). We yield_lock to fully drop our holds before
+ * blocking on join/cv_wait — workers need to acquire state_lock to run
+ * their body, so holding it here would deadlock. resume_lock restores
+ * the original depth before returning so the caller's invariants still
+ * hold. */
 void mino_host_threads_quiesce(mino_state_t *S)
 {
     mino_future_t *impl;
@@ -512,6 +539,13 @@ void mino_future_gc_trace(mino_val_t *fut)
      * symmetry with the sweep hook below. */
 }
 
+/* Lock invariant: called from the GC sweep phase, which itself runs
+ * under the GC's own serialization (no concurrent mutator). State_lock
+ * is not taken here — instead we rely on the GC suppression while
+ * thread_count > 0 invariant: any worker for this future has already
+ * decremented thread_count and is past its last lock acquire, so a
+ * pthread_join here is safe and never blocks indefinitely. impl->mu is
+ * destroyed only after the join. */
 void mino_future_gc_sweep(mino_val_t *fut)
 {
     mino_future_t *impl;
