@@ -764,9 +764,12 @@ int main(int argc, char **argv)
      * thread/blocking core.async ops throw :mino/unsupported with a
      * message naming the cycle.
      *
-     * _SC_NPROCESSORS_ONLN is hidden under strict _POSIX_C_SOURCE on
-     * Darwin (Linux glibc exposes it). Use sysctlbyname on Darwin,
-     * sysconf on other POSIX, GetSystemInfo on Windows. */
+     * Use sysctlbyname on Darwin (the sysconf names are hidden under
+     * strict _POSIX_C_SOURCE there), GetSystemInfo on Windows, and
+     * sysconf on other POSIX. _SC_NPROCESSORS_ONLN is an enum in the
+     * Linux/glibc and musl unistd.h regardless of feature-test macros,
+     * so the call resolves; an earlier preprocessor #if guard was dead
+     * code (the enum is not a #define). */
     {
         int n = 1;
 #if defined(_WIN32)
@@ -783,7 +786,7 @@ int main(int argc, char **argv)
         } else if (sysctlbyname("hw.ncpu", &hw, &sz, NULL, 0) == 0 && hw > 0) {
             n = hw;
         }
-#elif defined(_SC_NPROCESSORS_ONLN)
+#else
         long sc = sysconf(_SC_NPROCESSORS_ONLN);
         if (sc > 0) { n = (int)sc; }
 #endif
