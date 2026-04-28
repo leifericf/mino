@@ -403,6 +403,11 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
                          "recur")) {
             return NULL;
         }
+        /* Cycle G4.2 safepoint: tight `loop`/`recur` bodies skip
+         * eval_impl entry between iterations (the trampoline is
+         * pure C), so without this poll a hot loop could starve a
+         * waiting collector. */
+        mino_safepoint_poll(S);
     }
 }
 

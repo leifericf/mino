@@ -168,6 +168,13 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         const char *e = getenv("MINO_GC_STRESS");
         S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
     }
+    /* Cycle G4.2 safepoint: every alloc is an opportunity for the
+     * collector to ask the mutator to park. The poll is gated on
+     * gc_depth == 0 so a recursive alloc reached from inside trace
+     * or sweep doesn't try to re-enter the park machinery. */
+    if (S->ctx->gc_depth == 0) {
+        mino_safepoint_poll(S);
+    }
     gc_driver_tick(S, size);
     /* Fault injection: simulate OOM when the countdown reaches zero. */
     if (S->fi_alloc_countdown > 0) {
@@ -535,10 +542,17 @@ void gc_major_collect(mino_state_t *S)
         return;
     }
     start_ns = mino_monotonic_ns();
+    /* Cycle G4.2: stop the world for the duration of the major
+     * sweep. Single-threaded today this is a flag toggle pair on
+     * S->main_ctx; multi-threaded variants ask every worker to park
+     * at its next safepoint, wait for the count to reach zero, run
+     * the sweep, then release. */
+    gc_request_stw(S);
     gc_major_begin(S);
     gc_major_step(S, (size_t)-1);
     gc_major_remark(S);
     gc_major_sweep_phase(S);
+    gc_release_stw(S);
     elapsed_ns = (size_t)(mino_monotonic_ns() - start_ns);
     S->gc_total_ns += elapsed_ns;
     if (elapsed_ns > S->gc_max_ns) {

@@ -340,6 +340,11 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     cur_body   = clause->as.cons.cdr;
                     local      = env_child(S, fn->as.fn.env);
                 }
+                /* Cycle G4.2 safepoint at the fn-self-recur backward
+                 * branch — same rationale as the loop trampoline in
+                 * eval/bindings.c: tight tail-recursive bodies skip
+                 * eval_impl entry between iterations. */
+                mino_safepoint_poll(S);
                 continue;
             }
             if (result->type == MINO_TAIL_CALL) {

@@ -181,6 +181,22 @@ typedef struct mino_thread_ctx {
     const mino_val_t *eval_current_form;
     volatile int    interrupted;
 
+    /* Safepoint-cooperative-yield flag (Cycle G4.2).
+     *
+     * Set by the GC driver when a major collection wants every worker
+     * for this state to park at its next safepoint, so the collector
+     * can run with a stable view of the heap. The mutator polls
+     * `should_yield` at canonical safepoints (eval_impl entry,
+     * gc_alloc_typed prologue, loop/recur backward branches); when
+     * non-zero the mutator calls into the parking slow path.
+     *
+     * Single-threaded today: nothing sets the flag, so the poll is
+     * a single predictably-not-taken branch on the fast path. Cycle
+     * G4 later sub-cycles flip it from the GC driver once real host
+     * threads exist, and `mino_safepoint_park` blocks the mutator
+     * until the collector signals release. */
+    volatile int    should_yield;
+
     /* Exception handling: longjmp targets for try/catch. */
     try_frame_t     try_stack[MAX_TRY_DEPTH];
     int             try_depth;
@@ -530,6 +546,20 @@ struct mino_state {
     int             thread_count;
     int             multi_threaded;
 
+    /* Stop-the-world request for major GC (Cycle G4.2).
+     *
+     * Set by `gc_request_stw` before running a major collection;
+     * mino_safepoint_propagate_stw walks the live thread set and
+     * sets `should_yield` on each ctx. Cleared after GC by
+     * `gc_release_stw`. In single-threaded mode there is exactly
+     * one ctx (S->main_ctx) and the GC is itself the mutator, so
+     * the propagation is a single-store no-op. The flag is
+     * declared volatile so future multi-threaded sub-cycles can
+     * safely read it from worker threads without explicit fences
+     * (the ordering invariants are enforced via the same
+     * __atomic_* primitives used by atom CAS). */
+    volatile int    stw_request;
+
     /* Async scheduler run queue. */
     sched_entry_t  *async_run_head;
     sched_entry_t  *async_run_tail;
@@ -537,6 +567,33 @@ struct mino_state {
     /* Async timer queue. */
     timer_entry_t  *async_timers;
 };
+
+/* ------------------------------------------------------------------------- */
+/* Safepoint poll (Cycle G4.2).                                              */
+/*                                                                           */
+/* Mutators poll `should_yield` at canonical safepoints so a stop-the-world  */
+/* major collection can run with a stable view of the heap. The fast path   */
+/* is one predictably-not-taken branch; the slow path (mino_safepoint_park) */
+/* is in state.c and blocks until the collector signals release.            */
+/*                                                                           */
+/* Single-threaded today: nothing sets the flag, so park is unreachable on  */
+/* the live execution path. The macro is in the header so the branch       */
+/* inlines into every alloc / eval-impl-entry / loop-recur site.            */
+/* ------------------------------------------------------------------------- */
+
+void mino_safepoint_park(mino_state_t *S);
+
+#define mino_safepoint_poll(S) do {                                       \
+    if ((S)->ctx->should_yield) {                                          \
+        mino_safepoint_park(S);                                            \
+    }                                                                      \
+} while (0)
+
+/* GC-side STW driver: request all worker ctxs park before a major sweep,
+ * then release them after. Single-threaded today these are O(1) on
+ * S->main_ctx; multi-threaded variants iterate the worker set. */
+void gc_request_stw(mino_state_t *S);
+void gc_release_stw(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* error.c                                                                   */

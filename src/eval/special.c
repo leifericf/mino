@@ -569,6 +569,12 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
  * limit_exceeded latch so the rest of eval_impl observes a single
  * source of truth. Returns 0 if eval should bail (with diag set
  * when applicable), 1 to proceed.
+ *
+ * The Cycle G4.2 safepoint poll for major-GC STW also folds in here
+ * — eval_impl entry is the densest legitimate safepoint site, so
+ * one branch covers both the cancel/limit path and the GC park
+ * request. The poll is a single predictably-not-taken read on the
+ * single-threaded fast path.
  */
 static int eval_check_limits(mino_state_t *S)
 {
@@ -581,6 +587,7 @@ static int eval_check_limits(mino_state_t *S)
                       "S->ctx->interrupted");
         return 0;
     }
+    mino_safepoint_poll(S);
     if (S->limit_steps > 0 && ++S->ctx->eval_steps > S->limit_steps) {
         S->ctx->limit_exceeded = 1;
         set_eval_diag(S, S->ctx->eval_current_form, "limit", "MLM001",

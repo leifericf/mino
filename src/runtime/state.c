@@ -783,6 +783,57 @@ void mino_quiesce_threads(mino_state_t *S)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Safepoint and STW (Cycle G4.2).                                           */
+/*                                                                           */
+/* `mino_safepoint_poll` is the inline fast path defined in internal.h; it  */
+/* checks `ctx->should_yield` and falls through to mino_safepoint_park when */
+/* set. The collector calls `gc_request_stw` to ask every worker to park,  */
+/* then `gc_release_stw` to wake them after the sweep. Single-threaded     */
+/* today: there's exactly one ctx (S->main_ctx) and the GC runs on the     */
+/* same thread that drove the alloc, so park/release are O(1) flag toggles  */
+/* with no contention. Cycle G4 later sub-cycles add the multi-worker walk. */
+/* ------------------------------------------------------------------------- */
+
+void mino_safepoint_park(mino_state_t *S)
+{
+    /* Single-threaded today: should_yield is set and immediately
+     * cleared by gc_request_stw / gc_release_stw on the same thread,
+     * so the only way to reach this slow path is if release-then-set
+     * raced or a host driver flipped the flag between sweeps. Either
+     * way the safe response is to clear the local flag and return —
+     * there's no other thread to coordinate with. Cycle G4 later
+     * sub-cycles replace this body with a condition-variable wait
+     * keyed to S->stw_request. */
+    if (S != NULL && S->ctx != NULL) {
+        S->ctx->should_yield = 0;
+    }
+}
+
+void gc_request_stw(mino_state_t *S)
+{
+    if (S == NULL) { return; }
+    S->stw_request = 1;
+    /* Single-threaded today: there is exactly one worker ctx
+     * (S->main_ctx). Cycle G4 later sub-cycles iterate the worker
+     * set and set should_yield on each. Note that the calling
+     * thread is the mutator-and-collector both, so it's already at
+     * the safepoint by definition; setting its should_yield is a
+     * formal record, not a wake signal. */
+    if (S->ctx != NULL) {
+        S->ctx->should_yield = 1;
+    }
+}
+
+void gc_release_stw(mino_state_t *S)
+{
+    if (S == NULL) { return; }
+    S->stw_request = 0;
+    if (S->ctx != NULL) {
+        S->ctx->should_yield = 0;
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */
 /* ------------------------------------------------------------------------- */
 
