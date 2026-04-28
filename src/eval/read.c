@@ -502,6 +502,51 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
     }
 }
 
+/* buf_push -- append elem to a GC-tracked dynamic array, doubling
+ * capacity as needed (initial 8). The buffer is allocated as a GC
+ * value array so intermediate allocations from later read_form calls
+ * cannot reclaim already-parsed entries. */
+static void buf_push(mino_state_t *S, mino_val_t ***buf,
+                     size_t *cap, size_t *len, mino_val_t *elem)
+{
+    if (*len == *cap) {
+        size_t       new_cap = (*cap == 0) ? 8 : *cap * 2;
+        mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(S,
+            GC_T_VALARR, new_cap * sizeof(*nb));
+        if (*buf != NULL && *len > 0) {
+            memcpy(nb, *buf, *len * sizeof(*nb));
+        }
+        *buf = nb;
+        *cap = new_cap;
+    }
+    (*buf)[(*len)++] = elem;
+}
+
+/* map_buf_push -- twin-buffer version of buf_push for {key val ...}
+ * pairs. Single grow keeps key and value arrays in lockstep. */
+static void map_buf_push(mino_state_t *S, mino_val_t ***kbuf,
+                         mino_val_t ***vbuf, size_t *cap, size_t *len,
+                         mino_val_t *key, mino_val_t *val)
+{
+    if (*len == *cap) {
+        size_t       new_cap = (*cap == 0) ? 8 : *cap * 2;
+        mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(S,
+            GC_T_VALARR, new_cap * sizeof(*nk));
+        mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(S,
+            GC_T_VALARR, new_cap * sizeof(*nv));
+        if (*kbuf != NULL && *len > 0) {
+            memcpy(nk, *kbuf, *len * sizeof(*nk));
+            memcpy(nv, *vbuf, *len * sizeof(*nv));
+        }
+        *kbuf = nk;
+        *vbuf = nv;
+        *cap  = new_cap;
+    }
+    (*kbuf)[*len] = key;
+    (*vbuf)[*len] = val;
+    (*len)++;
+}
+
 static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '['. `buf` accumulates the
@@ -544,15 +589,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                 mino_val_t *record;
                 if (body == NULL && mino_last_error(S) != NULL) return NULL;
                 record = make_reader_conditional_record(S, body, 1);
-                if (len == cap) {
-                    size_t       new_cap = cap == 0 ? 8 : cap * 2;
-                    mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(
-                        S, GC_T_VALARR, new_cap * sizeof(*nb));
-                    if (buf != NULL && len > 0)
-                        memcpy(nb, buf, len * sizeof(*nb));
-                    buf = nb; cap = new_cap;
-                }
-                buf[len++] = record;
+                buf_push(S, &buf, &cap, &len, record);
                 continue;
             }
             ADVANCE(S, p);
@@ -564,28 +601,12 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                     size_t i;
                     size_t flen = found->as.vec.len;
                     for (i = 0; i < flen; i++) {
-                        if (len == cap) {
-                            size_t new_cap = cap == 0 ? 8 : cap * 2;
-                            mino_val_t **nb = (mino_val_t **)gc_alloc_typed(
-                                S, GC_T_VALARR, new_cap * sizeof(*nb));
-                            if (buf != NULL && len > 0)
-                                memcpy(nb, buf, len * sizeof(*nb));
-                            buf = nb; cap = new_cap;
-                        }
-                        buf[len++] = vec_nth(found, i);
+                        buf_push(S, &buf, &cap, &len, vec_nth(found, i));
                     }
                 } else {
                     mino_val_t *cur = found;
                     while (mino_is_cons(cur)) {
-                        if (len == cap) {
-                            size_t new_cap = cap == 0 ? 8 : cap * 2;
-                            mino_val_t **nb = (mino_val_t **)gc_alloc_typed(
-                                S, GC_T_VALARR, new_cap * sizeof(*nb));
-                            if (buf != NULL && len > 0)
-                                memcpy(nb, buf, len * sizeof(*nb));
-                            buf = nb; cap = new_cap;
-                        }
-                        buf[len++] = cur->as.cons.car;
+                        buf_push(S, &buf, &cap, &len, cur->as.cons.car);
                         cur = cur->as.cons.cdr;
                     }
                 }
@@ -608,17 +629,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
                 }
                 continue;
             }
-            if (len == cap) {
-                size_t       new_cap = cap == 0 ? 8 : cap * 2;
-                mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(S,
-                    GC_T_VALARR, new_cap * sizeof(*nb));
-                if (buf != NULL && len > 0) {
-                    memcpy(nb, buf, len * sizeof(*nb));
-                }
-                buf = nb;
-                cap = new_cap;
-            }
-            buf[len++] = elem;
+            buf_push(S, &buf, &cap, &len, elem);
         }
     }
     return mino_vector(S, buf, len);
@@ -684,40 +695,16 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
                         return NULL;
                     }
                     for (i = 0; i < found->as.vec.len; i += 2) {
-                        if (len == cap) {
-                            size_t new_cap = cap == 0 ? 8 : cap * 2;
-                            mino_val_t **nk = (mino_val_t **)gc_alloc_typed(S,
-                                GC_T_VALARR, new_cap * sizeof(*nk));
-                            mino_val_t **nv = (mino_val_t **)gc_alloc_typed(S,
-                                GC_T_VALARR, new_cap * sizeof(*nv));
-                            if (kbuf != NULL && len > 0) {
-                                memcpy(nk, kbuf, len * sizeof(*nk));
-                                memcpy(nv, vbuf, len * sizeof(*nv));
-                            }
-                            kbuf = nk; vbuf = nv; cap = new_cap;
-                        }
-                        kbuf[len] = vec_nth(found, i);
-                        vbuf[len] = vec_nth(found, i + 1);
-                        len++;
+                        map_buf_push(S, &kbuf, &vbuf, &cap, &len,
+                                     vec_nth(found, i),
+                                     vec_nth(found, i + 1));
                     }
                 } else {
                     mino_val_t *cur = found;
                     while (mino_is_cons(cur) && mino_is_cons(cur->as.cons.cdr)) {
-                        if (len == cap) {
-                            size_t new_cap = cap == 0 ? 8 : cap * 2;
-                            mino_val_t **nk = (mino_val_t **)gc_alloc_typed(S,
-                                GC_T_VALARR, new_cap * sizeof(*nk));
-                            mino_val_t **nv = (mino_val_t **)gc_alloc_typed(S,
-                                GC_T_VALARR, new_cap * sizeof(*nv));
-                            if (kbuf != NULL && len > 0) {
-                                memcpy(nk, kbuf, len * sizeof(*nk));
-                                memcpy(nv, vbuf, len * sizeof(*nv));
-                            }
-                            kbuf = nk; vbuf = nv; cap = new_cap;
-                        }
-                        kbuf[len] = cur->as.cons.car;
-                        vbuf[len] = cur->as.cons.cdr->as.cons.car;
-                        len++;
+                        map_buf_push(S, &kbuf, &vbuf, &cap, &len,
+                                     cur->as.cons.car,
+                                     cur->as.cons.cdr->as.cons.car);
                         cur = cur->as.cons.cdr->as.cons.cdr;
                     }
                     if (mino_is_cons(cur)) {
@@ -763,23 +750,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             if (**p == '}') { ADVANCE(S, p); break; }
             continue;
         }
-        if (len == cap) {
-            size_t       new_cap = cap == 0 ? 8 : cap * 2;
-            mino_val_t **nk      = (mino_val_t **)gc_alloc_typed(S,
-                GC_T_VALARR, new_cap * sizeof(*nk));
-            mino_val_t **nv      = (mino_val_t **)gc_alloc_typed(S,
-                GC_T_VALARR, new_cap * sizeof(*nv));
-            if (kbuf != NULL && len > 0) {
-                memcpy(nk, kbuf, len * sizeof(*nk));
-                memcpy(nv, vbuf, len * sizeof(*nv));
-            }
-            kbuf = nk;
-            vbuf = nv;
-            cap  = new_cap;
-        }
-        kbuf[len] = key;
-        vbuf[len] = val;
-        len++;
+        map_buf_push(S, &kbuf, &vbuf, &cap, &len, key, val);
     }
     return mino_map(S, kbuf, vbuf, len);
 }
@@ -811,17 +782,7 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
             }
             return NULL;
         }
-        if (len == cap) {
-            size_t       new_cap = cap == 0 ? 8 : cap * 2;
-            mino_val_t **nb      = (mino_val_t **)gc_alloc_typed(S,
-                GC_T_VALARR, new_cap * sizeof(*nb));
-            if (buf != NULL && len > 0) {
-                memcpy(nb, buf, len * sizeof(*nb));
-            }
-            buf = nb;
-            cap = new_cap;
-        }
-        buf[len++] = elem;
+        buf_push(S, &buf, &cap, &len, elem);
     }
     return mino_set(S, buf, len);
 }
