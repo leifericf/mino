@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.90.0 — Blocking Channel Ops Park Across Threads
+
+`<!!`, `>!!`, and `alts!!` outside a `go` block now do real OS-thread
+blocks when host threads are granted. The matching producer or
+consumer can run on any worker; the calling thread parks on a promise
+and is woken when the other side fires the callback. This closes the
+last gap that made channel-based coordination single-threaded in
+practice.
+
+**Behaviour by mode.** Each operation registers its callback on the
+channel and drains the scheduler once. If the result lands during
+that drain, return it. Otherwise: when `(mino-thread-limit) > 1`,
+park on the promise indefinitely (canonical Clojure semantics — no
+deadlock detection, since another thread can always supply the
+value). When threads are not granted, fall back to the cooperative
+drain-loop and throw on no progress (so a lone driver thread can't
+lock itself).
+
+**`thread` shares the future pool.** `(thread body)` is now a stable
+alias for `(future-call (fn [] body))`; the docstring is no longer
+phrased as a temporary alias. Same worker pool, same lifecycle, same
+thread-limit budget.
+
+**Slot-tracking fix.** `S->thread_count` now decrements when a worker
+exits, not only on quiesce. Previously, after spawning N futures,
+the count stayed at N even when all had completed — so a
+long-running standalone session would eventually hit the limit
+despite no live workers. The pthread itself remains joinable until
+`mino_host_threads_quiesce`; `pthread_join` on an exited joinable
+thread returns immediately. The limit now bounds *concurrently live*
+workers, matching JVM Clojure's `future` semantics.
+
+**Tests.** Cross-thread parking tests cover the multi-threaded path
+(producer in one future, consumer on the test thread; alts winning
+across threads; N×M ping stress). The single-threaded deadlock
+tests are gated on `(<= (mino-thread-limit) 1)` so the standalone
+suite doesn't hang on canonical-park behaviour. TSan-clean across
+the full suite.
+
 ## v0.89.0 — Real Host Threads
 
 Real OS-thread futures and promises. `(future expr)`, `(thread expr)`,
