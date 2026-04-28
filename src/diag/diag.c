@@ -171,26 +171,9 @@ void diag_add_note(mino_diag_t *d, const char *message)
     d->notes_len++;
 }
 
-void diag_add_note_at(mino_diag_t *d, const char *message, mino_span_t span)
-{
-    diag_add_note(d, message);
-    if (d->notes_len > 0) {
-        d->notes[d->notes_len - 1].span     = span;
-        d->notes[d->notes_len - 1].has_span = 1;
-    }
-}
-
 void diag_set_data(mino_diag_t *d, mino_val_t *data)
 {
     d->data = data;
-}
-
-void diag_set_cause(mino_diag_t *d, mino_diag_t *cause)
-{
-    if (d->cause != NULL) {
-        diag_free(d->cause);
-    }
-    d->cause = cause;
 }
 
 void diag_capture_frames(mino_state_t *S, mino_diag_t *d)

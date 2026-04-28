@@ -101,14 +101,8 @@ void diag_set_span(mino_diag_t *d, mino_span_t span);
 /* Append a note. message is copied. */
 void diag_add_note(mino_diag_t *d, const char *message);
 
-/* Append a note with a span. message is copied. */
-void diag_add_note_at(mino_diag_t *d, const char *message, mino_span_t span);
-
 /* Set the user data payload (GC-owned, caller must ensure it is pinned). */
 void diag_set_data(mino_diag_t *d, mino_val_t *data);
-
-/* Set the chained cause (takes ownership of cause). */
-void diag_set_cause(mino_diag_t *d, mino_diag_t *cause);
 
 /* Copy call stack frames from the runtime state into the diagnostic. */
 void diag_capture_frames(mino_state_t *S, mino_diag_t *d);
