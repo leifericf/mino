@@ -223,17 +223,21 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     if (alias_name != NULL && alias_len > 0) {
         char abuf[256];
         char fbuf[256];
-        if (alias_len < sizeof(abuf) && modlen < sizeof(fbuf)) {
-            memcpy(abuf, alias_name, alias_len);
-            abuf[alias_len] = '\0';
-            memcpy(fbuf, modname, modlen);
-            fbuf[modlen] = '\0';
-            if (runtime_module_add_alias(S, abuf, fbuf) != 0) {
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                              "internal", "MIN001",
-                              "ns: out of memory adding alias");
-                return -1;
-            }
+        if (alias_len >= sizeof(abuf) || modlen >= sizeof(fbuf)) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "syntax", "MSY001",
+                          "ns: alias or module name too long");
+            return -1;
+        }
+        memcpy(abuf, alias_name, alias_len);
+        abuf[alias_len] = '\0';
+        memcpy(fbuf, modname, modlen);
+        fbuf[modlen] = '\0';
+        if (runtime_module_add_alias(S, abuf, fbuf) != 0) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001",
+                          "ns: out of memory adding alias");
+            return -1;
         }
     }
 
@@ -241,76 +245,94 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
      * Iterate the source ns env so macros come through too. */
     {
         char modbuf[256];
-        if (modlen < sizeof(modbuf)) {
-            mino_env_t *target = current_ns_env(S);
-            mino_env_t *src;
-            memcpy(modbuf, modname, modlen);
-            modbuf[modlen] = '\0';
-            src = ns_env_lookup(S, modbuf);
-            if (refer_vec != NULL) {
-                size_t ri;
-                for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
-                    mino_val_t *rsym = vec_nth(refer_vec, ri);
-                    if (rsym != NULL && rsym->type == MINO_SYMBOL) {
-                        char rbuf[256];
-                        size_t rn = rsym->as.s.len;
-                        mino_val_t *val = NULL;
-                        mino_val_t *renamed;
-                        const char *bind_name;
-                        size_t bind_len;
-                        if (rn >= sizeof(rbuf)) continue;
-                        memcpy(rbuf, rsym->as.s.data, rn);
-                        rbuf[rn] = '\0';
-                        if (sym_vec_contains(exclude_vec, rbuf, rn)) {
-                            continue;
-                        }
-                        if (src != NULL) {
-                            env_binding_t *b = env_find_here(src, rbuf);
-                            if (b != NULL) val = b->val;
-                        }
-                        if (val == NULL) {
-                            mino_val_t *var = var_find(S, modbuf, rbuf);
-                            if (var != NULL) val = var->as.var.root;
-                        }
-                        if (val == NULL) continue;
-                        renamed = rename_map_lookup(rename_map, rbuf, rn);
-                        if (renamed != NULL && renamed->type == MINO_SYMBOL) {
-                            bind_name = renamed->as.s.data;
-                            bind_len  = renamed->as.s.len;
-                        } else {
-                            bind_name = rbuf;
-                            bind_len  = rn;
-                        }
-                        if (bind_len < sizeof(rbuf)) {
-                            char nbuf[256];
-                            memcpy(nbuf, bind_name, bind_len);
-                            nbuf[bind_len] = '\0';
-                            env_bind(S, target, nbuf, val);
-                        }
+        mino_env_t *target;
+        mino_env_t *src;
+        if (modlen >= sizeof(modbuf)) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "syntax", "MSY001",
+                          "ns: module name too long");
+            return -1;
+        }
+        target = current_ns_env(S);
+        memcpy(modbuf, modname, modlen);
+        modbuf[modlen] = '\0';
+        src = ns_env_lookup(S, modbuf);
+        if (refer_vec != NULL) {
+            size_t ri;
+            for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
+                mino_val_t *rsym = vec_nth(refer_vec, ri);
+                if (rsym != NULL && rsym->type == MINO_SYMBOL) {
+                    char rbuf[256];
+                    size_t rn = rsym->as.s.len;
+                    mino_val_t *val = NULL;
+                    mino_val_t *renamed;
+                    const char *bind_name;
+                    size_t bind_len;
+                    if (rn >= sizeof(rbuf)) {
+                        set_eval_diag(S,
+                            mino_current_ctx(S)->eval_current_form,
+                            "syntax", "MSY001",
+                            "ns: refer name too long");
+                        return -1;
+                    }
+                    memcpy(rbuf, rsym->as.s.data, rn);
+                    rbuf[rn] = '\0';
+                    if (sym_vec_contains(exclude_vec, rbuf, rn)) {
+                        continue;
+                    }
+                    if (src != NULL) {
+                        env_binding_t *b = env_find_here(src, rbuf);
+                        if (b != NULL) val = b->val;
+                    }
+                    if (val == NULL) {
+                        mino_val_t *var = var_find(S, modbuf, rbuf);
+                        if (var != NULL) val = var->as.var.root;
+                    }
+                    if (val == NULL) continue;
+                    renamed = rename_map_lookup(rename_map, rbuf, rn);
+                    if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                        bind_name = renamed->as.s.data;
+                        bind_len  = renamed->as.s.len;
+                    } else {
+                        bind_name = rbuf;
+                        bind_len  = rn;
+                    }
+                    if (bind_len >= sizeof(rbuf)) {
+                        set_eval_diag(S,
+                            mino_current_ctx(S)->eval_current_form,
+                            "syntax", "MSY001",
+                            "ns: rename target too long");
+                        return -1;
+                    }
+                    {
+                        char nbuf[256];
+                        memcpy(nbuf, bind_name, bind_len);
+                        nbuf[bind_len] = '\0';
+                        env_bind(S, target, nbuf, val);
                     }
                 }
             }
-            if (refer_all && src != NULL) {
-                size_t vi;
-                for (vi = 0; vi < src->len; vi++) {
-                    const char *nm  = src->bindings[vi].name;
-                    size_t      nl  = strlen(nm);
-                    mino_val_t *renamed;
-                    /* Skip private vars: :refer :all only brings in
-                     * publics, just like Clojure. */
-                    mino_val_t *var = var_find(S, modbuf, nm);
-                    if (var != NULL && var->as.var.is_private) continue;
-                    if (sym_vec_contains(exclude_vec, nm, nl)) continue;
-                    renamed = rename_map_lookup(rename_map, nm, nl);
-                    if (renamed != NULL && renamed->type == MINO_SYMBOL
-                        && renamed->as.s.len < 256) {
-                        char nbuf[256];
-                        memcpy(nbuf, renamed->as.s.data, renamed->as.s.len);
-                        nbuf[renamed->as.s.len] = '\0';
-                        env_bind(S, target, nbuf, src->bindings[vi].val);
-                    } else {
-                        env_bind(S, target, nm, src->bindings[vi].val);
-                    }
+        }
+        if (refer_all && src != NULL) {
+            size_t vi;
+            for (vi = 0; vi < src->len; vi++) {
+                const char *nm  = src->bindings[vi].name;
+                size_t      nl  = strlen(nm);
+                mino_val_t *renamed;
+                /* Skip private vars: :refer :all only brings in
+                 * publics, just like Clojure. */
+                mino_val_t *var = var_find(S, modbuf, nm);
+                if (var != NULL && var->as.var.is_private) continue;
+                if (sym_vec_contains(exclude_vec, nm, nl)) continue;
+                renamed = rename_map_lookup(rename_map, nm, nl);
+                if (renamed != NULL && renamed->type == MINO_SYMBOL
+                    && renamed->as.s.len < 256) {
+                    char nbuf[256];
+                    memcpy(nbuf, renamed->as.s.data, renamed->as.s.len);
+                    nbuf[renamed->as.s.len] = '\0';
+                    env_bind(S, target, nbuf, src->bindings[vi].val);
+                } else {
+                    env_bind(S, target, nm, src->bindings[vi].val);
                 }
             }
         }
