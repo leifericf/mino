@@ -32,6 +32,17 @@ despite no live workers. The pthread itself remains joinable until
 thread returns immediately. The limit now bounds *concurrently live*
 workers, matching JVM Clojure's `future` semantics.
 
+**GC sweep detaches future from list.** Latent in v0.89 but masked
+by the slot bug above: `mino_future_gc_sweep` freed the impl without
+unlinking it from `S->future_list_head`, so a later
+`mino_quiesce_threads` (called from `prim_exit` and `state_free`)
+walked into a freed pointer. Sweep now joins the worker thread (a
+no-op if it has already exited), removes the impl from the list,
+and only then destroys mu/cv and frees the struct. ASan caught it
+on the new cross-thread tests once the slot fix let GC run on
+resolved futures; both ASan and TSan are clean across the full
+suite after the fix.
+
 **Tests.** Cross-thread parking tests cover the multi-threaded path
 (producer in one future, consumer on the test thread; alts winning
 across threads; N×M ping stress). The single-threaded deadlock
