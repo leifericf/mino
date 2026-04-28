@@ -257,6 +257,10 @@ __thread
 #endif
 mino_thread_ctx_t *mino_tls_ctx;
 
+/* Forward decl for the embed thread pool surface (mino.h provides
+ * the struct definition; struct mino_state stores a pointer). */
+struct mino_thread_pool;
+
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */
@@ -582,6 +586,19 @@ struct mino_state {
     int             thread_limit;
     int             thread_count;
     int             multi_threaded;
+
+    /* Embed-distinctive thread knobs (Cycle G4.5). NULL/0 leaves the
+     * spawn-per-future default behaviour intact. See mino.h for the
+     * surface. thread_pool, when non-NULL, redirects spawn from
+     * pthread_create to pool->submit_fn. thread_start_fn / thread_end_fn
+     * fire on the worker thread for the spawn-per-future path only;
+     * pool-managed work items run under the pool's own lifecycle.
+     * thread_stack_size is applied via pthread_attr when set. */
+    struct mino_thread_pool *thread_pool;
+    void          (*thread_start_fn)(mino_state_t *S, void *ctx);
+    void          (*thread_end_fn)(mino_state_t *S, void *ctx);
+    void           *thread_factory_ctx;
+    size_t          thread_stack_size;
 
     /* Per-state mutex held across worker-thread eval (Cycle G4.3).
      *

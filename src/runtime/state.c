@@ -835,6 +835,29 @@ void mino_quiesce_threads(mino_state_t *S)
     mino_host_threads_quiesce(S);
 }
 
+void mino_set_thread_pool(mino_state_t *S, mino_thread_pool_t *pool)
+{
+    if (S == NULL) { return; }
+    S->thread_pool = pool;
+}
+
+void mino_set_thread_factory(mino_state_t *S,
+                             mino_thread_lifecycle_fn start_fn,
+                             mino_thread_lifecycle_fn end_fn,
+                             void *ctx)
+{
+    if (S == NULL) { return; }
+    S->thread_start_fn     = start_fn;
+    S->thread_end_fn       = end_fn;
+    S->thread_factory_ctx  = ctx;
+}
+
+void mino_set_thread_stack_size(mino_state_t *S, size_t n)
+{
+    if (S == NULL) { return; }
+    S->thread_stack_size = n;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Safepoint and STW (Cycle G4.2).                                           */
 /*                                                                           */

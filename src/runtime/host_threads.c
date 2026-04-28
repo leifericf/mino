@@ -212,21 +212,16 @@ int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
 /* Worker entry                                                              */
 /* ------------------------------------------------------------------------- */
 
-#if defined(_WIN32) && defined(_MSC_VER)
-static unsigned __stdcall worker_entry(void *arg)
-#else
-static void *worker_entry(void *arg)
-#endif
+static void worker_run(mino_future_t *impl, char *stack_anchor)
 {
-    mino_future_t      *impl = (mino_future_t *)arg;
     mino_state_t       *S    = impl->state;
     mino_thread_ctx_t  *ctx;
     mino_val_t         *result;
-    char                stack_anchor;
 
     /* Each worker has its own ctx. Allocate it on the heap (not on
      * the worker's stack) so it survives any sub-call boundary; the
-     * ctx's gc_stack_bottom is anchored to the worker's stack. */
+     * ctx's gc_stack_bottom is anchored to the worker's stack via
+     * the stack_anchor pointer the entry shell forwards. */
     ctx = (mino_thread_ctx_t *)calloc(1, sizeof(*ctx));
     if (ctx == NULL) {
         mu_lock(&impl->mu);
@@ -234,9 +229,9 @@ static void *worker_entry(void *arg)
         impl->exception = NULL;
         cv_broadcast(&impl->cv);
         mu_unlock(&impl->mu);
-        return 0;
+        return;
     }
-    ctx->gc_stack_bottom = (void *)&stack_anchor;
+    ctx->gc_stack_bottom = (void *)stack_anchor;
     mino_tls_ctx = ctx;
 
     /* Link onto S->worker_ctxs_head so gc_mark_roots can walk the
@@ -248,11 +243,14 @@ static void *worker_entry(void *arg)
     S->worker_ctxs_head = ctx;
     mino_state_lock_release(S);
 
-    /* Note: state_lock is NOT held for the entire eval. It guards
-     * short critical sections (gc_alloc, registry mutations) only.
-     * This lets workers and the embedder thread run eval in parallel;
-     * they serialize only on the contested critical sections. Cycle
-     * G4.4+ may relax this further with per-thread allocator arenas. */
+    /* Embed-distinctive lifecycle hook (Cycle G4.5). Spawn-per-future
+     * path only — pool-managed workers run under the pool's own
+     * lifecycle hooks. Hook fires on the worker thread so it can do
+     * pthread_setname_np / CPU pinning / priority class. */
+    if (S->thread_pool == NULL && S->thread_start_fn != NULL) {
+        S->thread_start_fn(S, S->thread_factory_ctx);
+    }
+
     result = mino_call(S, impl->thunk, mino_nil(S), NULL);
 
     /* Publish result. Note: mino_call returns NULL on uncaught throw;
@@ -273,12 +271,17 @@ static void *worker_entry(void *arg)
      * drop the result. */
     mu_unlock(&impl->mu);
 
+    if (S->thread_pool == NULL && S->thread_end_fn != NULL) {
+        S->thread_end_fn(S, S->thread_factory_ctx);
+    }
+
     /* Detach this worker's ctx from S->worker_ctxs_head before
      * freeing so GC root scanning never visits a freed ctx, and
      * release the slot so spawn() bookkeeping reflects only
-     * concurrently-live workers. The pthread itself remains joinable
-     * until mino_host_threads_quiesce; pthread_join on an already
-     * exited joinable thread is a no-op that returns immediately. */
+     * concurrently-live workers. For the spawn-per-future path the
+     * pthread itself remains joinable until mino_host_threads_quiesce;
+     * pthread_join on an already exited joinable thread is a no-op
+     * that returns immediately. */
     mino_state_lock_acquire(S);
     {
         mino_thread_ctx_t **pp = &S->worker_ctxs_head;
@@ -290,8 +293,31 @@ static void *worker_entry(void *arg)
 
     mino_tls_ctx = NULL;
     free(ctx);
+}
 
+#if defined(_WIN32) && defined(_MSC_VER)
+static unsigned __stdcall worker_entry(void *arg)
+{
+    char anchor;
+    worker_run((mino_future_t *)arg, &anchor);
     return 0;
+}
+#else
+static void *worker_entry(void *arg)
+{
+    char anchor;
+    worker_run((mino_future_t *)arg, &anchor);
+    return NULL;
+}
+#endif
+
+/* Pool work entry — the void(*)(void*) signature host pools expect.
+ * Same body as worker_entry; caller's responsibility to actually run
+ * this on a thread other than the submitter. */
+static void worker_pool_entry(void *arg)
+{
+    char anchor;
+    worker_run((mino_future_t *)arg, &anchor);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -323,9 +349,27 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
     S->multi_threaded = 1;
     S->thread_count++;
 
+    /* Pool path (Cycle G4.5): the embedder hands us a host pool and we
+     * just submit the work item. impl->thread_started stays 0 so the
+     * sweep + quiesce paths skip pthread_join (mino doesn't own the
+     * pthread). */
+    if (S->thread_pool != NULL && S->thread_pool->submit_fn != NULL) {
+        int rc = S->thread_pool->submit_fn(S->thread_pool,
+                                           worker_pool_entry, impl);
+        if (rc != 0) {
+            S->thread_count--;
+            return prim_throw_classified(S,
+                "mino/thread-limit-exceeded", "MTH001",
+                "host thread pool refused submission");
+        }
+        return fut;
+    }
+
 #if defined(_WIN32) && defined(_MSC_VER)
     {
-        uintptr_t h = _beginthreadex(NULL, 0, worker_entry, impl, 0, NULL);
+        unsigned stack = (unsigned)S->thread_stack_size;  /* 0 = default */
+        uintptr_t h = _beginthreadex(NULL, stack, worker_entry, impl,
+                                     0, NULL);
         if (h == 0) {
             S->thread_count--;
             return NULL;
@@ -335,7 +379,17 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
     }
 #else
     {
-        int rc = pthread_create(&impl->thread, NULL, worker_entry, impl);
+        pthread_attr_t attr;
+        pthread_attr_t *attrp = NULL;
+        int rc;
+        if (S->thread_stack_size > 0) {
+            if (pthread_attr_init(&attr) == 0) {
+                pthread_attr_setstacksize(&attr, S->thread_stack_size);
+                attrp = &attr;
+            }
+        }
+        rc = pthread_create(&impl->thread, attrp, worker_entry, impl);
+        if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
             S->thread_count--;
             return NULL;
@@ -397,11 +451,21 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
 void mino_host_threads_quiesce(mino_state_t *S)
 {
     mino_future_t *impl;
+    int saved_depth;
 
-    /* Walk outstanding futures and join each worker. We don't hold
-     * state_lock here — workers need to take it to resolve. We
-     * rely on the embedder having stopped feeding new evals before
-     * calling quiesce. */
+    /* If the caller is mid-eval (e.g. prim_exit), we hold state_lock
+     * recursively. Workers need state_lock to run mino_call inside
+     * the future body, so we must drop our holds before blocking on
+     * pthread_join / cv_wait — otherwise an in-flight worker can
+     * never finish and we deadlock. */
+    saved_depth = mino_yield_lock(S);
+
+    /* Walk outstanding futures and wait for each. Two cases:
+     *   - Spawn-per-future: pthread_join (Win: WaitForSingleObject).
+     *   - Pool-managed (Cycle G4.5): impl->thread_started is 0 since
+     *     mino didn't pthread_create the worker. Wait on impl->cv
+     *     until state_tag != PENDING; the pool worker publishes the
+     *     result and broadcasts before returning. */
     impl = S->future_list_head;
     while (impl != NULL) {
         if (impl->thread_started && !impl->thread_joined) {
@@ -412,9 +476,17 @@ void mino_host_threads_quiesce(mino_state_t *S)
             pthread_join(impl->thread, NULL);
 #endif
             impl->thread_joined = 1;
+        } else if (!impl->thread_started) {
+            mu_lock(&impl->mu);
+            while (impl->state_tag == MINO_FUTURE_PENDING) {
+                cv_wait(&impl->cv, &impl->mu);
+            }
+            mu_unlock(&impl->mu);
         }
         impl = impl->next_in_state;
     }
+
+    mino_resume_lock(S, saved_depth);
 }
 
 /* ------------------------------------------------------------------------- */

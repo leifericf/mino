@@ -26,7 +26,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 90
+#define MINO_VERSION_MINOR 91
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -957,6 +957,78 @@ int  mino_thread_count(mino_state_t *S);
  * when no threads are in flight (returns immediately).
  */
 void mino_quiesce_threads(mino_state_t *S);
+
+/* ------------------------------------------------------------------------- */
+/* Embed-distinctive thread API (Cycle G4.5)                                 */
+/* ------------------------------------------------------------------------- */
+/*
+ * The default model is "spawn-per-future": each `(future ...)` calls
+ * pthread_create / CreateThread and the resulting OS thread runs the
+ * future body. Three knobs let embedders shape that:
+ *
+ *   1. mino_set_thread_pool — delegate worker management to a host
+ *      pool (Tokio runtime, libuv, ASIO, custom pthread pool). Mino
+ *      submits work items via the pool's submit_fn; the pool decides
+ *      scheduling, threading, and recycling. The same pool may be
+ *      bound to multiple `mino_state_t` for multi-tenant patterns
+ *      (game-engine-per-NPC, chat-bot-fleet, IDE-per-buffer-linter):
+ *      the pool's N workers fan out across all of them.
+ *
+ *   2. mino_set_thread_factory — install start/end callbacks that
+ *      fire on each mino-spawned worker. Use for naming, CPU
+ *      affinity, priority class, or tracing-context inheritance.
+ *      Spawn-per-future path only; pool workers are owned by the
+ *      pool and run under its own lifecycle hooks.
+ *
+ *   3. mino_set_thread_stack_size — set the per-worker stack size for
+ *      the spawn-per-future path. Pool-managed workers ignore this.
+ */
+
+/*
+ * Function-pointer interface a host thread pool implements. Mino
+ * calls submit_fn for each `(future ...)` while a pool is registered;
+ * the pool MUST eventually call (*work)(ctx) on a worker thread. The
+ * pool MUST NOT call work synchronously on the calling thread —
+ * that defeats the parallelism mino is asking for.
+ */
+typedef struct mino_thread_pool {
+    /* Submit a work item. Return 0 on success, non-zero on
+     * pool-full / shut-down / refusal. A non-zero return makes mino
+     * throw `:mino/thread-limit-exceeded`. */
+    int (*submit_fn)(struct mino_thread_pool *pool,
+                     void (*work)(void *), void *ctx);
+    /* User data for the pool implementation; mino doesn't touch. */
+    void *user_data;
+} mino_thread_pool_t;
+
+/*
+ * Register a host thread pool for this state. Pass NULL to revert
+ * to spawn-per-future. The pool's `submit_fn` is consulted for each
+ * `(future ...)`. The pool may be shared across multiple states; mino
+ * does not enforce single-state ownership. The thread_limit still
+ * applies — submission is rejected when the per-state count is full.
+ */
+void mino_set_thread_pool(mino_state_t *S, mino_thread_pool_t *pool);
+
+/*
+ * Per-thread factory hooks for the spawn-per-future path. start_fn
+ * runs on the worker thread before the body executes; end_fn runs
+ * after the body returns (whether normally or via uncaught throw).
+ * ctx is opaque to mino. Pass NULL fns to clear. Ignored entirely
+ * when a pool is registered (the pool owns thread lifecycle).
+ */
+typedef void (*mino_thread_lifecycle_fn)(mino_state_t *S, void *ctx);
+
+void mino_set_thread_factory(mino_state_t *S,
+                             mino_thread_lifecycle_fn start_fn,
+                             mino_thread_lifecycle_fn end_fn,
+                             void *ctx);
+
+/*
+ * Per-worker stack size for the spawn-per-future path. n=0 means
+ * platform default. Ignored when a pool is registered.
+ */
+void mino_set_thread_stack_size(mino_state_t *S, size_t n);
 
 /* ------------------------------------------------------------------------- */
 /* Garbage collector control                                                 */
