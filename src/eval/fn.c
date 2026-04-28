@@ -211,6 +211,32 @@ static mino_val_t *find_arity_clause(mino_state_t *S, mino_val_t *clauses,
  * evaluator's function-call path and by primitives (e.g. update) that
  * need to call back into user-defined code.
  */
+/* dispatch_multi_arity -- when a fn was defined with multiple arity
+ * clauses, fn->as.fn.params is NULL and fn->as.fn.body is a clause
+ * list. Pick the clause matching the current argc, update *params and
+ * *body to the chosen clause's pair, and return 0. On no-match, set the
+ * diagnostic with the supplied context tag (e.g. "" for the call entry,
+ * " in recur" for a recur backward branch) and return -1. */
+static int dispatch_multi_arity(mino_state_t *S, mino_val_t *clauses,
+                                mino_val_t *call_args, const char *ctx_suffix,
+                                mino_val_t **out_params,
+                                mino_val_t **out_body)
+{
+    int         argc   = list_len(call_args);
+    mino_val_t *clause = find_arity_clause(S, clauses, argc);
+    if (clause == NULL) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "no matching arity for %d args%s",
+                 argc, ctx_suffix);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "eval/arity", "MAR002", msg);
+        return -1;
+    }
+    *out_params = clause->as.cons.car;
+    *out_body   = clause->as.cons.cdr;
+    return 0;
+}
+
 mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                            mino_env_t *env)
 {
@@ -296,19 +322,12 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
         push_frame(S, tag, file, line, col);
         /* Multi-arity dispatch: params == NULL means body is a clause list. */
-        if (cur_params == NULL) {
-            int argc = list_len(call_args);
-            mino_val_t *clause = find_arity_clause(S, cur_body, argc);
-            if (clause == NULL) {
-                char msg[96];
-                snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR002", msg);
-                S->current_ns    = saved_ns;
-                S->fn_ambient_ns = saved_ambient;
-                return NULL;
-            }
-            cur_params = clause->as.cons.car;
-            cur_body   = clause->as.cons.cdr;
+        if (cur_params == NULL
+            && dispatch_multi_arity(S, cur_body, call_args, "",
+                                    &cur_params, &cur_body) != 0) {
+            S->current_ns    = saved_ns;
+            S->fn_ambient_ns = saved_ambient;
+            return NULL;
         }
         for (;;) {
             if (!bind_params(S, local, cur_params, call_args, tag)) {
@@ -327,18 +346,13 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                  * For multi-arity, re-dispatch on new arg count. */
                 call_args = result->as.recur.args;
                 if (fn->as.fn.params == NULL) {
-                    int argc = list_len(call_args);
-                    mino_val_t *clause = find_arity_clause(S, fn->as.fn.body, argc);
-                    if (clause == NULL) {
-                        char msg[96];
-                        snprintf(msg, sizeof(msg), "no matching arity for %d args in recur", argc);
-                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR002", msg);
+                    if (dispatch_multi_arity(S, fn->as.fn.body, call_args,
+                                             " in recur",
+                                             &cur_params, &cur_body) != 0) {
                         S->current_ns = saved_ns;
                         return NULL;
                     }
-                    cur_params = clause->as.cons.car;
-                    cur_body   = clause->as.cons.cdr;
-                    local      = env_child(S, fn->as.fn.env);
+                    local = env_child(S, fn->as.fn.env);
                 }
                 /* Cycle G4.2 safepoint at the fn-self-recur backward
                  * branch — same rationale as the loop trampoline in
@@ -367,18 +381,11 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     S->current_ns    = fn->as.fn.defining_ns;
                     S->fn_ambient_ns = fn->as.fn.defining_ns;
                 }
-                if (cur_params == NULL) {
-                    int argc = list_len(call_args);
-                    mino_val_t *clause = find_arity_clause(S, cur_body, argc);
-                    if (clause == NULL) {
-                        char msg[96];
-                        snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
-                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR002", msg);
-                        S->current_ns = saved_ns;
-                        return NULL;
-                    }
-                    cur_params = clause->as.cons.car;
-                    cur_body   = clause->as.cons.cdr;
+                if (cur_params == NULL
+                    && dispatch_multi_arity(S, cur_body, call_args, "",
+                                            &cur_params, &cur_body) != 0) {
+                    S->current_ns = saved_ns;
+                    return NULL;
                 }
                 continue;
             }
