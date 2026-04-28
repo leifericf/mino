@@ -145,7 +145,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
 
-    /* Phase 1: evaluate body forms. */
+    /* Body: evaluate inside a setjmp landing pad so a throw lands here. */
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
@@ -181,7 +181,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         got_exception = 1;
     }
 
-    /* Phase 2: run catch handler if we caught an exception. */
+    /* Catch: run the handler if the body threw. */
     if (got_exception && clauses.has_catch) {
         mino_val_t *ex_val = normalize_exception(S,
             vol_ex ? (mino_val_t *)vol_ex : mino_nil(S));
@@ -242,12 +242,12 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         }
     }
 
-    /* Phase 3: run finally unconditionally. */
+    /* Finally: run unconditionally before propagating any unhandled throw. */
     if (clauses.has_finally) {
         eval_implicit_do(S, clauses.finally_body, env);
     }
 
-    /* Phase 4: re-throw if exception was not handled. */
+    /* Rethrow: if no handler matched, propagate to the enclosing try. */
     if (got_exception) {
         mino_val_t *e = (mino_val_t *)vol_ex;
         if (mino_current_ctx(S)->try_depth > 0) {

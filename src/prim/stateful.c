@@ -86,9 +86,9 @@ static int atom_set(mino_state_t *S, mino_val_t *atom,
 }
 
 /* Atomic load of an atom's current value.  In single-threaded mode this
- * is a plain pointer read; once S->multi_threaded flips (Cycle G4 later
- * sub-cycles) the read goes through __atomic_load_n with acquire ordering
- * so swap! sees a coherent snapshot of writes from other workers. */
+ * is a plain pointer read; once S->multi_threaded flips the read goes
+ * through __atomic_load_n with acquire ordering so swap! sees a
+ * coherent snapshot of writes from other workers. */
 static mino_val_t *atom_load(mino_state_t *S, mino_val_t *atom)
 {
     if (S->multi_threaded) {
@@ -199,9 +199,8 @@ mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  *
  * Single-threaded path is a straight read-compute-publish.  Multi-threaded
  * path runs the canonical retry loop: load, compute, CAS, retry on loss.
- * The retry path is dormant in v0.87.x (S->multi_threaded never flips)
- * and lights up when Cycle G4 later sub-cycles introduce real host
- * threads. */
+ * The retry path lights up once S->multi_threaded flips after host
+ * threads enter the picture. */
 mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a, *fn, *cur, *call_args, *result, *extra;
@@ -663,7 +662,7 @@ mino_val_t *prim_mino_thread_count(mino_state_t *S, mino_val_t *args,
 }
 
 /* ------------------------------------------------------------------------- */
-/* Host-thread futures (Cycle G4.3).                                         */
+/* Host-thread futures                                                       */
 /* ------------------------------------------------------------------------- */
 
 /* (future-call thunk) — spawn a worker thread that evaluates (thunk)

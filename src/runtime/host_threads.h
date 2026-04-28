@@ -1,8 +1,8 @@
 /*
  * host_threads.h -- internal interface for host worker threads.
  *
- * Cycle G4.3. Declares the entry points used by the future/promise
- * primitives in src/prim/. The struct mino_future definition lives in
+ * Declares the entry points used by the future/promise primitives in
+ * src/prim/. The struct mino_future definition lives in
  * runtime/internal.h so all GC trace/sweep + print + collections sites
  * can see its fields.
  *

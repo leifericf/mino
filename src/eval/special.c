@@ -1,12 +1,12 @@
 /*
- * eval_special.c -- eval dispatch (eval_impl), literal evaluation, and the
- *                   top-level eval entry point.
+ * special.c -- eval dispatch (eval_impl), literal evaluation, and the
+ *              top-level eval entry point.
  *
  * Special-form implementations live in domain-specific files:
- *   eval_special_defs.c      -- def, defmacro, declare
- *   eval_special_bindings.c  -- let, loop, binding, destructuring
- *   eval_special_control.c   -- try/catch/finally
- *   eval_special_fn.c        -- fn, apply_callable, arity dispatch
+ *   defs.c      -- def, defmacro, declare
+ *   bindings.c  -- let, loop, binding, destructuring
+ *   control.c   -- try/catch/finally
+ *   fn.c        -- fn, apply_callable, arity dispatch
  */
 
 #include "eval/special_internal.h"
@@ -570,11 +570,11 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
  * source of truth. Returns 0 if eval should bail (with diag set
  * when applicable), 1 to proceed.
  *
- * The Cycle G4.2 safepoint poll for major-GC STW also folds in here
- * — eval_impl entry is the densest legitimate safepoint site, so
- * one branch covers both the cancel/limit path and the GC park
- * request. The poll is a single predictably-not-taken read on the
- * single-threaded fast path.
+ * The safepoint poll for major-GC STW also folds in here — eval_impl
+ * entry is the densest legitimate safepoint site, so one branch
+ * covers both the cancel/limit path and the GC park request. The
+ * poll is a single predictably-not-taken read on the single-threaded
+ * fast path.
  */
 static int eval_check_limits(mino_state_t *S)
 {

@@ -118,11 +118,11 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
     if (mino_current_ctx(S)->gc_depth > 0 || mino_current_ctx(S)->gc_stack_bottom == NULL) {
         return;
     }
-    /* Cycle G4.3: skip collection while host worker threads are alive.
-     * The conservative stack scan only walks the current thread's
-     * stack, so a GC initiated from one thread can't see another
-     * thread's stack-rooted values. Cycle G4.4+ introduces per-thread
-     * stack snapshots at safepoints; until then we trade memory for
+    /* Skip collection while host worker threads are alive. The
+     * conservative stack scan only walks the current thread's stack,
+     * so a GC initiated from one thread can't see another thread's
+     * stack-rooted values. Per-thread stack snapshots at safepoints
+     * would lift this restriction; until then we trade memory for
      * correctness. Memory normalizes after mino_quiesce_threads. */
     if (S->thread_count > 0) {
         return;
@@ -583,8 +583,8 @@ void gc_major_collect(mino_state_t *S)
         return;
     }
     start_ns = mino_monotonic_ns();
-    /* Cycle G4.2: stop the world for the duration of the major
-     * sweep. Single-threaded today this is a flag toggle pair on
+    /* Stop the world for the duration of the major sweep.
+     * Single-threaded today this is a flag toggle pair on
      * S->main_ctx; multi-threaded variants ask every worker to park
      * at its next safepoint, wait for the count to reach zero, run
      * the sweep, then release. */

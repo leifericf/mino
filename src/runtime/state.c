@@ -44,8 +44,8 @@ const char *mino_version_string(void)
 /* TLS pointer to the active per-thread ctx.                                  */
 /*                                                                            */
 /* NULL on the embedder's main thread (mino_state_new caller). Spawned host  */
-/* worker threads (Cycle G4.3+) set this to their freshly-allocated ctx at   */
-/* thread entry and clear it before exit. The inline mino_current_ctx        */
+/* worker threads set this to their freshly-allocated ctx at thread entry    */
+/* and clear it before exit. The inline mino_current_ctx                     */
 /* accessor in internal.h reads this and falls through to &S->main_ctx       */
 /* when NULL.                                                                 */
 /* ------------------------------------------------------------------------- */
@@ -65,7 +65,7 @@ static void state_init(mino_state_t *S)
 {
     memset(S, 0, sizeof(*S));
     /* main_ctx is the embedder thread's view; spawned worker threads
-     * (Cycle G4.3+) install their own ctx via TLS at thread entry. */
+     * install their own ctx via TLS at thread entry. */
     S->gc_threshold            = 1u << 20;
     S->gc_nursery_bytes        = 1u << 20;  /* 1 MiB default */
     {
@@ -348,9 +348,9 @@ void mino_state_free(mino_state_t *S)
     if (S == NULL) {
         return;
     }
-    /* Cycle G4.3: join every outstanding worker before tearing down
-     * any heap state. Workers depend on S being live; freeing under
-     * them would crash. */
+    /* Join every outstanding worker before tearing down any heap
+     * state. Workers depend on S being live; freeing under them
+     * would crash. */
     mino_host_threads_quiesce(S);
     state_free_root_envs(S);
     state_free_refs(S);
@@ -812,7 +812,7 @@ void mino_interrupt(mino_state_t *S)
 }
 
 /* ------------------------------------------------------------------------- */
-/* Host-thread grant (Cycle G4 foundation)                                   */
+/* Host-thread grant                                                         */
 /* ------------------------------------------------------------------------- */
 
 void mino_set_thread_limit(mino_state_t *S, int n)
@@ -847,11 +847,11 @@ int mino_thread_count(mino_state_t *S)
 void mino_quiesce_threads(mino_state_t *S)
 {
     /* Walk S->future_list_head and join every worker that hasn't been
-     * joined yet. Cycle G4.3 added the real implementation in
-     * runtime/host_threads.c; mino_state_free calls this before tearing
-     * down the heap so workers don't run after free. Embedders also
-     * call this directly when they need to wait for in-flight futures
-     * before doing other work. */
+     * joined yet. The implementation lives in runtime/host_threads.c;
+     * mino_state_free calls this before tearing down the heap so
+     * workers don't run after free. Embedders also call this directly
+     * when they need to wait for in-flight futures before doing other
+     * work. */
     if (S == NULL) { return; }
     mino_host_threads_quiesce(S);
 }
@@ -880,7 +880,7 @@ void mino_set_thread_stack_size(mino_state_t *S, size_t n)
 }
 
 /* ------------------------------------------------------------------------- */
-/* Safepoint and STW (Cycle G4.2).                                           */
+/* Safepoint and STW                                                         */
 /*                                                                           */
 /* `mino_safepoint_poll` is the inline fast path defined in internal.h; it  */
 /* checks `ctx->should_yield` and falls through to mino_safepoint_park when */
@@ -888,7 +888,7 @@ void mino_set_thread_stack_size(mino_state_t *S, size_t n)
 /* then `gc_release_stw` to wake them after the sweep. Single-threaded     */
 /* today: there's exactly one ctx (S->main_ctx) and the GC runs on the     */
 /* same thread that drove the alloc, so park/release are O(1) flag toggles  */
-/* with no contention. Cycle G4 later sub-cycles add the multi-worker walk. */
+/* with no contention. Multi-worker walk slots into the same path.          */
 /* ------------------------------------------------------------------------- */
 
 void mino_safepoint_park(mino_state_t *S)
@@ -898,7 +898,7 @@ void mino_safepoint_park(mino_state_t *S)
      * only way to reach this slow path is if release-then-set raced
      * or a host driver flipped the flag between sweeps. Clear the
      * local flag and return — no other thread to coordinate with.
-     * Cycle G4 later sub-cycles replace this body with a
+     * A multi-worker variant would replace this body with a
      * condition-variable wait keyed to S->stw_request. */
     if (S == NULL) { return; }
     mino_current_ctx(S)->should_yield = 0;
@@ -908,8 +908,8 @@ void gc_request_stw(mino_state_t *S)
 {
     if (S == NULL) { return; }
     S->stw_request = 1;
-    /* Single-threaded today: only S->main_ctx exists. Cycle G4 later
-     * sub-cycles walk the worker set and set should_yield on each.
+    /* Single-threaded today: only S->main_ctx exists. A multi-worker
+     * variant would walk the worker set and set should_yield on each.
      * The calling thread is the mutator-and-collector both, so it's
      * already at the safepoint by definition; setting should_yield
      * on its current ctx is a formal record, not a wake signal. */
@@ -924,7 +924,7 @@ void gc_release_stw(mino_state_t *S)
 }
 
 /* ------------------------------------------------------------------------- */
-/* Per-state lock (Cycle G4.3).                                              */
+/* Per-state lock                                                            */
 /*                                                                            */
 /* Initialized at state_init unconditionally so any caller can take it       */
 /* whether or not the host has granted threads. The mino_lock / mino_unlock  */

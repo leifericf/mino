@@ -1453,7 +1453,7 @@
                   {:mino/unsupported :agent-error})))
 
 ;; ---------------------------------------------------------------------------
-;; Host threads — Cycle G4.3 (v0.89.0).
+;; Host threads.
 ;;
 ;; Real OS-thread futures and promises. Embedded mode starts at
 ;; thread_limit = 1 (single-threaded) and embedders raise it via

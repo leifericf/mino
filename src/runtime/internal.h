@@ -49,8 +49,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Cycle G4.3: pthread for state_lock + worker threads. Win32 path uses
- * a CRITICAL_SECTION wrapped in state_lock as void* (defined in state.c). */
+/* pthread for state_lock + worker threads. Win32 path uses a
+ * CRITICAL_SECTION wrapped in state_lock as void* (defined in state.c). */
 #if !(defined(_WIN32) && defined(_MSC_VER))
 #  include <pthread.h>
 #endif
@@ -179,13 +179,13 @@ struct mino_env {
 };
 
 /* ------------------------------------------------------------------------- */
-/* Per-thread runtime context (G4.1).                                        */
+/* Per-thread runtime context                                                */
 /*                                                                           */
 /* Every field that mutates with eval progress lives here, separately from   */
 /* the shared mino_state_t. Each OS thread that enters eval has its own      */
 /* ctx; the state pointer is shared. The embedder thread reads main_ctx via */
 /* the mino_current_ctx() TLS-fallback accessor; spawned host worker threads */
-/* (Cycle G4.3+) install their own ctx via TLS at thread entry.              */
+/* install their own ctx via TLS at thread entry.                            */
 /* ------------------------------------------------------------------------- */
 
 typedef struct mino_thread_ctx {
@@ -195,7 +195,7 @@ typedef struct mino_thread_ctx {
     const mino_val_t *eval_current_form;
     volatile int    interrupted;
 
-    /* Safepoint-cooperative-yield flag (Cycle G4.2).
+    /* Safepoint-cooperative-yield flag.
      *
      * Set by the GC driver when a major collection wants every worker
      * for this state to park at its next safepoint, so the collector
@@ -205,10 +205,10 @@ typedef struct mino_thread_ctx {
      * non-zero the mutator calls into the parking slow path.
      *
      * Single-threaded today: nothing sets the flag, so the poll is
-     * a single predictably-not-taken branch on the fast path. Cycle
-     * G4 later sub-cycles flip it from the GC driver once real host
-     * threads exist, and `mino_safepoint_park` blocks the mutator
-     * until the collector signals release. */
+     * a single predictably-not-taken branch on the fast path. The
+     * GC driver flips it once real host threads exist, and
+     * `mino_safepoint_park` blocks the mutator until the collector
+     * signals release. */
     volatile int    should_yield;
 
     /* Exception handling: longjmp targets for try/catch. */
@@ -233,7 +233,7 @@ typedef struct mino_thread_ctx {
     /* Dynamic binding stack head. */
     dyn_frame_t    *dyn_stack;
 
-    /* Cycle G4.3: this thread's recursive depth on S->state_lock.
+    /* This thread's recursive depth on S->state_lock.
      * mino_lock increments, mino_unlock decrements; mino_yield_lock
      * saves the depth and unlocks down to zero, mino_resume_lock
      * re-locks up to the saved depth. Used by mino_future_deref so
@@ -241,22 +241,21 @@ typedef struct mino_thread_ctx {
      * state_lock and starving the worker. */
     int             lock_depth;
 
-    /* Linked list of live worker ctxs (Cycle G4.3). Walked during
-     * gc_mark_roots so values pinned by gc_save / dyn_stack / etc.
-     * on a blocked worker stay reachable across GCs initiated from
-     * another thread. main_ctx is not on this list; the GC walker
-     * processes it separately. NULL on main_ctx and on the head
-     * sentinel. */
+    /* Linked list of live worker ctxs. Walked during gc_mark_roots so
+     * values pinned by gc_save / dyn_stack / etc. on a blocked worker
+     * stay reachable across GCs initiated from another thread.
+     * main_ctx is not on this list; the GC walker processes it
+     * separately. NULL on main_ctx and on the head sentinel. */
     struct mino_thread_ctx *next_worker;
 } mino_thread_ctx_t;
 
 /* TLS pointer to the per-thread ctx for the current worker.
  *
  * NULL on the embedder's main thread (the one that called
- * mino_state_new). Spawned host threads (Cycle G4.3+) set this to
- * their freshly-allocated worker ctx at thread entry and clear it
- * before exit. Accessed only via `mino_current_ctx(S)` (defined
- * below struct mino_state). */
+ * mino_state_new). Spawned host threads set this to their
+ * freshly-allocated worker ctx at thread entry and clear it before
+ * exit. Accessed only via `mino_current_ctx(S)` (defined below
+ * struct mino_state). */
 extern
 #if defined(_WIN32) && defined(_MSC_VER)
 __declspec(thread)
@@ -278,7 +277,7 @@ struct mino_state {
      *
      * `main_ctx` is the embedded ctx for the OS thread that owns S
      * (calls mino_state_new and runs the bulk of work). Spawned host
-     * threads (Cycle G4.3+) allocate their own ctx and install it via
+     * threads allocate their own ctx and install it via
      * `mino_tls_ctx` for the duration of the worker run. Code that
      * needs the active ctx calls `mino_current_ctx(S)` which returns
      * the TLS ctx if set, else &main_ctx for the embedder thread. */
@@ -607,7 +606,7 @@ struct mino_state {
     int             thread_count;
     int             multi_threaded;
 
-    /* Embed-distinctive thread knobs (Cycle G4.5). NULL/0 leaves the
+    /* Embed-distinctive thread knobs. NULL/0 leaves the
      * spawn-per-future default behaviour intact. See mino.h for the
      * surface. thread_pool, when non-NULL, redirects spawn from
      * pthread_create to pool->submit_fn. thread_start_fn / thread_end_fn
@@ -620,51 +619,48 @@ struct mino_state {
     void           *thread_factory_ctx;
     size_t          thread_stack_size;
 
-    /* Per-state mutex held across worker-thread eval (Cycle G4.3).
+    /* Per-state mutex held across worker-thread eval.
      *
      * Worker threads acquire `state_lock` before running eval and
      * release after, serializing all evals (workers + embedder
-     * thread) within a single state. This is a coarse v0.89 model
-     * that gives correct semantics for futures/promises/threads
-     * without a per-subsystem lock matrix. Cross-state work runs
-     * fully concurrent (each state has its own lock); a host pool
-     * sharing N workers across M states gets per-state mutual
-     * exclusion but pool-wide parallelism.
+     * thread) within a single state. This is a coarse model that
+     * gives correct semantics for futures/promises/threads without
+     * a per-subsystem lock matrix. Cross-state work runs fully
+     * concurrent (each state has its own lock); a host pool sharing
+     * N workers across M states gets per-state mutual exclusion but
+     * pool-wide parallelism.
      *
      * Initialized in state_init unconditionally (mutex_init is
      * cheap). `mino_lock(S)` / `mino_unlock(S)` no-op when
-     * !multi_threaded so single-threaded states pay nothing.
-     *
-     * Cycle G4.4+ relaxes serialization with per-thread allocator
-     * arenas + finer-grained registry locks for parallel eval. */
+     * !multi_threaded so single-threaded states pay nothing. */
 #if defined(_WIN32) && defined(_MSC_VER)
     void           *state_lock;        /* CRITICAL_SECTION; see state.c */
 #else
     pthread_mutex_t state_lock;
 #endif
 
-    /* Outstanding futures (Cycle G4.3). Singly-linked; quiesce walks
-     * this to join worker threads before state teardown. The struct
-     * mino_future definition is below (after struct mino_state). */
+    /* Outstanding futures. Singly-linked; quiesce walks this to join
+     * worker threads before state teardown. The struct mino_future
+     * definition is below (after struct mino_state). */
     mino_future_t *future_list_head;
 
-    /* Linked list of live worker ctxs (Cycle G4.3). Walked during
-     * GC root scanning so blocked workers' pinned values stay live.
+    /* Linked list of live worker ctxs. Walked during GC root
+     * scanning so blocked workers' pinned values stay live.
      * Mutated under state_lock. */
     mino_thread_ctx_t *worker_ctxs_head;
 
-    /* Stop-the-world request for major GC (Cycle G4.2).
+    /* Stop-the-world request for major GC.
      *
      * Set by `gc_request_stw` before running a major collection;
      * mino_safepoint_propagate_stw walks the live thread set and
      * sets `should_yield` on each ctx. Cleared after GC by
      * `gc_release_stw`. In single-threaded mode there is exactly
      * one ctx (S->main_ctx) and the GC is itself the mutator, so
-     * the propagation is a single-store no-op. The flag is
-     * declared volatile so future multi-threaded sub-cycles can
-     * safely read it from worker threads without explicit fences
-     * (the ordering invariants are enforced via the same
-     * __atomic_* primitives used by atom CAS). */
+     * the propagation is a single-store no-op. The flag is declared
+     * volatile so future multi-threaded code can safely read it
+     * from worker threads without explicit fences (the ordering
+     * invariants are enforced via the same __atomic_* primitives
+     * used by atom CAS). */
     volatile int    stw_request;
 
     /* === Async scheduler and timers ==================================== */
@@ -689,7 +685,7 @@ static inline mino_thread_ctx_t *mino_current_ctx(mino_state_t *S)
 }
 
 /* ------------------------------------------------------------------------- */
-/* Host-thread future (Cycle G4.3).                                          */
+/* Host-thread future                                                        */
 /*                                                                            */
 /* Defined here (rather than runtime/host_threads.h) so GC trace + sweep,    */
 /* print, and other dispatch sites can see field offsets without including   */
@@ -736,7 +732,7 @@ struct mino_future {
 };
 
 /* ------------------------------------------------------------------------- */
-/* Safepoint poll (Cycle G4.2).                                              */
+/* Safepoint poll                                                            */
 /*                                                                           */
 /* Mutators poll `should_yield` at canonical safepoints so a stop-the-world  */
 /* major collection can run with a stable view of the heap. The fast path   */
@@ -763,7 +759,7 @@ void gc_request_stw(mino_state_t *S);
 void gc_release_stw(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
-/* Per-state lock helpers (Cycle G4.3).                                      */
+/* Per-state lock helpers                                                    */
 /*                                                                           */
 /* mino_lock(S) / mino_unlock(S) acquire/release S->state_lock when         */
 /* multi_threaded is set; otherwise they're a no-op. Held by worker threads */
@@ -782,8 +778,8 @@ void mino_state_lock_release(mino_state_t *S);
  * entered without taking the lock when multi_threaded was still 0).
  * Single-threaded states pay one uncontested mutex lock per eval entry,
  * which is on the order of tens of nanoseconds and dominated by other
- * eval costs. Cycle G4.4+ may reintroduce a fast-path skip after
- * proving safe-flip sequencing. */
+ * eval costs. A fast-path skip is reintroducable later if safe-flip
+ * sequencing can be proven. */
 #define mino_lock(S) do {                                                 \
     mino_state_lock_acquire(S);                                            \
     mino_current_ctx(S)->lock_depth++;                                     \
