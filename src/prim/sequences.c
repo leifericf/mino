@@ -12,6 +12,26 @@
 /* seq and realized?                                                         */
 /* ------------------------------------------------------------------------- */
 
+/* seq_cons_append -- append one cell carrying elem to the (head, tail)
+ * cons chain. Used while building seq lists from indexable sources. */
+static void seq_cons_append(mino_state_t *S, mino_val_t **head,
+                            mino_val_t **tail, mino_val_t *elem)
+{
+    mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
+    if (*tail == NULL) *head = cell;
+    else mino_cons_cdr_set(S, *tail, cell);
+    *tail = cell;
+}
+
+/* seq_kv_pair -- build the [k v] vector value used for map/record seqs. */
+static mino_val_t *seq_kv_pair(mino_state_t *S, mino_val_t *k, mino_val_t *v)
+{
+    mino_val_t *kv[2];
+    kv[0] = k;
+    kv[1] = v;
+    return mino_vector(S, kv, 2);
+}
+
 mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
@@ -33,9 +53,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t i;
         if (coll->as.vec.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.vec.len; i++) {
-            mino_val_t *cell = mino_cons(S, vec_nth(coll, i), mino_nil(S));
-            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
-            tail = cell;
+            seq_cons_append(S, &head, &tail, vec_nth(coll, i));
         }
         return head;
     }
@@ -45,12 +63,8 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll->as.map.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.map.len; i++) {
             mino_val_t *key = vec_nth(coll->as.map.key_order, i);
-            mino_val_t *val = map_get_val(coll, key);
-            mino_val_t *kv[2], *cell;
-            kv[0] = key; kv[1] = val;
-            cell = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
-            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
-            tail = cell;
+            seq_cons_append(S, &head, &tail,
+                seq_kv_pair(S, key, map_get_val(coll, key)));
         }
         return head;
     }
@@ -59,9 +73,8 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t i;
         if (coll->as.set.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.set.len; i++) {
-            mino_val_t *cell = mino_cons(S, vec_nth(coll->as.set.key_order, i), mino_nil(S));
-            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
-            tail = cell;
+            seq_cons_append(S, &head, &tail,
+                vec_nth(coll->as.set.key_order, i));
         }
         return head;
     }
@@ -73,9 +86,8 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t i;
         if (coll->as.s.len == 0) return mino_nil(S);
         for (i = 0; i < coll->as.s.len; i++) {
-            mino_val_t *cell = mino_cons(S, mino_string_n(S, coll->as.s.data + i, 1), mino_nil(S));
-            if (tail == NULL) head = cell; else mino_cons_cdr_set(S, tail, cell);
-            tail = cell;
+            seq_cons_append(S, &head, &tail,
+                mino_string_n(S, coll->as.s.data + i, 1));
         }
         return head;
     }
@@ -91,26 +103,17 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t i;
         if (n_fields == 0 && ext_n == 0) return mino_nil(S);
         for (i = 0; i < n_fields; i++) {
-            mino_val_t *kv[2], *cell;
-            kv[0] = vec_nth(fields, i);
-            kv[1] = coll->as.record.vals[i];
-            cell  = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
-            if (tail == NULL) head = cell;
-            else mino_cons_cdr_set(S, tail, cell);
-            tail = cell;
+            seq_cons_append(S, &head, &tail,
+                seq_kv_pair(S, vec_nth(fields, i),
+                               coll->as.record.vals[i]));
         }
         if (ext_n > 0) {
             const mino_val_t *e = coll->as.record.ext;
             size_t k;
             for (k = 0; k < e->as.map.len; k++) {
                 mino_val_t *ek = vec_nth(e->as.map.key_order, k);
-                mino_val_t *kv[2], *cell;
-                kv[0] = ek;
-                kv[1] = map_get_val(e, ek);
-                cell  = mino_cons(S, mino_vector(S, kv, 2), mino_nil(S));
-                if (tail == NULL) head = cell;
-                else mino_cons_cdr_set(S, tail, cell);
-                tail = cell;
+                seq_cons_append(S, &head, &tail,
+                    seq_kv_pair(S, ek, map_get_val(e, ek)));
             }
         }
         return head;
