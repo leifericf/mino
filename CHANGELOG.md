@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.88.0 — Safepoint Poll And STW Request For Major GC
+
+Mutators now poll a per-thread `should_yield` flag at canonical
+safepoints so a stop-the-world major collection can run with a
+stable view of the heap. Locations: eval_impl entry (folded into
+the existing limit / interrupt gate), `gc_alloc_typed` prologue,
+and the two loop / recur backward branches in `eval/bindings.c`
+and `eval/fn.c`. The fast path is one predictably-not-taken
+volatile read; the slow path (`mino_safepoint_park`) blocks the
+mutator until the collector signals release.
+
+The major GC driver wraps its sweep in `gc_request_stw` /
+`gc_release_stw`. Single-threaded today these are O(1) flag
+toggles on `S->main_ctx` with no contention; the GC is itself
+the mutator and is at a safepoint by definition. Cycle G4 later
+sub-cycles iterate the worker set and use a condition variable
+for park / release.
+
+The flags themselves: `ctx->should_yield` (per-thread parking
+signal) and `S->stw_request` (per-state broadcast). Both are
+volatile so multi-threaded sub-cycles read them without
+explicit fences; ordering invariants pair with the same
+`__atomic_*` primitives the atom CAS path uses.
+
+Perf budget held: fib(30) and reduce-over-million-range bench
+both within noise compared to v0.87.0, comfortably under the
+1% target.
+
+ASan + UBSan clean. GC-stress smoke clean. Suite: 1453 tests,
+6984 assertions, all green.
+
 ## v0.87.0 — Per-Thread Context And Atom CAS
 
 Foundation for real host threads, with no observable change in
