@@ -1,22 +1,37 @@
 # Changelog
 
-## v0.86.1 — Linux CPU-Count Detection Fix
+## v0.86.1 — Audit-Cycle Fixes
 
-`_SC_NPROCESSORS_ONLN` is an enum value in glibc and musl
-unistd.h, not a `#define`, so the
-`#elif defined(_SC_NPROCESSORS_ONLN)` guard introduced in
-v0.84.0 was always false. Linux standalone fell through to
-`thread_limit = 1` even when running on a multi-core box,
-silently turning every grant-gated `(future ...)` into the
-"host has not granted threads" message.
+Three issues found auditing v0.84.0 + v0.85.0 + v0.86.0:
 
-Fixed by removing the dead preprocessor guard and gating only
-on `__APPLE__` and `_WIN32`. The constant resolves at compile
-time on both glibc and musl regardless of feature-test macros,
-and `sysconf` returns the right value at runtime. Darwin
-continues to use `sysctlbyname`.
+- **Linux CPU-count detection.** `_SC_NPROCESSORS_ONLN` is an
+  enum value in glibc and musl `<unistd.h>`, not a `#define`,
+  so the `#elif defined(_SC_NPROCESSORS_ONLN)` guard
+  introduced in v0.84.0 was always false. Linux standalone
+  fell through to `thread_limit = 1` even on a multi-core
+  box, silently turning every grant-gated `(future ...)` into
+  the "host has not granted threads" message. Fixed by
+  dropping the dead preprocessor guard and calling `sysconf`
+  unconditionally on the non-Apple, non-Windows branch.
+- **Standalone test files silently no-op.** The two new test
+  files added in v0.84.0 and v0.85.0
+  (`tests/host_threads_foundation_test.clj` and
+  `tests/capability_metadata_test.clj`) didn't end with
+  `(run-tests)`, so invoking them directly produced no
+  output. Added the trailing call; under `tests/run.clj`'s
+  suite-mode it stays a no-op, standalone it runs and exits
+  with the per-file summary.
+- **Empty-doc capability render.** `doc_render_with_capability`
+  prepended `"\n  Capability: :foo"` to the docstring
+  unconditionally, so a binding with an empty docstring +
+  capability rendered with a stray leading newline. No
+  primitive in tree exercises that path today (every
+  primitive ships a docstring), but the case is reachable
+  through the C `meta_set` helper and the rendering should
+  stay clean for hosts that inject bindings that way.
 
-Audit-cycle fix; no functional change to the v0.86.0 surface.
+ASan + UBSan clean. Suite: 1453 tests, 6984 assertions,
+all green.
 
 ## v0.86.0 — Test Harness Suite Mode
 
