@@ -354,10 +354,10 @@ void gc_minor_collect(mino_state_t *S)
     size_t    elapsed_ns;
     int       saved_phase;
     size_t    mark_floor;
-    if (S->gc_depth > 0) {
+    if (S->ctx->gc_depth > 0) {
         return;
     }
-    S->gc_depth++;
+    S->ctx->gc_depth++;
     /* Save the caller's phase and the current mark-stack length.
      * When a minor runs nested inside MAJOR_MARK, the saved length
      * is the floor below which major's pending entries live; minor
@@ -414,5 +414,5 @@ void gc_minor_collect(mino_state_t *S)
     if (elapsed_ns > S->gc_max_ns) {
         S->gc_max_ns = elapsed_ns;
     }
-    S->gc_depth--;
+    S->ctx->gc_depth--;
 }

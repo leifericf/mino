@@ -398,12 +398,12 @@ mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* C-heap items[] is invisible to the precise GC; suppress collection
      * so freshly minted ints cannot be swept before mino_vector rehomes
      * them into GC-visible storage. */
-    S->gc_depth++;
+    S->ctx->gc_depth++;
     for (i = start, n = 0; n < len; i += step, n++) {
         items[n] = mino_int(S, i);
     }
     result = mino_vector(S, items, len);
-    S->gc_depth--;
+    S->ctx->gc_depth--;
     free(items);
     return result;
 }
@@ -422,7 +422,7 @@ static mino_val_t **ptrarr_grow(mino_state_t *S, mino_val_t **old,
     for (i = 0; i < old_len; i++) {
         nb[i] = old[i];
     }
-    S->gc_save[pin_slot] = (mino_val_t *)nb;
+    S->ctx->gc_save[pin_slot] = (mino_val_t *)nb;
     return nb;
 }
 
@@ -455,7 +455,7 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
                                           cap * sizeof(mino_val_t *));
     if (items == NULL) return NULL;
-    pin_slot = S->gc_save_len;
+    pin_slot = S->ctx->gc_save_len;
     gc_pin((mino_val_t *)items);
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
@@ -500,7 +500,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
                                           cap * sizeof(mino_val_t *));
     if (items == NULL) return NULL;
-    pin_slot = S->gc_save_len;
+    pin_slot = S->ctx->gc_save_len;
     gc_pin((mino_val_t *)items);
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {

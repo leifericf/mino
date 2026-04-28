@@ -283,8 +283,8 @@ void gc_mark_roots(mino_state_t *S)
     gc_mark_intern_table(S, &S->sym_intern);
     gc_mark_intern_table(S, &S->kw_intern);
     /* Pin try/catch exception values and module cache results. */
-    for (i = 0; i < S->try_depth; i++) {
-        gc_mark_interior(S, S->try_stack[i].exception);
+    for (i = 0; i < S->ctx->try_depth; i++) {
+        gc_mark_interior(S, S->ctx->try_stack[i].exception);
     }
     {
         size_t mi;
@@ -326,16 +326,16 @@ void gc_mark_roots(mino_state_t *S)
     {
         dyn_frame_t *f;
         dyn_binding_t *b;
-        for (f = S->dyn_stack; f != NULL; f = f->prev) {
+        for (f = S->ctx->dyn_stack; f != NULL; f = f->prev) {
             for (b = f->bindings; b != NULL; b = b->next) {
                 gc_mark_interior(S, b->val);
             }
         }
     }
     /* Pin diagnostic data and cached map. */
-    if (S->last_diag != NULL) {
-        gc_mark_interior(S, S->last_diag->data);
-        gc_mark_interior(S, S->last_diag->cached_map);
+    if (S->ctx->last_diag != NULL) {
+        gc_mark_interior(S, S->ctx->last_diag->data);
+        gc_mark_interior(S, S->ctx->last_diag->cached_map);
     }
     /* Pin sort comparator if active. */
     gc_mark_interior(S, S->sort_comp_fn);
@@ -344,9 +344,9 @@ void gc_mark_roots(mino_state_t *S)
     /* Pin values on the GC save stack. */
     {
         int si;
-        int limit = S->gc_save_len < GC_SAVE_MAX ? S->gc_save_len : GC_SAVE_MAX;
+        int limit = S->ctx->gc_save_len < GC_SAVE_MAX ? S->ctx->gc_save_len : GC_SAVE_MAX;
         for (si = 0; si < limit; si++) {
-            gc_mark_interior(S, S->gc_save[si]);
+            gc_mark_interior(S, S->ctx->gc_save[si]);
         }
     }
     /* Pin cached core.clj parsed forms. */
@@ -402,14 +402,14 @@ void gc_scan_stack(mino_state_t *S)
     char         *lo;
     char         *hi;
     char         *cur;
-    if (S->gc_stack_bottom == NULL) {
+    if (S->ctx->gc_stack_bottom == NULL) {
         return;
     }
-    if ((char *)&probe < (char *)S->gc_stack_bottom) {
+    if ((char *)&probe < (char *)S->ctx->gc_stack_bottom) {
         lo = (char *)&probe;
-        hi = (char *)S->gc_stack_bottom;
+        hi = (char *)S->ctx->gc_stack_bottom;
     } else {
-        lo = (char *)S->gc_stack_bottom;
+        lo = (char *)S->ctx->gc_stack_bottom;
         hi = (char *)&probe;
     }
     while (((uintptr_t)lo % sizeof(void *)) != 0 && lo < hi) {

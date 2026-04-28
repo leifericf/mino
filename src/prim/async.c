@@ -29,7 +29,7 @@ static mino_val_t *prim_sched_enqueue(mino_state_t *S, mino_val_t *args,
 
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001",
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001",
                       "async-sched-enqueue* requires callback and value");
         return NULL;
     }
@@ -50,12 +50,12 @@ static mino_val_t *prim_timer_schedule(mino_state_t *S, mino_val_t *args,
 
     if (args == NULL || args->type != MINO_CONS ||
         args->as.cons.cdr == NULL) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001",
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001",
                       "async-schedule-timer* requires ms and callback");
         return NULL;
     }
     if (!as_double(args->as.cons.car, &ms)) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001",
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001",
                       "async-schedule-timer* first argument must be a number");
         return NULL;
     }
@@ -87,7 +87,7 @@ static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
     mino_val_t *done_thunk, *result;
 
     if (args == NULL || args->type != MINO_CONS) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001",
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001",
                       "drain-loop! requires a done-check thunk");
         return NULL;
     }

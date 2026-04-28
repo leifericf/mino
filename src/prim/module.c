@@ -30,7 +30,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      i;
     mino_val_t *result;
     if (!mino_is_cons(args)) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "require requires at least one argument");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001", "require requires at least one argument");
         return NULL;
     }
     /* Multi-arg form: (require 'foo 'bar ...) -- recurse for each. */
@@ -167,7 +167,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (runtime_module_dotted_to_path(name_val->as.s.data,
                                           name_val->as.s.len,
                                           pathbuf, sizeof(pathbuf)) != 0) {
-            set_eval_diag(S, S->eval_current_form, "name", "MNS001",
+            set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001",
                           "require: invalid module name");
             return NULL;
         }
@@ -197,7 +197,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *rename_map        = NULL;
         size_t      vi;
         if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
-            set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
+            set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
             return NULL;
         }
         /* Parse keyword args.
@@ -222,7 +222,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                            && kw_match(v, "all")) {
                     refer_all = 1;
                 } else {
-                    set_eval_diag(S, S->eval_current_form,
+                    set_eval_diag(S, S->ctx->eval_current_form,
                         "eval/type", "MTY001",
                         "require: :refer requires a vector of symbols or :all");
                     return NULL;
@@ -245,7 +245,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             char abuf[256];
             if (mod_sym->as.s.len >= sizeof(fbuf)
                 || as_alias_len >= sizeof(abuf)) {
-                set_eval_diag(S, S->eval_current_form, "name", "MNS001",
+                set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001",
                               "require: :as-alias name too long");
                 return NULL;
             }
@@ -302,7 +302,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                                   mod_sym->as.s.len,
                                                   pathbuf,
                                                   sizeof(pathbuf)) != 0) {
-                    set_eval_diag(S, S->eval_current_form, "name",
+                    set_eval_diag(S, S->ctx->eval_current_form, "name",
                                   "MNS001", "require: invalid module name");
                     return NULL;
                 }
@@ -376,7 +376,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                             snprintf(msg, sizeof(msg),
                                 "require: %s does not refer var %s",
                                 modbuf, rbuf);
-                            set_eval_diag(S, S->eval_current_form,
+                            set_eval_diag(S, S->ctx->eval_current_form,
                                 "name", "MNS001", msg);
                             return NULL;
                         }
@@ -456,7 +456,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 
     if (name_val == NULL || name_val->type != MINO_STRING) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "require: argument must be a string, symbol, or vector");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001", "require: argument must be a string, symbol, or vector");
         return NULL;
     }
     name = name_val->as.s.data;
@@ -529,7 +529,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (off < sizeof(msg)) {
                 snprintf(msg + off, sizeof(msg) - off, "%s", name);
             }
-            set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
+            set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001", msg);
             return NULL;
         }
     }
@@ -543,14 +543,14 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         path = NULL;
     } else {
         if (S->module_resolver == NULL) {
-            set_eval_diag(S, S->eval_current_form, "name", "MNS001", "require: no module resolver configured");
+            set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001", "require: no module resolver configured");
             return NULL;
         }
         path = S->module_resolver(name, S->module_resolver_ctx);
         if (path == NULL) {
             char msg[300];
             snprintf(msg, sizeof(msg), "require: cannot resolve module: %s", name);
-            set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
+            set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001", msg);
             return NULL;
         }
     }
@@ -559,7 +559,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t new_cap = S->load_stack_cap == 0 ? 8 : S->load_stack_cap * 2;
         char **nb = (char **)realloc(S->load_stack, new_cap * sizeof(*nb));
         if (nb == NULL) {
-            set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001",
                 "require: out of memory");
             return NULL;
         }
@@ -570,7 +570,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t nlen = strlen(name);
         char *dup = (char *)malloc(nlen + 1);
         if (dup == NULL) {
-            set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001",
                 "require: out of memory");
             return NULL;
         }
@@ -658,7 +658,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                             (path != NULL ? "file" : "bundled"),
                             (path != NULL ? path  : name),
                             post_ns, expected);
-                        set_eval_diag(S, S->eval_current_form,
+                        set_eval_diag(S, S->ctx->eval_current_form,
                             "name", "MNS001", msg);
                         return NULL;
                     }
@@ -672,7 +672,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         module_entry_t *nb     = (module_entry_t *)realloc(
             S->module_cache, new_cap * sizeof(*nb));
         if (nb == NULL) {
-            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "require: out of memory");
+            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "require: out of memory");
             return NULL;
         }
         S->module_cache     = nb;
@@ -682,7 +682,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         size_t nlen = strlen(name);
         char *dup   = (char *)malloc(nlen + 1);
         if (dup == NULL) {
-            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "require: out of memory");
+            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "require: out of memory");
             return NULL;
         }
         memcpy(dup, name, nlen + 1);
@@ -833,17 +833,17 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     meta_entry_t *e;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "doc requires one argument");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001", "doc requires one argument");
         return NULL;
     }
     name_val = args->as.cons.car;
     if (name_val == NULL || name_val->type != MINO_SYMBOL) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "doc: argument must be a symbol");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001", "doc: argument must be a symbol");
         return NULL;
     }
     n = name_val->as.s.len;
     if (n >= sizeof(buf)) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "doc: name too long");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001", "doc: name too long");
         return NULL;
     }
     memcpy(buf, name_val->as.s.data, n);
@@ -888,17 +888,17 @@ mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     meta_entry_t *e;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "source requires one argument");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001", "source requires one argument");
         return NULL;
     }
     name_val = args->as.cons.car;
     if (name_val == NULL || name_val->type != MINO_SYMBOL) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "source: argument must be a symbol");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001", "source: argument must be a symbol");
         return NULL;
     }
     n = name_val->as.s.len;
     if (n >= sizeof(buf)) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "source: name too long");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001", "source: name too long");
         return NULL;
     }
     memcpy(buf, name_val->as.s.data, n);
@@ -919,12 +919,12 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *tail = NULL;
     mino_env_t *e;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001", "apropos requires one argument");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001", "apropos requires one argument");
         return NULL;
     }
     pat_val = args->as.cons.car;
     if (pat_val == NULL || pat_val->type != MINO_STRING) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001", "apropos: argument must be a string");
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001", "apropos: argument must be a string");
         return NULL;
     }
     pat = pat_val->as.s.data;

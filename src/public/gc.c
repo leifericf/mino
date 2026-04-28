@@ -12,17 +12,17 @@
 
 void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
 {
-    if (S == NULL || S->gc_depth > 0) {
+    if (S == NULL || S->ctx->gc_depth > 0) {
         return;
     }
     switch (kind) {
     case MINO_GC_MINOR:
-        if (S->gc_stack_bottom != NULL) {
+        if (S->ctx->gc_stack_bottom != NULL) {
             gc_minor_collect(S);
         }
         return;
     case MINO_GC_MAJOR:
-        if (S->gc_stack_bottom == NULL) {
+        if (S->ctx->gc_stack_bottom == NULL) {
             return;
         }
         if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
@@ -32,7 +32,7 @@ void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
         }
         return;
     case MINO_GC_FULL:
-        if (S->gc_stack_bottom == NULL) {
+        if (S->ctx->gc_stack_bottom == NULL) {
             return;
         }
         if (S->gc_bytes_young > 0) {

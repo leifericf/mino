@@ -757,7 +757,7 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "throw requires one argument");
     }
     ex = args->as.cons.car;
-    if (S->try_depth <= 0) {
+    if (S->ctx->try_depth <= 0) {
         /* No enclosing try -- format as fatal error. */
         char msg[512];
         if (ex != NULL && ex->type == MINO_STRING) {
@@ -768,8 +768,8 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return prim_throw_classified(S, "user", "MUS001", msg);
     }
-    S->try_stack[S->try_depth - 1].exception = ex;
-    longjmp(S->try_stack[S->try_depth - 1].buf, 1);
+    S->ctx->try_stack[S->ctx->try_depth - 1].exception = ex;
+    longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
     return NULL; /* unreachable */
 }
 

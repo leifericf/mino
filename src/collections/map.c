@@ -511,7 +511,7 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size
      * stay valid. Without this, intermediate allocations (hamt_entry_new,
      * vec_conj1) could trigger collection that reclaims values the caller
      * holds only on the C stack. */
-    S->gc_depth++;
+    S->ctx->gc_depth++;
     v     = alloc_val(S, MINO_MAP);
     order = mino_vector(S, NULL, 0);
     for (i = 0; i < len; i++) {
@@ -527,7 +527,7 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size
     v->as.map.root      = root;
     v->as.map.key_order = order;
     v->as.map.len       = len_out;
-    S->gc_depth--;
+    S->ctx->gc_depth--;
     return v;
 }
 
@@ -539,7 +539,7 @@ mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len)
     size_t            len_out  = 0;
     size_t            i;
     mino_val_t       *sentinel;
-    S->gc_depth++;
+    S->ctx->gc_depth++;
     v        = alloc_val(S, MINO_SET);
     order    = mino_vector(S, NULL, 0);
     sentinel = mino_true(S);
@@ -556,7 +556,7 @@ mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len)
     v->as.set.root      = root;
     v->as.set.key_order = order;
     v->as.set.len       = len_out;
-    S->gc_depth--;
+    S->ctx->gc_depth--;
     return v;
 }
 

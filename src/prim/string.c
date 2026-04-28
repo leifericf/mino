@@ -20,7 +20,7 @@ static inline char *fmt_ensure(mino_state_t *S, char *buf,
         while (newcap < need) newcap *= 2;
         newbuf = (char *)realloc(buf, newcap);
         if (newbuf == NULL) {
-            set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001",
                           "out of memory");
             return NULL;
         }
@@ -242,9 +242,9 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* Throw parse errors as catchable exceptions so user code can
          * handle them via try/catch. */
         mino_val_t *ex = mino_string(S, mino_last_error(S));
-        if (S->try_depth > 0) {
-            S->try_stack[S->try_depth - 1].exception = ex;
-            longjmp(S->try_stack[S->try_depth - 1].buf, 1);
+        if (S->ctx->try_depth > 0) {
+            S->ctx->try_stack[S->ctx->try_depth - 1].exception = ex;
+            longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
         }
         /* No enclosing try — propagate as fatal error. */
         {
@@ -276,7 +276,7 @@ mino_val_t *prim_pr_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             cap = cap == 0 ? 128 : cap;
             while (cap < need) cap *= 2;
             buf = (char *)realloc(buf, cap);
-            if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+            if (buf == NULL) { set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
         }
         if (!first) buf[len++] = ' ';
         memcpy(buf + len, printed->as.s.data, printed->as.s.len);
@@ -472,7 +472,7 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             buf_cap = buf_cap == 0 ? 128 : buf_cap;
             while (buf_cap < need) buf_cap *= 2;
             buf = (char *)realloc(buf, buf_cap);
-            if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+            if (buf == NULL) { set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
         }
         if (!first && sep_len > 0) {
             memcpy(buf + buf_len, sep, sep_len);
@@ -524,7 +524,7 @@ mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
     buf_cap = slen + 256;
     buf = (char *)malloc(buf_cap);
     if (buf == NULL) {
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001",
+        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001",
                       "out of memory");
         return NULL;
     }
@@ -545,7 +545,7 @@ mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
             if (need > buf_cap) {
                 while (buf_cap < need) buf_cap = buf_cap * 2;
                 buf = (char *)realloc(buf, buf_cap);
-                if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+                if (buf == NULL) { set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
             }
             memcpy(buf + buf_len, p, prefix_len);
             buf_len += prefix_len;
@@ -558,7 +558,7 @@ mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
             if (need > buf_cap) {
                 while (buf_cap < need) buf_cap = buf_cap * 2;
                 buf = (char *)realloc(buf, buf_cap);
-                if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+                if (buf == NULL) { set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
             }
             memcpy(buf + buf_len, p, tail_len);
             buf_len += tail_len;
@@ -648,7 +648,7 @@ mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
+        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
     }
     for (i = 0; i < s->as.s.len; i++) {
         buf[i] = (char)toupper((unsigned char)s->as.s.data[i]);
@@ -675,7 +675,7 @@ mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     buf = (char *)malloc(s->as.s.len);
     if (buf == NULL && s->as.s.len > 0) {
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
+        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL;
     }
     for (i = 0; i < s->as.s.len; i++) {
         buf[i] = (char)tolower((unsigned char)s->as.s.data[i]);
@@ -725,7 +725,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 cap = cap == 0 ? 128 : cap;
                 while (cap < need) cap *= 2;
                 buf = (char *)realloc(buf, cap);
-                if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+                if (buf == NULL) { set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
             }
             memcpy(buf + len, a->as.s.data, a->as.s.len);
             len += a->as.s.len;
@@ -815,7 +815,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         cap = cap == 0 ? 128 : cap;
                         while (cap < need2) cap *= 2;
                         buf = (char *)realloc(buf, cap);
-                        if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+                        if (buf == NULL) { set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
                     }
                     memcpy(buf + len, printed->as.s.data, plen);
                     len += plen;
@@ -836,7 +836,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     cap = cap == 0 ? 128 : cap;
                     while (cap < need) cap *= 2;
                     buf = (char *)realloc(buf, cap);
-                    if (buf == NULL) { set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
+                    if (buf == NULL) { set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
                 }
                 memcpy(buf + len, tmp, (size_t)n);
                 len += (size_t)n;

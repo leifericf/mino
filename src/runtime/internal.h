@@ -165,10 +165,60 @@ struct mino_env {
 };
 
 /* ------------------------------------------------------------------------- */
+/* Per-thread runtime context (G4.1).                                        */
+/*                                                                           */
+/* Every field that mutates with eval progress lives here, separately from   */
+/* the shared mino_state_t. Each OS thread that enters eval has its own      */
+/* ctx; the state pointer is shared. In v0.87.x only the main ctx exists    */
+/* (S->ctx == &S->main_ctx), so observable behavior is unchanged. Cycle G4  */
+/* later versions add per-spawn ctxs and TLS-backed lookup.                  */
+/* ------------------------------------------------------------------------- */
+
+typedef struct mino_thread_ctx {
+    /* Eval progress + step limit + interrupt poll. */
+    size_t          eval_steps;
+    int             limit_exceeded;
+    const mino_val_t *eval_current_form;
+    volatile int    interrupted;
+
+    /* Exception handling: longjmp targets for try/catch. */
+    try_frame_t     try_stack[MAX_TRY_DEPTH];
+    int             try_depth;
+
+    /* Error reporting: text buffer + structured diagnostic + frame stack. */
+    char            error_buf[2048];
+    mino_diag_t    *last_diag;
+    call_frame_t    call_stack[MAX_CALL_DEPTH];
+    int             call_depth;
+    int             trace_added;
+
+    /* GC save stack: transient roots pinned across allocations. */
+    mino_val_t     *gc_save[64];
+    int             gc_save_len;
+
+    /* Conservative stack scan anchor + GC re-entrancy depth. */
+    void           *gc_stack_bottom;
+    int             gc_depth;
+
+    /* Dynamic binding stack head. */
+    dyn_frame_t    *dyn_stack;
+} mino_thread_ctx_t;
+
+/* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */
 
 struct mino_state {
+    /* Per-thread context.
+     *
+     * `main_ctx` is the embedded ctx for the OS thread that owns S
+     * (calls mino_state_new and runs the bulk of work today). `ctx`
+     * resolves to the active per-thread context; in v0.87.x there is
+     * only ever main_ctx so ctx is always &main_ctx. Cycle G4 later
+     * versions add per-spawn ctxs and TLS-backed lookup. */
+    mino_thread_ctx_t  main_ctx;
+    mino_thread_ctx_t *ctx;
+
     /* Garbage collection.
      *
      * gc_all_young and gc_all_old are singly-linked lists partitioning
@@ -184,8 +234,7 @@ struct mino_state {
     size_t          gc_bytes_live;
     size_t          gc_threshold;
     int             gc_stress;
-    int             gc_depth;
-    void           *gc_stack_bottom;
+    /* gc_depth and gc_stack_bottom moved to mino_thread_ctx_t. */
     root_env_t     *gc_root_envs;
     gc_range_t     *gc_ranges;
     size_t          gc_ranges_len;
@@ -319,15 +368,9 @@ struct mino_state {
     mino_val_t     *sf_and;
     mino_val_t     *sf_or;
 
-    /* Execution limits */
+    /* Execution limits (config knobs; set once by host, read by ctx). */
     size_t          limit_steps;
     size_t          limit_heap;
-    size_t          eval_steps;
-    int             limit_exceeded;
-
-    /* Exception handling */
-    try_frame_t     try_stack[MAX_TRY_DEPTH];
-    int             try_depth;
 
     /* Module system */
     mino_resolve_fn module_resolver;
@@ -359,12 +402,8 @@ struct mino_state {
     /* Printer */
     int             print_depth;
 
-    /* Error reporting */
-    char            error_buf[2048];
-    call_frame_t    call_stack[MAX_CALL_DEPTH];
-    int             call_depth;
-    int             trace_added;
-    mino_diag_t    *last_diag;      /* malloc-owned structured diagnostic */
+    /* Error reporting state moved to mino_thread_ctx_t (error_buf,
+     * call_stack, call_depth, trace_added, last_diag). */
 
     /* Reader */
     const char     *reader_file;
@@ -430,8 +469,7 @@ struct mino_state {
     size_t          host_types_len;
     size_t          host_types_cap;
 
-    /* Eval */
-    const mino_val_t *eval_current_form;
+    /* Eval current_form moved to mino_thread_ctx_t. */
 
     /* Per-state PRNG (xorshift64*). Seeded lazily on first draw so two
      * runtimes initialised at the same instant get distinct sequences.
@@ -455,15 +493,8 @@ struct mino_state {
     /* Host-retained value refs */
     mino_ref_t     *ref_roots;
 
-    /* Dynamic bindings */
-    dyn_frame_t    *dyn_stack;
-
-    /* Interrupt flag */
-    volatile int    interrupted;
-
-    /* GC save stack */
-    mino_val_t     *gc_save[64];
-    int             gc_save_len;
+    /* Dynamic bindings, interrupt flag, and GC save stack moved to
+     * mino_thread_ctx_t (dyn_stack, interrupted, gc_save, gc_save_len). */
 
     /* Cached parsed core.clj forms (avoids re-parsing on second
      * mino_install_core call within the same state). */
@@ -511,7 +542,7 @@ struct mino_state {
 /* error.c                                                                   */
 /* ------------------------------------------------------------------------- */
 
-/* set_error/set_error_at copy msg into S->error_buf; msg is borrowed. */
+/* set_error/set_error_at copy msg into S->ctx->error_buf; msg is borrowed. */
 void        set_error(mino_state_t *S, const char *msg);          /* msg: borrowed */
 void        set_error_at(mino_state_t *S, const mino_val_t *form, /* form: borrowed */
                          const char *msg);                         /* msg: borrowed */

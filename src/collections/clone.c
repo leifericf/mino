@@ -241,7 +241,7 @@ mino_val_t *mino_clone(mino_state_t *dst, mino_state_t *src, mino_val_t *val)
     (void)src;
     result = clone_val(dst, val);
     if (result == NULL && val != NULL) {
-        set_eval_diag(dst, dst->eval_current_form, "internal", "MIN001",
+        set_eval_diag(dst, dst->ctx->eval_current_form, "internal", "MIN001",
                   "clone: value contains non-transferable types "
                   "(fn, macro, prim, handle, atom, or lazy-seq)");
     }

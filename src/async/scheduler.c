@@ -11,7 +11,7 @@ void async_sched_enqueue(mino_state_t *S, mino_val_t *callback,
 {
     sched_entry_t *e = calloc(1, sizeof(*e));
     if (e == NULL) {
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory in scheduler enqueue");
+        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory in scheduler enqueue");
         return;
     }
     e->callback = callback;

@@ -35,6 +35,9 @@ const char *mino_version_string(void)
 static void state_init(mino_state_t *S)
 {
     memset(S, 0, sizeof(*S));
+    /* Single-threaded today: ctx always points at the embedded main_ctx.
+     * Cycle G4 later sub-cycles introduce per-spawn ctxs and TLS lookup. */
+    S->ctx = &S->main_ctx;
     S->gc_threshold            = 1u << 20;
     S->gc_nursery_bytes        = 1u << 20;  /* 1 MiB default */
     {
@@ -257,8 +260,8 @@ static void state_free_gc_aux(mino_state_t *S)
 static void state_free_diag_state(mino_state_t *S)
 {
     int sci;
-    diag_free(S->last_diag);
-    S->last_diag = NULL;
+    diag_free(S->ctx->last_diag);
+    S->ctx->last_diag = NULL;
     for (sci = 0; sci < MINO_SOURCE_CACHE_SIZE; sci++) {
         free(S->source_cache[sci].text);
     }
@@ -408,29 +411,29 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
     volatile char probe = 0;
     mino_val_t   *v;
-    int           saved_try = S->try_depth;
+    int           saved_try = S->ctx->try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    S->eval_steps     = 0;
-    S->limit_exceeded = 0;
-    S->interrupted    = 0;
-    S->trace_added    = 0;
-    S->call_depth     = 0;
+    S->ctx->eval_steps     = 0;
+    S->ctx->limit_exceeded = 0;
+    S->ctx->interrupted    = 0;
+    S->ctx->trace_added    = 0;
+    S->ctx->call_depth     = 0;
 
     /* Top-level try frame so that OOM and unhandled throw during eval
      * surface as a NULL return instead of aborting the process. */
-    if (S->try_depth < MAX_TRY_DEPTH) {
-        S->try_stack[S->try_depth].exception      = NULL;
-        S->try_stack[S->try_depth].saved_ns       = S->current_ns;
-        S->try_stack[S->try_depth].saved_ambient  = S->fn_ambient_ns;
-        S->try_stack[S->try_depth].saved_load_len = S->load_stack_len;
-        if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
+    if (S->ctx->try_depth < MAX_TRY_DEPTH) {
+        S->ctx->try_stack[S->ctx->try_depth].exception      = NULL;
+        S->ctx->try_stack[S->ctx->try_depth].saved_ns       = S->current_ns;
+        S->ctx->try_stack[S->ctx->try_depth].saved_ambient  = S->fn_ambient_ns;
+        S->ctx->try_stack[S->ctx->try_depth].saved_load_len = S->load_stack_len;
+        if (setjmp(S->ctx->try_stack[S->ctx->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
-            mino_val_t *ex = S->try_stack[saved_try].exception;
-            S->current_ns    = S->try_stack[saved_try].saved_ns;
-            S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
-            load_stack_truncate(S, S->try_stack[saved_try].saved_load_len);
-            S->try_depth = saved_try;
+            mino_val_t *ex = S->ctx->try_stack[saved_try].exception;
+            S->current_ns    = S->ctx->try_stack[saved_try].saved_ns;
+            S->fn_ambient_ns = S->ctx->try_stack[saved_try].saved_ambient;
+            load_stack_truncate(S, S->ctx->try_stack[saved_try].saved_load_len);
+            S->ctx->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
                 /* If the exception is a diagnostic map, extract its
                  * message for the error buffer. */
@@ -441,7 +444,7 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
                         mino_keyword(S, "mino/kind"));
                     mino_val_t *code = map_get_val(ex,
                         mino_keyword(S, "mino/code"));
-                    set_eval_diag(S, S->eval_current_form,
+                    set_eval_diag(S, S->ctx->eval_current_form,
                         (kind && kind->type == MINO_KEYWORD)
                             ? kind->as.s.data : "internal",
                         (code && code->type == MINO_STRING)
@@ -452,38 +455,38 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
                     char msg[512];
                     snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                              (int)ex->as.s.len, ex->as.s.data);
-                    set_eval_diag(S, S->eval_current_form,
+                    set_eval_diag(S, S->ctx->eval_current_form,
                                   "user", "MUS001", msg);
                 } else {
-                    set_eval_diag(S, S->eval_current_form,
+                    set_eval_diag(S, S->ctx->eval_current_form,
                                   "internal", "MIN001",
                                   "unhandled exception");
                 }
             }
-            S->call_depth = 0;
+            S->ctx->call_depth = 0;
             return NULL;
         }
-        S->try_depth++;
+        S->ctx->try_depth++;
     }
 
     v = eval(S, form, env);
-    S->try_depth = saved_try;
+    S->ctx->try_depth = saved_try;
     if (v == NULL) {
         append_trace(S);
-        S->call_depth = 0;
+        S->ctx->call_depth = 0;
         return NULL;
     }
     if (v->type == MINO_RECUR) {
-        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "recur must be in tail position");
-        S->call_depth = 0;
+        set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", "recur must be in tail position");
+        S->ctx->call_depth = 0;
         return NULL;
     }
     if (v->type == MINO_TAIL_CALL) {
-        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "tail call escaped to top level");
-        S->call_depth = 0;
+        set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", "tail call escaped to top level");
+        S->ctx->call_depth = 0;
         return NULL;
     }
-    S->call_depth = 0;
+    S->ctx->call_depth = 0;
     /* Drain async scheduler run queue after each top-level eval. */
     async_sched_drain(S, env);
     return v;
@@ -495,12 +498,12 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     mino_val_t     *last  = mino_nil(S);
     const char     *saved_file = S->reader_file;
     int             saved_line = S->reader_line;
-    int             saved_try  = S->try_depth;
+    int             saved_try  = S->ctx->try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    S->eval_steps     = 0;
-    S->limit_exceeded = 0;
-    S->interrupted    = 0;
+    S->ctx->eval_steps     = 0;
+    S->ctx->limit_exceeded = 0;
+    S->ctx->interrupted    = 0;
     if (S->reader_file == NULL) {
         S->reader_file = intern_filename(S, "<string>");
     }
@@ -508,17 +511,17 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
 
     /* Top-level try frame so that OOM during read or eval surfaces as a
      * NULL return instead of aborting the process. */
-    if (S->try_depth < MAX_TRY_DEPTH) {
-        S->try_stack[S->try_depth].exception      = NULL;
-        S->try_stack[S->try_depth].saved_ns       = S->current_ns;
-        S->try_stack[S->try_depth].saved_ambient  = S->fn_ambient_ns;
-        S->try_stack[S->try_depth].saved_load_len = S->load_stack_len;
-        if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
-            mino_val_t *ex = S->try_stack[saved_try].exception;
-            S->current_ns    = S->try_stack[saved_try].saved_ns;
-            S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
-            load_stack_truncate(S, S->try_stack[saved_try].saved_load_len);
-            S->try_depth   = saved_try;
+    if (S->ctx->try_depth < MAX_TRY_DEPTH) {
+        S->ctx->try_stack[S->ctx->try_depth].exception      = NULL;
+        S->ctx->try_stack[S->ctx->try_depth].saved_ns       = S->current_ns;
+        S->ctx->try_stack[S->ctx->try_depth].saved_ambient  = S->fn_ambient_ns;
+        S->ctx->try_stack[S->ctx->try_depth].saved_load_len = S->load_stack_len;
+        if (setjmp(S->ctx->try_stack[S->ctx->try_depth].buf) != 0) {
+            mino_val_t *ex = S->ctx->try_stack[saved_try].exception;
+            S->current_ns    = S->ctx->try_stack[saved_try].saved_ns;
+            S->fn_ambient_ns = S->ctx->try_stack[saved_try].saved_ambient;
+            load_stack_truncate(S, S->ctx->try_stack[saved_try].saved_load_len);
+            S->ctx->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;
             if (mino_last_error(S) == NULL) {
@@ -532,19 +535,19 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
                         char msg[512];
                         snprintf(msg, sizeof(msg), "in %s: %.*s",
                                  file, (int)ex->as.s.len, ex->as.s.data);
-                        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", msg);
+                        set_eval_diag(S, S->ctx->eval_current_form, "eval/contract", "MCT001", msg);
                     } else {
-                        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001",
+                        set_eval_diag(S, S->ctx->eval_current_form, "eval/contract", "MCT001",
                                       ex->as.s.data);
                     }
                 } else {
-                    set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
+                    set_eval_diag(S, S->ctx->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
                 }
             }
-            S->call_depth = 0;
+            S->ctx->call_depth = 0;
             return NULL;
         }
-        S->try_depth++;
+        S->ctx->try_depth++;
     }
 
     while (*src != '\0') {
@@ -552,7 +555,7 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
         mino_val_t *form = mino_read(S, src, &end);
         if (form == NULL) {
             if (mino_last_error(S) != NULL) {
-                S->try_depth   = saved_try;
+                S->ctx->try_depth   = saved_try;
                 S->reader_file = saved_file;
                 S->reader_line = saved_line;
                 return NULL;
@@ -565,14 +568,14 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
         }
         last = mino_eval(S, form, env);
         if (last == NULL) {
-            S->try_depth   = saved_try;
+            S->ctx->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;
             return NULL;
         }
         src = end;
     }
-    S->try_depth   = saved_try;
+    S->ctx->try_depth   = saved_try;
     S->reader_file = saved_file;
     S->reader_line = saved_line;
     return last;
@@ -587,43 +590,43 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
     mino_val_t    *result;
     const char    *saved_file;
     if (path == NULL || env == NULL) {
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "mino_load_file: NULL argument");
+        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "mino_load_file: NULL argument");
         return NULL;
     }
     f = fopen(path, "rb");
     if (f == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "cannot open file: %s", path);
-        set_eval_diag(S, S->eval_current_form, "name", "MNS001", msg);
+        set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001", msg);
         return NULL;
     }
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
-        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "cannot seek to end of file");
+        set_eval_diag(S, S->ctx->eval_current_form, "host", "MHO001", "cannot seek to end of file");
         return NULL;
     }
     sz = ftell(f);
     if (sz < 0) {
         fclose(f);
-        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "cannot determine file size");
+        set_eval_diag(S, S->ctx->eval_current_form, "host", "MHO001", "cannot determine file size");
         return NULL;
     }
     if (fseek(f, 0, SEEK_SET) != 0) {
         fclose(f);
-        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "cannot seek to start of file");
+        set_eval_diag(S, S->ctx->eval_current_form, "host", "MHO001", "cannot seek to start of file");
         return NULL;
     }
     buf = (char *)malloc((size_t)sz + 1);
     if (buf == NULL) {
         fclose(f);
-        set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "out of memory loading file");
+        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory loading file");
         return NULL;
     }
     rd = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     if (rd != (size_t)sz) {
         free(buf);
-        set_eval_diag(S, S->eval_current_form, "host", "MHO001", "short read loading file");
+        set_eval_diag(S, S->ctx->eval_current_form, "host", "MHO001", "short read loading file");
         return NULL;
     }
     buf[rd] = '\0';
@@ -660,36 +663,36 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_en
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
                mino_val_t **out)
 {
-    int saved_try = S->try_depth;
+    int saved_try = S->ctx->try_depth;
     mino_val_t *result;
 
-    if (S->try_depth >= MAX_TRY_DEPTH) {
+    if (S->ctx->try_depth >= MAX_TRY_DEPTH) {
         if (out != NULL) {
             *out = NULL;
         }
         return -1;
     }
 
-    S->try_stack[S->try_depth].exception      = NULL;
-    S->try_stack[S->try_depth].saved_ns       = S->current_ns;
-    S->try_stack[S->try_depth].saved_ambient  = S->fn_ambient_ns;
-    S->try_stack[S->try_depth].saved_load_len = S->load_stack_len;
-    if (setjmp(S->try_stack[S->try_depth].buf) != 0) {
+    S->ctx->try_stack[S->ctx->try_depth].exception      = NULL;
+    S->ctx->try_stack[S->ctx->try_depth].saved_ns       = S->current_ns;
+    S->ctx->try_stack[S->ctx->try_depth].saved_ambient  = S->fn_ambient_ns;
+    S->ctx->try_stack[S->ctx->try_depth].saved_load_len = S->load_stack_len;
+    if (setjmp(S->ctx->try_stack[S->ctx->try_depth].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. */
-        mino_val_t *ex = S->try_stack[saved_try].exception;
-        S->current_ns    = S->try_stack[saved_try].saved_ns;
-        S->fn_ambient_ns = S->try_stack[saved_try].saved_ambient;
-        load_stack_truncate(S, S->try_stack[saved_try].saved_load_len);
-        S->try_depth = saved_try;
+        mino_val_t *ex = S->ctx->try_stack[saved_try].exception;
+        S->current_ns    = S->ctx->try_stack[saved_try].saved_ns;
+        S->fn_ambient_ns = S->ctx->try_stack[saved_try].saved_ambient;
+        load_stack_truncate(S, S->ctx->try_stack[saved_try].saved_load_len);
+        S->ctx->try_depth = saved_try;
         /* Populate last_error from the exception value so the host
          * can inspect it via mino_last_error(). */
         if (mino_last_error(S) == NULL || mino_last_error(S)[0] == '\0') {
             const char *s = NULL;
             size_t slen = 0;
             if (ex != NULL && mino_to_string(ex, &s, &slen)) {
-                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", s);
+                set_eval_diag(S, S->ctx->eval_current_form, "eval/contract", "MCT001", s);
             } else {
-                set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
+                set_eval_diag(S, S->ctx->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
             }
         }
         if (out != NULL) {
@@ -697,10 +700,10 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
         }
         return -1;
     }
-    S->try_depth++;
+    S->ctx->try_depth++;
 
     result = mino_call(S, fn, args, env);
-    S->try_depth = saved_try;
+    S->ctx->try_depth = saved_try;
 
     if (out != NULL) {
         *out = result;
@@ -744,7 +747,7 @@ int mino_fi_should_fail_raw(mino_state_t *S)
 
 void mino_interrupt(mino_state_t *S)
 {
-    S->interrupted = 1;
+    S->ctx->interrupted = 1;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -835,7 +838,7 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
         while (new_cap < repl->len + add + 1) { new_cap *= 2; }
         nb = (char *)realloc(repl->buf, new_cap);
         if (nb == NULL) {
-            set_eval_diag(S, S->eval_current_form, "internal", "MIN001", "repl: out of memory");
+            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "repl: out of memory");
             return MINO_REPL_ERROR;
         }
         repl->buf = nb;

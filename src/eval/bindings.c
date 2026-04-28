@@ -56,7 +56,7 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
         if (sym_eq(p, "&")) {
             /* Rest parameter: next element gets remaining args. */
             if (i + 1 >= plen) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "& must be followed by a binding form");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", "& must be followed by a binding form");
                 return 0;
             }
             i++;
@@ -65,19 +65,19 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
             /* Check for :as after rest. */
             if (i + 1 < plen && kw_eq(vec_nth(pattern, i + 1), "as")) {
                 if (i + 2 >= plen) {
-                    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
+                    set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                     return 0;
                 }
                 i += 2;
                 p = vec_nth(pattern, i);
                 if (p == NULL || p->type != MINO_SYMBOL) {
-                    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
+                    set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                     return 0;
                 }
                 if (!bind_sym(S, env, p, val)) return 0;
             }
             if (i + 1 < plen) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "unexpected forms after & binding");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", "unexpected forms after & binding");
                 return 0;
             }
             return 1;
@@ -85,13 +85,13 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
         if (kw_eq(p, "as")) {
             /* Whole-collection binding. */
             if (i + 1 >= plen) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                 return 0;
             }
             i++;
             p = vec_nth(pattern, i);
             if (p == NULL || p->type != MINO_SYMBOL) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
                 return 0;
             }
             if (!bind_sym(S, env, p, val)) return 0;
@@ -161,7 +161,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
             mino_val_t *lookup_key;
             mino_val_t *found;
             if (ksym == NULL || ksym->type != MINO_SYMBOL) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":keys elements must be symbols");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", ":keys elements must be symbols");
                 return 0;
             }
             lookup_key = mino_keyword_n(S, ksym->as.s.data, ksym->as.s.len);
@@ -180,7 +180,7 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
     /* :as sym -- bind whole map. */
     if (as_sym != NULL) {
         if (as_sym->type != MINO_SYMBOL) {
-            set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
+            set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", ":as must be followed by a symbol");
             return 0;
         }
         if (!bind_sym(S, env, as_sym, val)) return 0;
@@ -207,7 +207,7 @@ static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
     if (pattern->type == MINO_MAP) {
         return bind_map_destructure(S, env, pattern, val, ctx);
     }
-    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "unsupported binding form (expected symbol, vector, or map)");
+    set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", "unsupported binding form (expected symbol, vector, or map)");
     return 0;
 }
 
@@ -230,11 +230,11 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
             params = params->as.cons.cdr;
             if (!mino_is_cons(params)
                 || params->as.cons.car == NULL) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "& must be followed by a binding form");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", "& must be followed by a binding form");
                 return 0;
             }
             if (mino_is_cons(params->as.cons.cdr)) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003", "& parameter must be last");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003", "& parameter must be last");
                 return 0;
             }
             return bind_form(S, env, params->as.cons.car, args, ctx);
@@ -242,7 +242,7 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
         if (!mino_is_cons(args)) {
             char msg[96];
             snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-            set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", msg);
+            set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", msg);
             return 0;
         }
         if (!bind_form(S, env, name, args->as.cons.car, ctx)) return 0;
@@ -252,7 +252,7 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
     if (mino_is_cons(args)) {
         char msg[96];
         snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", msg);
+        set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", msg);
         return 0;
     }
     return 1;
@@ -412,7 +412,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
     mino_val_t *pairs, *body, *result;
     /* Frame is heap-allocated so the pointer remains valid even if a
      * throw inside body unwinds this C frame past the cleanup at the
-     * end. The control.c longjmp handler walks S->dyn_stack and frees
+     * end. The control.c longjmp handler walks S->ctx->dyn_stack and frees
      * each frame's bindings; if frame were stack-local, that walk
      * would read popped stack memory. */
     dyn_frame_t   *frame;
@@ -525,11 +525,11 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
     frame->bindings = bhead;
-    frame->prev     = S->dyn_stack;
-    S->dyn_stack    = frame;
+    frame->prev     = S->ctx->dyn_stack;
+    S->ctx->dyn_stack    = frame;
     result = eval_implicit_do(S, body, env);
     /* Pop frame. */
-    S->dyn_stack = frame->prev;
+    S->ctx->dyn_stack = frame->prev;
     dyn_binding_list_free(bhead);
     free(frame);
     return result;
@@ -593,7 +593,7 @@ static int destructure_vec_pair(mino_state_t *S, mino_val_t *lhs,
             mino_val_t *expr;
             i++;
             if (i >= plen) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003",
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003",
                               "destructure: & must be followed by a binding form");
                 return 0;
             }
@@ -610,7 +610,7 @@ static int destructure_vec_pair(mino_state_t *S, mino_val_t *lhs,
             if (i + 1 < plen && kw_eq(vec_nth(lhs, i + 1), "as")) {
                 i += 2;
                 if (i >= plen) {
-                    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003",
+                    set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003",
                                   "destructure: :as must be followed by a symbol");
                     return 0;
                 }
@@ -621,7 +621,7 @@ static int destructure_vec_pair(mino_state_t *S, mino_val_t *lhs,
         if (kw_eq(p, "as")) {
             i++;
             if (i >= plen) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003",
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003",
                               "destructure: :as must be followed by a symbol");
                 return 0;
             }
@@ -671,7 +671,7 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
             mino_val_t *kkw;
             mino_val_t *deflt = NULL;
             if (ksym == NULL || ksym->type != MINO_SYMBOL) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003",
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003",
                               "destructure: :keys elements must be symbols");
                 return 0;
             }
@@ -690,7 +690,7 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
             mino_val_t *kstr;
             mino_val_t *deflt = NULL;
             if (ssym == NULL || ssym->type != MINO_SYMBOL) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003",
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003",
                               "destructure: :strs elements must be symbols");
                 return 0;
             }
@@ -709,7 +709,7 @@ static int destructure_map_pair(mino_state_t *S, mino_val_t *lhs,
             mino_val_t *quoted;
             mino_val_t *deflt = NULL;
             if (ssym == NULL || ssym->type != MINO_SYMBOL) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY003",
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003",
                               "destructure: :syms elements must be symbols");
                 return 0;
             }
@@ -761,7 +761,7 @@ static int destructure_pair(mino_state_t *S, mino_val_t *lhs, mino_val_t *rhs,
     if (lhs->type == MINO_MAP) {
         return destructure_map_pair(S, lhs, rhs, acc);
     }
-    set_eval_diag(S, S->eval_current_form, "syntax", "MSY003",
+    set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY003",
                   "destructure: pattern must be a symbol, vector, or map");
     return 0;
 }
@@ -774,18 +774,18 @@ mino_val_t *prim_destructure(mino_state_t *S, mino_val_t *args,
     size_t      i;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        set_eval_diag(S, S->eval_current_form, "eval/arity", "MAR001",
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR001",
             "destructure requires one argument: a binding-pairs vector");
         return NULL;
     }
     bindings = args->as.cons.car;
     if (bindings == NULL || bindings->type != MINO_VECTOR) {
-        set_eval_diag(S, S->eval_current_form, "eval/type", "MTY001",
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY001",
                       "destructure: argument must be a vector");
         return NULL;
     }
     if ((bindings->as.vec.len % 2) != 0) {
-        set_eval_diag(S, S->eval_current_form, "eval/contract", "MCT001",
+        set_eval_diag(S, S->ctx->eval_current_form, "eval/contract", "MCT001",
                       "destructure: binding vector requires an even number of forms");
         return NULL;
     }

@@ -36,7 +36,7 @@ int args_have_float(mino_val_t *args)
 mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
                                   const char *code, const char *msg)
 {
-    if (S->try_depth > 0) {
+    if (S->ctx->try_depth > 0) {
         /* Build a diagnostic map so catch normalization preserves the
          * classification instead of wrapping it as :user/MUS001. */
         mino_val_t *keys[5], *vals[5];
@@ -52,10 +52,10 @@ mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
         keys[4] = mino_keyword(S, "mino/data");
         vals[4] = mino_nil(S);
         ex = mino_map(S, keys, vals, 5);
-        S->try_stack[S->try_depth - 1].exception = ex;
-        longjmp(S->try_stack[S->try_depth - 1].buf, 1);
+        S->ctx->try_stack[S->ctx->try_depth - 1].exception = ex;
+        longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
     }
-    set_eval_diag(S, S->eval_current_form, kind, code, msg);
+    set_eval_diag(S, S->ctx->eval_current_form, kind, code, msg);
     append_trace(S);
     return NULL;
 }

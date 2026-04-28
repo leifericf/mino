@@ -336,7 +336,7 @@ mino_val_t *mino_sorted_map_by(mino_state_t *S, mino_val_t *comparator,
     mino_val_t     *v;
     mino_rb_node_t *root = NULL;
     size_t i;
-    S->gc_depth++;
+    S->ctx->gc_depth++;
     v = alloc_val(S, MINO_SORTED_MAP);
     v->as.sorted.comparator = comparator;
     v->as.sorted.len = 0;
@@ -346,7 +346,7 @@ mino_val_t *mino_sorted_map_by(mino_state_t *S, mino_val_t *comparator,
         if (!replaced) v->as.sorted.len++;
     }
     v->as.sorted.root = root;
-    S->gc_depth--;
+    S->ctx->gc_depth--;
     return v;
 }
 
@@ -356,7 +356,7 @@ mino_val_t *mino_sorted_set_by(mino_state_t *S, mino_val_t *comparator,
     mino_val_t     *v;
     mino_rb_node_t *root = NULL;
     size_t i;
-    S->gc_depth++;
+    S->ctx->gc_depth++;
     v = alloc_val(S, MINO_SORTED_SET);
     v->as.sorted.comparator = comparator;
     v->as.sorted.len = 0;
@@ -366,7 +366,7 @@ mino_val_t *mino_sorted_set_by(mino_state_t *S, mino_val_t *comparator,
         if (!replaced) v->as.sorted.len++;
     }
     v->as.sorted.root = root;
-    S->gc_depth--;
+    S->ctx->gc_depth--;
     return v;
 }
 

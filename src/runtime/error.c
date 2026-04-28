@@ -10,32 +10,32 @@
 
 const char *mino_last_error(mino_state_t *S)
 {
-    return S->error_buf[0] ? S->error_buf : NULL;
+    return S->ctx->error_buf[0] ? S->ctx->error_buf : NULL;
 }
 
 const mino_diag_t *mino_last_diag(mino_state_t *S)
 {
-    return S->last_diag;
+    return S->ctx->last_diag;
 }
 
 mino_val_t *mino_last_error_map(mino_state_t *S)
 {
-    if (S->last_diag == NULL) return mino_nil(S);
-    return diag_to_map(S, S->last_diag);
+    if (S->ctx->last_diag == NULL) return mino_nil(S);
+    return diag_to_map(S, S->ctx->last_diag);
 }
 
 /* Install a fully-built diagnostic as the current error. Takes ownership
  * of d. Renders a compact form into error_buf for backward compat. */
 void set_diag(mino_state_t *S, mino_diag_t *d)
 {
-    if (S->last_diag != NULL) {
-        diag_free(S->last_diag);
+    if (S->ctx->last_diag != NULL) {
+        diag_free(S->ctx->last_diag);
     }
-    S->last_diag = d;
+    S->ctx->last_diag = d;
     if (d != NULL) {
-        diag_render_compact(d, S->error_buf, sizeof(S->error_buf));
+        diag_render_compact(d, S->ctx->error_buf, sizeof(S->ctx->error_buf));
     } else {
-        S->error_buf[0] = '\0';
+        S->ctx->error_buf[0] = '\0';
     }
 }
 
@@ -43,24 +43,24 @@ void set_error(mino_state_t *S, const char *msg)
 {
     mino_diag_t *d;
     size_t n = strlen(msg);
-    if (n >= sizeof(S->error_buf)) {
-        n = sizeof(S->error_buf) - 1;
+    if (n >= sizeof(S->ctx->error_buf)) {
+        n = sizeof(S->ctx->error_buf) - 1;
     }
-    memcpy(S->error_buf, msg, n);
-    S->error_buf[n] = '\0';
+    memcpy(S->ctx->error_buf, msg, n);
+    S->ctx->error_buf[n] = '\0';
 
     /* Build a minimal unclassified diagnostic alongside. */
     d = diag_new("internal", "MIN001", "eval", msg);
-    if (S->last_diag != NULL) diag_free(S->last_diag);
-    S->last_diag = d;
+    if (S->ctx->last_diag != NULL) diag_free(S->ctx->last_diag);
+    S->ctx->last_diag = d;
 }
 
 void clear_error(mino_state_t *S)
 {
-    S->error_buf[0] = '\0';
-    if (S->last_diag != NULL) {
-        diag_free(S->last_diag);
-        S->last_diag = NULL;
+    S->ctx->error_buf[0] = '\0';
+    if (S->ctx->last_diag != NULL) {
+        diag_free(S->ctx->last_diag);
+        S->ctx->last_diag = NULL;
     }
 }
 
@@ -75,12 +75,12 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
                  form->as.cons.file, form->as.cons.line, msg);
         set_error(S, buf);
         /* Enrich the diagnostic with source span. */
-        if (S->last_diag != NULL) {
+        if (S->ctx->last_diag != NULL) {
             memset(&span, 0, sizeof(span));
             span.file   = form->as.cons.file;
             span.line   = form->as.cons.line;
             span.column = form->as.cons.column;
-            diag_set_span(S->last_diag, span);
+            diag_set_span(S->ctx->last_diag, span);
         }
     } else {
         set_error(S, msg);
@@ -93,10 +93,10 @@ void set_eval_diag(mino_state_t *S, const mino_val_t *form,
 {
     /* Inside a try block, convert diagnostics to thrown exceptions so they
      * are catchable by the surrounding catch clause. */
-    if (S->try_depth > 0) {
+    if (S->ctx->try_depth > 0) {
         mino_val_t *ex = mino_string((mino_state_t *)S, msg);
-        S->try_stack[S->try_depth - 1].exception = ex;
-        longjmp(S->try_stack[S->try_depth - 1].buf, 1);
+        S->ctx->try_stack[S->ctx->try_depth - 1].exception = ex;
+        longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
     }
 
     {
@@ -160,19 +160,19 @@ const char *type_tag_str(const mino_val_t *v)
 void push_frame(mino_state_t *S, const char *name, const char *file,
                 int line, int column)
 {
-    if (S->call_depth < MAX_CALL_DEPTH) {
-        S->call_stack[S->call_depth].name   = name;
-        S->call_stack[S->call_depth].file   = file;
-        S->call_stack[S->call_depth].line   = line;
-        S->call_stack[S->call_depth].column = column;
-        S->call_depth++;
+    if (S->ctx->call_depth < MAX_CALL_DEPTH) {
+        S->ctx->call_stack[S->ctx->call_depth].name   = name;
+        S->ctx->call_stack[S->ctx->call_depth].file   = file;
+        S->ctx->call_stack[S->ctx->call_depth].line   = line;
+        S->ctx->call_stack[S->ctx->call_depth].column = column;
+        S->ctx->call_depth++;
     }
 }
 
 void pop_frame(mino_state_t *S)
 {
-    if (S->call_depth > 0) {
-        S->call_depth--;
+    if (S->ctx->call_depth > 0) {
+        S->ctx->call_depth--;
     }
 }
 
@@ -181,19 +181,19 @@ void append_trace(mino_state_t *S)
 {
     size_t pos;
     int    i;
-    if (S->trace_added || S->call_depth == 0) {
+    if (S->ctx->trace_added || S->ctx->call_depth == 0) {
         return;
     }
-    S->trace_added = 1;
-    pos = strlen(S->error_buf);
-    for (i = S->call_depth - 1; i >= 0 && pos + 80 < sizeof(S->error_buf); i--) {
+    S->ctx->trace_added = 1;
+    pos = strlen(S->ctx->error_buf);
+    for (i = S->ctx->call_depth - 1; i >= 0 && pos + 80 < sizeof(S->ctx->error_buf); i--) {
         pos += (size_t)snprintf(
-            S->error_buf + pos, sizeof(S->error_buf) - pos, "\n  in %s",
-            S->call_stack[i].name ? S->call_stack[i].name : "<fn>");
-        if (S->call_stack[i].file != NULL && pos + 40 < sizeof(S->error_buf)) {
+            S->ctx->error_buf + pos, sizeof(S->ctx->error_buf) - pos, "\n  in %s",
+            S->ctx->call_stack[i].name ? S->ctx->call_stack[i].name : "<fn>");
+        if (S->ctx->call_stack[i].file != NULL && pos + 40 < sizeof(S->ctx->error_buf)) {
             pos += (size_t)snprintf(
-                S->error_buf + pos, sizeof(S->error_buf) - pos, " (%s:%d)",
-                S->call_stack[i].file, S->call_stack[i].line);
+                S->ctx->error_buf + pos, sizeof(S->ctx->error_buf) - pos, " (%s:%d)",
+                S->ctx->call_stack[i].file, S->ctx->call_stack[i].line);
         }
     }
 }

@@ -196,23 +196,23 @@ void diag_set_cause(mino_diag_t *d, mino_diag_t *cause)
 void diag_capture_frames(mino_state_t *S, mino_diag_t *d)
 {
     int i;
-    if (S->call_depth <= 0) return;
+    if (S->ctx->call_depth <= 0) return;
     free(d->frames);
     d->frames = (mino_diag_frame_t *)calloc(
-        (size_t)S->call_depth, sizeof(*d->frames));
+        (size_t)S->ctx->call_depth, sizeof(*d->frames));
     if (d->frames == NULL) {
         d->frames_len = 0;
         d->frames_cap = 0;
         return;
     }
-    d->frames_len = (size_t)S->call_depth;
-    d->frames_cap = (size_t)S->call_depth;
-    for (i = S->call_depth - 1; i >= 0; i--) {
-        size_t idx = (size_t)(S->call_depth - 1 - i);
-        d->frames[idx].fn_name  = S->call_stack[i].name;
-        d->frames[idx].file     = S->call_stack[i].file;
-        d->frames[idx].line     = S->call_stack[i].line;
-        d->frames[idx].column   = S->call_stack[i].column;
+    d->frames_len = (size_t)S->ctx->call_depth;
+    d->frames_cap = (size_t)S->ctx->call_depth;
+    for (i = S->ctx->call_depth - 1; i >= 0; i--) {
+        size_t idx = (size_t)(S->ctx->call_depth - 1 - i);
+        d->frames[idx].fn_name  = S->ctx->call_stack[i].name;
+        d->frames[idx].file     = S->ctx->call_stack[i].file;
+        d->frames[idx].line     = S->ctx->call_stack[i].line;
+        d->frames[idx].column   = S->ctx->call_stack[i].column;
         d->frames[idx].is_macro = 0;
         d->frames[idx].is_host  = 0;
     }

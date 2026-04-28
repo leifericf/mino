@@ -230,7 +230,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                 mino_val_t *arg = elem->as.cons.cdr;
                 mino_val_t *spliced;
                 if (!mino_is_cons(arg)) {
-                    set_eval_diag(S, S->eval_current_form, "syntax",
+                    set_eval_diag(S, S->ctx->eval_current_form, "syntax",
                         "MSY001", "unquote-splicing requires one argument");
                     return NULL;
                 }
@@ -311,13 +311,13 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
         if (sym_eq(head, "unquote")) {
             mino_val_t *arg = form->as.cons.cdr;
             if (!mino_is_cons(arg)) {
-                set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "unquote requires one argument");
+                set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", "unquote requires one argument");
                 return NULL;
             }
             return eval_value(S, arg->as.cons.car, env);
         }
         if (sym_eq(head, "unquote-splicing")) {
-            set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "unquote-splicing must appear inside a list");
+            set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", "unquote-splicing must appear inside a list");
             return NULL;
         }
     }
@@ -333,7 +333,7 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                 mino_val_t *spliced;
                 mino_val_t *sp;
                 if (!mino_is_cons(arg)) {
-                    set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "unquote-splicing requires one argument");
+                    set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", "unquote-splicing requires one argument");
                     return NULL;
                 }
                 spliced = eval_value(S, arg->as.cons.car, env);
@@ -372,11 +372,11 @@ mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env)
         return NULL;
     }
     if (v->type == MINO_RECUR) {
-        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "recur must be in tail position");
+        set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", "recur must be in tail position");
         return NULL;
     }
     if (v->type == MINO_TAIL_CALL) {
-        set_eval_diag(S, S->eval_current_form, "syntax", "MSY001", "tail call in non-tail position");
+        set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001", "tail call in non-tail position");
         return NULL;
     }
     return v;

@@ -1914,7 +1914,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         call_env = current_ns_env(S);
 
         /* (1) per-tag reader from *data-readers*. */
-        readers = (S->dyn_stack != NULL)
+        readers = (S->ctx->dyn_stack != NULL)
                     ? dyn_lookup(S, "*data-readers*") : NULL;
         if (readers == NULL) {
             mino_val_t *var = var_find(S, "clojure.core", "*data-readers*");
@@ -1929,7 +1929,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         }
 
         /* (2) *default-data-reader-fn*. */
-        fn = (S->dyn_stack != NULL)
+        fn = (S->ctx->dyn_stack != NULL)
                 ? dyn_lookup(S, "*default-data-reader-fn*") : NULL;
         if (fn == NULL) {
             mino_val_t *var = var_find(S, "clojure.core",
