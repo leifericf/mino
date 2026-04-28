@@ -95,6 +95,7 @@ static void state_init(mino_state_t *S)
     S->thread_limit        = 1;
     S->thread_count        = 0;
     S->multi_threaded      = 0;
+    mino_state_lock_init(S);
     gc_evt_init(S);
 }
 
@@ -351,6 +352,7 @@ void mino_state_free(mino_state_t *S)
     state_free_string_interns(S);
     state_free_async(S);
     state_free_heap(S);
+    mino_state_lock_destroy(S);
     free(S);
 }
 
@@ -841,6 +843,60 @@ void gc_release_stw(mino_state_t *S)
     S->stw_request = 0;
     mino_current_ctx(S)->should_yield = 0;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Per-state lock (Cycle G4.3).                                              */
+/*                                                                            */
+/* Initialized at state_init unconditionally so any caller can take it       */
+/* whether or not the host has granted threads. The mino_lock / mino_unlock  */
+/* macros gate on S->multi_threaded so single-threaded states pay no         */
+/* lock/unlock cost; only states with active worker threads serialize.       */
+/* ------------------------------------------------------------------------- */
+
+#if defined(_WIN32) && defined(_MSC_VER)
+#  include <windows.h>
+void mino_state_lock_init(mino_state_t *S)
+{
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)calloc(1, sizeof(*cs));
+    if (cs == NULL) { abort(); }
+    InitializeCriticalSection(cs);
+    S->state_lock = cs;
+}
+void mino_state_lock_destroy(mino_state_t *S)
+{
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->state_lock;
+    if (cs != NULL) {
+        DeleteCriticalSection(cs);
+        free(cs);
+        S->state_lock = NULL;
+    }
+}
+void mino_state_lock_acquire(mino_state_t *S)
+{
+    EnterCriticalSection((CRITICAL_SECTION *)S->state_lock);
+}
+void mino_state_lock_release(mino_state_t *S)
+{
+    LeaveCriticalSection((CRITICAL_SECTION *)S->state_lock);
+}
+#else
+void mino_state_lock_init(mino_state_t *S)
+{
+    pthread_mutex_init(&S->state_lock, NULL);
+}
+void mino_state_lock_destroy(mino_state_t *S)
+{
+    pthread_mutex_destroy(&S->state_lock);
+}
+void mino_state_lock_acquire(mino_state_t *S)
+{
+    pthread_mutex_lock(&S->state_lock);
+}
+void mino_state_lock_release(mino_state_t *S)
+{
+    pthread_mutex_unlock(&S->state_lock);
+}
+#endif
 
 /* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */

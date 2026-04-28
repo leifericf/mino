@@ -40,6 +40,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Cycle G4.3: pthread for state_lock + worker threads. Win32 path uses
+ * a CRITICAL_SECTION wrapped in state_lock as void* (defined in state.c). */
+#if !(defined(_WIN32) && defined(_MSC_VER))
+#  include <pthread.h>
+#endif
 #include <time.h>
 
 /* ------------------------------------------------------------------------- */
@@ -561,6 +567,29 @@ struct mino_state {
     int             thread_count;
     int             multi_threaded;
 
+    /* Per-state mutex held across worker-thread eval (Cycle G4.3).
+     *
+     * Worker threads acquire `state_lock` before running eval and
+     * release after, serializing all evals (workers + embedder
+     * thread) within a single state. This is a coarse v0.89 model
+     * that gives correct semantics for futures/promises/threads
+     * without a per-subsystem lock matrix. Cross-state work runs
+     * fully concurrent (each state has its own lock); a host pool
+     * sharing N workers across M states gets per-state mutual
+     * exclusion but pool-wide parallelism.
+     *
+     * Initialized in state_init unconditionally (mutex_init is
+     * cheap). `mino_lock(S)` / `mino_unlock(S)` no-op when
+     * !multi_threaded so single-threaded states pay nothing.
+     *
+     * Cycle G4.4+ relaxes serialization with per-thread allocator
+     * arenas + finer-grained registry locks for parallel eval. */
+#if defined(_WIN32) && defined(_MSC_VER)
+    void           *state_lock;        /* CRITICAL_SECTION; see state.c */
+#else
+    pthread_mutex_t state_lock;
+#endif
+
     /* Stop-the-world request for major GC (Cycle G4.2).
      *
      * Set by `gc_request_stw` before running a major collection;
@@ -620,6 +649,23 @@ void mino_safepoint_park(mino_state_t *S);
  * S->main_ctx; multi-threaded variants iterate the worker set. */
 void gc_request_stw(mino_state_t *S);
 void gc_release_stw(mino_state_t *S);
+
+/* ------------------------------------------------------------------------- */
+/* Per-state lock helpers (Cycle G4.3).                                      */
+/*                                                                           */
+/* mino_lock(S) / mino_unlock(S) acquire/release S->state_lock when         */
+/* multi_threaded is set; otherwise they're a no-op. Held by worker threads */
+/* across the entire eval call so single-state futures execute serialized.  */
+/* Cross-state work runs fully concurrent (each state has its own lock).    */
+/* ------------------------------------------------------------------------- */
+
+void mino_state_lock_init(mino_state_t *S);
+void mino_state_lock_destroy(mino_state_t *S);
+void mino_state_lock_acquire(mino_state_t *S);
+void mino_state_lock_release(mino_state_t *S);
+
+#define mino_lock(S)   do { if ((S)->multi_threaded) mino_state_lock_acquire(S); } while (0)
+#define mino_unlock(S) do { if ((S)->multi_threaded) mino_state_lock_release(S); } while (0)
 
 /* ------------------------------------------------------------------------- */
 /* error.c                                                                   */
