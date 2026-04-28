@@ -55,3 +55,5 @@
   (let [s (doc-string 'mkdir-p)]
     (is (string? s))
     (is (clojure.string/includes? s "Capability: :fs"))))
+
+(run-tests)

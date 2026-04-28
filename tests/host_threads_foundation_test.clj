@@ -76,3 +76,5 @@
       (do
         (is (clojure.string/includes? msg "not granted"))
         (is (clojure.string/includes? msg "mino_set_thread_limit"))))))
+
+(run-tests)
