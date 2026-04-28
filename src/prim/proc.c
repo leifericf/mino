@@ -3,6 +3,16 @@
  *
  * Uses popen(3) to capture stdout from external commands.  popen is
  * POSIX; Windows provides _popen with the same interface.
+ *
+ * Trust model.
+ *
+ * `sh` and `sh!` execute whatever the script author asks.  The embedder
+ * is inside the trust boundary; the script author *is* the trust
+ * boundary.  These primitives validate argument *shape* (each command
+ * piece must be a string) and shell-quote inputs to prevent accidental
+ * word-splitting, but they do not police *intent*: an embedder that
+ * wants to forbid shell-out should refuse to bind these primitives in
+ * the embedder's namespace.
  */
 
 #define _POSIX_C_SOURCE 200809L

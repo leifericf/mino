@@ -1,6 +1,17 @@
 /*
  * state.c -- state lifecycle, refs, public eval entry points,
  *            execution limits, fault injection, interrupt.
+ *
+ * Trust model.
+ *
+ * A `mino_state_t` is single-embedder: the C/C++ application that
+ * calls `mino_state_new` is inside the trust boundary and may freely
+ * set step limits, alloc limits, fault injection, and interrupt flags.
+ * Script authors observe these limits but cannot raise them from
+ * inside the runtime.  Each state owns its own evaluator stack;
+ * concurrent `mino_call` from multiple OS threads onto the *same*
+ * state is supported only via the host_threads / future / promise
+ * primitives, which serialize through `state_lock`.
  */
 
 #include "runtime/internal.h"

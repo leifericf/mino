@@ -6,6 +6,15 @@
  *     attempt; stat(2) is microseconds vs. milliseconds for fork+exec.
  *   - mkdir -p and rm -rf are Unix shell commands; the C implementations
  *     using POSIX APIs are portable across platforms.
+ *
+ * Trust model.
+ *
+ * `mkdir-p` and `rm-rf` take whatever path the script author hands them.
+ * The embedder is inside the trust boundary; the script author *is* the
+ * trust boundary.  These primitives validate argument *shape* (paths
+ * must be strings) but do not police *intent* — no allowlist, no chroot,
+ * no sandbox.  An embedder that wants to forbid filesystem mutation
+ * should refuse to bind these primitives in the embedder's namespace.
  */
 
 #include "prim/internal.h"
