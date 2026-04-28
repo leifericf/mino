@@ -104,62 +104,58 @@ void gc_force_finish_major(mino_state_t *S)
     }
 }
 
-/* Driver: called from gc_alloc_typed before each allocation. Picks
- * between starting a minor, starting a major (incrementally), or
- * advancing an in-flight major by one slice. The checks are ordered
- * so that: (1) stress mode still forces a full STW major on every
- * allocation, preserving the legacy test coverage; (2) while a major
- * is in flight, a nursery overflow has to force the major to finish
- * before the minor runs -- the minor-during-major interaction
- * requires a mark-stack floor and promotion hook that land in the
- * next step; (3) otherwise the normal IDLE-phase flow runs. */
-static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
+/* Suppress collection: collection is only safe when this thread holds
+ * the world (no other host threads alive, no recursive alloc), and the
+ * conservative scan needs gc_stack_bottom recorded for the running
+ * frame. Memory normalizes again after mino_quiesce_threads. */
+static int gc_tick_should_suppress(mino_state_t *S)
 {
-    if (mino_current_ctx(S)->gc_depth > 0 || mino_current_ctx(S)->gc_stack_bottom == NULL) {
-        return;
-    }
-    /* Skip collection while host worker threads are alive. The
-     * conservative stack scan only walks the current thread's stack,
-     * so a GC initiated from one thread can't see another thread's
-     * stack-rooted values. Per-thread stack snapshots at safepoints
-     * would lift this restriction; until then we trade memory for
-     * correctness. Memory normalizes after mino_quiesce_threads. */
-    if (S->thread_count > 0) {
-        return;
-    }
-    if (S->gc_stress) {
-        if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
-            gc_force_finish_major(S);
-        }
-        if (S->gc_phase == GC_PHASE_IDLE) {
-            gc_major_collect(S);
-        }
-        return;
-    }
+    return mino_current_ctx(S)->gc_depth > 0
+        || mino_current_ctx(S)->gc_stack_bottom == NULL
+        || S->thread_count > 0;
+}
+
+/* Stress mode: every alloc forces a full STW major, preserving the
+ * legacy stress-mode test coverage. Any in-flight incremental major is
+ * driven to completion first so the stress major starts from IDLE. */
+static void gc_tick_stress(mino_state_t *S)
+{
     if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
-        S->gc_major_step_alloc += alloc_size;
-        if (S->gc_bytes_young > S->gc_nursery_bytes) {
-            /* Finish the in-flight major before running the nursery
-             * overflow minor. Running a nested minor while major's
-             * mark stack holds pending entries is unsafe: minor's
-             * sweep frees YOUNG objects reachable only through an
-             * OLD entry still on major's stack, and major's next
-             * gc_trace_children then chases the freed pointer. The
-             * cost of force-finishing is bounded by whatever major
-             * work is left; the alternative would require tracing
-             * transitively through every mark-stack entry on every
-             * nested minor, which is strictly more work in the
-             * common case. */
-            gc_force_finish_major(S);
-            gc_minor_collect(S);
-            return;
-        }
-        if (S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
-            gc_major_slice(S);
-        }
+        gc_force_finish_major(S);
+    }
+    if (S->gc_phase == GC_PHASE_IDLE) {
+        gc_major_collect(S);
+    }
+}
+
+/* MAJOR_MARK phase: a nursery overflow forces the in-flight major to
+ * finish before running the minor. Otherwise advance the major by one
+ * slice once enough mutator allocation has accumulated.
+ *
+ * Why finish-then-minor rather than nest: a nested minor while major's
+ * mark stack still holds OLD entries could free a YOUNG object reachable
+ * only through an OLD pointer pending on major's stack, and major's next
+ * gc_trace_children would then chase the freed pointer. Force-finishing
+ * is bounded by the remaining major work; the alternative would require
+ * transitively tracing every pending mark-stack entry on every nested
+ * minor, which is strictly more work in the common case. */
+static void gc_tick_during_major(mino_state_t *S, size_t alloc_size)
+{
+    S->gc_major_step_alloc += alloc_size;
+    if (S->gc_bytes_young > S->gc_nursery_bytes) {
+        gc_force_finish_major(S);
+        gc_minor_collect(S);
         return;
     }
-    /* phase == IDLE */
+    if (S->gc_major_step_alloc >= S->gc_major_alloc_quantum) {
+        gc_major_slice(S);
+    }
+}
+
+/* IDLE phase: minor on nursery overflow; if the heap has grown enough
+ * past the post-major baseline, kick off a fresh incremental major. */
+static void gc_tick_idle(mino_state_t *S)
+{
     if (S->gc_bytes_young > S->gc_nursery_bytes) {
         gc_minor_collect(S);
     }
@@ -167,6 +163,22 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
         gc_major_begin(S);
         gc_major_slice(S);
     }
+}
+
+/* Driver: called from gc_alloc_typed before each allocation. Dispatches
+ * to the right tick handler based on stress mode and current phase. */
+static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
+{
+    if (gc_tick_should_suppress(S)) return;
+    if (S->gc_stress) {
+        gc_tick_stress(S);
+        return;
+    }
+    if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+        gc_tick_during_major(S, alloc_size);
+        return;
+    }
+    gc_tick_idle(S);
 }
 
 /* gc_alloc_raw -- pure mechanism: pull a header from the freelist (when
