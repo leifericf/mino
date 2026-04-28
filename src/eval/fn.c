@@ -215,7 +215,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                            mino_env_t *env)
 {
     if (fn == NULL) {
-        set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY002", "cannot apply null");
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY002", "cannot apply null");
         return NULL;
     }
     if (fn->type == MINO_VAR) {
@@ -224,12 +224,12 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             snprintf(msg, sizeof(msg), "var is unbound: %s/%s",
                      fn->as.var.ns ? fn->as.var.ns : "?",
                      fn->as.var.sym ? fn->as.var.sym : "?");
-            set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY002", msg);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY002", msg);
             return NULL;
         }
         fn = fn->as.var.root;
         if (fn == NULL) {
-            set_eval_diag(S, S->ctx->eval_current_form, "eval/type", "MTY002",
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY002",
                 "var has nil root");
             return NULL;
         }
@@ -239,11 +239,11 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         int         line = 0;
         int         col  = 0;
         mino_val_t *result;
-        if (S->ctx->eval_current_form != NULL
-            && S->ctx->eval_current_form->type == MINO_CONS) {
-            file = S->ctx->eval_current_form->as.cons.file;
-            line = S->ctx->eval_current_form->as.cons.line;
-            col  = S->ctx->eval_current_form->as.cons.column;
+        if (mino_current_ctx(S)->eval_current_form != NULL
+            && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+            file = mino_current_ctx(S)->eval_current_form->as.cons.file;
+            line = mino_current_ctx(S)->eval_current_form->as.cons.line;
+            col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
         }
         push_frame(S, fn->as.prim.name, file, line, col);
         result = fn->as.prim.fn(S, args, env);
@@ -288,11 +288,11 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 S->fn_ambient_ns = fn->as.fn.defining_ns;
             }
         }
-        if (S->ctx->eval_current_form != NULL
-            && S->ctx->eval_current_form->type == MINO_CONS) {
-            file = S->ctx->eval_current_form->as.cons.file;
-            line = S->ctx->eval_current_form->as.cons.line;
-            col  = S->ctx->eval_current_form->as.cons.column;
+        if (mino_current_ctx(S)->eval_current_form != NULL
+            && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+            file = mino_current_ctx(S)->eval_current_form->as.cons.file;
+            line = mino_current_ctx(S)->eval_current_form->as.cons.line;
+            col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
         }
         push_frame(S, tag, file, line, col);
         /* Multi-arity dispatch: params == NULL means body is a clause list. */
@@ -302,7 +302,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             if (clause == NULL) {
                 char msg[96];
                 snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
-                set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR002", msg);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR002", msg);
                 S->current_ns    = saved_ns;
                 S->fn_ambient_ns = saved_ambient;
                 return NULL;
@@ -332,7 +332,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     if (clause == NULL) {
                         char msg[96];
                         snprintf(msg, sizeof(msg), "no matching arity for %d args in recur", argc);
-                        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR002", msg);
+                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR002", msg);
                         S->current_ns = saved_ns;
                         return NULL;
                     }
@@ -373,7 +373,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     if (clause == NULL) {
                         char msg[96];
                         snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
-                        set_eval_diag(S, S->ctx->eval_current_form, "eval/arity", "MAR002", msg);
+                        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR002", msg);
                         S->current_ns = saved_ns;
                         return NULL;
                     }
@@ -388,7 +388,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             return result;
         }
     }
-    return apply_non_fn_callable(S, fn, args, S->ctx->eval_current_form);
+    return apply_non_fn_callable(S, fn, args, mino_current_ctx(S)->eval_current_form);
 }
 
 mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,

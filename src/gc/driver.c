@@ -21,9 +21,9 @@
 #endif
 void gc_note_host_frame(mino_state_t *S, void *addr)
 {
-    if (S->ctx->gc_stack_bottom == NULL
-        || (char *)addr > (char *)S->ctx->gc_stack_bottom) {
-        S->ctx->gc_stack_bottom = addr;
+    if (mino_current_ctx(S)->gc_stack_bottom == NULL
+        || (char *)addr > (char *)mino_current_ctx(S)->gc_stack_bottom) {
+        mino_current_ctx(S)->gc_stack_bottom = addr;
     }
 }
 #if defined(__GNUC__) && !defined(__clang__)
@@ -65,7 +65,7 @@ static void gc_major_slice(mino_state_t *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
-    if (S->gc_phase != GC_PHASE_MAJOR_MARK || S->ctx->gc_depth > 0) {
+    if (S->gc_phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
     }
     start_ns = mino_monotonic_ns();
@@ -90,7 +90,7 @@ void gc_force_finish_major(mino_state_t *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
-    if (S->gc_phase != GC_PHASE_MAJOR_MARK || S->ctx->gc_depth > 0) {
+    if (S->gc_phase != GC_PHASE_MAJOR_MARK || mino_current_ctx(S)->gc_depth > 0) {
         return;
     }
     start_ns = mino_monotonic_ns();
@@ -115,7 +115,7 @@ void gc_force_finish_major(mino_state_t *S)
  * next step; (3) otherwise the normal IDLE-phase flow runs. */
 static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
 {
-    if (S->ctx->gc_depth > 0 || S->ctx->gc_stack_bottom == NULL) {
+    if (mino_current_ctx(S)->gc_depth > 0 || mino_current_ctx(S)->gc_stack_bottom == NULL) {
         return;
     }
     if (S->gc_stress) {
@@ -172,7 +172,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
      * collector to ask the mutator to park. The poll is gated on
      * gc_depth == 0 so a recursive alloc reached from inside trace
      * or sweep doesn't try to re-enter the park machinery. */
-    if (S->ctx->gc_depth == 0) {
+    if (mino_current_ctx(S)->gc_depth == 0) {
         mino_safepoint_poll(S);
     }
     gc_driver_tick(S, size);
@@ -180,10 +180,10 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     if (S->fi_alloc_countdown > 0) {
         S->fi_alloc_countdown--;
         if (S->fi_alloc_countdown == 0) {
-            if (S->ctx->try_depth > 0) {
-                set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory (fault injection)");
-                S->ctx->try_stack[S->ctx->try_depth - 1].exception = NULL;
-                longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
+            if (mino_current_ctx(S)->try_depth > 0) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory (fault injection)");
+                mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = NULL;
+                longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
             }
             abort(); /* Class I: no error frame to recover through */
         }
@@ -196,7 +196,7 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         memset(h, 0, sizeof(*h) + size);
     } else {
         h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
-        if (h == NULL && S->ctx->gc_depth == 0 && S->ctx->gc_stack_bottom != NULL) {
+        if (h == NULL && mino_current_ctx(S)->gc_depth == 0 && mino_current_ctx(S)->gc_stack_bottom != NULL) {
             /* OOM fallback: close any in-flight major and run one
              * full STW major before giving up. That frees anything
              * kept alive only by old-gen references the minor
@@ -210,10 +210,10 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         }
         if (h == NULL) {
             /* Recoverable when an eval try-frame exists; fatal otherwise. */
-            if (S->ctx->try_depth > 0) {
-                set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory");
-                S->ctx->try_stack[S->ctx->try_depth - 1].exception = NULL;
-                longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
+            if (mino_current_ctx(S)->try_depth > 0) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
+                mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = NULL;
+                longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
             }
             abort(); /* Class I: no error frame to recover through */
         }
@@ -538,7 +538,7 @@ void gc_major_collect(mino_state_t *S)
 {
     long long start_ns;
     size_t    elapsed_ns;
-    if (S->ctx->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
         return;
     }
     start_ns = mino_monotonic_ns();

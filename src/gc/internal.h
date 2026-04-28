@@ -135,11 +135,11 @@ typedef struct {
  * Require a local variable named `S` of type mino_state_t *. */
 #define GC_SAVE_MAX 64
 #define gc_pin(v) \
-    do { if (S->ctx->gc_save_len < GC_SAVE_MAX) S->ctx->gc_save[S->ctx->gc_save_len] = (v); \
-         S->ctx->gc_save_len++; } while (0)
+    do { if (mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX) mino_current_ctx(S)->gc_save[mino_current_ctx(S)->gc_save_len] = (v); \
+         mino_current_ctx(S)->gc_save_len++; } while (0)
 #define gc_unpin(n) \
-    do { assert(S->ctx->gc_save_len >= (n)); \
-         S->ctx->gc_save_len -= (n); } while (0)
+    do { assert(mino_current_ctx(S)->gc_save_len >= (n)); \
+         mino_current_ctx(S)->gc_save_len -= (n); } while (0)
 
 /* ------------------------------------------------------------------------- */
 /* Shared GC function declarations                                           */

@@ -27,10 +27,10 @@
  * whatever was live at the start. */
 void gc_major_begin(mino_state_t *S)
 {
-    if (S->ctx->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
         return;
     }
-    S->ctx->gc_depth++;
+    mino_current_ctx(S)->gc_depth++;
     S->gc_phase = GC_PHASE_MAJOR_MARK;
     gc_evt_record(S, GC_EVT_MAJOR_BEGIN, NULL, NULL, NULL, 0, 0);
     if (!S->gc_ranges_valid) {
@@ -38,7 +38,7 @@ void gc_major_begin(mino_state_t *S)
     }
     gc_mark_roots(S);
     S->gc_major_step_alloc = 0;
-    S->ctx->gc_depth--;
+    mino_current_ctx(S)->gc_depth--;
 }
 
 /* Pop up to budget_words headers from the mark stack and trace each
@@ -49,16 +49,16 @@ void gc_major_begin(mino_state_t *S)
 void gc_major_step(mino_state_t *S, size_t budget_words)
 {
     size_t popped = 0;
-    if (S->ctx->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
-    S->ctx->gc_depth++;
+    mino_current_ctx(S)->gc_depth++;
     while (S->gc_mark_stack_len > 0 && popped < budget_words) {
         gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
         gc_trace_children(S, h);
         popped++;
     }
-    S->ctx->gc_depth--;
+    mino_current_ctx(S)->gc_depth--;
 }
 
 /* Finalise major mark: rescan the C stack (picks up anything the
@@ -70,10 +70,10 @@ void gc_major_step(mino_state_t *S, size_t budget_words)
 void gc_major_remark(mino_state_t *S)
 {
     jmp_buf jb;
-    if (S->ctx->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
-    S->ctx->gc_depth++;
+    mino_current_ctx(S)->gc_depth++;
     if (setjmp(jb) != 0) {
         abort(); /* Class I: nonzero return only under corruption */
     }
@@ -83,7 +83,7 @@ void gc_major_remark(mino_state_t *S)
     }
     gc_scan_stack(S);
     gc_drain_mark_stack(S);
-    S->ctx->gc_depth--;
+    mino_current_ctx(S)->gc_depth--;
 }
 
 /* Sweep dead OLD objects and return to IDLE. Invariant: mark stack
@@ -132,10 +132,10 @@ static void gc_verify_roots_marked(mino_state_t *S)
 
 void gc_major_sweep_phase(mino_state_t *S)
 {
-    if (S->ctx->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
+    if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
-    S->ctx->gc_depth++;
+    mino_current_ctx(S)->gc_depth++;
     S->gc_phase = GC_PHASE_MAJOR_SWEEP;
     gc_evt_record(S, GC_EVT_MAJOR_SWEEP, NULL, NULL, NULL, 0, 0);
     gc_verify_roots_marked(S);
@@ -153,7 +153,7 @@ void gc_major_sweep_phase(mino_state_t *S)
     S->gc_ranges_valid = 0;
     S->gc_collections_major++;
     S->gc_phase = GC_PHASE_IDLE;
-    S->ctx->gc_depth--;
+    mino_current_ctx(S)->gc_depth--;
 }
 
 /* Major sweep. Called from gc_major_sweep_phase. Frees dead OLD

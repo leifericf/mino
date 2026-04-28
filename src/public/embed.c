@@ -24,7 +24,7 @@ mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex)
 {
     if (S == NULL) return NULL;
 
-    if (S->ctx->try_depth <= 0) {
+    if (mino_current_ctx(S)->try_depth <= 0) {
         /* No enclosing try: surface as a classified error. */
         char msg[512];
         if (ex != NULL && ex->type == MINO_STRING) {
@@ -36,8 +36,8 @@ mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex)
         return prim_throw_classified(S, "user", "MUS001", msg);
     }
 
-    S->ctx->try_stack[S->ctx->try_depth - 1].exception = ex;
-    longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
+    longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     return NULL; /* unreachable */
 }
 

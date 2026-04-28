@@ -10,32 +10,32 @@
 
 const char *mino_last_error(mino_state_t *S)
 {
-    return S->ctx->error_buf[0] ? S->ctx->error_buf : NULL;
+    return mino_current_ctx(S)->error_buf[0] ? mino_current_ctx(S)->error_buf : NULL;
 }
 
 const mino_diag_t *mino_last_diag(mino_state_t *S)
 {
-    return S->ctx->last_diag;
+    return mino_current_ctx(S)->last_diag;
 }
 
 mino_val_t *mino_last_error_map(mino_state_t *S)
 {
-    if (S->ctx->last_diag == NULL) return mino_nil(S);
-    return diag_to_map(S, S->ctx->last_diag);
+    if (mino_current_ctx(S)->last_diag == NULL) return mino_nil(S);
+    return diag_to_map(S, mino_current_ctx(S)->last_diag);
 }
 
 /* Install a fully-built diagnostic as the current error. Takes ownership
  * of d. Renders a compact form into error_buf for backward compat. */
 void set_diag(mino_state_t *S, mino_diag_t *d)
 {
-    if (S->ctx->last_diag != NULL) {
-        diag_free(S->ctx->last_diag);
+    if (mino_current_ctx(S)->last_diag != NULL) {
+        diag_free(mino_current_ctx(S)->last_diag);
     }
-    S->ctx->last_diag = d;
+    mino_current_ctx(S)->last_diag = d;
     if (d != NULL) {
-        diag_render_compact(d, S->ctx->error_buf, sizeof(S->ctx->error_buf));
+        diag_render_compact(d, mino_current_ctx(S)->error_buf, sizeof(mino_current_ctx(S)->error_buf));
     } else {
-        S->ctx->error_buf[0] = '\0';
+        mino_current_ctx(S)->error_buf[0] = '\0';
     }
 }
 
@@ -43,24 +43,24 @@ void set_error(mino_state_t *S, const char *msg)
 {
     mino_diag_t *d;
     size_t n = strlen(msg);
-    if (n >= sizeof(S->ctx->error_buf)) {
-        n = sizeof(S->ctx->error_buf) - 1;
+    if (n >= sizeof(mino_current_ctx(S)->error_buf)) {
+        n = sizeof(mino_current_ctx(S)->error_buf) - 1;
     }
-    memcpy(S->ctx->error_buf, msg, n);
-    S->ctx->error_buf[n] = '\0';
+    memcpy(mino_current_ctx(S)->error_buf, msg, n);
+    mino_current_ctx(S)->error_buf[n] = '\0';
 
     /* Build a minimal unclassified diagnostic alongside. */
     d = diag_new("internal", "MIN001", "eval", msg);
-    if (S->ctx->last_diag != NULL) diag_free(S->ctx->last_diag);
-    S->ctx->last_diag = d;
+    if (mino_current_ctx(S)->last_diag != NULL) diag_free(mino_current_ctx(S)->last_diag);
+    mino_current_ctx(S)->last_diag = d;
 }
 
 void clear_error(mino_state_t *S)
 {
-    S->ctx->error_buf[0] = '\0';
-    if (S->ctx->last_diag != NULL) {
-        diag_free(S->ctx->last_diag);
-        S->ctx->last_diag = NULL;
+    mino_current_ctx(S)->error_buf[0] = '\0';
+    if (mino_current_ctx(S)->last_diag != NULL) {
+        diag_free(mino_current_ctx(S)->last_diag);
+        mino_current_ctx(S)->last_diag = NULL;
     }
 }
 
@@ -75,12 +75,12 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
                  form->as.cons.file, form->as.cons.line, msg);
         set_error(S, buf);
         /* Enrich the diagnostic with source span. */
-        if (S->ctx->last_diag != NULL) {
+        if (mino_current_ctx(S)->last_diag != NULL) {
             memset(&span, 0, sizeof(span));
             span.file   = form->as.cons.file;
             span.line   = form->as.cons.line;
             span.column = form->as.cons.column;
-            diag_set_span(S->ctx->last_diag, span);
+            diag_set_span(mino_current_ctx(S)->last_diag, span);
         }
     } else {
         set_error(S, msg);
@@ -93,10 +93,10 @@ void set_eval_diag(mino_state_t *S, const mino_val_t *form,
 {
     /* Inside a try block, convert diagnostics to thrown exceptions so they
      * are catchable by the surrounding catch clause. */
-    if (S->ctx->try_depth > 0) {
+    if (mino_current_ctx(S)->try_depth > 0) {
         mino_val_t *ex = mino_string((mino_state_t *)S, msg);
-        S->ctx->try_stack[S->ctx->try_depth - 1].exception = ex;
-        longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
+        longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     }
 
     {
@@ -160,19 +160,19 @@ const char *type_tag_str(const mino_val_t *v)
 void push_frame(mino_state_t *S, const char *name, const char *file,
                 int line, int column)
 {
-    if (S->ctx->call_depth < MAX_CALL_DEPTH) {
-        S->ctx->call_stack[S->ctx->call_depth].name   = name;
-        S->ctx->call_stack[S->ctx->call_depth].file   = file;
-        S->ctx->call_stack[S->ctx->call_depth].line   = line;
-        S->ctx->call_stack[S->ctx->call_depth].column = column;
-        S->ctx->call_depth++;
+    if (mino_current_ctx(S)->call_depth < MAX_CALL_DEPTH) {
+        mino_current_ctx(S)->call_stack[mino_current_ctx(S)->call_depth].name   = name;
+        mino_current_ctx(S)->call_stack[mino_current_ctx(S)->call_depth].file   = file;
+        mino_current_ctx(S)->call_stack[mino_current_ctx(S)->call_depth].line   = line;
+        mino_current_ctx(S)->call_stack[mino_current_ctx(S)->call_depth].column = column;
+        mino_current_ctx(S)->call_depth++;
     }
 }
 
 void pop_frame(mino_state_t *S)
 {
-    if (S->ctx->call_depth > 0) {
-        S->ctx->call_depth--;
+    if (mino_current_ctx(S)->call_depth > 0) {
+        mino_current_ctx(S)->call_depth--;
     }
 }
 
@@ -181,19 +181,19 @@ void append_trace(mino_state_t *S)
 {
     size_t pos;
     int    i;
-    if (S->ctx->trace_added || S->ctx->call_depth == 0) {
+    if (mino_current_ctx(S)->trace_added || mino_current_ctx(S)->call_depth == 0) {
         return;
     }
-    S->ctx->trace_added = 1;
-    pos = strlen(S->ctx->error_buf);
-    for (i = S->ctx->call_depth - 1; i >= 0 && pos + 80 < sizeof(S->ctx->error_buf); i--) {
+    mino_current_ctx(S)->trace_added = 1;
+    pos = strlen(mino_current_ctx(S)->error_buf);
+    for (i = mino_current_ctx(S)->call_depth - 1; i >= 0 && pos + 80 < sizeof(mino_current_ctx(S)->error_buf); i--) {
         pos += (size_t)snprintf(
-            S->ctx->error_buf + pos, sizeof(S->ctx->error_buf) - pos, "\n  in %s",
-            S->ctx->call_stack[i].name ? S->ctx->call_stack[i].name : "<fn>");
-        if (S->ctx->call_stack[i].file != NULL && pos + 40 < sizeof(S->ctx->error_buf)) {
+            mino_current_ctx(S)->error_buf + pos, sizeof(mino_current_ctx(S)->error_buf) - pos, "\n  in %s",
+            mino_current_ctx(S)->call_stack[i].name ? mino_current_ctx(S)->call_stack[i].name : "<fn>");
+        if (mino_current_ctx(S)->call_stack[i].file != NULL && pos + 40 < sizeof(mino_current_ctx(S)->error_buf)) {
             pos += (size_t)snprintf(
-                S->ctx->error_buf + pos, sizeof(S->ctx->error_buf) - pos, " (%s:%d)",
-                S->ctx->call_stack[i].file, S->ctx->call_stack[i].line);
+                mino_current_ctx(S)->error_buf + pos, sizeof(mino_current_ctx(S)->error_buf) - pos, " (%s:%d)",
+                mino_current_ctx(S)->call_stack[i].file, mino_current_ctx(S)->call_stack[i].line);
         }
     }
 }

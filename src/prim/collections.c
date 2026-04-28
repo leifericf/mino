@@ -517,7 +517,7 @@ static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
     mino_val_t       *out;
     size_t            len_out;
     size_t            i;
-    S->ctx->gc_depth++;
+    mino_current_ctx(S)->gc_depth++;
     if (coll == NULL || coll->type == MINO_NIL) {
         root    = NULL;
         order   = mino_vector(S, NULL, 0);
@@ -547,7 +547,7 @@ static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
     if (coll != NULL && coll->type == MINO_MAP) {
         out->meta = coll->meta;
     }
-    S->ctx->gc_depth--;
+    mino_current_ctx(S)->gc_depth--;
     return out;
 }
 

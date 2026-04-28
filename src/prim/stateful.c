@@ -50,22 +50,22 @@ static void atom_notify_watches(mino_state_t *S, mino_val_t *atom,
                     mino_cons(S, old_val,
                       mino_cons(S, new_val, mino_nil(S)))));
         /* Wrap in a try frame so watch exceptions don't propagate. */
-        saved_try = S->ctx->try_depth;
-        if (S->ctx->try_depth < MAX_TRY_DEPTH) {
-            S->ctx->try_stack[S->ctx->try_depth].exception      = NULL;
-            S->ctx->try_stack[S->ctx->try_depth].saved_ns       = S->current_ns;
-            S->ctx->try_stack[S->ctx->try_depth].saved_ambient  = S->fn_ambient_ns;
-            S->ctx->try_stack[S->ctx->try_depth].saved_load_len = S->load_stack_len;
-            if (setjmp(S->ctx->try_stack[S->ctx->try_depth].buf) == 0) {
-                S->ctx->try_depth++;
+        saved_try = mino_current_ctx(S)->try_depth;
+        if (mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
+            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
+            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
+            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
+            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
+            if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
+                mino_current_ctx(S)->try_depth++;
                 (void)mino_call(S, fn, wargs, env);
-                S->ctx->try_depth = saved_try;
+                mino_current_ctx(S)->try_depth = saved_try;
             } else {
                 /* Watch threw -- swallow and continue. */
-                S->current_ns    = S->ctx->try_stack[saved_try].saved_ns;
-                S->fn_ambient_ns = S->ctx->try_stack[saved_try].saved_ambient;
-                load_stack_truncate(S, S->ctx->try_stack[saved_try].saved_load_len);
-                S->ctx->try_depth = saved_try;
+                S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+                S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+                load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
+                mino_current_ctx(S)->try_depth = saved_try;
             }
         }
     }
@@ -491,9 +491,9 @@ mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
     mino_val_t   **vals = NULL;
     (void)args;
     (void)env;
-    if (S->ctx->dyn_stack == NULL) return mino_nil(S);
+    if (mino_current_ctx(S)->dyn_stack == NULL) return mino_nil(S);
 
-    for (f = S->ctx->dyn_stack; f != NULL; f = f->prev) {
+    for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
         for (b = f->bindings; b != NULL; b = b->next) {
             size_t i;
             int    dup = 0;
@@ -543,7 +543,7 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
     mino_val_t    *result;
     /* Heap-allocated so the pointer remains valid if a throw inside
      * fn unwinds past the cleanup. control.c's longjmp handler walks
-     * S->ctx->dyn_stack to free each frame; a stack-local frame would
+     * mino_current_ctx(S)->dyn_stack to free each frame; a stack-local frame would
      * leave a dangling read on Windows where popped stack memory is
      * not preserved as eagerly as on POSIX. */
     dyn_frame_t   *frame;
@@ -600,10 +600,10 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
             "with-bindings*: out of memory");
     }
     frame->bindings = bhead;
-    frame->prev     = S->ctx->dyn_stack;
-    S->ctx->dyn_stack    = frame;
+    frame->prev     = mino_current_ctx(S)->dyn_stack;
+    mino_current_ctx(S)->dyn_stack    = frame;
     result          = mino_call(S, fn, mino_nil(S), env);
-    S->ctx->dyn_stack    = frame->prev;
+    mino_current_ctx(S)->dyn_stack    = frame->prev;
     dyn_binding_list_free(bhead);
     free(frame);
     return result;

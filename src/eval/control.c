@@ -15,10 +15,10 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     (void)tail;
     int         has_catch   = 0;
     int         has_finally = 0;
-    int         saved_try   = S->ctx->try_depth;
-    int         saved_call  = S->ctx->call_depth;
-    int         saved_trace = S->ctx->trace_added;
-    dyn_frame_t *saved_dyn  = S->ctx->dyn_stack;
+    int         saved_try   = mino_current_ctx(S)->try_depth;
+    int         saved_call  = mino_current_ctx(S)->call_depth;
+    int         saved_trace = mino_current_ctx(S)->trace_added;
+    dyn_frame_t *saved_dyn  = mino_current_ctx(S)->dyn_stack;
     volatile int         got_exception = 0;
     volatile mino_val_t *vol_result    = NULL;
     volatile mino_val_t *vol_ex        = NULL;
@@ -78,21 +78,21 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         }
     }
 
-    if (S->ctx->try_depth >= MAX_TRY_DEPTH) {
+    if (mino_current_ctx(S)->try_depth >= MAX_TRY_DEPTH) {
         set_eval_diag(S, form, "limit", "MLM002", "try nesting too deep");
         return NULL;
     }
 
     /* Phase 1: evaluate body forms. */
-    S->ctx->try_stack[S->ctx->try_depth].exception      = NULL;
-    S->ctx->try_stack[S->ctx->try_depth].saved_ns       = S->current_ns;
-    S->ctx->try_stack[S->ctx->try_depth].saved_ambient  = S->fn_ambient_ns;
-    S->ctx->try_stack[S->ctx->try_depth].saved_load_len = S->load_stack_len;
-    if (setjmp(S->ctx->try_stack[S->ctx->try_depth].buf) == 0) {
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
+    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
+    if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
         mino_val_t *r;
-        S->ctx->try_depth++;
+        mino_current_ctx(S)->try_depth++;
         r = eval_implicit_do(S, body_head, env);
-        S->ctx->try_depth = saved_try;
+        mino_current_ctx(S)->try_depth = saved_try;
         if (r == NULL) {
             /* Fatal runtime error. */
             if (has_finally)
@@ -103,16 +103,16 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     } else {
         /* longjmp'd from throw in body. Restore current_ns and ambient
          * since the throw bypassed any per-fn restore on its way up. */
-        vol_ex      = S->ctx->try_stack[saved_try].exception;
-        S->current_ns    = S->ctx->try_stack[saved_try].saved_ns;
-        S->fn_ambient_ns = S->ctx->try_stack[saved_try].saved_ambient;
-        load_stack_truncate(S, S->ctx->try_stack[saved_try].saved_load_len);
-        S->ctx->try_depth   = saved_try;
-        S->ctx->call_depth  = saved_call;
-        S->ctx->trace_added = saved_trace;
-        while (S->ctx->dyn_stack != saved_dyn) {
-            dyn_frame_t *f = S->ctx->dyn_stack;
-            S->ctx->dyn_stack = f->prev;
+        vol_ex      = mino_current_ctx(S)->try_stack[saved_try].exception;
+        S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+        S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+        load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
+        mino_current_ctx(S)->try_depth   = saved_try;
+        mino_current_ctx(S)->call_depth  = saved_call;
+        mino_current_ctx(S)->trace_added = saved_trace;
+        while (mino_current_ctx(S)->dyn_stack != saved_dyn) {
+            dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
+            mino_current_ctx(S)->dyn_stack = f->prev;
             dyn_binding_list_free(f->bindings);
         }
         clear_error(S);
@@ -155,22 +155,22 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
         mino_env_t *local  = env_child(S, env);
         env_bind(S, local, var_buf, ex_val);
 
-        if (has_finally && S->ctx->try_depth < MAX_TRY_DEPTH) {
+        if (has_finally && mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
             /* Inner try frame catches re-throws from handler
              * so that finally still runs. */
-            int         ic = S->ctx->call_depth;
-            int         it = S->ctx->trace_added;
-            int         is = S->ctx->try_depth; /* save before setjmp */
-            dyn_frame_t *id = S->ctx->dyn_stack;
-            S->ctx->try_stack[is].exception      = NULL;
-            S->ctx->try_stack[is].saved_ns       = S->current_ns;
-            S->ctx->try_stack[is].saved_ambient  = S->fn_ambient_ns;
-            S->ctx->try_stack[is].saved_load_len = S->load_stack_len;
-            if (setjmp(S->ctx->try_stack[is].buf) == 0) {
+            int         ic = mino_current_ctx(S)->call_depth;
+            int         it = mino_current_ctx(S)->trace_added;
+            int         is = mino_current_ctx(S)->try_depth; /* save before setjmp */
+            dyn_frame_t *id = mino_current_ctx(S)->dyn_stack;
+            mino_current_ctx(S)->try_stack[is].exception      = NULL;
+            mino_current_ctx(S)->try_stack[is].saved_ns       = S->current_ns;
+            mino_current_ctx(S)->try_stack[is].saved_ambient  = S->fn_ambient_ns;
+            mino_current_ctx(S)->try_stack[is].saved_load_len = S->load_stack_len;
+            if (setjmp(mino_current_ctx(S)->try_stack[is].buf) == 0) {
                 mino_val_t *r;
-                S->ctx->try_depth++;
+                mino_current_ctx(S)->try_depth++;
                 r = eval_implicit_do(S, catch_body, local);
-                S->ctx->try_depth = is;
+                mino_current_ctx(S)->try_depth = is;
                 if (r == NULL) {
                     eval_implicit_do(S, finally_body, env);
                     return NULL;
@@ -179,16 +179,16 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
                 got_exception = 0;
             } else {
                 /* Catch handler re-threw. */
-                vol_ex      = S->ctx->try_stack[is].exception;
-                S->current_ns    = S->ctx->try_stack[is].saved_ns;
-                S->fn_ambient_ns = S->ctx->try_stack[is].saved_ambient;
-                load_stack_truncate(S, S->ctx->try_stack[is].saved_load_len);
-                S->ctx->try_depth   = is;
-                S->ctx->call_depth  = ic;
-                S->ctx->trace_added = it;
-                while (S->ctx->dyn_stack != id) {
-                    dyn_frame_t *f = S->ctx->dyn_stack;
-                    S->ctx->dyn_stack = f->prev;
+                vol_ex      = mino_current_ctx(S)->try_stack[is].exception;
+                S->current_ns    = mino_current_ctx(S)->try_stack[is].saved_ns;
+                S->fn_ambient_ns = mino_current_ctx(S)->try_stack[is].saved_ambient;
+                load_stack_truncate(S, mino_current_ctx(S)->try_stack[is].saved_load_len);
+                mino_current_ctx(S)->try_depth   = is;
+                mino_current_ctx(S)->call_depth  = ic;
+                mino_current_ctx(S)->trace_added = it;
+                while (mino_current_ctx(S)->dyn_stack != id) {
+                    dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
+                    mino_current_ctx(S)->dyn_stack = f->prev;
                     dyn_binding_list_free(f->bindings);
                 }
                 clear_error(S);
@@ -217,18 +217,18 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     /* Phase 4: re-throw if exception was not handled. */
     if (got_exception) {
         mino_val_t *e = (mino_val_t *)vol_ex;
-        if (S->ctx->try_depth > 0) {
-            S->ctx->try_stack[S->ctx->try_depth - 1].exception = e;
-            longjmp(S->ctx->try_stack[S->ctx->try_depth - 1].buf, 1);
+        if (mino_current_ctx(S)->try_depth > 0) {
+            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = e;
+            longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
         }
         if (e != NULL && e->type == MINO_STRING) {
             char msg[512];
             snprintf(msg, sizeof(msg),
                      "unhandled exception: %.*s",
                      (int)e->as.s.len, e->as.s.data);
-            set_eval_diag(S, S->ctx->eval_current_form, "user", "MUS001", msg);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "user", "MUS001", msg);
         } else {
-            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "unhandled exception");
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "unhandled exception");
         }
         return NULL;
     }

@@ -41,14 +41,14 @@ int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback)
     timer_entry_t *entry;
 
     if (callback == NULL || callback->type == MINO_NIL) {
-        set_eval_diag(S, S->ctx->eval_current_form, "eval/contract", "MCT001",
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001",
                       "async-schedule-timer* requires a non-nil callback");
         return -1;
     }
 
     entry = calloc(1, sizeof(*entry));
     if (entry == NULL) {
-        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001",
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001",
                       "out of memory creating timer entry");
         return -1;
     }

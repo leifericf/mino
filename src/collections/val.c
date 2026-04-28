@@ -137,7 +137,7 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
         mino_val_t **ne = (mino_val_t **)realloc(
             tbl->entries, new_cap * sizeof(*ne));
         if (ne == NULL) {
-            set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory");
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
             return NULL;
         }
         tbl->entries = ne;
@@ -156,14 +156,14 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
      * variable when the optimizer keeps it in a register. ASan
      * caught this freed under load; gc_depth is the reliable
      * protection. */
-    S->ctx->gc_depth++;
+    mino_current_ctx(S)->gc_depth++;
     {
         char *data = dup_n(S, s, len);
         v = alloc_val(S, type);
         v->as.s.data = data;
         v->as.s.len  = len;
     }
-    S->ctx->gc_depth--;
+    mino_current_ctx(S)->gc_depth--;
     tbl->entries[tbl->len] = v;
 
     /* Insert index into hash table. */

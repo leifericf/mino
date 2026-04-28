@@ -53,7 +53,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         if (v != NULL) return v;
 
         if (ns_len >= sizeof(ns_buf)) {
-            set_eval_diag(S, S->ctx->eval_current_form, "syntax", "MSY001",
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001",
                 "symbol name too long");
             return NULL;
         }
@@ -76,7 +76,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
                 char msg[300];
                 snprintf(msg, sizeof(msg),
                          "var %s/%s is private", resolved_ns, sym_name);
-                set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001",
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001",
                               msg);
                 return NULL;
             }
@@ -112,7 +112,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
                              "no such alias: %s in namespace %s",
                              ns_buf, cur);
                 }
-                set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001", msg);
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);
                 return NULL;
             }
         }
@@ -140,7 +140,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     }
 
     /* Unqualified: dynamic → lexical → current-ns env → fn ambient ns. */
-    v = (S->ctx->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
+    v = (mino_current_ctx(S)->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
     if (v == NULL) v = mino_env_get(env, data);
     if (v == NULL) {
         mino_env_t *ns_env = current_ns_env(S);
@@ -156,7 +156,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     if (v == NULL) {
         char msg[300];
         snprintf(msg, sizeof(msg), "unbound symbol: %s", data);
-        set_eval_diag(S, S->ctx->eval_current_form, "name", "MNS001", msg);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);
         return NULL;
     }
     return v;
@@ -578,25 +578,25 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
  */
 static int eval_check_limits(mino_state_t *S)
 {
-    if (S->ctx->limit_exceeded) {
+    if (mino_current_ctx(S)->limit_exceeded) {
         return 0;
     }
-    if (S->ctx->interrupted) {
-        S->ctx->limit_exceeded = 1;
-        set_eval_diag(S, S->ctx->eval_current_form, "limit", "MLM001",
-                      "S->ctx->interrupted");
+    if (mino_current_ctx(S)->interrupted) {
+        mino_current_ctx(S)->limit_exceeded = 1;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "limit", "MLM001",
+                      "mino_current_ctx(S)->interrupted");
         return 0;
     }
     mino_safepoint_poll(S);
-    if (S->limit_steps > 0 && ++S->ctx->eval_steps > S->limit_steps) {
-        S->ctx->limit_exceeded = 1;
-        set_eval_diag(S, S->ctx->eval_current_form, "limit", "MLM001",
+    if (S->limit_steps > 0 && ++mino_current_ctx(S)->eval_steps > S->limit_steps) {
+        mino_current_ctx(S)->limit_exceeded = 1;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "limit", "MLM001",
                       "step limit exceeded");
         return 0;
     }
     if (S->limit_heap > 0 && S->gc_bytes_alloc > S->limit_heap) {
-        S->ctx->limit_exceeded = 1;
-        set_eval_diag(S, S->ctx->eval_current_form, "limit", "MLM001",
+        mino_current_ctx(S)->limit_exceeded = 1;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "limit", "MLM001",
                       "heap limit exceeded");
         return 0;
     }
@@ -653,7 +653,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         mino_val_t *head = form->as.cons.car;
         mino_val_t *args = form->as.cons.cdr;
         mino_val_t *host_result;
-        S->ctx->eval_current_form = form;
+        mino_current_ctx(S)->eval_current_form = form;
 
         if (eval_try_host_syntax(S, form, head, args, env, &host_result)) {
             return host_result;
@@ -673,7 +673,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         return eval_apply_regular_call(S, form, head, args, env, tail);
     }
     }
-    set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "eval: unknown value type");
+    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "eval: unknown value type");
     return NULL;
 }
 

@@ -36,7 +36,7 @@ static mino_val_t *resolve_io_sink(mino_state_t *S, const char *name)
     mino_val_t *v;
     mino_val_t *var;
     char        qualified[64];
-    if (S->ctx->dyn_stack != NULL) {
+    if (mino_current_ctx(S)->dyn_stack != NULL) {
         v = dyn_lookup(S, name);
         if (v != NULL) return v;
         if (strlen(name) + sizeof("clojure.core/") < sizeof(qualified)) {
@@ -213,11 +213,11 @@ static mino_val_t *format_via_hook_or_builtin(mino_state_t *S,
             return NULL;
         }
         frame->bindings = binding;
-        frame->prev     = S->ctx->dyn_stack;
-        S->ctx->dyn_stack    = frame;
+        frame->prev     = mino_current_ctx(S)->dyn_stack;
+        mino_current_ctx(S)->dyn_stack    = frame;
         call_args = mino_cons(S, v, mino_nil(S));
         (void)mino_call(S, S->print_method_fn, call_args, env);
-        S->ctx->dyn_stack = frame->prev;
+        mino_current_ctx(S)->dyn_stack = frame->prev;
         free(binding);
         free(frame);
         if (mino_last_error(S) != NULL) return NULL;

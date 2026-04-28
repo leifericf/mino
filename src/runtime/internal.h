@@ -169,9 +169,9 @@ struct mino_env {
 /*                                                                           */
 /* Every field that mutates with eval progress lives here, separately from   */
 /* the shared mino_state_t. Each OS thread that enters eval has its own      */
-/* ctx; the state pointer is shared. In v0.87.x only the main ctx exists    */
-/* (S->ctx == &S->main_ctx), so observable behavior is unchanged. Cycle G4  */
-/* later versions add per-spawn ctxs and TLS-backed lookup.                  */
+/* ctx; the state pointer is shared. The embedder thread reads main_ctx via */
+/* the mino_current_ctx() TLS-fallback accessor; spawned host worker threads */
+/* (Cycle G4.3+) install their own ctx via TLS at thread entry.              */
 /* ------------------------------------------------------------------------- */
 
 typedef struct mino_thread_ctx {
@@ -220,6 +220,21 @@ typedef struct mino_thread_ctx {
     dyn_frame_t    *dyn_stack;
 } mino_thread_ctx_t;
 
+/* TLS pointer to the per-thread ctx for the current worker.
+ *
+ * NULL on the embedder's main thread (the one that called
+ * mino_state_new). Spawned host threads (Cycle G4.3+) set this to
+ * their freshly-allocated worker ctx at thread entry and clear it
+ * before exit. Accessed only via `mino_current_ctx(S)` (defined
+ * below struct mino_state). */
+extern
+#if defined(_WIN32) && defined(_MSC_VER)
+__declspec(thread)
+#else
+__thread
+#endif
+mino_thread_ctx_t *mino_tls_ctx;
+
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */
@@ -228,12 +243,12 @@ struct mino_state {
     /* Per-thread context.
      *
      * `main_ctx` is the embedded ctx for the OS thread that owns S
-     * (calls mino_state_new and runs the bulk of work today). `ctx`
-     * resolves to the active per-thread context; in v0.87.x there is
-     * only ever main_ctx so ctx is always &main_ctx. Cycle G4 later
-     * versions add per-spawn ctxs and TLS-backed lookup. */
+     * (calls mino_state_new and runs the bulk of work). Spawned host
+     * threads (Cycle G4.3+) allocate their own ctx and install it via
+     * `mino_tls_ctx` for the duration of the worker run. Code that
+     * needs the active ctx calls `mino_current_ctx(S)` which returns
+     * the TLS ctx if set, else &main_ctx for the embedder thread. */
     mino_thread_ctx_t  main_ctx;
-    mino_thread_ctx_t *ctx;
 
     /* Garbage collection.
      *
@@ -568,6 +583,17 @@ struct mino_state {
     timer_entry_t  *async_timers;
 };
 
+/* Resolve the active per-thread ctx for state S.
+ *
+ * Worker threads set TLS at spawn; the embedder's thread leaves it
+ * NULL and falls through to &S->main_ctx. Inline so the fast path
+ * is a TLS load + predictable branch. */
+static inline mino_thread_ctx_t *mino_current_ctx(mino_state_t *S)
+{
+    mino_thread_ctx_t *t = mino_tls_ctx;
+    return t != NULL ? t : &S->main_ctx;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Safepoint poll (Cycle G4.2).                                              */
 /*                                                                           */
@@ -584,7 +610,7 @@ struct mino_state {
 void mino_safepoint_park(mino_state_t *S);
 
 #define mino_safepoint_poll(S) do {                                       \
-    if ((S)->ctx->should_yield) {                                          \
+    if (mino_current_ctx(S)->should_yield) {                               \
         mino_safepoint_park(S);                                            \
     }                                                                      \
 } while (0)
@@ -599,7 +625,7 @@ void gc_release_stw(mino_state_t *S);
 /* error.c                                                                   */
 /* ------------------------------------------------------------------------- */
 
-/* set_error/set_error_at copy msg into S->ctx->error_buf; msg is borrowed. */
+/* set_error/set_error_at copy msg into the current ctx's error_buf; msg is borrowed. */
 void        set_error(mino_state_t *S, const char *msg);          /* msg: borrowed */
 void        set_error_at(mino_state_t *S, const mino_val_t *form, /* form: borrowed */
                          const char *msg);                         /* msg: borrowed */

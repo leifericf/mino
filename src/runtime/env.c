@@ -38,7 +38,7 @@ mino_env_t *mino_env_new(mino_state_t *S)
     env = env_alloc(S, NULL);
     r   = (root_env_t *)malloc(sizeof(*r));
     if (r == NULL) {
-        set_eval_diag(S, S->ctx->eval_current_form, "internal", "MIN001", "out of memory");
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
         return NULL;
     }
     r->env       = env;
@@ -295,7 +295,7 @@ mino_val_t *dyn_lookup(mino_state_t *S, const char *name)
 {
     dyn_frame_t *f;
     dyn_binding_t *b;
-    for (f = S->ctx->dyn_stack; f != NULL; f = f->prev) {
+    for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
         for (b = f->bindings; b != NULL; b = b->next) {
             if (strcmp(b->name, name) == 0) return b->val;
         }
