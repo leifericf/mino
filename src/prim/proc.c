@@ -107,8 +107,13 @@ static char *build_command(mino_state_t *S, mino_val_t *args)
         }
         new_pos = append_escaped(buf, pos, cap, arg->as.s.data, arg->as.s.len);
         if (new_pos == 0) {
-            /* Grow buffer and retry. */
-            cap = cap * 2 + arg->as.s.len * 4;
+            /* Grow buffer and retry. cap*2 plus len*4 must not wrap. */
+            size_t arglen = arg->as.s.len;
+            if (arglen > SIZE_MAX / 4 || cap > SIZE_MAX / 2
+                || cap * 2 > SIZE_MAX - arglen * 4) {
+                free(buf); return NULL;
+            }
+            cap = cap * 2 + arglen * 4;
             buf = (char *)realloc(buf, cap);
             if (buf == NULL) return NULL;
             new_pos = append_escaped(buf, pos, cap,
@@ -132,9 +137,14 @@ static char *read_all(FILE *fp, size_t *out_len)
     size_t n;
 
     while ((n = fread(chunk, 1, sizeof(chunk), fp)) > 0) {
+        /* len + n + 1 must not wrap; subsequent doubling must not either. */
+        if (n > SIZE_MAX - len - 1) { free(buf); return NULL; }
         if (len + n + 1 > cap) {
             cap = cap == 0 ? 4096 : cap * 2;
-            while (cap < len + n + 1) cap *= 2;
+            while (cap < len + n + 1) {
+                if (cap > SIZE_MAX / 2) { free(buf); return NULL; }
+                cap *= 2;
+            }
             buf = (char *)realloc(buf, cap);
             if (buf == NULL) return NULL;
         }
