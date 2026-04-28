@@ -260,6 +260,23 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
 
 /* --- let, loop, binding special forms ------------------------------------ */
 
+/* eval_and_bind -- eval val_form in local, bind the result against pat.
+ * Pins the value across bind_form so any GC triggered while building
+ * destructure scaffolding cannot reclaim it. Returns 0 on eval failure
+ * or destructure failure (with diag already set), 1 on success. */
+static int eval_and_bind(mino_state_t *S, mino_val_t *pat,
+                         mino_val_t *val_form, mino_env_t *local,
+                         const char *ctx)
+{
+    mino_val_t *val = eval_value(S, val_form, local);
+    int ok;
+    if (val == NULL) return 0;
+    gc_pin(val);
+    ok = bind_form(S, local, pat, val, ctx);
+    gc_unpin(1);
+    return ok;
+}
+
 mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
                      mino_val_t *args, mino_env_t *env, int tail)
 {
@@ -278,42 +295,35 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
         size_t vlen = bindings->as.vec.len;
         size_t vi;
         if (vlen % 2 != 0) {
-            set_eval_diag(S, form, "syntax", "MSY003", "let vector bindings must have even number of forms");
+            set_eval_diag(S, form, "syntax", "MSY003",
+                "let vector bindings must have even number of forms");
             return NULL;
         }
         for (vi = 0; vi < vlen; vi += 2) {
-            mino_val_t *pat = vec_nth(bindings, vi);
-            mino_val_t *val = eval_value(S, vec_nth(bindings, vi + 1), local);
-            if (val == NULL) return NULL;
-            gc_pin(val);
-            if (!bind_form(S, local, pat, val, "let")) {
-                gc_unpin(1);
+            if (!eval_and_bind(S, vec_nth(bindings, vi),
+                               vec_nth(bindings, vi + 1), local, "let")) {
                 return NULL;
             }
-            gc_unpin(1);
         }
     } else if (mino_is_cons(bindings) || mino_is_nil(bindings)) {
         /* Legacy list binding form: (name val name val ...) */
         while (mino_is_cons(bindings)) {
             mino_val_t *name_form = bindings->as.cons.car;
             mino_val_t *rest_pair = bindings->as.cons.cdr;
-            mino_val_t *val;
             if (!mino_is_cons(rest_pair)) {
-                set_eval_diag(S, form, "syntax", "MSY003", "let binding missing value");
+                set_eval_diag(S, form, "syntax", "MSY003",
+                    "let binding missing value");
                 return NULL;
             }
-            val = eval_value(S, rest_pair->as.cons.car, local);
-            if (val == NULL) return NULL;
-            gc_pin(val);
-            if (!bind_form(S, local, name_form, val, "let")) {
-                gc_unpin(1);
+            if (!eval_and_bind(S, name_form, rest_pair->as.cons.car,
+                               local, "let")) {
                 return NULL;
             }
-            gc_unpin(1);
             bindings = rest_pair->as.cons.cdr;
         }
     } else {
-        set_eval_diag(S, form, "syntax", "MSY003", "let bindings must be a list or vector");
+        set_eval_diag(S, form, "syntax", "MSY003",
+            "let bindings must be a list or vector");
         return NULL;
     }
     return eval_implicit_do_impl(S, body, local, tail);
@@ -340,7 +350,8 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
         size_t vi;
         mino_val_t **ptmp;
         if (vlen % 2 != 0) {
-            set_eval_diag(S, form, "syntax", "MSY003", "loop vector bindings must have even number of forms");
+            set_eval_diag(S, form, "syntax", "MSY003",
+                "loop vector bindings must have even number of forms");
             return NULL;
         }
         /* Build a params vector of just the name symbols for recur. */
@@ -348,14 +359,10 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
                     (vlen / 2) * sizeof(*ptmp));
         for (vi = 0; vi < vlen; vi += 2) {
             mino_val_t *pat = vec_nth(bindings, vi);
-            mino_val_t *val = eval_value(S, vec_nth(bindings, vi + 1), local);
-            if (val == NULL) return NULL;
-            gc_pin(val);
-            if (!bind_form(S, local, pat, val, "loop")) {
-                gc_unpin(1);
+            if (!eval_and_bind(S, pat, vec_nth(bindings, vi + 1),
+                               local, "loop")) {
                 return NULL;
             }
-            gc_unpin(1);
             ptmp[vi / 2] = pat;
         }
         params = mino_vector(S, ptmp, vlen / 2);
@@ -364,20 +371,16 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
         while (mino_is_cons(bindings)) {
             mino_val_t *name_form = bindings->as.cons.car;
             mino_val_t *rest_pair = bindings->as.cons.cdr;
-            mino_val_t *val;
             mino_val_t *cell;
             if (!mino_is_cons(rest_pair)) {
-                set_eval_diag(S, form, "syntax", "MSY003", "loop binding missing value");
+                set_eval_diag(S, form, "syntax", "MSY003",
+                    "loop binding missing value");
                 return NULL;
             }
-            val = eval_value(S, rest_pair->as.cons.car, local);
-            if (val == NULL) return NULL;
-            gc_pin(val);
-            if (!bind_form(S, local, name_form, val, "loop")) {
-                gc_unpin(1);
+            if (!eval_and_bind(S, name_form, rest_pair->as.cons.car,
+                               local, "loop")) {
                 return NULL;
             }
-            gc_unpin(1);
             cell = mino_cons(S, name_form, mino_nil(S));
             if (params_tail == NULL) {
                 params = cell;
@@ -388,7 +391,8 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
             bindings = rest_pair->as.cons.cdr;
         }
     } else {
-        set_eval_diag(S, form, "syntax", "MSY003", "loop bindings must be a list or vector");
+        set_eval_diag(S, form, "syntax", "MSY003",
+            "loop bindings must be a list or vector");
         return NULL;
     }
     for (;;) {
