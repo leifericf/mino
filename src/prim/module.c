@@ -18,442 +18,21 @@ static int kw_match(const mino_val_t *v, const char *s)
  * runtime/module.c so this file and eval/defs.c share the
  * same logic. */
 
-/* (require name) -- load a module by name using the host-supplied resolver.
- * name can be a string ("path/to/mod") or a quoted vector
- * '[mod.name :as alias :refer [syms]]. */
-mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+/* require_load_path -- the string-form loader. Given a MINO_STRING name
+ * (already path-shaped or a literal path), check the module cache, do
+ * the runtime-only-ns short-circuit, run the cycle check, resolve via
+ * the bundled-lib registry or the host resolver, push the load stack,
+ * load the source, validate the declared namespace, and cache the
+ * result. The symbol- and vector-libspec forms in prim_require below
+ * normalize their input to a path string and call this directly. */
+static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
+                                     mino_env_t *env)
 {
-    mino_val_t *name_val;
     const char *name;
     const char *path;
     const char *bundled_source = NULL;
-    size_t      i;
     mino_val_t *result;
-    if (!mino_is_cons(args)) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001", "require requires at least one argument");
-        return NULL;
-    }
-    /* Multi-arg form: (require 'foo 'bar ...) -- recurse for each. */
-    if (mino_is_cons(args->as.cons.cdr)) {
-        mino_val_t *cur  = args;
-        mino_val_t *last = mino_nil(S);
-        while (mino_is_cons(cur)) {
-            mino_val_t *one = mino_cons(S, cur->as.cons.car, mino_nil(S));
-            gc_pin(one);
-            last = prim_require(S, one, env);
-            gc_unpin(1);
-            if (last == NULL) return NULL;
-            cur = cur->as.cons.cdr;
-        }
-        return last;
-    }
-    name_val = args->as.cons.car;
-
-    /* Prefix list: '[prefix sub1 sub2 ...] where each sub is either a
-     * bare symbol or a vector libspec. Expands to multiple individual
-     * (require '[prefix.sub ...]) calls. The disambiguator: if the
-     * second element isn't a keyword, the form is a prefix list. */
-    if (name_val != NULL && name_val->type == MINO_VECTOR
-        && name_val->as.vec.len >= 2) {
-        mino_val_t *first  = vec_nth(name_val, 0);
-        mino_val_t *second = vec_nth(name_val, 1);
-        if (first != NULL && first->type == MINO_SYMBOL
-            && second != NULL && second->type != MINO_KEYWORD) {
-            size_t      i;
-            mino_val_t *last_result = mino_nil(S);
-            for (i = 1; i < name_val->as.vec.len; i++) {
-                mino_val_t *sub = vec_nth(name_val, i);
-                mino_val_t *sub_name;
-                mino_val_t *sub_rest = mino_nil(S);
-                char        joined[512];
-                size_t      sn;
-                if (sub == NULL) continue;
-                if (sub->type == MINO_SYMBOL) {
-                    sub_name = sub;
-                } else if (sub->type == MINO_VECTOR
-                           && sub->as.vec.len >= 1) {
-                    sub_name = vec_nth(sub, 0);
-                    if (sub_name == NULL || sub_name->type != MINO_SYMBOL) {
-                        return prim_throw_classified(S,
-                            "eval/type", "MTY001",
-                            "require prefix list: subspec head must be a symbol");
-                    }
-                } else {
-                    return prim_throw_classified(S,
-                        "eval/type", "MTY001",
-                        "require prefix list: subspec must be symbol or vector");
-                }
-                if (memchr(sub_name->as.s.data, '.',
-                           sub_name->as.s.len) != NULL) {
-                    return prim_throw_classified(S,
-                        "name", "MNS001",
-                        "lib names inside prefix lists must not contain periods");
-                }
-                sn = first->as.s.len + 1 + sub_name->as.s.len;
-                if (sn >= sizeof(joined)) {
-                    return prim_throw_classified(S,
-                        "eval/type", "MTY001",
-                        "require: prefix list name too long");
-                }
-                memcpy(joined, first->as.s.data, first->as.s.len);
-                joined[first->as.s.len] = '.';
-                memcpy(joined + first->as.s.len + 1,
-                       sub_name->as.s.data, sub_name->as.s.len);
-                joined[sn] = '\0';
-                /* Build [joined-symbol opt1 v1 opt2 v2 ...] vector. */
-                {
-                    mino_val_t *joined_sym = mino_symbol_n(S, joined, sn);
-                    size_t      tail_len   = (sub->type == MINO_VECTOR)
-                        ? sub->as.vec.len - 1 : 0;
-                    size_t      total      = 1 + tail_len;
-                    mino_val_t **tmp       = (mino_val_t **)gc_alloc_typed(
-                        S, GC_T_VALARR, total * sizeof(*tmp));
-                    size_t      j;
-                    mino_val_t *libspec;
-                    mino_val_t *call_args;
-                    gc_valarr_set(S, tmp, 0, joined_sym);
-                    for (j = 0; j < tail_len; j++) {
-                        gc_valarr_set(S, tmp, 1 + j,
-                                      vec_nth(sub, j + 1));
-                    }
-                    libspec   = mino_vector(S, tmp, total);
-                    call_args = mino_cons(S, libspec, mino_nil(S));
-                    gc_pin(call_args);
-                    last_result = prim_require(S, call_args, env);
-                    gc_unpin(1);
-                    if (last_result == NULL) return NULL;
-                    (void)sub_rest;
-                }
-            }
-            return last_result;
-        }
-    }
-
-    /* Symbol form: '(require 'foo.bar) — Clojure's everyday form. */
-    if (name_val != NULL && name_val->type == MINO_SYMBOL) {
-        char pathbuf[256];
-        /* Runtime-ns shortcut: skip the file load when either the
-         * file's already in module_cache (loaded earlier) or no file
-         * backs the namespace (caller built it at runtime via
-         * (ns foo) (def ...) ). Primitive-only env entries don't
-         * trigger a skip on first load -- the wrapper file still
-         * has to run. */
-        if (name_val->as.s.len < 256) {
-            char dotbuf[256];
-            char shortcut_path[256];
-            mino_env_t *e;
-            int         path_ok;
-            memcpy(dotbuf, name_val->as.s.data, name_val->as.s.len);
-            dotbuf[name_val->as.s.len] = '\0';
-            e = ns_env_lookup(S, dotbuf);
-            path_ok = runtime_module_dotted_to_path(
-                          name_val->as.s.data, name_val->as.s.len,
-                          shortcut_path, sizeof(shortcut_path)) == 0;
-            if (e != NULL && e->len > 0) {
-                if (path_ok) {
-                    size_t ci;
-                    for (ci = 0; ci < S->module_cache_len; ci++) {
-                        if (strcmp(S->module_cache[ci].name,
-                                   shortcut_path) == 0) {
-                            return mino_nil(S);
-                        }
-                    }
-                } else {
-                    /* No filesystem path -- runtime-only namespace. */
-                    return mino_nil(S);
-                }
-            }
-        }
-        if (runtime_module_dotted_to_path(name_val->as.s.data,
-                                          name_val->as.s.len,
-                                          pathbuf, sizeof(pathbuf)) != 0) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001",
-                          "require: invalid module name");
-            return NULL;
-        }
-        {
-            mino_val_t *path_str = mino_string(S, pathbuf);
-            mino_val_t *str_args = mino_cons(S, path_str, mino_nil(S));
-            gc_pin(str_args);
-            result = prim_require(S, str_args, env);
-            gc_unpin(1);
-        }
-        return result;
-    }
-
-    /* Vector form: '[mod.name :as alias :refer [syms]] */
-    if (name_val != NULL && name_val->type == MINO_VECTOR
-        && name_val->as.vec.len >= 1) {
-        mino_val_t *mod_sym = vec_nth(name_val, 0);
-        char pathbuf[256];
-        const char *alias_name        = NULL;
-        size_t      alias_len         = 0;
-        const char *as_alias_name     = NULL;
-        size_t      as_alias_len      = 0;
-        mino_val_t *refer_vec         = NULL;
-        int         refer_all         = 0;
-        int         needs_load        = 0;
-        mino_val_t *exclude_vec       = NULL;
-        mino_val_t *rename_map        = NULL;
-        size_t      vi;
-        if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
-            return NULL;
-        }
-        /* Parse keyword args.
-         * :as / :refer require loading; :as-alias does not. The two
-         * alias forms can coexist (an entry can have :as and :as-alias
-         * in the same libspec to register two aliases). */
-        for (vi = 1; vi + 1 < name_val->as.vec.len; vi += 2) {
-            mino_val_t *k = vec_nth(name_val, vi);
-            mino_val_t *v = vec_nth(name_val, vi + 1);
-            if (kw_match(k, "as") && v->type == MINO_SYMBOL) {
-                alias_name = v->as.s.data;
-                alias_len  = v->as.s.len;
-                needs_load = 1;
-            } else if (kw_match(k, "as-alias") && v->type == MINO_SYMBOL) {
-                as_alias_name = v->as.s.data;
-                as_alias_len  = v->as.s.len;
-            } else if (kw_match(k, "refer")) {
-                needs_load = 1;
-                if (v != NULL && v->type == MINO_VECTOR) {
-                    refer_vec = v;
-                } else if (v != NULL && v->type == MINO_KEYWORD
-                           && kw_match(v, "all")) {
-                    refer_all = 1;
-                } else {
-                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                        "eval/type", "MTY001",
-                        "require: :refer requires a vector of symbols or :all");
-                    return NULL;
-                }
-            } else if (kw_match(k, "exclude")
-                       && v != NULL && v->type == MINO_VECTOR) {
-                exclude_vec = v;
-                /* :exclude is meaningful only alongside :refer :all (which
-                 * use injects); does not by itself trigger a load. */
-            } else if (kw_match(k, "rename")
-                       && v != NULL && v->type == MINO_MAP) {
-                rename_map = v;
-            }
-        }
-        /* If only :as-alias is present, register the alias without
-         * loading. The target ns is created (empty) so find-ns /
-         * the-ns succeed and qualified keywords resolve. */
-        if (!needs_load && as_alias_name != NULL) {
-            char fbuf[256];
-            char abuf[256];
-            if (mod_sym->as.s.len >= sizeof(fbuf)
-                || as_alias_len >= sizeof(abuf)) {
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001",
-                              "require: :as-alias name too long");
-                return NULL;
-            }
-            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
-            fbuf[mod_sym->as.s.len] = '\0';
-            memcpy(abuf, as_alias_name, as_alias_len);
-            abuf[as_alias_len] = '\0';
-            (void)ns_env_ensure(S, fbuf);
-            runtime_module_add_alias(S, abuf, fbuf);
-            return mino_nil(S);
-        }
-        /* Skip the file load only when the file's already in
-         * module_cache (loaded earlier in this state) or when no file
-         * backs the namespace (caller built it at runtime via
-         * (ns foo) (def ...) ). Pre-installed C primitives populate
-         * the env and the var registry at install time, but the
-         * wrapper .clj still has to run on first require so its
-         * defs/macros become visible to :refer. Mirrors the
-         * symbol-form check above. */
-        {
-            int skip_load = 0;
-            if (mod_sym->as.s.len < 256) {
-                char dotbuf[256];
-                char shortcut_path[256];
-                mino_env_t *e;
-                int         path_ok;
-                memcpy(dotbuf, mod_sym->as.s.data, mod_sym->as.s.len);
-                dotbuf[mod_sym->as.s.len] = '\0';
-                e = ns_env_lookup(S, dotbuf);
-                path_ok = runtime_module_dotted_to_path(
-                              mod_sym->as.s.data, mod_sym->as.s.len,
-                              shortcut_path, sizeof(shortcut_path)) == 0;
-                if (e != NULL && e->len > 0) {
-                    if (path_ok) {
-                        size_t ci;
-                        for (ci = 0; ci < S->module_cache_len; ci++) {
-                            if (strcmp(S->module_cache[ci].name,
-                                       shortcut_path) == 0) {
-                                skip_load = 1;
-                                result    = mino_nil(S);
-                                break;
-                            }
-                        }
-                    } else {
-                        /* No filesystem path -- runtime-only namespace. */
-                        skip_load = 1;
-                        result    = mino_nil(S);
-                    }
-                }
-            }
-            if (!skip_load) {
-                /* Convert dotted name and load. */
-                if (runtime_module_dotted_to_path(mod_sym->as.s.data,
-                                                  mod_sym->as.s.len,
-                                                  pathbuf,
-                                                  sizeof(pathbuf)) != 0) {
-                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name",
-                                  "MNS001", "require: invalid module name");
-                    return NULL;
-                }
-                {
-                    mino_val_t *path_str = mino_string(S, pathbuf);
-                    mino_val_t *str_args = mino_cons(S, path_str,
-                                                     mino_nil(S));
-                    gc_pin(str_args);
-                    result = prim_require(S, str_args, env);
-                    gc_unpin(1);
-                }
-                if (result == NULL) return NULL;
-            }
-        }
-        /* Store alias. */
-        if (alias_name != NULL && alias_len > 0
-            && alias_len < 256 && mod_sym->as.s.len < 256) {
-            char abuf[256];
-            char fbuf[256];
-            memcpy(abuf, alias_name, alias_len);
-            abuf[alias_len] = '\0';
-            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
-            fbuf[mod_sym->as.s.len] = '\0';
-            runtime_module_add_alias(S, abuf, fbuf);
-        }
-        /* Store :as-alias when paired with a load-triggering option;
-         * the alias-only path returned earlier when no load was needed. */
-        if (as_alias_name != NULL && as_alias_len > 0
-            && as_alias_len < 256 && mod_sym->as.s.len < 256) {
-            char abuf[256];
-            char fbuf[256];
-            memcpy(abuf, as_alias_name, as_alias_len);
-            abuf[as_alias_len] = '\0';
-            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
-            fbuf[mod_sym->as.s.len] = '\0';
-            runtime_module_add_alias(S, abuf, fbuf);
-        }
-        /* Process :refer — bind referred names into current ns env.
-         * Iterate the source ns env directly so macros (which live in
-         * the env without a var registry entry) come through too. */
-        if (mod_sym->as.s.len < 256 && (refer_vec != NULL || refer_all)) {
-            char modbuf[256];
-            mino_env_t *target = current_ns_env(S);
-            mino_env_t *src;
-            memcpy(modbuf, mod_sym->as.s.data, mod_sym->as.s.len);
-            modbuf[mod_sym->as.s.len] = '\0';
-            src = ns_env_lookup(S, modbuf);
-            if (refer_vec != NULL) {
-                size_t ri;
-                for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
-                    mino_val_t *rsym = vec_nth(refer_vec, ri);
-                    if (rsym != NULL && rsym->type == MINO_SYMBOL
-                        && rsym->as.s.len < 256) {
-                        char rbuf[256];
-                        size_t rn = rsym->as.s.len;
-                        mino_val_t *val = NULL;
-                        const char *bind_name = rbuf;
-                        size_t      bind_len  = rn;
-                        memcpy(rbuf, rsym->as.s.data, rn);
-                        rbuf[rn] = '\0';
-                        if (src != NULL) {
-                            env_binding_t *b = env_find_here(src, rbuf);
-                            if (b != NULL) val = b->val;
-                        }
-                        if (val == NULL) {
-                            mino_val_t *var = var_find(S, modbuf, rbuf);
-                            if (var != NULL) val = var->as.var.root;
-                        }
-                        if (val == NULL) {
-                            char msg[300];
-                            snprintf(msg, sizeof(msg),
-                                "require: %s does not refer var %s",
-                                modbuf, rbuf);
-                            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                                "name", "MNS001", msg);
-                            return NULL;
-                        }
-                        if (rename_map != NULL && rename_map->type == MINO_MAP) {
-                            size_t mi;
-                            for (mi = 0; mi < rename_map->as.map.len; mi++) {
-                                mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
-                                if (k != NULL && k->type == MINO_SYMBOL
-                                    && k->as.s.len == rn
-                                    && memcmp(k->as.s.data, rbuf, rn) == 0) {
-                                    mino_val_t *renamed = map_get_val(rename_map, k);
-                                    if (renamed != NULL && renamed->type == MINO_SYMBOL) {
-                                        bind_name = renamed->as.s.data;
-                                        bind_len  = renamed->as.s.len;
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        if (bind_len < sizeof(rbuf)) {
-                            char nbuf[256];
-                            memcpy(nbuf, bind_name, bind_len);
-                            nbuf[bind_len] = '\0';
-                            env_bind(S, target, nbuf, val);
-                        }
-                    }
-                }
-            }
-            if (refer_all && src != NULL) {
-                size_t ri;
-                for (ri = 0; ri < src->len; ri++) {
-                    const char *bname = src->bindings[ri].name;
-                    size_t       blen  = strlen(bname);
-                    const char *bind_name = bname;
-                    size_t      bind_len  = blen;
-                    /* Honor :exclude when paired with :refer :all. */
-                    if (exclude_vec != NULL) {
-                        size_t  ei;
-                        int     skip = 0;
-                        for (ei = 0; ei < exclude_vec->as.vec.len; ei++) {
-                            mino_val_t *e = vec_nth(exclude_vec, ei);
-                            if (e != NULL && e->type == MINO_SYMBOL
-                                && e->as.s.len == blen
-                                && memcmp(e->as.s.data, bname, blen) == 0) {
-                                skip = 1;
-                                break;
-                            }
-                        }
-                        if (skip) continue;
-                    }
-                    if (rename_map != NULL && rename_map->type == MINO_MAP) {
-                        size_t mi;
-                        for (mi = 0; mi < rename_map->as.map.len; mi++) {
-                            mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
-                            if (k != NULL && k->type == MINO_SYMBOL
-                                && k->as.s.len == blen
-                                && memcmp(k->as.s.data, bname, blen) == 0) {
-                                mino_val_t *renamed = map_get_val(rename_map, k);
-                                if (renamed != NULL && renamed->type == MINO_SYMBOL) {
-                                    bind_name = renamed->as.s.data;
-                                    bind_len  = renamed->as.s.len;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    if (bind_len < 256) {
-                        char nbuf[256];
-                        memcpy(nbuf, bind_name, bind_len);
-                        nbuf[bind_len] = '\0';
-                        env_bind(S, target, nbuf, src->bindings[ri].val);
-                    }
-                }
-            }
-        }
-        return result;
-    }
+    size_t      i;
 
     if (name_val == NULL || name_val->type != MINO_STRING) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "require: argument must be a string, symbol, or vector");
@@ -691,6 +270,430 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         S->module_cache_len++;
     }
     return result;
+}
+
+/* (require name) -- load a module by name using the host-supplied resolver.
+ * name can be a string ("path/to/mod") or a quoted vector
+ * '[mod.name :as alias :refer [syms]]. */
+mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *name_val;
+    mino_val_t *result;
+    if (!mino_is_cons(args)) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/arity", "MAR001", "require requires at least one argument");
+        return NULL;
+    }
+    /* Multi-arg form: (require 'foo 'bar ...) -- recurse for each. */
+    if (mino_is_cons(args->as.cons.cdr)) {
+        mino_val_t *cur  = args;
+        mino_val_t *last = mino_nil(S);
+        while (mino_is_cons(cur)) {
+            mino_val_t *one = mino_cons(S, cur->as.cons.car, mino_nil(S));
+            gc_pin(one);
+            last = prim_require(S, one, env);
+            gc_unpin(1);
+            if (last == NULL) return NULL;
+            cur = cur->as.cons.cdr;
+        }
+        return last;
+    }
+    name_val = args->as.cons.car;
+
+    /* Prefix list: '[prefix sub1 sub2 ...] where each sub is either a
+     * bare symbol or a vector libspec. Expands to multiple individual
+     * (require '[prefix.sub ...]) calls. The disambiguator: if the
+     * second element isn't a keyword, the form is a prefix list. */
+    if (name_val != NULL && name_val->type == MINO_VECTOR
+        && name_val->as.vec.len >= 2) {
+        mino_val_t *first  = vec_nth(name_val, 0);
+        mino_val_t *second = vec_nth(name_val, 1);
+        if (first != NULL && first->type == MINO_SYMBOL
+            && second != NULL && second->type != MINO_KEYWORD) {
+            size_t      i;
+            mino_val_t *last_result = mino_nil(S);
+            for (i = 1; i < name_val->as.vec.len; i++) {
+                mino_val_t *sub = vec_nth(name_val, i);
+                mino_val_t *sub_name;
+                mino_val_t *sub_rest = mino_nil(S);
+                char        joined[512];
+                size_t      sn;
+                if (sub == NULL) continue;
+                if (sub->type == MINO_SYMBOL) {
+                    sub_name = sub;
+                } else if (sub->type == MINO_VECTOR
+                           && sub->as.vec.len >= 1) {
+                    sub_name = vec_nth(sub, 0);
+                    if (sub_name == NULL || sub_name->type != MINO_SYMBOL) {
+                        return prim_throw_classified(S,
+                            "eval/type", "MTY001",
+                            "require prefix list: subspec head must be a symbol");
+                    }
+                } else {
+                    return prim_throw_classified(S,
+                        "eval/type", "MTY001",
+                        "require prefix list: subspec must be symbol or vector");
+                }
+                if (memchr(sub_name->as.s.data, '.',
+                           sub_name->as.s.len) != NULL) {
+                    return prim_throw_classified(S,
+                        "name", "MNS001",
+                        "lib names inside prefix lists must not contain periods");
+                }
+                sn = first->as.s.len + 1 + sub_name->as.s.len;
+                if (sn >= sizeof(joined)) {
+                    return prim_throw_classified(S,
+                        "eval/type", "MTY001",
+                        "require: prefix list name too long");
+                }
+                memcpy(joined, first->as.s.data, first->as.s.len);
+                joined[first->as.s.len] = '.';
+                memcpy(joined + first->as.s.len + 1,
+                       sub_name->as.s.data, sub_name->as.s.len);
+                joined[sn] = '\0';
+                /* Build [joined-symbol opt1 v1 opt2 v2 ...] vector. */
+                {
+                    mino_val_t *joined_sym = mino_symbol_n(S, joined, sn);
+                    size_t      tail_len   = (sub->type == MINO_VECTOR)
+                        ? sub->as.vec.len - 1 : 0;
+                    size_t      total      = 1 + tail_len;
+                    mino_val_t **tmp       = (mino_val_t **)gc_alloc_typed(
+                        S, GC_T_VALARR, total * sizeof(*tmp));
+                    size_t      j;
+                    mino_val_t *libspec;
+                    mino_val_t *call_args;
+                    gc_valarr_set(S, tmp, 0, joined_sym);
+                    for (j = 0; j < tail_len; j++) {
+                        gc_valarr_set(S, tmp, 1 + j,
+                                      vec_nth(sub, j + 1));
+                    }
+                    libspec   = mino_vector(S, tmp, total);
+                    call_args = mino_cons(S, libspec, mino_nil(S));
+                    gc_pin(call_args);
+                    last_result = prim_require(S, call_args, env);
+                    gc_unpin(1);
+                    if (last_result == NULL) return NULL;
+                    (void)sub_rest;
+                }
+            }
+            return last_result;
+        }
+    }
+
+    /* Symbol form: '(require 'foo.bar) — Clojure's everyday form. */
+    if (name_val != NULL && name_val->type == MINO_SYMBOL) {
+        char pathbuf[256];
+        /* Runtime-ns shortcut: skip the file load when either the
+         * file's already in module_cache (loaded earlier) or no file
+         * backs the namespace (caller built it at runtime via
+         * (ns foo) (def ...) ). Primitive-only env entries don't
+         * trigger a skip on first load -- the wrapper file still
+         * has to run. */
+        if (name_val->as.s.len < 256) {
+            char dotbuf[256];
+            char shortcut_path[256];
+            mino_env_t *e;
+            int         path_ok;
+            memcpy(dotbuf, name_val->as.s.data, name_val->as.s.len);
+            dotbuf[name_val->as.s.len] = '\0';
+            e = ns_env_lookup(S, dotbuf);
+            path_ok = runtime_module_dotted_to_path(
+                          name_val->as.s.data, name_val->as.s.len,
+                          shortcut_path, sizeof(shortcut_path)) == 0;
+            if (e != NULL && e->len > 0) {
+                if (path_ok) {
+                    size_t ci;
+                    for (ci = 0; ci < S->module_cache_len; ci++) {
+                        if (strcmp(S->module_cache[ci].name,
+                                   shortcut_path) == 0) {
+                            return mino_nil(S);
+                        }
+                    }
+                } else {
+                    /* No filesystem path -- runtime-only namespace. */
+                    return mino_nil(S);
+                }
+            }
+        }
+        if (runtime_module_dotted_to_path(name_val->as.s.data,
+                                          name_val->as.s.len,
+                                          pathbuf, sizeof(pathbuf)) != 0) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001",
+                          "require: invalid module name");
+            return NULL;
+        }
+        return require_load_path(S, mino_string(S, pathbuf), env);
+    }
+
+    /* Vector form: '[mod.name :as alias :refer [syms]] */
+    if (name_val != NULL && name_val->type == MINO_VECTOR
+        && name_val->as.vec.len >= 1) {
+        mino_val_t *mod_sym = vec_nth(name_val, 0);
+        char pathbuf[256];
+        const char *alias_name        = NULL;
+        size_t      alias_len         = 0;
+        const char *as_alias_name     = NULL;
+        size_t      as_alias_len      = 0;
+        mino_val_t *refer_vec         = NULL;
+        int         refer_all         = 0;
+        int         needs_load        = 0;
+        mino_val_t *exclude_vec       = NULL;
+        mino_val_t *rename_map        = NULL;
+        size_t      vi;
+        if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
+            return NULL;
+        }
+        /* Parse keyword args.
+         * :as / :refer require loading; :as-alias does not. The two
+         * alias forms can coexist (an entry can have :as and :as-alias
+         * in the same libspec to register two aliases). */
+        for (vi = 1; vi + 1 < name_val->as.vec.len; vi += 2) {
+            mino_val_t *k = vec_nth(name_val, vi);
+            mino_val_t *v = vec_nth(name_val, vi + 1);
+            if (kw_match(k, "as") && v->type == MINO_SYMBOL) {
+                alias_name = v->as.s.data;
+                alias_len  = v->as.s.len;
+                needs_load = 1;
+            } else if (kw_match(k, "as-alias") && v->type == MINO_SYMBOL) {
+                as_alias_name = v->as.s.data;
+                as_alias_len  = v->as.s.len;
+            } else if (kw_match(k, "refer")) {
+                needs_load = 1;
+                if (v != NULL && v->type == MINO_VECTOR) {
+                    refer_vec = v;
+                } else if (v != NULL && v->type == MINO_KEYWORD
+                           && kw_match(v, "all")) {
+                    refer_all = 1;
+                } else {
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                        "eval/type", "MTY001",
+                        "require: :refer requires a vector of symbols or :all");
+                    return NULL;
+                }
+            } else if (kw_match(k, "exclude")
+                       && v != NULL && v->type == MINO_VECTOR) {
+                exclude_vec = v;
+                /* :exclude is meaningful only alongside :refer :all (which
+                 * use injects); does not by itself trigger a load. */
+            } else if (kw_match(k, "rename")
+                       && v != NULL && v->type == MINO_MAP) {
+                rename_map = v;
+            }
+        }
+        /* If only :as-alias is present, register the alias without
+         * loading. The target ns is created (empty) so find-ns /
+         * the-ns succeed and qualified keywords resolve. */
+        if (!needs_load && as_alias_name != NULL) {
+            char fbuf[256];
+            char abuf[256];
+            if (mod_sym->as.s.len >= sizeof(fbuf)
+                || as_alias_len >= sizeof(abuf)) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001",
+                              "require: :as-alias name too long");
+                return NULL;
+            }
+            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+            fbuf[mod_sym->as.s.len] = '\0';
+            memcpy(abuf, as_alias_name, as_alias_len);
+            abuf[as_alias_len] = '\0';
+            (void)ns_env_ensure(S, fbuf);
+            runtime_module_add_alias(S, abuf, fbuf);
+            return mino_nil(S);
+        }
+        /* Skip the file load only when the file's already in
+         * module_cache (loaded earlier in this state) or when no file
+         * backs the namespace (caller built it at runtime via
+         * (ns foo) (def ...) ). Pre-installed C primitives populate
+         * the env and the var registry at install time, but the
+         * wrapper .clj still has to run on first require so its
+         * defs/macros become visible to :refer. Mirrors the
+         * symbol-form check above. */
+        {
+            int skip_load = 0;
+            if (mod_sym->as.s.len < 256) {
+                char dotbuf[256];
+                char shortcut_path[256];
+                mino_env_t *e;
+                int         path_ok;
+                memcpy(dotbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+                dotbuf[mod_sym->as.s.len] = '\0';
+                e = ns_env_lookup(S, dotbuf);
+                path_ok = runtime_module_dotted_to_path(
+                              mod_sym->as.s.data, mod_sym->as.s.len,
+                              shortcut_path, sizeof(shortcut_path)) == 0;
+                if (e != NULL && e->len > 0) {
+                    if (path_ok) {
+                        size_t ci;
+                        for (ci = 0; ci < S->module_cache_len; ci++) {
+                            if (strcmp(S->module_cache[ci].name,
+                                       shortcut_path) == 0) {
+                                skip_load = 1;
+                                result    = mino_nil(S);
+                                break;
+                            }
+                        }
+                    } else {
+                        /* No filesystem path -- runtime-only namespace. */
+                        skip_load = 1;
+                        result    = mino_nil(S);
+                    }
+                }
+            }
+            if (!skip_load) {
+                /* Convert dotted name and load. */
+                if (runtime_module_dotted_to_path(mod_sym->as.s.data,
+                                                  mod_sym->as.s.len,
+                                                  pathbuf,
+                                                  sizeof(pathbuf)) != 0) {
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name",
+                                  "MNS001", "require: invalid module name");
+                    return NULL;
+                }
+                result = require_load_path(S, mino_string(S, pathbuf),
+                                           env);
+                if (result == NULL) return NULL;
+            }
+        }
+        /* Store alias. */
+        if (alias_name != NULL && alias_len > 0
+            && alias_len < 256 && mod_sym->as.s.len < 256) {
+            char abuf[256];
+            char fbuf[256];
+            memcpy(abuf, alias_name, alias_len);
+            abuf[alias_len] = '\0';
+            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+            fbuf[mod_sym->as.s.len] = '\0';
+            runtime_module_add_alias(S, abuf, fbuf);
+        }
+        /* Store :as-alias when paired with a load-triggering option;
+         * the alias-only path returned earlier when no load was needed. */
+        if (as_alias_name != NULL && as_alias_len > 0
+            && as_alias_len < 256 && mod_sym->as.s.len < 256) {
+            char abuf[256];
+            char fbuf[256];
+            memcpy(abuf, as_alias_name, as_alias_len);
+            abuf[as_alias_len] = '\0';
+            memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+            fbuf[mod_sym->as.s.len] = '\0';
+            runtime_module_add_alias(S, abuf, fbuf);
+        }
+        /* Process :refer — bind referred names into current ns env.
+         * Iterate the source ns env directly so macros (which live in
+         * the env without a var registry entry) come through too. */
+        if (mod_sym->as.s.len < 256 && (refer_vec != NULL || refer_all)) {
+            char modbuf[256];
+            mino_env_t *target = current_ns_env(S);
+            mino_env_t *src;
+            memcpy(modbuf, mod_sym->as.s.data, mod_sym->as.s.len);
+            modbuf[mod_sym->as.s.len] = '\0';
+            src = ns_env_lookup(S, modbuf);
+            if (refer_vec != NULL) {
+                size_t ri;
+                for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
+                    mino_val_t *rsym = vec_nth(refer_vec, ri);
+                    if (rsym != NULL && rsym->type == MINO_SYMBOL
+                        && rsym->as.s.len < 256) {
+                        char rbuf[256];
+                        size_t rn = rsym->as.s.len;
+                        mino_val_t *val = NULL;
+                        const char *bind_name = rbuf;
+                        size_t      bind_len  = rn;
+                        memcpy(rbuf, rsym->as.s.data, rn);
+                        rbuf[rn] = '\0';
+                        if (src != NULL) {
+                            env_binding_t *b = env_find_here(src, rbuf);
+                            if (b != NULL) val = b->val;
+                        }
+                        if (val == NULL) {
+                            mino_val_t *var = var_find(S, modbuf, rbuf);
+                            if (var != NULL) val = var->as.var.root;
+                        }
+                        if (val == NULL) {
+                            char msg[300];
+                            snprintf(msg, sizeof(msg),
+                                "require: %s does not refer var %s",
+                                modbuf, rbuf);
+                            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                                "name", "MNS001", msg);
+                            return NULL;
+                        }
+                        if (rename_map != NULL && rename_map->type == MINO_MAP) {
+                            size_t mi;
+                            for (mi = 0; mi < rename_map->as.map.len; mi++) {
+                                mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
+                                if (k != NULL && k->type == MINO_SYMBOL
+                                    && k->as.s.len == rn
+                                    && memcmp(k->as.s.data, rbuf, rn) == 0) {
+                                    mino_val_t *renamed = map_get_val(rename_map, k);
+                                    if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                                        bind_name = renamed->as.s.data;
+                                        bind_len  = renamed->as.s.len;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        if (bind_len < sizeof(rbuf)) {
+                            char nbuf[256];
+                            memcpy(nbuf, bind_name, bind_len);
+                            nbuf[bind_len] = '\0';
+                            env_bind(S, target, nbuf, val);
+                        }
+                    }
+                }
+            }
+            if (refer_all && src != NULL) {
+                size_t ri;
+                for (ri = 0; ri < src->len; ri++) {
+                    const char *bname = src->bindings[ri].name;
+                    size_t       blen  = strlen(bname);
+                    const char *bind_name = bname;
+                    size_t      bind_len  = blen;
+                    /* Honor :exclude when paired with :refer :all. */
+                    if (exclude_vec != NULL) {
+                        size_t  ei;
+                        int     skip = 0;
+                        for (ei = 0; ei < exclude_vec->as.vec.len; ei++) {
+                            mino_val_t *e = vec_nth(exclude_vec, ei);
+                            if (e != NULL && e->type == MINO_SYMBOL
+                                && e->as.s.len == blen
+                                && memcmp(e->as.s.data, bname, blen) == 0) {
+                                skip = 1;
+                                break;
+                            }
+                        }
+                        if (skip) continue;
+                    }
+                    if (rename_map != NULL && rename_map->type == MINO_MAP) {
+                        size_t mi;
+                        for (mi = 0; mi < rename_map->as.map.len; mi++) {
+                            mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
+                            if (k != NULL && k->type == MINO_SYMBOL
+                                && k->as.s.len == blen
+                                && memcmp(k->as.s.data, bname, blen) == 0) {
+                                mino_val_t *renamed = map_get_val(rename_map, k);
+                                if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                                    bind_name = renamed->as.s.data;
+                                    bind_len  = renamed->as.s.len;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if (bind_len < 256) {
+                        char nbuf[256];
+                        memcpy(nbuf, bind_name, bind_len);
+                        nbuf[bind_len] = '\0';
+                        env_bind(S, target, nbuf, src->bindings[ri].val);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /* String / path form: delegate to the loader. */
+    return require_load_path(S, name_val, env);
 }
 
 /* (use libspec ...) -- like (require ...) but with :refer :all default.
