@@ -56,4 +56,11 @@
     (is (string? s))
     (is (clojure.string/includes? s "Capability: :fs"))))
 
+(deftest doc-string-prefixes-with-newline-after-real-doc
+  ;; Regression: a docstring + capability renders the capability on a
+  ;; new line preceded by two spaces, NOT inline at the end of the
+  ;; previous sentence. Catches future changes to the prefix shape.
+  (let [s (doc-string 'slurp)]
+    (is (clojure.string/includes? s "\n  Capability: :io"))))
+
 (run-tests)

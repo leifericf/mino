@@ -798,7 +798,12 @@ static mino_val_t *doc_render_with_capability(mino_state_t *S,
     {
         size_t doclen = e->docstring != NULL ? strlen(e->docstring) : 0;
         size_t caplen = strlen(e->capability);
-        const char *prefix = "\n  Capability: :";
+        /* Prepend the newline+indent only when there's a real docstring
+         * to separate from. An empty/NULL docstring would otherwise
+         * render with a stray leading newline (e.g. "\n  Capability:
+         * :foo"); the no-doc shape just renders "Capability: :foo". */
+        const char *prefix = doclen > 0 ? "\n  Capability: :"
+                                        : "Capability: :";
         size_t plen = strlen(prefix);
         size_t total = doclen + plen + caplen;
         char  *buf = (char *)malloc(total + 1);
