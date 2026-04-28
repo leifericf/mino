@@ -280,6 +280,12 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
      * pthread itself remains joinable until mino_host_threads_quiesce;
      * pthread_join on an already exited joinable thread is a no-op
      * that returns immediately. */
+    /* Worker exit takes the lock explicitly: this thread did not enter
+     * through mino_call, so no caller is holding state_lock for us. The
+     * detach of worker_ctxs_head and the thread_count decrement must
+     * happen as one atomic update so a concurrent mino_thread_count
+     * never sees a ctx removed from the GC-root list while the counter
+     * still claims a live worker. */
     mino_state_lock_acquire(S);
     {
         mino_thread_ctx_t **pp = &S->worker_ctxs_head;
@@ -343,7 +349,13 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
     impl->body_env = (mino_val_t *)env; /* env is gc-rooted via thunk closure */
 
     /* First spawn flips multi_threaded; from this point gc/atom paths
-     * take their multi-threaded branches. */
+     * take their multi-threaded branches. Lock invariant: this is
+     * reached only via apply_callable from mino_call, which holds
+     * state_lock for the entire call (state.c mino_call). The
+     * multi_threaded and thread_count writes therefore execute under
+     * the caller-held lock; workers later read these fields through
+     * paths that re-acquire the lock or use the documented relaxed
+     * accessor (mino_thread_count). */
     S->multi_threaded = 1;
     S->thread_count++;
 

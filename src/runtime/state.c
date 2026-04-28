@@ -828,6 +828,16 @@ int mino_get_thread_limit(mino_state_t *S)
     return S->thread_limit;
 }
 
+/* Relaxed observability read of S->thread_count -- intentionally without
+ * state_lock. The only consumer is the "suppress major GC while host
+ * workers are alive" approximation; a transient stale value either
+ * delays a major slice by one tick (harmless) or runs a slice during
+ * the gap between increment and visibility (also harmless, because
+ * workers tag their own roots through S->worker_ctxs_head rather than
+ * through thread_count). Writer sites in host_threads.c hold the lock:
+ * mino_future_spawn increments under the caller-held state_lock from
+ * mino_call (apply path); worker exit decrements after taking the lock
+ * explicitly. Plain int is acceptable for this counter. */
 int mino_thread_count(mino_state_t *S)
 {
     if (S == NULL) { return 0; }
