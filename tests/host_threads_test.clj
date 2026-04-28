@@ -66,9 +66,11 @@
   ;; Stress the atom CAS path under genuine concurrency. With N futures
   ;; each doing M increments, the final value must be N*M (no lost
   ;; updates). This exercises the __atomic_compare_exchange path.
+  ;; Cap N at (dec (mino-thread-limit)) so the test thread plus N
+  ;; workers fit under the runtime's grant on low-CPU shared runners.
   (when (> (mino-thread-limit) 1)
     (let [a (atom 0)
-          n 4
+          n (min 4 (max 1 (dec (mino-thread-limit))))
           m 250
           futs (doall (for [_ (range n)]
                         (future (dotimes [_ m] (swap! a inc)))))]

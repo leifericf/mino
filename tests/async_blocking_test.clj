@@ -124,10 +124,12 @@
 (deftest blocking-many-cross-thread-pings
   ;; Stress the channel under genuine concurrency: N futures each push
   ;; M values, the test thread takes N*M values back. With <!! and >!!
-  ;; bridging across OS threads, no values may be lost.
+  ;; bridging across OS threads, no values may be lost. Cap N at
+  ;; (dec (mino-thread-limit)) so the test thread plus N producers fit
+  ;; under the runtime's grant on low-CPU shared runners.
   (when (> (mino-thread-limit) 1)
     (let [ch (chan 8)
-          n  4
+          n  (min 4 (max 1 (dec (mino-thread-limit))))
           m  50
           producers (doall (for [i (range n)]
                              (future (dotimes [j m]
