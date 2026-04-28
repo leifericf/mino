@@ -108,8 +108,7 @@ typedef enum {
                      * CANCELLED), a mutex+cond for cross-thread
                      * delivery, and a thread handle. Promises share
                      * this type — a promise is a future that exposes
-                     * `deliver` and never has a worker thread. Cycle
-                     * G4.3. */
+                     * `deliver` and never has a worker thread. */
 } mino_type_t;
 
 typedef struct mino_val    mino_val_t;
@@ -117,9 +116,9 @@ typedef struct mino_env    mino_env_t;
 typedef struct mino_future mino_future_t;
 typedef struct mino_state mino_state_t;
 typedef struct mino_ref   mino_ref_t;
-typedef struct mino_vec_node  mino_vec_node_t;   /* opaque; see mino.c */
-typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque; see mino.c */
-typedef struct mino_rb_node   mino_rb_node_t;    /* opaque; see rbtree.c */
+typedef struct mino_vec_node  mino_vec_node_t;   /* opaque to embedders */
+typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque to embedders */
+typedef struct mino_rb_node   mino_rb_node_t;    /* opaque to embedders */
 
 typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);
@@ -364,8 +363,8 @@ void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
  *
  * Idempotent: subsequent calls with the same ns/name return the
  * existing type so re-loading scripts is safe. Field shape on a
- * re-call is ignored (the existing type wins) — F.4 macros validate
- * shape changes at the script layer when defrecord re-evaluates.
+ * re-call is ignored (the existing type wins) — the script-layer
+ * `defrecord` macro validates shape changes when it re-evaluates.
  *
  * The strings are copied into the state's intern table on first use,
  * so callers may pass stack-allocated names. Field names are
@@ -920,11 +919,6 @@ int mino_fi_should_fail_raw(mino_state_t *S);
  * `mino_install_all`, so REPL/script users get the canonical surface
  * working out of the box. Embedders opt in per state by calling
  * `mino_set_thread_limit` with a value > 1.
- *
- * The actual host-thread implementation lands across upcoming versions;
- * v0.84.x ships the API surface and the throw-stub bodies so
- * embedders can code against the contract while the runtime catches up.
- * Status of each cycle is tracked in CHANGELOG.md.
  */
 
 /*
@@ -959,7 +953,7 @@ int  mino_thread_count(mino_state_t *S);
 void mino_quiesce_threads(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
-/* Embed-distinctive thread API (Cycle G4.5)                                 */
+/* Host thread pool, factory, stack-size knobs                               */
 /* ------------------------------------------------------------------------- */
 /*
  * The default model is "spawn-per-future": each `(future ...)` calls
