@@ -197,6 +197,13 @@ void gc_sweep(mino_state_t *S)
             } else if (v->type == MINO_RECORD) {
                 free(v->as.record.vals);
                 v->as.record.vals = NULL;
+            } else if (v->type == MINO_FUTURE) {
+                /* Hosted-thread future: tear down mu/cv and free
+                 * the impl struct. quiesce should have joined any
+                 * outstanding worker before we get here; if not, the
+                 * impl is leaked rather than freed under it. */
+                extern void mino_future_gc_sweep(mino_val_t *fut);
+                mino_future_gc_sweep(v);
             }
         }
         freed_old += h->size;

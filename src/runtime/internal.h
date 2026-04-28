@@ -590,6 +590,11 @@ struct mino_state {
     pthread_mutex_t state_lock;
 #endif
 
+    /* Outstanding futures (Cycle G4.3). Singly-linked; quiesce walks
+     * this to join worker threads before state teardown. The struct
+     * mino_future definition is below (after struct mino_state). */
+    mino_future_t *future_list_head;
+
     /* Stop-the-world request for major GC (Cycle G4.2).
      *
      * Set by `gc_request_stw` before running a major collection;
@@ -622,6 +627,53 @@ static inline mino_thread_ctx_t *mino_current_ctx(mino_state_t *S)
     mino_thread_ctx_t *t = mino_tls_ctx;
     return t != NULL ? t : &S->main_ctx;
 }
+
+/* ------------------------------------------------------------------------- */
+/* Host-thread future (Cycle G4.3).                                          */
+/*                                                                            */
+/* Defined here (rather than runtime/host_threads.h) so GC trace + sweep,    */
+/* print, and other dispatch sites can see field offsets without including   */
+/* host_threads.h transitively. Pthread/Win32 mu+cv wrappers are the only    */
+/* platform-conditional fields.                                              */
+/* ------------------------------------------------------------------------- */
+
+typedef enum {
+    MINO_FUTURE_PENDING   = 0,
+    MINO_FUTURE_RESOLVED  = 1,
+    MINO_FUTURE_FAILED    = 2,
+    MINO_FUTURE_CANCELLED = 3
+} mino_future_state_t;
+
+struct mino_future {
+    mino_state_t       *state;
+
+#if defined(_WIN32) && defined(_MSC_VER)
+    CRITICAL_SECTION    mu;
+    CONDITION_VARIABLE  cv;
+#else
+    pthread_mutex_t     mu;
+    pthread_cond_t      cv;
+#endif
+    int                 state_tag;       /* mino_future_state_t */
+    mino_val_t         *result;          /* RESOLVED: worker's return */
+    mino_val_t         *exception;       /* FAILED: thrown value */
+
+    volatile int        cancel_flag;     /* set by future-cancel */
+
+#if defined(_WIN32) && defined(_MSC_VER)
+    HANDLE              thread;
+#else
+    pthread_t           thread;
+#endif
+    int                 thread_started;  /* 1 once spawn succeeded */
+    int                 thread_joined;   /* 1 once join completed */
+
+    mino_val_t         *thunk;           /* zero-arg fn for the body */
+    mino_val_t         *body_env;        /* env captured at spawn */
+    mino_val_t         *dyn_snapshot;    /* TODO: dyn-var conveyance */
+
+    mino_future_t      *next_in_state;   /* S->future_list_head chain */
+};
 
 /* ------------------------------------------------------------------------- */
 /* Safepoint poll (Cycle G4.2).                                              */

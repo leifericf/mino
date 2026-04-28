@@ -14,9 +14,9 @@
                                        include-flags)) " "))
 (def ^:private ldflags (let [v (or (getenv "LDFLAGS") "")]
                          (if (= v "") [] (str/split v " "))))
-(def ^:private libs    (str/split (or (getenv "LIBS") "-lm") " "))
-
 (def ^:private windows? (some? (getenv "OS")))
+(def ^:private libs    (str/split (or (getenv "LIBS")
+                                       (if windows? "-lm" "-lm -lpthread")) " "))
 (def ^:private mino-bin (if windows? "mino.exe" "./mino"))
 
 (def ^:private lib-srcs
@@ -28,6 +28,7 @@
    "src/runtime/error.c" "src/runtime/env.c"
    "src/runtime/ns_env.c"
    "src/runtime/path_buf.c"
+   "src/runtime/host_threads.c"
    "src/gc/driver.c" "src/gc/roots.c" "src/gc/major.c"
    "src/gc/barrier.c" "src/gc/minor.c"
    "src/gc/trace.c" "src/runtime/module.c"

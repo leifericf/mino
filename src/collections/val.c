@@ -824,6 +824,10 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         if (a->as.record.ext == NULL || b->as.record.ext == NULL) return 0;
         return mino_eq(a->as.record.ext, b->as.record.ext);
     }
+    case MINO_FUTURE:
+        /* Futures use identity equality — two distinct future cells
+         * are never equal even if they hold the same result. */
+        return a == b;
     }
     return 0;
 }

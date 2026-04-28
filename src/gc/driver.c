@@ -434,6 +434,20 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             }
             break;
         }
+        case MINO_FUTURE: {
+            /* The impl struct is malloc-owned; the only GC-owned values
+             * are the result/exception/thunk/body_env/dyn_snapshot
+             * slots inside it. */
+            mino_future_t *impl = v->as.future.impl;
+            if (impl != NULL) {
+                gc_mark_child_push(S, impl->result);
+                gc_mark_child_push(S, impl->exception);
+                gc_mark_child_push(S, impl->thunk);
+                gc_mark_child_push(S, impl->body_env);
+                gc_mark_child_push(S, impl->dyn_snapshot);
+            }
+            break;
+        }
         default:
             break;
         }

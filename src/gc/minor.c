@@ -97,6 +97,9 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
             } else if (v->type == MINO_RECORD) {
                 free(v->as.record.vals);
                 v->as.record.vals = NULL;
+            } else if (v->type == MINO_FUTURE) {
+                extern void mino_future_gc_sweep(mino_val_t *fut);
+                mino_future_gc_sweep(v);
             }
         }
         freed_bytes += h->size;
@@ -272,6 +275,19 @@ static void gc_verify_remset_complete(mino_state_t *S)
                     ? v->as.record.type->as.record_type.fields->as.vec.len : 0;
                 for (k = 0; k < kn; k++) {
                     gc_verify_check(S, h, v->as.record.vals[k]);
+                }
+                break;
+            }
+            case MINO_FUTURE: {
+                /* Trace owned values held by the impl. The impl is
+                 * malloc-owned, not GC-owned, so we don't verify_check
+                 * impl itself; we walk its referent fields. */
+                if (v->as.future.impl != NULL) {
+                    gc_verify_check(S, h, v->as.future.impl->result);
+                    gc_verify_check(S, h, v->as.future.impl->exception);
+                    gc_verify_check(S, h, v->as.future.impl->thunk);
+                    gc_verify_check(S, h, v->as.future.impl->body_env);
+                    gc_verify_check(S, h, v->as.future.impl->dyn_snapshot);
                 }
                 break;
             }

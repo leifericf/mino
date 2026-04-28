@@ -96,17 +96,25 @@ typedef enum {
                      * dispatch lives in the protocol's namespace,
                      * keyed by what (type x) returns. Construct via
                      * mino_defrecord. */
-    MINO_RECORD     /* record value: pointer to its MINO_TYPE plus a
+    MINO_RECORD,    /* record value: pointer to its MINO_TYPE plus a
                      * malloc-owned array of field-value slots and an
                      * optional MINO_MAP for extension keys. Storage
                      * is field slots, not a backing map; map-iso
                      * behaviour (get, assoc, seq, count, ...) is a
                      * contract layered on top via primitive dispatch
                      * on this tag. Construct via mino_record. */
+    MINO_FUTURE     /* host-thread future: carries a result-or-exception
+                     * cell, a state machine (PENDING, RESOLVED, FAILED,
+                     * CANCELLED), a mutex+cond for cross-thread
+                     * delivery, and a thread handle. Promises share
+                     * this type — a promise is a future that exposes
+                     * `deliver` and never has a worker thread. Cycle
+                     * G4.3. */
 } mino_type_t;
 
-typedef struct mino_val   mino_val_t;
-typedef struct mino_env   mino_env_t;
+typedef struct mino_val    mino_val_t;
+typedef struct mino_env    mino_env_t;
+typedef struct mino_future mino_future_t;
 typedef struct mino_state mino_state_t;
 typedef struct mino_ref   mino_ref_t;
 typedef struct mino_vec_node  mino_vec_node_t;   /* opaque; see mino.c */
@@ -237,6 +245,9 @@ struct mino_val {
             mino_val_t **vals;   /* malloc-owned; len == type's field count */
             mino_val_t  *ext;    /* MINO_MAP for ext keys, or NULL */
         } record;
+        struct {          /* MINO_FUTURE: host-thread future */
+            struct mino_future *impl; /* opaque; see runtime/host_threads.c */
+        } future;
     } as;
 };
 

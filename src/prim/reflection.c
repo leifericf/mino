@@ -280,6 +280,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * pointer. Returning a keyword here would be a leak in the
          * protocol-dispatch story. */
         return v->as.record.type;
+    case MINO_FUTURE:    return mino_keyword(S, "future");
     }
     return mino_keyword(S, "unknown");
 }

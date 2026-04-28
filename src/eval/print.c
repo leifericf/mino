@@ -3,6 +3,7 @@
  */
 
 #include "runtime/internal.h"
+#include "runtime/host_threads.h"
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */
@@ -338,6 +339,22 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         }
         S->print_depth--;
         fputc('}', out);
+        return;
+    }
+    case MINO_FUTURE: {
+        const mino_future_t *impl = v->as.future.impl;
+        const char *st = "pending";
+        if (impl != NULL) {
+            switch (impl->state_tag) {
+            case MINO_FUTURE_RESOLVED:  st = "resolved"; break;
+            case MINO_FUTURE_FAILED:    st = "failed";   break;
+            case MINO_FUTURE_CANCELLED: st = "cancelled"; break;
+            default:                    st = "pending";  break;
+            }
+        }
+        fputs("#<future:", out);
+        fputs(st, out);
+        fputc('>', out);
         return;
     }
     }
