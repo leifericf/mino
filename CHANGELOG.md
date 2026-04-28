@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.91.0 — Embed-Distinctive Thread API
+
+Three knobs let embedders shape mino's threading without forking the
+runtime: a host thread pool, a per-worker lifecycle factory, and a
+per-worker stack size. Default behaviour (spawn-per-future) is
+unchanged when none of them are set.
+
+**`mino_set_thread_pool`.** Hand mino a host pool — Tokio runtime,
+libuv, ASIO, custom pthread pool — and every `(future ...)` submits
+a work item via `pool->submit_fn` instead of calling
+`pthread_create`. The same pool can be bound to multiple
+`mino_state_t` for multi-tenant patterns: per-NPC AI, per-tenant
+script sandbox, per-buffer linter, chat-bot fleet. The pool's N
+workers fan out across all states; each work item carries its own
+ctx and finds the right state via `impl->state`. Pool-managed
+quiesce uses cv-wait on the future's mu since mino doesn't own the
+pthread; spawn-per-future quiesce keeps `pthread_join`.
+
+**`mino_set_thread_factory`.** Install start/end callbacks that fire
+on the worker thread for the spawn-per-future path. Use for naming
+(`pthread_setname_np`), CPU affinity, priority class, or
+tracing-context propagation. Pool-managed workers run under the
+pool's own lifecycle hooks.
+
+**`mino_set_thread_stack_size`.** Per-worker stack size for the
+spawn-per-future path. Defaults to platform default. Useful for
+tight-RSS embedders running many small futures. Pool workers ignore
+it (the pool decides).
+
+**Quiesce drops the GIL.** Previously a recursive caller (most
+common: `prim_exit` from inside a script-side `(exit ...)`) would
+deadlock on `pthread_join` because the worker needed the same
+state_lock to publish its result. `mino_host_threads_quiesce` now
+yields the lock before joining and re-acquires after.
+
+**Worked example.** `examples/embed_multi_tenant_threads.c` spins up
+six tenants over three shared pool workers and round-trips a future
+from each tenant. Demonstrates the work-item-carries-state-pointer
+model end-to-end.
+
 ## v0.90.0 — Blocking Channel Ops Park Across Threads
 
 `<!!`, `>!!`, and `alts!!` outside a `go` block now do real OS-thread
