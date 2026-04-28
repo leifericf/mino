@@ -273,10 +273,37 @@ static void gc_mark_intern_table(mino_state_t *S, const intern_table_t *tbl)
  * cached core forms, async scheduler queue, trampoline sentinels, and
  * async timer channels.
  */
+/* gc_mark_ctx_dyn_stack -- mark every value bound in this ctx's dyn
+ * stack. Walks frame -> bindings -> val. */
+static void gc_mark_ctx_dyn_stack(mino_state_t *S, mino_thread_ctx_t *ctx)
+{
+    dyn_frame_t   *f;
+    dyn_binding_t *b;
+    for (f = ctx->dyn_stack; f != NULL; f = f->prev) {
+        for (b = f->bindings; b != NULL; b = b->next) {
+            gc_mark_interior(S, b->val);
+        }
+    }
+}
+
+/* gc_mark_ctx_gc_save -- mark every value pinned on this ctx's gc_save
+ * stack. Used so blocked workers' pinned values stay visible to a GC
+ * initiated from another thread. */
+static void gc_mark_ctx_gc_save(mino_state_t *S, mino_thread_ctx_t *ctx)
+{
+    int si;
+    int limit = ctx->gc_save_len < GC_SAVE_MAX
+        ? ctx->gc_save_len : GC_SAVE_MAX;
+    for (si = 0; si < limit; si++) {
+        gc_mark_interior(S, ctx->gc_save[si]);
+    }
+}
+
 void gc_mark_roots(mino_state_t *S)
 {
-    root_env_t *r;
-    int i;
+    root_env_t        *r;
+    mino_thread_ctx_t *w;
+    int                i;
     for (r = S->gc_root_envs; r != NULL; r = r->next) {
         gc_mark_interior(S, r->env);
     }
@@ -323,22 +350,9 @@ void gc_mark_roots(mino_state_t *S)
         }
     }
     /* Pin dynamic binding values for every live ctx (main + workers). */
-    {
-        dyn_frame_t *f;
-        dyn_binding_t *b;
-        mino_thread_ctx_t *w;
-        for (f = S->main_ctx.dyn_stack; f != NULL; f = f->prev) {
-            for (b = f->bindings; b != NULL; b = b->next) {
-                gc_mark_interior(S, b->val);
-            }
-        }
-        for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
-            for (f = w->dyn_stack; f != NULL; f = f->prev) {
-                for (b = f->bindings; b != NULL; b = b->next) {
-                    gc_mark_interior(S, b->val);
-                }
-            }
-        }
+    gc_mark_ctx_dyn_stack(S, &S->main_ctx);
+    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+        gc_mark_ctx_dyn_stack(S, w);
     }
     /* Pin diagnostic data and cached map (current ctx; workers don't
      * publish diagnostics back through this path). */
@@ -351,32 +365,11 @@ void gc_mark_roots(mino_state_t *S)
     /* Pin print-method hook if installed. */
     gc_mark_interior(S, S->print_method_fn);
     /* Pin values on the GC save stack of every live ctx. The current
-     * thread's ctx is whichever is mino_current_ctx; other ctxs are
-     * blocked workers (Cycle G4.3) whose gc_save would otherwise be
-     * invisible to a GC initiated from a different thread. We walk
-     * S->main_ctx + S->worker_ctxs_head; the current thread's ctx is
-     * one of those, so it's covered. */
-    {
-        mino_thread_ctx_t *ctxs[2];
-        mino_thread_ctx_t *w;
-        int               ci;
-        ctxs[0] = &S->main_ctx;
-        ctxs[1] = NULL; /* sentinel */
-        for (ci = 0; ctxs[ci] != NULL; ci++) {
-            mino_thread_ctx_t *c = ctxs[ci];
-            int si;
-            int limit = c->gc_save_len < GC_SAVE_MAX ? c->gc_save_len : GC_SAVE_MAX;
-            for (si = 0; si < limit; si++) {
-                gc_mark_interior(S, c->gc_save[si]);
-            }
-        }
-        for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
-            int si;
-            int limit = w->gc_save_len < GC_SAVE_MAX ? w->gc_save_len : GC_SAVE_MAX;
-            for (si = 0; si < limit; si++) {
-                gc_mark_interior(S, w->gc_save[si]);
-            }
-        }
+     * thread's ctx is in S->main_ctx + S->worker_ctxs_head, so we
+     * cover it via the same loop that covers blocked workers. */
+    gc_mark_ctx_gc_save(S, &S->main_ctx);
+    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+        gc_mark_ctx_gc_save(S, w);
     }
     /* Pin cached core.clj parsed forms. */
     if (S->core_forms != NULL) {
