@@ -4,6 +4,7 @@
  */
 
 #include "runtime/internal.h"
+#include "runtime/host_threads.h"
 #include "async/scheduler.h"
 #include "async/timer.h"
 
@@ -336,6 +337,10 @@ void mino_state_free(mino_state_t *S)
     if (S == NULL) {
         return;
     }
+    /* Cycle G4.3: join every outstanding worker before tearing down
+     * any heap state. Workers depend on S being live; freeing under
+     * them would crash. */
+    mino_host_threads_quiesce(S);
     state_free_root_envs(S);
     state_free_refs(S);
     state_free_ns_aliases(S);
@@ -820,11 +825,14 @@ int mino_thread_count(mino_state_t *S)
 
 void mino_quiesce_threads(mino_state_t *S)
 {
-    /* In the v0.84.0 foundation slice no host threads can spawn yet
-     * (the thrown stubs in core.clj reject every entry point), so
-     * thread_count is always 0 here and the wait is a no-op. The full
-     * impl will join every entry in S's thread set before returning. */
-    (void)S;
+    /* Walk S->future_list_head and join every worker that hasn't been
+     * joined yet. Cycle G4.3 added the real implementation in
+     * runtime/host_threads.c; mino_state_free calls this before tearing
+     * down the heap so workers don't run after free. Embedders also
+     * call this directly when they need to wait for in-flight futures
+     * before doing other work. */
+    if (S == NULL) { return; }
+    mino_host_threads_quiesce(S);
 }
 
 /* ------------------------------------------------------------------------- */

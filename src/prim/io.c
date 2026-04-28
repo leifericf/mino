@@ -623,6 +623,11 @@ mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             code = (int)v->as.f;
         }
     }
+    /* Cycle G4.3: join outstanding host worker threads before libc
+     * teardown so leaked threads don't trip TSan (or, on Windows,
+     * DllMain teardown ordering). State teardown via mino_state_free
+     * also calls quiesce, but `(exit ...)` bypasses that path. */
+    mino_quiesce_threads(S);
     exit(code);
     return mino_nil(S); /* unreachable */
 }

@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.89.0 — Real Host Threads
+
+Real OS-thread futures and promises. `(future expr)`, `(thread expr)`,
+`(promise)`, `deliver`, `realized?`, `future-cancel`, `future-done?`,
+`future-cancelled?`, `future?` all work end-to-end against
+pthread-backed workers (CreateThread on Windows). Standalone
+`./mino` grants `cpu_count` after `mino_install_all` so REPL users
+get the canonical surface without configuration; embedders raise the
+limit per state via `mino_set_thread_limit`.
+
+**New value type: `MINO_FUTURE`.** A future cell holds a
+malloc-owned impl struct with mu/cv, state machine
+(`PENDING`/`RESOLVED`/`FAILED`/`CANCELLED`), result+exception slots,
+cancellation flag, and OS thread handle. Promises share the type
+(no thread; `deliver` writes the result directly). Identity
+equality. Prints as `#<future:state>`.
+
+**TLS-backed ctx accessor.** Worker threads allocate their own
+`mino_thread_ctx_t` at entry, install via TLS, and link onto
+`S->worker_ctxs_head` so GC root scanning walks every blocked
+worker's gc_save and dyn_stack. The embedder thread leaves TLS
+NULL and falls through to `&S->main_ctx`. ~415 sites migrated from
+`S->ctx->FIELD` to `mino_current_ctx(S)->FIELD`; per-state field
+removed.
+
+**Per-state recursive mutex.** `mino_lock(S)` / `mino_unlock(S)`
+take a recursive `state_lock` at the boundaries of `mino_eval`,
+`mino_eval_string`, and `mino_call`. Workers and the embedder
+thread serialize within one state; cross-state work runs fully
+concurrent. `ctx->lock_depth` tracks recursion so
+`mino_yield_lock` / `mino_resume_lock` can drop the lock entirely
+around a blocking `cv_wait` in `mino_future_deref`, then re-acquire
+to the saved depth. The lock is uncontested in single-threaded
+states; cost is one mutex-acquire per public eval entry.
+
+**GC suppression while workers are alive.** `gc_driver_tick` skips
+collection when `thread_count > 0`. The conservative stack scan
+only walks the current thread's stack, so a GC initiated from one
+thread can't see another thread's stack-rooted values. Memory
+normalizes after `mino_quiesce_threads`. Cycle G4.4+ replaces this
+with safepoint-driven per-thread stack snapshots for true
+concurrent GC.
+
+**Lifecycle.** `mino_quiesce_threads(S)` joins every outstanding
+worker. Called automatically from `mino_state_free` and from
+`(exit ...)` so workers don't run after the state is torn down.
+Embedders also call it directly to wait for in-flight futures
+before doing other work.
+
+**TSan-clean.** Full suite (1449 tests, 6987 assertions) passes
+under `-fsanitize=thread`. The host_threads test exercises spawn
++ deref, promise + deliver, future-cancel, the future? predicate,
+and a 4-future × 250-iter atom CAS contention test (lost updates
+caught via the v0.87.0 atomic CAS upgrade).
+
+**Documented limitation:** v0.89 single-state futures execute
+serialized; cross-state futures sharing a host pool run fully
+concurrent (no shared lock). Cycle G4.4 introduces blocking
+channel ops + core.async/thread unification; G4.5 adds the
+embed-distinctive surface (`mino_set_thread_pool`,
+`mino_set_thread_factory`, `mino_set_thread_stack_size`); G4.6
+relaxes single-state serialization with per-thread allocator
+arenas and finer-grained registry locks.
+
 ## v0.88.0 — Safepoint Poll And STW Request For Major GC
 
 Mutators now poll a per-thread `should_yield` flag at canonical
