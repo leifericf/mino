@@ -284,8 +284,8 @@ struct mino_state {
      * the TLS ctx if set, else &main_ctx for the embedder thread. */
     mino_thread_ctx_t  main_ctx;
 
-    /* Garbage collection.
-     *
+    /* === Garbage collection ============================================ */
+    /*
      * gc_all_young and gc_all_old are singly-linked lists partitioning
      * every live header by generation. Alloc prepends to the young
      * list; minor sweep walks only young (promotion moves a header
@@ -378,6 +378,8 @@ struct mino_state {
     gc_evt_t       *gc_evt_ring;
     uint64_t        gc_evt_seq;
 
+    /* === Value caches: singletons, sentinels, interns, special forms === */
+
     /* Singletons */
     mino_val_t      nil_singleton;
     mino_val_t      true_singleton;
@@ -433,6 +435,8 @@ struct mino_state {
     mino_val_t     *sf_and;
     mino_val_t     *sf_or;
 
+    /* === Module system, execution limits, metadata ===================== */
+
     /* Execution limits (config knobs; set once by host, read by ctx). */
     size_t          limit_steps;
     size_t          limit_heap;
@@ -463,6 +467,8 @@ struct mino_state {
     meta_entry_t   *meta_table;
     size_t          meta_table_len;
     size_t          meta_table_cap;
+
+    /* === Printer, reader, source diagnostics =========================== */
 
     /* Printer */
     int             print_depth;
@@ -503,6 +509,8 @@ struct mino_state {
         size_t      len;    /* length of text */
     } source_cache[4];
 
+    /* === Namespaces, vars, host interop ================================ */
+
     /* Namespace */
     const char     *current_ns;       /* from (ns ...), default "user" */
     ns_alias_t     *ns_aliases;
@@ -535,6 +543,8 @@ struct mino_state {
     size_t          host_types_cap;
 
     /* Eval current_form moved to mino_thread_ctx_t. */
+
+    /* === Misc per-state: PRNG, sort, gensym, refs, fault injection ===== */
 
     /* Per-state PRNG (xorshift64*). Seeded lazily on first draw so two
      * runtimes initialised at the same instant get distinct sequences.
@@ -574,7 +584,9 @@ struct mino_state {
      * clone serialization buffer. Same semantics as above. */
     long            fi_raw_countdown;
 
-    /* Host-thread grant (Cycle G4 foundation).
+    /* === Host-thread runtime: grant, knobs, lock, futures, STW ========= */
+
+    /* Host-thread grant.
      *
      * thread_limit is the host-granted ceiling on concurrent host
      * threads. Default 1 (single-threaded; future/promise/etc. throw
@@ -654,6 +666,8 @@ struct mino_state {
      * (the ordering invariants are enforced via the same
      * __atomic_* primitives used by atom CAS). */
     volatile int    stw_request;
+
+    /* === Async scheduler and timers ==================================== */
 
     /* Async scheduler run queue. */
     sched_entry_t  *async_run_head;
