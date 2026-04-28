@@ -181,45 +181,36 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
     return sym;
 }
 
-/*
- * quasiquote_expand: walk `form` as a template. Sublists, subvectors, and
- * submaps are recursed into; (unquote x) evaluates x and uses its value;
- * (unquote-splicing x) evaluates x (expected to yield a list) and splices
- * its elements into the enclosing list. Bare symbols are auto-qualified
- * to the namespace owning the binding (when one exists), matching the
- * Clojure backquote contract.
- */
-mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
-                                     mino_env_t *env)
+/* qq_expand_vector -- expand a vector template. The fast path (no ~@
+ * present) keeps the same length; the slow path builds a cons list and
+ * converts at the end so splicing can grow or shrink the result. */
+static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
+                                    mino_env_t *env)
 {
-    if (form != NULL && form->type == MINO_SYMBOL) {
-        return qq_qualify_symbol(S, form, env);
+    size_t       nn  = form->as.vec.len;
+    size_t       i;
+    int          has_splice = 0;
+    if (nn == 0) { return form; }
+    /* Fast path: no ~@ means fixed-size output. */
+    for (i = 0; i < nn; i++) {
+        mino_val_t *e = vec_nth(form, i);
+        if (mino_is_cons(e)
+            && sym_eq(e->as.cons.car, "unquote-splicing")) {
+            has_splice = 1; break;
+        }
     }
-    if (form != NULL && form->type == MINO_VECTOR) {
-        size_t       nn  = form->as.vec.len;
-        size_t       i;
-        int          has_splice = 0;
-        if (nn == 0) { return form; }
-        /* Fast path: no ~@ means fixed-size output. */
+    if (!has_splice) {
+        mino_val_t **tmp = (mino_val_t **)gc_alloc_typed(S,
+            GC_T_VALARR, nn * sizeof(*tmp));
         for (i = 0; i < nn; i++) {
-            mino_val_t *e = vec_nth(form, i);
-            if (mino_is_cons(e)
-                && sym_eq(e->as.cons.car, "unquote-splicing")) {
-                has_splice = 1; break;
-            }
+            mino_val_t *e = quasiquote_expand(S, vec_nth(form, i), env);
+            if (e == NULL) { return NULL; }
+            gc_valarr_set(S, tmp, i, e);
         }
-        if (!has_splice) {
-            mino_val_t **tmp = (mino_val_t **)gc_alloc_typed(S,
-                GC_T_VALARR, nn * sizeof(*tmp));
-            for (i = 0; i < nn; i++) {
-                mino_val_t *e = quasiquote_expand(S, vec_nth(form, i), env);
-                if (e == NULL) { return NULL; }
-                gc_valarr_set(S, tmp, i, e);
-            }
-            return mino_vector(S, tmp, nn);
-        }
-        /* Slow path: ~@ present, build cons list then convert. */
-        {
+        return mino_vector(S, tmp, nn);
+    }
+    /* Slow path: ~@ present, build cons list then convert. */
+    {
         mino_val_t  *out  = mino_nil(S);
         mino_val_t  *tail = NULL;
         size_t       count = 0;
@@ -280,46 +271,53 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
             }
             return mino_vector(S, tmp, count);
         }
-        } /* end slow path */
     }
-    if (form != NULL && form->type == MINO_MAP) {
-        size_t        nn = form->as.map.len;
-        mino_val_t  **ks;
-        mino_val_t  **vs;
-        size_t        i;
-        if (nn == 0) { return form; }
-        ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*ks));
-        vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*vs));
-        for (i = 0; i < nn; i++) {
-            mino_val_t *key = vec_nth(form->as.map.key_order, i);
-            mino_val_t *val = map_get_val(form, key);
-            mino_val_t *kk  = quasiquote_expand(S, key, env);
-            mino_val_t *vv;
-            if (kk == NULL) { return NULL; }
-            vv = quasiquote_expand(S, val, env);
-            if (vv == NULL) { return NULL; }
-            gc_valarr_set(S, ks, i, kk);
-            gc_valarr_set(S, vs, i, vv);
-        }
-        return mino_map(S, ks, vs, nn);
+}
+
+/* qq_expand_map -- expand both keys and values; the result keeps the
+ * map shape with possibly-different key/value identities. */
+static mino_val_t *qq_expand_map(mino_state_t *S, mino_val_t *form,
+                                 mino_env_t *env)
+{
+    size_t       nn = form->as.map.len;
+    mino_val_t **ks;
+    mino_val_t **vs;
+    size_t       i;
+    if (nn == 0) { return form; }
+    ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*ks));
+    vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, nn * sizeof(*vs));
+    for (i = 0; i < nn; i++) {
+        mino_val_t *key = vec_nth(form->as.map.key_order, i);
+        mino_val_t *val = map_get_val(form, key);
+        mino_val_t *kk  = quasiquote_expand(S, key, env);
+        mino_val_t *vv;
+        if (kk == NULL) { return NULL; }
+        vv = quasiquote_expand(S, val, env);
+        if (vv == NULL) { return NULL; }
+        gc_valarr_set(S, ks, i, kk);
+        gc_valarr_set(S, vs, i, vv);
     }
-    if (!mino_is_cons(form)) {
-        return form;
-    }
-    {
-        mino_val_t *head = form->as.cons.car;
-        if (sym_eq(head, "unquote")) {
-            mino_val_t *arg = form->as.cons.cdr;
-            if (!mino_is_cons(arg)) {
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "unquote requires one argument");
-                return NULL;
-            }
-            return eval_value(S, arg->as.cons.car, env);
-        }
-        if (sym_eq(head, "unquote-splicing")) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "unquote-splicing must appear inside a list");
+    return mino_map(S, ks, vs, nn);
+}
+
+/* qq_expand_cons -- expand a cons-list template. Handles the (unquote
+ * x) and (unquote-splicing x) special heads at top level, and walks
+ * each child detecting unquote-splicing per-element. */
+static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
+                                  mino_env_t *env)
+{
+    mino_val_t *head = form->as.cons.car;
+    if (sym_eq(head, "unquote")) {
+        mino_val_t *arg = form->as.cons.cdr;
+        if (!mino_is_cons(arg)) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "unquote requires one argument");
             return NULL;
         }
+        return eval_value(S, arg->as.cons.car, env);
+    }
+    if (sym_eq(head, "unquote-splicing")) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "unquote-splicing must appear inside a list");
+        return NULL;
     }
     {
         mino_val_t *out  = mino_nil(S);
@@ -357,6 +355,25 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
         }
         return out;
     }
+}
+
+/*
+ * quasiquote_expand: walk `form` as a template. Sublists, subvectors, and
+ * submaps are recursed into; (unquote x) evaluates x and uses its value;
+ * (unquote-splicing x) evaluates x (expected to yield a list) and splices
+ * its elements into the enclosing list. Bare symbols are auto-qualified
+ * to the namespace owning the binding (when one exists), matching the
+ * Clojure backquote contract.
+ */
+mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
+                              mino_env_t *env)
+{
+    if (form == NULL) { return form; }
+    if (form->type == MINO_SYMBOL) return qq_qualify_symbol(S, form, env);
+    if (form->type == MINO_VECTOR) return qq_expand_vector(S, form, env);
+    if (form->type == MINO_MAP)    return qq_expand_map(S, form, env);
+    if (!mino_is_cons(form))       return form;
+    return qq_expand_cons(S, form, env);
 }
 
 /*
