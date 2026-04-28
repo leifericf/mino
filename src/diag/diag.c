@@ -47,6 +47,14 @@ void source_cache_store(mino_state_t *S, const char *file,
         free(S->source_cache[slot].text);
     }
     S->source_cache[slot].file = file;
+    /* len + 1 must not wrap — pathological file size would otherwise
+     * malloc(0) and then memcpy SIZE_MAX bytes. */
+    if (len >= SIZE_MAX) {
+        S->source_cache[slot].text = NULL;
+        S->source_cache[slot].file = NULL;
+        S->source_cache[slot].len  = 0;
+        return;
+    }
     S->source_cache[slot].text = (char *)malloc(len + 1);
     if (S->source_cache[slot].text != NULL) {
         memcpy(S->source_cache[slot].text, text, len);

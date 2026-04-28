@@ -307,10 +307,17 @@ char *dup_n(mino_state_t *S, const char *s, size_t len)
 static void gc_mark_stack_push_raw(mino_state_t *S, gc_hdr_t *h)
 {
     if (S->gc_mark_stack_len == S->gc_mark_stack_cap) {
-        size_t new_cap = S->gc_mark_stack_cap == 0
-            ? GC_MARK_STACK_INIT : S->gc_mark_stack_cap * 2;
-        gc_hdr_t **ns = (gc_hdr_t **)realloc(
-            S->gc_mark_stack, new_cap * sizeof(*ns));
+        size_t     new_cap;
+        gc_hdr_t **ns;
+        if (S->gc_mark_stack_cap == 0) {
+            new_cap = GC_MARK_STACK_INIT;
+        } else if (S->gc_mark_stack_cap > SIZE_MAX / 2 / sizeof(*ns)) {
+            return; /* Cap overflow: drop the push (collector falls back
+                     * on conservative scan as a backstop). */
+        } else {
+            new_cap = S->gc_mark_stack_cap * 2;
+        }
+        ns = (gc_hdr_t **)realloc(S->gc_mark_stack, new_cap * sizeof(*ns));
         if (ns == NULL) return;
         S->gc_mark_stack = ns;
         S->gc_mark_stack_cap = new_cap;

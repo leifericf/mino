@@ -92,9 +92,16 @@ static int gc_ptr_is_state_embedded(const mino_state_t *S, const void *p)
 void gc_remset_add(mino_state_t *S, gc_hdr_t *container)
 {
     if (S->gc_remset_len == S->gc_remset_cap) {
-        size_t      new_cap = S->gc_remset_cap == 0 ? 256 : S->gc_remset_cap * 2;
-        gc_hdr_t  **nr      = (gc_hdr_t **)realloc(S->gc_remset,
-                                                   new_cap * sizeof(*nr));
+        size_t      new_cap;
+        gc_hdr_t  **nr;
+        if (S->gc_remset_cap == 0) {
+            new_cap = 256;
+        } else if (S->gc_remset_cap > SIZE_MAX / 2 / sizeof(*nr)) {
+            abort(); /* Class I: capacity overflow inside write barrier */
+        } else {
+            new_cap = S->gc_remset_cap * 2;
+        }
+        nr = (gc_hdr_t **)realloc(S->gc_remset, new_cap * sizeof(*nr));
         if (nr == NULL) {
             abort(); /* Class I: inside write barrier, no recovery path */
         }
