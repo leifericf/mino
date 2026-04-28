@@ -31,6 +31,89 @@ static const char *alias_resolve(mino_state_t *S, const char *alias)
     return NULL;
 }
 
+/* Resolve an ns/name qualified symbol. The caller has located the '/'
+ * separator; this helper handles the literal-binding fast path, alias
+ * resolution, var lookup with private-access check, and the ns-env
+ * fallback for primitives. On a miss it sets a diagnostic that names
+ * the most likely cause (missing var, missing ns, missing alias). */
+static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
+                                         const char *data, size_t n,
+                                         const char *slash)
+{
+    char        ns_buf[256];
+    const char *sym_name    = slash + 1;
+    size_t      ns_len      = (size_t)(slash - data);
+    const char *resolved_ns;
+    mino_env_t *target_env;
+    mino_val_t *var;
+    mino_val_t *v;
+    char        msg[300];
+    int         is_alias;
+    (void)n;
+
+    /* Try full name as a literal env binding first (e.g. "host/new"). */
+    v = mino_env_get(env, data);
+    if (v != NULL) return v;
+
+    if (ns_len >= sizeof(ns_buf)) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+            "syntax", "MSY001", "symbol name too long");
+        return NULL;
+    }
+    memcpy(ns_buf, data, ns_len);
+    ns_buf[ns_len] = '\0';
+
+    /* Resolve alias to full module name. */
+    resolved_ns = alias_resolve(S, ns_buf);
+    if (resolved_ns == NULL) resolved_ns = ns_buf;
+
+    /* Look up in var registry by resolved namespace + name. */
+    var = var_find(S, resolved_ns, sym_name);
+    if (var != NULL) {
+        /* Cross-ns access of a private var is rejected. Same-ns access
+         * is fine since callers within a namespace are not outsiders. */
+        if (var->as.var.is_private
+            && (S->current_ns == NULL
+                || strcmp(S->current_ns, resolved_ns) != 0)) {
+            snprintf(msg, sizeof(msg),
+                "var %s/%s is private", resolved_ns, sym_name);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                "name", "MNS001", msg);
+            return NULL;
+        }
+        return var->as.var.root;
+    }
+
+    /* Primitives live in the ns env but aren't interned as vars, so a
+     * var_find miss falls back to the ns env's own bindings. */
+    target_env = ns_env_lookup(S, resolved_ns);
+    if (target_env != NULL) {
+        env_binding_t *b = env_find_here(target_env, sym_name);
+        if (b != NULL) return b->val;
+    }
+
+    is_alias = (resolved_ns != ns_buf);
+    if (target_env != NULL) {
+        snprintf(msg, sizeof(msg),
+            "no var %s in namespace %s", sym_name, resolved_ns);
+    } else if (is_alias) {
+        /* alias_resolve gave us a name but no ns env exists: the alias
+         * points at an unloaded namespace. */
+        snprintf(msg, sizeof(msg),
+            "no such namespace: %s", resolved_ns);
+    } else {
+        /* Neither an alias nor a loaded namespace -- most likely the
+         * user meant an alias that isn't set up. */
+        const char *cur =
+            (S->current_ns != NULL) ? S->current_ns : "user";
+        snprintf(msg, sizeof(msg),
+            "no such alias: %s in namespace %s", ns_buf, cur);
+    }
+    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+        "name", "MNS001", msg);
+    return NULL;
+}
+
 static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
     size_t n = form->as.s.len;
@@ -42,80 +125,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
      * Single-char "/" is the division function, not a qualified symbol. */
     slash = (n > 1) ? memchr(data, '/', n) : NULL;
     if (slash != NULL) {
-        char ns_buf[256];
-        const char *sym_name = slash + 1;
-        size_t ns_len = (size_t)(slash - data);
-        const char *resolved_ns;
-        mino_val_t *var;
-
-        /* Try full name as a literal env binding first (e.g. "host/new"). */
-        v = mino_env_get(env, data);
-        if (v != NULL) return v;
-
-        if (ns_len >= sizeof(ns_buf)) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001",
-                "symbol name too long");
-            return NULL;
-        }
-        memcpy(ns_buf, data, ns_len);
-        ns_buf[ns_len] = '\0';
-
-        /* Resolve alias to full module name. */
-        resolved_ns = alias_resolve(S, ns_buf);
-        if (resolved_ns == NULL) resolved_ns = ns_buf;
-
-        /* Look up in var registry by resolved namespace + name. */
-        var = var_find(S, resolved_ns, sym_name);
-        if (var != NULL) {
-            /* Cross-ns access of a private var is rejected. Same-ns
-             * access is fine since callers within a namespace are not
-             * "outsiders". */
-            if (var->as.var.is_private
-                && (S->current_ns == NULL
-                    || strcmp(S->current_ns, resolved_ns) != 0)) {
-                char msg[300];
-                snprintf(msg, sizeof(msg),
-                         "var %s/%s is private", resolved_ns, sym_name);
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001",
-                              msg);
-                return NULL;
-            }
-            return var->as.var.root;
-        }
-
-        {
-            /* Primitives live in the ns env but aren't interned as vars,
-             * so a var_find miss falls back to the ns env's own bindings. */
-            mino_env_t *target_env = ns_env_lookup(S, resolved_ns);
-            if (target_env != NULL) {
-                env_binding_t *b = env_find_here(target_env, sym_name);
-                if (b != NULL) return b->val;
-            }
-            {
-                char msg[300];
-                int  is_alias = (resolved_ns != ns_buf);
-                if (target_env != NULL) {
-                    snprintf(msg, sizeof(msg),
-                             "no var %s in namespace %s",
-                             sym_name, resolved_ns);
-                } else if (is_alias) {
-                    /* alias_resolve gave us a name but no ns env exists:
-                     * the alias points at an unloaded namespace. */
-                    snprintf(msg, sizeof(msg),
-                             "no such namespace: %s", resolved_ns);
-                } else {
-                    /* Neither an alias nor a loaded namespace -- most
-                     * likely the user meant an alias that isn't set up. */
-                    const char *cur =
-                        (S->current_ns != NULL) ? S->current_ns : "user";
-                    snprintf(msg, sizeof(msg),
-                             "no such alias: %s in namespace %s",
-                             ns_buf, cur);
-                }
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);
-                return NULL;
-            }
-        }
+        return eval_qualified_symbol(S, env, data, n, slash);
     }
 
     /* *ns* derefs to the current namespace symbol. Once mino_install_core
