@@ -60,3 +60,4 @@ tests/multimethod_test_asan
 tests/multimethod_test_ubsan
 examples/embed_gc_stress
 examples/embed_gc_stress_asan
+examples/embed_multi_tenant_threads
