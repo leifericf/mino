@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.87.0 — Per-Thread Context And Atom CAS
+
+Foundation for real host threads, with no observable change in
+v0.87.x. Two pieces:
+
+**Per-thread context (`mino_thread_ctx_t`).** Every field that
+mutates with eval progress moves off `mino_state_t` into a new
+`mino_thread_ctx_t` struct: `try_stack` / `try_depth`,
+`dyn_stack`, `gc_save` / `gc_save_len`, `eval_steps` /
+`limit_exceeded` / `eval_current_form`, `interrupted`,
+`error_buf` / `last_diag`, `call_stack` / `call_depth` /
+`trace_added`, and `gc_stack_bottom` / `gc_depth`. The state
+embeds one `main_ctx` and exposes `S->ctx` pointing at it.
+Single-threaded today: `S->ctx == &S->main_ctx` always, so
+observable behavior is unchanged. Cycle G4 later sub-cycles
+introduce per-spawn ctxs and TLS-backed lookup; the field
+locations they need are already in place.
+
+**Atom CAS gated on `multi_threaded`.** `swap!` and
+`compare-and-set!` gain a multi-threaded path through
+`__atomic_compare_exchange_n` (GCC/Clang builtin, works on
+plain pointer fields without `_Atomic` typing). Single-threaded
+path keeps the existing read+write fast path. The CAS path is
+dormant until `S->multi_threaded` flips, which v0.87.x never
+does; getting the structure in place now means host-thread
+spawn lights up correct atom semantics without a second touch.
+
+`compare-and-set!` also moves from value-equality (`mino_eq`)
+to pointer-identity for the comparison, matching canon Clojure
+(JVM `AtomicReference` uses reference eq). Small-int cache
+means this is observably the same for small integers; the
+change matters for boxed values where pointer-eq is what a CAS
+instruction can actually express.
+
+ASan clean. Suite: 1453 tests, 6984 assertions, all green.
+
 ## v0.86.1 — Audit-Cycle Fixes
 
 Three issues found auditing v0.84.0 + v0.85.0 + v0.86.0:
