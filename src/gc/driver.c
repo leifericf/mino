@@ -169,34 +169,17 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
     }
 }
 
-void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
+/* gc_alloc_raw -- pure mechanism: pull a header from the freelist (when
+ * a size-class slot is available) or calloc a fresh one, initialize the
+ * header fields, link onto the young list, register with the range
+ * index, and emit the alloc event. Returns NULL on calloc failure; no
+ * GC, no fault-injection, no OOM recovery here -- those are the policy
+ * wrapper's job. */
+static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
+                              size_t size)
 {
     gc_hdr_t *h;
-    int fc;
-    if (S->gc_stress == -1) {
-        const char *e = getenv("MINO_GC_STRESS");
-        S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
-    }
-    /* Cycle G4.2 safepoint: every alloc is an opportunity for the
-     * collector to ask the mutator to park. The poll is gated on
-     * gc_depth == 0 so a recursive alloc reached from inside trace
-     * or sweep doesn't try to re-enter the park machinery. */
-    if (mino_current_ctx(S)->gc_depth == 0) {
-        mino_safepoint_poll(S);
-    }
-    gc_driver_tick(S, size);
-    /* Fault injection: simulate OOM when the countdown reaches zero. */
-    if (S->fi_alloc_countdown > 0) {
-        S->fi_alloc_countdown--;
-        if (S->fi_alloc_countdown == 0) {
-            if (mino_current_ctx(S)->try_depth > 0) {
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory (fault injection)");
-                mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = NULL;
-                longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
-            }
-            abort(); /* Class I: no error frame to recover through */
-        }
-    }
+    int       fc;
     /* Try free list first for fixed-size allocations. */
     fc = gc_freelist_class(size);
     if (fc >= 0 && S->gc_freelists[fc] != NULL) {
@@ -205,40 +188,75 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
         memset(h, 0, sizeof(*h) + size);
     } else {
         h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
-        if (h == NULL && mino_current_ctx(S)->gc_depth == 0 && mino_current_ctx(S)->gc_stack_bottom != NULL) {
-            /* OOM fallback: close any in-flight major and run one
-             * full STW major before giving up. That frees anything
-             * kept alive only by old-gen references the minor
-             * skipped and releases the snapshot overhead of the
-             * interrupted cycle. */
-            gc_force_finish_major(S);
-            if (S->gc_phase == GC_PHASE_IDLE) {
-                gc_major_collect(S);
-            }
-            h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
-        }
-        if (h == NULL) {
-            /* Recoverable when an eval try-frame exists; fatal otherwise. */
-            if (mino_current_ctx(S)->try_depth > 0) {
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory");
-                mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = NULL;
-                longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
-            }
-            abort(); /* Class I: no error frame to recover through */
-        }
+        if (h == NULL) return NULL;
     }
-    h->type_tag      = tag;
-    h->mark          = 0;
-    h->gen           = GC_GEN_YOUNG;
-    h->age           = 0;
-    h->size          = size;
-    h->next          = S->gc_all_young;
-    S->gc_all_young  = h;
-    S->gc_bytes_alloc  += size;
-    S->gc_bytes_young  += size;
+    h->type_tag        = tag;
+    h->mark            = 0;
+    h->gen             = GC_GEN_YOUNG;
+    h->age             = 0;
+    h->size            = size;
+    h->next            = S->gc_all_young;
+    S->gc_all_young    = h;
+    S->gc_bytes_alloc += size;
+    S->gc_bytes_young += size;
     gc_range_insert(S, h);
     gc_evt_record(S, GC_EVT_ALLOC, h, NULL, NULL,
                   (uintptr_t)tag, (uint16_t)(size & 0xffffu));
+    return h;
+}
+
+/* gc_oom_throw -- raise the standard OOM mino diagnostic by longjmp'ing
+ * into the active try frame, or abort if no try frame exists. */
+static void gc_oom_throw(mino_state_t *S, const char *msg)
+{
+    if (mino_current_ctx(S)->try_depth > 0) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001", msg);
+        mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = NULL;
+        longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
+    }
+    abort(); /* Class I: no error frame to recover through */
+}
+
+void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
+{
+    gc_hdr_t *h;
+    if (S->gc_stress == -1) {
+        const char *e = getenv("MINO_GC_STRESS");
+        S->gc_stress = (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : 0;
+    }
+    /* Safepoint: every alloc is an opportunity for the collector to ask
+     * the mutator to park. Gated on gc_depth == 0 so a recursive alloc
+     * reached from inside trace or sweep doesn't re-enter the park
+     * machinery. */
+    if (mino_current_ctx(S)->gc_depth == 0) {
+        mino_safepoint_poll(S);
+    }
+    gc_driver_tick(S, size);
+    /* Fault injection: simulate OOM when the countdown reaches zero. */
+    if (S->fi_alloc_countdown > 0) {
+        S->fi_alloc_countdown--;
+        if (S->fi_alloc_countdown == 0) {
+            gc_oom_throw(S, "out of memory (fault injection)");
+        }
+    }
+    h = gc_alloc_raw(S, tag, size);
+    if (h == NULL
+        && mino_current_ctx(S)->gc_depth == 0
+        && mino_current_ctx(S)->gc_stack_bottom != NULL) {
+        /* OOM fallback: close any in-flight major and run one full STW
+         * major before giving up. That frees anything kept alive only
+         * by old-gen references the minor skipped and releases the
+         * snapshot overhead of the interrupted cycle. */
+        gc_force_finish_major(S);
+        if (S->gc_phase == GC_PHASE_IDLE) {
+            gc_major_collect(S);
+        }
+        h = gc_alloc_raw(S, tag, size);
+    }
+    if (h == NULL) {
+        gc_oom_throw(S, "out of memory");
+    }
     return (void *)(h + 1);
 }
 
