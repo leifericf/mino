@@ -319,143 +319,184 @@ static mino_val_t *coerce_at_tier(mino_state_t *S, mino_val_t *v, int tier,
                                  "coerce_at_tier: unsupported tier transition");
 }
 
-/* Driver. Walks args, classifies each, promotes accumulator on tier
- * increase, and applies the per-tier op. Long-overflow on int-tier
- * arithmetic auto-promotes the accumulator to bigint. Returns the
- * final value. */
-static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
-                                tower_op_t op, const char *opname)
+/* tower_seed_div -- (/ x ...) seeds the accumulator with the first
+ * operand directly so subsequent operands divide into it. */
+static void tower_seed_div(tower_acc_t *acc, const mino_val_t *a, int at)
 {
-    tower_acc_t acc;
-    int seeded = 0;
+    switch (at) {
+    case TT_INT:    acc->iacc = a->as.i; break;
+    case TT_FLOAT:  acc->dacc = a->as.f; acc->tier = TT_FLOAT; break;
+    case TT_BIGINT: acc->vacc = (mino_val_t *)a; acc->tier = TT_BIGINT; break;
+    case TT_RATIO:  acc->vacc = (mino_val_t *)a; acc->tier = TT_RATIO; break;
+    case TT_BIGDEC: acc->vacc = (mino_val_t *)a; acc->tier = TT_BIGDEC; break;
+    }
+}
+
+/* tower_apply_int -- INT-tier step. add/sub/mul auto-promote the acc to
+ * bigint on long-overflow; div promotes to ratio when the quotient is
+ * not exact. Returns 0 on success, -1 on a runtime error (diag set or
+ * thrown). */
+static int tower_apply_int(mino_state_t *S, tower_acc_t *acc,
+                           const mino_val_t *a, tower_op_t op,
+                           const char *opname)
+{
+    long long x = a->as.i;
     int (*overflow_op)(long long, long long, long long *) =
         (op == OP_ADD) ? iadd_overflow
         : (op == OP_SUB) ? isub_overflow
         : (op == OP_MUL) ? imul_overflow : NULL;
-    long long identity = (op == OP_MUL) ? 1 : 0;
+    if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
+        long long out;
+        if (overflow_op(acc->iacc, x, &out)) {
+            mino_val_t *la = mino_bigint_from_ll(S, acc->iacc);
+            mino_val_t *lb = mino_bigint_from_ll(S, x);
+            if (la == NULL || lb == NULL) return -1;
+            acc->vacc = tower_op_at_tier(S, op, TT_BIGINT, la, lb, opname);
+            if (acc->vacc == NULL) return -1;
+            acc->tier = TT_BIGINT;
+            return 0;
+        }
+        acc->iacc = out;
+        return 0;
+    }
+    /* OP_DIV. */
+    if (x == 0) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+                              "division by zero");
+        return -1;
+    }
+    /* For exact int/int division keep an int; otherwise promote to ratio.
+     * (Clojure's `/` returns a Ratio for non-exact int/int.) */
+    if (acc->iacc % x == 0) {
+        acc->iacc /= x;
+        return 0;
+    }
+    {
+        mino_val_t *bn = mino_bigint_from_ll(S, acc->iacc);
+        mino_val_t *bd = mino_bigint_from_ll(S, x);
+        if (bn == NULL || bd == NULL) return -1;
+        acc->vacc = mino_ratio_make(S, bn, bd);
+        if (acc->vacc == NULL) return -1;
+        acc->tier = TT_RATIO;
+    }
+    return 0;
+}
+
+/* tower_apply_bigint -- BIGINT-tier step. div promotes to ratio (and
+ * may collapse back to int / bigint inside mino_ratio_div). */
+static int tower_apply_bigint(mino_state_t *S, tower_acc_t *acc,
+                              const mino_val_t *a, tower_op_t op,
+                              const char *opname)
+{
+    mino_val_t *operand = coerce_at_tier(S, (mino_val_t *)a, TT_BIGINT, opname);
+    if (operand == NULL) return -1;
+    if (op == OP_DIV) {
+        acc->vacc = mino_ratio_div(S, acc->vacc, operand);
+        if (acc->vacc == NULL) return -1;
+        if (acc->vacc->type == MINO_INT) {
+            acc->iacc = acc->vacc->as.i;
+            acc->vacc = NULL;
+            acc->tier = TT_INT;
+        } else if (acc->vacc->type == MINO_BIGINT) {
+            acc->tier = TT_BIGINT;
+        } else {
+            acc->tier = TT_RATIO;
+        }
+        return 0;
+    }
+    acc->vacc = tower_op_at_tier(S, op, TT_BIGINT, acc->vacc, operand, opname);
+    return acc->vacc == NULL ? -1 : 0;
+}
+
+/* tower_apply_ratio -- RATIO-tier step. Result may have collapsed back
+ * to int or bigint. */
+static int tower_apply_ratio(mino_state_t *S, tower_acc_t *acc,
+                             const mino_val_t *a, tower_op_t op,
+                             const char *opname)
+{
+    mino_val_t *operand = coerce_at_tier(S, (mino_val_t *)a, TT_RATIO, opname);
+    if (operand == NULL) return -1;
+    acc->vacc = tower_op_at_tier(S, op, TT_RATIO, acc->vacc, operand, opname);
+    if (acc->vacc == NULL) return -1;
+    if (acc->vacc->type == MINO_INT) {
+        acc->iacc = acc->vacc->as.i; acc->vacc = NULL; acc->tier = TT_INT;
+    } else if (acc->vacc->type == MINO_BIGINT) {
+        acc->tier = TT_BIGINT;
+    }
+    return 0;
+}
+
+/* tower_apply_bigdec -- BIGDEC-tier step. */
+static int tower_apply_bigdec(mino_state_t *S, tower_acc_t *acc,
+                              const mino_val_t *a, tower_op_t op,
+                              const char *opname)
+{
+    mino_val_t *operand = coerce_at_tier(S, (mino_val_t *)a, TT_BIGDEC, opname);
+    if (operand == NULL) return -1;
+    acc->vacc = tower_op_at_tier(S, op, TT_BIGDEC, acc->vacc, operand, opname);
+    return acc->vacc == NULL ? -1 : 0;
+}
+
+/* tower_apply_float -- FLOAT-tier step. The four ops are inlined since
+ * they correspond directly to a single C double op; no error path. */
+static int tower_apply_float(tower_acc_t *acc, const mino_val_t *a,
+                             tower_op_t op)
+{
+    double x = tower_to_double((mino_val_t *)a);
+    switch (op) {
+    case OP_ADD: acc->dacc += x; break;
+    case OP_SUB: acc->dacc -= x; break;
+    case OP_MUL: acc->dacc *= x; break;
+    case OP_DIV: acc->dacc /= x; break;
+    }
+    return 0;
+}
+
+/* Driver. Walks args, classifies each, promotes accumulator on tier
+ * increase, and dispatches to the per-tier step. Returns the final
+ * value, or NULL on error with diag already set. */
+static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
+                                tower_op_t op, const char *opname)
+{
+    tower_acc_t acc;
+    int         seeded   = 0;
+    long long   identity = (op == OP_MUL) ? 1 : 0;
     acc.tier = TT_INT;
     acc.iacc = identity;
     acc.vacc = NULL;
     acc.dacc = 0.0;
     while (mino_is_cons(args)) {
         mino_val_t *a = args->as.cons.car;
-        int at;
+        int         at;
+        int         step;
         if (!classify_or_throw(S, a, opname, &at)) return NULL;
         if (op == OP_DIV && !seeded) {
-            /* Seed with first operand directly, then continue with division.
-             * For div we always need the operand-1 path. */
+            tower_seed_div(&acc, a, at);
             seeded = 1;
-            switch (at) {
-            case TT_INT:    acc.iacc = a->as.i; break;
-            case TT_FLOAT:  acc.dacc = a->as.f; acc.tier = TT_FLOAT; break;
-            case TT_BIGINT: acc.vacc = (mino_val_t *)a; acc.tier = TT_BIGINT; break;
-            case TT_RATIO:  acc.vacc = (mino_val_t *)a; acc.tier = TT_RATIO; break;
-            case TT_BIGDEC: acc.vacc = (mino_val_t *)a; acc.tier = TT_BIGDEC; break;
-            }
             args = args->as.cons.cdr;
             continue;
         }
         /* Promote the running accumulator if the new operand is at a
          * higher tier. Ratio meeting bigdec triggers a float collapse. */
-        if (at > (int)acc.tier ||
-            (acc.tier == TT_RATIO && at == TT_BIGDEC) ||
-            (acc.tier == TT_BIGDEC && at == TT_RATIO)) {
+        if (at > (int)acc.tier
+            || (acc.tier == TT_RATIO && at == TT_BIGDEC)
+            || (acc.tier == TT_BIGDEC && at == TT_RATIO)) {
             int target = at;
-            if ((acc.tier == TT_RATIO && at == TT_BIGDEC) ||
-                (acc.tier == TT_BIGDEC && at == TT_RATIO)) {
+            if ((acc.tier == TT_RATIO && at == TT_BIGDEC)
+                || (acc.tier == TT_BIGDEC && at == TT_RATIO)) {
                 target = TT_FLOAT;
             }
             if (!promote_acc(S, &acc, target, opname)) return NULL;
         }
-        /* Coerce the operand to acc's tier and apply. */
         switch (acc.tier) {
-        case TT_INT: {
-            long long x = a->as.i;
-            long long out;
-            if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
-                if (overflow_op(acc.iacc, x, &out)) {
-                    mino_val_t *la = mino_bigint_from_ll(S, acc.iacc);
-                    mino_val_t *lb = mino_bigint_from_ll(S, x);
-                    if (la == NULL || lb == NULL) return NULL;
-                    acc.vacc = tower_op_at_tier(S, op, TT_BIGINT, la, lb, opname);
-                    if (acc.vacc == NULL) return NULL;
-                    acc.tier = TT_BIGINT;
-                    break;
-                }
-                acc.iacc = out;
-            } else { /* OP_DIV */
-                if (x == 0) return prim_throw_classified(S, "eval/type", "MTY001",
-                                                          "division by zero");
-                /* For exact int/int division, prefer ratio when not exact
-                 * (Clojure's `/` returns a Ratio for non-exact int/int). */
-                if (acc.iacc % x == 0) {
-                    acc.iacc /= x;
-                } else {
-                    /* Promote to ratio. */
-                    mino_val_t *bn = mino_bigint_from_ll(S, acc.iacc);
-                    mino_val_t *bd = mino_bigint_from_ll(S, x);
-                    if (bn == NULL || bd == NULL) return NULL;
-                    acc.vacc = mino_ratio_make(S, bn, bd);
-                    if (acc.vacc == NULL) return NULL;
-                    acc.tier = TT_RATIO;
-                }
-            }
-            break;
+        case TT_INT:    step = tower_apply_int(S, &acc, a, op, opname); break;
+        case TT_BIGINT: step = tower_apply_bigint(S, &acc, a, op, opname); break;
+        case TT_RATIO:  step = tower_apply_ratio(S, &acc, a, op, opname); break;
+        case TT_BIGDEC: step = tower_apply_bigdec(S, &acc, a, op, opname); break;
+        case TT_FLOAT:  step = tower_apply_float(&acc, a, op); break;
+        default:        step = -1; break;
         }
-        case TT_BIGINT: {
-            mino_val_t *operand = coerce_at_tier(S, a, TT_BIGINT, opname);
-            if (operand == NULL) return NULL;
-            if (op == OP_DIV) {
-                /* int/bigint division: promote to ratio. */
-                acc.vacc = mino_ratio_div(S, acc.vacc, operand);
-                if (acc.vacc == NULL) return NULL;
-                /* mino_ratio_div may have collapsed to int / bigint. */
-                if (acc.vacc->type == MINO_INT) {
-                    acc.iacc = acc.vacc->as.i;
-                    acc.vacc = NULL;
-                    acc.tier = TT_INT;
-                } else if (acc.vacc->type == MINO_BIGINT) {
-                    acc.tier = TT_BIGINT;
-                } else {
-                    acc.tier = TT_RATIO;
-                }
-            } else {
-                acc.vacc = tower_op_at_tier(S, op, TT_BIGINT, acc.vacc, operand, opname);
-                if (acc.vacc == NULL) return NULL;
-            }
-            break;
-        }
-        case TT_RATIO: {
-            mino_val_t *operand = coerce_at_tier(S, a, TT_RATIO, opname);
-            if (operand == NULL) return NULL;
-            acc.vacc = tower_op_at_tier(S, op, TT_RATIO, acc.vacc, operand, opname);
-            if (acc.vacc == NULL) return NULL;
-            /* Result may have collapsed back to int/bigint. */
-            if (acc.vacc->type == MINO_INT) {
-                acc.iacc = acc.vacc->as.i; acc.vacc = NULL; acc.tier = TT_INT;
-            } else if (acc.vacc->type == MINO_BIGINT) {
-                acc.tier = TT_BIGINT;
-            }
-            break;
-        }
-        case TT_BIGDEC: {
-            mino_val_t *operand = coerce_at_tier(S, a, TT_BIGDEC, opname);
-            if (operand == NULL) return NULL;
-            acc.vacc = tower_op_at_tier(S, op, TT_BIGDEC, acc.vacc, operand, opname);
-            if (acc.vacc == NULL) return NULL;
-            break;
-        }
-        case TT_FLOAT: {
-            double x = tower_to_double(a);
-            switch (op) {
-            case OP_ADD: acc.dacc += x; break;
-            case OP_SUB: acc.dacc -= x; break;
-            case OP_MUL: acc.dacc *= x; break;
-            case OP_DIV: acc.dacc /= x; break;
-            }
-            break;
-        }
-        }
+        if (step != 0) return NULL;
         seeded = 1;
         args = args->as.cons.cdr;
     }
