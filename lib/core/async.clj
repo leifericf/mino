@@ -794,43 +794,77 @@
   `(go (loop ~bindings ~@(seq body))))
 
 ;; --- Blocking bridge ---
+;;
+;; <!!, >!!, and alts!! adapt to the host-thread grant. When threads
+;; are granted, the callback delivers a promise and the calling thread
+;; parks on @promise — another thread doing the matching put/take fires
+;; the callback (via the scheduler drain on its own side), which wakes
+;; the parked thread. When threads are not granted, the calling thread
+;; drains the scheduler in a loop and throws on no progress, since no
+;; other thread can ever supply the value.
 
 (defn <!!
-  "Blocking take from a channel. Drains the scheduler in a loop
-   until a value is available. Returns the taken value (nil if closed).
-   Throws if no progress can be made (deadlock)."
+  "Blocking take from a channel. When host threads are granted, parks
+   the calling thread until a value is available (or the channel
+   closes). Without threads, drains the scheduler in a loop and throws
+   if no progress can be made. Returns the taken value (nil if closed)."
   [ch]
-  (let [result (atom ::pending)]
-    (take! ch (fn [v] (reset! result v)))
-    (let [ok (drain-loop! (fn [] (not (= ::pending @result))))]
-      (if ok
-        @result
+  (let [p (promise)]
+    (take! ch (fn [v] (deliver p [v])))
+    (drain!)
+    (cond
+      (realized? p)
+      (first @p)
+
+      (> (mino-thread-limit) 1)
+      (first @p)
+
+      :else
+      (if (drain-loop! (fn [] (realized? p)))
+        (first @p)
         (throw "<!!: would deadlock -- no producer for this channel")))))
 
 (defn >!!
-  "Blocking put onto a channel. Drains the scheduler in a loop
-   until the put completes. Returns true if successful, false if closed.
-   Throws if no progress can be made (deadlock)."
+  "Blocking put onto a channel. When host threads are granted, parks
+   the calling thread until the put completes. Without threads, drains
+   the scheduler in a loop and throws if no progress can be made.
+   Returns true if successful, false if the channel is closed."
   [ch val]
-  (let [result (atom ::pending)]
-    (put! ch val (fn [v] (reset! result v)))
-    (let [ok (drain-loop! (fn [] (not (= ::pending @result))))]
-      (if ok
-        @result
+  (let [p (promise)]
+    (put! ch val (fn [v] (deliver p [v])))
+    (drain!)
+    (cond
+      (realized? p)
+      (first @p)
+
+      (> (mino-thread-limit) 1)
+      (first @p)
+
+      :else
+      (if (drain-loop! (fn [] (realized? p)))
+        (first @p)
         (throw ">!!: would deadlock -- no consumer for this channel")))))
 
 (defn alts!!
-  "Blocking version of alts!. Drains the scheduler in a loop until
-   one operation completes. Returns [val ch].
-   Throws if no progress can be made (deadlock)."
+  "Blocking version of alts!. When host threads are granted, parks the
+   calling thread until one operation completes. Without threads,
+   drains the scheduler in a loop and throws on no progress.
+   Returns [val ch]."
   ([ops] (alts!! ops {}))
   ([ops opts]
-   (let [result (atom nil)
-         cb     (fn [v] (reset! result v))]
-     (alts* ops opts cb)
-     (let [ok (drain-loop! (fn [] (not (nil? @result))))]
-       (if ok
-         @result
+   (let [p (promise)]
+     (alts* ops opts (fn [v] (deliver p [v])))
+     (drain!)
+     (cond
+       (realized? p)
+       (first @p)
+
+       (> (mino-thread-limit) 1)
+       (first @p)
+
+       :else
+       (if (drain-loop! (fn [] (realized? p)))
+         (first @p)
          (throw "alts!!: would deadlock -- no operations can complete"))))))
 
 ;; --- Combinators ---

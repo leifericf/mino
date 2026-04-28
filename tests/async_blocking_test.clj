@@ -22,13 +22,20 @@
     (close! ch)
     (is (false? (>!! ch :x)))))
 
+;; Deadlock detection only fires when host threads are NOT granted.
+;; With threads granted (the standalone default), <!!/>!!/alts!! park
+;; forever waiting for another thread to fire the matching op — that's
+;; canonical behaviour. Single-threaded embed mode keeps the throw so a
+;; lone driver thread can't lock itself.
 (deftest blocking-take-deadlock-throws
-  (let [ch (chan)]
-    (is (thrown? (<!! ch)))))
+  (when (<= (mino-thread-limit) 1)
+    (let [ch (chan)]
+      (is (thrown? (<!! ch))))))
 
 (deftest blocking-put-deadlock-throws
-  (let [ch (chan)]
-    (is (thrown? (>!! ch :x)))))
+  (when (<= (mino-thread-limit) 1)
+    (let [ch (chan)]
+      (is (thrown? (>!! ch :x))))))
 
 (deftest blocking-round-trip
   (let [ch (chan 1)]
@@ -88,5 +95,48 @@
     (go (let [v (<! ch)]
           (>! (go v) v)))
     (is (true? (>!! ch :data)))))
+
+;; --- Cross-thread parking (host-thread grant required) ---
+
+(deftest blocking-take-parks-until-other-thread-puts
+  (when (> (mino-thread-limit) 1)
+    (let [ch (chan)]
+      (future (>!! ch :from-worker))
+      (is (= :from-worker (<!! ch))))))
+
+(deftest blocking-put-parks-until-other-thread-takes
+  (when (> (mino-thread-limit) 1)
+    (let [ch  (chan)
+          got (promise)]
+      (future (deliver got (<!! ch)))
+      (is (true? (>!! ch :payload)))
+      (is (= :payload @got)))))
+
+(deftest blocking-alts-parks-until-other-thread-fires
+  (when (> (mino-thread-limit) 1)
+    (let [ch1 (chan)
+          ch2 (chan)]
+      (future (>!! ch2 :win))
+      (let [[val port] (alts!! [ch1 ch2])]
+        (is (= :win val))
+        (is (identical? ch2 port))))))
+
+(deftest blocking-many-cross-thread-pings
+  ;; Stress the channel under genuine concurrency: N futures each push
+  ;; M values, the test thread takes N*M values back. With <!! and >!!
+  ;; bridging across OS threads, no values may be lost.
+  (when (> (mino-thread-limit) 1)
+    (let [ch (chan 8)
+          n  4
+          m  50
+          producers (doall (for [i (range n)]
+                             (future (dotimes [j m]
+                                       (>!! ch [i j])))))]
+      (let [seen (loop [acc [] k 0]
+                   (if (= k (* n m))
+                     acc
+                     (recur (conj acc (<!! ch)) (inc k))))]
+        (is (= (* n m) (count seen)))
+        (doseq [f producers] @f)))))
 
 (run-tests)

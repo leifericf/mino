@@ -1488,9 +1488,8 @@
 
 (defmacro thread
   "Executes the body in another thread, returning a future-like value
-  that can be deref'd. In Cycle G4.3 thread is an alias for future
-  (same worker pool). Throws :mino/unsupported when host threads are
-  not granted."
+  that can be deref'd. Shares the same worker pool as future. Throws
+  :mino/unsupported when host threads are not granted."
   [& body]
   `(if (<= (mino-thread-limit) 1)
      (throw (ex-info (mino-no-grant-msg "thread")
