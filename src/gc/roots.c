@@ -299,108 +299,118 @@ static void gc_mark_ctx_gc_save(mino_state_t *S, mino_thread_ctx_t *ctx)
     }
 }
 
-void gc_mark_roots(mino_state_t *S)
+/* Pin lexical environments published as GC roots and the symbol/keyword
+ * intern tables that anchor every interned name in the runtime. */
+static void gc_mark_envs_and_interns(mino_state_t *S)
 {
-    root_env_t        *r;
-    mino_thread_ctx_t *w;
-    int                i;
+    root_env_t *r;
     for (r = S->gc_root_envs; r != NULL; r = r->next) {
         gc_mark_interior(S, r->env);
     }
     gc_mark_intern_table(S, &S->sym_intern);
     gc_mark_intern_table(S, &S->kw_intern);
-    /* Pin try/catch exception values and module cache results. */
+}
+
+/* Pin in-flight try/catch exception values, cached module require
+ * results, namespace metadata maps, source-form metadata, the var
+ * registry, and host-retained refs. These are all pre-allocated tables
+ * or linked structures that hold runtime-visible state. */
+static void gc_mark_module_and_meta(mino_state_t *S)
+{
+    int         i;
+    size_t      idx;
+    mino_ref_t *ref;
     for (i = 0; i < mino_current_ctx(S)->try_depth; i++) {
         gc_mark_interior(S, mino_current_ctx(S)->try_stack[i].exception);
     }
-    {
-        size_t mi;
-        for (mi = 0; mi < S->module_cache_len; mi++) {
-            gc_mark_interior(S, S->module_cache[mi].value);
+    for (idx = 0; idx < S->module_cache_len; idx++) {
+        gc_mark_interior(S, S->module_cache[idx].value);
+    }
+    for (idx = 0; idx < S->ns_env_len; idx++) {
+        if (S->ns_env_table[idx].meta != NULL) {
+            gc_mark_interior(S, S->ns_env_table[idx].meta);
         }
     }
-    /* Pin per-namespace metadata maps. */
-    {
-        size_t ni;
-        for (ni = 0; ni < S->ns_env_len; ni++) {
-            if (S->ns_env_table[ni].meta != NULL) {
-                gc_mark_interior(S, S->ns_env_table[ni].meta);
-            }
-        }
+    for (idx = 0; idx < S->meta_table_len; idx++) {
+        gc_mark_interior(S, S->meta_table[idx].source);
     }
-    /* Pin metadata source forms. */
-    {
-        size_t mi;
-        for (mi = 0; mi < S->meta_table_len; mi++) {
-            gc_mark_interior(S, S->meta_table[mi].source);
-        }
+    for (idx = 0; idx < S->var_registry_len; idx++) {
+        gc_mark_interior(S, S->var_registry[idx].var);
     }
-    /* Pin var registry entries. */
-    {
-        size_t vi;
-        for (vi = 0; vi < S->var_registry_len; vi++) {
-            gc_mark_interior(S, S->var_registry[vi].var);
-        }
+    for (ref = S->ref_roots; ref != NULL; ref = ref->next) {
+        gc_mark_interior(S, ref->val);
     }
-    /* Pin host-retained refs. */
-    {
-        mino_ref_t *ref;
-        for (ref = S->ref_roots; ref != NULL; ref = ref->next) {
-            gc_mark_interior(S, ref->val);
-        }
-    }
-    /* Pin dynamic binding values for every live ctx (main + workers). */
+}
+
+/* Pin per-thread-context state: dynamic-binding values, GC save-stack
+ * payloads, and current-ctx diagnostic objects. Workers don't publish
+ * diagnostics back through this path, so only the current ctx's diag
+ * is walked. */
+static void gc_mark_thread_state(mino_state_t *S)
+{
+    mino_thread_ctx_t *w;
     gc_mark_ctx_dyn_stack(S, &S->main_ctx);
     for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_dyn_stack(S, w);
     }
-    /* Pin diagnostic data and cached map (current ctx; workers don't
-     * publish diagnostics back through this path). */
-    if (mino_current_ctx(S)->last_diag != NULL) {
-        gc_mark_interior(S, mino_current_ctx(S)->last_diag->data);
-        gc_mark_interior(S, mino_current_ctx(S)->last_diag->cached_map);
-    }
-    /* Pin sort comparator if active. */
-    gc_mark_interior(S, S->sort_comp_fn);
-    /* Pin print-method hook if installed. */
-    gc_mark_interior(S, S->print_method_fn);
-    /* Pin values on the GC save stack of every live ctx. The current
-     * thread's ctx is in S->main_ctx + S->worker_ctxs_head, so we
-     * cover it via the same loop that covers blocked workers. */
     gc_mark_ctx_gc_save(S, &S->main_ctx);
     for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_gc_save(S, w);
     }
-    /* Pin cached core.clj parsed forms. */
+    if (mino_current_ctx(S)->last_diag != NULL) {
+        gc_mark_interior(S, mino_current_ctx(S)->last_diag->data);
+        gc_mark_interior(S, mino_current_ctx(S)->last_diag->cached_map);
+    }
+}
+
+/* Pin runtime singletons: hooks (sort comparator, print-method),
+ * trampoline sentinel payloads, and the cached core.clj form vector. */
+static void gc_mark_runtime_globals(mino_state_t *S)
+{
+    gc_mark_interior(S, S->sort_comp_fn);
+    gc_mark_interior(S, S->print_method_fn);
+    gc_mark_interior(S, S->recur_sentinel.as.recur.args);
+    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.fn);
+    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.args);
     if (S->core_forms != NULL) {
         size_t ci;
         for (ci = 0; ci < S->core_forms_len; ci++) {
             gc_mark_interior(S, S->core_forms[ci]);
         }
     }
-    /* Pin async scheduler run queue values. */
-    {
-        struct sched_entry *e;
-        for (e = S->async_run_head; e != NULL; e = e->next) {
-            gc_mark_interior(S, e->callback);
-            gc_mark_interior(S, e->value);
-        }
+}
+
+/* Pin async-subsystem live values: scheduler run-queue callbacks/values
+ * and timer channel payloads. */
+static void gc_mark_async_roots(mino_state_t *S)
+{
+    struct sched_entry *e;
+    for (e = S->async_run_head; e != NULL; e = e->next) {
+        gc_mark_interior(S, e->callback);
+        gc_mark_interior(S, e->value);
     }
-    /* Pin current trampoline sentinel payloads (args/fn pointers). */
-    gc_mark_interior(S, S->recur_sentinel.as.recur.args);
-    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.fn);
-    gc_mark_interior(S, S->tail_call_sentinel.as.tail_call.args);
-    /* Pin async timer channel values. */
     async_timers_mark(S);
-    /* Pin record-type registry entries. Record types are interned per
-     * (ns, name) and live for the state's lifetime so re-eval'd
-     * defrecord forms keep the same MINO_TYPE pointer identity. */
-    {
-        record_type_entry_t *rt;
-        for (rt = S->record_types; rt != NULL; rt = rt->next) {
-            gc_mark_interior(S, rt->type);
-        }
+}
+
+/* Pin record-type registry entries. Record types are interned per
+ * (ns, name) and live for the state's lifetime so re-eval'd defrecord
+ * forms keep the same MINO_TYPE pointer identity. */
+static void gc_mark_record_types(mino_state_t *S)
+{
+    record_type_entry_t *rt;
+    for (rt = S->record_types; rt != NULL; rt = rt->next) {
+        gc_mark_interior(S, rt->type);
     }
+}
+
+void gc_mark_roots(mino_state_t *S)
+{
+    gc_mark_envs_and_interns(S);
+    gc_mark_module_and_meta(S);
+    gc_mark_thread_state(S);
+    gc_mark_runtime_globals(S);
+    gc_mark_async_roots(S);
+    gc_mark_record_types(S);
 }
 
 /*
