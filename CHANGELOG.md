@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.92.1 — CI And Linux Build Fixes
+
+Patch release covering build-pipeline fixes that surfaced after
+v0.92.0 went out. No runtime-visible behaviour changes.
+
+**Linux build.** `src/runtime/state.c` uses `PTHREAD_MUTEX_RECURSIVE`,
+which glibc gates behind `_XOPEN_SOURCE >= 500`. Without the macro
+the constant is undeclared and the build fails on Linux. Define
+`_XOPEN_SOURCE 600` at the top of `runtime/internal.h` so glibc
+exposes it to every translation unit. macOS and Windows are
+unaffected.
+
+**CI bootstrap.** The bundled-stdlib generator that produces
+`lib_clojure_*.h` ships as a mino task, so the manual bootstrap step
+in `ci.yml`, `release-build.yml`, and the README only generated
+`core_mino.h`. After `install_stdlib.c` was added, every fresh
+checkout failed at link time on `lib_clojure_string.h: not found`.
+Replace the inline sed with a `gen_header` shell function called
+once per bundled namespace.
+
+**CI test step.** `./mino task test` wraps the suite invocation in
+`sh!`, which buffers stdout until the subprocess exits; under a hang,
+no diagnostic ever surfaces. Invoke `./mino tests/run.clj` directly
+from the workflow so per-test output streams as it's emitted, and
+cap the step at 8 minutes so a deadlock fails fast instead of
+waiting on the 6h job-default.
+
+**Test fan-out cap.** `concurrent-atom-cas` and
+`blocking-many-cross-thread-pings` hard-coded `n=4` worker futures
+plus the test thread, which blew past the runtime grant on a 3-vCPU
+shared CI runner. Cap `n` at `(dec (mino-thread-limit))` so the
+suite still validates atomicity and cross-thread channel parking on
+small machines.
+
+**Channel close drain.** Folded into v0.92.0 retroactively but worth
+calling out for embedders who hit it on the fix-tag pre-release: a
+parked `<!!`/`>!!` waiter that was supposed to be released by
+`close!` could deadlock because `close!` scheduled the wake-callback
+without draining the run queue. Producers calling `close!` are
+typically the only thread that could pull the wake off the queue, so
+the parked thread waited forever. `close!` now drains at the tail.
+
+**Windows test informational.** `tests/proc_test.clj` asserts exact
+stdout from `sh "echo" "..."`, which on Windows comes back with a
+trailing space before `\n` because of cmd.exe's `echo` quirk. The
+build still must pass; the proc-test cases are marked
+`continue-on-error` on Windows until those tests are rewritten in a
+platform-portable way.
+
 ## v0.92.0 — Audit and Doc Realignment
 
 Cycle G4.6 closes the host-threads slice with a sanitizer audit, a
