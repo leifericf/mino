@@ -23,6 +23,14 @@
 #ifndef RUNTIME_INTERNAL_H
 #define RUNTIME_INTERNAL_H
 
+/* glibc gates PTHREAD_MUTEX_RECURSIVE and pthread_mutexattr_settype on
+ * _XOPEN_SOURCE >= 500. macOS exposes them unconditionally; Windows
+ * uses CRITICAL_SECTION. Define before any system header pulls in
+ * features.h so glibc sees the request. */
+#if defined(__linux__) && !defined(_XOPEN_SOURCE)
+#  define _XOPEN_SOURCE 600
+#endif
+
 #include "mino.h"
 #include "diag.h"
 
