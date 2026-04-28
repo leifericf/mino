@@ -411,6 +411,50 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
     }
 }
 
+/* push_dyn_binding -- validate sym_v as a binding name, eval val_form
+ * in env, and prepend a dyn_binding to *bhead. On any failure sets a
+ * diag, frees the in-progress list (so the caller cannot leak), and
+ * returns 0. */
+static int push_dyn_binding(mino_state_t *S, mino_val_t *form,
+                            mino_val_t *sym_v, mino_val_t *val_form,
+                            mino_env_t *env, dyn_binding_t **bhead)
+{
+    char           nbuf[256];
+    size_t         nlen;
+    mino_val_t    *val;
+    dyn_binding_t *b;
+    if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
+        set_eval_diag(S, form, "syntax", "MSY003",
+            "binding: names must be symbols");
+        goto fail;
+    }
+    nlen = sym_v->as.s.len;
+    if (nlen >= sizeof(nbuf)) {
+        set_eval_diag(S, form, "syntax", "MSY003",
+            "binding: name too long");
+        goto fail;
+    }
+    memcpy(nbuf, sym_v->as.s.data, nlen);
+    nbuf[nlen] = '\0';
+    val = eval(S, val_form, env);
+    if (val == NULL) goto fail;
+    b = (dyn_binding_t *)malloc(sizeof(*b));
+    if (b == NULL) {
+        set_eval_diag(S, form, "syntax", "MSY003",
+            "binding: out of memory");
+        goto fail;
+    }
+    b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
+    b->val  = val;
+    b->next = *bhead;
+    *bhead  = b;
+    return 1;
+fail:
+    dyn_binding_list_free(*bhead);
+    *bhead = NULL;
+    return 0;
+}
+
 mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
                          mino_val_t *args, mino_env_t *env, int tail)
 {
@@ -434,89 +478,33 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
         size_t vlen = pairs->as.vec.len;
         size_t vi;
         if (vlen % 2 != 0) {
-            set_eval_diag(S, form, "syntax", "MSY003", "binding: odd number of forms in binding vector");
+            set_eval_diag(S, form, "syntax", "MSY003",
+                "binding: odd number of forms in binding vector");
             return NULL;
         }
         for (vi = 0; vi < vlen; vi += 2) {
-            mino_val_t *sym_v = vec_nth(pairs, vi);
-            mino_val_t *val_form = vec_nth(pairs, vi + 1);
-            mino_val_t *val;
-            dyn_binding_t *b;
-            char nbuf[256];
-            size_t nlen;
-            if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
-                set_eval_diag(S, form, "syntax", "MSY003", "binding: names must be symbols");
-                dyn_binding_list_free(bhead);
+            if (!push_dyn_binding(S, form, vec_nth(pairs, vi),
+                                  vec_nth(pairs, vi + 1), env, &bhead)) {
                 return NULL;
             }
-            nlen = sym_v->as.s.len;
-            if (nlen >= sizeof(nbuf)) {
-                set_eval_diag(S, form, "syntax", "MSY003", "binding: name too long");
-                dyn_binding_list_free(bhead);
-                return NULL;
-            }
-            memcpy(nbuf, sym_v->as.s.data, nlen);
-            nbuf[nlen] = '\0';
-            val = eval(S, val_form, env);
-            if (val == NULL) {
-                dyn_binding_list_free(bhead);
-                return NULL;
-            }
-            b = (dyn_binding_t *)malloc(sizeof(*b));
-            if (b == NULL) {
-                set_eval_diag(S, form, "syntax", "MSY003", "binding: out of memory");
-                dyn_binding_list_free(bhead);
-                return NULL;
-            }
-            b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
-            b->val  = val;
-            b->next = bhead;
-            bhead   = b;
         }
     } else if (mino_is_cons(pairs)) {
         /* Legacy list binding form: (sym val sym val ...) */
         while (pairs != NULL && pairs->type == MINO_CONS) {
-            mino_val_t *sym_v, *val_form, *val;
-            dyn_binding_t *b;
-            char nbuf[256];
-            size_t nlen;
-            sym_v = pairs->as.cons.car;
-            if (sym_v == NULL || sym_v->type != MINO_SYMBOL) {
-                set_eval_diag(S, form, "syntax", "MSY003", "binding: names must be symbols");
-                dyn_binding_list_free(bhead);
-                return NULL;
-            }
-            nlen = sym_v->as.s.len;
-            if (nlen >= sizeof(nbuf)) {
-                set_eval_diag(S, form, "syntax", "MSY003", "binding: name too long");
-                dyn_binding_list_free(bhead);
-                return NULL;
-            }
-            memcpy(nbuf, sym_v->as.s.data, nlen);
-            nbuf[nlen] = '\0';
+            mino_val_t *sym_v    = pairs->as.cons.car;
+            mino_val_t *val_form;
             pairs = pairs->as.cons.cdr;
             if (pairs == NULL || pairs->type != MINO_CONS) {
-                set_eval_diag(S, form, "syntax", "MSY003", "binding: odd number of forms in binding list");
+                set_eval_diag(S, form, "syntax", "MSY003",
+                    "binding: odd number of forms in binding list");
                 dyn_binding_list_free(bhead);
                 return NULL;
             }
             val_form = pairs->as.cons.car;
             pairs    = pairs->as.cons.cdr;
-            val = eval(S, val_form, env);
-            if (val == NULL) {
-                dyn_binding_list_free(bhead);
+            if (!push_dyn_binding(S, form, sym_v, val_form, env, &bhead)) {
                 return NULL;
             }
-            b = (dyn_binding_t *)malloc(sizeof(*b));
-            if (b == NULL) {
-                set_eval_diag(S, form, "syntax", "MSY003", "binding: out of memory");
-                dyn_binding_list_free(bhead);
-                return NULL;
-            }
-            b->name = mino_symbol(S, nbuf)->as.s.data; /* interned */
-            b->val  = val;
-            b->next = bhead;
-            bhead   = b;
         }
     } else {
         set_eval_diag(S, form, "syntax", "MSY001", "binding requires a binding list and body");
