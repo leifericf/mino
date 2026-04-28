@@ -65,8 +65,11 @@ jobs:
         run: ./mino_bootstrap task build
 
       - name: Test
-        run: ./mino task test
-        # tests usually finish in seconds; a hang means a deadlock, not
+        # Run the suite runner directly so stdout streams. `task test`
+        # wraps the subprocess in sh!, which buffers output until exit;
+        # under a hang, no diagnostic ever surfaces.
+        run: ./mino tests/run.clj
+        # Tests usually finish in seconds; a hang means a deadlock, not
         # a slow runner. Cap so we get diagnostic output instead of
         # waiting on the 6h job-default timeout.
         timeout-minutes: 8
