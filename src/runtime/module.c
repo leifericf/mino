@@ -41,10 +41,11 @@ static char *dup_str(const char *s, size_t n)
 /* Add or update an ns alias entry: "alias" -> "full.module.name" in
  * the current namespace. ALIAS and FULL are NUL-terminated byte
  * strings. If an entry for the same (current_ns, alias) already
- * exists its full_name is replaced. On OOM the call is silently a
- * no-op (matches the prior behavior at both sites). */
-void runtime_module_add_alias(mino_state_t *S,
-                              const char *alias, const char *full)
+ * exists its full_name is replaced. Returns 0 on success and -1 on
+ * OOM; callers should surface failures via the standard diagnostic
+ * path so OOM during alias add is catchable. */
+int runtime_module_add_alias(mino_state_t *S,
+                             const char *alias, const char *full)
 {
     size_t i;
     size_t alen = strlen(alias);
@@ -60,10 +61,10 @@ void runtime_module_add_alias(mino_state_t *S,
             && strcmp(S->ns_aliases[i].owning_ns, owner) == 0
             && strcmp(S->ns_aliases[i].alias, alias) == 0) {
             char *replaced = dup_str(full, flen);
-            if (replaced == NULL) return;
+            if (replaced == NULL) return -1;
             free(S->ns_aliases[i].full_name);
             S->ns_aliases[i].full_name = replaced;
-            return;
+            return 0;
         }
     }
 
@@ -71,7 +72,7 @@ void runtime_module_add_alias(mino_state_t *S,
         size_t new_cap = S->ns_alias_cap == 0 ? 8 : S->ns_alias_cap * 2;
         ns_alias_t *nb = (ns_alias_t *)realloc(
             S->ns_aliases, new_cap * sizeof(*nb));
-        if (nb == NULL) return;
+        if (nb == NULL) return -1;
         S->ns_aliases   = nb;
         S->ns_alias_cap = new_cap;
     }
@@ -83,10 +84,11 @@ void runtime_module_add_alias(mino_state_t *S,
         free(o);
         free(a);
         free(f);
-        return;
+        return -1;
     }
     S->ns_aliases[S->ns_alias_len].owning_ns = o;
     S->ns_aliases[S->ns_alias_len].alias     = a;
     S->ns_aliases[S->ns_alias_len].full_name = f;
     S->ns_alias_len++;
+    return 0;
 }

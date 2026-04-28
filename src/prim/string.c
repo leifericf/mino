@@ -876,7 +876,7 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
     }
     bytes[6] = (unsigned char)((bytes[6] & 0x0F) | 0x40); /* version 4 */
     bytes[8] = (unsigned char)((bytes[8] & 0x3F) | 0x80); /* variant 1 */
-    sprintf(buf,
+    snprintf(buf, sizeof(buf),
         "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
         bytes[0], bytes[1], bytes[2],  bytes[3],
         bytes[4], bytes[5], bytes[6],  bytes[7],

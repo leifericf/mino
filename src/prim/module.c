@@ -652,7 +652,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             memcpy(abuf, opts.as_alias_name, opts.as_alias_len);
             abuf[opts.as_alias_len] = '\0';
             (void)ns_env_ensure(S, fbuf);
-            runtime_module_add_alias(S, abuf, fbuf);
+            if (runtime_module_add_alias(S, abuf, fbuf) != 0) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "require: out of memory adding alias");
+                return NULL;
+            }
             return mino_nil(S);
         }
         /* Skip the file load only when the file's already in
@@ -718,7 +723,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             abuf[opts.alias_len] = '\0';
             memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
             fbuf[mod_sym->as.s.len] = '\0';
-            runtime_module_add_alias(S, abuf, fbuf);
+            if (runtime_module_add_alias(S, abuf, fbuf) != 0) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "require: out of memory adding alias");
+                return NULL;
+            }
         }
         /* Store :as-alias when paired with a load-triggering option;
          * the alias-only path returned earlier when no load was needed. */
@@ -730,7 +740,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             abuf[opts.as_alias_len] = '\0';
             memcpy(fbuf, mod_sym->as.s.data, mod_sym->as.s.len);
             fbuf[mod_sym->as.s.len] = '\0';
-            runtime_module_add_alias(S, abuf, fbuf);
+            if (runtime_module_add_alias(S, abuf, fbuf) != 0) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "require: out of memory adding alias");
+                return NULL;
+            }
         }
         /* Process :refer — bind referred names into current ns env.
          * apply_refer_options iterates the source ns env directly so

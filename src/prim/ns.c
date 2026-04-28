@@ -643,7 +643,10 @@ mino_val_t *prim_alias(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                  "alias: no such namespace: %s", tbuf);
         return prim_throw_classified(S, "name", "MNS001", msg);
     }
-    runtime_module_add_alias(S, abuf, tbuf);
+    if (runtime_module_add_alias(S, abuf, tbuf) != 0) {
+        return prim_throw_classified(S, "internal", "MIN001",
+                                     "alias: out of memory");
+    }
     return mino_nil(S);
 }
 

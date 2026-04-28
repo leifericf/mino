@@ -892,7 +892,7 @@ uint64_t state_rand64(mino_state_t *S);
 
 int  runtime_module_dotted_to_path(const char *name, size_t nlen,
                                    char *buf, size_t bufsize);
-void runtime_module_add_alias(mino_state_t *S,
+int  runtime_module_add_alias(mino_state_t *S,
                               const char *alias, const char *full);
 
 /* ------------------------------------------------------------------------- */

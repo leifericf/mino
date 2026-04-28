@@ -228,7 +228,12 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             abuf[alias_len] = '\0';
             memcpy(fbuf, modname, modlen);
             fbuf[modlen] = '\0';
-            runtime_module_add_alias(S, abuf, fbuf);
+            if (runtime_module_add_alias(S, abuf, fbuf) != 0) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "ns: out of memory adding alias");
+                return -1;
+            }
         }
     }
 
