@@ -473,7 +473,13 @@
         (schedule-op! op nil))
       (doseq [op active-putters]
         (try-commit! op)
-        (schedule-op! op false))))
+        (schedule-op! op false))
+      ;; Drain the wake-callbacks we just enqueued. Parked takers and
+      ;; putters block on promise deref, so nothing else will pull
+      ;; them off the run queue; without this drain, blocking <!!/>!!
+      ;; calls deadlock when close! is the only signal that can release
+      ;; them.
+      (drain!)))
   nil)
 
 ;; ---------------------------------------------------------------------
