@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.86.1 — Linux CPU-Count Detection Fix
+
+`_SC_NPROCESSORS_ONLN` is an enum value in glibc and musl
+unistd.h, not a `#define`, so the
+`#elif defined(_SC_NPROCESSORS_ONLN)` guard introduced in
+v0.84.0 was always false. Linux standalone fell through to
+`thread_limit = 1` even when running on a multi-core box,
+silently turning every grant-gated `(future ...)` into the
+"host has not granted threads" message.
+
+Fixed by removing the dead preprocessor guard and gating only
+on `__APPLE__` and `_WIN32`. The constant resolves at compile
+time on both glibc and musl regardless of feature-test macros,
+and `sysconf` returns the right value at runtime. Darwin
+continues to use `sysctlbyname`.
+
+Audit-cycle fix; no functional change to the v0.86.0 surface.
+
 ## v0.86.0 — Test Harness Suite Mode
 
 Fixes a long-standing quirk where `tests/run.clj` silently
