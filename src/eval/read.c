@@ -381,6 +381,26 @@ static int peek_reader_cond_splice(mino_state_t *S, const char **p)
     return 0;
 }
 
+/* Append a single element to the list under construction. The first
+ * cell carries the opening-paren's line/col so diagnostics point at the
+ * list head; subsequent cells carry the element's own line/col. */
+static void list_append_cell(mino_state_t *S, mino_val_t **head,
+                             mino_val_t **tail, mino_val_t *elem,
+                             int list_line, int list_col,
+                             int elem_line, int elem_col)
+{
+    mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
+    cell->as.cons.file   = S->reader_file;
+    cell->as.cons.line   = (*tail == NULL) ? list_line : elem_line;
+    cell->as.cons.column = (*tail == NULL) ? list_col  : elem_col;
+    if (*tail == NULL) {
+        *head = cell;
+    } else {
+        mino_cons_cdr_set(S, *tail, cell);
+    }
+    *tail = cell;
+}
+
 static mino_val_t *read_list_form(mino_state_t *S, const char **p)
 {
     /* Caller has positioned *p on the opening '('. */
@@ -421,19 +441,10 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 /* preserve: append a reader-conditional record (no splice). */
                 mino_val_t *body = read_list_form(S, p);
                 mino_val_t *record;
-                mino_val_t *cell;
                 if (body == NULL && mino_last_error(S) != NULL) return NULL;
                 record = make_reader_conditional_record(S, body, 1);
-                cell = mino_cons(S, record, mino_nil(S));
-                cell->as.cons.file   = S->reader_file;
-                cell->as.cons.line   = (tail == NULL) ? list_line : splice_line;
-                cell->as.cons.column = (tail == NULL) ? list_col : 0;
-                if (tail == NULL) {
-                    head = cell;
-                } else {
-                    mino_cons_cdr_set(S, tail, cell);
-                }
-                tail = cell;
+                list_append_cell(S, &head, &tail, record,
+                                 list_line, list_col, splice_line, 0);
                 continue;
             }
             ADVANCE(S, p);
@@ -444,36 +455,18 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 if (found->type == MINO_VECTOR) {
                     size_t i;
                     for (i = 0; i < found->as.vec.len; i++) {
-                        mino_val_t *cell = mino_cons(S,
-                            vec_nth(found, i), mino_nil(S));
-                        cell->as.cons.file   = S->reader_file;
-                        cell->as.cons.line   = (tail == NULL)
-                                              ? list_line : splice_line;
-                        cell->as.cons.column = (tail == NULL)
-                                              ? list_col : 0;
-                        if (tail == NULL) {
-                            head = cell;
-                        } else {
-                            mino_cons_cdr_set(S, tail, cell);
-                        }
-                        tail = cell;
+                        list_append_cell(S, &head, &tail,
+                                         vec_nth(found, i),
+                                         list_line, list_col,
+                                         splice_line, 0);
                     }
                 } else {
                     mino_val_t *cur = found;
                     while (mino_is_cons(cur)) {
-                        mino_val_t *cell = mino_cons(S,
-                            cur->as.cons.car, mino_nil(S));
-                        cell->as.cons.file   = S->reader_file;
-                        cell->as.cons.line   = (tail == NULL)
-                                              ? list_line : splice_line;
-                        cell->as.cons.column = (tail == NULL)
-                                              ? list_col : 0;
-                        if (tail == NULL) {
-                            head = cell;
-                        } else {
-                            mino_cons_cdr_set(S, tail, cell);
-                        }
-                        tail = cell;
+                        list_append_cell(S, &head, &tail,
+                                         cur->as.cons.car,
+                                         list_line, list_col,
+                                         splice_line, 0);
                         cur = cur->as.cons.cdr;
                     }
                 }
@@ -503,18 +496,8 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 }
                 continue;
             }
-            {
-                mino_val_t *cell = mino_cons(S, elem, mino_nil(S));
-                cell->as.cons.file   = S->reader_file;
-                cell->as.cons.line   = (tail == NULL) ? list_line : elem_line;
-                cell->as.cons.column = (tail == NULL) ? list_col  : elem_col;
-                if (tail == NULL) {
-                    head = cell;
-                } else {
-                    mino_cons_cdr_set(S, tail, cell);
-                }
-                tail = cell;
-            }
+            list_append_cell(S, &head, &tail, elem,
+                             list_line, list_col, elem_line, elem_col);
         }
     }
 }
