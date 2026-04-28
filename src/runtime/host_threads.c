@@ -1,10 +1,8 @@
 /*
  * host_threads.c -- pthread/Win32 worker threads for futures + promises.
  *
- * Cycle G4.3 (v0.89.0).
- *
  * Threading model:
- *   - Per-state state_lock (G4.3.b) is held by the worker for the
+ *   - The per-state state_lock is held by the worker for the
  *     duration of the worker's eval call. Workers + embedder thread
  *     are mutually exclusive within one state. Cross-state is fully
  *     concurrent.
@@ -243,10 +241,10 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
     S->worker_ctxs_head = ctx;
     mino_state_lock_release(S);
 
-    /* Embed-distinctive lifecycle hook (Cycle G4.5). Spawn-per-future
-     * path only — pool-managed workers run under the pool's own
-     * lifecycle hooks. Hook fires on the worker thread so it can do
-     * pthread_setname_np / CPU pinning / priority class. */
+    /* Embed-distinctive lifecycle hook. Spawn-per-future path only.
+     * Pool-managed workers run under the pool's own lifecycle hooks.
+     * Hook fires on the worker thread so it can do pthread_setname_np,
+     * CPU pinning, or priority class. */
     if (S->thread_pool == NULL && S->thread_start_fn != NULL) {
         S->thread_start_fn(S, S->thread_factory_ctx);
     }
@@ -349,10 +347,9 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
     S->multi_threaded = 1;
     S->thread_count++;
 
-    /* Pool path (Cycle G4.5): the embedder hands us a host pool and we
-     * just submit the work item. impl->thread_started stays 0 so the
-     * sweep + quiesce paths skip pthread_join (mino doesn't own the
-     * pthread). */
+    /* Pool path: the embedder hands us a host pool and we just submit
+     * the work item. impl->thread_started stays 0 so the sweep + quiesce
+     * paths skip pthread_join (mino doesn't own the pthread). */
     if (S->thread_pool != NULL && S->thread_pool->submit_fn != NULL) {
         int rc = S->thread_pool->submit_fn(S->thread_pool,
                                            worker_pool_entry, impl);
@@ -462,10 +459,10 @@ void mino_host_threads_quiesce(mino_state_t *S)
 
     /* Walk outstanding futures and wait for each. Two cases:
      *   - Spawn-per-future: pthread_join (Win: WaitForSingleObject).
-     *   - Pool-managed (Cycle G4.5): impl->thread_started is 0 since
-     *     mino didn't pthread_create the worker. Wait on impl->cv
-     *     until state_tag != PENDING; the pool worker publishes the
-     *     result and broadcasts before returning. */
+     *   - Pool-managed: impl->thread_started is 0 since mino didn't
+     *     pthread_create the worker. Wait on impl->cv until
+     *     state_tag != PENDING; the pool worker publishes the result
+     *     and broadcasts before returning. */
     impl = S->future_list_head;
     while (impl != NULL) {
         if (impl->thread_started && !impl->thread_joined) {

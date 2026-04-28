@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.92.0 — Audit and Doc Realignment
+
+Cycle G4.6 closes the host-threads slice with a sanitizer audit, a
+documentation pass, and one bug fix surfaced while writing the
+Performance page.
+
+**Audit.** Full test suite runs ASan-, UBSan-, and TSan-clean. Perf
+smoke matches the v0.91.0 baseline. The slot-tracking and GC-sweep
+fixes from v0.90.0 hold under repeated stress runs.
+
+**Channel close fix.** `close!` now drains the run queue after
+scheduling wake-callbacks for parked takers and putters. Without the
+drain, blocking `<!!`/`>!!` calls could deadlock when `close!` was
+the only signal that could release them, because the producer thread
+returns immediately and no one else runs the scheduler. Surfaced
+while writing the cross-thread channel ping-pong benchmark for the
+new Performance page; reproducible at modest iteration counts before
+the fix.
+
+**Site refresh.** `mino-site` realigns positioning around four pillars
+("Drop into any host with C FFI", "Isolated runtimes with explicit
+message-passing", "Capability-gated host interop", "Clojure-inspired
+ergonomics"). Top nav trims to Get Started, Documentation, GitHub.
+The documentation hub reorganises into Embed, Script, Reference, and
+Internals sections with role chips at the top. Host-thread rows in
+the compatibility matrix and intentional-divergences page now reflect
+the shipped runtime, not the API-shipped/runtime-pending state from
+v0.84.0. The Coming-from-Clojure concurrency section gains a
+Futures, promises, threads subsection covering the OS-thread
+parking model.
+
+**Performance page refresh.** Single-thread numbers re-measured
+against v0.92.0 on the M3 Pro reference machine. New Concurrency
+section reports future spawn + deref roundtrip, atom-CAS contention
+scaling under the per-state GIL, and blocking-channel cross-thread
+ping-pong throughput. New Footprint and Startup section reports
+stripped binary size, source-tree size, vendor size, bundled-stdlib
+size, and cold REPL invocation time. Banner shifts from "preliminary
+results" to a versioned line that names the binary and hardware.
+
+**Internal cleanup.** Phase and version refs stripped from
+`src/runtime/host_threads.c` and `tests/host_threads_test.clj`.
+`examples/embed_host_threads.c` removed; `examples/embed_multi_tenant_threads.c`
+covers the same ground end-to-end.
+
 ## v0.91.0 — Embed-Distinctive Thread API
 
 Three knobs let embedders shape mino's threading without forking the

@@ -1,7 +1,7 @@
 (require "tests/test")
 
 ;; ---------------------------------------------------------------------------
-;; Host threads — Cycle G4.3 (v0.89.0).
+;; Host threads.
 ;;
 ;; Real OS-thread futures and promises. Standalone `./mino` grants
 ;; cpu_count after mino_install_all so future-call works without
@@ -65,8 +65,7 @@
 (deftest concurrent-atom-cas
   ;; Stress the atom CAS path under genuine concurrency. With N futures
   ;; each doing M increments, the final value must be N*M (no lost
-  ;; updates). This exercises the __atomic_compare_exchange path that
-  ;; G4.1 added.
+  ;; updates). This exercises the __atomic_compare_exchange path.
   (when (> (mino-thread-limit) 1)
     (let [a (atom 0)
           n 4
