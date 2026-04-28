@@ -322,17 +322,26 @@ void gc_mark_roots(mino_state_t *S)
             gc_mark_interior(S, ref->val);
         }
     }
-    /* Pin dynamic binding values. */
+    /* Pin dynamic binding values for every live ctx (main + workers). */
     {
         dyn_frame_t *f;
         dyn_binding_t *b;
-        for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        mino_thread_ctx_t *w;
+        for (f = S->main_ctx.dyn_stack; f != NULL; f = f->prev) {
             for (b = f->bindings; b != NULL; b = b->next) {
                 gc_mark_interior(S, b->val);
             }
         }
+        for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+            for (f = w->dyn_stack; f != NULL; f = f->prev) {
+                for (b = f->bindings; b != NULL; b = b->next) {
+                    gc_mark_interior(S, b->val);
+                }
+            }
+        }
     }
-    /* Pin diagnostic data and cached map. */
+    /* Pin diagnostic data and cached map (current ctx; workers don't
+     * publish diagnostics back through this path). */
     if (mino_current_ctx(S)->last_diag != NULL) {
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->data);
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->cached_map);
@@ -341,12 +350,32 @@ void gc_mark_roots(mino_state_t *S)
     gc_mark_interior(S, S->sort_comp_fn);
     /* Pin print-method hook if installed. */
     gc_mark_interior(S, S->print_method_fn);
-    /* Pin values on the GC save stack. */
+    /* Pin values on the GC save stack of every live ctx. The current
+     * thread's ctx is whichever is mino_current_ctx; other ctxs are
+     * blocked workers (Cycle G4.3) whose gc_save would otherwise be
+     * invisible to a GC initiated from a different thread. We walk
+     * S->main_ctx + S->worker_ctxs_head; the current thread's ctx is
+     * one of those, so it's covered. */
     {
-        int si;
-        int limit = mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX ? mino_current_ctx(S)->gc_save_len : GC_SAVE_MAX;
-        for (si = 0; si < limit; si++) {
-            gc_mark_interior(S, mino_current_ctx(S)->gc_save[si]);
+        mino_thread_ctx_t *ctxs[2];
+        mino_thread_ctx_t *w;
+        int               ci;
+        ctxs[0] = &S->main_ctx;
+        ctxs[1] = NULL; /* sentinel */
+        for (ci = 0; ctxs[ci] != NULL; ci++) {
+            mino_thread_ctx_t *c = ctxs[ci];
+            int si;
+            int limit = c->gc_save_len < GC_SAVE_MAX ? c->gc_save_len : GC_SAVE_MAX;
+            for (si = 0; si < limit; si++) {
+                gc_mark_interior(S, c->gc_save[si]);
+            }
+        }
+        for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+            int si;
+            int limit = w->gc_save_len < GC_SAVE_MAX ? w->gc_save_len : GC_SAVE_MAX;
+            for (si = 0; si < limit; si++) {
+                gc_mark_interior(S, w->gc_save[si]);
+            }
         }
     }
     /* Pin cached core.clj parsed forms. */

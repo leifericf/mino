@@ -615,13 +615,14 @@
       :delay/state state#}))
 (def deref-delay "Forces evaluation of a delay and returns its value." (fn [d] ((:delay/fn d))))
 (def force       "Forces evaluation of a delay. If x is not a delay, returns x." (fn [x] (if (delay? x) (deref-delay x) x)))
-;; Override C realized? to also handle delays
+;; Override C realized? to also handle delays and futures
 (let [c-realized? realized?]
-  (def realized? "Returns true if a delay or lazy sequence has been realized." (fn [x]
+  (def realized? "Returns true if a delay, lazy sequence, future, or promise has been realized." (fn [x]
     (cond
-      (nil? x)   (throw "realized? requires a non-nil argument")
-      (delay? x) (= :done (:status @(:delay/state x)))
-      :else      (c-realized? x)))))
+      (nil? x)    (throw "realized? requires a non-nil argument")
+      (delay? x)  (= :done (:status @(:delay/state x)))
+      (future? x) (future-done? x)
+      :else       (c-realized? x)))))
 
 ;; --- Sequence navigation ---
 
@@ -1452,108 +1453,50 @@
                   {:mino/unsupported :agent-error})))
 
 ;; ---------------------------------------------------------------------------
-;; Host threads — foundation API surface (v0.84.0).
+;; Host threads — Cycle G4.3 (v0.89.0).
 ;;
-;; The runtime exposes mino_set_thread_limit / mino_get_thread_limit /
-;; mino_thread_count / mino_quiesce_threads to embedders and a single
-;; primitive (mino-thread-limit) to the script side. The Clojure-canon
-;; future/promise/deliver/realized?/future-cancel/future-done?/
-;; future-cancelled?/thread surface lives here as throw-stubs that
-;; distinguish two failure modes:
+;; Real OS-thread futures and promises. Embedded mode starts at
+;; thread_limit = 1 (single-threaded) and embedders raise it via
+;; mino_set_thread_limit. Standalone `./mino` grants cpu_count
+;; automatically so the REPL surface matches Clojure canon.
 ;;
-;;   limit <= 1  (embedded default): the host has not granted threads.
-;;                Embedders unlock the surface via mino_set_thread_limit.
-;;   limit  > 1  (standalone or grant-on): the host has granted, but
-;;                the runtime impl (per-thread context refactor + GC
-;;                STW machinery + atom CAS upgrade) is in flight; see
-;;                CHANGELOG.md "Host Threads — Foundation Slice."
-;;
-;; The two messages are deliberately different so the difference between
-;; "your embedder hasn't opted in" and "the runtime hasn't shipped this
-;; yet" is loud and unambiguous. Per the no-fakery rule, neither path
-;; pretends to work.
+;; When the host has not granted threads (limit <= 1), spawn entry
+;; points throw :mino/unsupported with a message naming the grant
+;; API. When the host has granted, the C primitives behind these
+;; functions create real pthread/CreateThread workers.
 ;; ---------------------------------------------------------------------------
 
-(defn mino-thread-grant-msg
-  "Build the :mino/unsupported message that the host-thread throw stubs
-  use. Public because the future/thread macros expand into a call to it
-  in caller namespaces; private would block resolution there."
+(defn ^:private mino-no-grant-msg
+  "Build the :mino/unsupported message used when host threads are
+  not granted in the current state."
   [name]
-  (let [limit (mino-thread-limit)]
-    (if (<= limit 1)
-      (str name ": host threads are not granted in this state. "
-           "Embedders call mino_set_thread_limit(S, n) with n > 1; the "
-           "standalone `./mino` binary grants cpu_count automatically. "
-           "See CHANGELOG.md (cycle G4) for the API and current status.")
-      (str name ": host threads have been granted (limit=" limit ") but "
-           "the runtime implementation is in flight. The API surface is "
-           "stable; implementation lands across upcoming versions. "
-           "See CHANGELOG.md (cycle G4)."))))
+  (str name ": host threads are not granted in this state. "
+       "Embedders call mino_set_thread_limit(S, n) with n > 1; the "
+       "standalone `./mino` binary grants cpu_count automatically."))
 
 (defmacro future
   "Takes a body of expressions and yields a future object that will
-  evaluate the body in another thread. Mino: throws :mino/unsupported
-  in v0.84.x — the host-thread runtime is in flight; see CHANGELOG."
-  [& _body]
-  `(throw (ex-info (mino-thread-grant-msg "future")
-                   {:mino/unsupported :future
-                    :mino/thread-limit (mino-thread-limit)})))
+  evaluate the body in another thread, blocking on deref until the
+  value is available. Throws :mino/unsupported when host threads are
+  not granted; see mino-thread-limit."
+  [& body]
+  `(if (<= (mino-thread-limit) 1)
+     (throw (ex-info (mino-no-grant-msg "future")
+                     {:mino/unsupported :future
+                      :mino/thread-limit (mino-thread-limit)}))
+     (future-call (fn [] ~@body))))
 
 (defmacro thread
-  "Executes the body in another thread, returning immediately to the
-  calling thread. Mino: throws :mino/unsupported in v0.84.x; see
-  CHANGELOG."
-  [& _body]
-  `(throw (ex-info (mino-thread-grant-msg "thread")
-                   {:mino/unsupported :thread
-                    :mino/thread-limit (mino-thread-limit)})))
-
-(defn promise
-  "Returns a promise object that can be deliver'd a value once. Deref
-  blocks until delivered. Mino: throws :mino/unsupported in v0.84.x."
-  [& _]
-  (throw (ex-info (mino-thread-grant-msg "promise")
-                  {:mino/unsupported :promise
-                   :mino/thread-limit (mino-thread-limit)})))
-
-(defn deliver
-  "Delivers a value to a promise, unblocking any deref'ers. Mino:
-  throws :mino/unsupported in v0.84.x."
-  [& _]
-  (throw (ex-info (mino-thread-grant-msg "deliver")
-                  {:mino/unsupported :deliver
-                   :mino/thread-limit (mino-thread-limit)})))
-
-(defn future-cancel
-  "Cancels a future. Mino: throws :mino/unsupported in v0.84.x."
-  [& _]
-  (throw (ex-info (mino-thread-grant-msg "future-cancel")
-                  {:mino/unsupported :future-cancel
-                   :mino/thread-limit (mino-thread-limit)})))
-
-(defn future-done?
-  "Returns true if the future has completed. Mino: throws
-  :mino/unsupported in v0.84.x."
-  [& _]
-  (throw (ex-info (mino-thread-grant-msg "future-done?")
-                  {:mino/unsupported :future-done?
-                   :mino/thread-limit (mino-thread-limit)})))
-
-(defn future-cancelled?
-  "Returns true if the future was cancelled. Mino: throws
-  :mino/unsupported in v0.84.x."
-  [& _]
-  (throw (ex-info (mino-thread-grant-msg "future-cancelled?")
-                  {:mino/unsupported :future-cancelled?
-                   :mino/thread-limit (mino-thread-limit)})))
-
-(defn future?
-  "Returns true if x is a future. Mino: always false in v0.84.x; the
-  host-thread runtime is in flight. The predicate returns false rather
-  than throwing so callers that branch on (future? x) before deref'ing
-  pick the non-future arm without surprise."
-  [_]
-  false)
+  "Executes the body in another thread, returning a future-like value
+  that can be deref'd. In Cycle G4.3 thread is an alias for future
+  (same worker pool). Throws :mino/unsupported when host threads are
+  not granted."
+  [& body]
+  `(if (<= (mino-thread-limit) 1)
+     (throw (ex-info (mino-no-grant-msg "thread")
+                     {:mino/unsupported :thread
+                      :mino/thread-limit (mino-thread-limit)}))
+     (future-call (fn [] ~@body))))
 
 ;; ---------------------------------------------------------------------------
 ;; Protocols: polymorphic dispatch on the type of the first argument.

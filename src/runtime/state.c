@@ -425,11 +425,12 @@ void mino_unref(mino_state_t *S, mino_ref_t *ref)
 /* Public eval entry points                                                  */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 {
     volatile char probe = 0;
     mino_val_t   *v;
-    int           saved_try = mino_current_ctx(S)->try_depth;
+    int           saved_try;
+    saved_try = mino_current_ctx(S)->try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
     mino_current_ctx(S)->eval_steps     = 0;
@@ -510,7 +511,20 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     return v;
 }
 
-mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
+/* Public eval entry: hold state_lock for the entire call when host
+ * threads are active. Recursive lock so nested mino_call from
+ * primitives is fine; lock_depth tracks recursion so future-deref
+ * can yield + resume around a blocking cv_wait. */
+mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
+{
+    mino_val_t *v;
+    mino_lock(S);
+    v = mino_eval_inner(S, form, env);
+    mino_unlock(S);
+    return v;
+}
+
+static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src, mino_env_t *env)
 {
     volatile char   probe = 0;
     mino_val_t     *last  = mino_nil(S);
@@ -599,6 +613,15 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
     return last;
 }
 
+mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
+{
+    mino_val_t *v;
+    mino_lock(S);
+    v = mino_eval_string_inner(S, src, env);
+    mino_unlock(S);
+    return v;
+}
+
 mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
 {
     FILE  *f;
@@ -673,9 +696,13 @@ void mino_register_fn(mino_state_t *S, mino_env_t *env, const char *name, mino_p
 mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env)
 {
     volatile char probe = 0;
+    mino_val_t   *result;
+    mino_lock(S);
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
-    return apply_callable(S, fn, args, env);
+    result = apply_callable(S, fn, args, env);
+    mino_unlock(S);
+    return result;
 }
 
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
@@ -882,7 +909,15 @@ void mino_state_lock_release(mino_state_t *S)
 #else
 void mino_state_lock_init(mino_state_t *S)
 {
-    pthread_mutex_init(&S->state_lock, NULL);
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    /* Recursive: gc_alloc_typed is the most heavily-locked critical
+     * section, and its OOM fallback path calls gc_major_collect which
+     * itself can allocate. The same thread re-acquiring is correct;
+     * non-recursive would deadlock against the same thread. */
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&S->state_lock, &attr);
+    pthread_mutexattr_destroy(&attr);
 }
 void mino_state_lock_destroy(mino_state_t *S)
 {
@@ -897,6 +932,28 @@ void mino_state_lock_release(mino_state_t *S)
     pthread_mutex_unlock(&S->state_lock);
 }
 #endif
+
+/* Drop the current thread's lock holding to zero so a blocking wait
+ * (e.g. cv_wait inside future_deref) doesn't starve other workers.
+ * Returns the saved depth; the caller must call mino_resume_lock
+ * with that value when it's safe to re-take. */
+int mino_yield_lock(mino_state_t *S)
+{
+    int depth = mino_current_ctx(S)->lock_depth;
+    while (mino_current_ctx(S)->lock_depth > 0) {
+        mino_current_ctx(S)->lock_depth--;
+        mino_state_lock_release(S);
+    }
+    return depth;
+}
+
+void mino_resume_lock(mino_state_t *S, int saved_depth)
+{
+    while (saved_depth-- > 0) {
+        mino_state_lock_acquire(S);
+        mino_current_ctx(S)->lock_depth++;
+    }
+}
 
 /* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */

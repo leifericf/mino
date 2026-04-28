@@ -118,6 +118,15 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
     if (mino_current_ctx(S)->gc_depth > 0 || mino_current_ctx(S)->gc_stack_bottom == NULL) {
         return;
     }
+    /* Cycle G4.3: skip collection while host worker threads are alive.
+     * The conservative stack scan only walks the current thread's
+     * stack, so a GC initiated from one thread can't see another
+     * thread's stack-rooted values. Cycle G4.4+ introduces per-thread
+     * stack snapshots at safepoints; until then we trade memory for
+     * correctness. Memory normalizes after mino_quiesce_threads. */
+    if (S->thread_count > 0) {
+        return;
+    }
     if (S->gc_stress) {
         if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
             gc_force_finish_major(S);

@@ -6,6 +6,7 @@
  */
 
 #include "prim/internal.h"
+#include "runtime/host_threads.h"
 
 /* ---- shared helpers ---------------------------------------------------- */
 
@@ -171,7 +172,10 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return a->as.var.root != NULL ? a->as.var.root : mino_nil(S);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, var, or reduced");
+    if (a != NULL && a->type == MINO_FUTURE) {
+        return mino_future_deref(S, a);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, var, future, or reduced");
 }
 
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -646,9 +650,7 @@ mino_val_t *prim_mino_thread_limit(mino_state_t *S, mino_val_t *args,
     return mino_int(S, mino_get_thread_limit(S));
 }
 
-/* (mino-thread-count) — return the live worker count for this state.
- * Always 0 in the v0.84.0 foundation slice; the throw stubs reject
- * every spawn entry point. */
+/* (mino-thread-count) — return the live worker count for this state. */
 mino_val_t *prim_mino_thread_count(mino_state_t *S, mino_val_t *args,
                                    mino_env_t *env)
 {
@@ -658,6 +660,139 @@ mino_val_t *prim_mino_thread_count(mino_state_t *S, mino_val_t *args,
             "mino-thread-count takes no arguments");
     }
     return mino_int(S, mino_thread_count(S));
+}
+
+/* ------------------------------------------------------------------------- */
+/* Host-thread futures (Cycle G4.3).                                         */
+/* ------------------------------------------------------------------------- */
+
+/* (future-call thunk) — spawn a worker thread that evaluates (thunk)
+ * and returns a future. */
+static mino_val_t *prim_future_call(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env)
+{
+    mino_val_t *thunk;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "future-call expects exactly one argument");
+    }
+    thunk = args->as.cons.car;
+    if (thunk == NULL || (thunk->type != MINO_FN
+                          && thunk->type != MINO_PRIM
+                          && thunk->type != MINO_MACRO)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "future-call expects a function");
+    }
+    return mino_future_spawn(S, thunk, env);
+}
+
+/* (promise) — return a fresh promise. */
+static mino_val_t *prim_promise(mino_state_t *S, mino_val_t *args,
+                                mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "promise takes no arguments");
+    }
+    return mino_promise_new(S);
+}
+
+/* (deliver promise value) — deliver value to the promise. Returns the
+ * promise on success, nil if the promise was already realized. */
+static mino_val_t *prim_deliver(mino_state_t *S, mino_val_t *args,
+                                mino_env_t *env)
+{
+    mino_val_t *promise, *value;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "deliver expects two arguments: promise value");
+    }
+    promise = args->as.cons.car;
+    value   = args->as.cons.cdr->as.cons.car;
+    if (promise == NULL || promise->type != MINO_FUTURE) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "deliver expects a promise");
+    }
+    return mino_promise_deliver(S, promise, value) ? promise : mino_nil(S);
+}
+
+/* (future-cancel f) — cancel a future. Returns true if newly cancelled. */
+static mino_val_t *prim_future_cancel(mino_state_t *S, mino_val_t *args,
+                                      mino_env_t *env)
+{
+    mino_val_t *fut;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "future-cancel expects one argument");
+    }
+    fut = args->as.cons.car;
+    return mino_future_cancel(S, fut) ? mino_true(S) : mino_false(S);
+}
+
+/* (future-done? f) — true if the future has reached a terminal state. */
+static mino_val_t *prim_future_done_q(mino_state_t *S, mino_val_t *args,
+                                      mino_env_t *env)
+{
+    mino_val_t *fut;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "future-done? expects one argument");
+    }
+    fut = args->as.cons.car;
+    return mino_future_done_p(fut) ? mino_true(S) : mino_false(S);
+}
+
+/* (future-cancelled? f) — true if the future was cancelled. */
+static mino_val_t *prim_future_cancelled_q(mino_state_t *S, mino_val_t *args,
+                                           mino_env_t *env)
+{
+    mino_val_t *fut;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "future-cancelled? expects one argument");
+    }
+    fut = args->as.cons.car;
+    return mino_future_cancelled_p(fut) ? mino_true(S) : mino_false(S);
+}
+
+/* (future? x) — true if x is a future or promise. */
+static mino_val_t *prim_future_q(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env)
+{
+    mino_val_t *x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "future? expects one argument");
+    }
+    x = args->as.cons.car;
+    return (x != NULL && x->type == MINO_FUTURE) ? mino_true(S) : mino_false(S);
+}
+
+/* (future-deref f) — block until the future is realized; return result
+ * (or rethrow exception, or throw :mino/cancelled). The user-facing
+ * `deref` in core.clj routes futures to this primitive. */
+static mino_val_t *prim_future_deref(mino_state_t *S, mino_val_t *args,
+                                     mino_env_t *env)
+{
+    mino_val_t *fut;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "future-deref expects one argument");
+    }
+    fut = args->as.cons.car;
+    if (fut == NULL || fut->type != MINO_FUTURE) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "future-deref expects a future");
+    }
+    return mino_future_deref(S, fut);
 }
 
 const mino_prim_def k_prims_stateful[] = {
@@ -694,7 +829,23 @@ const mino_prim_def k_prims_stateful[] = {
     {"mino-thread-limit", prim_mino_thread_limit,
      "Return the host-granted thread limit for this state. 1 means single-threaded; >1 means the host has granted that many concurrent worker threads."},
     {"mino-thread-count", prim_mino_thread_count,
-     "Return the live host-thread count for this state. Always 0 until host threads spawn."},
+     "Return the live host-thread count for this state."},
+    {"future-call",         prim_future_call,
+     "Spawn a worker thread to evaluate the given thunk; return a future."},
+    {"promise",             prim_promise,
+     "Return a fresh promise that can be deliver'd a value once."},
+    {"deliver",             prim_deliver,
+     "Deliver a value to a promise. Returns the promise on success, nil if already realized."},
+    {"future-cancel",       prim_future_cancel,
+     "Cancel a pending future. Returns true if the future was newly cancelled."},
+    {"future-done?",        prim_future_done_q,
+     "Return true if the future has reached a terminal state (resolved/failed/cancelled)."},
+    {"future-cancelled?",   prim_future_cancelled_q,
+     "Return true if the future was cancelled."},
+    {"future?",             prim_future_q,
+     "Return true if x is a future or promise."},
+    {"future-deref",        prim_future_deref,
+     "Block until the future is realized; return result, rethrow exception, or throw :mino/cancelled."},
 };
 
 const size_t k_prims_stateful_count =

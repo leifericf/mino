@@ -224,6 +224,22 @@ typedef struct mino_thread_ctx {
 
     /* Dynamic binding stack head. */
     dyn_frame_t    *dyn_stack;
+
+    /* Cycle G4.3: this thread's recursive depth on S->state_lock.
+     * mino_lock increments, mino_unlock decrements; mino_yield_lock
+     * saves the depth and unlocks down to zero, mino_resume_lock
+     * re-locks up to the saved depth. Used by mino_future_deref so
+     * the waiter can park on the future's cv without holding the
+     * state_lock and starving the worker. */
+    int             lock_depth;
+
+    /* Linked list of live worker ctxs (Cycle G4.3). Walked during
+     * gc_mark_roots so values pinned by gc_save / dyn_stack / etc.
+     * on a blocked worker stay reachable across GCs initiated from
+     * another thread. main_ctx is not on this list; the GC walker
+     * processes it separately. NULL on main_ctx and on the head
+     * sentinel. */
+    struct mino_thread_ctx *next_worker;
 } mino_thread_ctx_t;
 
 /* TLS pointer to the per-thread ctx for the current worker.
@@ -595,6 +611,11 @@ struct mino_state {
      * mino_future definition is below (after struct mino_state). */
     mino_future_t *future_list_head;
 
+    /* Linked list of live worker ctxs (Cycle G4.3). Walked during
+     * GC root scanning so blocked workers' pinned values stay live.
+     * Mutated under state_lock. */
+    mino_thread_ctx_t *worker_ctxs_head;
+
     /* Stop-the-world request for major GC (Cycle G4.2).
      *
      * Set by `gc_request_stw` before running a major collection;
@@ -716,8 +737,28 @@ void mino_state_lock_destroy(mino_state_t *S);
 void mino_state_lock_acquire(mino_state_t *S);
 void mino_state_lock_release(mino_state_t *S);
 
-#define mino_lock(S)   do { if ((S)->multi_threaded) mino_state_lock_acquire(S); } while (0)
-#define mino_unlock(S) do { if ((S)->multi_threaded) mino_state_lock_release(S); } while (0)
+/* mino_lock / mino_unlock take the recursive state_lock unconditionally.
+ * This ensures correctness when multi_threaded flips mid-eval (a
+ * conditional lock could race because the eval that called future-spawn
+ * entered without taking the lock when multi_threaded was still 0).
+ * Single-threaded states pay one uncontested mutex lock per eval entry,
+ * which is on the order of tens of nanoseconds and dominated by other
+ * eval costs. Cycle G4.4+ may reintroduce a fast-path skip after
+ * proving safe-flip sequencing. */
+#define mino_lock(S) do {                                                 \
+    mino_state_lock_acquire(S);                                            \
+    mino_current_ctx(S)->lock_depth++;                                     \
+} while (0)
+
+#define mino_unlock(S) do {                                               \
+    mino_current_ctx(S)->lock_depth--;                                     \
+    mino_state_lock_release(S);                                            \
+} while (0)
+
+/* Yield: drop down to lock_depth==0, returning the previous depth so
+ * the caller can resume to the same level after a blocking wait. */
+int  mino_yield_lock(mino_state_t *S);
+void mino_resume_lock(mino_state_t *S, int saved_depth);
 
 /* ------------------------------------------------------------------------- */
 /* error.c                                                                   */

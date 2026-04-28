@@ -239,14 +239,21 @@ static void *worker_entry(void *arg)
     ctx->gc_stack_bottom = (void *)&stack_anchor;
     mino_tls_ctx = ctx;
 
-    /* Acquire the state lock for the entire eval. Per Cycle G4.3,
-     * single-state futures execute serialized w.r.t. each other and
-     * the embedder thread. */
-    mino_lock(S);
+    /* Link onto S->worker_ctxs_head so gc_mark_roots can walk the
+     * worker's gc_save and dyn_stack while it's blocked. Take the
+     * state_lock briefly for the list mutation; we're outside the
+     * mino_call lock at this point so it's a fresh acquire. */
+    mino_state_lock_acquire(S);
+    ctx->next_worker = S->worker_ctxs_head;
+    S->worker_ctxs_head = ctx;
+    mino_state_lock_release(S);
 
+    /* Note: state_lock is NOT held for the entire eval. It guards
+     * short critical sections (gc_alloc, registry mutations) only.
+     * This lets workers and the embedder thread run eval in parallel;
+     * they serialize only on the contested critical sections. Cycle
+     * G4.4+ may relax this further with per-thread allocator arenas. */
     result = mino_call(S, impl->thunk, mino_nil(S), NULL);
-
-    mino_unlock(S);
 
     /* Publish result. Note: mino_call returns NULL on uncaught throw;
      * we capture the diagnostic into the exception field so deref can
@@ -265,6 +272,16 @@ static void *worker_entry(void *arg)
     /* If state_tag was already CANCELLED, leave it as CANCELLED and
      * drop the result. */
     mu_unlock(&impl->mu);
+
+    /* Detach this worker's ctx from S->worker_ctxs_head before
+     * freeing so GC root scanning never visits a freed ctx. */
+    mino_state_lock_acquire(S);
+    {
+        mino_thread_ctx_t **pp = &S->worker_ctxs_head;
+        while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
+        if (*pp == ctx) { *pp = ctx->next_worker; }
+    }
+    mino_state_lock_release(S);
 
     mino_tls_ctx = NULL;
     free(ctx);
@@ -340,24 +357,18 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
     impl = fut->as.future.impl;
     if (impl == NULL) { return mino_nil(S); }
 
-    /* Release the state_lock during the wait so other workers can
-     * make progress. The waiter is itself running under state_lock
-     * (it's an in-eval call); cross-state futures depend on the
-     * holder dropping it. */
-    if (S->multi_threaded) {
-        mino_unlock(S);
-    }
-
-    mu_lock(&impl->mu);
-    while (impl->state_tag == MINO_FUTURE_PENDING) {
-        cv_wait(&impl->cv, &impl->mu);
-    }
-    out = (impl->state_tag == MINO_FUTURE_RESOLVED) ? impl->result : NULL;
-    mu_unlock(&impl->mu);
-
-    /* Re-acquire so the caller's eval continues holding it. */
-    if (S->multi_threaded) {
-        mino_lock(S);
+    /* Yield the state_lock fully before blocking on cv so the worker
+     * thread (which needs to take state_lock for its eval) can run.
+     * Resume the same depth after wake. */
+    {
+        int depth = mino_yield_lock(S);
+        mu_lock(&impl->mu);
+        while (impl->state_tag == MINO_FUTURE_PENDING) {
+            cv_wait(&impl->cv, &impl->mu);
+        }
+        out = (impl->state_tag == MINO_FUTURE_RESOLVED) ? impl->result : NULL;
+        mu_unlock(&impl->mu);
+        mino_resume_lock(S, depth);
     }
 
     if (out != NULL) {
