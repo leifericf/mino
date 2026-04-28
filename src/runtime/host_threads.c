@@ -274,13 +274,18 @@ static void *worker_entry(void *arg)
     mu_unlock(&impl->mu);
 
     /* Detach this worker's ctx from S->worker_ctxs_head before
-     * freeing so GC root scanning never visits a freed ctx. */
+     * freeing so GC root scanning never visits a freed ctx, and
+     * release the slot so spawn() bookkeeping reflects only
+     * concurrently-live workers. The pthread itself remains joinable
+     * until mino_host_threads_quiesce; pthread_join on an already
+     * exited joinable thread is a no-op that returns immediately. */
     mino_state_lock_acquire(S);
     {
         mino_thread_ctx_t **pp = &S->worker_ctxs_head;
         while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
         if (*pp == ctx) { *pp = ctx->next_worker; }
     }
+    if (S->thread_count > 0) { S->thread_count--; }
     mino_state_lock_release(S);
 
     mino_tls_ctx = NULL;
