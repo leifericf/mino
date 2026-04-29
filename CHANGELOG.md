@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.96.1 — Stateful Transducers Use Real `volatile!`
+
+Ten transducer state slots in `src/core.clj` switch from `(atom ...)`
+plus `swap!` / `reset!` to `(volatile! ...)` plus `vswap!` / `vreset!`:
+`take`, `drop`, `drop-while`, `take-nth`, `interpose`, `distinct`,
+`partition-by` (both buf and pval), `partition-all`, `map-indexed`, and
+`dedupe`. The transducer contract already implies single-thread access
+to that state — the reducing fn is invoked from one thread at a time —
+so the watch + validator + atomic-publish overhead the atom carried was
+pure waste on every step.
+
+The user-visible contract is unchanged: same primitives, same lazy-vs-
+eager arities, same return values. The change is per-step throughput
+on stateful-transducer pipelines once host threads enter the picture
+(single-threaded states avoided the CAS already, but still paid for
+the atom struct's extra slots).
+
 ## v0.96.0 — `volatile!` Becomes a Real Type
 
 Up to this release, `volatile!` was a Clojure-side alias for `atom`,

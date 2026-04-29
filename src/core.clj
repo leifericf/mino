@@ -198,12 +198,12 @@
 (defn take "Returns a lazy sequence of the first n items in coll. When called with no collection, returns a transducer."
   ([n]
    (fn [rf]
-     (let [remaining (atom n)]
+     (let [remaining (volatile! n)]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
             (let [r @remaining]
-              (swap! remaining dec)
+              (vswap! remaining dec)
               (if (> r 0)
                 (let [ret (rf result input)]
                   (if (= (dec r) 0)
@@ -215,12 +215,12 @@
 (defn drop "Returns a lazy sequence of all but the first n items in coll. When called with no collection, returns a transducer."
   ([n]
    (fn [rf]
-     (let [remaining (atom n)]
+     (let [remaining (volatile! n)]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
             (if (> @remaining 0)
-              (do (swap! remaining dec) result)
+              (do (vswap! remaining dec) result)
               (rf result input)))))))
   ([n coll] (drop-seq n coll)))
 
@@ -393,13 +393,13 @@
 (defn drop-while "Returns a lazy sequence of items from coll after pred returns falsy. When called with no collection, returns a transducer."
   ([pred]
    (fn [rf]
-     (let [dropping (atom true)]
+     (let [dropping (volatile! true)]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
             (if (and @dropping (pred input))
               result
-              (do (reset! dropping false)
+              (do (vreset! dropping false)
                   (rf result input))))))))
   ([pred coll]
    (let [s (seq coll)]
@@ -411,11 +411,11 @@
 (defn take-nth "Returns a lazy sequence of every nth item in coll. When called with no collection, returns a transducer."
   ([n]
    (fn [rf]
-     (let [i (atom -1)]
+     (let [i (volatile! -1)]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
-            (swap! i inc)
+            (vswap! i inc)
             (if (= 0 (mod @i n))
               (rf result input)
               result))))))
@@ -468,14 +468,14 @@
 (defn interpose "Returns a lazy sequence of the items in coll separated by sep. When called with no collection, returns a transducer."
   ([sep]
    (fn [rf]
-     (let [started (atom false)]
+     (let [started (volatile! false)]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
             (if @started
               (let [r (rf result sep)]
                 (if (reduced? r) r (rf r input)))
-              (do (reset! started true)
+              (do (vreset! started true)
                   (rf result input))))))))
   ([sep coll]
    (lazy-seq
@@ -487,13 +487,13 @@
 (defn distinct "Returns a lazy sequence of the distinct items in coll. When called with no collection, returns a transducer."
   ([]
    (fn [rf]
-     (let [seen (atom #{})]
+     (let [seen (volatile! #{})]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
             (if (contains? @seen input)
               result
-              (do (swap! seen conj input)
+              (do (vswap! seen conj input)
                   (rf result input))))))))
   ([coll]
    (let [dist-impl (fn dist-impl [seen coll]
@@ -530,8 +530,8 @@
 (defn partition-by "Splits coll into lazy sequences of consecutive items with the same (f item) value. When called with no collection, returns a transducer."
   ([f]
    (fn [rf]
-     (let [buf (atom [])
-           pval (atom ::none)]
+     (let [buf (volatile! [])
+           pval (volatile! ::none)]
        (fn ([] (rf))
            ([result]
             (let [b @buf]
@@ -542,11 +542,11 @@
            ([result input]
             (let [v (f input)
                   p @pval]
-              (reset! pval v)
+              (vreset! pval v)
               (if (or (= p ::none) (= v p))
-                (do (swap! buf conj input) result)
+                (do (vswap! buf conj input) result)
                 (let [b @buf]
-                  (reset! buf [input])
+                  (vreset! buf [input])
                   (rf result b)))))))))
   ([f coll]
    (lazy-seq
@@ -874,11 +874,11 @@
 (defn map-indexed "Returns a lazy sequence of (f index item) for each item in coll. When called with no collection, returns a transducer."
   ([f]
    (fn [rf]
-     (let [i (atom -1)]
+     (let [i (volatile! -1)]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
-            (rf result (f (swap! i inc) input)))))))
+            (rf result (f (vswap! i inc) input)))))))
   ([f coll]
    (let [step (fn step [i s]
                 (lazy-seq
@@ -897,7 +897,7 @@
     (fn
       ([n]
        (fn [rf]
-         (let [buf (atom [])]
+         (let [buf (volatile! [])]
            (fn ([] (rf))
                ([result]
                 (let [b @buf]
@@ -906,9 +906,9 @@
                     (let [r (rf result (seq b))]
                       (rf (if (reduced? r) @r r))))))
                ([result input]
-                (let [b (swap! buf conj input)]
+                (let [b (vswap! buf conj input)]
                   (if (= (count b) n)
-                    (do (reset! buf [])
+                    (do (vreset! buf [])
                         (rf result (seq b)))
                     result)))))))
       ([n coll] (pa-impl n n coll))
@@ -927,13 +927,13 @@
 (defn dedupe "Returns a lazy sequence removing consecutive duplicates. When called with no collection, returns a transducer."
   ([]
    (fn [rf]
-     (let [prev (atom ::none)]
+     (let [prev (volatile! ::none)]
        (fn ([] (rf))
            ([result] (rf result))
            ([result input]
             (if (= @prev input)
               result
-              (do (reset! prev input)
+              (do (vreset! prev input)
                   (rf result input))))))))
   ([coll]
    (let [step (fn step [prev s]
