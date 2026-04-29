@@ -70,13 +70,18 @@ $(BIN): $(HEADERS)
 # One recipe regenerates the entire bundled-source header set.
 # Triggered when any header is missing or older than this Makefile;
 # day-to-day incremental rebuilds use `./mino task build` instead.
+#
+# awk does the source-to-C-string-literal escape because Git Bash's
+# sed on Windows mangles the backslash run in `s/\\/\\\\/g` and emits
+# empty headers; awk takes a single-quoted script with no path-
+# translation surface so the recipe is one source for every platform.
 $(HEADERS): Makefile
 	@for pair in $(BUNDLED); do \
 	    sym=$${pair%%:*}; \
 	    src=$${pair##*:}; \
 	    out=src/$$sym.h; \
 	    printf 'static const char *%s_src =\n' "$$sym" > "$$out"; \
-	    sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$$/\\n"/' "$$src" >> "$$out"; \
+	    awk '{ gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); print "    \"" $$0 "\\n\"" }' "$$src" >> "$$out"; \
 	    printf '    ;\n' >> "$$out"; \
 	done
 
