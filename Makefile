@@ -1,0 +1,84 @@
+# Bootstrap Makefile -- the smallest recipe that turns a clean checkout
+# into a working `./mino` binary. After this, every other build, test,
+# release, and tooling task lives in mino code:
+#
+#   make            # gen bundled-source headers and compile ./mino
+#   make clean      # remove ./mino and the generated headers
+#   ./mino task     # list available tasks
+#   ./mino task build / test / build-asan / ...
+#
+# Anything beyond bootstrap belongs in lib/mino/tasks/builtin.clj. Do
+# not grow this Makefile -- if you find yourself adding a target here,
+# add it to the task runner instead.
+
+CC      ?= cc
+CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2
+INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
+           -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
+           -Isrc/diag -Isrc/vendor/imath
+
+ifeq ($(OS),Windows_NT)
+EXE  = .exe
+LIBS = -lm
+else
+EXE  =
+LIBS = -lm -lpthread
+endif
+
+BIN = mino$(EXE)
+
+SRCS = $(wildcard src/eval/*.c src/diag/*.c src/runtime/*.c \
+                  src/gc/*.c src/public/*.c src/collections/*.c \
+                  src/prim/*.c src/interop/*.c src/regex/*.c \
+                  src/async/*.c src/vendor/imath/*.c) main.c
+
+# Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
+# becomes src/<symbol>.h with a single static const char *<symbol>_src
+# C string literal. Keep this list in sync with `bundled-stdlib` in
+# lib/mino/tasks/builtin.clj; that one drives the incremental rebuilds
+# under `./mino task build`, this one drives the from-scratch bootstrap.
+BUNDLED = \
+    core_mino:src/core.clj \
+    lib_clojure_string:lib/clojure/string.clj \
+    lib_clojure_set:lib/clojure/set.clj \
+    lib_clojure_walk:lib/clojure/walk.clj \
+    lib_clojure_edn:lib/clojure/edn.clj \
+    lib_clojure_pprint:lib/clojure/pprint.clj \
+    lib_clojure_zip:lib/clojure/zip.clj \
+    lib_clojure_data:lib/clojure/data.clj \
+    lib_clojure_test:lib/clojure/test.clj \
+    lib_clojure_template:lib/clojure/template.clj \
+    lib_clojure_repl:lib/clojure/repl.clj \
+    lib_clojure_stacktrace:lib/clojure/stacktrace.clj \
+    lib_clojure_datafy:lib/clojure/datafy.clj \
+    lib_clojure_core_protocols:lib/clojure/core/protocols.clj \
+    lib_clojure_instant:lib/clojure/instant.clj \
+    lib_clojure_spec_alpha:lib/clojure/spec/alpha.clj \
+    lib_clojure_core_specs_alpha:lib/clojure/core/specs/alpha.clj \
+    lib_mino_deps:lib/mino/deps.clj \
+    lib_mino_tasks:lib/mino/tasks.clj \
+    lib_mino_tasks_builtin:lib/mino/tasks/builtin.clj
+
+HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
+
+.PHONY: bootstrap clean
+bootstrap: $(BIN)
+
+$(BIN): $(HEADERS)
+	$(CC) $(CFLAGS) $(INCDIRS) -o $@ $(SRCS) $(LIBS)
+
+# One recipe regenerates the entire bundled-source header set.
+# Triggered when any header is missing or older than this Makefile;
+# day-to-day incremental rebuilds use `./mino task build` instead.
+$(HEADERS): Makefile
+	@for pair in $(BUNDLED); do \
+	    sym=$${pair%%:*}; \
+	    src=$${pair##*:}; \
+	    out=src/$$sym.h; \
+	    printf 'static const char *%s_src =\n' "$$sym" > "$$out"; \
+	    sed 's/\\/\\\\/g; s/"/\\"/g; s/^/    "/; s/$$/\\n"/' "$$src" >> "$$out"; \
+	    printf '    ;\n' >> "$$out"; \
+	done
+
+clean:
+	rm -f $(BIN) $(HEADERS)
