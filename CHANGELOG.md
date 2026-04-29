@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.94.3 — bundle.awk Sidesteps MSYS Path Translation
+
+v0.94.2 moved the bundled-source escape from sed to awk, but kept the
+script inline on the command line. Git Bash on Windows mangled awk's
+inline `/\\/` regex literal through the same MSYS path-translation
+heuristic that broke sed: argument fragments that look path-shaped
+get rewritten before the tool parses them. The Windows job's
+Bootstrap step in v0.94.2's `release-build` matrix surfaced empty
+headers a second time and the Release artifact for Windows didn't
+upload (so `scoop install mino` against v0.94.2 would have 404'd
+just like v0.94.1).
+
+The escape script now lives in `src/bundle.awk`. The recipe invokes
+`awk -f src/bundle.awk "$src"` — the `-f` argument is a file path,
+which path translation handles correctly, and the script body never
+appears on the command line at all. Output is byte-identical to all
+prior implementations across the 20 generated headers; the full test
+suite passes (1460 / 7017). With Windows Bootstrap genuinely green,
+the v0.94.2 cleanup of `continue-on-error` and `fail-fast` finally
+takes effect: the Windows artifact rejoins the Release matrix.
+
 ## v0.94.2 — Portable Bootstrap, Windows Rejoins Releases
 
 The bootstrap Makefile recipe now uses awk instead of sed to escape
