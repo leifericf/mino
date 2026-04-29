@@ -152,7 +152,8 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
             }
             if (p != NULL && p->type == MINO_CONS) {
                 fputc(' ', out);
-            } else if (p != NULL && p->type != MINO_NIL) {
+            } else if (p != NULL && p->type != MINO_NIL
+                       && p->type != MINO_EMPTY_LIST) {
                 fputs(" . ", out);
                 mino_print_to(S, out, p);
                 break;
@@ -254,8 +255,15 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputc(']', out);
         return;
     case MINO_LAZY: {
-        /* Force the lazy seq and print the realized value. */
+        /* Force the lazy seq and print the realized value. A lazy seq
+         * that resolves to nil is the canonical empty seq — print as
+         * () so cross-type seq equality and printer agree. */
         mino_val_t *forced = lazy_force(S,(mino_val_t *)v);
+        if (forced == NULL || forced->type == MINO_NIL
+            || forced->type == MINO_EMPTY_LIST) {
+            fputs("()", out);
+            return;
+        }
         mino_print_to(S, out, forced);
         return;
     }

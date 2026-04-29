@@ -157,6 +157,7 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_cdr(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_list(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env);

@@ -316,7 +316,7 @@ DEFINE_TYPE_PRED(prim_char_p,    (v != NULL && v->type == MINO_CHAR),          "
 DEFINE_TYPE_PRED(prim_number_p,  (v != NULL && (v->type == MINO_INT || v->type == MINO_FLOAT || v->type == MINO_BIGINT || v->type == MINO_RATIO || v->type == MINO_BIGDEC)), "number?")
 DEFINE_TYPE_PRED(prim_map_p,     (v != NULL && (v->type == MINO_MAP || v->type == MINO_SORTED_MAP)), "map?")
 DEFINE_TYPE_PRED(prim_set_p,     (v != NULL && (v->type == MINO_SET || v->type == MINO_SORTED_SET)), "set?")
-DEFINE_TYPE_PRED(prim_seq_p,     (v != NULL && (v->type == MINO_CONS || v->type == MINO_LAZY)), "seq?")
+DEFINE_TYPE_PRED(prim_seq_p,     (v != NULL && (v->type == MINO_CONS || v->type == MINO_LAZY || v->type == MINO_EMPTY_LIST)), "seq?")
 DEFINE_TYPE_PRED(prim_boolean_p, (v != NULL && v->type == MINO_BOOL),          "boolean?")
 DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && v->type == MINO_BOOL && v->as.b != 0),  "true?")
 DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b == 0),  "false?")
@@ -358,6 +358,7 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL) return mino_true(S);
     switch (v->type) {
+    case MINO_EMPTY_LIST: return mino_true(S);
     case MINO_CONS:       return mino_false(S);
     case MINO_VECTOR:     return v->as.vec.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_MAP:        return v->as.map.len == 0 ? mino_true(S) : mino_false(S);

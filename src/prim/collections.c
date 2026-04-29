@@ -37,6 +37,10 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
     size_t i;
 
     if (v == NULL || v->type == MINO_NIL) return mino_nil(S);
+    /* The empty-list singleton is user-visible only. As a cons cdr it
+     * collapses back to nil so cons-chain walkers (mino_is_cons-based
+     * traversal) terminate without an extra case. */
+    if (v->type == MINO_EMPTY_LIST) return mino_nil(S);
     if (v->type == MINO_CONS) return v;
     /* Lazy seqs are valid as the cdr of a cons cell; do not force them
      * here to avoid infinite recursion with self-referential sequences
@@ -165,6 +169,7 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_int(S, 0);
     }
     switch (coll->type) {
+    case MINO_EMPTY_LIST: return mino_int(S, 0);
     case MINO_CONS:   return mino_int(S, (long long)list_length(S, coll));
     case MINO_VECTOR: return mino_int(S, (long long)coll->as.vec.len);
     case MINO_MAP:    return mino_int(S, (long long)coll->as.map.len);
@@ -337,6 +342,9 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
     }
+    if (coll->type == MINO_EMPTY_LIST) {
+        return mino_nil(S);
+    }
     if (coll->type == MINO_CONS) {
         return coll->as.cons.car;
     }
@@ -451,14 +459,24 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "rest requires one argument");
     }
     coll = args->as.cons.car;
+    /* User-visible empty rest is the empty-list singleton, not nil:
+     * (rest '()) -> (), (rest nil) -> (), (rest '(1)) -> (). */
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil(S);
+        return mino_empty_list(S);
+    }
+    if (coll->type == MINO_EMPTY_LIST) {
+        return mino_empty_list(S);
     }
     if (coll->type == MINO_CONS) {
-        return coll->as.cons.cdr;
+        mino_val_t *cdr = coll->as.cons.cdr;
+        if (cdr == NULL || cdr->type == MINO_NIL) return mino_empty_list(S);
+        /* Lazy cdr stays lazy here so infinite seqs don't blow the
+         * stack; the lazy-seq seam is handled at the next prim_rest /
+         * prim_first / prim_seq call. */
+        return cdr;
     }
     if (coll->type == MINO_VECTOR) {
-        if (coll->as.vec.len <= 1) return mino_nil(S);
+        if (coll->as.vec.len <= 1) return mino_empty_list(S);
         return mino_cons(S, vec_nth(coll, 1),
             make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
                         vec_rest_thunk));
@@ -466,19 +484,24 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_LAZY) {
         mino_val_t *s = lazy_force(S, coll);
         if (s == NULL) return NULL;
-        if (s->type == MINO_NIL || s == NULL) return mino_nil(S);
-        if (s->type == MINO_CONS) return s->as.cons.cdr;
-        return mino_nil(S);
+        if (s->type == MINO_NIL) return mino_empty_list(S);
+        if (s->type == MINO_EMPTY_LIST) return mino_empty_list(S);
+        if (s->type == MINO_CONS) {
+            mino_val_t *cdr = s->as.cons.cdr;
+            if (cdr == NULL || cdr->type == MINO_NIL) return mino_empty_list(S);
+            return cdr;
+        }
+        return mino_empty_list(S);
     }
     if (coll->type == MINO_STRING) {
-        if (coll->as.s.len <= 1) return mino_nil(S);
+        if (coll->as.s.len <= 1) return mino_empty_list(S);
         return mino_cons(S, mino_string_n(S, coll->as.s.data + 1, 1),
             make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
                         str_rest_thunk));
     }
     if (coll->type == MINO_MAP) {
         mino_val_t *kv[2];
-        if (coll->as.map.len <= 1) return mino_nil(S);
+        if (coll->as.map.len <= 1) return mino_empty_list(S);
         kv[0] = vec_nth(coll->as.map.key_order, 1);
         kv[1] = map_get_val(coll, kv[0]);
         return mino_cons(S, mino_vector(S, kv, 2),
@@ -486,13 +509,16 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         map_rest_thunk));
     }
     if (coll->type == MINO_SET) {
-        if (coll->as.set.len <= 1) return mino_nil(S);
+        if (coll->as.set.len <= 1) return mino_empty_list(S);
         return mino_cons(S, vec_nth(coll->as.set.key_order, 1),
             make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
                         set_rest_thunk));
     }
     if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
-        return sorted_rest(S, coll);
+        mino_val_t *r = sorted_rest(S, coll);
+        if (r == NULL) return NULL;
+        if (r->type == MINO_NIL) return mino_empty_list(S);
+        return r;
     }
     {
         char msg[96];
@@ -751,15 +777,20 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     p    = args->as.cons.cdr;
-    if (coll == NULL || coll->type == MINO_NIL || coll->type == MINO_CONS
+    if (coll == NULL || coll->type == MINO_NIL
+        || coll->type == MINO_EMPTY_LIST
+        || coll->type == MINO_CONS
         || coll->type == MINO_LAZY) {
-        /* List/nil: prepend each item so (conj '(1 2) 3 4) => (4 3 1 2). */
-        mino_val_t *out = (coll == NULL || coll->type == MINO_NIL)
+        /* List/nil/empty-list: prepend each item so
+         * (conj '(1 2) 3 4) => (4 3 1 2). */
+        mino_val_t *out = (coll == NULL || coll->type == MINO_NIL
+                           || coll->type == MINO_EMPTY_LIST)
             ? mino_nil(S) : coll;
         while (mino_is_cons(p)) {
             out = mino_cons(S, p->as.cons.car, out);
             p = p->as.cons.cdr;
         }
+        if (out == NULL || out->type == MINO_NIL) return mino_empty_list(S);
         return out;
     }
     if (coll->type == MINO_VECTOR) {
@@ -1477,6 +1508,13 @@ mino_val_t *prim_transient_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_is_transient(args->as.cons.car) ? mino_true(S) : mino_false(S);
 }
 
+mino_val_t *prim_list(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (args == NULL || !mino_is_cons(args)) return mino_empty_list(S);
+    return args;
+}
+
 const mino_prim_def k_prims_collections[] = {
     {"car",      prim_car,
      "Returns the first element of a cons cell."},
@@ -1492,6 +1530,8 @@ const mino_prim_def k_prims_collections[] = {
      "Returns the first item in a collection, or nil if empty."},
     {"rest",     prim_rest,
      "Returns all but the first item in a collection."},
+    {"list",     prim_list,
+     "Returns a list of the supplied arguments; () with no args."},
     {"vector",   prim_vector,
      "Returns a new vector containing the arguments."},
     {"hash-map", prim_hash_map,

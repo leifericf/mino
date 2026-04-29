@@ -73,15 +73,16 @@ mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     fn   = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil(S);
+    if (coll == NULL || coll->type == MINO_NIL
+        || coll->type == MINO_EMPTY_LIST) {
+        return mino_empty_list(S);
     }
     /* Normalize initial coll to cons-or-lazy so the thunk only needs to
      * handle those cases going forward. */
     if (coll->type != MINO_CONS && coll->type != MINO_LAZY) {
         coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
         if (coll == NULL) return NULL;
-        if (coll->type == MINO_NIL) return mino_nil(S);
+        if (coll->type == MINO_NIL) return mino_empty_list(S);
     }
     ctx = mino_cons(S, fn, mino_cons(S, coll, mino_nil(S)));
     lz = alloc_val(S, MINO_LAZY);
@@ -154,13 +155,14 @@ mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     pred = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil(S);
+    if (coll == NULL || coll->type == MINO_NIL
+        || coll->type == MINO_EMPTY_LIST) {
+        return mino_empty_list(S);
     }
     if (coll->type != MINO_CONS && coll->type != MINO_LAZY) {
         coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
         if (coll == NULL) return NULL;
-        if (coll->type == MINO_NIL) return mino_nil(S);
+        if (coll->type == MINO_NIL) return mino_empty_list(S);
     }
     ctx = mino_cons(S, pred, mino_cons(S, coll, mino_nil(S)));
     lz = alloc_val(S, MINO_LAZY);
@@ -266,13 +268,14 @@ mino_val_t *prim_lazy_take(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "lazy-take: n must be an integer");
     }
     coll = args->as.cons.cdr->as.cons.car;
-    if (n <= 0 || coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil(S);
+    if (n <= 0 || coll == NULL || coll->type == MINO_NIL
+        || coll->type == MINO_EMPTY_LIST) {
+        return mino_empty_list(S);
     }
     if (coll->type != MINO_CONS && coll->type != MINO_LAZY) {
         coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
         if (coll == NULL) return NULL;
-        if (coll->type == MINO_NIL) return mino_nil(S);
+        if (coll->type == MINO_NIL) return mino_empty_list(S);
     }
     ctx = mino_cons(S, mino_int(S, n), mino_cons(S, coll, mino_nil(S)));
     lz = alloc_val(S, MINO_LAZY);
@@ -300,22 +303,29 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "drop-seq: n must be an integer");
     }
     coll = args->as.cons.cdr->as.cons.car;
-    if (n <= 0) return coll;
+    if (n <= 0) {
+        if (coll == NULL || coll->type == MINO_NIL) return mino_empty_list(S);
+        return coll;
+    }
     while (n > 0) {
         if (coll != NULL && coll->type == MINO_LAZY) {
             coll = lazy_force(S, coll);
             if (coll == NULL) return NULL;
         }
-        if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+        if (coll == NULL || coll->type == MINO_NIL
+            || coll->type == MINO_EMPTY_LIST) {
+            return mino_empty_list(S);
+        }
         if (coll->type != MINO_CONS) {
             coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
             if (coll == NULL) return NULL;
-            if (coll->type == MINO_NIL) return mino_nil(S);
-            if (coll->type != MINO_CONS) return mino_nil(S);
+            if (coll->type == MINO_NIL) return mino_empty_list(S);
+            if (coll->type != MINO_CONS) return mino_empty_list(S);
         }
         coll = coll->as.cons.cdr;
         n--;
     }
+    if (coll == NULL || coll->type == MINO_NIL) return mino_empty_list(S);
     return coll;
 }
 
@@ -355,7 +365,12 @@ mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "range takes 0, 1, 2, or 3 arguments");
     }
-    return range_make_lazy(S, start, end, step, infinite);
+    {
+        mino_val_t *r = range_make_lazy(S, start, end, step, infinite);
+        if (r == NULL) return NULL;
+        if (r->type == MINO_NIL) return mino_empty_list(S);
+        return r;
+    }
 }
 
 const mino_prim_def k_prims_lazy[] = {

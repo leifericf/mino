@@ -418,7 +418,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
         }
         if (**p == ')') {
             ADVANCE(S, p);
-            return head;
+            return (tail == NULL) ? mino_empty_list(S) : head;
         }
         if (peek_reader_cond_splice(S, p)) {
             /* #?@ splice: read conditional body, splice matching list */
@@ -487,7 +487,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
                 skip_ws(S, p);
                 if (**p == ')') {
                     ADVANCE(S, p);
-                    return head;
+                    return (tail == NULL) ? mino_empty_list(S) : head;
                 }
                 if (**p == '\0') {
                     set_reader_diag(S, MRE003, "unterminated list",

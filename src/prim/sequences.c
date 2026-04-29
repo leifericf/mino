@@ -41,10 +41,12 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    if (coll->type == MINO_EMPTY_LIST) return mino_nil(S);
     if (coll->type == MINO_LAZY) {
         mino_val_t *forced = lazy_force(S, coll);
         if (forced == NULL) return NULL;
         if (forced->type == MINO_NIL) return mino_nil(S);
+        if (forced->type == MINO_EMPTY_LIST) return mino_nil(S);
         return forced;
     }
     if (coll->type == MINO_CONS) return coll;
@@ -543,14 +545,15 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     /* Conj each element of `from` into `to`. The type of `to` determines
      * the conj semantics (vector appends, list prepends, map/set merges). */
-    if (to == NULL || to->type == MINO_NIL) {
-        /* Into nil: build a list. */
+    if (to == NULL || to->type == MINO_NIL || to->type == MINO_EMPTY_LIST) {
+        /* Into nil or empty-list: build a list (prepend each element). */
         mino_val_t *out = mino_nil(S);
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             out = mino_cons(S, seq_iter_val(S, &it), out);
             seq_iter_next(S, &it);
         }
+        if (out == NULL || out->type == MINO_NIL) return mino_empty_list(S);
         return out;
     }
     if (to->type == MINO_VECTOR) {
@@ -670,7 +673,8 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return apply_callable(S, fn, head, env);
     }
     /* (apply f coll) — convert coll to a cons arg list. */
-    if (last == NULL || last->type == MINO_NIL) {
+    if (last == NULL || last->type == MINO_NIL
+        || last->type == MINO_EMPTY_LIST) {
         return apply_callable(S, fn, mino_nil(S), env);
     }
     if (last->type == MINO_CONS) {

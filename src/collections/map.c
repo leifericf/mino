@@ -134,6 +134,13 @@ uint32_t hash_val(const mino_val_t *v)
     switch (v->type) {
     case MINO_NIL:
         return fnv_mix(h, 0x01);
+    case MINO_EMPTY_LIST:
+        /* Distinct tag from MINO_NIL because (= '() nil) is false.
+         * Note: cross-type seq equality (e.g. (= '() [])) is true but
+         * the cons/vector/empty-list hashes are not yet unified — the
+         * equal-implies-equal-hash invariant has a known gap on the
+         * sequential cross-type axis. Tracked separately. */
+        return fnv_mix(h, 0x15);
     case MINO_BOOL:
         h = fnv_mix(h, 0x02);
         return fnv_mix(h, (unsigned char)(v->as.b ? 1 : 0));
