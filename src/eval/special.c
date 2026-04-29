@@ -626,6 +626,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     }
     switch (form->type) {
     case MINO_NIL:
+    case MINO_EMPTY_LIST:
     case MINO_BOOL:
     case MINO_INT:
     case MINO_FLOAT:

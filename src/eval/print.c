@@ -62,6 +62,9 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     case MINO_NIL:
         fputs("nil", out);
         return;
+    case MINO_EMPTY_LIST:
+        fputs("()", out);
+        return;
     case MINO_BOOL:
         fputs(v->as.b ? "true" : "false", out);
         return;

@@ -714,6 +714,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     }
     switch (a->type) {
     case MINO_NIL:
+    case MINO_EMPTY_LIST:
         return 1;
     case MINO_BOOL:
         return a->as.b == b->as.b;

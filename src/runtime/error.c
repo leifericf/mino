@@ -126,8 +126,9 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_CHAR:    return "char";
     case MINO_STRING:  return "string";
     case MINO_SYMBOL:  return "symbol";
-    case MINO_KEYWORD: return "keyword";
-    case MINO_CONS:    return "list";
+    case MINO_KEYWORD:    return "keyword";
+    case MINO_EMPTY_LIST: return "list";
+    case MINO_CONS:       return "list";
     case MINO_VECTOR:  return "vector";
     case MINO_MAP:     return "map";
     case MINO_SET:        return "set";

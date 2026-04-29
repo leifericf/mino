@@ -253,8 +253,9 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_CHAR:    return mino_keyword(S, "char");
     case MINO_STRING:  return mino_keyword(S, "string");
     case MINO_SYMBOL:  return mino_keyword(S, "symbol");
-    case MINO_KEYWORD: return mino_keyword(S, "keyword");
-    case MINO_CONS:    return mino_keyword(S, "list");
+    case MINO_KEYWORD:    return mino_keyword(S, "keyword");
+    case MINO_EMPTY_LIST: return mino_keyword(S, "list");
+    case MINO_CONS:       return mino_keyword(S, "list");
     case MINO_VECTOR:  return mino_keyword(S, "vector");
     case MINO_MAP:     return mino_keyword(S, "map");
     case MINO_SET:        return mino_keyword(S, "set");

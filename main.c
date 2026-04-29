@@ -432,8 +432,9 @@ static int parse_cli_flags(int argc, char **argv,
  * Interned in clojure.core from main.c rather than mino_install_core so that
  * embedders without a REPL or CLI front-end pay nothing. The vars are set up
  * before file/eval/REPL dispatch so a script reading *command-line-args* or
- * *file* sees them too. *1/*2/*3/*e are only mutated by the REPL loop, but
- * interning them up-front keeps unqualified lookup honest in either mode. */
+ * *file* sees them too. The history vars (star1, star2, star3, stare) are
+ * only mutated by the REPL loop, but interning them up-front keeps
+ * unqualified lookup honest in either mode. */
 typedef struct {
     mino_val_t *star1;
     mino_val_t *star2;
