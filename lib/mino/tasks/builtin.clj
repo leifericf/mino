@@ -84,18 +84,24 @@
 
 ;; ---- Tasks ----
 
+(defn- escape-source-as-c-string-literal
+  "Returns the body of a C string literal: backslash-escaped quotes
+   and backslashes, with newlines turned into \\n\" + indent + \" so
+   the literal stays readable when printed."
+  [src]
+  (let [src     (if (str/ends-with? src "\n")
+                  (subs src 0 (- (count src) 1))
+                  src)
+        escaped (-> src
+                    (str/replace "\\" "\\\\")
+                    (str/replace "\"" "\\\""))]
+    (str/replace escaped "\n" "\\n\"\n    \"")))
+
 (defn gen-core-header
   "Escape src/core.clj into src/core_mino.h as a C string literal."
   []
   (when (stale? ["src/core.clj"] "src/core_mino.h")
-    (let [src     (slurp "src/core.clj")
-          src     (if (str/ends-with? src "\n")
-                    (subs src 0 (- (count src) 1))
-                    src)
-          escaped (-> src
-                      (str/replace "\\" "\\\\")
-                      (str/replace "\"" "\\\""))
-          body    (str/replace escaped "\n" "\\n\"\n    \"")]
+    (let [body (escape-source-as-c-string-literal (slurp "src/core.clj"))]
       (spit "src/core_mino.h"
             (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
                  " *\n"
@@ -139,18 +145,28 @@
    ["lib/mino/tasks.clj"              "mino.tasks"              "lib_mino_tasks"]
    ["lib/mino/tasks/builtin.clj"      "mino.tasks.builtin"      "lib_mino_tasks_builtin"]])
 
-(defn- escape-source-as-c-string-literal
-  "Returns the body of a C string literal: backslash-escaped quotes
-   and backslashes, with newlines turned into \\n\" + indent + \" so
-   the literal stays readable when printed."
-  [src]
-  (let [src     (if (str/ends-with? src "\n")
-                  (subs src 0 (- (count src) 1))
-                  src)
-        escaped (-> src
-                    (str/replace "\\" "\\\\")
-                    (str/replace "\"" "\\\""))]
-    (str/replace escaped "\n" "\\n\"\n    \"")))
+(defn- regen-stdlib-header
+  "Regenerates one bundled-stdlib header if its source is newer.
+   Returns 1 when the header was rewritten, 0 otherwise."
+  [[src-path ns-name c-symbol]]
+  (let [out-path (str "src/" c-symbol ".h")]
+    (if (stale? [src-path] out-path)
+      (do (spit out-path
+                (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
+                     " *\n"
+                     " * Produced by `gen-stdlib-headers` from " src-path ".\n"
+                     " * Embeds the bundled mino-side " ns-name " namespace\n"
+                     " * source as a C string literal so the runtime can\n"
+                     " * register it without needing the file on disk.\n"
+                     " *\n"
+                     " * Edit " src-path ", then `./mino task build`\n"
+                     " * (which regenerates this file). Gitignored.\n"
+                     " */\n"
+                     "static const char *" c-symbol "_src =\n    \""
+                     (escape-source-as-c-string-literal (slurp src-path))
+                     "\\n\"\n    ;\n"))
+          1)
+      0)))
 
 (defn gen-stdlib-headers
   "Escape each lib/clojure/*.clj listed in bundled-stdlib into its
@@ -159,28 +175,9 @@
    per-namespace install hooks can register the source pointer
    without touching the disk."
   []
-  (let [updated (atom 0)]
-    (doseq [[src-path ns-name c-symbol] bundled-stdlib]
-      (let [out-path (str "src/" c-symbol ".h")]
-        (when (stale? [src-path] out-path)
-          (let [src  (slurp src-path)
-                body (escape-source-as-c-string-literal src)]
-            (spit out-path
-                  (str "/* AUTO-GENERATED -- DO NOT EDIT.\n"
-                       " *\n"
-                       " * Produced by `gen-stdlib-headers` from " src-path ".\n"
-                       " * Embeds the bundled mino-side " ns-name " namespace\n"
-                       " * source as a C string literal so the runtime can\n"
-                       " * register it without needing the file on disk.\n"
-                       " *\n"
-                       " * Edit " src-path ", then `./mino task build`\n"
-                       " * (which regenerates this file). Gitignored.\n"
-                       " */\n"
-                       "static const char *" c-symbol "_src =\n    \""
-                       body "\\n\"\n    ;\n"))
-            (swap! updated inc)))))
-    (when (> @updated 0)
-      (println (str "gen-stdlib-headers: " @updated " header(s) updated")))))
+  (let [updated (reduce + 0 (map regen-stdlib-header bundled-stdlib))]
+    (when (> updated 0)
+      (println (str "gen-stdlib-headers: " updated " header(s) updated")))))
 
 (defn build
   "Compile all .c sources and link the mino binary."
@@ -393,66 +390,71 @@
                                             :has-rationale has-comment})))
             (recur (+ i 1) results)))))))
 
+(defn- check-tu-size
+  "Prints one TU size line. Returns 1 on FAIL, 0 otherwise."
+  [f]
+  (let [n       (count-lines f)
+        allowed (get tu-allowlist f)
+        over    (> n tu-limit)]
+    (cond
+      (and over allowed)
+      (do (println (str "  ALLOW  " f ": " n " LOC (" allowed ")")) 0)
+      over
+      (do (println (str "  FAIL   " f ": " n " LOC")) 1)
+      :else
+      (do (println (str "  ok     " f ": " n " LOC")) 0))))
+
+(defn- check-large-fn
+  "Prints one large-function line. Returns 1 on FAIL, 0 on ALLOW."
+  [m]
+  (let [file (:file m)
+        sig  (:name m)
+        allowed (some (fn [entry]
+                        (let [parts (str/split entry ":")
+                              af    (first parts)
+                              afn   (first (rest parts))]
+                          (and (= file af) (includes? sig afn))))
+                      fn-allowlist)]
+    (if allowed
+      (do (println (str "  ALLOW  " file ": " sig " (" (:lines m) " LOC)")) 0)
+      (do (println (str "  FAIL   " file ": " sig " (" (:lines m) " LOC)")) 1))))
+
+(defn- run-tu-check [src-files]
+  (println "== Translation unit size (limit:" tu-limit "LOC) ==")
+  (reduce + 0 (map check-tu-size src-files)))
+
+(defn- run-fn-check [src-files]
+  (println)
+  (println "== Function size (limit:" fn-limit "LOC) ==")
+  (let [large (into [] (mapcat find-large-functions) src-files)]
+    (if (empty? large)
+      (do (println "  ok     no functions exceed limit") 0)
+      (reduce + 0 (map check-large-fn large)))))
+
+(defn- run-abort-check [src-files]
+  (println)
+  (println "== Abort inventory ==")
+  (let [sites             (into [] (mapcat find-abort-sites) src-files)
+        missing-rationale (filterv #(not (:has-rationale %)) sites)
+        n-missing         (count missing-rationale)]
+    (println (str "  " (count sites) " abort() sites across "
+                  (count (into #{} (map :file) sites)) " files"))
+    (doseq [s sites]
+      (println (str "  " (if (:has-rationale s) "ok   " "FAIL ")
+                    (:file s) ":" (:line s) " " (:text s))))
+    (when (> n-missing 0)
+      (println (str "  FAIL   " n-missing " sites missing rationale")))
+    n-missing))
+
 (defn qa-arch
   "Architecture quality gates: TU size, function size, abort inventory."
   []
   (let [src-files (sort (filterv #(str/ends-with? % ".c") (file-seq "src")))
-        failures  (atom 0)]
-
-    ;; --- TU size check ---
-    (println "== Translation unit size (limit:" tu-limit "LOC) ==")
-    (doseq [f src-files]
-      (let [n      (count-lines f)
-            allowed (get tu-allowlist f)
-            over    (> n tu-limit)]
-        (when over
-          (if allowed
-            (println (str "  ALLOW  " f ": " n " LOC (" allowed ")"))
-            (do
-              (println (str "  FAIL   " f ": " n " LOC"))
-              (swap! failures inc))))
-        (when (not over)
-          (println (str "  ok     " f ": " n " LOC")))))
-
-    ;; --- Function size check ---
+        failures  (+ (run-tu-check src-files)
+                     (run-fn-check src-files)
+                     (run-abort-check src-files))]
     (println)
-    (println "== Function size (limit:" fn-limit "LOC) ==")
-    (let [large (into [] (mapcat find-large-functions) src-files)]
-      (if (empty? large)
-        (println "  ok     no functions exceed limit")
-        (doseq [m large]
-          (let [file  (:file m)
-                sig   (:name m)
-                allowed (some (fn [entry]
-                          (let [parts (str/split entry ":")
-                                af    (first parts)
-                                afn   (first (rest parts))]
-                            (and (= file af) (includes? sig afn))))
-                        fn-allowlist)]
-            (if allowed
-              (println (str "  ALLOW  " (:file m) ": " (:name m) " (" (:lines m) " LOC)"))
-              (do
-                (println (str "  FAIL   " (:file m) ": " (:name m) " (" (:lines m) " LOC)"))
-                (swap! failures inc)))))))
-
-    ;; --- Abort inventory ---
-    (println)
-    (println "== Abort inventory ==")
-    (let [sites (into [] (mapcat find-abort-sites) src-files)
-          missing-rationale (filterv #(not (:has-rationale %)) sites)]
-      (println (str "  " (count sites) " abort() sites across "
-                    (count (into #{} (map :file) sites)) " files"))
-      (doseq [s sites]
-        (println (str "  " (if (:has-rationale s) "ok   " "FAIL ")
-                      (:file s) ":" (:line s) " " (:text s))))
-      (when (not (empty? missing-rationale))
-        (println (str "  FAIL   " (count missing-rationale) " sites missing rationale"))
-        (swap! failures (fn [n] (+ n (count missing-rationale))))))
-
-    ;; --- Summary ---
-    (println)
-    (if (= @failures 0)
+    (if (= failures 0)
       (println "qa-arch: PASS")
-      (do
-        (println (str "qa-arch: FAIL (" @failures " issue(s))"))
-        (throw (str "qa-arch failed with " @failures " issue(s)"))))))
+      (do (println (str "qa-arch: FAIL (" failures " issue(s))"))
+          (throw (str "qa-arch failed with " failures " issue(s)"))))))

@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.95.4 — `mino.tasks.builtin` and `clojure.string` Hygiene
+
+`gen-core-header` no longer carries its own copy of the C-string-literal
+escape logic. The `escape-source-as-c-string-literal` helper now sits
+above both `gen-core-header` and `gen-stdlib-headers`, and both call
+into it. The escape rules can no longer drift between the two
+generators.
+
+`gen-stdlib-headers` and `qa-arch` no longer thread accumulator atoms
+through their bodies. `gen-stdlib-headers` reduces over a per-file
+`regen-stdlib-header` helper that returns 1 or 0; the total update
+count is `(reduce + 0 ...)` instead of an `(atom 0)` updated inside a
+`doseq`. `qa-arch` follows the same shape: each gate (TU size,
+function size, abort inventory) is its own helper that prints its
+report and returns its failure count, and the top-level summary just
+adds them up.
+
+`clojure.string/index-of-from_` is renamed to `index-of-from`. The
+trailing-underscore-for-private convention is non-standard; the `defn-`
+on the helper already communicates privacy. `re-quote-replacement`
+no longer reinvents a per-character `loop`/`reduce`; it now delegates
+to the existing `clojure.string/escape` with a two-key char map for
+`\\` and `$`.
+
 ## v0.95.3 — `core.async` Canon Parity
 
 `onto-chan` and `to-chan` are renamed to `onto-chan!` and `to-chan!` to

@@ -110,7 +110,7 @@
   [s]
   (apply str (clojure.core/reverse (seq (assert-string s)))))
 
-(defn- index-of-from_ [s sub from]
+(defn- index-of-from [s sub from]
   ;; Brute-force substring search. Returns the index of the first
   ;; occurrence of sub in s at or after from, or nil. The hot path
   ;; reuses prim-includes? for the early-out — if sub never appears
@@ -133,8 +133,8 @@
 (defn index-of
   "Return index of value (string or char) in s, optionally searching
    forward from from-index. Returns nil if value not found."
-  ([s value]            (index-of-from_ s value 0))
-  ([s value from-index] (index-of-from_ s value from-index)))
+  ([s value]            (index-of-from s value 0))
+  ([s value from-index] (index-of-from s value from-index)))
 
 (defn last-index-of
   "Return last index of value (string or char) in s, optionally
@@ -157,16 +157,7 @@
   "Escapes $ and \\ in replacement so s can be used literally in
    replacement strings without triggering backreference syntax."
   [replacement]
-  (let [s (as-str replacement)]
-    (loop [i 0 acc []]
-      (if (>= i (count s))
-        (apply str acc)
-        (let [c (char-at s i)]
-          (recur (+ i 1)
-                 (cond
-                   (= c "\\") (conj acc "\\\\")
-                   (= c "$")  (conj acc "\\$")
-                   :else      (conj acc c))))))))
+  (escape (as-str replacement) {"\\" "\\\\" "$" "\\$"}))
 
 (defn replace-first
   "Replaces only the first occurrence of match in s with replacement.
