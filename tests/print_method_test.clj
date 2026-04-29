@@ -6,7 +6,7 @@
 
 (deftest print-method-exists
   ;; print-method is a multimethod, so (type) picks up the :multimethod
-  ;; metadata tag attached by create-multimethod_.
+  ;; metadata tag attached by create-multimethod.
   (is (= :multimethod (type print-method)))
   (is (some? (get-method print-method :default))))
 

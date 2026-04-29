@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.95.5 — `src/core.clj` Hygiene Sweep
+
+The bundled core library that ships inside the binary went through a
+naming and surface-form pass. Private helpers no longer carry a
+trailing underscore; mino now uses `defn-` (and `def ^:private` for
+non-fn vars) to communicate privacy the same way Clojure does. The
+private symbols renamed include `fn-arity-with-prepost`, `map1`,
+`all-some?`, `map-n`, `match-whole`, `substring-index`,
+`re-find-on-matcher`, `type-marker-key`, `partition-protocol-specs`,
+`global-hierarchy`, `hierarchy-version`, `tc-ancestors`,
+`recompute-hierarchy`, `valid-hierarchy?`, `prefers?`,
+`find-best-method`, `create-multimethod`, `register-method`,
+`special-symbols-set`, `uuid-hex-pattern`, `uuid-string?`, and
+`tap-fns`. The captured-primitive alias `into_` becomes the `prim-`-
+prefixed `prim-into`, matching the convention in `clojure.string`.
+Two formerly-underscored protocol helpers are public surface and keep
+their canon names: `internal-reduce` and `internal-reduce-kv` (shadow
+the C primitives that the protocol-aware `reduce` and `reduce-kv`
+delegate to). `protocol-dispatch` stays public because it is emitted
+by the `defprotocol` macro into user namespaces.
+
+Every definition past the bootstrap zone moved from
+`(def name "doc" (fn [args] body))` to the equivalent
+`(defn name "doc" [args] body)`. The bootstrap area at the top of the
+file (anything before the `defn` macro is bound) keeps the bare-`def`
+form because `defn` does not yet exist there. Roughly 120 forms
+changed shape; the binary semantics are identical because mino's
+`defn` macro expands to the same `(def name doc (fn ...))` form
+underneath.
+
+`comparator` no longer uses `true` as its catch-all clause in `cond`;
+it uses the canonical `:else`. `some-fn` was rewritten from a
+double-`loop` accumulator to a `(some (fn [p] (some p args)) preds)`
+expression; behaviour matches canon's "first truthy value of any
+pred against any argument" surface and the implementation is no
+longer an obstacle when reading the file.
+
 ## v0.95.4 — `mino.tasks.builtin` and `clojure.string` Hygiene
 
 `gen-core-header` no longer carries its own copy of the C-string-literal

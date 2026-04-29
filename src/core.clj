@@ -98,7 +98,7 @@
 ;; form is a {:pre [...] :post [...]} map, rewrite the arity so the
 ;; conditions run around the body. % in :post bodies refers to the
 ;; return value, matching Clojure.
-(def fn-arity-with-prepost_
+(def ^:private fn-arity-with-prepost
   (fn [arity]
     (let [params (first arity)
           body   (rest arity)
@@ -138,8 +138,8 @@
         ;; lists (params-vec body...) (params-vec body...). Handle the
         ;; :pre/:post map either way.
         rewritten (if (vector? (first fdecl))
-                    (fn-arity-with-prepost_ fdecl)
-                    (mapv fn-arity-with-prepost_ fdecl))
+                    (fn-arity-with-prepost fdecl)
+                    (mapv fn-arity-with-prepost fdecl))
         form     (if (vector? (first fdecl))
                    (cons 'fn rewritten)
                    (apply list 'fn rewritten))]
@@ -156,23 +156,23 @@
 
 ;; --- Lazy sequence operations ---
 
-(def map1_ lazy-map-1)
+(def ^:private map1 lazy-map-1)
 
-(def all-some?_ (fn all-some?_ [coll]
+(defn- all-some? [coll]
   (if (empty? coll)
     true
     (if (first coll)
-      (all-some?_ (rest coll))
-      false))))
+      (all-some? (rest coll))
+      false)))
 
-(def map-n_ (fn map-n_ [f seqs]
+(defn- map-n [f seqs]
   (lazy-seq
-    (let [ss (map1_ seq seqs)]
-      (when (all-some?_ ss)
-        (cons (apply f (map1_ first ss))
-              (map-n_ f (map1_ rest ss))))))))
+    (let [ss (map1 seq seqs)]
+      (when (all-some? ss)
+        (cons (apply f (map1 first ss))
+              (map-n f (map1 rest ss)))))))
 
-(def map "Returns a lazy sequence of applying f to each item in coll. When called with multiple collections, maps f across them in parallel. When called with no collection, returns a transducer." (fn
+(defn map "Returns a lazy sequence of applying f to each item in coll. When called with multiple collections, maps f across them in parallel. When called with no collection, returns a transducer."
   ([f]
    (fn [rf]
      (fn ([] (rf))
@@ -181,10 +181,10 @@
          ([result input & inputs] (rf result (apply f input inputs))))))
   ([f & colls]
    (if (= (count colls) 1)
-     (map1_ f (first colls))
-     (map-n_ f colls)))))
+     (map1 f (first colls))
+     (map-n f colls))))
 
-(def filter "Returns a lazy sequence of items in coll for which pred returns truthy. When called with no collection, returns a transducer." (fn
+(defn filter "Returns a lazy sequence of items in coll for which pred returns truthy. When called with no collection, returns a transducer."
   ([pred]
    (fn [rf]
      (fn ([] (rf))
@@ -193,9 +193,9 @@
           (if (pred input)
             (rf result input)
             result)))))
-  ([pred coll] (lazy-filter pred coll))))
+  ([pred coll] (lazy-filter pred coll)))
 
-(def take "Returns a lazy sequence of the first n items in coll. When called with no collection, returns a transducer." (fn
+(defn take "Returns a lazy sequence of the first n items in coll. When called with no collection, returns a transducer."
   ([n]
    (fn [rf]
      (let [remaining (atom n)]
@@ -210,9 +210,9 @@
                     (reduced ret)
                     ret))
                 result)))))))
-  ([n coll] (lazy-take n coll))))
+  ([n coll] (lazy-take n coll)))
 
-(def drop "Returns a lazy sequence of all but the first n items in coll. When called with no collection, returns a transducer." (fn
+(defn drop "Returns a lazy sequence of all but the first n items in coll. When called with no collection, returns a transducer."
   ([n]
    (fn [rf]
      (let [remaining (atom n)]
@@ -222,114 +222,114 @@
             (if (> @remaining 0)
               (do (swap! remaining dec) result)
               (rf result input)))))))
-  ([n coll] (drop-seq n coll))))
+  ([n coll] (drop-seq n coll)))
 
-(def concat "Returns a lazy sequence of the concatenation of the given collections." (fn [& colls]
+(defn concat "Returns a lazy sequence of the concatenation of the given collections." [& colls]
   (lazy-seq
     (when (seq colls)
       (let [s (seq (first colls))]
         (if s
           (cons (first s) (apply concat (cons (rest s) (rest colls))))
-          (apply concat (rest colls))))))))
+          (apply concat (rest colls)))))))
 
 ;; range is a C primitive.
 
-(def repeat "Returns a lazy sequence of xs. With two args, returns n repetitions of x." (fn
+(defn repeat "Returns a lazy sequence of xs. With two args, returns n repetitions of x."
   ([x]
    (lazy-seq (cons x (repeat x))))
   ([n x]
    (lazy-seq
      (when (> n 0)
-       (cons x (repeat (- n 1) x)))))))
+       (cons x (repeat (- n 1) x))))))
 
 ;; --- Collection utilities ---
 
-(def update "Updates the value at key k in map m by applying f to the old value and any args." (fn [m k f & args]
-  (assoc m k (apply f (get m k) args))))
+(defn update "Updates the value at key k in map m by applying f to the old value and any args." [m k f & args]
+  (assoc m k (apply f (get m k) args)))
 
 ;; --- Utility functions ---
 
-(def some "Returns the first truthy value of (pred x) for any x in coll, else nil." (fn [pred coll]
+(defn some "Returns the first truthy value of (pred x) for any x in coll, else nil." [pred coll]
   (when (not (empty? coll))
     (or (pred (first coll))
-        (some pred (rest coll))))))
+        (some pred (rest coll)))))
 
-(def every? "Returns true if (pred x) is truthy for every x in coll." (fn [pred coll]
+(defn every? "Returns true if (pred x) is truthy for every x in coll." [pred coll]
   (if (empty? coll)
     true
     (if (pred (first coll))
       (every? pred (rest coll))
-      false))))
+      false)))
 
 ;; --- Higher-order functions ---
 
-(def comp "Returns a function that is the composition of the given functions." (fn [& fns]
+(defn comp "Returns a function that is the composition of the given functions." [& fns]
   (if (empty? fns)
     identity
     (if (empty? (rest fns))
       (first fns)
       (let [comp2 (fn comp2 [f g] (fn [& args] (f (apply g args))))]
-        (reduce comp2 fns))))))
-(def partial "Returns a function that applies f with the given arguments prepended." (fn [f & bound] (fn [& args] (apply f (concat bound args)))))
-(def complement "Returns a function that returns the logical opposite of f." (fn [f] (fn [& args] (not (apply f args)))))
+        (reduce comp2 fns)))))
+(defn partial "Returns a function that applies f with the given arguments prepended." [f & bound] (fn [& args] (apply f (concat bound args))))
+(defn complement "Returns a function that returns the logical opposite of f." [f] (fn [& args] (not (apply f args))))
 
 ;; --- Trivial compositions ---
 
-(def second     "Returns the second item in coll." (fn [coll] (first (rest coll))))
-(def ffirst     "Returns the first item of the first item in coll." (fn [coll] (first (first coll))))
+(defn second "Returns the second item in coll." [coll] (first (rest coll)))
+(defn ffirst "Returns the first item of the first item in coll." [coll] (first (first coll)))
 ;; inc and dec are C primitives.
 ;; zero? is a C primitive.
-(def ==         "Returns true if nums are numerically equal, treating ints and floats uniformly." (fn
+(defn == "Returns true if nums are numerically equal, treating ints and floats uniformly."
                   ([x] true)
                   ([x y] (= (+ 0.0 x) (+ 0.0 y)))
                   ([x y & more]
                     (if (== x y)
                       (apply == y more)
-                      false))))
+                      false)))
 ;; pos?, neg?, even?, odd? are C primitives.
-(def abs        "Returns the absolute value of x." (fn [x] (if (< x 0) (- x) x)))
-(def max        "Returns the greatest of the given values." (fn
+(defn abs "Returns the absolute value of x." [x] (if (< x 0) (- x) x))
+(defn max "Returns the greatest of the given values."
                   ([a] a)
                   ([a b] (if (NaN? a) a (if (NaN? b) b (if (> a b) a b))))
-                  ([a b & more] (reduce max (max a b) more))))
-(def min        "Returns the least of the given values." (fn
+                  ([a b & more] (reduce max (max a b) more)))
+(defn min "Returns the least of the given values."
                   ([a] a)
                   ([a b] (if (NaN? a) a (if (NaN? b) b (if (< a b) a b))))
-                  ([a b & more] (reduce min (min a b) more))))
-(def min-key    "Returns the x for which (k x) is least." (fn
+                  ([a b & more] (reduce min (min a b) more)))
+(defn min-key "Returns the x for which (k x) is least."
                   ([k x] x)
                   ([k x y] (if (< (k x) (k y)) x y))
                   ([k x y & more]
                     (reduce (fn [best v] (min-key k best v))
-                            (min-key k x y) more))))
-(def max-key    "Returns the x for which (k x) is greatest." (fn
+                            (min-key k x y) more)))
+(defn max-key "Returns the x for which (k x) is greatest."
                   ([k x] x)
                   ([k x y] (if (> (k x) (k y)) x y))
                   ([k x y & more]
                     (reduce (fn [best v] (max-key k best v))
-                            (max-key k x y) more))))
-(def not-empty  "Returns coll if it has items, nil otherwise." (fn [coll] (if (seq coll) coll nil)))
-(def constantly "Returns a function that always returns x." (fn [x] (fn [& _] x)))
-(def boolean    "Coerces x to a boolean value." (fn [x] (if x true false)))
+                            (max-key k x y) more)))
+(defn not-empty "Returns coll if it has items, nil otherwise." [coll] (if (seq coll) coll nil))
+(defn constantly "Returns a function that always returns x." [x] (fn [& _] x))
+(defn boolean "Coerces x to a boolean value." [x] (if x true false))
 ;; seq? is defined as a C primitive; no mino-level fallback needed.
 
 ;; --- Collection utilities ---
 
-(def merge "Returns a map that is the merge of the given maps." (fn [& maps]
+(defn merge "Returns a map that is the merge of the given maps." [& maps]
   (when (some identity maps)
     (reduce (fn [acc m]
       (if m
         (reduce (fn [a kv] (assoc a (first kv) (second kv)))
                 (if acc acc (with-meta {} (meta m))) (seq m))
         acc))
-      nil maps))))
+      nil maps)))
 
-(def select-keys "Returns a map containing only the entries whose keys are in ks." (fn [m ks]
+(defn select-keys "Returns a map containing only the entries whose keys are in ks." [m ks]
   (reduce (fn [acc k]
     (if (contains? m k)
       (assoc acc k (get m k))
       acc))
-    (with-meta {} (meta m)) ks)))
+    (with-meta {} (meta m)) ks))
 
 (def zipmap "Returns a map with keys mapped to corresponding vals."
   (let [zm-impl (fn [acc ks vs]
@@ -339,23 +339,23 @@
            acc))]
     (fn [ks vs] (zm-impl {} ks vs))))
 
-(def frequencies "Returns a map from distinct items in coll to the number of times they appear." (fn [coll]
+(defn frequencies "Returns a map from distinct items in coll to the number of times they appear." [coll]
   (reduce (fn [acc x]
     (update acc x (fn [n] (+ (if n n 0) 1))))
-    {} coll)))
+    {} coll))
 
-(def group-by "Returns a map of the items in coll grouped by the result of f." (fn [f coll]
+(defn group-by "Returns a map of the items in coll grouped by the result of f." [f coll]
   (reduce (fn [acc x]
     (let [k (f x)]
       (update acc k (fn [v] (conj (if v v []) x)))))
-    {} coll)))
+    {} coll))
 
 ;; --- More higher-order ---
 
-(def juxt "Returns a function that returns a vector of applying each f to its args." (fn [& fs]
-  (fn [& args] (vec (map (fn [f] (apply f args)) fs)))))
+(defn juxt "Returns a function that returns a vector of applying each f to its args." [& fs]
+  (fn [& args] (vec (map (fn [f] (apply f args)) fs))))
 
-(def mapcat "Returns the result of applying concat to the result of mapping f over coll. When called with no collection, returns a transducer." (fn
+(defn mapcat "Returns the result of applying concat to the result of mapping f over coll. When called with no collection, returns a transducer."
   ([f] (comp (map f) cat))
   ([f coll]
    (let [cat-lazy (fn cat-lazy [s]
@@ -371,11 +371,11 @@
            (map vector c1 c2)))
   ([f c1 c2 & colls]
    (mapcat (fn [args] (apply f args))
-           (apply map vector c1 c2 colls)))))
+           (apply map vector c1 c2 colls))))
 
 ;; --- Lazy combinators ---
 
-(def take-while "Returns a lazy sequence of items from coll while pred returns truthy. When called with no collection, returns a transducer." (fn
+(defn take-while "Returns a lazy sequence of items from coll while pred returns truthy. When called with no collection, returns a transducer."
   ([pred]
    (fn [rf]
      (fn ([] (rf))
@@ -388,9 +388,9 @@
    (lazy-seq
      (let [s (seq coll)]
        (when (and s (pred (first s)))
-         (cons (first s) (take-while pred (rest s)))))))))
+         (cons (first s) (take-while pred (rest s))))))))
 
-(def drop-while "Returns a lazy sequence of items from coll after pred returns falsy. When called with no collection, returns a transducer." (fn
+(defn drop-while "Returns a lazy sequence of items from coll after pred returns falsy. When called with no collection, returns a transducer."
   ([pred]
    (fn [rf]
      (let [dropping (atom true)]
@@ -406,9 +406,9 @@
      (cond
        (nil? s)            (list)
        (pred (first s))    (drop-while pred (rest s))
-       :else               s)))))
+       :else               s))))
 
-(def take-nth "Returns a lazy sequence of every nth item in coll. When called with no collection, returns a transducer." (fn
+(defn take-nth "Returns a lazy sequence of every nth item in coll. When called with no collection, returns a transducer."
   ([n]
    (fn [rf]
      (let [i (atom -1)]
@@ -423,15 +423,15 @@
    (lazy-seq
      (let [s (seq coll)]
        (when s
-         (cons (first s) (take-nth n (drop n s)))))))))
+         (cons (first s) (take-nth n (drop n s))))))))
 
 (defmacro lazy-cat "Expands to code that yields a lazy concatenation of the given collections." [& colls]
   (if (seq colls)
     `(lazy-seq (concat ~(first colls) (lazy-cat ~@(rest colls))))
     `(lazy-seq nil)))
 
-(def iterate "Returns a lazy sequence of x, (f x), (f (f x)), and so on." (fn [f x]
-  (lazy-seq (cons x (iterate f (f x))))))
+(defn iterate "Returns a lazy sequence of x, (f x), (f (f x)), and so on." [f x]
+  (lazy-seq (cons x (iterate f (f x)))))
 
 (def cycle "Returns a lazy infinite sequence of repetitions of the items in coll."
   (let [cycle-impl (fn [orig coll]
@@ -443,9 +443,9 @@
                  (cycle-impl orig orig))))))]
     (fn [coll] (cycle-impl coll coll))))
 
-(def repeatedly "Returns a lazy sequence of calls to f. With two args, returns n calls." (fn
+(defn repeatedly "Returns a lazy sequence of calls to f. With two args, returns n calls."
   ([f]   (lazy-seq (cons (f) (repeatedly f))))
-  ([n f] (take n (repeatedly f)))))
+  ([n f] (take n (repeatedly f))))
 
 (def interleave "Returns a lazy sequence of the first item in each collection, then the second, and so on."
   (let [interleave2 (fn [c1 c2]
@@ -465,7 +465,7 @@
              (concat (map first ss)
                      (apply interleave (map rest ss))))))))))
 
-(def interpose "Returns a lazy sequence of the items in coll separated by sep. When called with no collection, returns a transducer." (fn
+(defn interpose "Returns a lazy sequence of the items in coll separated by sep. When called with no collection, returns a transducer."
   ([sep]
    (fn [rf]
      (let [started (atom false)]
@@ -482,9 +482,9 @@
      (let [s (seq coll)]
        (when s
          (cons (first s)
-           (mapcat (fn [x] (list sep x)) (rest s)))))))))
+           (mapcat (fn [x] (list sep x)) (rest s))))))))
 
-(def distinct "Returns a lazy sequence of the distinct items in coll. When called with no collection, returns a transducer." (fn
+(defn distinct "Returns a lazy sequence of the distinct items in coll. When called with no collection, returns a transducer."
   ([]
    (fn [rf]
      (let [seen (atom #{})]
@@ -504,7 +504,7 @@
                               (if (contains? seen x)
                                 (dist-impl seen (rest s))
                                 (cons x (dist-impl (conj seen x) (rest s)))))))))]
-     (dist-impl #{} coll)))))
+     (dist-impl #{} coll))))
 
 (def partition "Returns a lazy sequence of lists of n items each, at offsets step apart. With pad, the final partition is filled from pad to reach n; if pad is shorter than needed, returns a partition with fewer than n items."
   (let [part-impl
@@ -527,7 +527,7 @@
       ([n step coll]       (part-impl n step coll))
       ([n step pad coll]   (part-pad-impl n step pad coll)))))
 
-(def partition-by "Splits coll into lazy sequences of consecutive items with the same (f item) value. When called with no collection, returns a transducer." (fn
+(defn partition-by "Splits coll into lazy sequences of consecutive items with the same (f item) value. When called with no collection, returns a transducer."
   ([f]
    (fn [rf]
      (let [buf (atom [])
@@ -556,7 +556,7 @@
                run (cons (first s)
                      (take-while (fn [x] (= (f x) v)) (rest s)))
                remaining (drop (count run) s)]
-           (cons run (partition-by f remaining)))))))))
+           (cons run (partition-by f remaining))))))))
 
 ;; --- Forcing ---
 
@@ -566,44 +566,44 @@
 ;; true?, false?, boolean?, int?, float?, char? are C primitives.
 
 (def integer?  "Returns true if x is an integer." int?)
-(def pos-int?  "Returns true if x is a positive integer." (fn [x] (and (int? x) (pos? x))))
-(def neg-int?  "Returns true if x is a negative integer." (fn [x] (and (int? x) (neg? x))))
-(def nat-int?  "Returns true if x is a non-negative integer." (fn [x] (and (int? x) (not (neg? x)))))
+(defn pos-int? "Returns true if x is a positive integer." [x] (and (int? x) (pos? x)))
+(defn neg-int? "Returns true if x is a negative integer." [x] (and (int? x) (neg? x)))
+(defn nat-int? "Returns true if x is a non-negative integer." [x] (and (int? x) (not (neg? x))))
 (def double?   "Returns true if x is a float." float?)
 ;; ratio? / rational? / decimal? are C primitives that consult the real
 ;; numeric-tower types (MINO_RATIO, MINO_BIGDEC); registered in prim.c.
 (def long      "Coerces x to an integer." int)
 (def double    "Coerces x to a float." float)
-(def num       "Returns x if it is a number, otherwise throws." (fn [x] (if (number? x) x (throw "num expects a number"))))
-(def coll?     "Returns true if x is a collection." (fn [x] (or (seq? x) (vector? x) (map? x) (set? x))))
+(defn num "Returns x if it is a number, otherwise throws." [x] (if (number? x) x (throw "num expects a number")))
+(defn coll? "Returns true if x is a collection." [x] (or (seq? x) (vector? x) (map? x) (set? x)))
 ;; some? is a C primitive.
 (def list?     "Returns true if x is a list." cons?)
 ;; atom? is defined as a C primitive; no mino-level fallback needed.
-(def not-any?  "Returns true if (pred x) is falsy for every x in coll." (fn [pred coll] (not (some pred coll))))
-(def not-every? "Returns true if (pred x) is falsy for at least one x in coll." (fn [pred coll] (not (every? pred coll))))
-(def distinct? "Returns true if no two of the arguments are equal." (fn [& xs]
+(defn not-any? "Returns true if (pred x) is falsy for every x in coll." [pred coll] (not (some pred coll)))
+(defn not-every? "Returns true if (pred x) is falsy for at least one x in coll." [pred coll] (not (every? pred coll)))
+(defn distinct? "Returns true if no two of the arguments are equal." [& xs]
   (if (empty? xs)
     true
     (let [s (set xs)]
-      (= (count s) (count xs))))))
+      (= (count s) (count xs)))))
 (def array-map    "Creates a hash-map." hash-map)
-(def sorted?      "Returns true if x is a sorted collection." (fn [x] (let [t (type x)] (or (= t :sorted-map) (= t :sorted-set)))))
-(def associative?  "Returns true if x supports assoc (maps and vectors)." (fn [x] (let [t (type x)] (or (= t :map) (= t :vector) (= t :sorted-map)))))
-(def reversible?   "Returns true if x supports rseq (vectors)." (fn [x] (= (type x) :vector)))
-(def any?          "Returns true for any argument." (fn [x] true))
-(def seqable?      "Returns true if (seq x) is supported." (fn [x] (or (nil? x) (coll? x) (string? x))))
-(def indexed?      "Returns true if x supports nth in constant time (vectors)." (fn [x] (vector? x)))
+(defn sorted? "Returns true if x is a sorted collection." [x] (let [t (type x)] (or (= t :sorted-map) (= t :sorted-set))))
+(defn associative? "Returns true if x supports assoc (maps and vectors)." [x] (let [t (type x)] (or (= t :map) (= t :vector) (= t :sorted-map))))
+(defn reversible? "Returns true if x supports rseq (vectors)." [x] (= (type x) :vector))
+(defn any? "Returns true for any argument." [x] true)
+(defn seqable? "Returns true if (seq x) is supported." [x] (or (nil? x) (coll? x) (string? x)))
+(defn indexed? "Returns true if x supports nth in constant time (vectors)." [x] (vector? x))
 
 ;; --- Volatile (lightweight mutable box, backed by atom) ---
 
-(def volatile!   "Creates a volatile with the given initial value." (fn [val] (atom val)))
+(defn volatile! "Creates a volatile with the given initial value." [val] (atom val))
 (def volatile?   "Returns true if x is a volatile." atom?)
 (def vreset!     "Sets the value of a volatile to val." reset!)
 (def vswap!      "Applies f to the current value of a volatile and any args." swap!)
 
 ;; --- Delay (lazy thunk) ---
 
-(def delay?      "Returns true if x is a delay." (fn [x] (and (map? x) (contains? x :delay/fn))))
+(defn delay? "Returns true if x is a delay." [x] (and (map? x) (contains? x :delay/fn)))
 (defmacro delay "Creates a delay that evaluates body on first deref." [& body]
   `(let [state# (atom {:status :pending})]
      {:delay/fn  (fn []
@@ -614,8 +614,8 @@
                          (reset! state# {:status :done :value v#})
                          v#))))
       :delay/state state#}))
-(def deref-delay "Forces evaluation of a delay and returns its value." (fn [d] ((:delay/fn d))))
-(def force       "Forces evaluation of a delay. If x is not a delay, returns x." (fn [x] (if (delay? x) (deref-delay x) x)))
+(defn deref-delay "Forces evaluation of a delay and returns its value." [d] ((:delay/fn d)))
+(defn force "Forces evaluation of a delay. If x is not a delay, returns x." [x] (if (delay? x) (deref-delay x) x))
 ;; Override C realized? to also handle delays and futures
 (let [c-realized? realized?]
   (def realized? "Returns true if a delay, lazy sequence, future, or promise has been realized." (fn [x]
@@ -627,52 +627,52 @@
 
 ;; --- Sequence navigation ---
 
-(def next      "Returns a seq of the items after the first. Returns nil if no more items." (fn [coll] (seq (rest coll))))
-(def nfirst    "Same as (next (first coll))." (fn [coll] (next (first coll))))
-(def fnext     "Same as (first (next coll))." (fn [coll] (first (next coll))))
-(def nnext     "Same as (next (next coll))." (fn [coll] (next (next coll))))
+(defn next "Returns a seq of the items after the first. Returns nil if no more items." [coll] (seq (rest coll)))
+(defn nfirst "Same as (next (first coll))." [coll] (next (first coll)))
+(defn fnext "Same as (first (next coll))." [coll] (first (next coll)))
+(defn nnext "Same as (next (next coll))." [coll] (next (next coll)))
 
 ;; --- Map entry accessors ---
 
-(def key       "Returns the key of a map entry." (fn [entry] (first entry)))
-(def val       "Returns the value of a map entry." (fn [entry] (second entry)))
+(defn key "Returns the key of a map entry." [entry] (first entry))
+(defn val "Returns the value of a map entry." [entry] (second entry))
 
-(def counted?   "Returns true if (count x) is a constant-time operation." (fn [x]
+(defn counted? "Returns true if (count x) is a constant-time operation." [x]
   (let [t (type x)]
     (or (= t :vector) (= t :map) (= t :set) (= t :string)
-        (= t :sorted-map) (= t :sorted-set)))))
+        (= t :sorted-map) (= t :sorted-set))))
 
-(def bounded-count "Returns the count of coll, but stops counting at n." (fn [n coll]
+(defn bounded-count "Returns the count of coll, but stops counting at n." [n coll]
   (if (counted? coll)
     (count coll)
     (loop [i 0 s (seq coll)]
       (if (and s (< i n))
         (recur (inc i) (next s))
-        i)))))
+        i))))
 
 ;; --- Collection conversions ---
 
-(def remove "Returns a lazy sequence of items in coll for which pred returns falsy. When called with no collection, returns a transducer." (fn
+(defn remove "Returns a lazy sequence of items in coll for which pred returns falsy. When called with no collection, returns a transducer."
   ([pred] (filter (complement pred)))
-  ([pred coll] (filter (complement pred) coll))))
-(def vec       "Converts coll into a vector." (fn [coll] (into [] coll)))
+  ([pred coll] (filter (complement pred) coll)))
+(defn vec "Converts coll into a vector." [coll] (into [] coll))
 
 ;; --- Random utilities ---
 
-(def rand-int  "Returns a random integer between 0 (inclusive) and n (exclusive)." (fn [n] (int (* (rand) n))))
-(def rand-nth  "Returns a random element from coll." (fn [coll] (nth coll (rand-int (count coll)))))
-(def random-sample "Returns items from coll with probability prob. When called with no collection, returns a transducer." (fn
+(defn rand-int "Returns a random integer between 0 (inclusive) and n (exclusive)." [n] (int (* (rand) n)))
+(defn rand-nth "Returns a random element from coll." [coll] (nth coll (rand-int (count coll))))
+(defn random-sample "Returns items from coll with probability prob. When called with no collection, returns a transducer."
   ([prob]
    (filter (fn [_] (< (rand) prob))))
   ([prob coll]
-   (filter (fn [_] (< (rand) prob)) coll))))
+   (filter (fn [_] (< (rand) prob)) coll)))
 
 ;; --- Side-effecting traversal ---
 
-(def run!      "Applies f to each item in coll for side effects. Returns nil." (fn [f coll]
+(defn run! "Applies f to each item in coll for side effects. Returns nil." [f coll]
   (let [go (fn [s] (when (seq s) (f (first s)) (go (rest s))))]
     (go coll)
-    nil)))
+    nil))
 
 ;; --- Control flow macros ---
 
@@ -733,48 +733,48 @@
 
 ;; --- Sequence functions ---
 
-(def last "Returns the last item in coll." (fn [coll]
+(defn last "Returns the last item in coll." [coll]
   (let [s (seq coll)]
     (if (next s)
       (last (next s))
-      (first s)))))
+      (first s))))
 
-(def butlast "Returns a seq of all but the last item in coll." (fn [coll]
+(defn butlast "Returns a seq of all but the last item in coll." [coll]
   (let [s (seq coll)]
     (when (next s)
-      (cons (first s) (butlast (next s)))))))
+      (cons (first s) (butlast (next s))))))
 
-(def nthrest "Returns the result of calling rest n times on coll." (fn [coll n]
-  (if (<= n 0) coll (nthrest (rest coll) (- n 1)))))
+(defn nthrest "Returns the result of calling rest n times on coll." [coll n]
+  (if (<= n 0) coll (nthrest (rest coll) (- n 1))))
 
-(def nthnext "Returns the result of calling next n times on coll." (fn [coll n]
-  (if (<= n 0) (seq coll) (nthnext (next coll) (- n 1)))))
+(defn nthnext "Returns the result of calling next n times on coll." [coll n]
+  (if (<= n 0) (seq coll) (nthnext (next coll) (- n 1))))
 
-(def take-last "Returns a seq of the last n items in coll." (fn [n coll]
+(defn take-last "Returns a seq of the last n items in coll." [n coll]
   (let [lead (drop n coll)
         step (fn [s lead]
                (if (seq lead)
                  (step (next s) (next lead))
                  s))]
-    (step (seq coll) (seq lead)))))
+    (step (seq coll) (seq lead))))
 
-(def drop-last "Returns a lazy sequence of all but the last n items in coll." (fn
+(defn drop-last "Returns a lazy sequence of all but the last n items in coll."
   ([coll]   (drop-last 1 coll))
-  ([n coll] (map (fn [x _] x) coll (drop n coll)))))
+  ([n coll] (map (fn [x _] x) coll (drop n coll))))
 
-(def split-at "Returns a vector of [(take n coll) (drop n coll)]." (fn [n coll]
-  (vector (take n coll) (drop n coll))))
+(defn split-at "Returns a vector of [(take n coll) (drop n coll)]." [n coll]
+  (vector (take n coll) (drop n coll)))
 
-(def split-with "Returns a vector of [(take-while pred coll) (drop-while pred coll)]." (fn [pred coll]
-  (vector (take-while pred coll) (drop-while pred coll))))
+(defn split-with "Returns a vector of [(take-while pred coll) (drop-while pred coll)]." [pred coll]
+  (vector (take-while pred coll) (drop-while pred coll)))
 
 ;; mapv is defined as a C primitive; no mino-level fallback needed.
 ;; filterv is defined as a C primitive; no mino-level fallback needed.
 
-(def sort-by "Returns a sorted sequence of the items in coll, ordered by (keyfn item)." (fn [keyfn & args]
+(defn sort-by "Returns a sorted sequence of the items in coll, ordered by (keyfn item)." [keyfn & args]
   (let [cmp  (if (= (count args) 2) (first args) compare)
         coll (last args)]
-    (sort (fn [a b] (cmp (keyfn a) (keyfn b))) coll))))
+    (sort (fn [a b] (cmp (keyfn a) (keyfn b))) coll)))
 
 ;; --- Collection utilities ---
 
@@ -790,19 +790,19 @@
       ([m ks]     (reduce get m ks))
       ([m ks nf]  (step m (seq ks) nf (gensym))))))
 
-(def assoc-in "Associates a value in a nested associative structure at the given key path." (fn [m ks v]
+(defn assoc-in "Associates a value in a nested associative structure at the given key path." [m ks v]
   (let [k (first ks)]
     (if (next ks)
       (assoc m k (assoc-in (get m k) (rest ks) v))
-      (assoc m k v)))))
+      (assoc m k v))))
 
-(def update-in "Updates a value in a nested associative structure by applying f at the given key path." (fn [m ks f & args]
+(defn update-in "Updates a value in a nested associative structure by applying f at the given key path." [m ks f & args]
   (let [k (first ks)]
     (if (next ks)
       (assoc m k (apply update-in (get m k) (rest ks) f args))
-      (assoc m k (apply f (get m k) args))))))
+      (assoc m k (apply f (get m k) args)))))
 
-(def merge-with "Returns a map that is the merge of the given maps, using f to combine values at shared keys." (fn [f & maps]
+(defn merge-with "Returns a map that is the merge of the given maps, using f to combine values at shared keys." [f & maps]
   (when (some identity maps)
     (reduce (fn [acc m]
       (if m
@@ -814,42 +814,42 @@
               (assoc a k v))))
           (if acc acc (with-meta {} (meta m))) (seq m))
         acc))
-      nil maps))))
+      nil maps)))
 
-(def reduce-kv "Reduces a map with f taking accumulator, key, and value." (fn [f init m]
+(defn reduce-kv "Reduces a map with f taking accumulator, key, and value." [f init m]
   (reduce (fn [acc kv] (f acc (first kv) (second kv)))
-          init (seq m))))
+          init (seq m)))
 
-(def update-vals "Returns a map with f applied to each value." (fn [m f]
-  (reduce-kv (fn [acc k v] (assoc acc k (f v))) {} m)))
+(defn update-vals "Returns a map with f applied to each value." [m f]
+  (reduce-kv (fn [acc k v] (assoc acc k (f v))) {} m))
 
-(def update-keys "Returns a map with f applied to each key." (fn [m f]
-  (reduce-kv (fn [acc k v] (assoc acc (f k) v)) {} m)))
+(defn update-keys "Returns a map with f applied to each key." [m f]
+  (reduce-kv (fn [acc k v] (assoc acc (f k) v)) {} m))
 
-(def replace "Returns a collection with items in coll replaced by entries in smap." (fn [smap coll]
+(defn replace "Returns a collection with items in coll replaced by entries in smap." [smap coll]
   (let [f (fn [x] (if-let [e (find smap x)] (val e) x))]
     (if (vector? coll)
       (with-meta (mapv f coll) (meta coll))
-      (map f coll)))))
+      (map f coll))))
 
 ;; str-replace is now a C primitive in prim/string.c
 
 ;; --- Bitwise compositions ---
 
-(def bit-and-not "Returns the bitwise AND of x and the complement of y." (fn [x y] (bit-and x (bit-not y))))
-(def bit-test    "Returns true if bit n of x is set." (fn [x n] (not (= 0 (bit-and x (bit-shift-left 1 n))))))
-(def bit-set     "Returns x with bit n set." (fn [x n] (bit-or x (bit-shift-left 1 n))))
-(def bit-clear   "Returns x with bit n cleared." (fn [x n] (bit-and x (bit-not (bit-shift-left 1 n)))))
-(def bit-flip    "Returns x with bit n flipped." (fn [x n] (bit-xor x (bit-shift-left 1 n))))
+(defn bit-and-not "Returns the bitwise AND of x and the complement of y." [x y] (bit-and x (bit-not y)))
+(defn bit-test "Returns true if bit n of x is set." [x n] (not (= 0 (bit-and x (bit-shift-left 1 n)))))
+(defn bit-set "Returns x with bit n set." [x n] (bit-or x (bit-shift-left 1 n)))
+(defn bit-clear "Returns x with bit n cleared." [x n] (bit-and x (bit-not (bit-shift-left 1 n))))
+(defn bit-flip "Returns x with bit n flipped." [x n] (bit-xor x (bit-shift-left 1 n)))
 
 ;; --- Misc utilities ---
 
-(def comparator "Returns a comparator function from a two-arg predicate." (fn [pred]
-  (fn [a b] (cond (pred a b) -1 (pred b a) 1 true 0))))
+(defn comparator "Returns a comparator function from a two-arg predicate." [pred]
+  (fn [a b] (cond (pred a b) -1 (pred b a) 1 :else 0)))
 
 ;; --- Lazy combinators ---
 
-(def keep "Returns a lazy sequence of non-nil results of (f item). When called with no collection, returns a transducer." (fn
+(defn keep "Returns a lazy sequence of non-nil results of (f item). When called with no collection, returns a transducer."
   ([f]
    (fn [rf]
      (fn ([] (rf))
@@ -866,9 +866,9 @@
          (let [v (f (first s))]
            (if (nil? v)
              (keep f (rest s))
-             (cons v (keep f (rest s)))))))))))
+             (cons v (keep f (rest s))))))))))
 
-(def keep-indexed "Returns a lazy sequence of non-nil results of (f index item)." (fn [f coll]
+(defn keep-indexed "Returns a lazy sequence of non-nil results of (f index item)." [f coll]
   (let [step (fn [i s]
                (lazy-seq
                  (when (seq s)
@@ -876,9 +876,9 @@
                      (if (nil? v)
                        (step (inc i) (rest s))
                        (cons v (step (inc i) (rest s))))))))]
-    (step 0 coll))))
+    (step 0 coll)))
 
-(def map-indexed "Returns a lazy sequence of (f index item) for each item in coll. When called with no collection, returns a transducer." (fn
+(defn map-indexed "Returns a lazy sequence of (f index item) for each item in coll. When called with no collection, returns a transducer."
   ([f]
    (fn [rf]
      (let [i (atom -1)]
@@ -892,7 +892,7 @@
                   (when (seq s)
                     (cons (f i (first s))
                           (step (inc i) (rest s))))))]
-     (step 0 coll)))))
+     (step 0 coll))))
 
 (def partition-all "Like partition, but includes a final partial group if items remain."
   (let [pa-impl (fn [n step coll]
@@ -921,7 +921,7 @@
       ([n coll] (pa-impl n n coll))
       ([n step coll] (pa-impl n step coll)))))
 
-(def reductions "Returns a lazy sequence of the intermediate values of a reduction." (fn [f & args]
+(defn reductions "Returns a lazy sequence of the intermediate values of a reduction." [f & args]
   (let [init (if (= (count args) 2) (first args) (first (first args)))
         coll (if (= (count args) 2) (second args) (rest (first args)))
         step (fn [acc s]
@@ -929,9 +929,9 @@
                  (when (seq s)
                    (let [v (f acc (first s))]
                      (cons v (step v (rest s)))))))]
-    (cons init (step init coll)))))
+    (cons init (step init coll))))
 
-(def dedupe "Returns a lazy sequence removing consecutive duplicates. When called with no collection, returns a transducer." (fn
+(defn dedupe "Returns a lazy sequence removing consecutive duplicates. When called with no collection, returns a transducer."
   ([]
    (fn [rf]
      (let [prev (atom ::none)]
@@ -952,32 +952,21 @@
                         (cons x (step x (rest s))))))))]
      (lazy-seq
        (when (seq coll)
-         (cons (first coll) (step (first coll) (rest coll)))))))))
+         (cons (first coll) (step (first coll) (rest coll))))))))
 
 ;; --- Higher-order combinators ---
 
-(def every-pred "Returns a function that returns true when all preds are satisfied by all its arguments." (fn [& preds]
+(defn every-pred "Returns a function that returns true when all preds are satisfied by all its arguments." [& preds]
   (fn [& args]
-    (every? (fn [p] (every? p args)) preds))))
+    (every? (fn [p] (every? p args)) preds)))
 
-(def some-fn "Returns a function that returns the first truthy value from any pred applied to any argument." (fn [& preds]
+(defn some-fn "Returns a function that returns the first truthy value from any pred applied to any argument." [& preds]
   (when (empty? preds)
     (throw (ex-info "some-fn requires at least one predicate" {})))
   (fn [& args]
-    (loop [ps preds
-           result nil]
-      (if (empty? ps)
-        result
-        (let [p (first ps)
-              r (loop [as args
-                       last-r nil]
-                  (if (empty? as)
-                    last-r
-                    (let [v (p (first as))]
-                      (if v v (recur (rest as) v)))))]
-          (if r r (recur (rest ps) r))))))))
+    (some (fn [p] (some p args)) preds)))
 
-(def fnil "Returns a function like f, but replaces nil arguments with the given defaults." (fn
+(defn fnil "Returns a function like f, but replaces nil arguments with the given defaults."
   ([f d1]
    (fn [x & args]
      (apply f (if (nil? x) d1 x) args)))
@@ -986,9 +975,9 @@
      (apply f (if (nil? x) d1 x) (if (nil? y) d2 y) args)))
   ([f d1 d2 d3]
    (fn [x y z & args]
-     (apply f (if (nil? x) d1 x) (if (nil? y) d2 y) (if (nil? z) d3 z) args)))))
+     (apply f (if (nil? x) d1 x) (if (nil? y) d2 y) (if (nil? z) d3 z) args))))
 
-(def memoize "Returns a memoized version of f that caches return values by arguments." (fn [f]
+(defn memoize "Returns a memoized version of f that caches return values by arguments." [f]
   (let [cache (atom {})]
     (fn [& args]
       (let [e (find (deref cache) args)]
@@ -996,12 +985,12 @@
           (val e)
           (let [v (apply f args)]
             (swap! cache assoc args v)
-            v)))))))
+            v))))))
 
-(def trampoline "Calls f with args, then repeatedly calls the result if it is a function." (fn [f & args]
+(defn trampoline "Calls f with args, then repeatedly calls the result if it is a function." [f & args]
   (let [result (apply f args)
         bounce (fn [r] (if (fn? r) (bounce (r)) r))]
-    (bounce result))))
+    (bounce result)))
 
 ;; --- Threading macros ---
 
@@ -1114,7 +1103,7 @@
 
 ;; --- Shuffle (Fisher-Yates) ---
 
-(def shuffle "Returns a randomly shuffled vector of the items in coll." (fn [coll]
+(defn shuffle "Returns a randomly shuffled vector of the items in coll." [coll]
   (when (not (coll? coll)) (throw "shuffle requires a collection"))
   (let [v   (vec coll)
         n   (count v)
@@ -1124,7 +1113,7 @@
                  (let [j (rand-int (inc i))]
                    (step (assoc (assoc v i (nth v j)) j (nth v i))
                          (dec i)))))]
-    (into [] (step v (dec n))))))
+    (into [] (step v (dec n)))))
 
 ;; --- Timing ---
 
@@ -1138,37 +1127,37 @@
 
 ;; --- Tree walking ---
 
-(def sequential? "Returns true if x is a sequential collection (list, vector, or lazy-seq)." (fn [x]
-  (or (cons? x) (vector? x) (seq? x))))
+(defn sequential? "Returns true if x is a sequential collection (list, vector, or lazy-seq)." [x]
+  (or (cons? x) (vector? x) (seq? x)))
 
-(def flatten "Returns a lazy sequence of the non-sequential items from a nested structure." (fn [x]
+(defn flatten "Returns a lazy sequence of the non-sequential items from a nested structure." [x]
   (filter (complement sequential?)
-          (rest (tree-seq sequential? seq x)))))
+          (rest (tree-seq sequential? seq x))))
 
-(def tree-seq "Returns a lazy depth-first sequence of nodes in a tree." (fn [branch? children root]
+(defn tree-seq "Returns a lazy depth-first sequence of nodes in a tree." [branch? children root]
   (let [walk (fn [node]
                (lazy-seq
                  (cons node
                    (when (branch? node)
                      (mapcat walk (children node))))))]
-    (walk root))))
+    (walk root)))
 
-(def walk "Traverses form, applying inner to each element and outer to the result." (fn [inner outer form]
+(defn walk "Traverses form, applying inner to each element and outer to the result." [inner outer form]
   (cond
     (cons?   form) (outer (apply list (map inner form)))
     (vector? form) (outer (mapv inner form))
     (map?    form) (outer (into (empty form) (map inner (seq form))))
     (set?    form) (outer (into (empty form) (map inner form)))
-    true           (outer form))))
+    true           (outer form)))
 
-(def postwalk  "Walks form depth-first, applying f to each sub-form after its children." (fn [f form] (walk (fn [x] (postwalk f x)) f form)))
-(def prewalk   "Walks form depth-first, applying f to each sub-form before its children." (fn [f form] (walk (fn [x] (prewalk f x)) identity (f form))))
+(defn postwalk "Walks form depth-first, applying f to each sub-form after its children." [f form] (walk (fn [x] (postwalk f x)) f form))
+(defn prewalk "Walks form depth-first, applying f to each sub-form before its children." [f form] (walk (fn [x] (prewalk f x)) identity (f form)))
 
-(def postwalk-replace "Replaces items in form that appear as keys in smap, walking bottom-up." (fn [smap form]
-  (postwalk (fn [x] (if (contains? smap x) (get smap x) x)) form)))
+(defn postwalk-replace "Replaces items in form that appear as keys in smap, walking bottom-up." [smap form]
+  (postwalk (fn [x] (if (contains? smap x) (get smap x) x)) form))
 
-(def prewalk-replace "Replaces items in form that appear as keys in smap, walking top-down." (fn [smap form]
-  (prewalk (fn [x] (if (contains? smap x) (get smap x) x)) form)))
+(defn prewalk-replace "Replaces items in form that appear as keys in smap, walking top-down." [smap form]
+  (prewalk (fn [x] (if (contains? smap x) (get smap x) x)) form))
 
 ;; --- Regex ---
 
@@ -1179,7 +1168,7 @@
 (def ^:private prim-re-find    re-find)
 (def ^:private prim-re-matches re-matches)
 
-(defn ^:private match-whole_ [m]
+(defn- match-whole [m]
   ;; The C primitives return either a string (no groups) or a vector
   ;; [whole g1 g2 ...] (groups present). Normalise to the whole match.
   (if (vector? m) (first m) m))
@@ -1197,7 +1186,7 @@
     (fn [pattern s]
       (lazy-seq
         (when-let [m (prim-re-find pattern s)]
-          (let [whole (match-whole_ m)
+          (let [whole (match-whole m)
                 idx   (find-index s whole 0)]
             (when (not (nil? idx))
               (let [rest-s (subs s (+ idx (max (count whole) 1)))]
@@ -1218,9 +1207,9 @@
        (let [v (deref m)]
          (and (map? v) (::matcher? v)))))
 
-(defn ^:private substring-index_ [s sub]
+(defn- substring-index [s sub]
   ;; Brute-force scan for the first index of sub in s. Used by
-  ;; re-find-on-matcher_ to advance the matcher's :pos. Lives here
+  ;; re-find-on-matcher to advance the matcher's :pos. Lives here
   ;; (rather than calling clojure.string/index-of) because core.clj
   ;; loads before clojure.string.
   (let [slen (count s)
@@ -1233,7 +1222,7 @@
           (= (subs s i (+ i nlen)) sub) i
           :else (recur (+ i 1)))))))
 
-(defn ^:private re-find-on-matcher_ [m]
+(defn- re-find-on-matcher [m]
   (let [state   @m
         pattern (:pattern state)
         text    (:text state)
@@ -1241,8 +1230,8 @@
         rem     (subs text pos)
         result  (prim-re-find pattern rem)]
     (when (some? result)
-      (let [whole  (match-whole_ result)
-            offset (substring-index_ rem whole)]
+      (let [whole  (match-whole result)
+            offset (substring-index rem whole)]
         (when (some? offset)
           (let [end (+ pos offset (max (count whole) 1))]
             (swap! m assoc :pos end :last result)
@@ -1251,7 +1240,7 @@
 (defn re-find
   "Find the first match. (re-find pattern text) returns a string (no
    groups) or [whole g1 g2 ...] (groups). (re-find m) advances a matcher."
-  ([m]            (re-find-on-matcher_ m))
+  ([m]            (re-find-on-matcher m))
   ([pattern text] (prim-re-find pattern text)))
 
 (defn re-matches
@@ -1519,7 +1508,7 @@
 ;; (satisfies? Name x) returns true if x's type has implementations for Name.
 ;; ---------------------------------------------------------------------------
 
-(defn protocol-dispatch_ [dispatch-atom mname & args]
+(defn protocol-dispatch [dispatch-atom mname & args]
   (let [target (first args)
         t (type target)
         dispatch-map @dispatch-atom
@@ -1551,7 +1540,7 @@
                        method-info))
         fn-defs (into [] (map (fn [mi]
                        (let [dispatch-call (apply list
-                                             'protocol-dispatch_
+                                             'protocol-dispatch
                                              (:dsym mi)
                                              (str (:mname mi))
                                              (:params mi))]
@@ -1591,7 +1580,7 @@
               groups)]
     (apply list 'do (vec swaps))))
 
-(defn type-marker-key_
+(defn- type-marker-key
   "Translates an extend-protocol type marker to the dispatch key
    extend-type understands. Keywords pass through (used for built-in
    types and ad-hoc tags via :type metadata). Symbols pass through
@@ -1609,7 +1598,7 @@
                           {:marker marker
                            :mino/unsupported :extend-protocol-type-marker}))))
 
-(defn partition-protocol-specs_ [specs]
+(defn- partition-protocol-specs [specs]
   (loop [remaining specs groups [] current nil]
     (if (empty? remaining)
       (if current (conj groups current) groups)
@@ -1618,10 +1607,10 @@
           (recur (rest remaining) groups (conj current item))
           (recur (rest remaining)
                  (if current (conj groups current) groups)
-                 [(type-marker-key_ item)]))))))
+                 [(type-marker-key item)]))))))
 
 (defmacro extend-protocol "Extends a protocol with implementations for multiple types." [proto & specs]
-  (let [groups (partition-protocol-specs_ specs)
+  (let [groups (partition-protocol-specs specs)
         forms (into [] (map (fn [group]
                 (apply list 'extend-type (first group) proto (rest group)))
               groups))]
@@ -1651,8 +1640,8 @@
 ;; registered a per-type override (or a :default catch-all).
 ;; ---------------------------------------------------------------------------
 
-(def internal-reduce_ reduce)
-(def internal-reduce-kv_ reduce-kv)
+(def internal-reduce reduce)
+(def internal-reduce-kv reduce-kv)
 
 (defprotocol CollReduce
   "Protocol for collection types that can reduce themselves. User types
@@ -1680,12 +1669,10 @@
 
 (extend-type :default Navigable (nav [_coll _k v] v))
 
-(def reduce
-  "Reduces coll using f. With 2 args, uses the first element as init.
+(defn reduce "Reduces coll using f. With 2 args, uses the first element as init.
   With 3 args, uses init explicitly. Consults CollReduce: a user
   type or :default override on coll-reduce takes precedence over the
   built-in seq-driven reduction."
-  (fn
     ([f coll]
      (let [s (seq coll)]
        (if (nil? s)
@@ -1697,25 +1684,23 @@
                          (get table :default))]
            (if impl
              (impl rs f init)
-             (internal-reduce_ f init rs))))))
+             (internal-reduce f init rs))))))
     ([f init coll]
      (let [table @CollReduce--coll-reduce
            impl  (or (get table (type coll))
                      (get table :default))]
        (if impl
          (impl coll f init)
-         (internal-reduce_ f init coll))))))
+         (internal-reduce f init coll)))))
 
-(def reduce-kv
-  "Reduces a map (or any associative source) with f taking accumulator,
-  key, and value. Consults IKVReduce; falls back to walking the seq."
-  (fn [f init m]
+(defn reduce-kv "Reduces a map (or any associative source) with f taking accumulator,
+  key, and value. Consults IKVReduce; falls back to walking the seq." [f init m]
     (let [table @IKVReduce--kv-reduce
           impl  (or (get table (type m))
                     (get table :default))]
       (if impl
         (impl m f init)
-        (internal-reduce-kv_ f init m)))))
+        (internal-reduce-kv f init m))))
 
 ;; ---------------------------------------------------------------------------
 ;; Hierarchies: immutable parent/child/ancestor/descendant relationships.
@@ -1730,16 +1715,16 @@
 ;; (isa? h child parent) checks if child derives from parent.
 ;; ---------------------------------------------------------------------------
 
-(def global-hierarchy_ (atom {:parents {} :ancestors {} :descendants {}}))
+(def ^:private global-hierarchy (atom {:parents {} :ancestors {} :descendants {}}))
 
-;; Bumped on every mutation of global-hierarchy_; multimethods compare it
+;; Bumped on every mutation of global-hierarchy; multimethods compare it
 ;; against their cached version to invalidate stale dispatch entries when
 ;; derive / underive runs after methods have populated the cache.
-(def hierarchy-version_ (atom 0))
+(def ^:private hierarchy-version (atom 0))
 
 (defn make-hierarchy "Returns an empty hierarchy." [] {:parents {} :ancestors {} :descendants {}})
 
-(defn tc-ancestors_ [parents-map node]
+(defn- tc-ancestors [parents-map node]
   (loop [frontier (get parents-map node #{})
          result #{}]
     (if (empty? frontier)
@@ -1751,12 +1736,12 @@
           (recur (into rst (get parents-map p #{}))
                  (conj result p)))))))
 
-(defn recompute-hierarchy_ [h]
+(defn- recompute-hierarchy [h]
   (let [pm (:parents h)
         all-nodes (into (set (keys pm))
                         (apply concat (vals pm)))
         ancestors-map (reduce (fn [m node]
-                                (let [ancs (tc-ancestors_ pm node)]
+                                (let [ancs (tc-ancestors pm node)]
                                   (if (empty? ancs) m (assoc m node ancs))))
                               {} all-nodes)
         descendants-map (reduce (fn [m node]
@@ -1768,8 +1753,8 @@
 
 (defn derive "Establishes a parent/child relationship between child and parent in a hierarchy."
   ([child parent]
-   (swap! global-hierarchy_ derive child parent)
-   (swap! hierarchy-version_ inc)
+   (swap! global-hierarchy derive child parent)
+   (swap! hierarchy-version inc)
    nil)
   ([h child parent]
    (when (= child parent)
@@ -1778,18 +1763,18 @@
      (throw (ex-info "Cyclic derivation" {:child child :parent parent})))
    (let [new-parents (update (:parents h) child
                              (fn [s] (conj (or s #{}) parent)))]
-     (recompute-hierarchy_ (assoc h :parents new-parents)))))
+     (recompute-hierarchy (assoc h :parents new-parents)))))
 
-(defn valid-hierarchy?_ [h]
+(defn- valid-hierarchy? [h]
   (and (map? h) (contains? h :parents) (contains? h :ancestors) (contains? h :descendants)))
 
 (defn underive "Removes a parent/child relationship between child and parent."
   ([child parent]
-   (swap! global-hierarchy_ underive child parent)
-   (swap! hierarchy-version_ inc)
+   (swap! global-hierarchy underive child parent)
+   (swap! hierarchy-version inc)
    nil)
   ([h child parent]
-   (when-not (valid-hierarchy?_ h)
+   (when-not (valid-hierarchy? h)
      (throw (ex-info "invalid hierarchy" {:h h})))
    (let [cur (get (:parents h) child #{})]
      (if (contains? cur parent)
@@ -1797,29 +1782,29 @@
              new-parents (if (empty? new-set)
                            (dissoc (:parents h) child)
                            (assoc (:parents h) child new-set))]
-         (recompute-hierarchy_ (assoc h :parents new-parents)))
+         (recompute-hierarchy (assoc h :parents new-parents)))
        h))))
 
 (defn parents "Returns the immediate parents of tag in the hierarchy."
-  ([tag] (parents @global-hierarchy_ tag))
+  ([tag] (parents @global-hierarchy tag))
   ([h tag]
    (let [p (get (:parents h) tag)]
      (if (and p (not (empty? p))) p nil))))
 
 (defn ancestors "Returns all ancestors of tag in the hierarchy."
-  ([tag] (ancestors @global-hierarchy_ tag))
+  ([tag] (ancestors @global-hierarchy tag))
   ([h tag]
    (let [a (get (:ancestors h) tag)]
      (if (and a (not (empty? a))) a nil))))
 
 (defn descendants "Returns all descendants of tag in the hierarchy."
-  ([tag] (descendants @global-hierarchy_ tag))
+  ([tag] (descendants @global-hierarchy tag))
   ([h tag]
    (let [d (get (:descendants h) tag)]
      (if (and d (not (empty? d))) d nil))))
 
 (defn isa? "Returns true if child is equal to or derives from parent."
-  ([child parent] (isa? @global-hierarchy_ child parent))
+  ([child parent] (isa? @global-hierarchy child parent))
   ([h child parent]
    (or (= child parent)
        (contains? (get (:ancestors h) child #{}) parent)
@@ -1831,16 +1816,16 @@
 ;; Multimethods: value-dispatched polymorphism.
 ;; ---------------------------------------------------------------------------
 
-(defn- prefers?_ [x y prefer-table hierarchy]
+(defn- prefers? [x y prefer-table hierarchy]
   ;; True when x is preferred over y, considering transitive preferences
   ;; through hierarchy parents (matching Clojure's prefers? semantics).
   (or (contains? (get prefer-table x #{}) y)
-      (boolean (some (fn [yp] (prefers?_ x yp prefer-table hierarchy))
+      (boolean (some (fn [yp] (prefers? x yp prefer-table hierarchy))
                      (or (parents hierarchy y) #{})))
-      (boolean (some (fn [xp] (prefers?_ xp y prefer-table hierarchy))
+      (boolean (some (fn [xp] (prefers? xp y prefer-table hierarchy))
                      (or (parents hierarchy x) #{})))))
 
-(defn- find-best-method_ [methods dval default-val prefer-table hierarchy]
+(defn- find-best-method [methods dval default-val prefer-table hierarchy]
   (let [exact (get methods dval)]
     (if exact
       exact
@@ -1859,7 +1844,7 @@
                               (every?
                                 (fn [[k2 _]]
                                   (or (= k k2)
-                                      (prefers?_ k k2 prefer-table hierarchy)))
+                                      (prefers? k k2 prefer-table hierarchy)))
                                 matches))
                             matches)]
             (if (= 1 (count preferred))
@@ -1870,13 +1855,13 @@
                        {:dispatch-val dval
                         :matches (mapv first matches)})))))))))
 
-(defn- create-multimethod_ [dispatch-fn default-val]
+(defn- create-multimethod [dispatch-fn default-val]
   (let [method-table   (atom {})
         prefer-table   (atom {})
         dispatch-cache (atom {})
-        cache-version  (atom @hierarchy-version_)
+        cache-version  (atom @hierarchy-version)
         mm (fn [& args]
-             (let [hver @hierarchy-version_]
+             (let [hver @hierarchy-version]
                (when (not= hver @cache-version)
                  (reset! dispatch-cache {})
                  (reset! cache-version hver)))
@@ -1886,9 +1871,9 @@
                  (apply cached args)
                  (let [methods @method-table
                        impl    (or (get methods dval)
-                                   (find-best-method_ methods dval default-val
+                                   (find-best-method methods dval default-val
                                                       @prefer-table
-                                                      @global-hierarchy_)
+                                                      @global-hierarchy)
                                    (get methods default-val))]
                    (if impl
                      (do (swap! dispatch-cache assoc dval impl)
@@ -1904,7 +1889,7 @@
                    :cache-version  cache-version
                    :default        default-val})))
 
-(defn- register-method_ [mm dispatch-val f]
+(defn- register-method [mm dispatch-val f]
   (swap! (:method-table (meta mm)) assoc dispatch-val f)
   (reset! (:dispatch-cache (meta mm)) {})
   mm)
@@ -1916,10 +1901,10 @@
         kw-opts  (apply hash-map (rest options))
         default-val (get kw-opts :default :default)]
     (list 'def mm-name
-          (list 'create-multimethod_ dispatch-fn-form default-val))))
+          (list 'create-multimethod dispatch-fn-form default-val))))
 
 (defmacro defmethod "Defines a method for a multimethod." [mm-name dispatch-val & fn-tail]
-  (list 'register-method_ mm-name dispatch-val
+  (list 'register-method mm-name dispatch-val
         (apply list 'fn fn-tail)))
 
 (defn prefer-method "Prefers dispatch-val x over y in multimethod mm." [mm x y]
@@ -2020,15 +2005,14 @@
 ;; Use (transduce xf f coll) or (into to xf from) to apply.
 ;; ---------------------------------------------------------------------------
 
-(def cat "A transducer that concatenates the contents of each input."
-  (fn [rf]
+(defn cat "A transducer that concatenates the contents of each input." [rf]
     (fn ([] (rf))
         ([result] (rf result))
         ([result input]
          (reduce (fn [r v]
                    (let [ret (rf r v)]
                      (if (reduced? ret) (reduced ret) ret)))
-                 result input)))))
+                 result input))))
 
 (defn completing "Returns a reducing function with a completion step."
   ([f] (completing f identity))
@@ -2037,11 +2021,11 @@
        ([result] (cf result))
        ([result input] (f result input)))))
 
-(def unreduced "Unwraps a reduced value. If not reduced, returns x." (fn [x]
-  (if (reduced? x) (unreduced @x) x)))
+(defn unreduced "Unwraps a reduced value. If not reduced, returns x." [x]
+  (if (reduced? x) (unreduced @x) x))
 
-(def ensure-reduced "Wraps x in reduced if it is not already reduced." (fn [x]
-  (if (reduced? x) x (reduced x))))
+(defn ensure-reduced "Wraps x in reduced if it is not already reduced." [x]
+  (if (reduced? x) x (reduced x)))
 
 (defn transduce "Reduces coll using the transducer xf applied to the reducing function f."
   ([xf f coll]
@@ -2051,12 +2035,12 @@
          result (reduce xrf init coll)]
      (xrf (unreduced result)))))
 
-(def into_ into)
-(def into "Adds all items from from into to. With a transducer, transforms items first." (fn
-  ([to from] (into_ to from))
-  ([to xf from] (transduce xf conj to from))))
+(def ^:private prim-into into)
+(defn into "Adds all items from from into to. With a transducer, transforms items first."
+  ([to from] (prim-into to from))
+  ([to xf from] (transduce xf conj to from)))
 
-(def sequence "Returns a lazy sequence of applying transducer xf to coll, or to the pair-wise step of multiple collections. Parallel collections stop at the shortest." (fn
+(defn sequence "Returns a lazy sequence of applying transducer xf to coll, or to the pair-wise step of multiple collections. Parallel collections stop at the shortest."
   ([xf coll]
    (let [acc   (atom [])
          xrf   (xf (fn
@@ -2099,9 +2083,9 @@
      ((fn step [ss]
         (lazy-seq
           (loop [ss ss]
-            (let [seqs (map1_ seq ss)]
-              (if (all-some?_ seqs)
-                (let [firsts (map1_ first seqs)
+            (let [seqs (map1 seq ss)]
+              (if (all-some? seqs)
+                (let [firsts (map1 first seqs)
                       ret   (apply xrf nil firsts)]
                   (if (reduced? ret)
                     (do (xrf nil)
@@ -2111,15 +2095,15 @@
                     (let [items @acc]
                       (if (seq items)
                         (do (reset! acc [])
-                            (concat items (step (map1_ rest seqs))))
-                        (recur (map1_ rest seqs))))))
+                            (concat items (step (map1 rest seqs))))
+                        (recur (map1 rest seqs))))))
                 (do (xrf nil)
                     (let [items @acc]
                       (reset! acc [])
                       (when (seq items) (seq items)))))))))
-      (cons coll more-colls))))))
+      (cons coll more-colls)))))
 
-(def halt-when "Returns a transducer that halts reduction when pred is satisfied." (fn
+(defn halt-when "Returns a transducer that halts reduction when pred is satisfied."
   ([pred] (halt-when pred nil))
   ([pred retf]
    (fn [rf]
@@ -2132,7 +2116,7 @@
           (if (pred input)
             (reduced {:__halt-when__
                       (if retf (retf (rf result) input) input)})
-            (rf result input))))))))
+            (rf result input)))))))
 
 (defn eduction "Returns a lazy sequence of applying the given transducers to coll." [& args]
   (let [coll (last args)
@@ -2150,7 +2134,7 @@
      (vec size-or-coll))))
 
 (def to-array    "Converts a collection to a vector." vec)
-(def into-array  "Converts a collection to a vector." (fn [& args] (vec (last args))))
+(defn into-array "Converts a collection to a vector." [& args] (vec (last args)))
 (def int-array   "Creates a vector from a size or collection." object-array)
 (def long-array  "Creates a vector from a size or collection." object-array)
 (def float-array "Creates a vector from a size or collection." object-array)
@@ -2189,13 +2173,13 @@
   "Returns true if x is a namespace-qualified symbol or keyword."
   [x] (and (ident? x) (some? (namespace x))))
 
-(def ^:private special-symbols-set_
+(def ^:private special-symbols-set
   '#{if let do fn quote def set! var loop recur try throw new ns
      refer-clojure binding lazy-seq})
 
 (defn special-symbol?
   "Returns true if x is a symbol that names a special form."
-  [x] (contains? special-symbols-set_ x))
+  [x] (contains? special-symbols-set x))
 
 (defn map-entry?
   "Returns true if x is a map entry (mino represents entries as
@@ -2209,9 +2193,9 @@
 (defn inst?  [_] false)
 (defn uri?   [_] false)
 
-(def ^:private uuid-hex-pattern_ #"[0-9a-fA-F]+")
+(def ^:private uuid-hex-pattern #"[0-9a-fA-F]+")
 
-(defn- uuid-string?_
+(defn- uuid-string?
   "Validates RFC 4122 textual layout: 36 chars with dashes at the
    8/13/18/23 positions and hex digits everywhere else. Avoids the
    {n} quantifier mino's regex engine does not support."
@@ -2222,7 +2206,7 @@
        (= "-" (nth s 13))
        (= "-" (nth s 18))
        (= "-" (nth s 23))
-       (some? (re-matches uuid-hex-pattern_
+       (some? (re-matches uuid-hex-pattern
                           (str (subs s 0  8)
                                (subs s 9  13)
                                (subs s 14 18)
@@ -2232,7 +2216,7 @@
 (defn uuid?
   "Returns true if x looks like a UUID string. Mino has no dedicated
    UUID type; UUIDs round-trip as their canonical string form."
-  [x] (uuid-string?_ x))
+  [x] (uuid-string? x))
 
 (defn tagged-literal?
   "Returns true if x is a tagged-literal record produced by
@@ -2265,7 +2249,7 @@
   "Parses s as a UUID. Returns the canonical lowercase string (mino
    has no UUID type) or nil if s does not match the UUID format."
   [s]
-  (when (uuid-string?_ s)
+  (when (uuid-string? s)
     (clojure.string/lower-case s)))
 
 ;; Eager-vector partitioning (Clojure 1.13+ surface, useful pre-1.13).
@@ -2392,19 +2376,19 @@
           (alter-var-root (first pair) (constantly (second pair))))))))
 
 ;; Tap mechanism: a registry of fns invoked from tap>.
-(def ^:private tap-fns_ (atom #{}))
+(def ^:private tap-fns (atom #{}))
 
 (defn add-tap
   "Registers f as a tap target. Each call to tap> invokes every
    registered tap with the tapped value. Returns nil."
   [f]
-  (swap! tap-fns_ conj f)
+  (swap! tap-fns conj f)
   nil)
 
 (defn remove-tap
   "Unregisters f from the tap registry. Returns nil."
   [f]
-  (swap! tap-fns_ disj f)
+  (swap! tap-fns disj f)
   nil)
 
 (defn tap>
@@ -2412,7 +2396,7 @@
    skipped so a misbehaving subscriber does not poison the stream.
    Returns true."
   [x]
-  (doseq [f @tap-fns_]
+  (doseq [f @tap-fns]
     (try (f x) (catch __e nil)))
   true)
 

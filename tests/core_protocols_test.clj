@@ -41,7 +41,7 @@
       :vector
       (coll-reduce [v f init]
         ;; Marker: tag the result so we can confirm we hit the override.
-        (let [base (clojure.core/internal-reduce_ f init v)]
+        (let [base (clojure.core/internal-reduce f init v)]
           [::overridden base])))
     (try
       (is (= [::overridden 6] (reduce + 0 [1 2 3])))
