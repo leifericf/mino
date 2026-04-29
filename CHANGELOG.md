@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.94.1 — Release-Build Windows Guard
+
+Patch fix for the v0.94.0 release pipeline. The Windows release-build
+job tripped the same Git Bash sed quirk that `ci.yml` already gates
+around — the bootstrap Makefile recipe escapes differently than POSIX
+sed and emits empty bundled-source headers. `ci.yml` had been marking
+its Windows Bootstrap step `continue-on-error` since v0.93.0;
+`release-build.yml` was missing the same guard, and `fail-fast: true`
+was cancelling the otherwise-green macOS jobs. The release-build
+matrix now runs with `fail-fast: false` and the Windows job is
+informational at the job level until a portable Makefile recipe
+lands. Linux and macOS artifacts are the authoritative release set.
+
+No runtime behaviour changes; if you build from source on Linux,
+macOS, or via the bootstrap Makefile, this release is identical to
+v0.94.0.
+
 ## v0.94.0 — Empty-List Canon Parity
 
 The empty list `()` is now a real value type, distinct from nil. This
