@@ -1,5 +1,64 @@
 # Changelog
 
+## v0.94.0 — Empty-List Canon Parity
+
+The empty list `()` is now a real value type, distinct from nil. This
+matches Clojure's canonical semantics where the empty list, an empty
+vector, and an empty seq compare equal but none of them equal nil.
+The cycle also folds in three post-v0.93.0 fixes that have been
+sitting on main: the bootstrap Makefile, the Windows informational
+guard, and the disk-wins-over-bundled resolver fix.
+
+**Empty-list canon parity (breaking).** The reader, the `(list)`
+constructor, and every primitive that surfaces an empty seq result
+now produce the canonical empty-list singleton instead of nil. User-
+visible behaviour flips on five axes:
+
+- `(= '() nil)` is now false (was true). nil is its own thing; the
+  empty list is a sequential collection that happens to have no
+  elements.
+- `(seq? '())` is now true (was false), and `(nil? '())` is now
+  false (was true). The singleton is a seq, not nil.
+- `(rest '(1))` returns `()` instead of nil, as does `(rest [])`,
+  `(rest '())`, `(rest nil)`, and any other empty-seq-result branch
+  through `take`, `drop`, `take-while`, `drop-while`, `filter`,
+  `map`, `range`, `concat`, `interpose`, `interleave`, `cycle`,
+  `iterate`, `partition*`, `flatten`, `repeat`, `nthrest`,
+  `random-sample`, etc.
+- The empty list prints as `()` (a lazy seq that resolves to nil
+  prints as `()` too — the printed form follows the user-visible
+  semantic, not the internal cache).
+- Cross-type sequential equality includes empty-list and excludes
+  nil: `(= '() [])`, `(= '() (list))`, `(= '() (take 0 [1 2 3]))`,
+  and `(= '(1) (cons 1 (lazy-seq nil)))` are all true; `(= nil [])`
+  and `(= nil '())` are both false.
+
+Internally, cons-cell cdrs still terminate on nil (the precise GC
+treats nil as the canonical end-of-chain marker), and the lazy thunk
+contract still returns nil to mean "no more elements". The
+translation to `()` happens at the user-facing seam — `first`,
+`rest`, `seq`, `count`, equality, and the printer — so embedders
+walking cons chains via `mino_is_cons` see no behaviour change.
+
+**Bootstrap Makefile.** A 75-line top-level `Makefile` generates the
+bundled-source headers and compiles `./mino` in one `make` invocation;
+that's the entire bootstrap surface. Everything beyond a clean
+checkout still lives in `./mino task`. README, both CI workflows, and
+mino-site's deploy use it. Windows uses `$(OS)` to pick up the `.exe`
+suffix; the Bootstrap step there is `continue-on-error: true` because
+Git Bash's sed handles the recipe's escape pattern differently than
+POSIX sed and emits empty headers — Windows test posture is already
+informational, and a portable recipe is its own follow-up.
+
+**Resolver: disk wins over bundled.** v0.93.0's bundled-stdlib
+registry shadowed user-supplied overrides on disk. The lookup order
+flips: a `lib/<ns>.clj` file on the resolver's path wins over the
+bundled copy, with the bundled copy as the brew/scoop fallback. This
+unblocks mino-bench's `lib/mino/tasks/builtin.clj` override (which
+adds a `perf-gate` task the builtin doesn't ship). Brew and Scoop
+installs see the same behaviour as v0.93.0 because they don't ship a
+`lib/` tree, so the bundled fallback fires.
+
 ## v0.93.0 — C Refactoring Pass
 
 Top-down legibility pass over the C runtime. Behaviour is unchanged for
