@@ -88,6 +88,7 @@ static void state_init(mino_state_t *S)
     S->true_singleton.type = MINO_BOOL;
     S->true_singleton.as.b = 1;
     S->false_singleton.type = MINO_BOOL;
+    S->empty_list_singleton.type = MINO_EMPTY_LIST;
     S->recur_sentinel.type     = MINO_RECUR;
     S->tail_call_sentinel.type = MINO_TAIL_CALL;
     {

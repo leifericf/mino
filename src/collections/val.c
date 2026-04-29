@@ -23,6 +23,11 @@ mino_val_t *mino_false(mino_state_t *S)
     return &S->false_singleton;
 }
 
+mino_val_t *mino_empty_list(mino_state_t *S)
+{
+    return &S->empty_list_singleton;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Constructors                                                              */
 /* ------------------------------------------------------------------------- */
@@ -425,6 +430,11 @@ int mino_is_truthy(const mino_val_t *v)
 int mino_is_cons(const mino_val_t *v)
 {
     return v != NULL && v->type == MINO_CONS;
+}
+
+int mino_is_empty_list(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_EMPTY_LIST;
 }
 
 mino_val_t *mino_car(const mino_val_t *v)

@@ -383,6 +383,7 @@ struct mino_state {
     mino_val_t      nil_singleton;
     mino_val_t      true_singleton;
     mino_val_t      false_singleton;
+    mino_val_t      empty_list_singleton;
     /* Trampoline sentinels reused across recur/tail-call to avoid
      * per-iteration allocation. Their args/fn fields are replaced in-place
      * and the containing eval loop consumes them before any other code

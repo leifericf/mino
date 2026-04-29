@@ -53,6 +53,11 @@ typedef enum {
     MINO_STRING,
     MINO_SYMBOL,
     MINO_KEYWORD,
+    MINO_EMPTY_LIST, /* singleton: the canonical empty list `()`.
+                      * Distinct from nil: seq?-true, nil?-false,
+                      * empty?-true. Walkers terminate on it because
+                      * mino_is_cons returns false. Construct via
+                      * mino_empty_list(S). */
     MINO_CONS,
     MINO_VECTOR,
     MINO_MAP,
@@ -263,6 +268,12 @@ mino_val_t *mino_true(mino_state_t *S);
 /* Return the singleton false value. */
 mino_val_t *mino_false(mino_state_t *S);
 
+/* Return the singleton empty-list value `()`. Distinct from nil:
+ * `seq?` is true, `nil?` is false, `empty?` is true, and `=` against
+ * nil is false. Walkers using `mino_is_cons` terminate on it because
+ * the type tag is MINO_EMPTY_LIST, not MINO_CONS. */
+mino_val_t *mino_empty_list(mino_state_t *S);
+
 /* Create an integer value. */
 mino_val_t *mino_int(mino_state_t *S, long long n);
 
@@ -463,6 +474,9 @@ int mino_is_truthy(const mino_val_t *v);
 
 /* Return 1 if v is a cons cell (list node), 0 otherwise. */
 int mino_is_cons(const mino_val_t *v);
+
+/* Return 1 if v is the canonical empty-list singleton `()`, 0 otherwise. */
+int mino_is_empty_list(const mino_val_t *v);
 
 /* Structural equality. Returns 1 if a and b are equal, 0 otherwise. */
 int mino_eq(const mino_val_t *a, const mino_val_t *b);
