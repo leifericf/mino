@@ -435,6 +435,9 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             gc_mark_child_push(S, v->as.atom.watches);
             gc_mark_child_push(S, v->as.atom.validator);
             break;
+        case MINO_VOLATILE:
+            gc_mark_child_push(S, v->as.volatile_.val);
+            break;
         case MINO_LAZY:
             if (v->as.lazy.realized) {
                 gc_mark_child_push(S, v->as.lazy.cached);

@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.96.0 — `volatile!` Becomes a Real Type
+
+Up to this release, `volatile!` was a Clojure-side alias for `atom`,
+which meant every transducer state slot paid for the atom's watch and
+validator pointers and (once host threads entered the picture) for the
+write barrier and atomic publish that swap! issues on multi-threaded
+states. Canon and ClojureScript both ship a real one-slot volatile cell
+because transducer state has a single owner — the reducing function —
+and does not need any of that infrastructure.
+
+`MINO_VOLATILE` joins the value-type enum as a one-slot mutable cell
+with no watches, no validators, and no atomic publish. The four
+operations are now C primitives: `volatile!`, `volatile?`, `vreset!`,
+and `vswap!`. `deref` recognises a volatile in addition to atom, var,
+future, and reduced. The four Clojure-side aliases at the top of the
+volatile section in `src/core.clj` are gone; nothing in user code
+should notice because the surface and semantics are unchanged on
+single-thread reads and writes.
+
+The print form is `#volatile[VAL]`, `(type v)` returns `:volatile`,
+and `(= (atom 1) (volatile! 1))` is now `false` because the two are
+distinct types. The `MINO_VOLATILE` enum entry is appended after
+`MINO_ATOM`, so the embedder ABI stays additive.
+
+This release is the foundation for the stateful-transducer rewrite
+that ships in v0.96.1.
+
 ## v0.95.5 — `src/core.clj` Hygiene Sweep
 
 The bundled core library that ships inside the binary went through a

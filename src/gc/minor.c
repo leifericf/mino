@@ -254,6 +254,8 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 gc_verify_check(S, h, v->as.atom.val);
                 gc_verify_check(S, h, v->as.atom.watches);
                 gc_verify_check(S, h, v->as.atom.validator); break;
+            case MINO_VOLATILE:
+                gc_verify_check(S, h, v->as.volatile_.val); break;
             case MINO_LAZY:
                 if (v->as.lazy.realized) gc_verify_check(S, h, v->as.lazy.cached);
                 else {

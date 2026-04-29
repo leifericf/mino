@@ -594,13 +594,6 @@
 (defn seqable? "Returns true if (seq x) is supported." [x] (or (nil? x) (coll? x) (string? x)))
 (defn indexed? "Returns true if x supports nth in constant time (vectors)." [x] (vector? x))
 
-;; --- Volatile (lightweight mutable box, backed by atom) ---
-
-(defn volatile! "Creates a volatile with the given initial value." [val] (atom val))
-(def volatile?   "Returns true if x is a volatile." atom?)
-(def vreset!     "Sets the value of a volatile to val." reset!)
-(def vswap!      "Applies f to the current value of a volatile and any args." swap!)
-
 ;; --- Delay (lazy thunk) ---
 
 (defn delay? "Returns true if x is a delay." [x] (and (map? x) (contains? x :delay/fn)))

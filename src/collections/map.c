@@ -220,6 +220,7 @@ uint32_t hash_val(const mino_val_t *v)
         h = fnv_mix(h, 0x0c);
         return hash_pointer_bytes(h, (uintptr_t)v->as.handle.ptr);
     case MINO_ATOM:
+    case MINO_VOLATILE:
         h = fnv_mix(h, 0x0e);
         return hash_pointer_bytes(h, (uintptr_t)v);
     case MINO_BIGINT: {
@@ -636,6 +637,24 @@ mino_val_t *mino_atom_deref(const mino_val_t *a)
 {
     if (a == NULL || a->type != MINO_ATOM) return NULL;
     return a->as.atom.val;
+}
+
+mino_val_t *mino_volatile(mino_state_t *S, mino_val_t *val)
+{
+    mino_val_t *v = alloc_val(S, MINO_VOLATILE);
+    v->as.volatile_.val = val;
+    return v;
+}
+
+int mino_is_volatile(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_VOLATILE;
+}
+
+mino_val_t *mino_volatile_deref(const mino_val_t *v)
+{
+    if (v == NULL || v->type != MINO_VOLATILE) return NULL;
+    return v->as.volatile_.val;
 }
 
 void mino_atom_reset(mino_val_t *a, mino_val_t *val)

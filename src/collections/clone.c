@@ -201,6 +201,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     case MINO_PRIM:
     case MINO_HANDLE:
     case MINO_ATOM:
+    case MINO_VOLATILE:
     case MINO_LAZY:
     case MINO_RECUR:
     case MINO_TAIL_CALL:

@@ -254,6 +254,13 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         S->print_depth--;
         fputc(']', out);
         return;
+    case MINO_VOLATILE:
+        fputs("#volatile[", out);
+        S->print_depth++;
+        mino_print_to(S, out, v->as.volatile_.val);
+        S->print_depth--;
+        fputc(']', out);
+        return;
     case MINO_LAZY: {
         /* Force the lazy seq and print the realized value. A lazy seq
          * that resolves to nil is the canonical empty seq — print as

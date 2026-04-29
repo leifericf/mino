@@ -808,6 +808,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_HANDLE:
         return a->as.handle.ptr == b->as.handle.ptr;
     case MINO_ATOM:
+    case MINO_VOLATILE:
         return a == b;
     case MINO_LAZY:
         /* Should not reach here — lazy seqs are forced above. */

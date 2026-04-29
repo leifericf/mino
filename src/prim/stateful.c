@@ -162,6 +162,9 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a != NULL && a->type == MINO_ATOM) {
         return a->as.atom.val;
     }
+    if (a != NULL && a->type == MINO_VOLATILE) {
+        return a->as.volatile_.val;
+    }
     if (a != NULL && a->type == MINO_REDUCED) {
         return a->as.reduced.val;
     }
@@ -175,7 +178,7 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a != NULL && a->type == MINO_FUTURE) {
         return mino_future_deref(S, a);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, var, future, or reduced");
+    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, or reduced");
 }
 
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -794,6 +797,75 @@ static mino_val_t *prim_future_deref(mino_state_t *S, mino_val_t *args,
     return mino_future_deref(S, fut);
 }
 
+/* ---- volatile primitives ----------------------------------------------- */
+
+mino_val_t *prim_volatile_bang(mino_state_t *S, mino_val_t *args,
+                               mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "volatile! requires one argument");
+    }
+    return mino_volatile(S, args->as.cons.car);
+}
+
+mino_val_t *prim_volatile_p(mino_state_t *S, mino_val_t *args,
+                            mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "volatile? requires one argument");
+    }
+    return mino_is_volatile(args->as.cons.car) ? mino_true(S) : mino_false(S);
+}
+
+mino_val_t *prim_vreset_bang(mino_state_t *S, mino_val_t *args,
+                             mino_env_t *env)
+{
+    mino_val_t *v, *val;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "vreset! requires two arguments");
+    }
+    v   = args->as.cons.car;
+    val = args->as.cons.cdr->as.cons.car;
+    if (v == NULL || v->type != MINO_VOLATILE) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "vreset!: first argument must be a volatile");
+    }
+    gc_write_barrier(S, v, v->as.volatile_.val, val);
+    v->as.volatile_.val = val;
+    return val;
+}
+
+mino_val_t *prim_vswap_bang(mino_state_t *S, mino_val_t *args,
+                            mino_env_t *env)
+{
+    mino_val_t *v, *fn, *cur, *call_args, *result, *extra;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "vswap! requires at least 2 arguments: volatile and function");
+    }
+    v  = args->as.cons.car;
+    fn = args->as.cons.cdr->as.cons.car;
+    if (v == NULL || v->type != MINO_VOLATILE) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "vswap!: first argument must be a volatile");
+    }
+    extra     = args->as.cons.cdr->as.cons.cdr;
+    cur       = v->as.volatile_.val;
+    call_args = swap_build_args(S, cur, extra);
+    result    = mino_call(S, fn, call_args, env);
+    if (result == NULL) return NULL;
+    gc_write_barrier(S, v, cur, result);
+    v->as.volatile_.val = result;
+    return result;
+}
+
 const mino_prim_def k_prims_stateful[] = {
     {"atom",           prim_atom,
      "Creates an atom with the given initial value."},
@@ -807,6 +879,14 @@ const mino_prim_def k_prims_stateful[] = {
      "Atomically sets the atom to new-val if its current value equals expected. Returns true on swap, false otherwise."},
     {"atom?",          prim_atom_p,
      "Returns true if x is an atom."},
+    {"volatile!",      prim_volatile_bang,
+     "Creates a volatile cell with the given initial value. A volatile is a single-slot mutable reference with no watches, validators, or atomic publish — intended for transducer state where the reducing fn already implies single-thread access."},
+    {"volatile?",      prim_volatile_p,
+     "Returns true if x is a volatile."},
+    {"vreset!",        prim_vreset_bang,
+     "Sets the value of a volatile to newval and returns newval. No watches, no validators, no atomicity."},
+    {"vswap!",         prim_vswap_bang,
+     "Applies f to the current value of the volatile and any args, sets the result, and returns it. No retry loop — single-thread only."},
     {"add-watch",      prim_add_watch,
      "Adds a watch function to an atom, called on state changes."},
     {"remove-watch",   prim_remove_watch,

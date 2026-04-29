@@ -26,8 +26,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 95
-#define MINO_VERSION_PATCH 5
+#define MINO_VERSION_MINOR 96
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -69,6 +69,11 @@ typedef enum {
     MINO_MACRO,   /* user-defined macro (shares the fn struct layout) */
     MINO_HANDLE,  /* opaque host object: pointer + type tag string */
     MINO_ATOM,    /* mutable reference cell: wraps a single value */
+    MINO_VOLATILE, /* lightweight single-slot mutable cell. No watches,
+                    * no validators, no atomic publish. Intended for
+                    * transducer state where the reducing fn already
+                    * implies single-thread access. Constructed via
+                    * mino_volatile / `volatile!`. */
     MINO_LAZY,    /* lazy sequence: thunk body + env, cached on first force */
     MINO_RECUR,   /* internal tail-call trampoline sentinel */
     MINO_TAIL_CALL, /* proper tail call: carries {fn, args} for trampoline */
@@ -198,6 +203,9 @@ struct mino_val {
             mino_val_t *watches;   /* key -> callback fn, or NULL */
             mino_val_t *validator; /* validation fn or NULL */
         } atom;
+        struct {          /* MINO_VOLATILE: single-slot mutable cell */
+            mino_val_t *val;       /* current value */
+        } volatile_;
         struct {          /* MINO_LAZY: deferred sequence */
             mino_val_t *body;     /* unevaluated form list (NULL after force) */
             mino_env_t *env;      /* captured environment (NULL after force) */
@@ -359,6 +367,15 @@ int         mino_is_atom(const mino_val_t *v);
 
 /* Return the current value of an atom. */
 mino_val_t *mino_atom_deref(const mino_val_t *a);
+
+/* Create a volatile cell initialized with val. */
+mino_val_t *mino_volatile(mino_state_t *S, mino_val_t *val);
+
+/* Return 1 if v is a volatile, 0 otherwise. */
+int         mino_is_volatile(const mino_val_t *v);
+
+/* Return the current value of a volatile, or NULL if v is not a volatile. */
+mino_val_t *mino_volatile_deref(const mino_val_t *v);
 
 /* Set the value of an atom. */
 void        mino_atom_reset(mino_val_t *a, mino_val_t *val);

@@ -266,6 +266,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_MACRO:   return mino_keyword(S, "macro");
     case MINO_HANDLE:  return mino_keyword(S, "handle");
     case MINO_ATOM:    return mino_keyword(S, "atom");
+    case MINO_VOLATILE: return mino_keyword(S, "volatile");
     case MINO_LAZY:    return mino_keyword(S, "lazy-seq");
     case MINO_RECUR:     return mino_keyword(S, "recur");
     case MINO_TAIL_CALL: return mino_keyword(S, "tail-call");

@@ -139,6 +139,7 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_MACRO:   return "macro";
     case MINO_HANDLE:  return "handle";
     case MINO_ATOM:    return "atom";
+    case MINO_VOLATILE: return "volatile";
     case MINO_LAZY:    return "lazy-seq";
     case MINO_RECUR:     return "recur";
     case MINO_TAIL_CALL: return "tail-call";
