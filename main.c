@@ -684,6 +684,18 @@ int main(int argc, char **argv)
     int           dash_dash   = 0;
     int           parse_state;
 
+#ifdef _WIN32
+    /* On Windows, MSVCRT's stdout is fully buffered when stdout is not
+     * a tty (e.g., when launched through Scoop's shim under
+     * PowerShell). The shim's child-process plumbing doesn't always
+     * propagate the buffered tail when mino.exe exits, so users see
+     * `mino --version` and the REPL banner produce no output. Force
+     * line-buffered stdout and unbuffered stderr at program start so
+     * output is visible regardless of how the binary is invoked. */
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+#endif
+
     parse_state = parse_cli_flags(argc, argv, &first, &eval_expr, &dash_dash);
     if (parse_state == 1) return 0;
     if (parse_state == 2) return 2;

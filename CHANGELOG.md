@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.94.4 — Force Line-Buffered Stdout on Windows
+
+`mino --version` and `mino` (REPL) printed nothing when launched from
+PowerShell against a Scoop install. The Git Bash path on the same
+binary worked: the GHA release-build's smoke step ran `mino.exe
+--version` under Git Bash and got the expected output. The
+difference is buffering — MSVCRT's stdout is block-buffered when
+stdout is not a tty (which the Scoop shim's PowerShell pipeline
+looks like), and the shim's child-process plumbing doesn't always
+propagate the buffered tail when mino.exe exits.
+
+`main()` now calls `setvbuf(stdout, NULL, _IOLBF, 0)` and
+`setvbuf(stderr, NULL, _IONBF, 0)` on `_WIN32` at program start. Each
+fprintf flushes on newline (or immediately, for stderr) regardless
+of how the binary is invoked. macOS and Linux are unchanged.
+
 ## v0.94.3 — bundle.awk Sidesteps MSYS Path Translation
 
 v0.94.2 moved the bundled-source escape from sed to awk, but kept the
