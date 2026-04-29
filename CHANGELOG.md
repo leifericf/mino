@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.96.4 — Small Canon-Parity Additions
+
+`comp` and `partial` adopt canon's hand-unrolled fast-path shape: 0/1/
+2-arg `comp` and `partial` no-op or curry directly; the binary `comp`
+returns a fn with explicit 0/1/2/3-arg arities plus a variadic
+fallthrough; `partial` does the same for one-, two-, and three-arg
+prebound forms. The general n-arg form remains for the long tail.
+
+`some-fn` and `every-pred` move from a single variadic implementation
+to canon's per-arity unrolled shape (1, 2, 3 preds × 0, 1, 2, 3 args
+plus variadic). The binary semantics are unchanged — both still
+short-circuit on the first decisive value — but the hot 1/2/3-pred
+case skips the iterator the variadic shape used.
+
+`into` gains the missing 0-arg (`(into) ;=> []`) and 1-arg
+(`(into to) ;=> to`) forms that canon ships. The 2-arg `(into to from)`
+and 3-arg `(into to xform from)` forms are unchanged.
+
+`unchecked-divide-int` is installed as an alias for `quot` — both are
+truncating integer division. Canon's `unchecked-divide-int` skips
+overflow checks because the JVM `idiv` instruction does; mino's `quot`
+is already a primitive C division on long, so no extra elision is
+needed.
+
+The four `(def name "doc" (let [helper ...] (fn ...)))` forms left over
+from the prior cycle's hygiene pass — `zipmap`, `cycle`, `partition-all`,
+`re-seq` — convert to `(defn name "doc" [args] (letfn [(helper ...)] ...))`.
+The local helper now sits in a `letfn` (or directly in the body) where
+it can `recur` instead of self-reference; semantics are identical.
+
 ## v0.96.3 — Transients in `frequencies`/`group-by`; `unreduced` Cleanups
 
 `frequencies` and `group-by` rebuild their result map through a

@@ -1670,6 +1670,11 @@ const mino_prim_def k_prims_numeric[] = {
     {"unchecked-negate",   prim_unchecked_negate,
      "Returns -x as a long with two's-complement wraparound. "
      "Argument must be an int."},
+    {"unchecked-divide-int", prim_quot,
+     "Returns the truncating integer division of x by y. Both must be ints. "
+     "Aliased to quot — the truncating semantic matches canon's "
+     "unchecked-divide-int (no overflow check; on the JVM this is the "
+     "primitive idiv instruction)."},
 };
 
 const size_t k_prims_numeric_count =

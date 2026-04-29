@@ -263,14 +263,40 @@
 
 ;; --- Higher-order functions ---
 
-(defn comp "Returns a function that is the composition of the given functions." [& fns]
-  (if (empty? fns)
-    identity
-    (if (empty? (rest fns))
-      (first fns)
-      (let [comp2 (fn comp2 [f g] (fn [& args] (f (apply g args))))]
-        (reduce comp2 fns)))))
-(defn partial "Returns a function that applies f with the given arguments prepended." [f & bound] (fn [& args] (apply f (concat bound args))))
+(defn comp "Returns a function that is the composition of the given functions."
+  ([] identity)
+  ([f] f)
+  ([f g]
+   (fn ([] (f (g)))
+       ([x] (f (g x)))
+       ([x y] (f (g x y)))
+       ([x y z] (f (g x y z)))
+       ([x y z & args] (f (apply g x y z args)))))
+  ([f g & fs]
+   (reduce comp (cons f (cons g fs)))))
+
+(defn partial "Returns a function that applies f with the given arguments prepended."
+  ([f] f)
+  ([f arg1]
+   (fn ([] (f arg1))
+       ([x] (f arg1 x))
+       ([x y] (f arg1 x y))
+       ([x y z] (f arg1 x y z))
+       ([x y z & args] (apply f arg1 x y z args))))
+  ([f arg1 arg2]
+   (fn ([] (f arg1 arg2))
+       ([x] (f arg1 arg2 x))
+       ([x y] (f arg1 arg2 x y))
+       ([x y z] (f arg1 arg2 x y z))
+       ([x y z & args] (apply f arg1 arg2 x y z args))))
+  ([f arg1 arg2 arg3]
+   (fn ([] (f arg1 arg2 arg3))
+       ([x] (f arg1 arg2 arg3 x))
+       ([x y] (f arg1 arg2 arg3 x y))
+       ([x y z] (f arg1 arg2 arg3 x y z))
+       ([x y z & args] (apply f arg1 arg2 arg3 x y z args))))
+  ([f arg1 arg2 arg3 & more]
+   (fn [& args] (apply f arg1 arg2 arg3 (concat more args)))))
 (defn complement "Returns a function that returns the logical opposite of f." [f] (fn [& args] (not (apply f args))))
 
 ;; --- Trivial compositions ---
@@ -331,13 +357,13 @@
       acc))
     (with-meta {} (meta m)) ks))
 
-(def zipmap "Returns a map with keys mapped to corresponding vals."
-  (let [zm-impl (fn [acc ks vs]
-         (if (and (seq ks) (seq vs))
-           (zm-impl (assoc acc (first ks) (first vs))
-                    (rest ks) (rest vs))
-           acc))]
-    (fn [ks vs] (zm-impl {} ks vs))))
+(defn zipmap "Returns a map with keys mapped to corresponding vals." [ks vs]
+  (letfn [(zm-impl [acc ks vs]
+            (if (and (seq ks) (seq vs))
+              (recur (assoc acc (first ks) (first vs))
+                     (rest ks) (rest vs))
+              acc))]
+    (zm-impl {} ks vs)))
 
 (defn frequencies "Returns a map from distinct items in coll to the number of times they appear." [coll]
   (persistent!
@@ -436,15 +462,15 @@
 (defn iterate "Returns a lazy sequence of x, (f x), (f (f x)), and so on." [f x]
   (lazy-seq (cons x (iterate f (f x)))))
 
-(def cycle "Returns a lazy infinite sequence of repetitions of the items in coll."
-  (let [cycle-impl (fn [orig coll]
-         (lazy-seq
-           (let [s (seq coll)]
-             (if s
-               (cons (first s) (cycle-impl orig (rest s)))
-               (when (seq orig)
-                 (cycle-impl orig orig))))))]
-    (fn [coll] (cycle-impl coll coll))))
+(defn cycle "Returns a lazy infinite sequence of repetitions of the items in coll." [coll]
+  (letfn [(cycle-impl [orig coll]
+            (lazy-seq
+              (let [s (seq coll)]
+                (if s
+                  (cons (first s) (cycle-impl orig (rest s)))
+                  (when (seq orig)
+                    (cycle-impl orig orig))))))]
+    (cycle-impl coll coll)))
 
 (defn repeatedly "Returns a lazy sequence of calls to f. With two args, returns n calls."
   ([f]   (lazy-seq (cons (f) (repeatedly f))))
@@ -893,32 +919,32 @@
                           (step (inc i) (rest s))))))]
      (step 0 coll))))
 
-(def partition-all "Like partition, but includes a final partial group if items remain."
-  (let [pa-impl (fn [n step coll]
-         (lazy-seq
-           (let [s (seq coll)]
-             (when s
-               (let [p (doall (take n s))]
-                 (cons p (pa-impl n step (drop step s))))))))]
-    (fn
-      ([n]
-       (fn [rf]
-         (let [buf (volatile! [])]
-           (fn ([] (rf))
-               ([result]
-                (let [b @buf]
-                  (if (empty? b)
-                    (rf result)
-                    (let [r (rf result (seq b))]
-                      (rf (unreduced r))))))
-               ([result input]
-                (let [b (vswap! buf conj input)]
-                  (if (= (count b) n)
-                    (do (vreset! buf [])
-                        (rf result (seq b)))
-                    result)))))))
-      ([n coll] (pa-impl n n coll))
-      ([n step coll] (pa-impl n step coll)))))
+(defn partition-all "Like partition, but includes a final partial group if items remain."
+  ([n]
+   (fn [rf]
+     (let [buf (volatile! [])]
+       (fn ([] (rf))
+           ([result]
+            (let [b @buf]
+              (if (empty? b)
+                (rf result)
+                (let [r (rf result (seq b))]
+                  (rf (unreduced r))))))
+           ([result input]
+            (let [b (vswap! buf conj input)]
+              (if (= (count b) n)
+                (do (vreset! buf [])
+                    (rf result (seq b)))
+                result)))))))
+  ([n coll] (partition-all n n coll))
+  ([n step coll]
+   (letfn [(pa-impl [n step coll]
+             (lazy-seq
+               (let [s (seq coll)]
+                 (when s
+                   (let [p (doall (take n s))]
+                     (cons p (pa-impl n step (drop step s))))))))]
+     (pa-impl n step coll))))
 
 (defn reductions "Returns a lazy sequence of the intermediate values of a reduction." [f & args]
   (let [init (if (= (count args) 2) (first args) (first (first args)))
@@ -945,15 +971,73 @@
 
 ;; --- Higher-order combinators ---
 
-(defn every-pred "Returns a function that returns true when all preds are satisfied by all its arguments." [& preds]
-  (fn [& args]
-    (every? (fn [p] (every? p args)) preds)))
+(defn every-pred "Returns a function that returns true when all preds are satisfied by all its arguments."
+  ([p]
+   (fn ep1
+     ([] true)
+     ([x] (boolean (p x)))
+     ([x y] (boolean (and (p x) (p y))))
+     ([x y z] (boolean (and (p x) (p y) (p z))))
+     ([x y z & args] (boolean (and (ep1 x y z) (every? p args))))))
+  ([p1 p2]
+   (fn ep2
+     ([] true)
+     ([x] (boolean (and (p1 x) (p2 x))))
+     ([x y] (boolean (and (p1 x) (p1 y) (p2 x) (p2 y))))
+     ([x y z] (boolean (and (p1 x) (p1 y) (p1 z) (p2 x) (p2 y) (p2 z))))
+     ([x y z & args] (boolean (and (ep2 x y z)
+                                   (every? (fn [a] (and (p1 a) (p2 a))) args))))))
+  ([p1 p2 p3]
+   (fn ep3
+     ([] true)
+     ([x] (boolean (and (p1 x) (p2 x) (p3 x))))
+     ([x y] (boolean (and (p1 x) (p1 y) (p2 x) (p2 y) (p3 x) (p3 y))))
+     ([x y z] (boolean (and (p1 x) (p1 y) (p1 z) (p2 x) (p2 y) (p2 z) (p3 x) (p3 y) (p3 z))))
+     ([x y z & args] (boolean (and (ep3 x y z)
+                                   (every? (fn [a] (and (p1 a) (p2 a) (p3 a))) args))))))
+  ([p1 p2 p3 & ps]
+   (let [ps (cons p1 (cons p2 (cons p3 ps)))]
+     (fn epn
+       ([] true)
+       ([x] (every? (fn [p] (p x)) ps))
+       ([x y] (every? (fn [p] (and (p x) (p y))) ps))
+       ([x y z] (every? (fn [p] (and (p x) (p y) (p z))) ps))
+       ([x y z & args] (boolean (and (epn x y z)
+                                     (every? (fn [p] (every? p args)) ps))))))))
 
-(defn some-fn "Returns a function that returns the first truthy value from any pred applied to any argument." [& preds]
-  (when (empty? preds)
-    (throw (ex-info "some-fn requires at least one predicate" {})))
-  (fn [& args]
-    (some (fn [p] (some p args)) preds)))
+(defn some-fn "Returns a function that returns the first truthy value from any pred applied to any argument."
+  ([p]
+   (fn sp1
+     ([] nil)
+     ([x] (p x))
+     ([x y] (or (p x) (p y)))
+     ([x y z] (or (p x) (p y) (p z)))
+     ([x y z & args] (or (sp1 x y z) (some p args)))))
+  ([p1 p2]
+   (fn sp2
+     ([] nil)
+     ([x] (or (p1 x) (p2 x)))
+     ([x y] (or (p1 x) (p1 y) (p2 x) (p2 y)))
+     ([x y z] (or (p1 x) (p1 y) (p1 z) (p2 x) (p2 y) (p2 z)))
+     ([x y z & args] (or (sp2 x y z)
+                         (some (fn [a] (or (p1 a) (p2 a))) args)))))
+  ([p1 p2 p3]
+   (fn sp3
+     ([] nil)
+     ([x] (or (p1 x) (p2 x) (p3 x)))
+     ([x y] (or (p1 x) (p1 y) (p2 x) (p2 y) (p3 x) (p3 y)))
+     ([x y z] (or (p1 x) (p1 y) (p1 z) (p2 x) (p2 y) (p2 z) (p3 x) (p3 y) (p3 z)))
+     ([x y z & args] (or (sp3 x y z)
+                         (some (fn [a] (or (p1 a) (p2 a) (p3 a))) args)))))
+  ([p1 p2 p3 & ps]
+   (let [ps (cons p1 (cons p2 (cons p3 ps)))]
+     (fn spn
+       ([] nil)
+       ([x] (some (fn [p] (p x)) ps))
+       ([x y] (some (fn [p] (or (p x) (p y))) ps))
+       ([x y z] (some (fn [p] (or (p x) (p y) (p z))) ps))
+       ([x y z & args] (or (spn x y z)
+                           (some (fn [p] (some p args)) ps)))))))
 
 (defn fnil "Returns a function like f, but replaces nil arguments with the given defaults."
   ([f d1]
@@ -1162,24 +1246,24 @@
   ;; [whole g1 g2 ...] (groups present). Normalise to the whole match.
   (if (vector? m) (first m) m))
 
-(def re-seq
+(defn re-seq
   "Returns a lazy sequence of all matches of pattern in string s. Each
    match is a string when the pattern has no groups, or a vector
    [whole g1 g2 ...] when it does."
-  (let [find-index (fn [s sub i]
-                     (if (> (+ i (count sub)) (count s))
-                       nil
-                       (if (= (subs s i (+ i (count sub))) sub)
-                         i
-                         (find-index s sub (inc i)))))]
-    (fn [pattern s]
-      (lazy-seq
-        (when-let [m (prim-re-find pattern s)]
-          (let [whole (match-whole m)
-                idx   (find-index s whole 0)]
-            (when (not (nil? idx))
-              (let [rest-s (subs s (+ idx (max (count whole) 1)))]
-                (cons m (re-seq pattern rest-s))))))))))
+  [pattern s]
+  (letfn [(find-index [s sub i]
+            (if (> (+ i (count sub)) (count s))
+              nil
+              (if (= (subs s i (+ i (count sub))) sub)
+                i
+                (recur s sub (inc i)))))]
+    (lazy-seq
+      (when-let [m (prim-re-find pattern s)]
+        (let [whole (match-whole m)
+              idx   (find-index s whole 0)]
+          (when (not (nil? idx))
+            (let [rest-s (subs s (+ idx (max (count whole) 1)))]
+              (cons m (re-seq pattern rest-s)))))))))
 
 ;; re-matcher: a stateful matcher value backed by an atom holding
 ;; {:pattern :text :pos :last}. Each (re-find m) advances :pos past the
@@ -2026,6 +2110,8 @@
 
 (def ^:private prim-into into)
 (defn into "Adds all items from from into to. With a transducer, transforms items first."
+  ([] [])
+  ([to] to)
   ([to from] (prim-into to from))
   ([to xf from] (transduce xf conj to from)))
 
