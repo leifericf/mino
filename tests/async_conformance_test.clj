@@ -1053,4 +1053,4 @@
     (drain!)
     (is (nil? (<!! ch)))))
 
-(run-tests)
+(run-tests-and-exit)

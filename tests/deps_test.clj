@@ -78,4 +78,4 @@
   (let [m {:paths ["mylib"]}]
     (is (= ["mylib"] (deps/resolve-paths m)))))
 
-(run-tests)
+(run-tests-and-exit)

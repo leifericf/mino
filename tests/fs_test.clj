@@ -49,4 +49,4 @@
   (is (thrown? (mkdir-p :foo)))
   (is (thrown? (rm-rf 123))))
 
-(run-tests)
+(run-tests-and-exit)

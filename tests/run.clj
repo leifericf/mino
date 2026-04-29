@@ -1,15 +1,15 @@
 ;; Test runner: loads all test files and runs them.
 ;; Usage: ./mino tests/run.clj
 ;;
-;; suite-mode suppresses each per-file (run-tests) call at the
-;; bottom of individual test files; without it the first file to
-;; reach (run-tests) would call (exit ...) and drop every file
-;; required after. The final (run-tests) at the bottom of this
-;; file runs the accumulated registry once, end-to-end.
+;; suite-mode is set to true around the require chain so each test
+;; file's bottom (run-tests-and-exit) call is a no-op. The final
+;; (run-tests-and-exit) runs the accumulated registry once,
+;; end-to-end, and exits with 0 on success or 1 on any failure.
 
 (require "tests/test")
 
-(reset! clojure.test/*suite-mode* true)
+(reset! clojure.test/suite-mode true)
+
 (require "tests/compat_test")
 (require "tests/doc_examples_test")
 (require "tests/arithmetic_test")
@@ -72,7 +72,7 @@
 (require "tests/are_test")
 (require "tests/literal_test")
 (require "tests/char_test")
-(require "tests/numeric_tower_test") ;; bigint/tower — Phase C
+(require "tests/numeric_tower_test")
 (require "tests/collections_semantics_test")
 (require "tests/stateful_test")
 (require "tests/hierarchy_test")
@@ -100,5 +100,6 @@
 (require "tests/proc_test")
 (require "tests/deps_test")
 
-(reset! clojure.test/*suite-mode* false)
-(run-tests)
+(reset! clojure.test/suite-mode false)
+
+(run-tests-and-exit)

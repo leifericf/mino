@@ -517,8 +517,9 @@
 
 (def ^:dynamic *bf-x* 1)
 
-(deftest get-thread-bindings-is-nil-without-binding
-  (is (nil? (get-thread-bindings))))
+(deftest get-thread-bindings-omits-vars-without-active-binding
+  (let [m (get-thread-bindings)]
+    (is (not (contains? m '*bf-x*)))))
 
 (deftest get-thread-bindings-snapshots-active-frame
   (binding [*bf-x* 42]

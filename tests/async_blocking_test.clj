@@ -141,4 +141,4 @@
         (is (= (* n m) (count seen)))
         (doseq [f producers] @f)))))
 
-(run-tests)
+(run-tests-and-exit)

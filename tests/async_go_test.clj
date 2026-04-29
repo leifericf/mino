@@ -393,4 +393,4 @@
       (drain!)
       (is (= [:x :y] @result) "loop with pending channels"))))
 
-(run-tests)
+(run-tests-and-exit)

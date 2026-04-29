@@ -287,4 +287,4 @@
     (is (= "hello" (reset! a "hello")))
     (is (= [1 2] (reset! a [1 2])))))
 
-(run-tests)
+(run-tests-and-exit)

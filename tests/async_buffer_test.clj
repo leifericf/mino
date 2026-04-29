@@ -147,4 +147,4 @@
     (drain!)
     (is (= :val @result) "take from closed channel with buffered value returns that value")))
 
-(run-tests)
+(run-tests-and-exit)

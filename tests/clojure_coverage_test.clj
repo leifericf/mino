@@ -334,4 +334,4 @@
       (let [pct (long (/ (* 100 (:present report)) (:portable report)))]
         (is (>= pct 50))))))
 
-(run-tests)
+(run-tests-and-exit)

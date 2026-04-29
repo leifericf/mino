@@ -142,4 +142,4 @@
 (require "../clojure-test-suite/test/clojure/core_test/zero_qmark.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/zipmap.cljc")
 
-(run-tests)
+(run-tests-and-exit)

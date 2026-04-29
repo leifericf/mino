@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.95.1 — Dynamic-Var `clojure.test` Internals
+
+`clojure.test` previously kept its pass/fail counters, testing-context
+stack, and current-test name in atoms named with earmuffs
+(`*test-state*`, `*testing-context*`, `*current-test*`). Earmuffs
+signal a dynamic var meant for `binding`-style rebinding; an atom
+behind one is a smell, and canon `clojure.test` uses real `^:dynamic`
+vars + `binding` for these. mino now does the same: pass/fail
+counters live in `*report-counters*` (canon name) bound to a fresh
+atom inside each `run-tests` call; the testing-context stack lives
+in `*testing-contexts*` (canon name) and is pushed via `binding`
+inside the `testing` macro; `*current-test*` is bound per test.
+The cross-file suite-mode flag (`suite-mode`) stays a plain atom
+because `require` evaluates a loaded file outside the caller's
+dynamic scope.
+
+`run-tests` is now library-friendly: it returns the summary map
+`{:test n :pass n :fail n :error n :failures [...]}` instead of
+calling `(exit ...)`, and it accepts an `[& namespaces]` arity that
+filters the registry to tests registered in those namespaces.
+Process exit moved to a small `run-tests-and-exit` wrapper used by
+`tests/run.clj` and the per-file bottoms.
+
+The `is` macro previously dispatched three branches inline; it now
+dispatches into private `is-thrown`, `is-eq`, `is-truthy` helpers.
+The internal `assert-pass!`, `assert-fail!`, and `thrown?-form?` are
+private (`defn-`).
+
 ## v0.95.0 — Reduce-Based `clojure.data/diff`
 
 `clojure.data/diff-map` and `diff-sequential` previously threaded three

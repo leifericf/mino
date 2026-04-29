@@ -4,4 +4,4 @@
 (require "tests/test")
 (require "tests/fault_inject_test")
 
-(run-tests)
+(run-tests-and-exit)

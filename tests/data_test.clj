@@ -71,4 +71,4 @@
 (deftest data-diff-set-empty
   (is (= [nil nil #{}] (diff #{} #{}))))
 
-(when-not @clojure.test/*suite-mode* (run-tests))
+(run-tests-and-exit)

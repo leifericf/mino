@@ -131,4 +131,4 @@
 (deftest syntax-static-unknown
   (is (thrown? (Math/bogus 1))))
 
-(run-tests)
+(run-tests-and-exit)

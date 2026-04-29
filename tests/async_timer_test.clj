@@ -22,4 +22,4 @@
     (is (nil? val))
     (is (identical? tch port))))
 
-(run-tests)
+(run-tests-and-exit)

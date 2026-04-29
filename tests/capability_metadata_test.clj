@@ -63,4 +63,4 @@
   (let [s (doc-string 'slurp)]
     (is (clojure.string/includes? s "\n  Capability: :io"))))
 
-(run-tests)
+(run-tests-and-exit)

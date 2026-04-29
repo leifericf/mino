@@ -78,4 +78,4 @@
       (doseq [f futs] @f)
       (is (= (* n m) @a)))))
 
-(run-tests)
+(run-tests-and-exit)

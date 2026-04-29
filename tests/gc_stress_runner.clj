@@ -52,4 +52,4 @@
       (is (= (reduce + 0 (mk i))
              (reduce + 0 (nth v i)))))))
 
-(run-tests)
+(run-tests-and-exit)

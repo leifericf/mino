@@ -123,4 +123,4 @@
     (drain!)
     (is (= {} (:channels @(:state m))) "closed channel removed from mix")))
 
-(run-tests)
+(run-tests-and-exit)

@@ -123,4 +123,4 @@
     (is (= :once @r1))
     (is (= :once @r2))))
 
-(run-tests)
+(run-tests-and-exit)

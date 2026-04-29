@@ -97,4 +97,4 @@
   (let [ch (chan 1)]
     (is (thrown? (alts! [[ch nil]])))))
 
-(run-tests)
+(run-tests-and-exit)

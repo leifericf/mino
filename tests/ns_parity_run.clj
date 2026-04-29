@@ -20,4 +20,4 @@
 (require "tests/ns_cljs_checkpoint_test")     ;; ClojureScript ns_test.cljs
 (require "tests/ns_sci_checkpoint_test")      ;; Babashka SCI namespaces_test.cljc
 
-(run-tests)
+(run-tests-and-exit)

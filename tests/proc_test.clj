@@ -31,4 +31,4 @@
   (is (thrown? (sh 42)))
   (is (thrown? (sh "echo" 42))))
 
-(run-tests)
+(run-tests-and-exit)
