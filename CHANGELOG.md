@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.96.7 — `:refer :all` Drops Transitive Refers; Macros Get Vars
+
+`(require '[some.ns :refer :all])` previously bound every name present
+in the source ns env into the consumer — including names the source ns
+had referred *into* itself from `clojure.core` via auto-refer.
+Result: any consumer of a wrapper namespace silently re-bound every
+clojure.core name through that wrapper, shadowing its own
+clojure.core refers. Canon brings only the source ns's owned publics
+(matching `(ns-publics 'src)`); mino now does the same.
+
+`defmacro` now interns a var alongside the env binding, so macros
+appear in `(ns-publics 'ns)` and propagate via `:refer :all` the same
+way `defn` does. Macro publics that previously slipped through only
+the env binding now show up in introspection too.
+
+A separate macroexpansion-after-`:refer :all` defect is still open and
+tracked in `.local/BUGS.md` #9; the recommended idiom for now remains
+`(require '[some.ns :as a :refer [...]])` with an explicit refer list
+when the consumer also calls macros defined in `clojure.core`.
+
 ## v0.96.6 — Wrap `clojure.core.async`; Rename `merge-chans`/`async-into`
 
 The two files that backed mino's CSP layer — `lib/core/channel.clj`

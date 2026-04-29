@@ -319,10 +319,15 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                 const char *nm  = src->bindings[vi].name;
                 size_t      nl  = strlen(nm);
                 mino_val_t *renamed;
-                /* Skip private vars: :refer :all only brings in
-                 * publics, just like Clojure. */
+                /* Bring in only the source ns's own interned publics, the
+                 * way canon (ns-publics 'src) does. Bindings without an
+                 * owning var in this ns are transitive refers (e.g.,
+                 * clojure.core names that were referred into src) and
+                 * must not drag across — otherwise they shadow the
+                 * consumer's own clojure.core refers. */
                 mino_val_t *var = var_find(S, modbuf, nm);
-                if (var != NULL && var->as.var.is_private) continue;
+                if (var == NULL) continue;
+                if (var->type == MINO_VAR && var->as.var.is_private) continue;
                 if (sym_vec_contains(exclude_vec, nm, nl)) continue;
                 renamed = rename_map_lookup(rename_map, nm, nl);
                 if (renamed != NULL && renamed->type == MINO_SYMBOL
@@ -612,10 +617,26 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     memcpy(buf, name_form->as.s.data, n);
     buf[n] = '\0';
     if (refer_collision_check(S, form, buf)) return NULL;
-    gc_pin(mac);
-    env_bind(S, current_ns_env(S), buf, mac);
-    gc_unpin(1);
-    meta_set(S, buf, doc, doc_len, form);
+    {
+        int is_priv = 0;
+        mino_val_t *m = name_form->meta;
+        if (m != NULL && m->type == MINO_MAP) {
+            mino_val_t *pk = mino_keyword(S, "private");
+            mino_val_t *pv = map_get_val(m, pk);
+            if (pv != NULL && mino_is_truthy(pv)) is_priv = 1;
+        }
+        gc_pin(mac);
+        {
+            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            if (var != NULL) {
+                var_set_root(S, var, mac);
+                if (is_priv) var->as.var.is_private = 1;
+            }
+            env_bind(S, current_ns_env(S), buf, mac);
+        }
+        gc_unpin(1);
+        meta_set(S, buf, doc, doc_len, form);
+    }
     return mac;
 }
 
