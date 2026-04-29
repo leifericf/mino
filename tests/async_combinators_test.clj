@@ -36,10 +36,10 @@
     (drain!)
     (is (false? (closed? to)) "pipe does not close to when close? is false")))
 
-;; --- to-chan ---
+;; --- to-chan! ---
 
-(deftest to-chan-basics
-  (let [ch (to-chan [1 2 3])
+(deftest to-chan!-basics
+  (let [ch (to-chan! [1 2 3])
         result (atom [])]
     (take! ch (fn [v] (swap! result conj v)))
     (take! ch (fn [v] (swap! result conj v)))
@@ -47,8 +47,8 @@
     (drain!)
     (is (= [1 2 3] @result))))
 
-(deftest to-chan-closes
-  (let [ch (to-chan [:x])]
+(deftest to-chan!-closes
+  (let [ch (to-chan! [:x])]
     (take! ch (fn [v] nil))  ;; consume the value
     (drain!)
     (is (true? (closed? ch)))))
@@ -56,7 +56,7 @@
 ;; --- into ---
 
 (deftest into-collects
-  (let [ch  (to-chan [1 2 3])
+  (let [ch  (to-chan! [1 2 3])
         out (async-into [] ch)
         result (atom nil)]
     (take! out (fn [v] (reset! result v)))
@@ -75,8 +75,8 @@
 ;; --- merge ---
 
 (deftest merge-combines-channels
-  (let [ch1 (to-chan [:a :b])
-        ch2 (to-chan [:c :d])
+  (let [ch1 (to-chan! [:a :b])
+        ch2 (to-chan! [:c :d])
         out (merge-chans [ch1 ch2] 4)
         result (atom #{})]
     (dotimes [_ 4]
@@ -156,7 +156,7 @@
 ;; --- pipeline edge cases ---
 
 (deftest pipeline-ordering-n4
-  (let [from (to-chan [1 2 3 4 5 6 7 8])
+  (let [from (to-chan! [1 2 3 4 5 6 7 8])
         to   (chan 8)]
     (pipeline 4 to (fn [x] (* x 10)) from)
     (drain!)
@@ -167,7 +167,7 @@
       (is (= [10 20 30 40 50 60 70 80] @result)))))
 
 (deftest pipeline-async-ordering-n4
-  (let [from (to-chan [1 2 3 4 5 6 7 8])
+  (let [from (to-chan! [1 2 3 4 5 6 7 8])
         to   (chan 8)]
     (pipeline-async 4 to
       (fn [v result-ch]

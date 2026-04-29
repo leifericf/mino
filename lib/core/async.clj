@@ -883,22 +883,22 @@
      (take! from do-pipe))
    to))
 
-(defn onto-chan
+(defn onto-chan!
   "Puts each element of coll onto the channel ch, then closes ch
    (unless close? is false). Returns ch."
-  ([ch coll] (onto-chan ch coll true))
+  ([ch coll] (onto-chan! ch coll true))
   ([ch coll close?]
    (doseq [v coll]
      (put! ch v))
    (when close? (close! ch))
    ch))
 
-(defn to-chan
+(defn to-chan!
   "Creates and returns a channel that receives all elements of coll,
    then closes."
   [coll]
   (let [ch (chan (count coll))]
-    (onto-chan ch coll)))
+    (onto-chan! ch coll)))
 
 (defn async-into
   "Returns a channel containing the single result of reducing
@@ -1105,12 +1105,21 @@
   "Takes items from the from channel, applies xf to each (using n
    parallel go blocks), and puts results on the to channel.
    Closes to when from is exhausted (unless close? is false).
-   Preserves input ordering regardless of worker completion order."
-  ([n to xf from] (pipeline n to xf from true))
-  ([n to xf from close?]
+   Preserves input ordering regardless of worker completion order.
+
+   ex-handler, when supplied, is invoked with any exception thrown by
+   xf; its return value is used as the replacement output (nil drops)."
+  ([n to xf from] (pipeline n to xf from true nil))
+  ([n to xf from close?] (pipeline n to xf from close? nil))
+  ([n to xf from close? ex-handler]
    (let [jobs    (chan n)
          results (chan n)
-         done    (atom 0)]
+         done    (atom 0)
+         apply-xf (fn [v]
+                    (if ex-handler
+                      (try (xf v)
+                           (catch e (ex-handler e)))
+                      (xf v)))]
      ;; Feed: for each input, create a result channel, send [val res-ch]
      ;; to workers, and send res-ch to collector (in order).
      ;; Uses callbacks to wait for puts, preventing stalls when channels fill.
@@ -1129,8 +1138,10 @@
                         (when (= n (swap! done inc))
                           (close! results))
                         (let [v      (first job)
-                              res-ch (second job)]
-                          (put! res-ch (xf v))
+                              res-ch (second job)
+                              out    (apply-xf v)]
+                          (when (some? out)
+                            (put! res-ch out))
                           (close! res-ch)
                           (take! jobs worker))))]
          (take! jobs worker)))
@@ -1191,4 +1202,8 @@
        (take! results collector))
      to)))
 
+;; mino has no separate blocking-IO scheduler, so pipeline-blocking
+;; collapses into pipeline. When blocking IO lands, this should split
+;; into its own implementation that releases the worker to a blocking
+;; pool for the duration of the call.
 (def pipeline-blocking pipeline)

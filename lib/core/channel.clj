@@ -606,20 +606,6 @@
                       state
                       (update state :takers conj new-op))))))))
 
-(defn- range-vec [n]
-  (loop [i 0 acc []]
-    (if (>= i n) acc (recur (+ i 1) (conj acc i)))))
-
-(defn- shuffle-vec [v]
-  (let [n (count v)]
-    (loop [i (- n 1) acc v]
-      (if (<= i 0)
-        acc
-        (let [j (rand-int (+ i 1))
-              a (nth acc i)
-              b (nth acc j)]
-          (recur (- i 1) (assoc (assoc acc i b) j a)))))))
-
 (defn- alts-start
   "Core alts machinery. Tries immediate completion; if nothing ready and
    a :default is given, returns [default :default]; otherwise registers
@@ -628,9 +614,9 @@
   [ops opts cb]
   (when (zero? (count ops))
     (throw "alts!: ops vector must not be empty"))
-  (let [indices   (if (:priority opts)
-                    (range-vec (count ops))
-                    (shuffle-vec (range-vec (count ops))))
+  (let [n         (count ops)
+        base      (vec (range n))
+        indices   (if (:priority opts) base (shuffle base))
         immediate (try-immediate ops indices)]
     (cond
       immediate             immediate
@@ -642,19 +628,29 @@
         (register-pending-alts ops flag cb)
         nil))))
 
+(defn- alts-opts-map
+  "Normalises alts!/alts-callback trailing args to an opts map. Accepts
+   the canon kwargs surface (:priority true :default val), the legacy
+   single-map form ({:priority true :default val}), or none."
+  [opts]
+  (cond
+    (empty? opts)                                 {}
+    (and (= 1 (count opts)) (map? (first opts)))  (first opts)
+    :else                                         (apply hash-map opts)))
+
 (defn alts!
   "Atomically complete one of several channel operations.
    ops is a vector. Each element is either a channel (take) or
-   [ch val] (put). opts keys:
+   [ch val] (put). opts (kwargs or a single map):
      :priority true  -- try in order (no shuffle)
      :default val    -- return [val :default] if no op is ready
    Returns [result channel]."
-  ([ops] (alts! ops {}))
-  ([ops opts]
-   (let [result (atom nil)
-         cb     (fn [r] (reset! result r))]
-     (or (alts-start ops opts cb)
-         (do (drain!) @result)))))
+  [ops & opts]
+  (let [opts-m (alts-opts-map opts)
+        result (atom nil)
+        cb     (fn [r] (reset! result r))]
+    (or (alts-start ops opts-m cb)
+        (do (drain!) @result))))
 
 (defn alts-callback
   "Callback-style alts matching the old C alts* contract. cb fires with

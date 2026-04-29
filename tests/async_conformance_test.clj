@@ -380,19 +380,19 @@
     (is (= 4 (<!! to)))
     (is (= 5 (<!! to)))))
 
-;; ===== Combinator: to-chan / async-into round-trip =====
+;; ===== Combinator: to-chan! / async-into round-trip =====
 
-(deftest to-chan-into-round-trip
+(deftest to-chan!-into-round-trip
   (let [data [1 2 3 4 5]
-        result (<!! (async-into [] (to-chan data)))]
+        result (<!! (async-into [] (to-chan! data)))]
     (is (= data result))))
 
 ;; ===== Combinator: merge ordering =====
 
 (deftest merge-all-values-received
-  (let [ch1 (to-chan [1 2])
-        ch2 (to-chan [3 4])
-        ch3 (to-chan [5 6])
+  (let [ch1 (to-chan! [1 2])
+        ch2 (to-chan! [3 4])
+        ch3 (to-chan! [5 6])
         out (merge-chans [ch1 ch2 ch3] 6)
         result (<!! (async-into [] out))]
     (is (= 6 (count result)) "all values received")
@@ -439,7 +439,7 @@
 ;; ===== Combinator: pipeline =====
 
 (deftest pipeline-transforms
-  (let [from (to-chan [1 2 3 4 5])
+  (let [from (to-chan! [1 2 3 4 5])
         to   (chan 5)]
     (pipeline 2 to (fn [x] (* x x)) from)
     (drain!)
@@ -450,7 +450,7 @@
       (is (= #{1 4 9 16 25} @result)))))
 
 (deftest pipeline-preserves-ordering
-  (let [from (to-chan [1 2 3 4 5 6 7 8])
+  (let [from (to-chan! [1 2 3 4 5 6 7 8])
         to   (chan 8)]
     (pipeline 4 to (fn [x] (* x x)) from)
     (drain!)
@@ -461,7 +461,7 @@
       (is (= [1 4 9 16 25 36 49 64] @result)))))
 
 (deftest pipeline-closes-to
-  (let [from (to-chan [1])
+  (let [from (to-chan! [1])
         to   (chan 1)]
     (pipeline 1 to inc from)
     (drain!)
@@ -471,7 +471,7 @@
 ;; ===== Combinator: pipeline-async =====
 
 (deftest pipeline-async-transforms
-  (let [from (to-chan [1 2 3])
+  (let [from (to-chan! [1 2 3])
         to   (chan 3)]
     (pipeline-async 1 to
       (fn [v result-ch]
@@ -486,7 +486,7 @@
       (is (= #{10 20 30} @result)))))
 
 (deftest pipeline-async-preserves-ordering
-  (let [from (to-chan [1 2 3 4 5 6 7 8])
+  (let [from (to-chan! [1 2 3 4 5 6 7 8])
         to   (chan 8)]
     (pipeline-async 4 to
       (fn [v result-ch]

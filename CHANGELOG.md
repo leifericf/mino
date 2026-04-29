@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.95.3 — `core.async` Canon Parity
+
+`onto-chan` and `to-chan` are renamed to `onto-chan!` and `to-chan!` to
+match canon `clojure.core.async`. Both side-effecting bang-suffixed
+names communicate the same write intent canon does: `onto-chan!`
+puts each element of a collection onto a channel and (by default)
+closes it; `to-chan!` constructs a channel sized to a collection,
+fills it, and closes. No aliases are kept — alpha posture means call
+sites move forward in lockstep.
+
+`pipeline` gains the canon 6-arg form `[n to xf from close? ex-handler]`.
+When the transducer throws, `ex-handler` is called with the exception
+and its return value (when non-nil) is forwarded as the replacement
+output; nil results are dropped. The 4-arg and 5-arg forms keep the
+same surface and now route through the new arity with a nil handler.
+
+`alts!` accepts canon-style trailing kwargs in addition to its
+existing single-map form. `(alts! ops :priority true :default :nope)`,
+`(alts! ops {:priority true :default :nope})`, and `(alts! ops)` all
+work. The dispatch normalises the trailing args via a small
+`alts-opts-map` helper that detects the legacy single-map call and
+otherwise rebuilds the opts map from the kwargs.
+
+Two ad-hoc helpers in `core/channel` were collapsed into primitives:
+`range-vec` is now `(vec (range n))` and `shuffle-vec` is now
+`shuffle`, both already in mino. `pipeline-blocking` remains a `def`
+alias for `pipeline` until a separate blocking-IO scheduler lands;
+the comment on the alias documents the divergence.
+
+Two canon names that would shadow `clojure.core/merge` and
+`clojure.core/into` if defined unqualified — `merge-chans` and
+`async-into` — are intentionally still mino-spelled. Wrapping
+`lib/core/async.clj` and `lib/core/channel.clj` in their own
+namespace and updating every consumer to refer them is its own
+follow-up cycle and has been logged in the bug registry.
+
 ## v0.95.2 — Decomposed `clojure.instant/parse-timestamp`
 
 `parse-timestamp` was a single ~70-line `cond` inside one driver
