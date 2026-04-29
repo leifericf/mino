@@ -82,6 +82,7 @@
 (require "tests/tasks_test")
 (require "tests/records_test")
 (require "tests/instant_template_test")
+(require "tests/data_test")
 (require "tests/data_readers_test")
 (require "tests/spec_test")
 (require "tests/host_threads_test")

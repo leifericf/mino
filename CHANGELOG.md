@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.95.0 — Reduce-Based `clojure.data/diff`
+
+`clojure.data/diff-map` and `diff-sequential` previously threaded three
+mutable atoms (`only-a`, `only-b`, `both`) through a `doseq` or
+`loop`/`recur` driver, accumulating shape via `swap!` on each step.
+The standard treats earmuffs and `swap!`-as-fold as a smell when a
+plain reduction would do, and the canon `clojure.data` implementation
+is itself a reduce over a three-element accumulator.
+
+Both helpers are now `reduce` over `[only-a only-b both]` triples
+(starting from `[nil nil nil]` for maps and `[[] [] []]` for
+sequentials), with no atoms in flight. Behaviour is unchanged — the
+same diff triples come out for maps, sequentials, sets, scalars, and
+mixed-type inputs — and a new `tests/data_test.clj` covers the
+public surface (14 tests, 21 assertions) so the next refactor pass
+has a real safety net.
+
 ## v0.94.5 — Static-Link Windows Binary
 
 `mino --version` and the REPL silently failed under PowerShell on
