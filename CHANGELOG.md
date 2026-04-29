@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.95.2 — Decomposed `clojure.instant/parse-timestamp`
+
+`parse-timestamp` was a single ~70-line `cond` inside one driver
+loop, mixing per-segment parsing with bounds checks and the
+position-marker cascade that decides which segment fires next.
+Both halves are now separate: each ISO 8601 component lives in a
+small `parse-month-segment`, `parse-day-segment`,
+`parse-time-segment`, `parse-second-segment`, `parse-frac-segment`,
+or `parse-zone-segment` helper that takes `[s idx m]` and returns
+`[m new-idx]`. The driver loop is a one-screen `cond` over the
+next-segment marker that delegates to a helper and recurs on the
+returned position.
+
+Inline `(parse-long (nth s j))` truthiness as a digit test became a
+named `digit?` predicate so the fractional-seconds scan reads as
+intent. The public `parse-timestamp`, `validated`, and
+`read-instant-date` surface is unchanged; the existing
+`tests/instant_template_test.clj` (27 instant assertions) covers
+the refactor.
+
 ## v0.95.1 — Dynamic-Var `clojure.test` Internals
 
 `clojure.test` previously kept its pass/fail counters, testing-context

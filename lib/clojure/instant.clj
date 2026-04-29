@@ -38,9 +38,79 @@
   (and (< idx (count s))
        (= (nth s idx) (str ch))))
 
+(defn- digit? [c]
+  (some? (parse-long c)))
+
 (defn- ensure-len [s idx need msg]
   (when (> (+ idx need) (count s))
     (throw (ex-info (str "instant: " msg ": " s)
+                    {:input s :at idx}))))
+
+;; --- Segment parsers ---
+;;
+;; Each segment parser starts at the marker character (`-`, `T`, `:`,
+;; `.`, `Z`, `+`, `-`) and returns [m new-idx]. The driver loop reads
+;; the marker to decide which segment fires, then advances by what
+;; the segment returns. No segment is invoked unless its marker has
+;; already been confirmed.
+
+(defn- parse-month-segment [s idx m]
+  (ensure-len s (+ idx 1) 2 "month truncated")
+  [(assoc m :months (parse-int s (+ idx 1) (+ idx 3)))
+   (+ idx 3)])
+
+(defn- parse-day-segment [s idx m]
+  (ensure-len s (+ idx 1) 2 "day truncated")
+  [(assoc m :days (parse-int s (+ idx 1) (+ idx 3)))
+   (+ idx 3)])
+
+(defn- parse-time-segment [s idx m]
+  (ensure-len s (+ idx 1) 5 "hour:minute truncated")
+  (when-not (char-at-eq? s (+ idx 3) \:)
+    (throw (ex-info "instant: missing : between HH and MM" {:input s})))
+  [(-> m
+       (assoc :hours   (parse-int s (+ idx 1) (+ idx 3)))
+       (assoc :minutes (parse-int s (+ idx 4) (+ idx 6))))
+   (+ idx 6)])
+
+(defn- parse-second-segment [s idx m]
+  (ensure-len s (+ idx 1) 2 "second truncated")
+  [(assoc m :seconds (parse-int s (+ idx 1) (+ idx 3)))
+   (+ idx 3)])
+
+(defn- parse-frac-segment [s idx m]
+  (let [n          (count s)
+        frac-start (inc idx)
+        end        (loop [j frac-start]
+                     (if (and (< j n) (digit? (nth s j)))
+                       (recur (inc j))
+                       j))]
+    (when (= end frac-start)
+      (throw (ex-info "instant: fractional seconds empty" {:input s})))
+    (let [digits (subs s frac-start end)
+          len    (count digits)
+          padded (if (< len 9)
+                   (str digits (apply str (repeat (- 9 len) \0)))
+                   (subs digits 0 9))]
+      [(assoc m :nanoseconds (parse-long padded)) end])))
+
+(defn- parse-zone-segment [s idx m]
+  (cond
+    (char-at-eq? s idx \Z)
+    [m (inc idx)]
+
+    (or (char-at-eq? s idx \+) (char-at-eq? s idx \-))
+    (do (ensure-len s (+ idx 1) 5 "offset truncated")
+        (when-not (char-at-eq? s (+ idx 3) \:)
+          (throw (ex-info "instant: missing : in zone offset" {:input s})))
+        [(-> m
+             (assoc :offset-sign    (if (= (nth s idx) "+") 1 -1))
+             (assoc :offset-hours   (parse-int s (+ idx 1) (+ idx 3)))
+             (assoc :offset-minutes (parse-int s (+ idx 4) (+ idx 6))))
+         (+ idx 6)])
+
+    :else
+    (throw (ex-info (str "instant: unexpected character at " idx ": " s)
                     {:input s :at idx}))))
 
 ;; --- Public surface ---
@@ -68,7 +138,6 @@
   (let [n (count s)]
     (ensure-len s 0 4 "year truncated")
     (let [year (parse-int s 0 4)
-          ;; Initial defaults; layered fields overwrite.
           base {:years          year
                 :months         1
                 :days           1
@@ -81,80 +150,27 @@
                 :offset-minutes 0}]
       (loop [m   base
              idx 4]
-        (cond
-          ;; End of input.
-          (= idx n) m
+        (if (= idx n)
+          m
+          (let [[m' idx'] (cond
+                            (and (= idx 4)  (char-at-eq? s idx \-))
+                            (parse-month-segment s idx m)
 
-          ;; Date components after year: -MM at idx 4.
-          (and (= idx 4) (char-at-eq? s idx \-))
-          (do (ensure-len s 5 2 "month truncated")
-              (recur (assoc m :months (parse-int s 5 7)) 7))
+                            (and (= idx 7)  (char-at-eq? s idx \-))
+                            (parse-day-segment s idx m)
 
-          ;; -DD at idx 7.
-          (and (= idx 7) (char-at-eq? s idx \-))
-          (do (ensure-len s 8 2 "day truncated")
-              (recur (assoc m :days (parse-int s 8 10)) 10))
+                            (and (= idx 10) (char-at-eq? s idx \T))
+                            (parse-time-segment s idx m)
 
-          ;; Time block: T then HH:MM[:SS[.fff]].
-          (and (= idx 10) (char-at-eq? s idx \T))
-          (do (ensure-len s 11 5 "hour:minute truncated")
-              (when-not (char-at-eq? s 13 \:)
-                (throw (ex-info "instant: missing : between HH and MM"
-                                {:input s})))
-              (let [m2 (-> m
-                           (assoc :hours   (parse-int s 11 13))
-                           (assoc :minutes (parse-int s 14 16)))]
-                (recur m2 16)))
+                            (and (= idx 16) (char-at-eq? s idx \:))
+                            (parse-second-segment s idx m)
 
-          ;; Optional :SS after HH:MM.
-          (and (= idx 16) (char-at-eq? s idx \:))
-          (do (ensure-len s 17 2 "second truncated")
-              (recur (assoc m :seconds (parse-int s 17 19)) 19))
+                            (and (= idx 19) (char-at-eq? s idx \.))
+                            (parse-frac-segment s idx m)
 
-          ;; Optional .fff fractional seconds (variable length; up to
-          ;; nanoseconds precision = 9 digits).
-          (and (= idx 19) (char-at-eq? s idx \.))
-          (let [frac-start (inc idx)
-                end        (loop [j frac-start]
-                             (if (and (< j n)
-                                      (parse-long (nth s j)))
-                               (recur (inc j))
-                               j))
-                _          (when (= end frac-start)
-                             (throw (ex-info "instant: fractional seconds empty"
-                                             {:input s})))
-                digits     (subs s frac-start end)
-                ;; Right-pad to 9 digits so :nanoseconds is consistent.
-                len        (count digits)
-                padded     (if (< len 9)
-                             (str digits (apply str (repeat (- 9 len) \0)))
-                             (subs digits 0 9))
-                nanos      (parse-long padded)]
-            (recur (assoc m :nanoseconds nanos) end))
-
-          ;; UTC zone: Z.
-          (char-at-eq? s idx \Z)
-          (recur m (inc idx))
-
-          ;; Numeric offset: +HH:MM or -HH:MM.
-          (or (char-at-eq? s idx \+) (char-at-eq? s idx \-))
-          (do (ensure-len s (+ idx 1) 5 "offset truncated")
-              (when-not (char-at-eq? s (+ idx 3) \:)
-                (throw (ex-info "instant: missing : in zone offset"
-                                {:input s})))
-              (let [sign (if (= (nth s idx) "+") 1 -1)
-                    oh   (parse-int s (+ idx 1) (+ idx 3))
-                    om   (parse-int s (+ idx 4) (+ idx 6))]
-                (recur (-> m
-                           (assoc :offset-sign    sign)
-                           (assoc :offset-hours   oh)
-                           (assoc :offset-minutes om))
-                       (+ idx 6))))
-
-          :else
-          (throw (ex-info (str "instant: unexpected character at " idx
-                               ": " s)
-                          {:input s :at idx})))))))
+                            :else
+                            (parse-zone-segment s idx m))]
+            (recur m' idx')))))))
 
 (defn validated
   "Range-checks the components in a parsed timestamp map. Returns
