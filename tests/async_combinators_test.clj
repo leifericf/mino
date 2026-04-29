@@ -1,5 +1,5 @@
 (require "tests/test")
-(require "core/async")
+(require '[clojure.core.async :as a :refer [chan chan? buffer dropping-buffer sliding-buffer promise-chan closed? close! put! take! alts! offer! poll! <!! >!! alts!! timeout go go-loop pipe onto-chan! to-chan! mult tap untap pub sub unsub unsub-all mix admix unmix unmix-all toggle solo-mode pipeline pipeline-async pipeline-blocking chan* chan?* chan-put* chan-take* chan-close* chan-closed?* offer!* poll!* alts* buf-fixed* buf-dropping* buf-sliding* buf-promise* chan-set-xform*]])
 
 ;; --- pipe ---
 
@@ -57,7 +57,7 @@
 
 (deftest into-collects
   (let [ch  (to-chan! [1 2 3])
-        out (async-into [] ch)
+        out (a/into [] ch)
         result (atom nil)]
     (take! out (fn [v] (reset! result v)))
     (drain!)
@@ -66,7 +66,7 @@
 (deftest into-empty
   (let [ch  (chan)]
     (close! ch)
-    (let [out (async-into [] ch)
+    (let [out (a/into [] ch)
           result (atom nil)]
       (take! out (fn [v] (reset! result v)))
       (drain!)
@@ -77,7 +77,7 @@
 (deftest merge-combines-channels
   (let [ch1 (to-chan! [:a :b])
         ch2 (to-chan! [:c :d])
-        out (merge-chans [ch1 ch2] 4)
+        out (a/merge [ch1 ch2] 4)
         result (atom #{})]
     (dotimes [_ 4]
       (take! out (fn [v] (swap! result conj v))))
@@ -87,7 +87,7 @@
 (deftest merge-closes-when-all-done
   (let [ch1 (chan)
         ch2 (chan)
-        out (merge-chans [ch1 ch2])]
+        out (a/merge [ch1 ch2])]
     (close! ch1)
     (drain!)
     (is (false? (closed? out)) "not closed while one source remains")
@@ -149,7 +149,7 @@
 ;; --- merge edge cases ---
 
 (deftest merge-zero-channels
-  (let [out (merge-chans [] 1)]
+  (let [out (a/merge [] 1)]
     (drain!)
     (is (true? (closed? out)))))
 

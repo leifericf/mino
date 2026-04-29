@@ -1,6 +1,5 @@
 (require "tests/test")
-(require "core/channel")
-(require "core/async")
+(require '[clojure.core.async :as a :refer [chan chan? buffer dropping-buffer sliding-buffer promise-chan closed? close! put! take! alts! offer! poll! <!! >!! alts!! timeout go go-loop pipe onto-chan! to-chan! mult tap untap pub sub unsub unsub-all mix admix unmix unmix-all toggle solo-mode pipeline pipeline-async pipeline-blocking chan* chan?* chan-put* chan-take* chan-close* chan-closed?* offer!* poll!* alts* buf-fixed* buf-dropping* buf-sliding* buf-promise* chan-set-xform*]])
 
 ;; Stress-spawn tests: exercise the bot-fleet pattern at counts that
 ;; used to hit a precise-GC heap-use-after-free inside hamt_assoc.

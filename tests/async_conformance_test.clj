@@ -1,5 +1,5 @@
 (require "tests/test")
-(require "core/async")
+(require '[clojure.core.async :as a :refer [chan chan? buffer dropping-buffer sliding-buffer promise-chan closed? close! put! take! alts! offer! poll! <!! >!! alts!! timeout go go-loop pipe onto-chan! to-chan! mult tap untap pub sub unsub unsub-all mix admix unmix unmix-all toggle solo-mode pipeline pipeline-async pipeline-blocking chan* chan?* chan-put* chan-take* chan-close* chan-closed?* offer!* poll!* alts* buf-fixed* buf-dropping* buf-sliding* buf-promise* chan-set-xform*]])
 
 ;; Conformance tests adapted from the canonical core.async test suite.
 ;; Covers channel semantics, go macro state machine, and combinators.
@@ -380,11 +380,11 @@
     (is (= 4 (<!! to)))
     (is (= 5 (<!! to)))))
 
-;; ===== Combinator: to-chan! / async-into round-trip =====
+;; ===== Combinator: to-chan! / into round-trip =====
 
 (deftest to-chan!-into-round-trip
   (let [data [1 2 3 4 5]
-        result (<!! (async-into [] (to-chan! data)))]
+        result (<!! (a/into [] (to-chan! data)))]
     (is (= data result))))
 
 ;; ===== Combinator: merge ordering =====
@@ -393,8 +393,8 @@
   (let [ch1 (to-chan! [1 2])
         ch2 (to-chan! [3 4])
         ch3 (to-chan! [5 6])
-        out (merge-chans [ch1 ch2 ch3] 6)
-        result (<!! (async-into [] out))]
+        out (a/merge [ch1 ch2 ch3] 6)
+        result (<!! (a/into [] out))]
     (is (= 6 (count result)) "all values received")
     (is (= #{1 2 3 4 5 6} (set result)) "correct values")))
 

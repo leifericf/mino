@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.96.6 — Wrap `clojure.core.async`; Rename `merge-chans`/`async-into`
+
+The two files that backed mino's CSP layer — `lib/core/channel.clj`
+and `lib/core/async.clj` — combine into `lib/clojure/core/async.clj`,
+declaring `(ns clojure.core.async (:refer-clojure :exclude [merge into]))`.
+The pre-existing `merge-chans` and `async-into` names existed only to
+avoid shadowing `clojure.core/merge` and `clojure.core/into` for any
+consumer that loaded `core/async`; with the namespace wrap, that
+constraint goes away and the canon names are restored.
+
+Consumers in mino's own test suite migrate from
+`(require "core/async")` to
+`(require '[clojure.core.async :as a :refer [...]])` with an explicit
+refer list. The async surface stays bare in test bodies; the renamed
+`merge` and `into` are accessed as `a/merge` and `a/into` so they do
+not shadow `clojure.core/merge` and `clojure.core/into` in the test
+file's local namespace.
+
+`(into old modes)` inside `toggle` switches to
+`(clojure.core/into ...)` because the unqualified call now resolves
+to the channel `into`.
+
+The `:refer :all` shape is intentionally not used here. Mino's
+`require :refer :all` pulls every binding present in the source ns
+env, including transitive refers from `clojure.core` (`atom`, `*out*`,
+`deref`, ...) — that drag-along is itself a smaller silent-surprise
+debt tracked separately, and an explicit refer list sidesteps it for
+this consumer.
+
+Sibling-repo consumers — `mino-bench` benches that
+`(require "core/async")`, the `mino-site` "Coming from Clojure" page
+that mentions `merge-chans`, and `mino-site/parse/async_api.clj` that
+reads both source files — update when their submodule pins advance.
+
 ## v0.96.5 — `iteration` (Clojure 1.11)
 
 `iteration` constructs a seqable from repeated calls to a step
