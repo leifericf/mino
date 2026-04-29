@@ -5,14 +5,14 @@
 (deftest map-fn
   (is (= '(2 4 6) (map (fn [x] (* x 2)) (list 1 2 3))))
   (is (= '(11 21 31) (map (fn [x] (+ x 1)) [10 20 30])))
-  (is (= nil (map (fn [x] x) nil))))
+  (is (= '() (map (fn [x] x) nil))))
 
 (deftest map-over-map
   (is (= '(1 2) (map (fn [kv] (nth kv 1)) {:a 1 :b 2}))))
 
 (deftest filter-fn
   (is (= '(3 4 5) (filter (fn [x] (> x 2)) [1 2 3 4 5])))
-  (is (= nil (filter (fn [x] false) [1 2 3]))))
+  (is (= '() (filter (fn [x] false) [1 2 3]))))
 
 (deftest reduce-fn
   (is (= 15 (reduce + 0 [1 2 3 4 5])))
@@ -22,11 +22,11 @@
 (deftest take-fn
   (is (= '(1 2 3) (take 3 [1 2 3 4 5])))
   (is (= '(1 2) (take 10 [1 2])))
-  (is (= nil (take 0 [1 2 3]))))
+  (is (= '() (take 0 [1 2 3]))))
 
 (deftest drop-fn
   (is (= '(3 4 5) (drop 2 [1 2 3 4 5])))
-  (is (= nil (drop 10 [1 2]))))
+  (is (= '() (drop 10 [1 2]))))
 
 (deftest range-fn
   (is (= '(0 1 2 3 4) (range 5)))
@@ -36,7 +36,7 @@
 
 (deftest repeat-fn
   (is (= '("x" "x" "x") (repeat 3 "x")))
-  (is (= nil (repeat 0 "x"))))
+  (is (= '() (repeat 0 "x"))))
 
 (deftest concat-fn
   (is (= '(1 2 3 4) (concat [1 2] [3 4])))

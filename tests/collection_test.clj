@@ -111,7 +111,7 @@
   (is (= 10 (first [10 20 30])))
   (is (= '(20 30) (rest [10 20 30])))
   (is (= nil (first nil)))
-  (is (= nil (rest nil))))
+  (is (= '() (rest nil))))
 
 (deftest nth-fn
   (is (= 20 (nth [10 20 30] 1)))

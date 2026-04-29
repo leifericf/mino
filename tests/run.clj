@@ -54,6 +54,7 @@
 (require "tests/clj_higher_order_test")
 (require "tests/clj_transducer_test")
 (require "tests/clj_metadata_test")
+(require "tests/empty_list_test")
 (require "tests/error_path_test")
 (require "tests/regex_reentrant_test")
 (require "tests/ifn_test")

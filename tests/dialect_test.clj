@@ -52,7 +52,7 @@
 (deftest rest-on-map
   (testing "rest on map returns remaining entries"
     (is (= 1 (count (rest {:a 1 :b 2}))))
-    (is (nil? (rest {:a 1})))))
+    (is (empty? (rest {:a 1})))))
 
 ;; --- get-in with not-found ---
 
