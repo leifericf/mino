@@ -340,15 +340,17 @@
     (fn [ks vs] (zm-impl {} ks vs))))
 
 (defn frequencies "Returns a map from distinct items in coll to the number of times they appear." [coll]
-  (reduce (fn [acc x]
-    (update acc x (fn [n] (+ (if n n 0) 1))))
-    {} coll))
+  (persistent!
+    (reduce (fn [acc x]
+              (assoc! acc x (inc (get acc x 0))))
+            (transient {}) coll)))
 
 (defn group-by "Returns a map of the items in coll grouped by the result of f." [f coll]
-  (reduce (fn [acc x]
-    (let [k (f x)]
-      (update acc k (fn [v] (conj (if v v []) x)))))
-    {} coll))
+  (persistent!
+    (reduce (fn [acc x]
+              (let [k (f x)]
+                (assoc! acc k (conj (get acc k []) x))))
+            (transient {}) coll)))
 
 ;; --- More higher-order ---
 
@@ -540,7 +542,7 @@
               (if (empty? b)
                 (rf result)
                 (let [r (rf result b)]
-                  (rf (if (reduced? r) @r r))))))
+                  (rf (unreduced r))))))
            ([result input]
             (let [v (f input)
                   p @pval]
@@ -908,7 +910,7 @@
                   (if (empty? b)
                     (rf result)
                     (let [r (rf result (seq b))]
-                      (rf (if (reduced? r) @r r))))))
+                      (rf (unreduced r))))))
                ([result input]
                 (let [b (vswap! buf conj input)]
                   (if (= (count b) n)

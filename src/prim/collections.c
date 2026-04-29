@@ -709,6 +709,13 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         return def_val;
     }
+    if (coll->type == MINO_TRANSIENT) {
+        if (!coll->as.transient.valid)
+            return prim_throw_classified(S, "eval/state", "MST001",
+                "get: transient is no longer valid");
+        coll = coll->as.transient.current;
+        if (coll == NULL || coll->type == MINO_NIL) return def_val;
+    }
     if (coll->type == MINO_MAP) {
         mino_val_t *v = map_get_val(coll, key);
         return v == NULL ? def_val : v;

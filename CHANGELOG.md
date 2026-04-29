@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.96.3 — Transients in `frequencies`/`group-by`; `unreduced` Cleanups
+
+`frequencies` and `group-by` rebuild their result map through a
+`(transient {})` accumulator with `assoc!`, ending in `persistent!`.
+Both used to allocate a fresh persistent map per input element via
+`update`; the transient path drops that to one allocation per distinct
+key plus log-N batched writes.
+
+`get` now treats a transient associative as transparent — it follows
+the transient's underlying persistent collection, matching canon's
+`ITransientAssociative2` contract. `find` already did this; bringing
+`get` in line was needed for `frequencies`/`group-by`'s
+`(get acc x default)` lookups against the transient accumulator.
+
+The completion arities of `partition-by` and `partition-all` swap
+their inline `(if (reduced? r) @r r)` for the existing `unreduced`
+helper; the helper has been in `src/core.clj` since the Cycle G
+rewrite.
+
 ## v0.96.2 — Lazy-Seq `recur`-On-Skip Rewrites
 
 Four lazy-seq combinators that previously allocated a fresh `lazy-seq`
