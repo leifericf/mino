@@ -1,5 +1,183 @@
 # Changelog
 
+## v0.93.0 — C Refactoring Pass
+
+Top-down legibility pass over the C runtime. Behaviour is unchanged for
+script authors and embedders; the work is structural — splitting god
+functions into named helpers, documenting lock and ownership contracts,
+and removing dead helpers — so future changes land more cleanly. All
+commits in the cycle pass the full mino test suite (1453 tests, 6991
+assertions) and a clean macOS build.
+
+**Trust model and lock contracts.** Three subsystem entry points now
+state their authority and threading model in a banner comment:
+`prim/proc.c` and `prim/fs.c` declare that the script author is the
+trust boundary (primitives validate shape, not intent — embedders that
+want to forbid shell-out or filesystem mutation refuse to bind these
+primitives in the embedder's namespace); `runtime/state.c` declares the
+single-embedder lifecycle of `mino_state_t`. Every public-API entry
+point in `runtime/host_threads.c` (`mino_promise_deliver`,
+`mino_future_cancel`, `worker_run`, `mino_future_spawn`,
+`mino_host_threads_quiesce`, `mino_future_gc_sweep`) now states the
+lock invariant it relies on or maintains. The relaxed-read on
+`S->thread_count` is documented at both the reader (`mino_thread_count`)
+and writer (`mino_future_spawn`, worker exit) sites so its
+deliberately-loose contract is no longer implicit.
+
+**God-function surgery.** Eight large functions were split along
+natural seams into named helpers:
+
+- `prim_require` (prim/module.c) shed three sub-phases: `require_load_path`
+  for the cache + cycle-check + resolve + load + ns-validate path,
+  `apply_refer_options` for the :refer / :refer :all binding loop with
+  :exclude / :rename, and `parse_libspec_opts` filling a typed
+  `libspec_opts_t` struct from the kw/val pairs of a vector libspec.
+  `prim_require` is now a clear dispatcher over arg shape.
+
+- `eval_try` (eval/control.c) extracted `partition_try_clauses` (one-pass
+  walk classifying clauses into a typed `try_clauses_t`) and
+  `normalize_exception` (wrap a non-diagnostic thrown value into the
+  standard map shape). The setjmp-bearing phases stay inline as C99
+  requires; the surrounding work reads as a sequence of named ops.
+
+- `apply_callable` (eval/fn.c) replaced three near-identical multi-arity
+  dispatch blocks (call entry, recur backward branch, tail-call to a
+  multi-arity fn) with `dispatch_multi_arity`, deduping ~30 lines.
+
+- `gc_mark_roots` (gc/roots.c) factored the per-thread-ctx work into
+  `gc_mark_ctx_dyn_stack` and `gc_mark_ctx_gc_save` so the "every live
+  ctx" loop is visible at the call site instead of buried in two
+  parallel inner loops.
+
+- `gc_alloc_typed` (gc/driver.c) split into policy and mechanism:
+  `gc_alloc_raw` owns the freelist + calloc + header init + young-list
+  link + range index + alloc event (returns NULL on calloc failure,
+  no GC, no recovery); `gc_oom_throw` owns the longjmp-into-try /
+  abort path; `gc_alloc_typed` keeps stress lazy-init, safepoint,
+  driver tick, fault injection, and OOM fallback. The OOM-fallback
+  retry now calls `gc_alloc_raw` a second time instead of repeating
+  the alloc body.
+
+- `read_atom` (eval/read.c) lifted the cascading numeric-literal parse
+  (hex, radix Nr, ratio, bigint N suffix, bigdec M suffix, decimal int
+  or float) into `try_parse_numeric`. The helper returns the parsed
+  value, or NULL with an err-out-param distinguishing "not numeric,
+  fall through to symbol" from "numeric but malformed, diag set".
+
+- `quasiquote_expand` (eval/eval.c) became a five-line dispatcher over
+  form kind, with `qq_expand_vector` (with the fast path / splicing
+  slow path), `qq_expand_map` (k/v walk), and `qq_expand_cons`
+  (top-level unquote head + per-element splice walk) as helpers.
+
+- `tower_reduce` (prim/numeric.c) split into per-tier helpers:
+  `tower_apply_int` (overflow-promotes to bigint, ratio-promotes on
+  non-exact division), `tower_apply_bigint` (ratio promotion on
+  division, possible collapse back to int / bigint), `tower_apply_ratio`,
+  `tower_apply_bigdec`, `tower_apply_float`, plus `tower_seed_div`
+  for the (/ x ...) one-operand seed. The orchestrator now reads as
+  table-driven dispatch.
+
+**File-level smell sweeps.** Per-pattern helpers were extracted to
+flatten near-identical sites in five files:
+
+- `eval/bindings.c`: `push_dyn_binding` collapses the two ~25-line per
+  pair blocks in `eval_binding` (vector and list paths) into one
+  helper; `eval_and_bind` does the same for `eval_let` and `eval_loop`,
+  replacing four 6-line eval/pin/destructure/unpin sequences.
+
+- `eval/special.c`: `eval_qualified_symbol` lifts the ~80-line
+  qualified-symbol resolution branch (literal-binding fast path,
+  alias resolution, var lookup with private-access check, ns-env
+  fallback for primitives, miss-message synthesis) out of
+  `eval_symbol`. The function now reads as three top-level cases:
+  qualified, `*ns*` fast path, unqualified-with-fallback.
+
+- `eval/read.c`: `list_append_cell` deduplicates the four cons-cell
+  append sites in `read_list_form`; `buf_push` and `map_buf_push` do
+  the same for the GC-tracked dynamic-array grow-and-push pattern
+  used at six sites across `read_vector_form`, `read_map_form`, and
+  `read_set_form`.
+
+- `gc/driver.c`: `gc_driver_tick` split into per-phase helpers
+  (`gc_tick_should_suppress`, `gc_tick_stress`, `gc_tick_during_major`,
+  `gc_tick_idle`); the dispatcher is now a five-line switch and the
+  why-finish-then-minor rationale lives next to its code.
+
+- `gc/roots.c`: `gc_mark_roots` factored into six per-kind helpers
+  (`gc_mark_envs_and_interns`, `gc_mark_module_and_meta`,
+  `gc_mark_thread_state`, `gc_mark_runtime_globals`,
+  `gc_mark_async_roots`, `gc_mark_record_types`). The orchestrator is
+  now a six-line list of what gets pinned.
+
+- `prim/sequences.c`: `seq_cons_append` and `seq_kv_pair` collapse the
+  cons-append and key-value-vector patterns repeated across `prim_seq`'s
+  five per-collection-type branches.
+
+**Code-level fixes.**
+`runtime_module_add_alias` returns int instead of void; all five
+callers now surface OOM as a catchable internal/MIN001 exception
+instead of silently dropping the alias. `prim_random_uuid` swaps
+`sprintf` for `snprintf` for hygiene (the buffer was already correctly
+sized so this is not a fix). `ns_process_require_spec_ex` now sets a
+loud `MSY001` diagnostic when an alias, module, refer, or rename name
+exceeds the 256-byte stack-buffer limit; previously the entry was
+silently skipped.
+
+**Defensive overflow guards.** Five buffer-grow paths previously did
+unguarded `cap*2` or `len+1` arithmetic. None are reachable today, but
+the invariant is now explicit:
+
+- `prim/string.c:fmt_ensure` (printf-style result buffer) and
+  `prim/proc.c:build_command` / `read_all` (shell-call argv and stdout
+  buffers) bail with a diagnostic before `len+extra+1` or `cap*2 +
+  arg.len*4` can wrap.
+- `gc/barrier.c:gc_remset_add` aborts on cap overflow (write-barrier
+  path has no recovery model).
+- `gc/driver.c:gc_mark_stack_push_raw` drops the push on cap overflow;
+  the conservative scan is the documented backstop.
+- `diag/diag.c:source_cache_store` bails before `malloc(len+1)` wraps
+  to `malloc(0)` followed by a `SIZE_MAX`-byte memcpy.
+
+**Dead-code removal.** `diag_add_note_at` and `diag_set_cause` were
+declared and defined but never called from anywhere in the repo or in
+any sibling consumer (mino-bench, mino-examples, mino-site). They are
+not part of the public `mino.h` embedding surface; removed without a
+deprecation shim per the alpha posture.
+
+**Public-header polish.** `src/mino.h` had a doc-only sweep: removed
+stale references to deleted code paths, replaced "see mino.c" / "see
+rbtree.c" with "opaque to embedders" for forward-declared types,
+removed remaining cycle-name references from inline comments, and
+renamed an internal-jargon section banner to a shape-describing one.
+
+**`mino_state` god-struct seam map.** Eight banner comments inside
+`mino_state` (GC, value caches, modules, printer/reader, namespaces,
+misc per-state, host threads, async) name the conceptual sub-states
+that share fields. No memory layout changes — the banners give later
+refactors a seam to split along.
+
+**Bundled `mino` tooling.** `mino deps` and `mino task` previously
+required `lib/mino/*.clj` to be reachable from cwd, so brew-installed
+mino on a project without a sibling `lib/` couldn't use the built-in
+tooling without a symlink or submodule. The three sources
+(`lib/mino/deps.clj`, `lib/mino/tasks.clj`, `lib/mino/tasks/builtin.clj`)
+now bundle into the binary the same way the `clojure.*` stdlib does:
+gen_header escapes each into a C string literal, and a new
+`mino_install_mino_tooling` install hook registers them via
+`mino_register_bundled_lib`. Standalone projects work from any cwd.
+Embedders that don't expose those subcommands can omit the install
+hook.
+
+**Empty-list type scaffolding (foundation for a later cycle).** A new
+`MINO_EMPTY_LIST` value type and `mino_empty_list(S)` accessor sit in
+the runtime as scaffolding; nothing produces or consumes the singleton
+in v0.93.0. Wiring it through the reader, sequence primitives, and
+equality lattice to fix the `(list) ⇒ nil` divergence requires
+updating ~70 compatibility tests that currently rely on the legacy
+"empty seq is nil" semantics, so the user-visible parity work was
+deferred to a later cycle. The type sits in `mino_type_t` as an
+explicit seam; embedders can ignore it.
+
 ## v0.92.1 — CI And Linux Build Fixes
 
 Patch release covering build-pipeline fixes that surfaced after
