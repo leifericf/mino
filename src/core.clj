@@ -69,7 +69,7 @@
                 ([x y] (not (= x y)))
                 ([x y & more] (not (apply = x y more)))))
 (def identity "Returns its argument." (fn [x] x))
-(def list     "Creates a list of the given arguments." (fn [& args] args))
+;; list is a C primitive.
 ;; empty? is a C primitive.
 
 ;; >, <=, >= are C primitives (compare_chain) - see prim/numeric.c
@@ -403,9 +403,10 @@
                   (rf result input))))))))
   ([pred coll]
    (let [s (seq coll)]
-     (if (and s (pred (first s)))
-       (drop-while pred (rest s))
-       s)))))
+     (cond
+       (nil? s)            (list)
+       (pred (first s))    (drop-while pred (rest s))
+       :else               s)))))
 
 (def take-nth "Returns a lazy sequence of every nth item in coll. When called with no collection, returns a transducer." (fn
   ([n]
