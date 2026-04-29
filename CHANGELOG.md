@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.96.9
+
+Adds `workflow_dispatch` to the release-build GitHub Actions
+workflow. GitHub drops tag-push events when more than three tags push
+in one batch, so the v0.95.* and v0.96.* canon-parity cycles never
+fired the workflow on tag push. The dispatch trigger lets the workflow
+run against any existing tag via `gh workflow run release-build --ref
+<tag>`. No runtime changes; the C version-define moves to `0.96.9` so
+the bump itself fires release-build under the new trigger.
+
 ## v0.96.8 — Chunked-Seq Family
 
 Adds the `clojure.core` chunked-seq surface: `chunk-buffer`,
