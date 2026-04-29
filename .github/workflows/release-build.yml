@@ -11,10 +11,8 @@ jobs:
   build:
     name: ${{ matrix.platform }}
     strategy:
-      # Don't fail-fast: a Windows-only failure (Git Bash sed quirk in
-      # the Makefile) shouldn't cancel Linux / macOS builds and block
-      # the draft release. The Windows job is `continue-on-error` so a
-      # failed Windows run doesn't block publish-draft either.
+      # Don't fail-fast: one slow or flaky platform shouldn't cancel
+      # the others mid-matrix and block the draft release.
       fail-fast: false
       matrix:
         include:
@@ -49,11 +47,6 @@ jobs:
             ext: zip
             exe: ".exe"
     runs-on: ${{ matrix.runner }}
-    # Windows release-build is informational until the bootstrap
-    # Makefile has a portable sed recipe (Git Bash on Windows handles
-    # the bundled-source escape pattern differently than POSIX sed).
-    # Linux + macOS artifacts are the authoritative release set.
-    continue-on-error: ${{ matrix.os == 'windows' }}
     defaults:
       run:
         shell: bash

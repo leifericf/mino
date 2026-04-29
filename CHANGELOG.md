@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.94.2 — Portable Bootstrap, Windows Rejoins Releases
+
+The bootstrap Makefile recipe now uses awk instead of sed to escape
+each `lib/<ns>.clj` source into its `src/<sym>.h` C string literal.
+Sed via Git Bash on Windows mangled the leading-slash regex argument
+through MSYS path translation and emitted empty headers; awk's
+script body starts with `{` and the regex literals are internal
+tokens, so the recipe is one source for every platform. Output is
+byte-identical across all 20 generated headers.
+
+With the recipe portable, the `continue-on-error` guards that were
+masking the Windows Bootstrap failure go away: `ci.yml`'s Windows
+Bootstrap step is no longer informational, and `release-build.yml`
+drops its job-level `continue-on-error: ${{ matrix.os == 'windows' }}`.
+The Windows artifact rejoins the Release matrix; `scoop install
+mino` works against the v0.94.2 zip again. (The Test step on
+Windows stays informational — that's a separate cmd.exe trailing-
+space quirk in the proc-test assertions, unrelated to the
+bootstrap.)
+
+No runtime behaviour changes vs v0.94.1; this is a build-pipeline
+patch.
+
 ## v0.94.1 — Release-Build Windows Guard
 
 Patch fix for the v0.94.0 release pipeline. The Windows release-build
