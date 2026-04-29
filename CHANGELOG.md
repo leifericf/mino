@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.94.5 — Static-Link Windows Binary
+
+`mino --version` and the REPL silently failed under PowerShell on
+fresh Windows installs (Scoop or Homebrew-on-Windows). Exit code
+`-1073741515` (`0xC0000135`, `STATUS_DLL_NOT_FOUND`) showed the
+binary never started: mingw-gcc by default produces an exe that
+imports `libgcc_s_seh-1.dll` and `libwinpthread-1.dll`. The GHA
+runner has those DLLs in scope (so the release-build smoke test
+passed), but a clean Windows install doesn't.
+
+The bootstrap Makefile now passes `-static` to the linker on
+`Windows_NT`, so mingw's runtime gets baked into mino.exe. macOS and
+Linux remain dynamically linked. This makes the v0.94.4 stdout-
+buffering patch actually observable too, since the binary now runs.
+
 ## v0.94.4 — Force Line-Buffered Stdout on Windows
 
 `mino --version` and `mino` (REPL) printed nothing when launched from

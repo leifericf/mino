@@ -20,6 +20,12 @@ INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
 ifeq ($(OS),Windows_NT)
 EXE  = .exe
 LIBS = -lm
+# Static link on Windows so mino.exe doesn't depend on mingw runtime
+# DLLs (libgcc_s_seh-1.dll, libwinpthread-1.dll). Without -static the
+# exe fails to start on a fresh Windows install with
+# STATUS_DLL_NOT_FOUND (0xC0000135) — the GHA runner has the DLLs,
+# but a Scoop / Homebrew end user doesn't.
+LDFLAGS += -static
 else
 EXE  =
 LIBS = -lm -lpthread
@@ -65,7 +71,7 @@ HEADERS = $(foreach p,$(BUNDLED),src/$(word 1,$(subst :, ,$(p))).h)
 bootstrap: $(BIN)
 
 $(BIN): $(HEADERS)
-	$(CC) $(CFLAGS) $(INCDIRS) -o $@ $(SRCS) $(LIBS)
+	$(CC) $(CFLAGS) $(INCDIRS) -o $@ $(SRCS) $(LDFLAGS) $(LIBS)
 
 # One recipe regenerates the entire bundled-source header set.
 # Triggered when any header is missing or older than this Makefile;
