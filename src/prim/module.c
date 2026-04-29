@@ -112,21 +112,23 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
             return NULL;
         }
     }
-    /* Resolve. The bundled-stdlib registry wins over the disk resolver
-     * so brew/scoop installs without a lib/ directory still load
-     * (require '[clojure.string]) cleanly. A name registered as a
-     * bundled lib stays bundled regardless of resolver state, since
-     * the embed-time install hook is the explicit opt-in. */
-    bundled_source = bundled_lib_lookup(S, name);
-    if (bundled_source != NULL) {
-        path = NULL;
-    } else {
+    /* Resolve. Disk wins over the bundled-stdlib registry: a project
+     * that ships its own lib/<ns>.clj on disk gets to override the
+     * bundled namespace (e.g. mino-bench's lib/mino/tasks/builtin.clj
+     * customises mino.tasks.builtin/build with bench-aware source
+     * paths). The bundled registry is the brew/scoop fallback for the
+     * common case where no lib/ directory exists on cwd; a name
+     * stays bundled only when the disk resolver also misses. */
+    path = (S->module_resolver != NULL)
+        ? S->module_resolver(name, S->module_resolver_ctx)
+        : NULL;
+    bundled_source = (path == NULL) ? bundled_lib_lookup(S, name) : NULL;
+    if (path == NULL && bundled_source == NULL) {
         if (S->module_resolver == NULL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", "require: no module resolver configured");
             return NULL;
         }
-        path = S->module_resolver(name, S->module_resolver_ctx);
-        if (path == NULL) {
+        {
             char msg[300];
             snprintf(msg, sizeof(msg), "require: cannot resolve module: %s", name);
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);
