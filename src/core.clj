@@ -462,6 +462,40 @@
 (defn iterate "Returns a lazy sequence of x, (f x), (f (f x)), and so on." [f x]
   (lazy-seq (cons x (iterate f (f x)))))
 
+(defn iteration
+  "Creates a seqable via repeated calls to step, a function of some
+   continuation token 'k'. The first call to step is passed initk,
+   returning 'ret'. If (somef ret) is true, (vf ret) is included in
+   the iteration; else iteration terminates and vf/kf are not called.
+   If (kf ret) is non-nil it is passed to the next step call; else
+   iteration terminates. Used to consume APIs that return paginated
+   or batched data.
+
+   step  - (possibly impure) fn of 'k' -> 'ret'
+   :somef - fn of 'ret' -> truthy/falsy, default some?
+   :vf    - fn of 'ret' -> 'v', default identity
+   :kf    - fn of 'ret' -> 'next-k' or nil, default identity
+   :initk - first value passed to step, default nil
+
+   Step with non-initk is presumed unreproducible. The first step
+   call is deferred until the result is realized.
+
+   Divergence from canon: opts are passed as a single map (mino's
+   destructuring does not yet support `& {:keys [...]}` keyword args)."
+  ([step] (iteration step {}))
+  ([step opts]
+   (let [somef (get opts :somef some?)
+         vf    (get opts :vf identity)
+         kf    (get opts :kf identity)
+         initk (get opts :initk nil)]
+     (lazy-seq
+       ((fn next-iter [ret]
+          (when (somef ret)
+            (cons (vf ret)
+                  (when-some [k (kf ret)]
+                    (lazy-seq (next-iter (step k)))))))
+        (step initk))))))
+
 (defn cycle "Returns a lazy infinite sequence of repetitions of the items in coll." [coll]
   (letfn [(cycle-impl [orig coll]
             (lazy-seq

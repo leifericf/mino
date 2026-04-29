@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.96.5 — `iteration` (Clojure 1.11)
+
+`iteration` constructs a seqable from repeated calls to a step
+function: each step returns a value plus a continuation token. Used
+to consume paginated APIs and other batch sources where the producer
+exposes "give me the next page from here". The first call is deferred
+until the seq head is forced, so the step function may be impure.
+
+The defaults match canon: `:somef` defaults to `some?`, `:vf` and
+`:kf` default to `identity`, and `:initk` defaults to nil.
+
+Divergence from canon: opts are passed as a single map argument
+(`(iteration step {:vf identity ...})`), not as keyword args
+(`(iteration step :vf identity ...)`). Mino's `& {:keys [...]}`
+destructuring does not yet pick up trailing keyword pairs; a future
+cycle will close that gap and the canon-style call shape will work
+without code changes.
+
 ## v0.96.4 — Small Canon-Parity Additions
 
 `comp` and `partial` adopt canon's hand-unrolled fast-path shape: 0/1/
