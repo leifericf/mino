@@ -42,6 +42,9 @@
 #include "lib_clojure_instant.h"
 #include "lib_clojure_spec_alpha.h"
 #include "lib_clojure_core_specs_alpha.h"
+#include "lib_mino_deps.h"
+#include "lib_mino_tasks.h"
+#include "lib_mino_tasks_builtin.h"
 #if defined(__clang__)
 #  pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -139,6 +142,17 @@ void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env)
                               lib_clojure_core_specs_alpha_src);
 }
 
+/* mino.deps + mino.tasks + mino.tasks.builtin: the standalone-binary
+ * tooling that backs the `mino deps` and `mino task` subcommands.
+ * Bundled so brew/scoop installs without a lib/ on cwd still work. */
+void mino_install_mino_tooling(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "mino.deps",          lib_mino_deps_src);
+    mino_register_bundled_lib(S, "mino.tasks",         lib_mino_tasks_src);
+    mino_register_bundled_lib(S, "mino.tasks.builtin", lib_mino_tasks_builtin_src);
+}
+
 void mino_install_all(mino_state_t *S, mino_env_t *env)
 {
     mino_install_core(S, env);
@@ -157,4 +171,5 @@ void mino_install_all(mino_state_t *S, mino_env_t *env)
     mino_install_clojure_datafy(S, env);
     mino_install_clojure_instant(S, env);
     mino_install_clojure_spec(S, env);
+    mino_install_mino_tooling(S, env);
 }

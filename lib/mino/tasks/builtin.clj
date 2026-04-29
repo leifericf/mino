@@ -134,7 +134,10 @@
    ["lib/clojure/core/protocols.clj"  "clojure.core.protocols"  "lib_clojure_core_protocols"]
    ["lib/clojure/instant.clj"         "clojure.instant"         "lib_clojure_instant"]
    ["lib/clojure/spec/alpha.clj"      "clojure.spec.alpha"      "lib_clojure_spec_alpha"]
-   ["lib/clojure/core/specs/alpha.clj" "clojure.core.specs.alpha" "lib_clojure_core_specs_alpha"]])
+   ["lib/clojure/core/specs/alpha.clj" "clojure.core.specs.alpha" "lib_clojure_core_specs_alpha"]
+   ["lib/mino/deps.clj"               "mino.deps"               "lib_mino_deps"]
+   ["lib/mino/tasks.clj"              "mino.tasks"              "lib_mino_tasks"]
+   ["lib/mino/tasks/builtin.clj"      "mino.tasks.builtin"      "lib_mino_tasks_builtin"]])
 
 (defn- escape-source-as-c-string-literal
   "Returns the body of a C string literal: backslash-escaped quotes

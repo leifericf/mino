@@ -833,6 +833,12 @@ void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env);
 
+/* mino.deps + mino.tasks + mino.tasks.builtin -- the bundled
+ * mino-side sources for the standalone binary's `mino deps` and
+ * `mino task` subcommands. Embedders that don't expose those
+ * subcommands can omit this hook. */
+void mino_install_mino_tooling(mino_state_t *S, mino_env_t *env);
+
 /*
  * Register the every-bundled-namespace + every-primitive-group set
  * the standalone binary ships with. Equivalent to the sequence:
