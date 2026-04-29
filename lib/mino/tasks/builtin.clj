@@ -34,6 +34,7 @@
    "src/gc/trace.c" "src/runtime/module.c"
    "src/public/gc.c" "src/public/embed.c"
    "src/collections/val.c" "src/collections/vec.c" "src/collections/map.c"
+   "src/collections/chunk.c"
    "src/collections/rbtree.c" "src/eval/read.c" "src/eval/print.c"
    "src/prim/prim.c" "src/prim/install.c" "src/prim/install_stdlib.c"
    "src/prim/numeric.c" "src/prim/collections.c"

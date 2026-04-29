@@ -438,6 +438,17 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         case MINO_VOLATILE:
             gc_mark_child_push(S, v->as.volatile_.val);
             break;
+        case MINO_CHUNK: {
+            unsigned k;
+            for (k = 0; k < v->as.chunk.len; k++) {
+                gc_mark_child_push(S, v->as.chunk.vals[k]);
+            }
+            break;
+        }
+        case MINO_CHUNKED_CONS:
+            gc_mark_child_push(S, v->as.chunked_cons.chunk);
+            gc_mark_child_push(S, v->as.chunked_cons.more);
+            break;
         case MINO_LAZY:
             if (v->as.lazy.realized) {
                 gc_mark_child_push(S, v->as.lazy.cached);

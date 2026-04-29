@@ -525,7 +525,7 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
 static int is_sequential(mino_type_t t)
 {
     return (t == MINO_CONS || t == MINO_VECTOR || t == MINO_EMPTY_LIST
-            || t == MINO_LAZY);
+            || t == MINO_LAZY || t == MINO_CHUNKED_CONS);
 }
 
 /*
@@ -545,11 +545,38 @@ static const mino_val_t *resolve_lazy(const mino_val_t *v)
  * Handles cons lists, vectors, nil, and realized lazy seqs.
  * Returns 1 if they contain the same elements in the same order.
  */
+/* Per-side step state for eq_seq_like / eq_seq_like_force.
+ * For chunked-cons, ia is the offset within the current chunk: the
+ * next element is at chunk.vals[ia], and ia transitions to .more once
+ * ia == chunk.len. */
+static void eq_seq_step(const mino_val_t **cur, size_t *idx)
+{
+    const mino_val_t *c = *cur;
+    if (c == NULL) return;
+    if (c->type == MINO_CONS) { *cur = c->as.cons.cdr; return; }
+    if (c->type == MINO_CHUNKED_CONS) {
+        const mino_val_t *ch = c->as.chunked_cons.chunk;
+        size_t next = (*idx) + 1;
+        if (next < ch->as.chunk.len) { *idx = next; return; }
+        *cur = c->as.chunked_cons.more;
+        *idx = 0;
+        if (*cur != NULL && (*cur)->type == MINO_CHUNKED_CONS) {
+            *idx = (*cur)->as.chunked_cons.off;
+        }
+        return;
+    }
+    /* MINO_VECTOR */
+    (*idx)++;
+}
+
 static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
 {
     const mino_val_t *ca = resolve_lazy(a);
     const mino_val_t *cb = resolve_lazy(b);
-    size_t ia = 0, ib = 0;
+    size_t ia = (ca != NULL && ca->type == MINO_CHUNKED_CONS)
+                    ? ca->as.chunked_cons.off : 0;
+    size_t ib = (cb != NULL && cb->type == MINO_CHUNKED_CONS)
+                    ? cb->as.chunked_cons.off : 0;
 
     for (;;) {
         const mino_val_t *ea;
@@ -573,18 +600,19 @@ static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
         if (a_end || b_end) return 0;
 
         if (ca->type == MINO_CONS) ea = ca->as.cons.car;
+        else if (ca->type == MINO_CHUNKED_CONS)
+            ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
         else ea = vec_nth(ca, ia);
 
         if (cb->type == MINO_CONS) eb = cb->as.cons.car;
+        else if (cb->type == MINO_CHUNKED_CONS)
+            eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
         else eb = vec_nth(cb, ib);
 
         if (!mino_eq(ea, eb)) return 0;
 
-        if (ca->type == MINO_CONS) ca = ca->as.cons.cdr;
-        else ia++;
-
-        if (cb->type == MINO_CONS) cb = cb->as.cons.cdr;
-        else ib++;
+        eq_seq_step(&ca, &ia);
+        eq_seq_step(&cb, &ib);
     }
 }
 
@@ -813,6 +841,14 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_LAZY:
         /* Should not reach here — lazy seqs are forced above. */
         return 0;
+    case MINO_CHUNK:
+        /* Internal seq leaf; identity equality (chunk-buffer state
+         * is mutable and not meaningfully comparable across instances). */
+        return a == b;
+    case MINO_CHUNKED_CONS:
+        /* Should not reach here — handled by the cross-type sequential
+         * path via is_sequential. */
+        return eq_seq_like(a, b);
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET:
         /* Structural comparison: same length + identical tree structure. */
@@ -873,6 +909,11 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
     const mino_val_t *cb = b;
     size_t ia = 0, ib = 0;
 
+    if (ca != NULL && ca->type == MINO_CHUNKED_CONS)
+        ia = ca->as.chunked_cons.off;
+    if (cb != NULL && cb->type == MINO_CHUNKED_CONS)
+        ib = cb->as.chunked_cons.off;
+
     for (;;) {
         const mino_val_t *ea;
         const mino_val_t *eb;
@@ -896,18 +937,19 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
         if (a_end || b_end) return 0;
 
         if (ca->type == MINO_CONS) ea = ca->as.cons.car;
+        else if (ca->type == MINO_CHUNKED_CONS)
+            ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
         else ea = vec_nth(ca, ia);
 
         if (cb->type == MINO_CONS) eb = cb->as.cons.car;
+        else if (cb->type == MINO_CHUNKED_CONS)
+            eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
         else eb = vec_nth(cb, ib);
 
         if (!mino_eq_force(S, ea, eb)) return 0;
 
-        if (ca->type == MINO_CONS) ca = ca->as.cons.cdr;
-        else ia++;
-
-        if (cb->type == MINO_CONS) cb = cb->as.cons.cdr;
-        else ib++;
+        eq_seq_step(&ca, &ia);
+        eq_seq_step(&cb, &ib);
     }
 }
 

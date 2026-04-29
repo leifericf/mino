@@ -640,6 +640,8 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_ATOM:
     case MINO_VOLATILE:
     case MINO_LAZY:
+    case MINO_CHUNK:
+    case MINO_CHUNKED_CONS:
     case MINO_RECUR:
     case MINO_TAIL_CALL:
     case MINO_REDUCED:

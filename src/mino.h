@@ -27,7 +27,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 96
-#define MINO_VERSION_PATCH 7
+#define MINO_VERSION_PATCH 8
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -75,6 +75,19 @@ typedef enum {
                     * implies single-thread access. Constructed via
                     * mino_volatile / `volatile!`. */
     MINO_LAZY,    /* lazy sequence: thunk body + env, cached on first force */
+    MINO_CHUNK,   /* fixed-capacity buffer of values used as the leaf
+                   * of a chunked seq. Constructed via `chunk-buffer`
+                   * (mutable, for accumulation) and sealed via
+                   * `chunk` (returns the same value with sealed=1).
+                   * After sealing, chunk-append throws. */
+    MINO_CHUNKED_CONS, /* chunked-seq cell: holds one MINO_CHUNK plus
+                        * an offset into it and a `more` seq for what
+                        * follows the chunk. first/next/rest treat
+                        * this transparently as a seq; chunk-first /
+                        * chunk-rest expose the underlying chunk so
+                        * combinators can pull a whole chunk at a
+                        * time and emit chunked output. Constructed
+                        * via `chunk-cons`. */
     MINO_RECUR,   /* internal tail-call trampoline sentinel */
     MINO_TAIL_CALL, /* proper tail call: carries {fn, args} for trampoline */
     MINO_REDUCED, /* early termination wrapper for reduce */
@@ -214,6 +227,17 @@ struct mino_val {
                                   /* optional C thunk; body is context if set */
             int         realized; /* 0 = pending, 1 = forced */
         } lazy;
+        struct {          /* MINO_CHUNK: fixed-cap value buffer */
+            mino_val_t **vals;    /* malloc-owned slot array, length cap */
+            unsigned     cap;     /* capacity (typically 32) */
+            unsigned     len;     /* number of populated slots */
+            int          sealed;  /* 0 = mutable buffer, 1 = sealed chunk */
+        } chunk;
+        struct {          /* MINO_CHUNKED_CONS: chunk + offset + more */
+            mino_val_t *chunk;    /* MINO_CHUNK; off < chunk.len at all times */
+            mino_val_t *more;     /* tail seq (nil/empty/cons/lazy/chunked) */
+            unsigned    off;      /* offset of this cell's first element */
+        } chunked_cons;
         struct {          /* MINO_RECUR: carries rebind args for trampoline */
             mino_val_t *args;  /* argument list for next iteration */
         } recur;
@@ -379,6 +403,30 @@ mino_val_t *mino_volatile_deref(const mino_val_t *v);
 
 /* Set the value of an atom. */
 void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
+
+/* Create an empty chunk buffer with the given capacity. The returned
+ * value is mutable until `mino_chunk_seal` is called; subsequent
+ * `mino_chunk_append` calls fail once the buffer is sealed or full. */
+mino_val_t *mino_chunk_buffer(mino_state_t *S, unsigned cap);
+
+/* Append elem to a chunk buffer. Returns 1 on success, 0 if buf is
+ * not a chunk, is sealed, or is full. */
+int         mino_chunk_append(mino_val_t *buf, mino_val_t *elem);
+
+/* Seal a chunk buffer so no further appends are accepted. Returns
+ * the same value (now an immutable chunk). */
+mino_val_t *mino_chunk_seal(mino_val_t *buf);
+
+/* Construct a chunked-cons cell wrapping a sealed chunk and a tail
+ * seq (`more` may be nil, empty-list, cons, lazy, or another
+ * chunked-cons). Returns `more` directly when the chunk is empty. */
+mino_val_t *mino_chunked_cons(mino_state_t *S, mino_val_t *chunk,
+                              mino_val_t *more);
+
+/* Build a chunked-cons positioned one element past `cs`, sharing the
+ * underlying chunk. Returns the cell's `more` pointer when the
+ * advance would exceed the chunk's length. */
+mino_val_t *mino_chunked_cons_advance(mino_state_t *S, const mino_val_t *cs);
 
 /* ------------------------------------------------------------------------- */
 /* Record types                                                              */

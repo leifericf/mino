@@ -223,6 +223,34 @@ uint32_t hash_val(const mino_val_t *v)
     case MINO_VOLATILE:
         h = fnv_mix(h, 0x0e);
         return hash_pointer_bytes(h, (uintptr_t)v);
+    case MINO_CHUNK:
+        /* Internal seq leaf; identity-hashed (matches identity equality
+         * in mino_eq above). */
+        h = fnv_mix(h, 0x14);
+        return hash_pointer_bytes(h, (uintptr_t)v);
+    case MINO_CHUNKED_CONS: {
+        /* Element-wise fold across chunk + more. Distinct tag from
+         * cons / vector (mino's seq hashing was already non-uniform
+         * across MINO_CONS / MINO_VECTOR before chunked-cons existed
+         * and is tracked as a separate divergence). */
+        const mino_val_t *cur = v;
+        size_t idx = v->as.chunked_cons.off;
+        h = fnv_mix(h, 0x15);
+        while (cur != NULL && cur->type == MINO_CHUNKED_CONS) {
+            const mino_val_t *ch = cur->as.chunked_cons.chunk;
+            for (; idx < ch->as.chunk.len; idx++) {
+                h = hash_uint32_bytes(h, hash_val(ch->as.chunk.vals[idx]));
+            }
+            cur = cur->as.chunked_cons.more;
+            idx = (cur != NULL && cur->type == MINO_CHUNKED_CONS)
+                      ? cur->as.chunked_cons.off : 0;
+        }
+        if (cur != NULL && cur->type != MINO_NIL
+            && cur->type != MINO_EMPTY_LIST) {
+            h = hash_uint32_bytes(h, hash_val(cur));
+        }
+        return h;
+    }
     case MINO_BIGINT: {
         /* Bigints that fit in a long long hash under the MINO_INT tag
          * so (= 1 1N) and (hash-of 1 1N) agree. Larger magnitudes use a

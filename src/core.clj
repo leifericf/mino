@@ -920,21 +920,43 @@
    (lazy-seq
      (let [s (seq coll)]
        (when s
-         (let [v (f (first s))]
-           (if (nil? v)
-             (keep f (rest s))
-             (cons v (keep f (rest s))))))))))
+         (if (chunked-seq? s)
+           (let [c (chunk-first s)
+                 size (count c)
+                 b (chunk-buffer size)]
+             (loop [i 0]
+               (when (< i size)
+                 (let [v (f (nth c i))]
+                   (when-not (nil? v) (chunk-append b v)))
+                 (recur (inc i))))
+             (chunk-cons (chunk b) (keep f (chunk-rest s))))
+           (let [v (f (first s))]
+             (if (nil? v)
+               (keep f (rest s))
+               (cons v (keep f (rest s)))))))))))
 
 (defn keep-indexed "Returns a lazy sequence of non-nil results of (f index item)." [f coll]
   (let [keepi (fn keepi [i coll]
                 (lazy-seq
-                  ((fn [i coll]
-                     (when-let [s (seq coll)]
-                       (let [v (f i (first s))]
-                         (if (nil? v)
-                           (recur (inc i) (rest s))
-                           (cons v (keepi (inc i) (rest s)))))))
-                   i coll)))]
+                  (when-let [s (seq coll)]
+                    (if (chunked-seq? s)
+                      (let [c (chunk-first s)
+                            size (count c)
+                            b (chunk-buffer size)]
+                        (loop [j 0]
+                          (when (< j size)
+                            (let [v (f (+ i j) (nth c j))]
+                              (when-not (nil? v) (chunk-append b v)))
+                            (recur (inc j))))
+                        (chunk-cons (chunk b)
+                                    (keepi (+ i size) (chunk-rest s))))
+                      ((fn [i coll]
+                         (when-let [s (seq coll)]
+                           (let [v (f i (first s))]
+                             (if (nil? v)
+                               (recur (inc i) (rest s))
+                               (cons v (keepi (inc i) (rest s)))))))
+                       i coll)))))]
     (keepi 0 coll)))
 
 (defn map-indexed "Returns a lazy sequence of (f index item) for each item in coll. When called with no collection, returns a transducer."
@@ -948,9 +970,19 @@
   ([f coll]
    (let [step (fn step [i s]
                 (lazy-seq
-                  (when (seq s)
-                    (cons (f i (first s))
-                          (step (inc i) (rest s))))))]
+                  (when-let [s (seq s)]
+                    (if (chunked-seq? s)
+                      (let [c (chunk-first s)
+                            size (count c)
+                            b (chunk-buffer size)]
+                        (loop [j 0]
+                          (when (< j size)
+                            (chunk-append b (f (+ i j) (nth c j)))
+                            (recur (inc j))))
+                        (chunk-cons (chunk b)
+                                    (step (+ i size) (chunk-rest s))))
+                      (cons (f i (first s))
+                            (step (inc i) (rest s)))))))]
      (step 0 coll))))
 
 (defn partition-all "Like partition, but includes a final partial group if items remain."

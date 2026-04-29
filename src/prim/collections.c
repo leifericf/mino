@@ -190,6 +190,25 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (forced->type == MINO_NIL) return mino_int(S, 0);
         return mino_int(S, (long long)list_length(S, forced));
     }
+    case MINO_CHUNK: return mino_int(S, (long long)coll->as.chunk.len);
+    case MINO_CHUNKED_CONS: {
+        long long          n = 0;
+        const mino_val_t  *cur = coll;
+        while (cur != NULL && cur->type == MINO_CHUNKED_CONS) {
+            const mino_val_t *ch = cur->as.chunked_cons.chunk;
+            n += (long long)(ch->as.chunk.len - cur->as.chunked_cons.off);
+            cur = cur->as.chunked_cons.more;
+            if (cur != NULL && cur->type == MINO_LAZY) {
+                cur = lazy_force(S, (mino_val_t *)cur);
+                if (cur == NULL) return NULL;
+            }
+        }
+        if (cur != NULL && cur->type != MINO_NIL
+            && cur->type != MINO_EMPTY_LIST) {
+            n += (long long)list_length(S, (mino_val_t *)cur);
+        }
+        return mino_int(S, n);
+    }
     default:
         {
             char msg[96];
@@ -296,6 +315,13 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return vec_nth(coll, (size_t)idx);
     }
+    if (coll->type == MINO_CHUNK) {
+        if ((size_t)idx >= coll->as.chunk.len) {
+            if (def_val != NULL) return def_val;
+            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        }
+        return coll->as.chunk.vals[(size_t)idx];
+    }
     if (coll->type == MINO_CONS) {
         mino_val_t *p = coll;
         long long   i;
@@ -359,7 +385,15 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (s == NULL) return NULL;
         if (s->type == MINO_NIL || s == NULL) return mino_nil(S);
         if (s->type == MINO_CONS) return s->as.cons.car;
+        if (s->type == MINO_CHUNKED_CONS) {
+            const mino_val_t *ch = s->as.chunked_cons.chunk;
+            return ch->as.chunk.vals[s->as.chunked_cons.off];
+        }
         return mino_nil(S);
+    }
+    if (coll->type == MINO_CHUNKED_CONS) {
+        const mino_val_t *ch = coll->as.chunked_cons.chunk;
+        return ch->as.chunk.vals[coll->as.chunked_cons.off];
     }
     if (coll->type == MINO_STRING) {
         if (coll->as.s.len == 0) return mino_nil(S);
@@ -491,7 +525,17 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (cdr == NULL || cdr->type == MINO_NIL) return mino_empty_list(S);
             return cdr;
         }
+        if (s->type == MINO_CHUNKED_CONS) {
+            mino_val_t *r = mino_chunked_cons_advance(S, s);
+            if (r == NULL || r->type == MINO_NIL) return mino_empty_list(S);
+            return r;
+        }
         return mino_empty_list(S);
+    }
+    if (coll->type == MINO_CHUNKED_CONS) {
+        mino_val_t *r = mino_chunked_cons_advance(S, coll);
+        if (r == NULL || r->type == MINO_NIL) return mino_empty_list(S);
+        return r;
     }
     if (coll->type == MINO_STRING) {
         if (coll->as.s.len <= 1) return mino_empty_list(S);

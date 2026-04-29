@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.96.8 — Chunked-Seq Family
+
+Adds the `clojure.core` chunked-seq surface: `chunk-buffer`,
+`chunk-append`, `chunk`, `chunk-cons`, `chunk-first`, `chunk-rest`,
+`chunk-next`, and `chunked-seq?`. Two new C value types back the
+implementation: `MINO_CHUNK` (a fixed-cap, mutable-then-sealed value
+buffer) and `MINO_CHUNKED_CONS` (a seq cell that carries a chunk plus
+an offset and a tail seq).
+
+Chunked seqs participate in the seq protocol transparently: `first`,
+`next`, `rest`, `seq`, `count`, `nth`, `reduce`, equality
+(`(= chunked flat)` is true), and printing all walk a chunk-cons the
+way they walk a regular cons. The walk dispatches at the chunk level
+where possible — `count` sums chunk lengths, `nth` indexes into the
+underlying chunk, `reduce` honours chunk boundaries via the seq
+iterator.
+
+The C-level lazy combinators `map`, `filter`, and `take` propagate
+chunkedness end-to-end: when fed a chunked input, they read the head
+chunk in one go via `chunk-first`, build a fresh chunk via
+`chunk-buffer`/`chunk-append`/`chunk`, and emit a `chunk-cons`. The
+`mino`-level `keep`, `keep-indexed`, and `map-indexed` follow the
+same pattern, so longer pipelines preserve chunkedness across mixed
+C-level and `mino`-level steps.
+
+Sources are not auto-chunked yet — `(seq [1 2 3])` still returns a
+flat cons list, and `(chunked-seq? (seq [1 2 3]))` is `false`. The
+chunk-aware fast paths fire when consumers explicitly construct a
+chunked seq via the new primitives. Auto-chunking vectors and ranges
+is a follow-up cycle that needs the wider walker audit (`mino_is_cons`
+appears in 416 sites; see `.local/BUGS.md`-tracked notes).
+
 ## v0.96.7 — `:refer :all` Drops Transitive Refers; Macros Get Vars
 
 `(require '[some.ns :refer :all])` previously bound every name present

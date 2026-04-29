@@ -50,6 +50,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return forced;
     }
     if (coll->type == MINO_CONS) return coll;
+    if (coll->type == MINO_CHUNKED_CONS) return coll;
     if (coll->type == MINO_VECTOR) {
         mino_val_t *head = mino_nil(S), *tail = NULL;
         size_t i;
@@ -160,6 +161,10 @@ void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
     it->coll  = coll;
     it->idx   = 0;
     it->cons_p = (coll != NULL && coll->type == MINO_CONS) ? coll : NULL;
+    if (coll != NULL && coll->type == MINO_CHUNKED_CONS) {
+        it->cons_p = coll;
+        it->idx    = (size_t)coll->as.chunked_cons.off;
+    }
 }
 
 int seq_iter_done(const seq_iter_t *it)
@@ -168,6 +173,8 @@ int seq_iter_done(const seq_iter_t *it)
     if (c == NULL || c->type == MINO_NIL) return 1;
     switch (c->type) {
     case MINO_CONS:   return it->cons_p == NULL || it->cons_p->type != MINO_CONS;
+    case MINO_CHUNKED_CONS:
+        return it->cons_p == NULL || it->cons_p->type != MINO_CHUNKED_CONS;
     case MINO_VECTOR: return it->idx >= c->as.vec.len;
     case MINO_MAP:    return it->idx >= c->as.map.len;
     case MINO_SET:    return it->idx >= c->as.set.len;
@@ -181,6 +188,11 @@ mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
     const mino_val_t *c = it->coll;
     switch (c->type) {
     case MINO_CONS:   return it->cons_p->as.cons.car;
+    case MINO_CHUNKED_CONS: {
+        const mino_val_t *cell = it->cons_p;
+        const mino_val_t *ch   = cell->as.chunked_cons.chunk;
+        return ch->as.chunk.vals[it->idx];
+    }
     case MINO_VECTOR: return vec_nth(c, it->idx);
     case MINO_MAP: {
         /* Yield [key value] vectors for maps. */
@@ -207,6 +219,35 @@ void seq_iter_next(mino_state_t *S, seq_iter_t *it)
                 next = lazy_force(S, (mino_val_t *)next);
             }
             it->cons_p = next;
+        }
+    } else if (it->coll != NULL && it->coll->type == MINO_CHUNKED_CONS) {
+        if (it->cons_p != NULL && it->cons_p->type == MINO_CHUNKED_CONS) {
+            const mino_val_t *cell = it->cons_p;
+            const mino_val_t *ch   = cell->as.chunked_cons.chunk;
+            unsigned          next_idx = (unsigned)(it->idx + 1);
+            if (next_idx < ch->as.chunk.len) {
+                it->idx = next_idx;
+                return;
+            }
+            {
+                const mino_val_t *more = cell->as.chunked_cons.more;
+                if (more != NULL && more->type == MINO_LAZY) {
+                    more = lazy_force(S, (mino_val_t *)more);
+                }
+                if (more != NULL && more->type == MINO_CONS) {
+                    /* Switch dispatch to cons-mode for the rest of the
+                     * walk. */
+                    it->coll   = more;
+                    it->cons_p = more;
+                    it->idx    = 0;
+                } else if (more != NULL
+                           && more->type == MINO_CHUNKED_CONS) {
+                    it->cons_p = more;
+                    it->idx    = (size_t)more->as.chunked_cons.off;
+                } else {
+                    it->cons_p = NULL;
+                }
+            }
         }
     } else {
         it->idx++;

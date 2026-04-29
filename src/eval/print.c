@@ -274,6 +274,56 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         mino_print_to(S, out, forced);
         return;
     }
+    case MINO_CHUNK: {
+        /* Internal seq leaf; surface as `#chunk[…]` rather than
+         * pretending to be a vector. */
+        unsigned k;
+        fputs("#chunk[", out);
+        S->print_depth++;
+        for (k = 0; k < v->as.chunk.len; k++) {
+            if (k > 0) fputc(' ', out);
+            mino_print_to(S, out, v->as.chunk.vals[k]);
+        }
+        S->print_depth--;
+        fputc(']', out);
+        return;
+    }
+    case MINO_CHUNKED_CONS: {
+        /* Print as a list. Walk the chunk from off..len-1, then
+         * recurse into the more pointer (which may be cons / lazy /
+         * another chunked-cons). */
+        const mino_val_t *cur = v;
+        fputc('(', out);
+        S->print_depth++;
+        while (cur != NULL && cur->type == MINO_CHUNKED_CONS) {
+            const mino_val_t *ch = cur->as.chunked_cons.chunk;
+            unsigned k;
+            for (k = cur->as.chunked_cons.off; k < ch->as.chunk.len; k++) {
+                if (k > cur->as.chunked_cons.off
+                    || cur != v) fputc(' ', out);
+                mino_print_to(S, out, ch->as.chunk.vals[k]);
+            }
+            cur = cur->as.chunked_cons.more;
+            if (cur != NULL && cur->type == MINO_LAZY) {
+                cur = lazy_force(S, (mino_val_t *)cur);
+            }
+        }
+        if (cur != NULL && cur->type == MINO_CONS) {
+            fputc(' ', out);
+            /* Reuse the cons walker by printing the tail inline. */
+            while (cur != NULL && cur->type == MINO_CONS) {
+                mino_print_to(S, out, cur->as.cons.car);
+                cur = cur->as.cons.cdr;
+                if (cur != NULL && cur->type == MINO_LAZY) {
+                    cur = lazy_force(S, (mino_val_t *)cur);
+                }
+                if (cur != NULL && cur->type == MINO_CONS) fputc(' ', out);
+            }
+        }
+        S->print_depth--;
+        fputc(')', out);
+        return;
+    }
     case MINO_RECUR:
         /* Internal sentinel; should not escape to user-visible output. */
         fputs("#<recur>", out);

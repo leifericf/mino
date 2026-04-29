@@ -97,6 +97,9 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
             } else if (v->type == MINO_RECORD) {
                 free(v->as.record.vals);
                 v->as.record.vals = NULL;
+            } else if (v->type == MINO_CHUNK) {
+                free(v->as.chunk.vals);
+                v->as.chunk.vals = NULL;
             } else if (v->type == MINO_FUTURE) {
                 extern void mino_future_gc_sweep(mino_val_t *fut);
                 mino_future_gc_sweep(v);
@@ -256,6 +259,16 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 gc_verify_check(S, h, v->as.atom.validator); break;
             case MINO_VOLATILE:
                 gc_verify_check(S, h, v->as.volatile_.val); break;
+            case MINO_CHUNK: {
+                unsigned k;
+                for (k = 0; k < v->as.chunk.len; k++) {
+                    gc_verify_check(S, h, v->as.chunk.vals[k]);
+                }
+                break;
+            }
+            case MINO_CHUNKED_CONS:
+                gc_verify_check(S, h, v->as.chunked_cons.chunk);
+                gc_verify_check(S, h, v->as.chunked_cons.more); break;
             case MINO_LAZY:
                 if (v->as.lazy.realized) gc_verify_check(S, h, v->as.lazy.cached);
                 else {
