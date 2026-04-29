@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.96.2 — Lazy-Seq `recur`-On-Skip Rewrites
+
+Four lazy-seq combinators that previously allocated a fresh `lazy-seq`
+cell on every input — including the ones they were going to skip —
+adopt canon's pattern: an outer step function produces a `lazy-seq` cell
+only when emitting, and an inner anonymous fn `recur`s when skipping.
+The rewritten sites are `distinct` (collection arity), `drop-while`
+(collection arity), `keep-indexed`, and `dedupe` (collection arity).
+`dedupe`'s collection arity now delegates to `(sequence (dedupe) coll)`,
+matching canon's shortcut.
+
+The user-visible result on duplicate-heavy or long-skip inputs is one
+allocation per emitted value instead of one per element visited. The
+pre-existing `drop-while` collection arity used a non-lazy recursive
+walk; the rewrite restores lazy semantics that match canon.
+
 ## v0.96.1 — Stateful Transducers Use Real `volatile!`
 
 Ten transducer state slots in `src/core.clj` switch from `(atom ...)`

@@ -402,11 +402,12 @@
               (do (vreset! dropping false)
                   (rf result input))))))))
   ([pred coll]
-   (let [s (seq coll)]
-     (cond
-       (nil? s)            (list)
-       (pred (first s))    (drop-while pred (rest s))
-       :else               s))))
+   (let [step (fn [pred coll]
+                (let [s (seq coll)]
+                  (if (and s (pred (first s)))
+                    (recur pred (rest s))
+                    s)))]
+     (lazy-seq (step pred coll)))))
 
 (defn take-nth "Returns a lazy sequence of every nth item in coll. When called with no collection, returns a transducer."
   ([n]
@@ -496,15 +497,16 @@
               (do (vswap! seen conj input)
                   (rf result input))))))))
   ([coll]
-   (let [dist-impl (fn dist-impl [seen coll]
-                      (lazy-seq
-                        (let [s (seq coll)]
-                          (when s
-                            (let [x (first s)]
-                              (if (contains? seen x)
-                                (dist-impl seen (rest s))
-                                (cons x (dist-impl (conj seen x) (rest s)))))))))]
-     (dist-impl #{} coll))))
+   (let [step (fn step [xs seen]
+                (lazy-seq
+                  ((fn [xs seen]
+                     (when-let [s (seq xs)]
+                       (let [f (first s)]
+                         (if (contains? seen f)
+                           (recur (rest s) seen)
+                           (cons f (step (rest s) (conj seen f)))))))
+                   xs seen)))]
+     (step coll #{}))))
 
 (def partition "Returns a lazy sequence of lists of n items each, at offsets step apart. With pad, the final partition is filled from pad to reach n; if pad is shorter than needed, returns a partition with fewer than n items."
   (let [part-impl
@@ -862,14 +864,16 @@
              (cons v (keep f (rest s))))))))))
 
 (defn keep-indexed "Returns a lazy sequence of non-nil results of (f index item)." [f coll]
-  (let [step (fn [i s]
-               (lazy-seq
-                 (when (seq s)
-                   (let [v (f i (first s))]
-                     (if (nil? v)
-                       (step (inc i) (rest s))
-                       (cons v (step (inc i) (rest s))))))))]
-    (step 0 coll)))
+  (let [keepi (fn keepi [i coll]
+                (lazy-seq
+                  ((fn [i coll]
+                     (when-let [s (seq coll)]
+                       (let [v (f i (first s))]
+                         (if (nil? v)
+                           (recur (inc i) (rest s))
+                           (cons v (keepi (inc i) (rest s)))))))
+                   i coll)))]
+    (keepi 0 coll)))
 
 (defn map-indexed "Returns a lazy sequence of (f index item) for each item in coll. When called with no collection, returns a transducer."
   ([f]
@@ -935,17 +939,7 @@
               result
               (do (vreset! prev input)
                   (rf result input))))))))
-  ([coll]
-   (let [step (fn step [prev s]
-                (lazy-seq
-                  (when (seq s)
-                    (let [x (first s)]
-                      (if (= x prev)
-                        (step prev (rest s))
-                        (cons x (step x (rest s))))))))]
-     (lazy-seq
-       (when (seq coll)
-         (cons (first coll) (step (first coll) (rest coll))))))))
+  ([coll] (sequence (dedupe) coll)))
 
 ;; --- Higher-order combinators ---
 
