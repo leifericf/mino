@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.97.2 — src/core.clj Code-Quality Sweep
+
+Walk `src/core.clj` for the project's 80-char line limit. 157 long
+lines are gone (the longest was 226 chars on `partition`). Most cuts
+are docstrings that used to live on the same line as the `defn`
+signature; they now sit on their own line with a 3-space continuation
+indent.
+
+Five macros (`lazy-cat`, `delay`, `defprotocol`, `extend-protocol`,
+`defmulti`) had their args vectors on the docstring line; both moves
+to their own line beneath the docstring. Three inline anonymous fns
+(method metadata and method-defn builders inside `defprotocol`, and
+the descendants accumulator inside `recompute-hierarchy`) became
+`letfn` helpers with descriptive names. `bit-test` swaps
+`(not (= 0 ...))` for `(not= 0 ...)`. Two opportunistic idiom swaps:
+`(when (not (coll? ...)))` becomes `when-not` in `shuffle`, and
+`(when (not (nil? idx)))` becomes `(when (some? idx))` in `re-seq`.
+
+The six `(def NAME "doc" (fn ...))` sites at the very top of the
+file (`identity`, `ifn?`, `qualified-symbol?`, `simple-symbol?`,
+`qualified-keyword?`, `simple-keyword?`) keep the `def` form because
+they load before `defn` itself is interned. Their docstrings are
+wrapped onto their own lines.
+
+No behavioral changes; the full test suite still passes.
+
 ## v0.97.1 — Sort-By and Reductions Arities
 
 `sort-by` and `reductions` were single-signature `[f & args]` defns
