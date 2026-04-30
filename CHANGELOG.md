@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.97.4 — Lift defn So Top-Of-File Predicates Use It
+
+`defn`, `defn-`, `defonce`, and the private `fn-arity-with-prepost`
+helper move above the early type predicates in `src/core.clj`. With
+`defn` now available before `not=`, the six bootstrap-era
+`(def NAME "doc" (fn ...))` sites — `not=`, `identity`, `ifn?`,
+`qualified-symbol?`, `simple-symbol?`, `qualified-keyword?`,
+`simple-keyword?` — become regular `defn` forms. The `defn` macro
+itself only depends on special forms, primitive fns, and the macros
+already defined above its new position (`when`, `cond`, `and`, `or`,
+`->`, `->>`).
+
+No behavioral changes; the full test suite still passes.
+
 ## v0.97.3 — clojure.core.async Canon Combinators
 
 Adds four canon channel combinators to `clojure.core.async`:

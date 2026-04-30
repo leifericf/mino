@@ -61,54 +61,11 @@
         `(->> (~(first step) ~@(rest step) ~x) ~@(rest forms))
         `(->> (~step ~x) ~@(rest forms))))))
 
-;; --- Logic and utilities ---
-
-;; not is a C primitive.
-(def not=
-  "Returns true if the arguments are not equal."
-  (fn ([x] false)
-      ([x y] (not (= x y)))
-      ([x y & more] (not (apply = x y more)))))
-(def identity "Returns its argument." (fn [x] x))
-;; list is a C primitive.
-;; empty? is a C primitive.
-
-;; >, <=, >= are C primitives (compare_chain) - see prim/numeric.c
-
-;; --- Type predicates ---
-;; Most primitive type predicates (nil?, cons?, string?, number?, keyword?,
-;; symbol?, vector?, map?, fn?, set?, seq?) are defined as C primitives
-;; for speed. ifn? is kept here since it combines multiple predicates.
-
-(def ifn?
-  "Returns true if x can be called as a function."
-  (fn [x]
-    (or (fn? x) (keyword? x) (map? x) (vector? x)
-        (set? x) (symbol? x) (var? x))))
-
-;; --- Qualified symbol/keyword predicates ---
-
-(def qualified-symbol?
-  "Returns true if x is a namespace-qualified symbol."
-  (fn [x] (and (symbol? x) (some? (namespace x)))))
-
-(def simple-symbol?
-  "Returns true if x is a symbol with no namespace."
-  (fn [x] (and (symbol? x) (nil? (namespace x)))))
-
-(def qualified-keyword?
-  "Returns true if x is a namespace-qualified keyword."
-  (fn [x] (and (keyword? x) (some? (namespace x)))))
-
-(def simple-keyword?
-  "Returns true if x is a keyword with no namespace."
-  (fn [x] (and (keyword? x) (nil? (namespace x)))))
-
-;; --- Atoms ---
-
-;; swap! is defined as a C primitive; no mino-level fallback needed.
-
 ;; --- Definitions ---
+
+;; defn is lifted above the early type predicates so they can use it.
+;; Anything that depends only on special forms, primitives, and the
+;; macros defined above (when, cond, and, or, ->, ->>) is fair game.
 
 ;; Walk a single fn arity (params-vec body...) and, if the first body
 ;; form is a {:pre [...] :post [...]} map, rewrite the arity so the
@@ -176,12 +133,68 @@
       `(def ~name ~doc ~form)
       `(def ~name ~form))))
 
-(defmacro defn- "Same as defn, yielding a non-public def." [name & body]
+(defmacro defn-
+  "Same as defn, yielding a non-public def."
+  [name & body]
   (apply list 'defn (vary-meta name assoc :private true) body))
 
-(defmacro defonce "Defines name only if it has no root binding." [name expr]
+(defmacro defonce
+  "Defines name only if it has no root binding."
+  [name expr]
   `(when-not (resolve '~name)
      (def ~name ~expr)))
+
+;; --- Logic and utilities ---
+
+;; not is a C primitive.
+(defn not=
+  "Returns true if the arguments are not equal."
+  ([x] false)
+  ([x y] (not (= x y)))
+  ([x y & more] (not (apply = x y more))))
+
+(defn identity "Returns its argument." [x] x)
+
+;; list is a C primitive.
+;; empty? is a C primitive.
+;; >, <=, >= are C primitives (compare_chain) - see prim/numeric.c
+
+;; --- Type predicates ---
+;; Most primitive type predicates (nil?, cons?, string?, number?, keyword?,
+;; symbol?, vector?, map?, fn?, set?, seq?) are defined as C primitives
+;; for speed. ifn? is kept here since it combines multiple predicates.
+
+(defn ifn?
+  "Returns true if x can be called as a function."
+  [x]
+  (or (fn? x) (keyword? x) (map? x) (vector? x)
+      (set? x) (symbol? x) (var? x)))
+
+;; --- Qualified symbol/keyword predicates ---
+
+(defn qualified-symbol?
+  "Returns true if x is a namespace-qualified symbol."
+  [x]
+  (and (symbol? x) (some? (namespace x))))
+
+(defn simple-symbol?
+  "Returns true if x is a symbol with no namespace."
+  [x]
+  (and (symbol? x) (nil? (namespace x))))
+
+(defn qualified-keyword?
+  "Returns true if x is a namespace-qualified keyword."
+  [x]
+  (and (keyword? x) (some? (namespace x))))
+
+(defn simple-keyword?
+  "Returns true if x is a keyword with no namespace."
+  [x]
+  (and (keyword? x) (nil? (namespace x))))
+
+;; --- Atoms ---
+
+;; swap! is defined as a C primitive; no mino-level fallback needed.
 
 ;; --- Lazy sequence operations ---
 
