@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.97.0 — Kwargs Destructuring
+
+`& {:keys [...]}` parameter lists now match Clojure 1.11+ canon. The
+runtime's map destructure accepts all three rest-args shapes: an
+inline keyword/value pair sequence (`(g :k v :k v)`), a single
+trailing map (`(g {:k v})`), and a mix of pairs followed by an
+override map (`(g :k v {:k v})`). The fix lives in
+`bind_map_destructure` in `src/eval/bindings.c`. `:or` defaults are
+now evaluated in the binding env, so symbols like `some?` resolve to
+their function values instead of being bound as the literal symbol.
+
+`iteration` no longer carries a divergence note. Its signature is now
+`[step & {:keys [somef vf kf initk] :or {...}}]`, matching canon.
+
 ## v0.96.9
 
 Adds `workflow_dispatch` to the release-build GitHub Actions
