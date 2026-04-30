@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.98.1 — compare Cross-Type Total Order
+
+`compare` no longer throws when its two arguments straddle type
+tiers; it returns the canon total order instead:
+
+```
+nil < false < true < numbers < strings < symbols < keywords
+```
+
+`(sort [:b 'a "c" 1 false nil])` now returns
+`(nil false 1 "c" a :b)` — same as canon Clojure.
+
+Same-type compares are unchanged; same-tier-different-content
+mixes still throw if neither operand is comparable to the other
+(e.g., a record and a function in the same tier).
+
 ## v0.98.0 — Macro Hygiene For Cross-NS :refer :all
 
 Syntax-quote inside a macro body now qualifies bare symbols against

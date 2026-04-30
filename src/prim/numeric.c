@@ -1309,11 +1309,32 @@ mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env
 /* Comparison                                                                */
 /* ------------------------------------------------------------------------- */
 
+/* Total-order tier for cross-type compare. Canon order:
+ *   nil < false < true < numbers < strings < symbols < keywords
+ * Returns -1 for any type outside this set so the caller can fall
+ * through to the "incomparable" error path. */
+static int compare_type_tier(const mino_val_t *v)
+{
+    if (v == NULL || v->type == MINO_NIL) return 0;
+    if (v->type == MINO_BOOL)             return v->as.b ? 2 : 1;
+    if (v->type == MINO_INT || v->type == MINO_FLOAT
+        || v->type == MINO_BIGINT || v->type == MINO_RATIO
+        || v->type == MINO_BIGDEC) return 3;
+    if (v->type == MINO_STRING)  return 4;
+    if (v->type == MINO_SYMBOL)  return 5;
+    if (v->type == MINO_KEYWORD) return 6;
+    return -1;
+}
+
 /* (compare a b) -- general comparison returning -1, 0, or 1.
- * Compares numbers, strings, keywords, symbols, and nil. */
+ * For values of the same type the natural same-type comparison
+ * applies; for values of different types within the canon-recognized
+ * set, the tier order above provides a total order matching
+ * Clojure's `compare`. */
 mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a, *b;
+    int ta, tb;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1321,21 +1342,27 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     a = args->as.cons.car;
     b = args->as.cons.cdr->as.cons.car;
-    /* nil sorts before everything */
-    if ((a == NULL || (a->type == MINO_NIL)) &&
-        (b == NULL || (b->type == MINO_NIL))) return mino_int(S, 0);
-    if (a == NULL || a->type == MINO_NIL) return mino_int(S, -1);
-    if (b == NULL || b->type == MINO_NIL) return mino_int(S, 1);
-    /* numbers */
+    ta = compare_type_tier(a);
+    tb = compare_type_tier(b);
+    if (ta >= 0 && tb >= 0 && ta != tb) {
+        return mino_int(S, ta < tb ? -1 : 1);
+    }
+    /* Same tier: dispatch by content. */
+    if ((a == NULL || a->type == MINO_NIL) &&
+        (b == NULL || b->type == MINO_NIL)) return mino_int(S, 0);
+    if (a != NULL && b != NULL && a->type == MINO_BOOL && b->type == MINO_BOOL) {
+        return mino_int(S, a->as.b < b->as.b ? -1 :
+                           a->as.b > b->as.b ? 1 : 0);
+    }
     {
         double da, db;
         if (as_double(a, &da) && as_double(b, &db)) {
             return mino_int(S, da < db ? -1 : da > db ? 1 : 0);
         }
     }
-    /* strings, keywords, symbols -- lexicographic */
-    if ((a->type == MINO_STRING || a->type == MINO_KEYWORD ||
-         a->type == MINO_SYMBOL) && a->type == b->type) {
+    if (a != NULL && b != NULL && a->type == b->type
+        && (a->type == MINO_STRING || a->type == MINO_KEYWORD
+            || a->type == MINO_SYMBOL)) {
         int cmp = strcmp(a->as.s.data, b->as.s.data);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
