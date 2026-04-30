@@ -50,6 +50,33 @@ mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_float(S, r);
 }
 
+/* (random-seed! seed) -- seed the per-state PRNG to a known value
+ * so subsequent rand / rand-int / rand-nth calls produce a
+ * reproducible stream. Returns the seed. The seed must be a
+ * non-zero integer; a zero seed degenerates the xorshift step, so
+ * we re-seed to a fixed non-zero constant in that case. */
+mino_val_t *prim_random_seed_bang(mino_state_t *S, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "random-seed! requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL || v->type != MINO_INT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "random-seed! seed must be an integer");
+    }
+    {
+        uint64_t seed = (uint64_t)v->as.i;
+        if (seed == 0) seed = 0x243F6A8885A308D3ULL;
+        S->rand_state = seed;
+    }
+    return v;
+}
+
 mino_val_t *prim_eval(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     /* eval evaluates in the current namespace, not the calling fn's
@@ -1086,6 +1113,8 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns the var to which a symbol resolves, or nil."},
     {"rand",      prim_rand,
      "Returns a random float between 0 inclusive and 1 exclusive, or between 0 and n."},
+    {"random-seed!", prim_random_seed_bang,
+     "Seeds the per-state PRNG to a known integer value so subsequent rand calls produce a reproducible stream. Returns the seed."},
     {"eval",      prim_eval,
      "Evaluates the given form."},
     {"load-string", prim_load_string,

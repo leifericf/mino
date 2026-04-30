@@ -732,21 +732,147 @@
   true)
 
 ;; ---------------------------------------------------------------------------
-;; Generators: deferred until clojure.test.check ports.
+;; Generators: backed by the bundled clojure.test.check generators.
+;; The generator surface is intentionally minimal -- shrinking is
+;; deferred, and the predicate-to-generator map covers the common
+;; primitive specs only. User-defined :gen-fn overrides take
+;; precedence; pass them via the second argument to gen / exercise.
 ;; ---------------------------------------------------------------------------
 
+(require '[clojure.test.check.generators :as gen-impl])
+
+(def ^:private predicate-generators
+  ;; Map a predicate symbol (qualified or bare) to a generator that
+  ;; yields values satisfying it. Looked up by the symbolic form when
+  ;; spec was created from a bare predicate (e.g. (s/def ::n int?));
+  ;; spec stores the qualified form (clojure.core/int?) so both keys
+  ;; appear here.
+  (let [pairs {'int?     gen-impl/int
+               'integer? gen-impl/int
+               'nat-int? gen-impl/nat
+               'pos-int? gen-impl/s-pos-int
+               'neg-int? gen-impl/neg-int
+               'string?  gen-impl/string
+               'keyword? gen-impl/keyword
+               'symbol?  gen-impl/symbol
+               'boolean? gen-impl/boolean
+               'double?  gen-impl/double
+               'number?  gen-impl/double
+               'nil?     (gen-impl/return nil)
+               'any?     gen-impl/any}]
+    (merge pairs
+           (into {} (for [[k v] pairs]
+                      [(symbol "clojure.core" (name k)) v])))))
+
+(defn- spec-form-key [spec]
+  ;; Spec values store the form under :clojure.spec.alpha/form. Fall
+  ;; back to plain :form for any future shape that uses the bare key.
+  (or (get spec :clojure.spec.alpha/form)
+      (get spec :form)))
+
+(defn- spec-form
+  "Best-effort retrieval of a spec's :form key."
+  [spec]
+  (cond
+    (map? spec)        (or (spec-form-key spec) spec)
+    (symbol? spec)     spec
+    (keyword? spec)    spec
+    :else              spec))
+
+(declare gen)
+
+(defn- form->generator [form overrides]
+  ;; Walk a spec form and produce a clojure.test.check generator.
+  ;; Recognized shapes:
+  ;;   - bare predicate symbol -> predicate-generators lookup
+  ;;   - (s/coll-of pred) -> vector of pred
+  ;;   - (s/tuple p1 p2 ...) -> tuple of preds
+  ;;   - (s/and ...)    -> first form's generator filtered by rest
+  ;;   - (s/or k1 p1 k2 p2 ...) -> one-of of [tag value]
+  ;; Anything else falls through to predicate-generators or throws.
+  (cond
+    (and (symbol? form) (contains? predicate-generators form))
+    (get predicate-generators form)
+
+    (cons? form)
+    (let [head (first form)
+          tail (rest form)
+          hd   (cond
+                 (symbol? head) (name head)
+                 :else          (str head))]
+      (cond
+        (or (= hd "coll-of")
+            (and (= hd "spec") (cons? (first tail))
+                 (= "coll-of" (name (first (first tail))))))
+        (gen-impl/vector
+          (form->generator (if (= hd "coll-of")
+                             (first tail)
+                             (second (first tail)))
+                           overrides))
+
+        (= hd "tuple")
+        (apply gen-impl/tuple
+               (map #(form->generator % overrides) tail))
+
+        (= hd "nilable")
+        (gen-impl/one-of
+          [(form->generator (first tail) overrides)
+           (gen-impl/return nil)])
+
+        (= hd "and")
+        ;; First form drives generation; later forms refine via such-that.
+        (let [base (form->generator (first tail) overrides)
+              rest-preds (rest tail)]
+          (if (empty? rest-preds)
+            base
+            (gen-impl/such-that
+              (fn [v]
+                (every? (fn [p] (try ((eval p) v) (catch __e false)))
+                        rest-preds))
+              base)))
+
+        (= hd "or")
+        (let [pairs (partition 2 tail)]
+          (gen-impl/one-of
+            (map (fn [[k p]]
+                   (gen-impl/fmap
+                     (fn [v] [k v])
+                     (form->generator p overrides)))
+                 pairs)))
+
+        :else
+        (throw (ex-info (str "s/gen: don't know how to generate from form " form)
+                        {:type :mino/unsupported :form form}))))
+
+    :else
+    (throw (ex-info (str "s/gen: don't know how to generate from spec " form)
+                    {:type :mino/unsupported :spec form}))))
+
 (defn gen
+  "Build a clojure.test.check generator for `spec`. `overrides` is a
+  map from spec-key keywords (or predicate symbols) to alternative
+  generators."
   ([spec] (gen spec nil))
-  ([spec _overrides]
-   (throw (ex-info "s/gen requires clojure.test.check, which is not bundled in mino"
-                   {:type :mino/unsupported :op 's/gen}))))
+  ([spec overrides]
+   (or (when overrides
+         (or (get overrides spec)
+             (when (keyword? spec)
+               (get overrides spec))))
+       (let [resolved (cond
+                        (keyword? spec) (get @registry-ref spec)
+                        :else            spec)
+             form     (spec-form resolved)]
+         (form->generator form (or overrides {}))))))
 
 (defn exercise
+  "Generate `n` (default 10) sample/conformed pairs for `spec`."
   ([spec] (exercise spec 10))
   ([spec n] (exercise spec n nil))
-  ([spec _n _overrides]
-   (throw (ex-info "s/exercise requires clojure.test.check, which is not bundled in mino"
-                   {:type :mino/unsupported :op 's/exercise}))))
+  ([spec n overrides]
+   (let [g (gen spec overrides)]
+     (vec (for [i (range n)]
+            (let [v (gen-impl/generate g (mod (clojure.core/* (inc i) 7) 50))]
+              [v (conform spec v)]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Macros at the bottom of the file.  Before this point, internal defns

@@ -61,6 +61,9 @@ BUNDLED = \
     lib_clojure_instant:lib/clojure/instant.clj \
     lib_clojure_spec_alpha:lib/clojure/spec/alpha.clj \
     lib_clojure_core_specs_alpha:lib/clojure/core/specs/alpha.clj \
+    lib_clojure_test_check_generators:lib/clojure/test/check/generators.clj \
+    lib_clojure_test_check_properties:lib/clojure/test/check/properties.clj \
+    lib_clojure_test_check:lib/clojure/test/check.clj \
     lib_mino_deps:lib/mino/deps.clj \
     lib_mino_tasks:lib/mino/tasks.clj \
     lib_mino_tasks_builtin:lib/mino/tasks/builtin.clj

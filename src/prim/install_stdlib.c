@@ -42,6 +42,9 @@
 #include "lib_clojure_instant.h"
 #include "lib_clojure_spec_alpha.h"
 #include "lib_clojure_core_specs_alpha.h"
+#include "lib_clojure_test_check_generators.h"
+#include "lib_clojure_test_check_properties.h"
+#include "lib_clojure_test_check.h"
 #include "lib_mino_deps.h"
 #include "lib_mino_tasks.h"
 #include "lib_mino_tasks_builtin.h"
@@ -142,6 +145,21 @@ void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env)
                               lib_clojure_core_specs_alpha_src);
 }
 
+/* clojure.test.check + generators + properties: minimal property
+ * runner used by clojure.spec.alpha's s/gen and s/exercise. The
+ * three files install together so a single (require
+ * '[clojure.test.check :as tc]) brings the full surface online. */
+void mino_install_clojure_test_check(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.test.check.generators",
+                              lib_clojure_test_check_generators_src);
+    mino_register_bundled_lib(S, "clojure.test.check.properties",
+                              lib_clojure_test_check_properties_src);
+    mino_register_bundled_lib(S, "clojure.test.check",
+                              lib_clojure_test_check_src);
+}
+
 /* mino.deps + mino.tasks + mino.tasks.builtin: the standalone-binary
  * tooling that backs the `mino deps` and `mino task` subcommands.
  * Bundled so brew/scoop installs without a lib/ on cwd still work. */
@@ -171,5 +189,6 @@ void mino_install_all(mino_state_t *S, mino_env_t *env)
     mino_install_clojure_datafy(S, env);
     mino_install_clojure_instant(S, env);
     mino_install_clojure_spec(S, env);
+    mino_install_clojure_test_check(S, env);
     mino_install_mino_tooling(S, env);
 }

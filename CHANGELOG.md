@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.98.5 — Seedable PRNG + Minimal clojure.test.check Port
+
+`random-seed!` is a new primitive that seeds the per-state PRNG
+(xorshift64* on `S->rand_state`) to a known integer so subsequent
+`rand` / `rand-int` / `rand-nth` calls produce a reproducible
+stream. Same seed in, same sequence out.
+
+A minimal `clojure.test.check` ports lands in three new bundled
+namespaces:
+
+- `clojure.test.check.generators` (`gen/`) — `int`, `nat`,
+  `s-pos-int`, `neg-int`, `boolean`, `double`, `char`, `char-ascii`,
+  `char-alpha`, `char-alphanumeric`, `string`, `string-ascii`,
+  `string-alphanumeric`, `keyword`, `symbol`, `any`, `vector`,
+  `list`, `set`, `map`, `tuple`, `return`, `fmap`, `bind`,
+  `such-that`, `elements`, `one-of`, `sample`, `generate`.
+- `clojure.test.check.properties` (`prop/`) — `for-all`, plus the
+  internal `make-property` / `run-property` / `property?` helpers.
+- `clojure.test.check` (`tc/`) — `quick-check` runs N samples of a
+  property at growing sizes and returns
+  `{:result true/false :num-tests N :seed S [:failing-args ...]}`.
+
+Shrinking is **not** implemented — failure reports return the
+unshrunk failing args with a `:note` explaining the limit.
+
+`clojure.spec.alpha/gen` and `clojure.spec.alpha/exercise` no
+longer throw `:mino/unsupported`. They now consult
+`clojure.test.check.generators` to produce values matching common
+predicate forms (`int?`, `string?`, `keyword?`, `boolean?`, etc.,
+both bare and `clojure.core/*` qualified) and the structural
+combinators `coll-of`, `tuple`, `nilable`, `and`, `or`. Specs that
+need a custom generator can pass an `overrides` map keyed by spec
+or predicate symbol.
+
+mino strings carry no separate char type, so the `char` family of
+generators yields single-character strings instead of character
+values, matching mino's existing `subs s i (inc i)` idiom.
+
 ## v0.98.3 — Auto-Chunking Sources
 
 `(seq vector)` and `(range ...)` now emit `MINO_CHUNKED_CONS` spines

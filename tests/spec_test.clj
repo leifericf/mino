@@ -169,14 +169,20 @@
   (is (false? (s/valid? ::wrapped-pair [1 "x" "extra"]))))
 
 ;; ---------------------------------------------------------------------------
-;; gen / exercise stubs.
+;; gen / exercise (backed by clojure.test.check generators since v0.98.5).
 ;; ---------------------------------------------------------------------------
 
-(deftest gen-throws-mino-unsupported
-  (is (thrown? (s/gen ::name))))
+(deftest gen-returns-generator
+  (is (map? (s/gen ::name)))
+  (is (true? (:test.check/generator (s/gen ::name)))))
 
-(deftest exercise-throws-mino-unsupported
-  (is (thrown? (s/exercise ::name))))
+(deftest exercise-returns-pairs
+  (let [pairs (s/exercise ::name 5)]
+    (is (vector? pairs))
+    (is (= 5 (count pairs)))
+    (doseq [[v conformed] pairs]
+      (is (string? v))
+      (is (= v conformed)))))
 
 ;; ---------------------------------------------------------------------------
 ;; assert.

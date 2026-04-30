@@ -142,6 +142,9 @@
    ["lib/clojure/instant.clj"         "clojure.instant"         "lib_clojure_instant"]
    ["lib/clojure/spec/alpha.clj"      "clojure.spec.alpha"      "lib_clojure_spec_alpha"]
    ["lib/clojure/core/specs/alpha.clj" "clojure.core.specs.alpha" "lib_clojure_core_specs_alpha"]
+   ["lib/clojure/test/check/generators.clj" "clojure.test.check.generators" "lib_clojure_test_check_generators"]
+   ["lib/clojure/test/check/properties.clj" "clojure.test.check.properties" "lib_clojure_test_check_properties"]
+   ["lib/clojure/test/check.clj"      "clojure.test.check"      "lib_clojure_test_check"]
    ["lib/mino/deps.clj"               "mino.deps"               "lib_mino_deps"]
    ["lib/mino/tasks.clj"              "mino.tasks"              "lib_mino_tasks"]
    ["lib/mino/tasks/builtin.clj"      "mino.tasks.builtin"      "lib_mino_tasks_builtin"]])
