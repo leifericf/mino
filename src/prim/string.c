@@ -372,10 +372,12 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t  *s_val;
     mino_val_t  *sep_val;
+    mino_val_t  *limit_val = NULL;
     const char  *s;
     size_t       slen;
     const char  *sep;
     size_t       sep_len;
+    long long    limit = 0;       /* 0 / negative = no cap */
     mino_val_t **buf = NULL;
     size_t       cap = 0, len = 0;
     const char  *p;
@@ -385,6 +387,18 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     s_val   = args->as.cons.car;
     sep_val = args->as.cons.cdr->as.cons.car;
+    if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        limit_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "split takes at most 3 arguments");
+        }
+        if (limit_val == NULL || limit_val->type != MINO_INT) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "split: limit must be an integer");
+        }
+        limit = limit_val->as.i;
+    }
     if (s_val == NULL || s_val->type != MINO_STRING
         || sep_val == NULL || sep_val->type != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "split: both arguments must be strings");
@@ -397,12 +411,21 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (sep_len == 0) {
         /* Split into individual characters. */
         size_t i;
+        size_t out_len = (limit > 0 && (size_t)limit < slen) ? (size_t)limit : slen;
         buf = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
-              (slen > 0 ? slen : 1) * sizeof(*buf));
-        for (i = 0; i < slen; i++) {
-            buf[i] = mino_string_n(S, s + i, 1);
+              (out_len > 0 ? out_len : 1) * sizeof(*buf));
+        if (limit > 0 && (size_t)limit < slen) {
+            for (i = 0; i + 1 < out_len; i++) {
+                buf[i] = mino_string_n(S, s + i, 1);
+            }
+            buf[out_len - 1] = mino_string_n(S, s + (out_len - 1),
+                slen - (out_len - 1));
+        } else {
+            for (i = 0; i < slen; i++) {
+                buf[i] = mino_string_n(S, s + i, 1);
+            }
         }
-        return mino_vector(S, buf, slen);
+        return mino_vector(S, buf, out_len);
     }
     while (p <= s + slen) {
         const char *found = NULL;
@@ -420,6 +443,12 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
             buf = nb;
             cap = new_cap;
+        }
+        /* Limit reached: emit one final item that absorbs the rest of
+         * the string (matches canon's String.split(re, limit > 0). */
+        if (limit > 0 && (long long)len + 1 == limit) {
+            buf[len++] = mino_string_n(S, p, (size_t)(s + slen - p));
+            break;
         }
         if (found != NULL) {
             buf[len++] = mino_string_n(S, p, (size_t)(found - p));

@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.98.2 — clojure.string/split 3-Arg Limit
+
+`(split s sep limit)` now returns at most `limit` substrings, with
+the last element absorbing the rest of the input — matching canon's
+`String.split(re, limit)` for `limit > 0`. `limit <= 0` keeps the
+existing no-cap behavior (which preserves trailing empties, the
+canon `limit < 0` semantics). Char-split (`(split s "" limit)`) is
+covered by the same code path.
+
+Audit closures for the rest of the namespace:
+
+- `re-find`, `re-seq`, `re-matches`, `re-matcher` already live in
+  `clojure.core` (canon-correct location); no `clojure.string`
+  wrappers needed.
+- The remaining `clojure.string` surface (`blank?`, `capitalize`,
+  `escape`, `index-of`, `join`, `last-index-of`, `replace`,
+  `replace-first`, `reverse`, `split-lines`, `trim*`, etc.) was
+  re-walked against canon — no missing arities or fns surfaced.
+
 ## v0.98.1 — compare Cross-Type Total Order
 
 `compare` no longer throws when its two arguments straddle type
