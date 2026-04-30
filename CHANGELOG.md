@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.97.1 — Sort-By and Reductions Arities
+
+`sort-by` and `reductions` were single-signature `[f & args]` defns
+that branched on `(count args)` and silently returned `nil` on any
+arity outside the canon shapes. Both are now multi-arity: `sort-by`
+exposes `[keyfn coll]` and `[keyfn cmp coll]`; `reductions` exposes
+`[f coll]` and `[f init coll]`. Bad arities now throw the standard
+"no matching arity" diagnostic instead of producing a quiet wrong
+answer.
+
+The wider audit of `clojure.core` arities walked the rest of the
+spot-check list (`partition` 4-arg, `pop`/`peek` on lists,
+`subseq`/`rsubseq`, `nth` 3-arg, `assoc`/`dissoc` n-arg, `range`
+0-arg, `subs` 3-arg, `min-key`/`max-key` n-arg, `concat` 0/1/n-arg,
+`zipmap`/`interleave` arity coverage, `apply`, `merge`, `update`)
+and found everything else covered.
+
 ## v0.97.0 — Kwargs Destructuring
 
 `& {:keys [...]}` parameter lists now match Clojure 1.11+ canon. The

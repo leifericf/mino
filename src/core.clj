@@ -821,10 +821,12 @@
 ;; mapv is defined as a C primitive; no mino-level fallback needed.
 ;; filterv is defined as a C primitive; no mino-level fallback needed.
 
-(defn sort-by "Returns a sorted sequence of the items in coll, ordered by (keyfn item)." [keyfn & args]
-  (let [cmp  (if (= (count args) 2) (first args) compare)
-        coll (last args)]
-    (sort (fn [a b] (cmp (keyfn a) (keyfn b))) coll)))
+(defn sort-by
+  "Returns a sorted sequence of the items in coll, ordered by (keyfn item)."
+  ([keyfn coll]
+   (sort (fn [a b] (compare (keyfn a) (keyfn b))) coll))
+  ([keyfn cmp coll]
+   (sort (fn [a b] (cmp (keyfn a) (keyfn b))) coll)))
 
 ;; --- Collection utilities ---
 
@@ -1005,15 +1007,20 @@
                      (cons p (pa-impl n step (drop step s))))))))]
      (pa-impl n step coll))))
 
-(defn reductions "Returns a lazy sequence of the intermediate values of a reduction." [f & args]
-  (let [init (if (= (count args) 2) (first args) (first (first args)))
-        coll (if (= (count args) 2) (second args) (rest (first args)))
-        step (fn [acc s]
-               (lazy-seq
-                 (when (seq s)
-                   (let [v (f acc (first s))]
-                     (cons v (step v (rest s)))))))]
-    (cons init (step init coll))))
+(defn reductions
+  "Returns a lazy sequence of the intermediate values of a reduction."
+  ([f coll]
+   (lazy-seq
+     (if-let [s (seq coll)]
+       (reductions f (first s) (rest s))
+       (list (f)))))
+  ([f init coll]
+   (let [step (fn step [acc s]
+                (lazy-seq
+                  (when (seq s)
+                    (let [v (f acc (first s))]
+                      (cons v (step v (rest s)))))))]
+     (cons init (step init coll)))))
 
 (defn dedupe "Returns a lazy sequence removing consecutive duplicates. When called with no collection, returns a transducer."
   ([]
