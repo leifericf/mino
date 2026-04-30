@@ -96,6 +96,32 @@ static int qq_locally_bound(mino_state_t *S, mino_env_t *env, const char *name)
 }
 
 /*
+ * Pick the namespace context that syntax-quote should consult when
+ * qualifying a bare symbol. Inside a macro expansion, that is the
+ * macro's defining ns (carried in fn_ambient_ns by apply_callable),
+ * not the consumer's current_ns -- otherwise a syntax-quoted bare
+ * `atom` inside a clojure.core macro qualifies to the consumer's ns
+ * whenever the consumer pulled `atom` in via :refer :all. Macro
+ * context is exactly when fn_ambient_ns is set and differs from
+ * current_ns; for fn bodies, apply_callable sets them to the same
+ * value, so this falls through to the current_ns path.
+ */
+static void qq_qualifying_ns(mino_state_t *S, const char **ns_name_out,
+                             mino_env_t **ns_env_out)
+{
+    if (S->fn_ambient_ns != NULL
+        && S->fn_ambient_ns != S->current_ns
+        && (S->current_ns == NULL
+            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
+        *ns_name_out = S->fn_ambient_ns;
+        *ns_env_out  = ns_env_lookup(S, S->fn_ambient_ns);
+        return;
+    }
+    *ns_name_out = S->current_ns;
+    *ns_env_out  = current_ns_env(S);
+}
+
+/*
  * Auto-qualify a bare symbol against the current namespace's chain:
  * find the namespace whose env owns the binding (env_find_here), and
  * return ns/name. Symbols not found in any ns env stay bare so special
@@ -108,8 +134,11 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
     size_t      nlen = sym->as.s.len;
     mino_env_t *e;
     const char *slash;
+    const char *qns_name;
+    mino_env_t *qns_env;
     if (nlen == 0) return sym;
     if (nlen == 1 && name[0] == '/') return sym;
+    qq_qualifying_ns(S, &qns_name, &qns_env);
     /* For namespaced symbols, expand a leading alias to its target ns
      * (matching Clojure syntax-quote). Bare ns/name passes through. */
     slash = memchr(name, '/', nlen);
@@ -118,7 +147,7 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
         size_t suffix_len = nlen - prefix_len - 1;
         char   prefix_buf[256];
         size_t i;
-        const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+        const char *cur = qns_name != NULL ? qns_name : "user";
         if (prefix_len == 0 || prefix_len >= sizeof(prefix_buf)) return sym;
         memcpy(prefix_buf, name, prefix_len);
         prefix_buf[prefix_len] = '\0';
@@ -140,8 +169,8 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
         return sym;
     }
     if (qq_locally_bound(S, env, name)) return sym;
-    if (S->current_ns == NULL) return sym;
-    for (e = current_ns_env(S); e != NULL; e = e->parent) {
+    if (qns_name == NULL) return sym;
+    for (e = qns_env; e != NULL; e = e->parent) {
         env_binding_t *b = env_find_here(e, name);
         if (b != NULL) {
             size_t      i;

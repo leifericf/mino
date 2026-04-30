@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.98.0 — Macro Hygiene For Cross-NS :refer :all
+
+Syntax-quote inside a macro body now qualifies bare symbols against
+the macro's defining namespace, not the consumer's `*ns*`. Before
+this fix, a `clojure.core` macro that referenced bare `atom` (or
+`*out*`, `deref`, etc.) inside `` `(...) `` would qualify those
+symbols to whichever namespace the consumer happened to be in,
+silently breaking expansions like `with-out-str` whenever the
+consumer had pulled the source ns in via `:refer :all`. The
+`(a/go ...)` form invoked from outside `clojure.core.async`
+similarly threw `unbound symbol: chan*` because the macro's bare
+references to its own private helpers were qualified to the
+consumer's ns.
+
+`qq_qualify_symbol` (`src/eval/eval.c`) now consults
+`S->fn_ambient_ns` (the macro's defining ns, set by
+`apply_callable`) for both alias resolution and the env walk that
+finds the qualifying namespace. The check fires only when
+`fn_ambient_ns` differs from `current_ns`, which `apply_callable`
+arranges only for `MINO_MACRO` bodies — `MINO_FN` bodies leave them
+equal, so this is a no-op for fn calls.
+
+`clojure.test/is-eq`, `is-thrown`, `is-truthy` lose `^:private`,
+and the `assert-pass!` / `assert-fail!` helpers lose `defn-`. They
+were only "private" because the bug let public macros emit
+syntax-quoted references to them under the consumer's ns, which
+bypassed the privacy check. With the macro-hygiene fix these
+references correctly qualify to `clojure.test`, so the helpers must
+be public — matching canon `clojure.test`'s pattern of public-but-
+internal helpers.
+
 ## v0.97.5 — clojure.spec.alpha Introspection Utilities
 
 `clojure.spec.alpha` gains the two canon introspection helpers:

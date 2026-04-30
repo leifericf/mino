@@ -32,10 +32,10 @@
 
 ;; --- Internal helpers ---
 
-(defn- assert-pass! []
+(defn assert-pass! []
   (swap! *report-counters* update :pass inc))
 
-(defn- assert-fail! [form msg detail]
+(defn assert-fail! [form msg detail]
   (let [ctx   (reverse *testing-contexts*)
         tname *current-test*
         entry {:test tname
@@ -49,13 +49,13 @@
 (defn- thrown?-form? [sym]
   (and (symbol? sym) (= "thrown?" (name sym))))
 
-(defmacro ^:private is-thrown [expr msg]
+(defmacro is-thrown [expr msg]
   `(try
      (do ~@(rest expr)
          (assert-fail! (pr-str '~expr) ~msg "expected exception but none thrown"))
      (catch __e (assert-pass!))))
 
-(defmacro ^:private is-eq [expr msg]
+(defmacro is-eq [expr msg]
   (let [gs-exp (gensym) gs-act (gensym)
         a (first (rest expr))
         b (first (rest (rest expr)))]
@@ -66,7 +66,7 @@
          (assert-fail! (pr-str '~expr) ~msg
            (str "expected: " (pr-str ~gs-exp) "\n    actual: " (pr-str ~gs-act)))))))
 
-(defmacro ^:private is-truthy [expr msg]
+(defmacro is-truthy [expr msg]
   (let [gs (gensym)]
     `(let [~gs ~expr]
        (if ~gs
