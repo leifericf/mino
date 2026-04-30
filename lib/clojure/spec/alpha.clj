@@ -17,7 +17,8 @@
 ;; special-form dispatch and fire the macros instead, leaving the var
 ;; unbound.
 
-(ns clojure.spec.alpha)
+(ns clojure.spec.alpha
+  (:require [clojure.walk :as walk]))
 
 (def ^:private registry-ref (atom {}))
 
@@ -135,6 +136,34 @@
                                (or (::form s) ::unknown))
     (and (map? x) (::form x)) (::form x)
     :else                    ::unknown))
+
+(defn abbrev
+  "Return an abbreviated description of a spec form. Strips namespace
+  qualifiers from symbols and shortens (fn [%] body) to body."
+  [form]
+  (cond
+    (seq? form)
+    (walk/postwalk
+      (fn [f]
+        (cond
+          (and (symbol? f) (namespace f))
+          (symbol (name f))
+
+          (and (seq? f) (= 'fn (first f)) (= '[%] (second f)))
+          (last f)
+
+          :else f))
+      form)
+
+    (symbol? form)
+    (symbol (name form))
+
+    :else form))
+
+(defn describe
+  "Return an abbreviated description of the spec as data."
+  [spec]
+  (abbrev (form spec)))
 
 ;; ---------------------------------------------------------------------------
 ;; pred -- bare predicates promoted to specs.

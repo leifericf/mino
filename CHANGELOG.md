@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.97.5 — clojure.spec.alpha Introspection Utilities
+
+`clojure.spec.alpha` gains the two canon introspection helpers:
+
+- `abbrev` — strips namespace qualifiers from symbols and shortens
+  `(fn [%] body)` to `body`, so spec forms read cleanly in
+  diagnostics.
+- `describe` — returns `(abbrev (form spec))`, the canonical
+  human-readable description of a registered or anonymous spec.
+
+The namespace now requires `[clojure.walk :as walk]`. Generators
+(`gen`, `exercise`) continue to throw `:mino/unsupported`.
+
 ## v0.97.4 — Lift defn So Top-Of-File Predicates Use It
 
 `defn`, `defn-`, `defonce`, and the private `fn-arity-with-prepost`
