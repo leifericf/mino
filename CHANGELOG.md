@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.97.3 — clojure.core.async Canon Combinators
+
+Adds four canon channel combinators to `clojure.core.async`:
+
+- `reduce` — `[f init ch]` returns a channel yielding the final
+  accumulator after consuming `ch` to close. Honours `reduced` for
+  short-circuit.
+- `transduce` — `[xform f init ch]` applies a transducer to the
+  channel reduction; calls the completing arity once `ch` closes.
+- `split` — `[p ch]` and `[p ch t-buf f-buf]` returns `[t-ch f-ch]`,
+  routing items by predicate.
+- `partition-by` — `[f ch]` and `[f ch buf-or-n]` emits vectors of
+  consecutive items sharing `(f item)`. Flushes the in-progress
+  partition on close.
+
+The namespace's `:refer-clojure :exclude` list now also drops
+`reduce`, `transduce`, and `partition-by`. The one internal use of
+`clojure.core/reduce` inside the `go` macro is now fully qualified
+so excluding the unqualified name doesn't break macro expansion.
+
 ## v0.97.2 — src/core.clj Code-Quality Sweep
 
 Walk `src/core.clj` for the project's 80-char line limit. 157 long

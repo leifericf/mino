@@ -30,7 +30,7 @@
 ;; callbacks share a single run queue with the mino-level code.
 
 (ns clojure.core.async
-  (:refer-clojure :exclude [merge into]))
+  (:refer-clojure :exclude [merge into reduce transduce partition-by]))
 
 (def ^:private MAX-PENDING 1024)
 
@@ -1362,7 +1362,7 @@
                               (if (empty? cur-binds)
                                 v
                                 (let [base (if has-locals '(:locals val#) {})
-                                      locals-expr (reduce
+                                      locals-expr (clojure.core/reduce
                                                     (fn [m b] `(assoc ~m '~b ~b))
                                                     base cur-binds)]
                                   `{:val ~v :locals ~locals-expr}))))]
@@ -1637,6 +1637,105 @@
                            (do (put! out v)
                                (take! ch do-take))))]
            (take! ch do-take))))
+     out)))
+
+(defn reduce
+  "Asynchronously reduces ch with f, starting from init. Returns a
+   channel that yields the final accumulated value when ch closes.
+   Behaves like clojure.core/reduce but without the 2-arg form: in a
+   channel context the seeded form is the only one that makes sense."
+  [f init ch]
+  (let [result-ch (chan 1)
+        acc       (atom init)
+        do-take   (fn do-take [v]
+                    (cond
+                      (nil? v)
+                      (do (put! result-ch @acc)
+                          (close! result-ch))
+
+                      (reduced? @acc)
+                      (do (put! result-ch (deref @acc))
+                          (close! result-ch))
+
+                      :else
+                      (do (swap! acc f v)
+                          (if (reduced? @acc)
+                            (do (put! result-ch (deref @acc))
+                                (close! result-ch))
+                            (take! ch do-take)))))]
+    (take! ch do-take)
+    result-ch))
+
+(defn transduce
+  "Asynchronously reduces ch with the transducer xform applied to f,
+   starting from init. Returns a channel that yields the result of
+   the completing arity of the transducing reducer."
+  [xform f init ch]
+  (let [xf        (xform f)
+        result-ch (chan 1)
+        acc       (atom init)
+        finish    (fn finish []
+                    (let [final (xf @acc)]
+                      (put! result-ch final)
+                      (close! result-ch)))
+        do-take   (fn do-take [v]
+                    (if (nil? v)
+                      (finish)
+                      (let [next-acc (xf @acc v)]
+                        (reset! acc next-acc)
+                        (if (reduced? next-acc)
+                          (do (reset! acc (deref next-acc))
+                              (finish))
+                          (take! ch do-take)))))]
+    (take! ch do-take)
+    result-ch))
+
+(defn split
+  "Splits ch into two channels by predicate p. Values for which (p v)
+   is truthy go to the first channel; the rest go to the second.
+   Returns a vector [t-ch f-ch]. Both channels close when ch closes.
+   Optional t-buf and f-buf set buffer sizes (or buffer instances)."
+  ([p ch] (split p ch nil nil))
+  ([p ch t-buf f-buf]
+   (let [t-ch    (if t-buf (chan t-buf) (chan))
+         f-ch    (if f-buf (chan f-buf) (chan))
+         do-take (fn do-take [v]
+                   (if (nil? v)
+                     (do (close! t-ch)
+                         (close! f-ch))
+                     (let [out (if (p v) t-ch f-ch)]
+                       (put! out v)
+                       (take! ch do-take))))]
+     (take! ch do-take)
+     [t-ch f-ch])))
+
+(defn partition-by
+  "Returns a channel of vectors of consecutive items from ch with the
+   same (f item). Closes when ch closes; flushes the in-progress
+   partition before closing."
+  ([f ch] (partition-by f ch nil))
+  ([f ch buf-or-n]
+   (let [out      (if buf-or-n (chan buf-or-n) (chan))
+         current  (atom [])
+         last-key (atom ::none)
+         flush!   (fn []
+                    (when (seq @current)
+                      (put! out @current)
+                      (reset! current [])))
+         do-take  (fn do-take [v]
+                    (if (nil? v)
+                      (do (flush!)
+                          (close! out))
+                      (let [k (f v)]
+                        (if (or (= ::none @last-key) (= k @last-key))
+                          (do (swap! current conj v)
+                              (reset! last-key k)
+                              (take! ch do-take))
+                          (do (flush!)
+                              (swap! current conj v)
+                              (reset! last-key k)
+                              (take! ch do-take))))))]
+     (take! ch do-take)
      out)))
 
 ;; --- mult ---
