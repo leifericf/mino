@@ -26,8 +26,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 97
-#define MINO_VERSION_PATCH 5
+#define MINO_VERSION_MINOR 98
+#define MINO_VERSION_PATCH 6
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".

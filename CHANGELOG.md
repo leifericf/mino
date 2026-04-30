@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.98.6 — Bump MINO_VERSION_* Constants
+
+The five v0.98 tags (v0.98.0 through v0.98.5) shipped with
+`MINO_VERSION_MINOR=97` / `MINO_VERSION_PATCH=5` left over from
+v0.97.5. The release-build workflow asserts the tag matches the
+header constants and rejected v0.98.5 on every platform. Per the
+no-force-push-tags rule this lands as a fresh patch tag. No
+behavioral change; only `src/mino.h`'s version triple moves
+forward.
+
 ## v0.98.5 — Seedable PRNG + Minimal clojure.test.check Port
 
 `random-seed!` is a new primitive that seeds the per-state PRNG
