@@ -333,9 +333,33 @@ static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
     long long step  = ctx->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
     int infinite    = ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr->as.cons.car
                           == mino_true(S);
-    mino_val_t *head = ctx->as.cons.car;
-    return mino_cons(S, head,
-        range_make_lazy(S, start + step, end, step, infinite));
+    /* Emit a 32-element chunk (or whatever remains) on each force.
+     * Downstream consumers that handle MINO_CHUNKED_CONS skip the
+     * per-element lazy thunk and the per-element cons cell. */
+    enum { CHUNK_N = 32 };
+    long long count = CHUNK_N;
+    long long cur   = start;
+    long long i;
+    mino_val_t *buf;
+    if (!infinite) {
+        if (step > 0) {
+            long long remaining = (end - start + step - 1) / step;
+            if (remaining < count) count = remaining;
+        } else {
+            long long remaining = (start - end - step - 1) / -step;
+            if (remaining < count) count = remaining;
+        }
+        if (count <= 0) return mino_nil(S);
+    }
+    buf = mino_chunk_buffer(S, (unsigned)count);
+    if (buf == NULL) return NULL;
+    for (i = 0; i < count; i++) {
+        if (!mino_chunk_append(buf, mino_int(S, cur))) return NULL;
+        cur += step;
+    }
+    mino_chunk_seal(buf);
+    return mino_chunked_cons(S, buf,
+        range_make_lazy(S, cur, end, step, infinite));
 }
 
 /* Lazy take: ctx = cons(n, coll_state). Each force decrements n and

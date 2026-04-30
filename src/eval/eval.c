@@ -268,14 +268,40 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                     }
                 } else {
                     mino_val_t *sp = spliced;
-                    while (mino_is_cons(sp)) {
-                        mino_val_t *cell = mino_cons(S,
-                            sp->as.cons.car, mino_nil(S));
-                        if (tail == NULL) { out = cell; }
-                        else { mino_cons_cdr_set(S, tail, cell); }
-                        tail = cell;
-                        count++;
-                        sp = sp->as.cons.cdr;
+                    while (sp != NULL && sp->type == MINO_LAZY) {
+                        sp = lazy_force(S, sp);
+                        if (sp == NULL) return NULL;
+                    }
+                    while (sp != NULL && sp->type != MINO_NIL
+                           && sp->type != MINO_EMPTY_LIST) {
+                        if (sp->type == MINO_CONS) {
+                            mino_val_t *cell = mino_cons(S,
+                                sp->as.cons.car, mino_nil(S));
+                            if (tail == NULL) { out = cell; }
+                            else { mino_cons_cdr_set(S, tail, cell); }
+                            tail = cell;
+                            count++;
+                            sp = sp->as.cons.cdr;
+                        } else if (sp->type == MINO_CHUNKED_CONS) {
+                            const mino_val_t *ch = sp->as.chunked_cons.chunk;
+                            unsigned k;
+                            for (k = sp->as.chunked_cons.off;
+                                 k < ch->as.chunk.len; k++) {
+                                mino_val_t *cell = mino_cons(S,
+                                    ch->as.chunk.vals[k], mino_nil(S));
+                                if (tail == NULL) { out = cell; }
+                                else { mino_cons_cdr_set(S, tail, cell); }
+                                tail = cell;
+                                count++;
+                            }
+                            sp = sp->as.chunked_cons.more;
+                        } else {
+                            break;
+                        }
+                        while (sp != NULL && sp->type == MINO_LAZY) {
+                            sp = lazy_force(S, sp);
+                            if (sp == NULL) return NULL;
+                        }
                     }
                 }
             } else {
@@ -366,11 +392,49 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
                 spliced = eval_value(S, arg->as.cons.car, env);
                 if (spliced == NULL) { return NULL; }
                 sp = spliced;
-                while (mino_is_cons(sp)) {
-                    mino_val_t *cell = mino_cons(S, sp->as.cons.car, mino_nil(S));
-                    if (tail == NULL) { out = cell; } else { mino_cons_cdr_set(S, tail, cell); }
-                    tail = cell;
-                    sp = sp->as.cons.cdr;
+                if (sp != NULL && sp->type == MINO_VECTOR) {
+                    size_t j;
+                    for (j = 0; j < sp->as.vec.len; j++) {
+                        mino_val_t *cell = mino_cons(S,
+                            vec_nth(sp, j), mino_nil(S));
+                        if (tail == NULL) { out = cell; }
+                        else { mino_cons_cdr_set(S, tail, cell); }
+                        tail = cell;
+                    }
+                } else {
+                    while (sp != NULL && sp->type == MINO_LAZY) {
+                        sp = lazy_force(S, sp);
+                        if (sp == NULL) return NULL;
+                    }
+                    while (sp != NULL && sp->type != MINO_NIL
+                           && sp->type != MINO_EMPTY_LIST) {
+                        if (sp->type == MINO_CONS) {
+                            mino_val_t *cell = mino_cons(S,
+                                sp->as.cons.car, mino_nil(S));
+                            if (tail == NULL) { out = cell; }
+                            else { mino_cons_cdr_set(S, tail, cell); }
+                            tail = cell;
+                            sp = sp->as.cons.cdr;
+                        } else if (sp->type == MINO_CHUNKED_CONS) {
+                            const mino_val_t *ch = sp->as.chunked_cons.chunk;
+                            unsigned k;
+                            for (k = sp->as.chunked_cons.off;
+                                 k < ch->as.chunk.len; k++) {
+                                mino_val_t *cell = mino_cons(S,
+                                    ch->as.chunk.vals[k], mino_nil(S));
+                                if (tail == NULL) { out = cell; }
+                                else { mino_cons_cdr_set(S, tail, cell); }
+                                tail = cell;
+                            }
+                            sp = sp->as.chunked_cons.more;
+                        } else {
+                            break;
+                        }
+                        while (sp != NULL && sp->type == MINO_LAZY) {
+                            sp = lazy_force(S, sp);
+                            if (sp == NULL) return NULL;
+                        }
+                    }
                 }
             } else {
                 mino_val_t *expanded = quasiquote_expand(S, elem, env);

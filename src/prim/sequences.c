@@ -52,13 +52,38 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_CONS) return coll;
     if (coll->type == MINO_CHUNKED_CONS) return coll;
     if (coll->type == MINO_VECTOR) {
-        mino_val_t *head = mino_nil(S), *tail = NULL;
+        /* Emit a chunked-cons spine of 32-element chunks. Vector
+         * leaves are already 32-wide (MINO_VEC_WIDTH), so consumers
+         * that propagate chunkedness (map/filter/take/keep/...) get
+         * end-to-end chunk pipelines without per-element allocator
+         * overhead. */
+        size_t total = coll->as.vec.len;
         size_t i;
-        if (coll->as.vec.len == 0) return mino_nil(S);
-        for (i = 0; i < coll->as.vec.len; i++) {
-            seq_cons_append(S, &head, &tail, vec_nth(coll, i));
+        size_t n_chunks;
+        size_t c;
+        mino_val_t **chunks;
+        mino_val_t  *more;
+        if (total == 0) return mino_nil(S);
+        n_chunks = (total + 31u) / 32u;
+        chunks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+            n_chunks * sizeof(*chunks));
+        for (c = 0; c < n_chunks; c++) {
+            size_t base = c * 32u;
+            unsigned cap = (unsigned)(total - base < 32u ? total - base : 32u);
+            mino_val_t *buf = mino_chunk_buffer(S, cap);
+            if (buf == NULL) return NULL;
+            for (i = 0; i < cap; i++) {
+                if (!mino_chunk_append(buf, vec_nth(coll, base + i))) return NULL;
+            }
+            mino_chunk_seal(buf);
+            chunks[c] = buf;
         }
-        return head;
+        more = mino_nil(S);
+        for (c = n_chunks; c-- > 0; ) {
+            more = mino_chunked_cons(S, chunks[c], more);
+            if (more == NULL) return NULL;
+        }
+        return more;
     }
     if (coll->type == MINO_MAP) {
         mino_val_t *head = mino_nil(S), *tail = NULL;

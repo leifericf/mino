@@ -184,10 +184,17 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_int(S, (long long)n);
     }
     case MINO_LAZY: {
-        /* Force the entire lazy seq and count it. */
+        /* Force the entire lazy seq and count it. The forced value may
+         * be a flat cons spine, a chunked-cons spine (e.g. lazy range
+         * since v0.98.3), or another lazy. Dispatch instead of
+         * assuming the cons-only walk. */
         mino_val_t *forced = lazy_force(S, coll);
         if (forced == NULL) return NULL;
         if (forced->type == MINO_NIL) return mino_int(S, 0);
+        if (forced->type == MINO_CHUNKED_CONS) {
+            mino_val_t *recur_args = mino_cons(S, forced, mino_nil(S));
+            return prim_count(S, recur_args, env);
+        }
         return mino_int(S, (long long)list_length(S, forced));
     }
     case MINO_CHUNK: return mino_int(S, (long long)coll->as.chunk.len);
@@ -341,6 +348,51 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
         }
         return p->as.cons.car;
+    }
+    if (coll->type == MINO_CHUNKED_CONS) {
+        long long remaining = idx;
+        mino_val_t *p = coll;
+        while (p != NULL && p->type == MINO_CHUNKED_CONS) {
+            const mino_val_t *ch = p->as.chunked_cons.chunk;
+            unsigned available = ch->as.chunk.len - p->as.chunked_cons.off;
+            if (remaining < (long long)available) {
+                return ch->as.chunk.vals[p->as.chunked_cons.off + remaining];
+            }
+            remaining -= (long long)available;
+            p = p->as.chunked_cons.more;
+            while (p != NULL && p->type == MINO_LAZY) {
+                p = lazy_force(S, p);
+                if (p == NULL) return NULL;
+            }
+        }
+        if (p == NULL || p->type == MINO_NIL || p->type == MINO_EMPTY_LIST) {
+            if (def_val != NULL) return def_val;
+            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        }
+        /* Fall through to the cons-walk for the lazy/cons tail. */
+        coll = p;
+        idx  = remaining;
+        if (coll->type == MINO_CONS) {
+            long long i;
+            for (i = 0; i < idx; i++) {
+                if (!mino_is_cons(coll)) {
+                    if (def_val != NULL) return def_val;
+                    return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+                }
+                coll = coll->as.cons.cdr;
+                if (coll != NULL && coll->type == MINO_LAZY) {
+                    coll = lazy_force(S, coll);
+                    if (coll == NULL) return NULL;
+                }
+            }
+            if (!mino_is_cons(coll)) {
+                if (def_val != NULL) return def_val;
+                return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+            }
+            return coll->as.cons.car;
+        }
+        if (def_val != NULL) return def_val;
+        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     if (coll->type == MINO_STRING) {
         if ((size_t)idx >= coll->as.s.len) {

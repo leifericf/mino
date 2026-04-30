@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.98.3 — Auto-Chunking Sources
+
+`(seq vector)` and `(range ...)` now emit `MINO_CHUNKED_CONS` spines
+of 32-element chunks instead of flat cons cells. Vector leaves are
+already 32-wide (`MINO_VEC_WIDTH=32`), so the source-side chunking
+walks them directly via `vec_nth` into a new `MINO_CHUNK` per leaf;
+lazy `range` produces a fresh chunk of 32 (or however many remain)
+on each force.
+
+`(chunked-seq? (seq [1 2 3]))` and `(chunked-seq? (range 10))` now
+return `true`. Map/filter/take/keep/keep-indexed/map-indexed already
+propagated chunkedness end-to-end (v0.96.8), so `(reduce + (map inc
+(filter odd? (range 1e6))))`-style pipelines now run end-to-end
+chunked without per-element cons-cell allocation.
+
+`array-map` insertion-order semantics were verified to already match
+canon — `MINO_MAP`'s companion `key_order` vector preserves
+insertion order through `seq`, `assoc`, and `dissoc`. mino's
+`hash-map` is more conservative than canon's (which has undefined
+order); no new `MINO_ARRAY_MAP` value type was needed.
+
+Touched primitives that needed CHUNKED_CONS handling now that more
+seqs flow through them:
+
+- `prim_count` MINO_LAZY arm dispatches to the chunked-cons walk
+  when the forced result is a chunked-cons.
+- `prim_empty?` and `prim_nth` learn the MINO_CHUNKED_CONS case.
+- `cons?` and `seq?` predicates extend to recognize MINO_CHUNKED_CONS;
+  `sequential?` follows by definition.
+- The two `unquote-splicing` paths in `quasiquote_expand_list` /
+  `qq_expand_vector` walk MINO_CHUNKED_CONS and force MINO_LAZY tails
+  (previously only walked flat MINO_CONS, silently splicing nothing
+  for chunked tails).
+
 ## v0.98.2 — clojure.string/split 3-Arg Limit
 
 `(split s sep limit)` now returns at most `limit` substrings, with
