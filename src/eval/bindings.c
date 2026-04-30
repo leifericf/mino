@@ -123,6 +123,68 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
     mino_val_t *as_sym    = NULL;
     size_t i;
 
+    /* Clojure 1.11+ map-destructure shapes when the value is a cons
+     * list (the typical fn rest-args shape, but also writable directly):
+     *   (g {:k v})        -- single trailing map
+     *   (g :k v :k v ...) -- inline keyword/value pairs
+     *   (g :k v {:k v})   -- pairs followed by an override map
+     * Build a hash-map from those shapes before the lookup loop below.
+     * Any other val type (including MINO_EMPTY_LIST and nil) falls
+     * through to the nil path so :or defaults still apply. */
+    if (val != NULL && val->type == MINO_CONS) {
+        size_t        n            = 0;
+        mino_val_t   *trailing_map = NULL;
+        mino_val_t   *p            = val;
+        mino_val_t  **ks;
+        mino_val_t  **vs;
+        size_t        total;
+        size_t        j;
+        while (mino_is_cons(p)) {
+            mino_val_t *first = p->as.cons.car;
+            mino_val_t *rest  = p->as.cons.cdr;
+            if (first != NULL && first->type == MINO_MAP
+                && !mino_is_cons(rest)) {
+                trailing_map = first;
+                break;
+            }
+            p = rest;
+            if (!mino_is_cons(p)) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                    "syntax", "MSY003",
+                    "map destructure of kwargs requires an even number of forms");
+                return 0;
+            }
+            p = p->as.cons.cdr;
+            n++;
+        }
+        if (trailing_map != NULL && n == 0) {
+            val = trailing_map;
+        } else {
+            total = n + (trailing_map != NULL ? trailing_map->as.map.len : 0);
+            ks = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+                                               total * sizeof(*ks));
+            vs = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR,
+                                               total * sizeof(*vs));
+            p = val;
+            for (j = 0; j < n; j++) {
+                gc_valarr_set(S, ks, j, p->as.cons.car);
+                p = p->as.cons.cdr;
+                gc_valarr_set(S, vs, j, p->as.cons.car);
+                p = p->as.cons.cdr;
+            }
+            if (trailing_map != NULL) {
+                size_t mi;
+                for (mi = 0; mi < trailing_map->as.map.len; mi++) {
+                    mino_val_t *mk = vec_nth(trailing_map->as.map.key_order, mi);
+                    mino_val_t *mv = map_get_val(trailing_map, mk);
+                    gc_valarr_set(S, ks, n + mi, mk);
+                    gc_valarr_set(S, vs, n + mi, mv);
+                }
+            }
+            val = mino_map(S, ks, vs, total);
+        }
+    }
+
     if (val == NULL || val->type != MINO_MAP) {
         val = mino_nil(S);
     }
@@ -147,7 +209,11 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                 found = map_get_val(val, pval);
             }
             if (found == NULL && or_map != NULL && or_map->type == MINO_MAP) {
-                found = map_get_val(or_map, pkey);
+                mino_val_t *deflt = map_get_val(or_map, pkey);
+                if (deflt != NULL) {
+                    found = eval(S, deflt, env);
+                    if (found == NULL) return 0;
+                }
             }
             if (found == NULL) found = mino_nil(S);
             if (!bind_form(S, env, pkey, found, ctx)) return 0;
@@ -170,7 +236,11 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                 found = map_get_val(val, lookup_key);
             }
             if (found == NULL && or_map != NULL && or_map->type == MINO_MAP) {
-                found = map_get_val(or_map, ksym);
+                mino_val_t *deflt = map_get_val(or_map, ksym);
+                if (deflt != NULL) {
+                    found = eval(S, deflt, env);
+                    if (found == NULL) return 0;
+                }
             }
             if (found == NULL) found = mino_nil(S);
             if (!bind_sym(S, env, ksym, found)) return 0;

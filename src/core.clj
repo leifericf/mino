@@ -478,23 +478,16 @@
    :initk - first value passed to step, default nil
 
    Step with non-initk is presumed unreproducible. The first step
-   call is deferred until the result is realized.
-
-   Divergence from canon: opts are passed as a single map (mino's
-   destructuring does not yet support `& {:keys [...]}` keyword args)."
-  ([step] (iteration step {}))
-  ([step opts]
-   (let [somef (get opts :somef some?)
-         vf    (get opts :vf identity)
-         kf    (get opts :kf identity)
-         initk (get opts :initk nil)]
-     (lazy-seq
-       ((fn next-iter [ret]
-          (when (somef ret)
-            (cons (vf ret)
-                  (when-some [k (kf ret)]
-                    (lazy-seq (next-iter (step k)))))))
-        (step initk))))))
+   call is deferred until the result is realized."
+  [step & {:keys [somef vf kf initk]
+           :or   {vf identity, kf identity, somef some?}}]
+  (lazy-seq
+    ((fn next-iter [ret]
+       (when (somef ret)
+         (cons (vf ret)
+               (when-some [k (kf ret)]
+                 (lazy-seq (next-iter (step k)))))))
+     (step initk))))
 
 (defn cycle "Returns a lazy infinite sequence of repetitions of the items in coll." [coll]
   (letfn [(cycle-impl [orig coll]
