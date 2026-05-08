@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### `pos-int?` / `neg-int?` / `nat-int?` Stay Long-only; `counted?` Drops Strings
+
+Per Clojure, the long-tier predicates `pos-int?`, `neg-int?`, and
+`nat-int?` compose `int?` (Long only) -- they reject BigInts -- so
+`(neg-int? -1N)` returns `false`. mino briefly broadened these to
+the new `integer?` (long + bigint) when fixing `(integer? 1N)`; this
+restores the narrow contract.
+
+`counted?` no longer reports strings as counted. Strings are not
+Counted on the JVM, where `count` on a `String` walks the
+`CharSequence` protocol; the predicate now mirrors that.
+
 ### `use-fixtures` Captures the Caller's Namespace
 
 `use-fixtures` is now a macro so it can capture the calling

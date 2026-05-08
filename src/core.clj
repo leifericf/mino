@@ -752,15 +752,19 @@
 (defn integer?
   "Returns true if x is an integer (long or bigint)."
   [x] (or (int? x) (bigint? x)))
+;; pos-int? / neg-int? / nat-int? specifically test the long-sized
+;; int tier per Clojure's contract: `(neg-int? -1N)` returns false on
+;; the JVM because clojure.core/neg-int? composes int? (Long-only),
+;; not the broader integer?.
 (defn pos-int?
-  "Returns true if x is a positive integer."
-  [x] (and (integer? x) (pos? x)))
+  "Returns true if x is a positive integer (long tier)."
+  [x] (and (int? x) (pos? x)))
 (defn neg-int?
-  "Returns true if x is a negative integer."
-  [x] (and (integer? x) (neg? x)))
+  "Returns true if x is a negative integer (long tier)."
+  [x] (and (int? x) (neg? x)))
 (defn nat-int?
-  "Returns true if x is a non-negative integer."
-  [x] (and (integer? x) (not (neg? x))))
+  "Returns true if x is a non-negative integer (long tier)."
+  [x] (and (int? x) (not (neg? x))))
 (def double?   "Returns true if x is a float." float?)
 ;; ratio? / rational? / decimal? are C primitives that consult the real
 ;; numeric-tower types (MINO_RATIO, MINO_BIGDEC); registered in prim.c.
@@ -861,9 +865,14 @@
 (defn key "Returns the key of a map entry." [entry] (first entry))
 (defn val "Returns the value of a map entry." [entry] (second entry))
 
-(defn counted? "Returns true if (count x) is a constant-time operation." [x]
+(defn counted?
+  "Returns true if (count x) is a constant-time operation. Per
+   Clojure this is the Counted protocol -- vectors, maps, sets, and
+   sorted variants. Strings are not Counted on the JVM (their count
+   walks java.lang.CharSequence)."
+  [x]
   (let [t (type x)]
-    (or (= t :vector) (= t :map) (= t :set) (= t :string)
+    (or (= t :vector) (= t :map) (= t :set)
         (= t :sorted-map) (= t :sorted-set))))
 
 (defn bounded-count
