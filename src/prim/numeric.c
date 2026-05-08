@@ -1762,22 +1762,48 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
     }
 }
 
+/* `(<)`, `(<=)`, `(>)`, `(>=)` -- relational chains.
+ *
+ *   - Non-numeric operands (including `nil`) throw, matching Clojure's
+ *     NPE / "cannot compare" semantics.
+ *   - Any NaN operand short-circuits to `false` for every relation
+ *     (NaN is unordered).
+ *   - Otherwise return true iff each successive pair satisfies the
+ *     relation; trivially true on zero or one argument.
+ */
+static int has_nan(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_FLOAT && isnan(v->as.f);
+}
+
 static mino_val_t *compare_chain(mino_state_t *S, mino_val_t *args, const char *name, int op)
 {
     if (!mino_is_cons(args)) return mino_true(S);
-    if (!mino_is_cons(args->as.cons.cdr)) return mino_true(S);
+    if (!mino_is_cons(args->as.cons.cdr)) {
+        /* Single-arg form: Clojure short-circuits and never inspects
+         * the operand's type, so even non-numeric arguments return
+         * true. */
+        return mino_true(S);
+    }
     {
         const mino_val_t *prev = args->as.cons.car;
+        if (!is_compare_number(prev)) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "%s expects numbers", name);
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        }
         args = args->as.cons.cdr;
         while (mino_is_cons(args)) {
             const mino_val_t *cur = args->as.cons.car;
-            int cmp = tower_cmp(prev, cur);
+            int cmp;
             int ok;
-            if (cmp == -2) {
+            if (!is_compare_number(cur)) {
                 char msg[64];
                 snprintf(msg, sizeof(msg), "%s expects numbers", name);
                 return prim_throw_classified(S, "eval/type", "MTY001", msg);
             }
+            if (has_nan(prev) || has_nan(cur)) return mino_false(S);
+            cmp = tower_cmp(prev, cur);
             switch (op) {
             case 0:  ok = cmp <  0; break;
             case 1:  ok = cmp <= 0; break;

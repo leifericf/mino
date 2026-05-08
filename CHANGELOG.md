@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### `<` / `<=` / `>` / `>=` -- Strict Numeric Operands and NaN Unordering
+
+The four numeric comparison operators previously accepted nil (silently
+treating it as `0.0`) and ranked any NaN operand as equal to NaN, so
+`(< nil 1)` returned `true` and `(<= ##NaN ##NaN)` also returned `true`.
+Both now match Clojure:
+
+  - Each pair of consecutive operands must be a number (long, bigint,
+    ratio, bigdec, or float). Anything else -- nil included -- throws
+    `eval/type`.
+  - If either operand in a pair is NaN, the whole chain short-circuits
+    to `false` (NaN is unordered against every value, itself included).
+
+The single-argument form is unchanged: `(< x)` returns `true` for any
+`x` without inspecting its type, matching Clojure's "trivially true on
+zero or one argument" contract.
+
 ### `special-symbol?` Recognises Clojure's Reserved Special Forms
 
 `special-symbol?` now returns `true` for the Clojure-reserved special
