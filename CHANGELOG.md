@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.100.9
+
+`(add-load-path! path)` adds a directory to the runtime's
+extra-load-paths list, consulted by `require` after `mino.edn`'s
+project paths and before the cwd fallback. The list lives on
+`mino_state_t` and is freed at state teardown; entries are
+deduplicated so re-registering an existing path is a no-op.
+
+The pure motivation is the external `clojure-test-suite` driver,
+where cross-file `(:require [clojure.core-test.X :as ...])` lives in
+files outside mino's tree. The driver now does
+`(add-load-path! "../clojure-test-suite/test")` once per sub-process,
+and sibling files resolve through the standard module path -- no
+per-file preloading hack, no test pollution from preloaded
+namespaces. External `not_eq.cljc` is now 130/130 (was load-error).
+
+External suite: 181 -> 182 OK. The remaining single load-error is
+`ancestors.cljc`, which uses the JVM `Object` symbol -- pre-existing
+JVM-specific gap, not addressable from this hook.
+
+The standalone-mode resolver (no `mino.edn` present) is now
+`runtime_paths_resolve`, which still consults the extra-load-paths
+list before the cwd fallback. Project mode keeps using
+`project_resolve` and now passes the state pointer as the resolver
+context so it can read `S->extra_load_paths`.
+
 ## v0.100.8
 
 Regexes are now a first-class value type (`MINO_REGEX`), distinct

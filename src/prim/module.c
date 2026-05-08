@@ -1106,6 +1106,55 @@ static const char *bundled_lib_lookup(mino_state_t *S, const char *name)
     return NULL;
 }
 
+/* (add-load-path! path) -- append a directory to the runtime's
+ * extra-load-paths list. The main.c project resolver consults this
+ * list before falling through to cwd, so bundled-suite drivers can
+ * register external sibling-test directories without having to
+ * pre-load each file. Returns nil. Idempotent: a path already in
+ * the list is not appended again. */
+mino_val_t *prim_add_load_path(mino_state_t *S, mino_val_t *args,
+                               mino_env_t *env)
+{
+    mino_val_t *path_val;
+    const char *path;
+    size_t      i;
+    char       *dup;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "add-load-path! requires one argument");
+    }
+    path_val = args->as.cons.car;
+    if (path_val == NULL || path_val->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "add-load-path!: argument must be a string");
+    }
+    path = path_val->as.s.data;
+    for (i = 0; i < S->extra_load_paths_len; i++) {
+        if (strcmp(S->extra_load_paths[i], path) == 0) return mino_nil(S);
+    }
+    if (S->extra_load_paths_len == S->extra_load_paths_cap) {
+        size_t new_cap = S->extra_load_paths_cap == 0 ? 4
+                       : S->extra_load_paths_cap * 2;
+        char **np = (char **)realloc(S->extra_load_paths,
+                                     new_cap * sizeof(*np));
+        if (np == NULL) {
+            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                "out of memory in add-load-path!");
+        }
+        S->extra_load_paths     = np;
+        S->extra_load_paths_cap = new_cap;
+    }
+    dup = (char *)malloc(strlen(path) + 1);
+    if (dup == NULL) {
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+            "out of memory in add-load-path!");
+    }
+    strcpy(dup, path);
+    S->extra_load_paths[S->extra_load_paths_len++] = dup;
+    return mino_nil(S);
+}
+
 /* (mino-capability sym) -- return the install-group capability label
  * for the named binding as a keyword (e.g. :fs), or nil when the
  * binding is part of the always-installed core. The label is set at
@@ -1157,6 +1206,8 @@ const mino_prim_def k_prims_module[] = {
      "Loads a module and refers all of its public names by default."},
     {"mino-capability", prim_mino_capability,
      "Return the install-group capability label for the named binding as a keyword, or nil when the binding is part of the always-installed core."},
+    {"add-load-path!", prim_add_load_path,
+     "Appends a directory to the runtime's extra-load-paths list (consulted by `require` after project paths). Returns nil; idempotent."},
 };
 
 const size_t k_prims_module_count =

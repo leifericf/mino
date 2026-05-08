@@ -191,6 +191,16 @@ static void state_free_bundled_libs(mino_state_t *S)
     free(S->bundled_libs);
 }
 
+/* Free extra load paths registered via (add-load-path! ...). */
+static void state_free_extra_load_paths(mino_state_t *S)
+{
+    size_t i;
+    for (i = 0; i < S->extra_load_paths_len; i++) {
+        free(S->extra_load_paths[i]);
+    }
+    free(S->extra_load_paths);
+}
+
 /* Truncate the load stack back to LEN, freeing any entries pushed past
  * that point. Used when a throw unwinds out of a require call before its
  * normal cleanup runs. */
@@ -361,6 +371,7 @@ void mino_state_free(mino_state_t *S)
     state_free_host_types(S);
     state_free_module_cache(S);
     state_free_bundled_libs(S);
+    state_free_extra_load_paths(S);
     state_free_meta_table(S);
     state_free_intern_tables(S);
     state_free_record_types(S);

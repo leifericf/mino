@@ -153,12 +153,15 @@ static int try_resolve_in(const char *dir, const char *name, size_t nlen,
     return 0;
 }
 
-/* Resolver that checks project paths first, then falls through to cwd. */
+/* Resolver that checks project paths first, then runtime-registered
+ * extra paths (from `(add-load-path! ...)`), then falls through to
+ * cwd. The state pointer is passed in via ctx so we can read
+ * S->extra_load_paths without a global. */
 static const char *project_resolve(const char *name, void *ctx)
 {
     static char pbuf[PATH_BUF_CAP];
     size_t i, nlen;
-    (void)ctx;
+    mino_state_t *S = (mino_state_t *)ctx;
     if (name == NULL) return NULL;
     nlen = strlen(name);
     if (nlen + 10 >= sizeof(pbuf)) return NULL;
@@ -168,7 +171,37 @@ static const char *project_resolve(const char *name, void *ctx)
                            pbuf, sizeof(pbuf)))
             return pbuf;
     }
+    if (S != NULL) {
+        for (i = 0; i < S->extra_load_paths_len; i++) {
+            if (try_resolve_in(S->extra_load_paths[i], name, nlen,
+                               pbuf, sizeof(pbuf)))
+                return pbuf;
+        }
+    }
     return cwd_resolve(name, NULL);
+}
+
+/* Resolver for the no-mino.edn path: skip project_paths but still
+ * consult runtime-registered extra paths (so add-load-path! works
+ * regardless of whether the binary loaded a project manifest). */
+static const char *runtime_paths_resolve(const char *name, void *ctx)
+{
+    static char pbuf[PATH_BUF_CAP];
+    size_t i, nlen;
+    mino_state_t *S = (mino_state_t *)ctx;
+    const char *cwd_result;
+    if (name == NULL) return NULL;
+    nlen = strlen(name);
+    if (nlen + 10 >= sizeof(pbuf)) return NULL;
+    if (S != NULL) {
+        for (i = 0; i < S->extra_load_paths_len; i++) {
+            if (try_resolve_in(S->extra_load_paths[i], name, nlen,
+                               pbuf, sizeof(pbuf)))
+                return pbuf;
+        }
+    }
+    cwd_result = cwd_resolve(name, NULL);
+    return cwd_result;
 }
 
 /* Read mino.edn and configure project paths + deps.
@@ -206,7 +239,7 @@ static void setup_project(mino_state_t *S, mino_env_t *env)
     mino_unref(S, ref);
 
     if (project_path_count > 0)
-        mino_set_resolver(S, project_resolve, NULL);
+        mino_set_resolver(S, project_resolve, S);
 }
 
 /* Report an evaluation error to stderr. */
@@ -786,7 +819,7 @@ int main(int argc, char **argv)
     }
 
     mino_install_all(S, env);
-    mino_set_resolver(S, cwd_resolve, NULL);
+    mino_set_resolver(S, runtime_paths_resolve, S);
 
     /* Standalone mode: grant the runtime permission to spawn cpu_count
      * host threads. Embedded users start at thread_limit=1 and opt in

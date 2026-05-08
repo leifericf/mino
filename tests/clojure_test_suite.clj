@@ -27,6 +27,12 @@
 
 (defn run-one [file-path]
   (require "tests/test")
+  ;; Register the suite root as an additional load path so any
+  ;; cross-file (:require [clojure.core-test.X :as ...]) resolves
+  ;; without per-file preloading. The runtime resolver consults
+  ;; extra-load-paths after project paths and before the cwd
+  ;; fallback, so this is a no-op for project-local requires.
+  (add-load-path! "../clojure-test-suite/test")
   (try
     (require file-path)
     (catch e

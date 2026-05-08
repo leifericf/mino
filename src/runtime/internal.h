@@ -462,6 +462,13 @@ struct mino_state {
     bundled_lib_entry_t *bundled_libs;
     size_t               bundled_libs_len;
     size_t               bundled_libs_cap;
+    /* Extra load paths registered at runtime via (add-load-path! ...).
+     * Consulted by the main.c resolver after the project_paths and
+     * before the cwd fallback. Each entry is a malloc-owned dup;
+     * freed at state teardown. */
+    char               **extra_load_paths;
+    size_t               extra_load_paths_len;
+    size_t               extra_load_paths_cap;
 
     /* Metadata */
     meta_entry_t   *meta_table;
