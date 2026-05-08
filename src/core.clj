@@ -773,7 +773,10 @@
   "Returns true if x is a collection."
   [x] (or (seq? x) (vector? x) (map? x) (set? x)))
 ;; some? is a C primitive.
-(def list?     "Returns true if x is a list." cons?)
+;; list? is registered as a C primitive (see src/prim/reflection.c)
+;; that distinguishes MINO_CONS / MINO_EMPTY_LIST from
+;; MINO_CHUNKED_CONS, matching Clojure's narrower contract: sequences
+;; produced by `seq` on other collections are seqs but not lists.
 ;; atom? is defined as a C primitive; no mino-level fallback needed.
 (defn not-any?
   "Returns true if (pred x) is falsy for every x in coll."

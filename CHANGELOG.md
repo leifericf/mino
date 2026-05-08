@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### `list?` Distinguishes Lists From Other Sequences
+
+`list?` was previously `cons?`, so it returned `true` for any cons cell
+including the chunked-cons spine produced by `(seq vector)`. Per
+Clojure's contract `list?` is narrower than `seq?`: it accepts the
+empty-list singleton and proper cons chains but excludes lazy-seqs and
+chunked-seqs. mino now ships a dedicated `list?` C primitive that
+matches `MINO_CONS` and `MINO_EMPTY_LIST` but rejects
+`MINO_CHUNKED_CONS`. (`seq?` continues to accept the broader family.)
+The lingering case `(list? (seq (sorted-map ...)))` still returns
+`true` because the sorted-collection seq builds a plain cons chain --
+that requires a finer-grained "is this a real list literal" tag and
+is left as future work.
+
 ### `rational?` Returns True For BigDecs
 
 `(rational? 1.5M)` now returns `true` instead of `false`, matching

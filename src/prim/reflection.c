@@ -362,6 +362,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 DEFINE_TYPE_PRED(prim_nil_p,     (v == NULL || v->type == MINO_NIL),           "nil?")
 DEFINE_TYPE_PRED(prim_cons_p,    (v != NULL && (v->type == MINO_CONS || v->type == MINO_CHUNKED_CONS)),          "cons?")
+DEFINE_TYPE_PRED(prim_list_p,    (v != NULL && (v->type == MINO_CONS || v->type == MINO_EMPTY_LIST)),             "list?")
 DEFINE_TYPE_PRED(prim_vector_p,  (v != NULL && v->type == MINO_VECTOR),        "vector?")
 DEFINE_TYPE_PRED(prim_int_p,     (v != NULL && v->type == MINO_INT),           "int?")
 DEFINE_TYPE_PRED(prim_float_p,   (v != NULL && v->type == MINO_FLOAT),         "float?")
@@ -1109,6 +1110,10 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns true if x is nil."},
     {"cons?",     prim_cons_p,
      "Returns true if x is a list (cons cell)."},
+    {"list?",     prim_list_p,
+     "Returns true if x is a list (cons chain or the empty-list singleton). "
+     "Excludes lazy-seq and chunked-cons; for the broader 'is a sequence' "
+     "predicate, use seq?."},
     {"vector?",   prim_vector_p,
      "Returns true if x is a vector."},
     {"int?",      prim_int_p,
