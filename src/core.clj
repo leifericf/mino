@@ -742,16 +742,18 @@
 ;; --- Type predicates and trivial compositions ---
 ;; true?, false?, boolean?, int?, float?, char? are C primitives.
 
-(def integer?  "Returns true if x is an integer." int?)
+(defn integer?
+  "Returns true if x is an integer (long or bigint)."
+  [x] (or (int? x) (bigint? x)))
 (defn pos-int?
   "Returns true if x is a positive integer."
-  [x] (and (int? x) (pos? x)))
+  [x] (and (integer? x) (pos? x)))
 (defn neg-int?
   "Returns true if x is a negative integer."
-  [x] (and (int? x) (neg? x)))
+  [x] (and (integer? x) (neg? x)))
 (defn nat-int?
   "Returns true if x is a non-negative integer."
-  [x] (and (int? x) (not (neg? x))))
+  [x] (and (integer? x) (not (neg? x))))
 (def double?   "Returns true if x is a float." float?)
 ;; ratio? / rational? / decimal? are C primitives that consult the real
 ;; numeric-tower types (MINO_RATIO, MINO_BIGDEC); registered in prim.c.

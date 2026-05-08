@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### `integer?` Recognises BigInts
+
+`integer?` previously aliased `int?`, so `(integer? 1N)` returned
+`false`. Per Clojure's contract, `integer?` is true for any value
+that is "exactly an integer", which on the JVM covers Long, Integer,
+Short, Byte, BigInt, and BigInteger. mino represents the integer
+tier with `MINO_INT` (long) and `MINO_BIGINT` (arbitrary-precision),
+so `integer?` now returns `(or (int? x) (bigint? x))`. The composed
+predicates `pos-int?`, `neg-int?`, and `nat-int?` route through the
+new `integer?` so they pick up the bigint tier for free.
+
+The external test suite's portability shim now defines `big-int?`
+as `bigint?` (rather than `integer?`) so it specifically probes the
+bigint type, matching the JVM `(instance? clojure.lang.BigInt n)`
+semantics.
+
 ### `doseq` Supports `:let`, `:when`, and `:while` Modifier Clauses
 
 `doseq` now recognises the three modifier clauses Clojure's

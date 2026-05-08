@@ -8,6 +8,6 @@
     `(do ~@body)
     `(println "SKIP -" '~var-sym)))
 
-(defn big-int? [n] (integer? n))
+(defn big-int? [n] (bigint? n))
 
 (defn sleep [ms] nil)
