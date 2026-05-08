@@ -75,7 +75,19 @@ jobs:
       - name: Bootstrap mino
         # The Makefile detects Windows via $(OS) and produces mino.exe
         # there, mino elsewhere; matches matrix.exe by construction.
-        run: make
+        # Tee the output so a build break leaves a downloadable
+        # artifact even though release-build runs on tags only.
+        run: |
+          set -o pipefail
+          make 2>&1 | tee /tmp/build.log
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.platform }}
+          path: /tmp/build.log
+          retention-days: 7
 
       - name: Smoke test
         run: |

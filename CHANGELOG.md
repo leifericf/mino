@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.99.4
+
+Add the same build-log artifact upload to `release-build.yml` that
+`ci.yml` already grew under v0.99.2. The release-build job runs on
+ubuntu-22.04 (gcc-11) and uses a different runner image than
+ci.yml's ubuntu-latest, so a build break that's gcc-11-specific
+(or glibc-22.04-specific) doesn't surface in ci.yml. Capturing the
+log here lets external observers grab the gcc error from the
+artifact even when only the release-build legs fail.
+
 ## v0.99.3
 
 Handle `getcwd`'s return value in `main.c`. Ubuntu's glibc declares
