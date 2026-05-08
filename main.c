@@ -720,7 +720,14 @@ int main(int argc, char **argv)
             return exec_companion("mino-lsp", argv + first);
     }
 
-    getcwd(initial_dir, sizeof(initial_dir));
+    /* Best-effort: clear the buffer if getcwd fails so any subsequent
+     * use of initial_dir reads as the empty path rather than as
+     * uninitialised stack. Ubuntu glibc declares getcwd with the
+     * `warn_unused_result` attribute and the bootstrap CFLAGS treat
+     * unused-result as an error. */
+    if (getcwd(initial_dir, sizeof(initial_dir)) == NULL) {
+        initial_dir[0] = '\0';
+    }
 
     /* Compute binary_dir from argv[0] for finding bundled lib/. */
     {

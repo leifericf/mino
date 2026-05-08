@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.99.3
+
+Handle `getcwd`'s return value in `main.c`. Ubuntu's glibc declares
+`getcwd` with `__attribute__((warn_unused_result))` and the
+bootstrap `CFLAGS` treat `unused-result` as an error, so the
+ignored-call line tipped over `-Werror=unused-result` on the
+ubuntu-latest runner. The macOS runner's libc declares the function
+without the attribute, so the same source compiled cleanly there
+and the regression went unnoticed locally on a gcc-14 + Debian
+glibc box where the attribute also doesn't fire. Fix is to capture
+the result and clear `initial_dir` on failure -- best-effort, so
+the rest of the binary still launches if the cwd lookup fails.
+
 ## v0.99.2
 
 CI follow-up to v0.99.1: also upload the captured build log as a
