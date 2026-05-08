@@ -902,6 +902,52 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         || x->type == MINO_RATIO) {
         return x;
     }
+    if (x->type == MINO_BIGDEC) {
+        /* unscaled / 10^scale, reduced. Negative scale means
+         * unscaled * 10^|scale| / 1 (an integer multiple). */
+        mino_val_t *unscaled = x->as.bigdec.unscaled;
+        int         scale    = x->as.bigdec.scale;
+        if (scale == 0) return unscaled;
+        if (scale < 0) {
+            mpz_t pw;
+            mino_val_t *out;
+            if (mp_int_init(&pw) != MP_OK) {
+                return prim_throw_classified(S, "eval/out-of-memory",
+                    "MOM001", "out of memory");
+            }
+            if (mp_int_set_value(&pw, 10) != MP_OK
+                || mp_int_expt(&pw, -scale, &pw) != MP_OK) {
+                mp_int_clear(&pw);
+                return prim_throw_classified(S, "eval/out-of-memory",
+                    "MOM001", "out of memory");
+            }
+            out = mino_bigint_from_ll(S, 0);
+            if (out == NULL) { mp_int_clear(&pw); return NULL; }
+            mp_int_mul((mp_int)unscaled->as.bigint.mpz, &pw,
+                       (mp_int)out->as.bigint.mpz);
+            mp_int_clear(&pw);
+            return out;
+        }
+        {
+            mino_val_t *bd;
+            mpz_t pw;
+            if (mp_int_init(&pw) != MP_OK) {
+                return prim_throw_classified(S, "eval/out-of-memory",
+                    "MOM001", "out of memory");
+            }
+            if (mp_int_set_value(&pw, 10) != MP_OK
+                || mp_int_expt(&pw, scale, &pw) != MP_OK) {
+                mp_int_clear(&pw);
+                return prim_throw_classified(S, "eval/out-of-memory",
+                    "MOM001", "out of memory");
+            }
+            bd = mino_bigint_from_ll(S, 1);
+            if (bd == NULL) { mp_int_clear(&pw); return NULL; }
+            mp_int_copy(&pw, (mp_int)bd->as.bigint.mpz);
+            mp_int_clear(&pw);
+            return mino_ratio_make(S, unscaled, bd);
+        }
+    }
     if (x->type == MINO_FLOAT) {
         /* Use the fact that any finite double is m * 2^e for some
          * 53-bit signed mantissa m and integer exponent e. Build a

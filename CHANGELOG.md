@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.100.4
+
+`rationalize` accepts BigDecimals. The previous arms accepted int,
+bigint, ratio, and float; passing a BigDecimal threw "argument must
+be numeric". Now `(rationalize unscaled * 10^-scale)` reduces to a
+ratio (or integer when scale <= 0). External `rationalize.cljc` rises
+from 11/16 to 14/16 assertions; the two remaining failures are float
+cases that depend on JVM `Double.toString` (shortest-decimal
+roundtrip) which mino does not yet implement -- mino's `%g` printer
+is the wider gap and is tracked separately.
+
 ## v0.100.3
 
 This release bundles four fixes that move three external test files
