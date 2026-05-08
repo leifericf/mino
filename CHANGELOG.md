@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.100.16
+
+### `(repeat n x)` accepts booleans (true -> 1, false -> 0)
+
+Per the cross-dialect test suite, every non-`:clj` dialect coerces
+a boolean count via `(if n 1 0)` instead of throwing. mino's
+`repeat` rejected booleans up front because `number?` returns
+false for them; the cond now adds an explicit boolean arm so
+`(repeat true :a)` is `[:a]` and `(repeat false :a)` is `[]`,
+while non-numeric / non-boolean counts (nil, strings, keywords)
+still throw with the same "count must be a number" message.
+
+External `repeat.cljc` 15/16 -> 17/17. External suite: 187 -> 188 OK.
+
 ## v0.100.15
 
 ### `subvec` coerces any number-tier index to long
