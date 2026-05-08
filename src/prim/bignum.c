@@ -863,7 +863,9 @@ mino_val_t *prim_ratio_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-/* (rational? x) — true for int / bigint / ratio. */
+/* (rational? x) — true for int / bigint / ratio / bigdec. Per Clojure
+ * BigDecimal is rational since its value `unscaled * 10^-scale` is an
+ * exact rational number; only floats (IEEE-754) sit outside. */
 mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -876,7 +878,8 @@ mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (x == NULL) return mino_false(S);
         return (x->type == MINO_INT
              || x->type == MINO_BIGINT
-             || x->type == MINO_RATIO) ? mino_true(S) : mino_false(S);
+             || x->type == MINO_RATIO
+             || x->type == MINO_BIGDEC) ? mino_true(S) : mino_false(S);
     }
 }
 

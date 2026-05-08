@@ -255,7 +255,8 @@
   (is (rational? 1N))
   (is (rational? 1/2))
   (is (not (rational? 1.5)))
-  (is (not (rational? 1.5M))))
+  ;; Per Clojure, BigDecimal is rational (its value is exact).
+  (is (rational? 1.5M)))
 
 ;; --- Phase C.3: bigdec reader, predicates, accessors ---
 
@@ -266,7 +267,7 @@
   (is (decimal? 1.5M))
   (is (not (decimal? 1.5)))
   (is (not (decimal? 1)))
-  (is (not (rational? 1.5M)))
+  (is (rational? 1.5M))
   ;; Same-rep equality under `=` (decimal scale-aware).
   (is (= 1.5M 1.5M))
   (is (not (= 1.0M 1.00M)))

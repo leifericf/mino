@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### `rational?` Returns True For BigDecs
+
+`(rational? 1.5M)` now returns `true` instead of `false`, matching
+Clojure: a BigDecimal's value `unscaled * 10^-scale` is an exact
+rational number, so the predicate accepts the bigdec tier alongside
+int / bigint / ratio. Only the float (IEEE-754) tier remains outside.
+The internal `nt-bigdec-literal` test, which had the inverted
+expectation, was corrected.
+
 ### Reader Accepts Arbitrarily Long Numeric Literals
 
 `try_parse_numeric` previously bailed out (treated the token as a
