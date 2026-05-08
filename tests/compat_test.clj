@@ -36,8 +36,9 @@
 ;; --- Map literal reader conditional key elimination ---
 
 (deftest map-reader-conditional-key-elim
-  ;; Mino matches both :mino and :clj, so we use :cljs to drive
-  ;; elimination behavior — :cljs is the always-skipped tag.
+  ;; Mino is its own dialect (matches :mino, then :default), so any
+  ;; non-:mino non-:default tag (:cljs, :clj, :jank, …) drives
+  ;; elimination behavior in mino.
   (testing "eliminated key skips paired value"
     (is (= {:c 2} {#?(:cljs :b) 1 :c 2})))
 
@@ -50,8 +51,8 @@
   (testing "mino branch matches"
     (is (= {:a 1} {#?(:mino :a :clj :b) 1})))
 
-  (testing "clj branch also matches under reader-conditional"
-    (is (= {:a 1} {#?(:clj :a :cljs :b) 1}))))
+  (testing "clj branch is skipped on mino"
+    (is (= {} {#?(:clj :a :cljs :b) 1}))))
 
 ;; --- Unquote-splicing in vectors ---
 
@@ -550,8 +551,12 @@
   (is (= 42       (read "42"))))
 
 (deftest read-cond-allow-evaluates-conditional
-  (is (= 1 (read "#?(:clj 1 :cljs 2)")))
-  (is (= 1 (read {:read-cond :allow} "#?(:clj 1 :cljs 2)"))))
+  ;; mino is not a JVM dialect, so :clj branches don't fire; with no
+  ;; :default key the reader returns nil for the conditional.
+  (is (nil? (read "#?(:clj 1 :cljs 2)")))
+  (is (nil? (read {:read-cond :allow} "#?(:clj 1 :cljs 2)")))
+  (is (= 3 (read "#?(:mino 3 :clj 1 :cljs 2)")))
+  (is (= 9 (read "#?(:clj 1 :default 9)"))))
 
 (deftest read-cond-preserve-builds-record
   (let [r (read {:read-cond :preserve} "#?(:clj 1 :cljs 2)")]

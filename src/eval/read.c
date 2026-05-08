@@ -300,15 +300,16 @@ static mino_val_t *make_reader_conditional_record(
 }
 
 /* Read a reader-conditional body: (keyword form keyword form ...).
- * Matches S->reader_dialect first, then "clj" (because mino is a
- * non-JVM Clojure dialect), then "default". Returns the matched form
- * in *found, or NULL if no match. Caller must have consumed the
- * opening '('. */
+ * Matches S->reader_dialect first, then "default". `:clj` is *not* a
+ * fallback: mino is not a JVM dialect, so JVM-only forms inside `:clj`
+ * branches must not fire on mino. Cross-dialect tests in the wild
+ * (e.g. jank-lang/clojure-test-suite) put JVM-only assertions in
+ * `:clj` and expect non-JVM dialects to land on `:default`. Returns
+ * the matched form in *found, or NULL if no match. */
 static int reader_cond_active(const char *dialect,
                               const char *kname, size_t klen)
 {
     if (klen == strlen(dialect) && memcmp(kname, dialect, klen) == 0) return 1;
-    if (klen == 3 && memcmp(kname, "clj", 3) == 0) return 1;
     return 0;
 }
 static mino_val_t *read_cond_body(mino_state_t *S, const char **p,

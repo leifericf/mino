@@ -5,10 +5,12 @@
 (deftest reader-cond-mino-branch
   (is (= 1 #?(:mino 1 :clj 2))))
 
-(deftest reader-cond-clj-matches
-  ;; Mino matches both :mino and :clj as active reader-conditional
-  ;; dialects, mirroring how Babashka treats :clj as the active feature.
-  (is (= 42 #?(:clj 42 :default 99))))
+(deftest reader-cond-clj-skipped
+  ;; Mino is *not* a JVM dialect: :clj branches are skipped so JVM-only
+  ;; assertions in cross-dialect tests (e.g., jank-lang/clojure-test-suite)
+  ;; do not fire on mino. Cross-dialect code is expected to put a :default
+  ;; branch as the catch-all for non-JVM runtimes.
+  (is (= 99 #?(:clj 42 :default 99))))
 
 (deftest reader-cond-default-when-no-active-key
   (is (= 99 #?(:cljs 42 :default 99))))
@@ -31,8 +33,8 @@
 (deftest reader-cond-splice-in-list
   (is (= 10 (+ 1 #?@(:mino (2 3) :clj (0 0)) 4))))
 
-(deftest reader-cond-splice-clj-matches
-  (is (= [1 2 3 4] [1 #?@(:clj [2 3]) 4])))
+(deftest reader-cond-splice-clj-skipped
+  (is (= [1 4] [1 #?@(:clj [2 3]) 4])))
 
 (deftest reader-cond-splice-skipped-when-no-match
   (is (= [1 4] [1 #?@(:cljs [2 3]) 4])))

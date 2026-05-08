@@ -482,7 +482,7 @@ struct mino_state {
     int             reader_col;
     const char     *reader_dialect;   /* "mino" */
     /* :read-cond mode for reader conditionals.
-     *   0 = allow (default; match S->reader_dialect / clj / default)
+     *   0 = allow (default; match S->reader_dialect / default)
      *   1 = preserve (return a reader-conditional record)
      *   2 = disallow (error on any #? or #?@) */
     int             reader_cond_mode;

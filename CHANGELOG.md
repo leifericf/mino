@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.100.0
+
+Reader conditionals: drop the `:clj` fallback. mino is not a JVM
+dialect, so `:clj` branches must not fire here. Cross-dialect tests
+in the wild (e.g., `jank-lang/clojure-test-suite`) put JVM-only
+assertions (`System/getProperty`, `(new Object)`,
+`clojure.lang.MapEntry/create`, `int-array`, …) inside their `:clj`
+branch, with `:default` as the catch-all for non-JVM runtimes -- the
+suite was authored on the assumption that each non-JVM dialect is
+named (`:cljs`, `:bb`, `:jank`, `:cljr`, `:lpy`, …) and `:default`
+covers everything else, mirroring how peer dialects (ClojureScript,
+Babashka, jank, ClojureCLR, Basilisp) handle the same files.
+
+mino now matches `S->reader_dialect` (defaults to `"mino"`) and
+`:default` only. The bundled `lib/clojure/*` is unaffected -- it uses
+`:mino`/`:default` exclusively, so no internal lib relied on the old
+`:clj` fallback. Internal reader-conditional tests under
+`tests/reader_cond_test.clj` and `tests/compat_test.clj` are updated
+to exercise the new semantics directly. External
+`jank-lang/clojure-test-suite` rises from 166/223 to 170/223 OK on
+this change alone.
+
+This is a documented intentional divergence. Embedders that *want*
+JVM-style behavior can override `S->reader_dialect` to `"clj"` to
+have their conditional code receive the `:clj` branch, but doing so
+loses the `:mino`-tagged escape hatch and is not a supported
+configuration.
+
 ## v0.99.4
 
 Add the same build-log artifact upload to `release-build.yml` that
