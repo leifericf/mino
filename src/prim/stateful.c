@@ -36,7 +36,8 @@ static void atom_notify_watches(mino_state_t *S, mino_val_t *atom,
                                 mino_env_t *env)
 {
     mino_val_t *watches = atom->as.atom.watches;
-    size_t i, len;
+    volatile size_t i;
+    size_t len;
     if (watches == NULL || watches->type != MINO_MAP || watches->as.map.len == 0)
         return;
     len = watches->as.map.len;

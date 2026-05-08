@@ -386,7 +386,7 @@ static int apply_refer_options(mino_state_t *S, mino_val_t *mod_sym,
                     if (var != NULL) val = var->as.var.root;
                 }
                 if (val == NULL) {
-                    char msg[300];
+                    char msg[600];
                     snprintf(msg, sizeof(msg),
                         "require: %s does not refer var %s",
                         modbuf, rbuf);

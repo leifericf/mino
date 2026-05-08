@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased — Clean Compile Under -Werror
+
+The default `make` build now compiles warning-free with `-Wall
+-Wpedantic -Wextra` and treats remaining warnings as errors via a
+new `-Werror` in `CFLAGS`. Fourteen pre-existing warnings are
+fixed, split between two classes.
+
+`-Wclobbered` flagged five locals whose values could be lost when
+a `longjmp` rewound past their `setjmp`. In `eval_try` the
+`vol_result` and `vol_ex` declarations were `volatile mino_val_t
+*` — pointer-to-volatile, which protects the pointee but leaves
+the pointer itself non-volatile. Moved the qualifier so the
+pointer is `volatile` (`mino_val_t * volatile`). In
+`mino_eval_string_inner` the `src` parameter was reassigned in
+the read loop after the top-level `setjmp`; it now lives in a
+`const char * volatile` local copied from the parameter. In
+`atom_notify_watches` the loop counter `i` is alive across the
+per-iteration `setjmp` and is now `volatile`.
+
+`-Wformat-truncation` flagged nine `snprintf` sites where worst-
+case inputs could overflow the destination. The diagnostic
+buffers in `apply_refer_options` (`require:` errors) and
+`validate_only_names` (`refer:` errors) were `char msg[300]` but
+hold two 256-byte names plus format text; bumped to 600. The
+four `cwd_resolve` / `try_resolve` paths that build
+`<dir>/lib/<name><ext>` now gate each `snprintf` on a runtime
+length check that proves the output fits.
+
 ## v0.98.6 — Bump MINO_VERSION_* Constants
 
 The five v0.98 tags (v0.98.0 through v0.98.5) shipped with

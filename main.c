@@ -71,19 +71,24 @@ static int try_resolve(const char *name, size_t nlen, char *buf, size_t bufsz)
     }
     /* Try initial dir's lib/ as fallback. */
     if (initial_dir[0] != '\0') {
-        for (i = 0; i < 3; i++) {
-            snprintf(buf, bufsz, "%s/lib/%s%s", initial_dir, name, exts[i]);
-            if (file_exists(buf)) return 1;
+        size_t dlen = strlen(initial_dir);
+        if (dlen + nlen + 11 < bufsz) {
+            for (i = 0; i < 3; i++) {
+                snprintf(buf, bufsz, "%s/lib/%s%s", initial_dir, name, exts[i]);
+                if (file_exists(buf)) return 1;
+            }
         }
     }
     /* Try binary dir's lib/ as fallback. */
     if (binary_dir[0] != '\0') {
-        for (i = 0; i < 3; i++) {
-            snprintf(buf, bufsz, "%s/lib/%s%s", binary_dir, name, exts[i]);
-            if (file_exists(buf)) return 1;
+        size_t dlen = strlen(binary_dir);
+        if (dlen + nlen + 11 < bufsz) {
+            for (i = 0; i < 3; i++) {
+                snprintf(buf, bufsz, "%s/lib/%s%s", binary_dir, name, exts[i]);
+                if (file_exists(buf)) return 1;
+            }
         }
     }
-    (void)nlen;
     return 0;
 }
 
@@ -105,12 +110,18 @@ static const char *cwd_resolve(const char *name, void *ctx)
         snprintf(path_buf, sizeof(path_buf), "lib/%s", name);
         if (file_exists(path_buf)) return path_buf;
         if (initial_dir[0] != '\0') {
-            snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", initial_dir, name);
-            if (file_exists(path_buf)) return path_buf;
+            size_t dlen = strlen(initial_dir);
+            if (dlen + nlen + 6 < sizeof(path_buf)) {
+                snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", initial_dir, name);
+                if (file_exists(path_buf)) return path_buf;
+            }
         }
         if (binary_dir[0] != '\0') {
-            snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", binary_dir, name);
-            if (file_exists(path_buf)) return path_buf;
+            size_t dlen = strlen(binary_dir);
+            if (dlen + nlen + 6 < sizeof(path_buf)) {
+                snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", binary_dir, name);
+                if (file_exists(path_buf)) return path_buf;
+            }
         }
         return NULL;
     }

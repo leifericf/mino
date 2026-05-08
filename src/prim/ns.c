@@ -464,7 +464,7 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
             memcpy(nm, e->as.s.data, e->as.s.len);
             nm[e->as.s.len] = '\0';
             if (env_find_here(src, nm) == NULL) {
-                char msg[300];
+                char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s does not exist in %s", nm, src_ns);
                 prim_throw_classified(S, "name", "MNS001", msg);
@@ -473,7 +473,7 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
             var = var_find(S, src_ns, nm);
             if (var != NULL && var->type == MINO_VAR
                 && var->as.var.is_private) {
-                char msg[300];
+                char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s is not public in %s", nm, src_ns);
                 prim_throw_classified(S, "name", "MNS001", msg);
@@ -492,7 +492,7 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
             memcpy(nm, e->as.s.data, e->as.s.len);
             nm[e->as.s.len] = '\0';
             if (env_find_here(src, nm) == NULL) {
-                char msg[300];
+                char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s does not exist in %s", nm, src_ns);
                 prim_throw_classified(S, "name", "MNS001", msg);
@@ -501,7 +501,7 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
             var = var_find(S, src_ns, nm);
             if (var != NULL && var->type == MINO_VAR
                 && var->as.var.is_private) {
-                char msg[300];
+                char msg[600];
                 snprintf(msg, sizeof(msg),
                     "refer: %s is not public in %s", nm, src_ns);
                 prim_throw_classified(S, "name", "MNS001", msg);

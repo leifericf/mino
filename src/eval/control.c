@@ -127,9 +127,9 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
     int           saved_call;
     int           saved_trace;
     dyn_frame_t  *saved_dyn;
-    volatile int         got_exception = 0;
-    volatile mino_val_t *vol_result    = NULL;
-    volatile mino_val_t *vol_ex        = NULL;
+    volatile int       got_exception = 0;
+    mino_val_t * volatile vol_result = NULL;
+    mino_val_t * volatile vol_ex     = NULL;
     (void)tail;
 
     if (partition_try_clauses(S, form, args, &clauses) != 0) {

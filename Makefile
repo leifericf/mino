@@ -12,7 +12,7 @@
 # add it to the task runner instead.
 
 CC      ?= cc
-CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -O2
+CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -O2
 INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
            -Isrc/diag -Isrc/vendor/imath

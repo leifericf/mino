@@ -541,9 +541,10 @@ mino_val_t *mino_eval(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     return v;
 }
 
-static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src, mino_env_t *env)
+static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, mino_env_t *env)
 {
     volatile char   probe = 0;
+    const char * volatile src = src_in;
     mino_val_t     *last  = mino_nil(S);
     const char     *saved_file = S->reader_file;
     int             saved_line = S->reader_line;
