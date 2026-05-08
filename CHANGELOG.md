@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Eager Validation for `cycle`, `mapcat`, `reverse`
+
+`cycle`, `mapcat`, and `reverse` now raise a type error eagerly when
+their collection (or function) argument is non-seqable (or, for
+`mapcat`, non-invokable). Previously the lazy variants returned a
+seq-shaped value that only blew up when something forced it; the
+eager variants (`reverse`) silently treated the input as empty
+because the `seq_iter_*` family short-circuits on unknown types.
+Matches Clojure's "throws at the call site" behaviour for these
+specific functions.
+
 ### Sorted Collections: Predicate Comparator + Cross-comparator Equality
 
 Two related fixes for `sorted-map` / `sorted-set` and the `-by`

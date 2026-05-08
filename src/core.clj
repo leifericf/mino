@@ -474,7 +474,11 @@
    over coll. When called with no collection, returns a transducer."
   ([f] (comp (map f) cat))
   ([f coll]
-   (let [cat-lazy (fn cat-lazy [s]
+   ;; Validate eagerly: f must be invokable, coll must be seqable.
+   (when-not (ifn? f)
+     (throw (str "mapcat: f must be a function, got " (type f))))
+   (let [_ (seq coll)
+         cat-lazy (fn cat-lazy [s]
                     (lazy-seq
                       (when (seq s)
                         (let [inner (seq (f (first s)))]
@@ -592,14 +596,17 @@
   "Returns a lazy infinite sequence of repetitions of the items in
    coll."
   [coll]
-  (letfn [(cycle-impl [orig coll]
-            (lazy-seq
-              (let [s (seq coll)]
-                (if s
-                  (cons (first s) (cycle-impl orig (rest s)))
-                  (when (seq orig)
-                    (cycle-impl orig orig))))))]
-    (cycle-impl coll coll)))
+  ;; Validate eagerly so non-seqable inputs surface a type error at the
+  ;; call site rather than only when the result is realised.
+  (let [_ (seq coll)]
+    (letfn [(cycle-impl [orig coll]
+              (lazy-seq
+                (let [s (seq coll)]
+                  (if s
+                    (cons (first s) (cycle-impl orig (rest s)))
+                    (when (seq orig)
+                      (cycle-impl orig orig))))))]
+      (cycle-impl coll coll))))
 
 (defn repeatedly
   "Returns a lazy sequence of calls to f. With two args, returns n

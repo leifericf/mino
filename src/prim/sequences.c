@@ -852,9 +852,14 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     /* Per Clojure, (reverse nil) and (reverse <empty>) return the
      * empty list (), not nil. Otherwise iterate the collection and
      * cons each element onto the running head (matching Clojure's
-     * reverse contract: returns a sequence). */
+     * reverse contract: returns a sequence). Non-seqable inputs
+     * (numbers, keywords, symbols, ...) throw via `prim_seq`'s
+     * coercion check; the silent "treat as empty" path was wrong
+     * because it suppressed the type error Clojure raises. */
     mino_val_t *coll;
+    mino_val_t *seqd;
     mino_val_t *out = mino_empty_list(S);
+    mino_val_t *seq_args;
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -864,7 +869,11 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_empty_list(S);
     }
-    seq_iter_init(S, &it, coll);
+    seq_args = mino_cons(S, coll, mino_nil(S));
+    seqd = prim_seq(S, seq_args, env);
+    if (seqd == NULL) return NULL;
+    if (seqd->type == MINO_NIL) return mino_empty_list(S);
+    seq_iter_init(S, &it, seqd);
     while (!seq_iter_done(&it)) {
         out = mino_cons(S, seq_iter_val(S, &it), out);
         seq_iter_next(S, &it);
