@@ -840,8 +840,12 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    /* Per Clojure, (reverse nil) and (reverse <empty>) return the
+     * empty list (), not nil. Otherwise iterate the collection and
+     * cons each element onto the running head (matching Clojure's
+     * reverse contract: returns a sequence). */
     mino_val_t *coll;
-    mino_val_t *out = mino_nil(S);
+    mino_val_t *out = mino_empty_list(S);
     seq_iter_t  it;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -849,7 +853,7 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil(S);
+        return mino_empty_list(S);
     }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {

@@ -46,7 +46,8 @@
 (deftest reverse-fn
   (is (= '(3 2 1) (reverse (list 1 2 3))))
   (is (= '(3 2 1) (reverse [1 2 3])))
-  (is (= nil (reverse nil))))
+  ;; Per Clojure, (reverse nil) returns () not nil.
+  (is (= '() (reverse nil))))
 
 (deftest sort-fn
   (is (= '(1 1 3 4 5) (sort [3 1 4 1 5])))

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### `reverse` Returns the Empty-list Singleton
+
+`(reverse nil)` and `(reverse <empty>)` now return `()` rather
+than `nil`, matching Clojure (`reverse` always returns a
+sequence). Updated the internal `reverse-fn` test which had been
+asserting the old nil-tolerant behaviour.
+
 ### Non-readable Print of Characters
 
 `print` / `println` (the non-readable family) now emit a
