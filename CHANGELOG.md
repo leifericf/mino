@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `keys` and `vals` Accept the Empty-List Singleton
+
+Both `keys` and `vals` had explicit "return nil" branches for empty
+vectors / sets / strings / sorted sets / `nil`, but `()` (the
+`MINO_EMPTY_LIST` singleton) wasn't in the set, so it fell through
+to the "must be a map" error. Added `MINO_EMPTY_LIST` alongside
+the other empty cases.
+
 ### `clojure.test/use-fixtures`
 
 `use-fixtures` now lives in `lib/clojure/test.clj` with the
