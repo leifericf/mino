@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.100.2
+
+Transients are now read-callable. Per Clojure, a transient supports
+the same read-only interface as its persistent view: `nth`, `get`,
+`count`, `contains?`, and direct invocation (`(t-vec idx)`,
+`(t-map :k)`, `(t-set v)`, `(:k t-map)`). All write operations
+(`assoc`, `conj`, `dissoc`, `disj`, `pop`) still throw, matching the
+"transients are not persistent" contract.
+
+mino was throwing "expected a vector/map/set, got transient" on
+every read primitive. Each call site now unwraps the transient to
+its `current` persistent backing (failing on transients that have
+already been `persistent!`'d). External `transient.cljc` rises from
+6/51 to 51/51 assertions passing.
+
 ## v0.100.1
 
 `(deref delay)` now forces and returns the delay's value. mino's

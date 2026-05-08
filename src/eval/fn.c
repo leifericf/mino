@@ -406,6 +406,24 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
     for (tmp = args; mino_is_cons(tmp); tmp = tmp->as.cons.cdr)
         nargs++;
 
+    /* Transients delegate the read interface to their persistent view.
+     * (t-vec idx), (t-map :k), (t-set v) all behave identically to the
+     * persistent original until persistent! is called -- matching
+     * Clojure's read-only-on-transient contract. */
+    if (fn->type == MINO_TRANSIENT) {
+        if (!fn->as.transient.valid) {
+            set_eval_diag(S, form, "eval/state", "MST001",
+                "transient is no longer valid");
+            return NULL;
+        }
+        fn = fn->as.transient.current;
+        if (fn == NULL || fn->type == MINO_NIL) {
+            set_eval_diag(S, form, "eval/type", "MTY002",
+                "transient has no underlying collection");
+            return NULL;
+        }
+    }
+
     if (fn->type == MINO_KEYWORD) {
         /* (:k m) => (get m :k); (:k m default) => (get m :k default). */
         if (nargs < 1 || nargs > 2) {
@@ -418,6 +436,15 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             mino_val_t *def_val = nargs == 2
                 ? args->as.cons.cdr->as.cons.car
                 : mino_nil(S);
+            if (coll != NULL && coll->type == MINO_TRANSIENT) {
+                if (!coll->as.transient.valid) {
+                    set_eval_diag(S, form, "eval/state", "MST001",
+                        "transient is no longer valid");
+                    return NULL;
+                }
+                coll = coll->as.transient.current;
+                if (coll == NULL || coll->type == MINO_NIL) return def_val;
+            }
             if (coll != NULL && coll->type == MINO_MAP) {
                 mino_val_t *v = map_get_val(coll, fn);
                 return v == NULL ? def_val : v;

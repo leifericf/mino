@@ -182,6 +182,13 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_int(S, 0);
     }
+    if (coll->type == MINO_TRANSIENT) {
+        if (!coll->as.transient.valid)
+            return prim_throw_classified(S, "eval/state", "MST001",
+                "count: transient is no longer valid");
+        coll = coll->as.transient.current;
+        if (coll == NULL || coll->type == MINO_NIL) return mino_int(S, 0);
+    }
     switch (coll->type) {
     case MINO_EMPTY_LIST: return mino_int(S, 0);
     case MINO_CONS:   return mino_int(S, (long long)list_length(S, coll));
@@ -320,6 +327,17 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         if (def_val != NULL) return def_val;
         return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+    }
+    if (coll->type == MINO_TRANSIENT) {
+        if (!coll->as.transient.valid)
+            return prim_throw_classified(S, "eval/state", "MST001",
+                "nth: transient is no longer valid");
+        coll = coll->as.transient.current;
+        if (coll == NULL || coll->type == MINO_NIL) {
+            if (def_val != NULL) return def_val;
+            return prim_throw_classified(S, "eval/bounds", "MBD001",
+                "nth index out of range");
+        }
     }
     if (coll->type == MINO_LAZY) {
         coll = lazy_force(S, coll);
@@ -1263,6 +1281,13 @@ mino_val_t *prim_contains_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     key  = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_false(S);
+    }
+    if (coll->type == MINO_TRANSIENT) {
+        if (!coll->as.transient.valid)
+            return prim_throw_classified(S, "eval/state", "MST001",
+                "contains?: transient is no longer valid");
+        coll = coll->as.transient.current;
+        if (coll == NULL || coll->type == MINO_NIL) return mino_false(S);
     }
     if (coll->type == MINO_MAP) {
         return map_get_val(coll, key) != NULL ? mino_true(S) : mino_false(S);
