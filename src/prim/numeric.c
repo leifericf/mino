@@ -1092,7 +1092,12 @@ static mino_val_t *mqr_ratio_inner(mino_state_t *S, const mino_val_t *a,
             /* rem + b. Promote both to ratio if either is ratio. */
             if (rem->type == MINO_RATIO || b->type == MINO_RATIO) {
                 mino_val_t *one = mino_bigint_from_ll(S, 1);
-                mino_val_t *r_at, *b_at;
+                /* Init to NULL so older GCC's -Wmaybe-uninitialized
+                 * flow analysis sees a definite assignment. The
+                 * conditional branches below cover every reachable
+                 * path; the NULL check before the final use catches
+                 * any allocator failure. */
+                mino_val_t *r_at = NULL, *b_at = NULL;
                 if (one == NULL) return NULL;
                 if (rem->type == MINO_RATIO) {
                     r_at = rem;

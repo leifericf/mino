@@ -46,10 +46,10 @@ jobs:
           make 2>&1 | tee /tmp/build.log
 
       - name: Surface build failure
-        # When the build step above fails the actor without log access
-        # cannot diagnose. Surface the captured tail on the job
-        # summary page (visible via the public Actions UI without
-        # signing in) so external contributors can see what broke.
+        # When the build step above fails, post the captured tail on
+        # the job summary page so anyone with Actions UI access (incl.
+        # signed-in external contributors) sees what broke without
+        # having to download artifacts.
         if: failure()
         run: |
           {
@@ -59,6 +59,18 @@ jobs:
             tail -60 /tmp/build.log 2>/dev/null || echo '(no build log captured)'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log on failure
+        # Artifacts are downloadable from the Actions page anonymously
+        # for public repositories, so this is the path for off-repo
+        # observers (and for the project bot) to see the actual gcc
+        # error output without needing log-download permission.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ matrix.os }}
+          path: /tmp/build.log
+          retention-days: 7
 
       - name: Test
         # Run the suite runner directly so stdout streams. `task test`

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.99.2
+
+CI follow-up to v0.99.1: also upload the captured build log as a
+public-downloadable artifact when the bootstrap step fails (in
+addition to the job summary), so external observers can fetch the
+exact gcc error without log-download permission. Initialise `r_at`
+and `b_at` to `NULL` in the `mqr_ratio` modulus-adjust path so
+older GCC's `-Wmaybe-uninitialized` flow analysis sees a definite
+assignment -- the conditional branches already cover every reachable
+path, but gcc-11 (release-build runner default on ubuntu-22.04) has
+a less-precise analyzer.
+
 ## v0.99.1
 
 CI plumbing: surface the build log on the job summary page (visible
