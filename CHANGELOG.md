@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.100.5
+
+Three small fixes for Clojure parity, all driven by the external
+suite. External suite: 170 OK -> 178 OK on the cumulative run.
+
+### `sort` throws on incomparable elements
+
+`(sort [1 []])` now throws "compare: cannot compare values of
+different types", matching Clojure's `ClassCastException`. Default
+`sort` (no comparator) routes through `prim_compare` instead of the
+internal type-tag fallback in `val_compare`, so cross-type elements
+fail loudly. `sort` with an explicit comparator is unchanged.
+
+### `min-key` / `max-key` NaN handling
+
+The variadic case `(min-key k a b & more)` now uses the `(<= kw kv)`
+"keep current on NaN" loop that JVM Clojure uses, instead of folding
+through the 2-arg form's `(< kx ky)` predicate. The two-arg case
+itself is unchanged. NaN-bearing inputs match Clojure's
+order-dependent results: `(min-key identity [##NaN ##-Inf 1])` is
+`##-Inf`, `(min-key identity [##-Inf ##NaN 1])` is `##NaN`, etc.
+
+### `if-let` / `when-let` / `if-some` / `when-some` validate the binding vector
+
+The macros now assert at expansion time that the binding form is a
+vector of exactly two elements (one symbol/expr pair). Anything else
+-- a list, a multi-pair vector -- throws. External `when_let.cljc`
+goes 13/13.
+
 ## v0.100.4
 
 `rationalize` accepts BigDecimals. The previous arms accepted int,

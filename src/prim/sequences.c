@@ -910,7 +910,22 @@ static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *
         /* Boolean result: true means a < b, false means a >= b */
         return mino_is_truthy(result) ? -1 : 1;
     }
-    return val_compare(a, b);
+    /* Default comparator: route through prim_compare so cross-type
+     * pairs throw a typed error instead of silently ordering by tag.
+     * (sort [1 []]) -> ClassCastException-shaped error matches Clojure. */
+    {
+        mino_val_t *args = mino_cons(S, (mino_val_t *)a,
+                              mino_cons(S, (mino_val_t *)b, mino_nil(S)));
+        mino_val_t *r = prim_compare(S, args, NULL);
+        if (r == NULL) return 0;
+        if (r->type == MINO_INT) {
+            return r->as.i < 0 ? -1 : r->as.i > 0 ? 1 : 0;
+        }
+        if (r->type == MINO_FLOAT) {
+            return r->as.f < 0 ? -1 : r->as.f > 0 ? 1 : 0;
+        }
+        return 0;
+    }
 }
 
 /* Merge sort for mino_val_t* arrays. */

@@ -402,14 +402,33 @@
                   ([k x] x)
                   ([k x y] (if (< (k x) (k y)) x y))
                   ([k x y & more]
-                    (reduce (fn [best v] (min-key k best v))
-                            (min-key k x y) more)))
+                   ;; Mirrors clojure.core/min-key: the variadic case
+                   ;; uses (<= kw kv) so NaN comparisons (always false)
+                   ;; keep the running minimum rather than swapping it
+                   ;; for the NaN. Different from the 2-arg case, but
+                   ;; that matches Clojure's spec semantics.
+                   (let [kx (k x) ky (k y)
+                         [v kv] (if (< kx ky) [x kx] [y ky])]
+                     (loop [v v kv kv more more]
+                       (if (seq more)
+                         (let [w (first more) kw (k w)]
+                           (if (<= kw kv)
+                             (recur w kw (next more))
+                             (recur v kv (next more))))
+                         v)))))
 (defn max-key "Returns the x for which (k x) is greatest."
                   ([k x] x)
                   ([k x y] (if (> (k x) (k y)) x y))
                   ([k x y & more]
-                    (reduce (fn [best v] (max-key k best v))
-                            (max-key k x y) more)))
+                   (let [kx (k x) ky (k y)
+                         [v kv] (if (> kx ky) [x kx] [y ky])]
+                     (loop [v v kv kv more more]
+                       (if (seq more)
+                         (let [w (first more) kw (k w)]
+                           (if (>= kw kv)
+                             (recur w kw (next more))
+                             (recur v kv (next more))))
+                         v)))))
 (defn not-empty
   "Returns coll if it has items, nil otherwise."
   [coll] (if (seq coll) coll nil))
@@ -953,6 +972,8 @@
 (defmacro if-let
   "Binds the result of expr, evaluates then if truthy, else otherwise."
   [bindings then & else]
+  (when-not (and (vector? bindings) (= 2 (count bindings)))
+    (throw "if-let requires a binding vector of exactly one symbol/expr pair"))
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]
@@ -965,6 +986,8 @@
 (defmacro when-let
   "Binds the result of expr, evaluates body if truthy."
   [bindings & body]
+  (when-not (and (vector? bindings) (= 2 (count bindings)))
+    (throw "when-let requires a binding vector of exactly one symbol/expr pair"))
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]
@@ -998,6 +1021,8 @@
   "Binds the result of expr, evaluates then if non-nil, else
    otherwise."
   [bindings then & else]
+  (when-not (and (vector? bindings) (= 2 (count bindings)))
+    (throw "if-some requires a binding vector of exactly one symbol/expr pair"))
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]
@@ -1010,6 +1035,8 @@
 (defmacro when-some
   "Binds the result of expr, evaluates body if non-nil."
   [bindings & body]
+  (when-not (and (vector? bindings) (= 2 (count bindings)))
+    (throw "when-some requires a binding vector of exactly one symbol/expr pair"))
   (let [sym  (first bindings)
         expr (first (rest bindings))
         g    (gensym)]

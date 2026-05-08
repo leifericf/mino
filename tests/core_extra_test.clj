@@ -88,22 +88,33 @@
   (is (= nil (when-not true :ok))))
 
 (deftest if-let-macro
-  (is (= 42 (if-let (x 42) x :none)))
-  (is (= :none (if-let (x nil) x :none)))
-  (is (= :none (if-let (x false) x :none))))
+  (is (= 42 (if-let [x 42] x :none)))
+  (is (= :none (if-let [x nil] x :none)))
+  (is (= :none (if-let [x false] x :none))))
 
 (deftest when-let-macro
-  (is (= "hi!" (when-let (x "hi") (str x "!"))))
-  (is (= nil (when-let (x nil) :nope))))
+  (is (= "hi!" (when-let [x "hi"] (str x "!"))))
+  (is (= nil (when-let [x nil] :nope))))
 
 (deftest if-some-macro
-  (is (= false (if-some (x false) x :none)))
-  (is (= :none (if-some (x nil) x :none)))
-  (is (= 42 (if-some (x 42) x :none))))
+  (is (= false (if-some [x false] x :none)))
+  (is (= :none (if-some [x nil] x :none)))
+  (is (= 42 (if-some [x 42] x :none))))
 
 (deftest when-some-macro
-  (is (= "got 0" (when-some (x 0) (str "got " x))))
-  (is (= nil (when-some (x nil) :nope))))
+  (is (= "got 0" (when-some [x 0] (str "got " x))))
+  (is (= nil (when-some [x nil] :nope))))
+
+(deftest let-binding-arity-checks
+  ;; if-let / when-let / if-some / when-some require an exactly-one-pair
+  ;; binding vector. Anything else (a list, a multi-pair vector) throws
+  ;; at macroexpand time.
+  (is (thrown? (macroexpand '(if-let [x 1 y 2] x))))
+  (is (thrown? (macroexpand '(when-let [x 1 y 2] x))))
+  (is (thrown? (macroexpand '(if-some [x 1 y 2] x))))
+  (is (thrown? (macroexpand '(when-some [x 1 y 2] x))))
+  (is (thrown? (macroexpand '(if-let (x 1) x))))
+  (is (thrown? (macroexpand '(when-let (x 1) x)))))
 
 ;; --- Sequence functions ---
 
