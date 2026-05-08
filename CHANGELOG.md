@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### `(empty seq)` Returns the Empty-list Singleton
+
+`empty` on a list / cons / lazy-seq / chunked-cons / `()` now
+returns the empty-list singleton `()` rather than `nil`. Per
+Clojure, the contract is "an empty collection of the same kind";
+for sequence types that's `()`, not `nil`. The branches for
+maps / vectors / sets / sorted maps already returned the right
+empty collection; only the seq branches were wrong.
+
 ### Char Semantics Across `first`, `rest`, `cons`, and Iterators
 
 The `(seq string)` change shipped chars on the seq path; this

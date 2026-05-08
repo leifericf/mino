@@ -1103,8 +1103,11 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             r->meta = coll->meta;
             return r;
         case MINO_CONS:
+        case MINO_CHUNKED_CONS:
         case MINO_LAZY:
-            return mino_nil(S);
+        case MINO_EMPTY_LIST:
+            /* Per Clojure, (empty seq) is the empty list (). */
+            return mino_empty_list(S);
         default:
             return mino_nil(S);
         }
