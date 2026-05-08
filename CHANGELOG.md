@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### `dissoc!` / `disj!` Variadic Arity
+
+Both transient ops now accept the variadic Clojure form
+`(dissoc! tcoll k & ks)` / `(disj! tcoll k & ks)`. Each extra
+key is processed left-to-right against the running transient.
+Previously only the 2-arg form was accepted.
+
 ### `conj!` Variadic Arity
 
 `conj!` now matches Clojure's full signature: `(conj!)` returns

@@ -1572,32 +1572,48 @@ mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_dissoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    size_t n;
-    mino_val_t *t, *key;
+    /* Clojure: (dissoc! tcoll k & ks) -- additional keys removed
+     * left-to-right; the final transient is returned. */
+    size_t      n;
+    mino_val_t *t;
+    mino_val_t *p;
     (void)env;
     arg_count(S, args, &n);
-    if (n != 2) {
+    if (n < 2) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "dissoc! requires two arguments");
+            "dissoc! requires at least a transient and a key");
     }
-    t   = args->as.cons.car;
-    key = args->as.cons.cdr->as.cons.car;
-    return mino_dissoc_bang(S, t, key);
+    t = args->as.cons.car;
+    p = args->as.cons.cdr;
+    while (mino_is_cons(p)) {
+        t = mino_dissoc_bang(S, t, p->as.cons.car);
+        if (t == NULL) return NULL;
+        p = p->as.cons.cdr;
+    }
+    return t;
 }
 
 mino_val_t *prim_disj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    size_t n;
-    mino_val_t *t, *key;
+    /* Clojure: (disj! tcoll k & ks) -- additional keys removed
+     * left-to-right; the final transient is returned. */
+    size_t      n;
+    mino_val_t *t;
+    mino_val_t *p;
     (void)env;
     arg_count(S, args, &n);
-    if (n != 2) {
+    if (n < 2) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "disj! requires two arguments");
+            "disj! requires at least a transient and a key");
     }
-    t   = args->as.cons.car;
-    key = args->as.cons.cdr->as.cons.car;
-    return mino_disj_bang(S, t, key);
+    t = args->as.cons.car;
+    p = args->as.cons.cdr;
+    while (mino_is_cons(p)) {
+        t = mino_disj_bang(S, t, p->as.cons.car);
+        if (t == NULL) return NULL;
+        p = p->as.cons.cdr;
+    }
+    return t;
 }
 
 mino_val_t *prim_pop_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
