@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### `mod` / `rem` / `quot` Preserve Operand Type
+
+`mod`, `rem`, and `quot` now dispatch on the higher tier of their two
+operands and preserve the result type per Clojure's contagion rules:
+
+  - bigint inputs produce bigint results
+  - ratio inputs produce bigint quot, ratio rem / mod (collapsing to
+    bigint when the value is integer)
+  - bigdec inputs produce bigdec results at the aligned scale
+  - long inputs stay long (with `LLONG_MIN / -1` overflow promoted to
+    bigint)
+  - float inputs use the existing `fmod` path
+
+Previously the three primitives coerced both operands through
+`tower_to_double`, computed via `fmod`, and packed the result as long
+or float. Bigints, ratios, and bigdecs all collapsed lossily, so
+`(mod 10 3N)` returned a long (failing `(big-int? r)`) and
+`(mod 10 3.0M)` returned a float (failing `(decimal? r)`).
+
+The new path adds three internal helpers in `src/prim/bignum.c` —
+`mino_bigint_quot` / `_rem` / `_mod` (truncated division on bigints,
+with `mod` adjusting toward the sign of the divisor) — and
+`mino_bigdec_quot` / `_rem` / `_mod` which align scales before
+deferring to the bigint helpers. The ratio path cross-multiplies
+numerators and denominators into bigints so it can reuse the same
+quotient logic, then derives `rem` and `mod` via tower subtraction.
+
 ### `integer?` Recognises BigInts
 
 `integer?` previously aliased `int?`, so `(integer? 1N)` returned

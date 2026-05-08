@@ -229,6 +229,15 @@ mino_val_t *mino_bigint_sub(mino_state_t *S, const mino_val_t *a,
 mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
                             const mino_val_t *b);
 mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a);
+mino_val_t *mino_bigint_quot(mino_state_t *S, const mino_val_t *a,
+                             const mino_val_t *b);
+mino_val_t *mino_bigint_rem(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigint_mod(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+int mino_bigint_quotrem(mino_state_t *S, const mino_val_t *a,
+                        const mino_val_t *b, mino_val_t **q_out,
+                        mino_val_t **r_out);
 double   mino_bigint_to_double(const mino_val_t *v);
 
 /* MINO_RATIO support. */
@@ -251,6 +260,12 @@ mino_val_t *mino_ratio_div(mino_state_t *S, const mino_val_t *a,
 
 /* MINO_BIGDEC support. */
 mino_val_t *mino_bigdec_make(mino_state_t *S, mino_val_t *unscaled, int scale);
+mino_val_t *mino_bigdec_quot(mino_state_t *S, const mino_val_t *a,
+                             const mino_val_t *b);
+mino_val_t *mino_bigdec_rem(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
+mino_val_t *mino_bigdec_mod(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
 void     mino_bigdec_print(mino_state_t *S, const mino_val_t *v, FILE *out);
 int      mino_bigdec_equals(const mino_val_t *a, const mino_val_t *b);
 int      mino_bigdec_cmp(const mino_val_t *a, const mino_val_t *b);

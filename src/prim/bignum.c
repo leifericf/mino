@@ -452,6 +452,98 @@ mino_val_t *mino_bigint_mul(mino_state_t *S, const mino_val_t *a,
     return bigint_binop(S, a, b, mp_int_mul, "*'");
 }
 
+/* mino_bigint_quotrem -- truncated integer division. Sign of remainder
+ * matches the sign of the dividend (`a`); sign of quotient is the
+ * usual product-of-signs. Either q_out or r_out may be NULL when only
+ * one half is wanted. Returns -1 on b == 0 (with diag set) or
+ * allocation failure; 0 on success. */
+int mino_bigint_quotrem(mino_state_t *S, const mino_val_t *a,
+                        const mino_val_t *b, mino_val_t **q_out,
+                        mino_val_t **r_out)
+{
+    mpz_t  as_buf, bs_buf;
+    mp_int av = NULL, bv = NULL;
+    int    owns_a = 0, owns_b = 0;
+    mp_int qz = NULL, rz = NULL;
+    if (q_out) *q_out = NULL;
+    if (r_out) *r_out = NULL;
+    if (!bigint_view(a, &as_buf, &av, &owns_a) ||
+        !bigint_view(b, &bs_buf, &bv, &owns_b)) {
+        if (owns_a) mp_int_clear(&as_buf);
+        prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                              "out of memory in bigint quotrem");
+        return -1;
+    }
+    if (mp_int_compare_zero(bv) == 0) {
+        if (owns_a) mp_int_clear(&as_buf);
+        if (owns_b) mp_int_clear(&bs_buf);
+        prim_throw_classified(S, "eval/type", "MTY001", "division by zero");
+        return -1;
+    }
+    if (q_out) {
+        qz = bigint_alloc_zeroed();
+        if (qz == NULL) goto oom;
+    }
+    if (r_out) {
+        rz = bigint_alloc_zeroed();
+        if (rz == NULL) goto oom;
+    }
+    if (mp_int_div(av, bv, qz, rz) != MP_OK) {
+        goto oom;
+    }
+    if (owns_a) mp_int_clear(&as_buf);
+    if (owns_b) mp_int_clear(&bs_buf);
+    if (q_out) *q_out = bigint_wrap(S, qz);
+    if (r_out) *r_out = bigint_wrap(S, rz);
+    return 0;
+oom:
+    if (owns_a) mp_int_clear(&as_buf);
+    if (owns_b) mp_int_clear(&bs_buf);
+    if (qz != NULL) { mp_int_clear(qz); free(qz); }
+    if (rz != NULL) { mp_int_clear(rz); free(rz); }
+    prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                          "out of memory in bigint quotrem");
+    return -1;
+}
+
+/* mino_bigint_quot / _rem -- thin wrappers, return only one half. */
+mino_val_t *mino_bigint_quot(mino_state_t *S, const mino_val_t *a,
+                             const mino_val_t *b)
+{
+    mino_val_t *q = NULL;
+    if (mino_bigint_quotrem(S, a, b, &q, NULL) != 0) return NULL;
+    return q;
+}
+
+mino_val_t *mino_bigint_rem(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    mino_val_t *r = NULL;
+    if (mino_bigint_quotrem(S, a, b, NULL, &r) != 0) return NULL;
+    return r;
+}
+
+/* mino_bigint_mod -- floored division remainder. Sign of result matches
+ * the sign of the divisor (`b`). Computed as: r = trunc-rem; if r != 0
+ * and (r and b have opposite signs) then r += b. */
+mino_val_t *mino_bigint_mod(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    mino_val_t *r = NULL;
+    int sr, sb;
+    if (mino_bigint_quotrem(S, a, b, NULL, &r) != 0) return NULL;
+    sr = mp_int_compare_zero((mp_int)r->as.bigint.mpz);
+    if (b->type == MINO_INT) {
+        sb = (b->as.i > 0) - (b->as.i < 0);
+    } else {
+        sb = mp_int_compare_zero((mp_int)b->as.bigint.mpz);
+    }
+    if (sr != 0 && ((sr < 0) != (sb < 0))) {
+        return mino_bigint_add(S, r, b);
+    }
+    return r;
+}
+
 mino_val_t *mino_bigint_neg(mino_state_t *S, const mino_val_t *a)
 {
     mpz_t  as_buf;
@@ -1305,6 +1397,84 @@ mino_val_t *mino_bigdec_neg(mino_state_t *S, const mino_val_t *a)
     u = mino_bigint_neg(S, a->as.bigdec.unscaled);
     if (u == NULL) return NULL;
     return mino_bigdec_make(S, u, a->as.bigdec.scale);
+}
+
+/* Bigdec quot / rem / mod operate on aligned-scale unscaled bigints.
+ * The integer quotient (or remainder) lives at scale `smax`, so it is
+ * re-encoded as a bigdec by multiplying by 10^smax (for quot, where
+ * the value is the integer portion of the result) or by passing the
+ * unscaled remainder through directly (for rem / mod). */
+static int bigdec_align(mino_state_t *S, const mino_val_t *a,
+                        const mino_val_t *b, mino_val_t **au_out,
+                        mino_val_t **bu_out, int *smax_out)
+{
+    int sa = a->as.bigdec.scale;
+    int sb = b->as.bigdec.scale;
+    int smax = sa > sb ? sa : sb;
+    mino_val_t *au = to_bigint(S, a->as.bigdec.unscaled);
+    mino_val_t *bu;
+    if (au == NULL) return 0;
+    bu = to_bigint(S, b->as.bigdec.unscaled);
+    if (bu == NULL) return 0;
+    if (!bigint_mul_pow10(au, smax - sa) || !bigint_mul_pow10(bu, smax - sb)) {
+        prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                              "out of memory aligning bigdec scales");
+        return 0;
+    }
+    *au_out = au;
+    *bu_out = bu;
+    *smax_out = smax;
+    return 1;
+}
+
+mino_val_t *mino_bigdec_quot(mino_state_t *S, const mino_val_t *a,
+                             const mino_val_t *b)
+{
+    mino_val_t *au, *bu, *q;
+    int smax;
+    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "bigdec quot: bigdec operands required");
+    }
+    if (!bigdec_align(S, a, b, &au, &bu, &smax)) return NULL;
+    q = mino_bigint_quot(S, au, bu);
+    if (q == NULL) return NULL;
+    /* Re-encode q at scale smax: unscaled = q * 10^smax. */
+    if (!bigint_mul_pow10(q, smax)) {
+        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                     "out of memory in bigdec quot");
+    }
+    return mino_bigdec_make(S, q, smax);
+}
+
+mino_val_t *mino_bigdec_rem(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    mino_val_t *au, *bu, *r;
+    int smax;
+    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "bigdec rem: bigdec operands required");
+    }
+    if (!bigdec_align(S, a, b, &au, &bu, &smax)) return NULL;
+    r = mino_bigint_rem(S, au, bu);
+    if (r == NULL) return NULL;
+    return mino_bigdec_make(S, r, smax);
+}
+
+mino_val_t *mino_bigdec_mod(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    mino_val_t *au, *bu, *m;
+    int smax;
+    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "bigdec mod: bigdec operands required");
+    }
+    if (!bigdec_align(S, a, b, &au, &bu, &smax)) return NULL;
+    m = mino_bigint_mod(S, au, bu);
+    if (m == NULL) return NULL;
+    return mino_bigdec_make(S, m, smax);
 }
 
 /* Compare two bigdecs. Returns -1, 0, or 1. */

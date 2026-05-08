@@ -3,6 +3,7 @@
  */
 
 #include "prim/internal.h"
+#include "imath.h"
 
 #include <math.h>
 #include <string.h>
@@ -905,116 +906,313 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_DIV, "/");
 }
 
-mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+/* mod/rem/quot dispatcher.
+ *
+ * The three operations share a common structure: classify both operands
+ * and dispatch on the higher tier. Each tier preserves the result type
+ * (Clojure contagion):
+ *   FLOAT  -- fmod-based double computation
+ *   BIGDEC -- align scales, integer-divide unscaled bigints, wrap back
+ *   RATIO  -- cross-multiply num/denom into bigints, integer-divide
+ *   BIGINT -- mp_int_div via mino_bigint_quot/rem/mod
+ *   INT    -- C / and %, with LLONG_MIN / -1 overflow promoted to bigint
+ *
+ * RATIO meeting BIGDEC collapses to FLOAT (mirrors `+` / `-` etc.).
+ */
+typedef enum { MQR_QUOT, MQR_REM, MQR_MOD } mqr_op_t;
+
+static const char *mqr_name(mqr_op_t op) {
+    return op == MQR_QUOT ? "quot" : op == MQR_REM ? "rem" : "mod";
+}
+
+static mino_val_t *mqr_float(mino_state_t *S, double a, double b, mqr_op_t op,
+                             const char *opname)
 {
-    double a, b, r;
-    (void)env;
+    double r;
+    if (isnan(a) || isinf(a)) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s: NaN or Infinite dividend", opname);
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    if (isnan(b)) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s: NaN divisor", opname);
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    if (b == 0.0) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s: division by zero", opname);
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    if (op == MQR_QUOT) {
+        if (isinf(b)) return mino_float(S, 0.0);
+        r = a / b;
+        return mino_float(S, r >= 0 ? floor(r) : ceil(r));
+    }
+    if (isinf(b)) return mino_float(S, NAN);
+    r = fmod(a, b);
+    if (op == MQR_MOD && r != 0.0 && ((r < 0.0) != (b < 0.0))) r += b;
+    return mino_float(S, r);
+}
+
+/* Coerce a ratio operand into an effective (num, denom) pair of bigints.
+ * For non-ratio inputs (int / bigint) returns (operand-as-bigint, 1). */
+static int as_ratio_pair_bigints(mino_state_t *S, const mino_val_t *v,
+                                 mino_val_t **num_out, mino_val_t **denom_out)
+{
+    if (v->type == MINO_RATIO) {
+        *num_out   = v->as.ratio.num;
+        *denom_out = v->as.ratio.denom;
+        return 1;
+    }
+    if (v->type == MINO_INT) {
+        *num_out = mino_bigint_from_ll(S, v->as.i);
+        if (*num_out == NULL) return 0;
+        *denom_out = mino_bigint_from_ll(S, 1);
+        return *denom_out != NULL;
+    }
+    if (v->type == MINO_BIGINT) {
+        *num_out = (mino_val_t *)v;
+        *denom_out = mino_bigint_from_ll(S, 1);
+        return *denom_out != NULL;
+    }
+    prim_throw_classified(S, "internal", "MIN001",
+                          "as_ratio_pair_bigints: unexpected type");
+    return 0;
+}
+
+/* Promote MINO_INT to MINO_BIGINT. Used in the ratio path to keep
+ * integer-valued results in the bigint tier (Clojure's BigInt contagion
+ * rule -- once arithmetic enters the bignum tier the result stays
+ * there, even when the value happens to fit a long). */
+static mino_val_t *bigint_or_self(mino_state_t *S, mino_val_t *v)
+{
+    if (v == NULL) return NULL;
+    if (v->type == MINO_INT) return mino_bigint_from_ll(S, v->as.i);
+    return v;
+}
+
+/* Ratio path. Produce bigint quot, ratio rem/mod (which may collapse). */
+static mino_val_t *mqr_ratio_inner(mino_state_t *S, const mino_val_t *a,
+                                   const mino_val_t *b, mqr_op_t op);
+
+static mino_val_t *mqr_ratio(mino_state_t *S, const mino_val_t *a,
+                             const mino_val_t *b, mqr_op_t op)
+{
+    mino_val_t *r = mqr_ratio_inner(S, a, b, op);
+    if (r == NULL) return NULL;
+    /* Once arithmetic crosses through the ratio tier its integer
+     * results live in the bigint tier (matching Clojure's BigInt
+     * contagion). Don't downgrade to MINO_INT on the way out. */
+    return bigint_or_self(S, r);
+}
+
+static mino_val_t *mqr_ratio_inner(mino_state_t *S, const mino_val_t *a,
+                                   const mino_val_t *b, mqr_op_t op)
+{
+    mino_val_t *na, *da, *nb, *db, *cross_num, *cross_den, *q;
+    if (!as_ratio_pair_bigints(S, a, &na, &da)) return NULL;
+    if (!as_ratio_pair_bigints(S, b, &nb, &db)) return NULL;
+    /* a / b = (na * db) / (da * nb). The integer quotient is
+     * trunc((na * db) / (da * nb)). */
+    cross_num = mino_bigint_mul(S, na, db);
+    if (cross_num == NULL) return NULL;
+    cross_den = mino_bigint_mul(S, da, nb);
+    if (cross_den == NULL) return NULL;
+    q = mino_bigint_quot(S, cross_num, cross_den);
+    if (q == NULL) return NULL;
+    if (op == MQR_QUOT) return q;
+    /* rem = a - q*b, mod = adjust(rem, b). Both compose in the ratio
+     * tier and may collapse to bigint when the result is integer. */
+    {
+        mino_val_t *qb_num = mino_bigint_mul(S, q, nb);
+        mino_val_t *qb;
+        mino_val_t *rem;
+        if (qb_num == NULL) return NULL;
+        qb = mino_ratio_make(S, qb_num, db);
+        if (qb == NULL) return NULL;
+        if (a->type == MINO_RATIO) {
+            mino_val_t *qb_at_ratio = qb;
+            if (qb->type != MINO_RATIO) {
+                /* qb collapsed to int / bigint; promote for ratio_sub. */
+                mino_val_t *qb_num2;
+                mino_val_t *one = mino_bigint_from_ll(S, 1);
+                if (one == NULL) return NULL;
+                qb_num2 = (qb->type == MINO_INT)
+                    ? mino_bigint_from_ll(S, qb->as.i)
+                    : qb;
+                if (qb_num2 == NULL) return NULL;
+                qb_at_ratio = mino_ratio_make_unchecked(S, qb_num2, one);
+                if (qb_at_ratio == NULL) return NULL;
+            }
+            rem = mino_ratio_sub(S, a, qb_at_ratio);
+        } else if (qb->type == MINO_RATIO) {
+            /* a is int / bigint, qb is ratio. Sub via ratio. */
+            mino_val_t *one = mino_bigint_from_ll(S, 1);
+            mino_val_t *a_num;
+            mino_val_t *a_at_ratio;
+            if (one == NULL) return NULL;
+            a_num = (a->type == MINO_INT)
+                ? mino_bigint_from_ll(S, a->as.i) : (mino_val_t *)a;
+            if (a_num == NULL) return NULL;
+            a_at_ratio = mino_ratio_make_unchecked(S, a_num, one);
+            if (a_at_ratio == NULL) return NULL;
+            rem = mino_ratio_sub(S, a_at_ratio, qb);
+        } else {
+            /* Both bigint-tier. */
+            mino_val_t *a_bn = (a->type == MINO_INT)
+                ? mino_bigint_from_ll(S, a->as.i) : (mino_val_t *)a;
+            mino_val_t *qb_bn = (qb->type == MINO_INT)
+                ? mino_bigint_from_ll(S, qb->as.i) : qb;
+            if (a_bn == NULL || qb_bn == NULL) return NULL;
+            rem = mino_bigint_sub(S, a_bn, qb_bn);
+        }
+        if (rem == NULL) return NULL;
+        if (op == MQR_REM) return rem;
+        /* mod: if rem != 0 and signs differ from b, rem += b. */
+        {
+            int sr;
+            int sb;
+            if (rem->type == MINO_INT) {
+                sr = (rem->as.i > 0) - (rem->as.i < 0);
+            } else if (rem->type == MINO_BIGINT) {
+                sr = mp_int_compare_zero((mp_int)rem->as.bigint.mpz);
+            } else { /* MINO_RATIO: sign matches numerator (denom positive) */
+                sr = mp_int_compare_zero((mp_int)rem->as.ratio.num->as.bigint.mpz);
+            }
+            /* Sign of b: ratio b sign matches numerator. */
+            if (b->type == MINO_RATIO) {
+                sb = mp_int_compare_zero((mp_int)b->as.ratio.num->as.bigint.mpz);
+            } else if (b->type == MINO_INT) {
+                sb = (b->as.i > 0) - (b->as.i < 0);
+            } else {
+                sb = mp_int_compare_zero((mp_int)b->as.bigint.mpz);
+            }
+            if (sr == 0 || ((sr < 0) == (sb < 0))) return rem;
+            /* rem + b. Promote both to ratio if either is ratio. */
+            if (rem->type == MINO_RATIO || b->type == MINO_RATIO) {
+                mino_val_t *one = mino_bigint_from_ll(S, 1);
+                mino_val_t *r_at, *b_at;
+                if (one == NULL) return NULL;
+                if (rem->type == MINO_RATIO) {
+                    r_at = rem;
+                } else {
+                    mino_val_t *rn = (rem->type == MINO_INT)
+                        ? mino_bigint_from_ll(S, rem->as.i) : rem;
+                    if (rn == NULL) return NULL;
+                    r_at = mino_ratio_make_unchecked(S, rn, one);
+                }
+                if (b->type == MINO_RATIO) {
+                    b_at = (mino_val_t *)b;
+                } else {
+                    mino_val_t *bn = (b->type == MINO_INT)
+                        ? mino_bigint_from_ll(S, b->as.i) : (mino_val_t *)b;
+                    mino_val_t *one2 = mino_bigint_from_ll(S, 1);
+                    if (bn == NULL || one2 == NULL) return NULL;
+                    b_at = mino_ratio_make_unchecked(S, bn, one2);
+                }
+                if (r_at == NULL || b_at == NULL) return NULL;
+                return mino_ratio_add(S, r_at, b_at);
+            }
+            /* Both bigint-tier. */
+            {
+                mino_val_t *r_bn = (rem->type == MINO_INT)
+                    ? mino_bigint_from_ll(S, rem->as.i) : rem;
+                mino_val_t *b_bn = (b->type == MINO_INT)
+                    ? mino_bigint_from_ll(S, b->as.i) : (mino_val_t *)b;
+                if (r_bn == NULL || b_bn == NULL) return NULL;
+                return mino_bigint_add(S, r_bn, b_bn);
+            }
+        }
+    }
+}
+
+static mino_val_t *prim_mqr(mino_state_t *S, mino_val_t *args, mqr_op_t op)
+{
+    const char *opname = mqr_name(op);
+    mino_val_t *xv, *yv;
+    int xt, yt, max_tier;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "mod requires two arguments");
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s requires two arguments", opname);
+        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
     }
+    xv = args->as.cons.car;
+    yv = args->as.cons.cdr->as.cons.car;
+    if (!classify_or_throw(S, xv, opname, &xt)) return NULL;
+    if (!classify_or_throw(S, yv, opname, &yt)) return NULL;
+    max_tier = xt > yt ? xt : yt;
+
+    /* Ratio meeting bigdec collapses to float. */
+    if ((xt == TT_RATIO && yt == TT_BIGDEC) ||
+        (xt == TT_BIGDEC && yt == TT_RATIO)) {
+        return mqr_float(S, tower_to_double(xv), tower_to_double(yv), op, opname);
+    }
+    if (max_tier == TT_FLOAT) {
+        return mqr_float(S, tower_to_double(xv), tower_to_double(yv), op, opname);
+    }
+    if (max_tier == TT_BIGDEC) {
+        mino_val_t *xb = coerce_at_tier(S, xv, TT_BIGDEC, opname);
+        mino_val_t *yb = coerce_at_tier(S, yv, TT_BIGDEC, opname);
+        if (xb == NULL || yb == NULL) return NULL;
+        if (op == MQR_QUOT) return mino_bigdec_quot(S, xb, yb);
+        if (op == MQR_REM)  return mino_bigdec_rem(S, xb, yb);
+        return mino_bigdec_mod(S, xb, yb);
+    }
+    if (max_tier == TT_RATIO) {
+        return mqr_ratio(S, xv, yv, op);
+    }
+    if (max_tier == TT_BIGINT) {
+        mino_val_t *xb = coerce_at_tier(S, xv, TT_BIGINT, opname);
+        mino_val_t *yb = coerce_at_tier(S, yv, TT_BIGINT, opname);
+        if (xb == NULL || yb == NULL) return NULL;
+        if (op == MQR_QUOT) return mino_bigint_quot(S, xb, yb);
+        if (op == MQR_REM)  return mino_bigint_rem(S, xb, yb);
+        return mino_bigint_mod(S, xb, yb);
+    }
+    /* Both INT. */
     {
-        mino_val_t *xv = args->as.cons.car;
-        mino_val_t *yv = args->as.cons.cdr->as.cons.car;
-        if (!is_compare_number(xv) || !is_compare_number(yv)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "mod expects numbers");
+        long long a = xv->as.i, b = yv->as.i;
+        if (b == 0) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s: division by zero", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
         }
-        a = tower_to_double(xv);
-        b = tower_to_double(yv);
+        if (a == LLONG_MIN && b == -1) {
+            /* Overflow: promote to bigint. */
+            mino_val_t *ba = mino_bigint_from_ll(S, a);
+            mino_val_t *bb = mino_bigint_from_ll(S, b);
+            if (ba == NULL || bb == NULL) return NULL;
+            if (op == MQR_QUOT) return mino_bigint_quot(S, ba, bb);
+            if (op == MQR_REM)  return mino_bigint_rem(S, ba, bb);
+            return mino_bigint_mod(S, ba, bb);
+        }
+        if (op == MQR_QUOT) return mino_int(S, a / b);
+        {
+            long long r = a % b; /* C truncated remainder, sign of a. */
+            if (op == MQR_MOD && r != 0 && ((r < 0) != (b < 0))) r += b;
+            return mino_int(S, r);
+        }
     }
-    if (isnan(a) || isinf(a))
-        return prim_throw_classified(S, "eval/type", "MTY001", "mod: NaN or Infinite dividend");
-    if (isnan(b))
-        return prim_throw_classified(S, "eval/type", "MTY001", "mod: NaN divisor");
-    if (b == 0.0)
-        return prim_throw_classified(S, "eval/type", "MTY001", "mod: division by zero");
-    if (isinf(b))
-        return mino_float(S, NAN);
-    r = fmod(a, b);
-    /* Floored modulo: result has same sign as divisor. */
-    if (r != 0.0 && ((r < 0.0) != (b < 0.0))) r += b;
-    /* Return int if both args are integer-typed (long or bigint). */
-    {
-        mino_type_t ta = args->as.cons.car->type;
-        mino_type_t tb = args->as.cons.cdr->as.cons.car->type;
-        int int_a = (ta == MINO_INT || ta == MINO_BIGINT);
-        int int_b = (tb == MINO_INT || tb == MINO_BIGINT);
-        if (int_a && int_b) return mino_int(S, (long long)r);
-    }
-    return mino_float(S, r);
+}
+
+mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_mqr(S, args, MQR_MOD);
 }
 
 mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    double a, b, r;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "rem requires two arguments");
-    }
-    {
-        mino_val_t *xv = args->as.cons.car;
-        mino_val_t *yv = args->as.cons.cdr->as.cons.car;
-        if (!is_compare_number(xv) || !is_compare_number(yv)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "rem expects numbers");
-        }
-        a = tower_to_double(xv);
-        b = tower_to_double(yv);
-    }
-    if (isnan(a) || isinf(a))
-        return prim_throw_classified(S, "eval/type", "MTY001", "rem: NaN or Infinite dividend");
-    if (isnan(b))
-        return prim_throw_classified(S, "eval/type", "MTY001", "rem: NaN divisor");
-    if (b == 0.0)
-        return prim_throw_classified(S, "eval/type", "MTY001", "rem: division by zero");
-    if (isinf(b))
-        return mino_float(S, NAN);
-    r = fmod(a, b);
-    {
-        mino_type_t ta = args->as.cons.car->type;
-        mino_type_t tb = args->as.cons.cdr->as.cons.car->type;
-        int int_a = (ta == MINO_INT || ta == MINO_BIGINT);
-        int int_b = (tb == MINO_INT || tb == MINO_BIGINT);
-        if (int_a && int_b) return mino_int(S, (long long)r);
-    }
-    return mino_float(S, r);
+    return prim_mqr(S, args, MQR_REM);
 }
 
 mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    double a, b, q;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
-        mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "quot requires two arguments");
-    }
-    {
-        mino_val_t *xv = args->as.cons.car;
-        mino_val_t *yv = args->as.cons.cdr->as.cons.car;
-        if (!is_compare_number(xv) || !is_compare_number(yv)) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "quot expects numbers");
-        }
-        a = tower_to_double(xv);
-        b = tower_to_double(yv);
-    }
-    if (isnan(a) || isinf(a))
-        return prim_throw_classified(S, "eval/type", "MTY001", "quot: NaN or Infinite dividend");
-    if (isnan(b))
-        return prim_throw_classified(S, "eval/type", "MTY001", "quot: NaN divisor");
-    if (b == 0.0)
-        return prim_throw_classified(S, "eval/type", "MTY001", "quot: division by zero");
-    if (isinf(b))
-        return mino_float(S, 0.0);
-    q = a / b;
-    q = q >= 0 ? floor(q) : ceil(q);
-    {
-        mino_type_t ta = args->as.cons.car->type;
-        mino_type_t tb = args->as.cons.cdr->as.cons.car->type;
-        int int_a = (ta == MINO_INT || ta == MINO_BIGINT);
-        int int_b = (tb == MINO_INT || tb == MINO_BIGINT);
-        if (int_a && int_b) return mino_int(S, (long long)q);
-    }
-    return mino_float(S, q);
+    return prim_mqr(S, args, MQR_QUOT);
 }
 
 /* ------------------------------------------------------------------------- */
