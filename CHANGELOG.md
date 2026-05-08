@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.100.17
+
+### Shortest-decimal Double-to-string for `bigint` and `rationalize`
+
+Adds `mino_double_shortest`, a static helper in `src/prim/bignum.c`
+that prints a finite double as the shortest decimal that
+round-trips through `strtod` to the same bit pattern. Handled by
+iterating precision 1..17 with `%.*g`, parsing back, and accepting
+the first match. Slow paths only -- never on the hot loop.
+
+`(bigint d)` now routes the float arm through the shortest-decimal
+string, parses it via `mino_bigdec_from_string`, and truncates the
+resulting BigDecimal toward zero with imath's integer division.
+Result: `(bigint 1.7976931348623157E308)` is the full 309-digit
+integer instead of `Long/MIN_VALUE` (the previous long-cast
+saturation). Other doubles are unaffected.
+
+`(rationalize d)` likewise converts via shortest-decimal +
+BigDecimal: `(rationalize 1.1)` is `11/10`, `(rationalize 1.5)`
+is `3/2`, `(rationalize (/ 1.0 3.0))` is
+`3333333333333333/10000000000000000`. The previous binary mantissa
+decomposition (`m * 2^e` -> `m / 2^|e|`) is gone.
+
+### `clojure.lang.BigInt` bridge for `instance?`
+
+`(def clojure.lang.BigInt :bigint)` so cross-dialect tests using
+`(instance? clojure.lang.BigInt x)` succeed on mino. Same narrow
+bridge pattern as the prior `clojure.lang.IPending -> :future`
+mapping; no other JVM types are aliased.
+
+### Auto-promoting arithmetic aliases
+
+`+'`, `-'`, `*'`, `inc'`, `dec'` are now defined as aliases for
+their unprimed forms. mino's unprimed forms already auto-promote
+(an intentional divergence) so the primed forms have the same
+semantics. The aliases let portable Clojure code that uses the
+primed forms compile without rewriting.
+
+External `bigint.cljc` 13/15 -> 18/18, `rationalize.cljc`
+14/16 -> 16/16. External suite: 188 -> 190 OK.
+
 ## v0.100.16
 
 ### `(repeat n x)` accepts booleans (true -> 1, false -> 0)

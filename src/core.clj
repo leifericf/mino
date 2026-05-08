@@ -3182,6 +3182,19 @@
 ;; (Float vs Double, IBlockingDeref distinct from IPending, ...) are
 ;; deliberately not bridged.
 (def clojure.lang.IPending :future)
+(def clojure.lang.BigInt :bigint)
+
+;; In Clojure JVM the primed arithmetic forms (`+'`, `-'`, `*'`, `inc'`,
+;; `dec'`) auto-promote to BigInt rather than overflowing in long; the
+;; unprimed forms throw on overflow. mino's unprimed forms already
+;; auto-promote (an intentional divergence -- see
+;; `intentional_divergences.clj`), so the primed forms are just
+;; aliases that let portable code compile without rewriting.
+(def +' "Auto-promoting +. Alias for + on mino." +)
+(def -' "Auto-promoting -. Alias for - on mino." -)
+(def *' "Auto-promoting *. Alias for * on mino." *)
+(def inc' "Auto-promoting inc. Alias for inc on mino." inc)
+(def dec' "Auto-promoting dec. Alias for dec on mino." dec)
 
 (defmacro with-redefs
   "Temporarily rebinds the root bindings of vars while body executes, restoring

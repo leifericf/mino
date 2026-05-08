@@ -17,8 +17,34 @@
 #include "prim/internal.h"
 #include "imath.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Shortest-decimal-double printer. Iterates precision 1..17 with
+ * %.Xg, parses the result back via strtod, and accepts the first
+ * precision whose round-trip is bit-identical to the input. Buffer
+ * must hold at least 32 bytes. Writes the canonical "NaN" /
+ * "Infinity" / "-Infinity" tokens for non-finite inputs. */
+static int mino_double_shortest(double d, char *out, size_t outsz)
+{
+    int prec;
+    double pinf = (double)(1.0 / 0.0);
+    if (d != d)     return snprintf(out, outsz, "NaN");
+    if (d == pinf)  return snprintf(out, outsz, "Infinity");
+    if (d == -pinf) return snprintf(out, outsz, "-Infinity");
+    for (prec = 1; prec <= 17; prec++) {
+        char    buf[64];
+        char   *end;
+        double  parsed;
+        snprintf(buf, sizeof(buf), "%.*g", prec, d);
+        parsed = strtod(buf, &end);
+        if (memcmp(&parsed, &d, sizeof(double)) == 0) {
+            return snprintf(out, outsz, "%s", buf);
+        }
+    }
+    return snprintf(out, outsz, "%.17g", d);
+}
 
 /* ------------------------------------------------------------------------- */
 /* Internal helpers                                                          */
@@ -299,17 +325,56 @@ mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return bigint_wrap(S, z);
     }
     case MINO_FLOAT: {
-        /* Truncate toward zero, matching Clojure's bigint on doubles. */
+        /* JVM Clojure's (bigint d) goes through BigDecimal.valueOf(d),
+         * which uses Double.toString -- the shortest decimal that
+         * round-trips. We do the same so (bigint 1.79e308) yields the
+         * full 309-digit integer rather than saturating through long. */
         double      f = x->as.f;
-        long long   n;
+        char        buf[64];
+        mino_val_t *bd, *unscaled;
+        int         scale;
         if (f != f || f == (double)(1.0 / 0.0) || f == -(double)(1.0 / 0.0)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "cannot convert non-finite double to bigint");
         }
-        if (f >= 0) f = f >= 0 ? (double)((long long)f) : f;
-        else        f = -(double)((long long)(-f));
-        n = (long long)f;
-        return mino_bigint_from_ll(S, n);
+        mino_double_shortest(f, buf, sizeof(buf));
+        bd = mino_bigdec_from_string(S, buf);
+        if (bd == NULL) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "bigint: failed to convert double");
+        }
+        unscaled = bd->as.bigdec.unscaled;
+        scale    = bd->as.bigdec.scale;
+        if (scale <= 0) {
+            /* mino_bigdec_from_string already multiplied unscaled by
+             * 10^|scale| when scale was negative, leaving scale=0. */
+            return unscaled;
+        }
+        /* scale > 0: truncate fractional part via integer division. */
+        {
+            mpz_t       pw;
+            mino_val_t *out;
+            if (mp_int_init(&pw) != MP_OK) {
+                return prim_throw_classified(S, "eval/out-of-memory",
+                                             "MOM001", "out of memory");
+            }
+            if (mp_int_set_value(&pw, 10) != MP_OK
+                || mp_int_expt(&pw, scale, &pw) != MP_OK) {
+                mp_int_clear(&pw);
+                return prim_throw_classified(S, "eval/out-of-memory",
+                                             "MOM001", "out of memory");
+            }
+            out = mino_bigint_from_ll(S, 0);
+            if (out == NULL) { mp_int_clear(&pw); return NULL; }
+            if (mp_int_div((mp_int)unscaled->as.bigint.mpz, &pw,
+                           (mp_int)out->as.bigint.mpz, NULL) != MP_OK) {
+                mp_int_clear(&pw);
+                return prim_throw_classified(S, "eval/out-of-memory",
+                                             "MOM001", "out of memory");
+            }
+            mp_int_clear(&pw);
+            return out;
+        }
     }
     case MINO_STRING: {
         mino_val_t *r = mino_bigint_from_string_n(S, x->as.s.data, x->as.s.len);
@@ -949,60 +1014,49 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
     }
     if (x->type == MINO_FLOAT) {
-        /* Use the fact that any finite double is m * 2^e for some
-         * 53-bit signed mantissa m and integer exponent e. Build a
-         * ratio numerator / denominator from that decomposition. */
+        /* JVM Clojure's (rationalize d) for a double goes through
+         * BigDecimal.valueOf(d), i.e. the shortest decimal that
+         * round-trips. So (rationalize 1.1) is 11/10 (matching the
+         * literal "1.1") rather than the binary mantissa fraction
+         * 2476979795053773/2251799813685248. We mirror that here:
+         * shortest-decimal-double -> bigdec -> ratio. */
         double      d = x->as.f;
-        int         exp;
-        double      mant;
-        long long   m;
-        mino_val_t *bn, *bd;
+        char        buf[64];
+        mino_val_t *bd;
+        mino_val_t *unscaled;
+        int         scale;
         if (d != d) /* NaN */
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "rationalize: NaN");
         if (d == 0.0) return mino_int(S, 0);
-        mant = frexp(d, &exp);
-        /* mant in [0.5, 1.0); shift to integer mantissa. */
-        m = (long long)(mant * 9007199254740992.0); /* 2^53 */
-        exp -= 53;
-        bn = mino_bigint_from_ll(S, m);
-        if (bn == NULL) return NULL;
-        if (exp >= 0) {
-            mpz_t pw;
+        mino_double_shortest(d, buf, sizeof(buf));
+        bd = mino_bigdec_from_string(S, buf);
+        if (bd == NULL) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "rationalize: failed to convert double");
+        }
+        unscaled = bd->as.bigdec.unscaled;
+        scale    = bd->as.bigdec.scale;
+        if (scale <= 0) return unscaled;
+        {
+            /* (numerator unscaled, denominator 10^scale) reduced. */
+            mpz_t       pw;
+            mino_val_t *denom;
             if (mp_int_init(&pw) != MP_OK) {
-                return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
-                                             "out of memory");
+                return prim_throw_classified(S, "eval/out-of-memory",
+                                             "MOM001", "out of memory");
             }
-            if (mp_int_set_value(&pw, 2) != MP_OK ||
-                mp_int_expt(&pw, exp, &pw) != MP_OK) {
+            if (mp_int_set_value(&pw, 10) != MP_OK
+                || mp_int_expt(&pw, scale, &pw) != MP_OK) {
                 mp_int_clear(&pw);
-                return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
-                                             "out of memory");
+                return prim_throw_classified(S, "eval/out-of-memory",
+                                             "MOM001", "out of memory");
             }
-            mp_int_mul((mp_int)bn->as.bigint.mpz, &pw,
-                       (mp_int)bn->as.bigint.mpz);
+            denom = mino_bigint_from_ll(S, 1);
+            if (denom == NULL) { mp_int_clear(&pw); return NULL; }
+            mp_int_copy(&pw, (mp_int)denom->as.bigint.mpz);
             mp_int_clear(&pw);
-            return mino_ratio_make(S, bn, mino_int(S, 1));
-        } else {
-            int neg_exp = -exp;
-            bd = mino_bigint_from_ll(S, 1);
-            if (bd == NULL) return NULL;
-            {
-                mpz_t pw;
-                if (mp_int_init(&pw) != MP_OK) {
-                    return prim_throw_classified(S, "eval/out-of-memory",
-                                                 "MOM001", "out of memory");
-                }
-                if (mp_int_set_value(&pw, 2) != MP_OK ||
-                    mp_int_expt(&pw, neg_exp, &pw) != MP_OK) {
-                    mp_int_clear(&pw);
-                    return prim_throw_classified(S, "eval/out-of-memory",
-                                                 "MOM001", "out of memory");
-                }
-                mp_int_copy(&pw, (mp_int)bd->as.bigint.mpz);
-                mp_int_clear(&pw);
-            }
-            return mino_ratio_make(S, bn, bd);
+            return mino_ratio_make(S, unscaled, denom);
         }
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
