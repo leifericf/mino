@@ -996,6 +996,14 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
     if (a->type == MINO_CONS && b->type == MINO_CONS) {
         return eq_seq_like_force(S, a, b);
     }
+    /* Same-tag chunked sequential: a chunked-cons spine can have a
+     * lazy seq in its `more` field (the typical shape filter/range
+     * produce). The non-forcing eq_seq_like would see that unrealized
+     * lazy as end-of-seq and short-circuit incorrectly. Force on both
+     * sides instead. */
+    if (a->type == MINO_CHUNKED_CONS && b->type == MINO_CHUNKED_CONS) {
+        return eq_seq_like_force(S, a, b);
+    }
     /* Cross-type sequential: cons vs vector, nil vs vector, etc. */
     if (a->type != b->type && is_sequential(a->type) && is_sequential(b->type)) {
         /* Force any remaining lazy seqs in elements during comparison. */

@@ -914,7 +914,13 @@
   [n] (int (* (rand) n)))
 (defn rand-nth
   "Returns a random element from coll."
-  [coll] (nth coll (rand-int (count coll))))
+  [coll]
+  (cond
+    (nil? coll) nil
+    (or (string? coll) (sequential? coll) (set? coll) (map? coll))
+      (nth (vec coll) (rand-int (count coll)))
+    :else
+      (throw (str "rand-nth: expected a collection, got " (pr-str coll)))))
 (defn random-sample
   "Returns items from coll with probability prob. When called with no
    collection, returns a transducer."
@@ -1027,7 +1033,11 @@
   (if (<= n 0) coll (nthrest (rest coll) (- n 1))))
 
 (defn nthnext "Returns the result of calling next n times on coll." [coll n]
-  (if (<= n 0) (seq coll) (nthnext (next coll) (- n 1))))
+  (cond
+    (nil? coll)         nil
+    (not (integer? n))  (throw (str "nthnext: n must be an integer, got " (pr-str n)))
+    (<= n 0)            (seq coll)
+    :else               (nthnext (next coll) (- n 1))))
 
 (defn take-last "Returns a seq of the last n items in coll." [n coll]
   (let [lead (drop n coll)

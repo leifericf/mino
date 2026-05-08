@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.100.3
+
+This release bundles four fixes that move three external test files
+to green and patches one underlying equality bug surfaced by the
+fourth.
+
+### `nthnext` validates inputs
+
+`(nthnext nil _)` returns `nil` (was throwing). Non-integer `n`
+throws a typed error instead of bottoming out in the inner `<=`
+arithmetic. Matches Clojure's surface behavior. Test:
+`nthnext.cljc` 13/13.
+
+### `rand-nth` validates the collection
+
+`(rand-nth nil)` returns `nil` (was throwing on `count`).
+`(rand-nth 1)` (or any non-collection) throws a typed error rather
+than the inner "count: expected a collection" message. Test:
+`rand_nth.cljc` 4/4.
+
+### Equality forces lazy tails inside chunked-cons spines
+
+A chunked-cons can hold an unrealized lazy seq in its `more` field
+(the typical shape `(filter pred (range N))` builds when the
+predicate keeps every element of each source chunk). The
+non-forcing `eq_seq_like` was treating that unrealized lazy as
+end-of-seq, so `(= (range 1000) (filter (fn [_] true) (range 1000)))`
+returned `false`. `mino_eq_force` now routes same-tag chunked-cons
+through `eq_seq_like_force`, which forces lazy tails on both sides.
+Regression test added at `tests/lazy_test.clj` under
+`eq-chunked-cons-with-lazy-tail`.
+
+### `random-sample` test now passes
+
+The remaining `random_sample.cljc` failures were a downstream effect
+of the equality bug above (the suite compares the filter output to
+the source range with `=`). With both `random-sample` itself and the
+chunked-cons equality bug addressed, the test goes 21/21.
+
 ## v0.100.2
 
 Transients are now read-callable. Per Clojure, a transient supports

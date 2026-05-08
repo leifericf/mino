@@ -65,3 +65,14 @@
 
 (deftest doall-fn
   (is (= 3 (count (doall (map inc [1 2 3]))))))
+
+(deftest eq-chunked-cons-with-lazy-tail
+  ;; Regression: a chunked-cons spine can have an unrealized lazy seq
+  ;; in its `more` field. Equality must force that tail rather than
+  ;; treating it as end-of-seq. (filter pred (range N)) produces this
+  ;; shape; comparing it to (range N) was returning false even when
+  ;; pred kept every element.
+  (let [coll (doall (range 1000))]
+    (is (= coll (filter (fn [_] true) coll)))
+    (is (= coll (filter (fn [_] true) coll)))
+    (is (not (= coll (filter (fn [_] false) coll))))))
