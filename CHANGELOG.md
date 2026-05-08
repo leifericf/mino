@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### `peek` on the Empty-List Singleton
+
+`peek` now recognises the canonical empty list `()` (a
+`MINO_EMPTY_LIST` singleton, distinct from `MINO_NIL` and
+`MINO_CONS`) and returns `nil` for it, matching Clojure. Without
+this, `(peek '())` threw `peek: expected a vector or list, got
+list` because the empty-list type slipped past the existing
+NIL/CONS branches.
+
 ### `assoc!` Variadic Arity (with Odd-out Nil)
 
 `(assoc! tcoll k v & kvs)` now accepts the variadic Clojure form

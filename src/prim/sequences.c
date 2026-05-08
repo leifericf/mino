@@ -887,7 +887,8 @@ mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "peek requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    if (coll == NULL || coll->type == MINO_NIL
+        || coll->type == MINO_EMPTY_LIST) return mino_nil(S);
     if (coll->type == MINO_VECTOR) {
         if (coll->as.vec.len == 0) return mino_nil(S);
         return vec_nth(coll, coll->as.vec.len - 1);
