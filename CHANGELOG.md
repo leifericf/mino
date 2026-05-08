@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.100.19
+
+### Future spawn now conveys the caller's dynamic bindings
+
+JVM Clojure's `(future ...)` snapshots the calling thread's binding
+frame and reinstalls it on the worker, so a `bound-fn` captured
+inside the future body sees the caller's `*x*` (plus whatever the
+worker's own `binding` blocks pushed). mino's worker thread
+previously started with an empty `dyn_stack`, so a nested future
+that captured `*x*` saw only the root value (or, for the test in
+question, the dereferer's binding).
+
+`mino_future_spawn` now calls a new public helper
+`mino_snapshot_thread_bindings(S)` (factored out of
+`prim_get_thread_bindings`) and stores the resulting symbol -> value
+map on `impl->dyn_snapshot`. `worker_run` unpacks that map into a
+malloc-owned `dyn_binding_t` chain wrapped in a single
+`dyn_frame_t`, pushes it as the worker's initial `dyn_stack`,
+invokes the thunk, then pops and frees. The frame is freed on both
+the success and error paths.
+
+External `bound_fn.cljc` 7/8 -> 8/8, `bound_fn_star.cljc` 7/8 -> 8/8.
+External suite: 191 -> 193 OK.
+
 ## v0.100.18
 
 ### `(seq sorted-map/-set)` is no longer a list

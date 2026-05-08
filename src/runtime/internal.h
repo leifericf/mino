@@ -856,6 +856,11 @@ mino_env_t    *env_root(mino_state_t *S, mino_env_t *env);     /* borrowed (walk
 mino_val_t    *dyn_lookup(mino_state_t *S, const char *name);  /* borrowed */
 void           dyn_binding_list_free(dyn_binding_t *head);     /* frees malloc chain */
 
+/* Snapshot the calling thread's dyn_stack into a map (symbol -> value).
+ * Returns mino_nil(S) when the stack is empty. Used by future spawn to
+ * convey caller bindings to the worker, and by get-thread-bindings. */
+mino_val_t    *mino_snapshot_thread_bindings(mino_state_t *S);
+
 /* ------------------------------------------------------------------------- */
 /* ns_env.c: per-namespace root env table.                                   */
 /*                                                                           */

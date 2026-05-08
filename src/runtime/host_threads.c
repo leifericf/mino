@@ -265,7 +265,51 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
         S->thread_start_fn(S, S->thread_factory_ctx);
     }
 
-    result = mino_call(S, impl->thunk, mino_nil(S), NULL);
+    /* Install conveyed dynamic bindings before running the thunk. The
+     * snapshot is a map keyed by symbol; build a malloc-owned binding
+     * chain and push as a single dyn_frame so the thunk sees the same
+     * dynamic-binding context active at spawn time. */
+    {
+        mino_val_t  *snap = impl->dyn_snapshot;
+        dyn_frame_t *conveyed = NULL;
+        if (snap != NULL && snap->type == MINO_MAP && snap->as.map.len > 0) {
+            dyn_binding_t *bhead = NULL;
+            size_t i;
+            int    oom = 0;
+            for (i = 0; i < snap->as.map.len; i++) {
+                mino_val_t    *key = vec_nth(snap->as.map.key_order, i);
+                mino_val_t    *val = map_get_val(snap, key);
+                dyn_binding_t *b;
+                if (key == NULL
+                    || (key->type != MINO_SYMBOL && key->type != MINO_STRING)) {
+                    continue;
+                }
+                b = (dyn_binding_t *)malloc(sizeof(*b));
+                if (b == NULL) { oom = 1; break; }
+                b->name = mino_symbol(S, key->as.s.data)->as.s.data;
+                b->val  = val;
+                b->next = bhead;
+                bhead   = b;
+            }
+            if (!oom) {
+                conveyed = (dyn_frame_t *)malloc(sizeof(*conveyed));
+                if (conveyed == NULL) { dyn_binding_list_free(bhead); }
+                else {
+                    conveyed->bindings = bhead;
+                    conveyed->prev     = NULL;
+                    ctx->dyn_stack     = conveyed;
+                }
+            } else {
+                dyn_binding_list_free(bhead);
+            }
+        }
+        result = mino_call(S, impl->thunk, mino_nil(S), NULL);
+        if (conveyed != NULL) {
+            ctx->dyn_stack = conveyed->prev;
+            dyn_binding_list_free(conveyed->bindings);
+            free(conveyed);
+        }
+    }
 
     /* Publish result. Note: mino_call returns NULL on uncaught throw;
      * we capture the diagnostic into the exception field so deref can
@@ -368,6 +412,12 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
     impl = fut->as.future.impl;
     impl->thunk    = thunk;
     impl->body_env = (mino_val_t *)env; /* env is gc-rooted via thunk closure */
+    /* Convey the caller's dynamic bindings to the worker. The worker
+     * unpacks this map into a dyn_frame before invoking the thunk so
+     * `(future ...)` sees the binding context active at spawn time --
+     * matching Clojure JVM's binding-conveyance contract that
+     * `bound-fn`, `binding`, and `*ns*` rely on across threads. */
+    impl->dyn_snapshot = mino_snapshot_thread_bindings(S);
 
     /* First spawn flips multi_threaded; from this point gc/atom paths
      * take their multi-threaded branches. Lock invariant: this is

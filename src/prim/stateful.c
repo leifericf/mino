@@ -523,21 +523,16 @@ mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_vector(S, pair, 2);
 }
 
-/* (get-thread-bindings) -- snapshot the current dyn_stack into a map
- * keyed by binding-name symbols. Inner frames shadow outer frames; the
- * first occurrence walking newest-first wins. Returns nil when the
- * stack is empty. The returned map is suitable input for
- * with-bindings*. */
-mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
-                                     mino_env_t *env)
+/* Snapshot the current thread's dyn_stack into a map keyed by binding-
+ * name symbols. Inner frames shadow outer frames; the first occurrence
+ * walking newest-first wins. Returns nil when the stack is empty. */
+mino_val_t *mino_snapshot_thread_bindings(mino_state_t *S)
 {
     dyn_frame_t   *f;
     dyn_binding_t *b;
     size_t         cap = 0, len = 0;
     mino_val_t   **keys = NULL;
     mino_val_t   **vals = NULL;
-    (void)args;
-    (void)env;
     if (mino_current_ctx(S)->dyn_stack == NULL) return mino_nil(S);
 
     for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
@@ -573,6 +568,16 @@ mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
     }
     if (len == 0) return mino_nil(S);
     return mino_map(S, keys, vals, len);
+}
+
+/* (get-thread-bindings) -- snapshot the current dyn_stack into a map
+ * suitable as input to with-bindings*. */
+mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
+                                     mino_env_t *env)
+{
+    (void)args;
+    (void)env;
+    return mino_snapshot_thread_bindings(S);
 }
 
 /* (with-bindings* bindings-map fn) -- pushes a fresh dynamic-binding
