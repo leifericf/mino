@@ -108,7 +108,7 @@ static int ineg_overflow(long long a, long long *out)
 
 typedef enum { OP_ADD, OP_SUB, OP_MUL, OP_DIV } tower_op_t;
 
-static double tower_to_double(const mino_val_t *v)
+double tower_to_double(const mino_val_t *v)
 {
     if (v == NULL) return 0.0;
     switch (v->type) {

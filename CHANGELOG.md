@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Numeric Predicates Across the Full Tower
+
+`zero?`, `pos?`, `neg?`, `even?`, and `odd?` now accept the full
+numeric tower (long, double, bigint, ratio, bigdec) instead of
+just long/double. Sign predicates route through
+`tower_to_double` for ordering; `even?` / `odd?` use imath's
+`mp_int_is_odd` directly so arbitrary-precision integers work
+without the lossy double conversion. `tower_to_double` is
+exported via `prim/internal.h` for shared use.
+
+This unblocks the predicate test files (e.g. `pos_qmark.cljc`,
+`even_qmark.cljc`) that previously erred on `(pos? 0N)`,
+`(even? 122N)`, etc.
+
 ### `compare` Cross-numeric, Chars, and Vectors
 
 `compare` now matches Clojure's contract more precisely:

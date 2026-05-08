@@ -35,6 +35,7 @@ mino_val_t  *prim_throw_classified(mino_state_t *S, const char *kind,
                                    const char *code, const char *msg);
 int          as_double(const mino_val_t *v, double *out);   /* pure extraction */
 int          as_long(const mino_val_t *v, long long *out);  /* pure extraction */
+double       tower_to_double(const mino_val_t *v);           /* full numeric tower */
 size_t       list_length(mino_state_t *S, mino_val_t *list); /* pure traversal */
 int          arg_count(mino_state_t *S, mino_val_t *args, size_t *out); /* pure */
 mino_val_t  *print_to_string(mino_state_t *S, const mino_val_t *v); /* GC-owned */

@@ -3,6 +3,7 @@
  */
 
 #include "prim/internal.h"
+#include "imath.h"
 
 mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
@@ -439,7 +440,11 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 /* Numeric predicates. The mino-level versions invoke number? then compare,
  * doing two prim dispatches per call; inlining the check here is a direct
- * tag read plus a comparison. */
+ * tag read plus a comparison.
+ *
+ * BigInt / Ratio / BigDec route through tower_to_double for the sign /
+ * zero comparison. The double approximation preserves sign for any
+ * finite value; (zero? 0N), (pos? 1N), (neg? -1.0M) etc. all work. */
 static mino_val_t *num_pred(mino_state_t *S, mino_val_t *args,
                             const char *name, int (*cmp_int)(long long),
                             int (*cmp_float)(double))
@@ -454,6 +459,11 @@ static mino_val_t *num_pred(mino_state_t *S, mino_val_t *args,
     if (v == NULL) goto type_err;
     if (v->type == MINO_INT)   return cmp_int(v->as.i) ? mino_true(S) : mino_false(S);
     if (v->type == MINO_FLOAT) return cmp_float(v->as.f) ? mino_true(S) : mino_false(S);
+    if (v->type == MINO_BIGINT || v->type == MINO_RATIO
+        || v->type == MINO_BIGDEC) {
+        double d = tower_to_double(v);
+        return cmp_float(d) ? mino_true(S) : mino_false(S);
+    }
 type_err:
     {
         char buf[96];
@@ -488,11 +498,19 @@ mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "odd? requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_INT) {
+    if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "odd? requires an integer");
     }
-    return (v->as.i & 1LL) != 0 ? mino_true(S) : mino_false(S);
+    if (v->type == MINO_INT) {
+        return (v->as.i & 1LL) != 0 ? mino_true(S) : mino_false(S);
+    }
+    if (v->type == MINO_BIGINT) {
+        return mp_int_is_odd((mp_int)v->as.bigint.mpz)
+            ? mino_true(S) : mino_false(S);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001",
+        "odd? requires an integer");
 }
 
 mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -504,11 +522,19 @@ mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "even? requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_INT) {
+    if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "even? requires an integer");
     }
-    return (v->as.i & 1LL) == 0 ? mino_true(S) : mino_false(S);
+    if (v->type == MINO_INT) {
+        return (v->as.i & 1LL) == 0 ? mino_true(S) : mino_false(S);
+    }
+    if (v->type == MINO_BIGINT) {
+        return mp_int_is_odd((mp_int)v->as.bigint.mpz)
+            ? mino_false(S) : mino_true(S);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001",
+        "even? requires an integer");
 }
 
 mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
