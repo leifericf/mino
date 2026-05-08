@@ -900,6 +900,12 @@ int  runtime_module_add_alias(mino_state_t *S,
 
 long long mino_monotonic_ns(void);
 
+/* UUID helpers (defined in src/prim/string.c) -- declared here so the
+ * reader can build a MINO_UUID directly for the `#uuid "..."` literal
+ * without pulling in the full prim/internal.h. */
+mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b);
+int         mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
+
 /* ------------------------------------------------------------------------- */
 /* Ownership conventions used in the per-subsystem internal headers:         */
 /*   GC-owned  — returned pointer is managed by the garbage collector.       */

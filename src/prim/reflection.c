@@ -341,6 +341,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * protocol-dispatch story. */
         return v->as.record.type;
     case MINO_FUTURE:    return mino_keyword(S, "future");
+    case MINO_UUID:      return mino_keyword(S, "uuid");
     }
     return mino_keyword(S, "unknown");
 }
@@ -382,6 +383,7 @@ DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && v->type == MINO_BOOL && v->as.b !
 DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b == 0),  "false?")
 DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && v->type == MINO_TYPE), "record-type?")
 DEFINE_TYPE_PRED(prim_record_p,      (v != NULL && v->type == MINO_RECORD), "record?")
+DEFINE_TYPE_PRED(prim_uuid_p,        (v != NULL && v->type == MINO_UUID),    "uuid?")
 
 #undef DEFINE_TYPE_PRED
 
@@ -1212,6 +1214,8 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns the declared field-name vector for a record type."},
     {"record?",    prim_record_p,
      "Returns true if x is a record value."},
+    {"uuid?",      prim_uuid_p,
+     "Returns true if x is a UUID value."},
 };
 
 const size_t k_prims_reflection_count =

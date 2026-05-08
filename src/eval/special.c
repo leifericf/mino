@@ -655,6 +655,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_TYPE:
     case MINO_RECORD:
     case MINO_FUTURE:
+    case MINO_UUID:
         return form;
     case MINO_SYMBOL:
         return eval_symbol(S, form, env);

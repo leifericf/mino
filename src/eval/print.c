@@ -425,6 +425,19 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputc('>', out);
         return;
     }
+    case MINO_UUID: {
+        /* Canonical lowercase 8-4-4-4-12 form prefixed with #uuid so
+         * the printed form roundtrips through the reader. */
+        const unsigned char *b = v->as.uuid.bytes;
+        char buf[64];
+        snprintf(buf, sizeof(buf),
+            "#uuid \"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-"
+            "%02x%02x%02x%02x%02x%02x\"",
+            b[0],  b[1],  b[2],  b[3],  b[4],  b[5],  b[6],  b[7],
+            b[8],  b[9],  b[10], b[11], b[12], b[13], b[14], b[15]);
+        fputs(buf, out);
+        return;
+    }
     }
 }
 

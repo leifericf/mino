@@ -906,6 +906,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         /* Futures use identity equality — two distinct future cells
          * are never equal even if they hold the same result. */
         return a == b;
+    case MINO_UUID:
+        return memcmp(a->as.uuid.bytes, b->as.uuid.bytes, 16) == 0;
     }
     return 0;
 }

@@ -290,6 +290,12 @@ uint32_t hash_val(const mino_val_t *v)
         }
         return h;
     }
+    case MINO_UUID: {
+        size_t i;
+        h = fnv_mix(h, 0x15);
+        for (i = 0; i < 16; i++) h = fnv_mix(h, v->as.uuid.bytes[i]);
+        return h;
+    }
     default:
         /* PRIM, FN, RECUR: identity-based. */
         h = fnv_mix(h, 0x0b);

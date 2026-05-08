@@ -234,6 +234,9 @@ mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_parse_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b);
+int mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
 
 /* io.c */
 mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env);

@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.100.7
+
+UUIDs are now a first-class value type (`MINO_UUID`, 16 bytes
+inline). The `#uuid "..."` reader literal, `(parse-uuid s)`,
+`(random-uuid)`, and `(uuid? x)` all participate in the new type:
+
+- `parse-uuid` (now a C primitive) returns a UUID value or `nil` on
+  malformed input; throws on non-string args. The strict canonical
+  form is required (36 chars, dashes at 8/13/18/23, hex everywhere
+  else; case-insensitive).
+- `random-uuid` returns a UUID value (was a 36-char string). Version
+  4 / variant 1 bits are set canonically.
+- `uuid?` now recognises the type, not the printed form. `(uuid?
+  "550e...")` is `false`, matching Clojure JVM where `(uuid? s)` is
+  only true for `java.util.UUID`.
+- `#uuid "..."` reader literal is built into the reader (does not
+  rely on `*data-readers*`).
+- Equality is byte-wise; hash mixes the 16 bytes through the
+  type-tagged FNV combiner.
+- `(type x)` returns `:uuid`. `(str u)` and `(pr-str u)` print as
+  `#uuid "...lower-hex..."` so the round-trip is exact.
+
+External suite: 178 -> 180 OK. `parse_uuid.cljc` 17/17 (was 9/17),
+`uuid_qmark.cljc` 24/24 (was load-error). The internal
+compat tests for random-uuid / uuid? / parse-uuid are updated to
+exercise the new type contract.
+
 ## v0.100.6
 
 ### Bigdec division

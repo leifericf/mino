@@ -1039,12 +1039,55 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-/* (random-uuid) — generate a UUID v4 string. */
+/* mino_uuid_from_bytes -- copy 16 bytes into a freshly-allocated
+ * MINO_UUID. */
+mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b)
+{
+    mino_val_t *v = alloc_val(S, MINO_UUID);
+    if (v == NULL) return NULL;
+    memcpy(v->as.uuid.bytes, b, 16);
+    return v;
+}
+
+/* mino_uuid_parse -- parse the canonical 8-4-4-4-12 hex form into
+ * `out_bytes` (16 bytes). Returns 1 on success, 0 if the input is
+ * malformed. Accepts upper-case and lower-case hex. */
+static int hex_nibble(int c, unsigned *out)
+{
+    if (c >= '0' && c <= '9') { *out = (unsigned)(c - '0');      return 1; }
+    if (c >= 'a' && c <= 'f') { *out = (unsigned)(c - 'a' + 10); return 1; }
+    if (c >= 'A' && c <= 'F') { *out = (unsigned)(c - 'A' + 10); return 1; }
+    return 0;
+}
+int mino_uuid_parse(const char *s, size_t len, unsigned char out[16])
+{
+    /* Layout: 8-4-4-4-12 with `-` at indices 8, 13, 18, 23. */
+    static const int dashes[4] = {8, 13, 18, 23};
+    size_t i;
+    int    di = 0;
+    int    bi = 0;
+    if (len != 36) return 0;
+    for (i = 0; i < 36; i++) {
+        if (di < 4 && (int)i == dashes[di]) {
+            if (s[i] != '-') return 0;
+            di++;
+        } else {
+            unsigned hi, lo;
+            if (!hex_nibble((unsigned char)s[i], &hi)) return 0;
+            i++;
+            if (i >= 36) return 0;
+            if (!hex_nibble((unsigned char)s[i], &lo)) return 0;
+            out[bi++] = (unsigned char)((hi << 4) | lo);
+        }
+    }
+    return bi == 16;
+}
+
+/* (random-uuid) — generate a UUID v4. */
 mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
                              mino_env_t *env)
 {
     unsigned char bytes[16];
-    char buf[37];
     int i;
     (void)env;
     if (mino_is_cons(args)) {
@@ -1064,13 +1107,31 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args,
     }
     bytes[6] = (unsigned char)((bytes[6] & 0x0F) | 0x40); /* version 4 */
     bytes[8] = (unsigned char)((bytes[8] & 0x3F) | 0x80); /* variant 1 */
-    snprintf(buf, sizeof(buf),
-        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-        bytes[0], bytes[1], bytes[2],  bytes[3],
-        bytes[4], bytes[5], bytes[6],  bytes[7],
-        bytes[8], bytes[9], bytes[10], bytes[11],
-        bytes[12], bytes[13], bytes[14], bytes[15]);
-    return mino_string_n(S, buf, 36);
+    return mino_uuid_from_bytes(S, bytes);
+}
+
+/* (parse-uuid s) — parse a canonical UUID string into a UUID value.
+ * Strict canonical form (36 chars, dashes at 8/13/18/23). Throws on
+ * non-string input; returns nil for strings that fail the strict
+ * form. */
+mino_val_t *prim_parse_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *s;
+    unsigned char bytes[16];
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "parse-uuid requires one argument");
+    }
+    s = args->as.cons.car;
+    if (s == NULL || s->type != MINO_STRING) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "parse-uuid: argument must be a string");
+    }
+    if (!mino_uuid_parse(s->as.s.data, s->as.s.len, bytes)) {
+        return mino_nil(S);
+    }
+    return mino_uuid_from_bytes(S, bytes);
 }
 
 /* Core string operations live in clojure.core: the always-available
@@ -1089,6 +1150,9 @@ const mino_prim_def k_prims_string[] = {
      "Returns the character at the given index as a string."},
     {"subs",         prim_subs,
      "Returns a substring from start (inclusive) to end (exclusive)."},
+    {"parse-uuid",   prim_parse_uuid,
+     "Parses s as a UUID; returns a UUID value or nil if s is not a "
+     "valid canonical UUID string."},
     {"random-uuid",  prim_random_uuid,
      "Returns a random UUID v4 string."},
 };

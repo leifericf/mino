@@ -263,11 +263,11 @@
 ;; --- random-uuid ---
 
 (deftest random-uuid-basic
-  (testing "returns a 36-character string"
-    (is (= 36 (count (random-uuid)))))
+  (testing "returns a UUID value"
+    (is (uuid? (random-uuid))))
 
-  (testing "version 4 nibble"
-    (is (= "4" (subs (random-uuid) 14 15))))
+  (testing "version 4 nibble (printed form)"
+    (is (= "4" (subs (str (random-uuid)) 21 22))))
 
   (testing "unique on each call"
     (is (not= (random-uuid) (random-uuid)))))
@@ -357,12 +357,15 @@
     (is (false? (uri? "https://example.com")))))
 
 (deftest uuid-predicate
-  (testing "valid uuid strings"
-    (is (true? (uuid? "550e8400-e29b-41d4-a716-446655440000")))
-    (is (true? (uuid? "00000000-0000-0000-0000-000000000000"))))
+  (testing "uuid? recognises UUID values"
+    ;; uuid? matches Clojure JVM: only true for actual java.util.UUID
+    ;; values, never for the canonical string form.
+    (is (true? (uuid? (parse-uuid "550e8400-e29b-41d4-a716-446655440000"))))
+    (is (true? (uuid? #uuid "00000000-0000-0000-0000-000000000000")))
+    (is (true? (uuid? (random-uuid)))))
 
-  (testing "invalid uuid strings"
-    (is (false? (uuid? "550e8400-e29b-41d4-a716-44665544000")))
+  (testing "non-uuids"
+    (is (false? (uuid? "550e8400-e29b-41d4-a716-446655440000")))
     (is (false? (uuid? "not-a-uuid")))
     (is (false? (uuid? "")))
     (is (false? (uuid? nil)))
@@ -398,15 +401,22 @@
     (is (thrown? (parse-boolean 42)))))
 
 (deftest parse-uuid-canonicalization
-  (testing "canonical lowercase round-trip"
-    (is (= "550e8400-e29b-41d4-a716-446655440000"
-           (parse-uuid "550E8400-E29B-41D4-A716-446655440000")))
-    (is (= "550e8400-e29b-41d4-a716-446655440000"
-           (parse-uuid "550e8400-e29b-41d4-a716-446655440000"))))
+  (testing "case-insensitive parse produces same UUID value"
+    ;; parse-uuid returns a UUID value (mino has a real UUID type as
+    ;; of v0.100.7); two case variants of the canonical hex form parse
+    ;; to bytewise-equal UUIDs.
+    (is (= (parse-uuid "550E8400-E29B-41D4-A716-446655440000")
+           (parse-uuid "550e8400-e29b-41d4-a716-446655440000")))
+    (is (uuid? (parse-uuid "550e8400-e29b-41d4-a716-446655440000")))
+    (is (= #uuid "550e8400-e29b-41d4-a716-446655440000"
+           (parse-uuid "550E8400-E29B-41D4-A716-446655440000"))))
 
   (testing "rejected inputs"
     (is (nil? (parse-uuid "junk")))
-    (is (nil? (parse-uuid nil)))))
+    ;; Non-string input throws (matches Clojure JVM, which dispatches
+    ;; UUID.fromString and rejects nil with NPE / non-string with
+    ;; ClassCastException).
+    (is (thrown? (parse-uuid nil)))))
 
 (deftest partitionv-returns-vectors
   (testing "exact partitions"

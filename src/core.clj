@@ -2866,10 +2866,8 @@
                                (subs s 19 23)
                                (subs s 24 36))))))
 
-(defn uuid?
-  "Returns true if x looks like a UUID string. Mino has no dedicated
-   UUID type; UUIDs round-trip as their canonical string form."
-  [x] (uuid-string? x))
+;; uuid? is a C primitive (recognises MINO_UUID values).
+
 
 (defn tagged-literal?
   "Returns true if x is a tagged-literal record produced by
@@ -2902,12 +2900,8 @@
                     {:value s :type (type s)})))
   (case s "true" true "false" false nil))
 
-(defn parse-uuid
-  "Parses s as a UUID. Returns the canonical lowercase string (mino
-   has no UUID type) or nil if s does not match the UUID format."
-  [s]
-  (when (uuid-string? s)
-    (clojure.string/lower-case s)))
+;; parse-uuid is a C primitive (returns a MINO_UUID value or nil).
+
 
 ;; Eager-vector partitioning (Clojure 1.13+ surface, useful pre-1.13).
 (defn partitionv

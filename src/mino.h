@@ -27,7 +27,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 100
-#define MINO_VERSION_PATCH 6
+#define MINO_VERSION_PATCH 7
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -126,12 +126,16 @@ typedef enum {
                      * behaviour (get, assoc, seq, count, ...) is a
                      * contract layered on top via primitive dispatch
                      * on this tag. Construct via mino_record. */
-    MINO_FUTURE     /* host-thread future: carries a result-or-exception
+    MINO_FUTURE,    /* host-thread future: carries a result-or-exception
                      * cell, a state machine (PENDING, RESOLVED, FAILED,
                      * CANCELLED), a mutex+cond for cross-thread
                      * delivery, and a thread handle. Promises share
                      * this type — a promise is a future that exposes
                      * `deliver` and never has a worker thread. */
+    MINO_UUID       /* RFC 4122 UUID. 16 bytes inline. Equality is
+                     * byte-wise; hash mixes the 16 bytes. The
+                     * `#uuid "..."` reader literal and (random-uuid),
+                     * (parse-uuid s) construct it. */
 } mino_type_t;
 
 typedef struct mino_val    mino_val_t;
@@ -284,6 +288,9 @@ struct mino_val {
         struct {          /* MINO_FUTURE: host-thread future */
             struct mino_future *impl; /* opaque; see runtime/host_threads.c */
         } future;
+        struct {          /* MINO_UUID: RFC 4122 UUID (16 bytes inline) */
+            unsigned char bytes[16];
+        } uuid;
     } as;
 };
 

@@ -154,6 +154,7 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_TYPE:      return "record-type";
     case MINO_RECORD:    return "record";
     case MINO_FUTURE:    return "future";
+    case MINO_UUID:      return "uuid";
     }
     return "unknown";
 }

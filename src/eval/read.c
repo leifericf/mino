@@ -1893,6 +1893,23 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         tag_sym  = mino_symbol_n(S, tag_start, tag_len);
         call_env = current_ns_env(S);
 
+        /* (0) Built-in #uuid "..." literal. Match exactly tag "uuid"
+         * with a string body; produce a MINO_UUID directly (so the
+         * reader literal is a value, not a tagged-literal record).
+         * Mirrors Clojure's reader where #uuid "..." constructs a
+         * java.util.UUID at read time. */
+        if (tag_len == 4 && memcmp(tag_start, "uuid", 4) == 0
+            && body != NULL && body->type == MINO_STRING) {
+            unsigned char bytes[16];
+            if (!mino_uuid_parse(body->as.s.data, body->as.s.len, bytes)) {
+                set_reader_diag(S, MRE008,
+                    "#uuid: malformed UUID string",
+                    S->reader_line, S->reader_col);
+                return NULL;
+            }
+            return mino_uuid_from_bytes(S, bytes);
+        }
+
         /* (1) per-tag reader from *data-readers*. */
         readers = (mino_current_ctx(S)->dyn_stack != NULL)
                     ? dyn_lookup(S, "*data-readers*") : NULL;
