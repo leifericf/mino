@@ -1548,17 +1548,26 @@ mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    size_t n;
-    mino_val_t *t, *val;
+    /* Clojure: (conj!)              -> (transient [])
+     *          (conj! tcoll)        -> tcoll unchanged
+     *          (conj! tcoll x)      -> tcoll with x added
+     *          (conj! tcoll x & xs) -> additional values conj'd left-
+     *                                  to-right; final transient is
+     *                                  returned. */
+    mino_val_t *t;
+    mino_val_t *p;
     (void)env;
-    arg_count(S, args, &n);
-    if (n != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "conj! requires two arguments");
+    if (!mino_is_cons(args)) {
+        return mino_transient(S, mino_vector(S, NULL, 0));
     }
-    t   = args->as.cons.car;
-    val = args->as.cons.cdr->as.cons.car;
-    return mino_conj_bang(S, t, val);
+    t = args->as.cons.car;
+    p = args->as.cons.cdr;
+    while (mino_is_cons(p)) {
+        t = mino_conj_bang(S, t, p->as.cons.car);
+        if (t == NULL) return NULL;
+        p = p->as.cons.cdr;
+    }
+    return t;
 }
 
 mino_val_t *prim_dissoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)

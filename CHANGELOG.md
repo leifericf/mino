@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `conj!` Variadic Arity
+
+`conj!` now matches Clojure's full signature: `(conj!)` returns
+a fresh transient empty vector, `(conj! tcoll)` returns the
+transient unchanged, and `(conj! tcoll x & xs)` conj's each extra
+value in turn and returns the final transient. Previously only
+the 2-arg form was accepted.
+
 ### `(dissoc m)` Returns the Map Unchanged
 
 Per Clojure's contract, `dissoc` is variadic with a 1-arg form
