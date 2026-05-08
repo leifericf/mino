@@ -564,4 +564,4 @@
 ;; --- into via concat ---
 
 (deftest clj-into-concat
-  (is (= [1 2 "a" "b"] (into [] (concat [1 2] "ab")))))
+  (is (= [1 2 \a \b] (into [] (concat [1 2] "ab")))))

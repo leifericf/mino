@@ -58,16 +58,12 @@
 
 (deftest str-escape-basic
   (is (= "" (str/escape "" {})))
-  ;; mino iterates strings as single-char strings, so the escape map is
-  ;; keyed by one-char strings rather than chars. Clojure's version
-  ;; accepts char keys because (seq s) yields chars there; we intend to
-  ;; align (seq s) with Clojure in a later cycle.
-  (is (= "A_Abc" (str/escape "abc" {"a" "A_A"})))
-  (is (= "A_AbC_C" (str/escape "abc" {"a" "A_A" "c" "C_C"}))))
+  (is (= "A_Abc" (str/escape "abc" {\a "A_A"})))
+  (is (= "A_AbC_C" (str/escape "abc" {\a "A_A" \c "C_C"}))))
 
 (deftest str-escape-throws
-  (is (thrown? (str/escape nil {"a" "A"})))
-  (is (thrown? (str/escape 1 {"a" "A"}))))
+  (is (thrown? (str/escape nil {\a "A"})))
+  (is (thrown? (str/escape 1 {\a "A"}))))
 
 ;; --- lower-case ---
 

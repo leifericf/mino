@@ -13,7 +13,7 @@
   (is (= nil (seq nil)))
   (is (= nil (seq [])))
   (is (= '([:a 1]) (seq {:a 1})))
-  (is (= '("a" "b") (seq "ab"))))
+  (is (= '(\a \b) (seq "ab"))))
 
 (deftest realized-fn
   (let [s (lazy-seq (cons 1 nil))]

@@ -110,12 +110,39 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return sorted_seq(S, coll);
     }
     if (coll->type == MINO_STRING) {
-        mino_val_t *head = mino_nil(S), *tail = NULL;
-        size_t i;
-        if (coll->as.s.len == 0) return mino_nil(S);
-        for (i = 0; i < coll->as.s.len; i++) {
-            seq_cons_append(S, &head, &tail,
-                mino_string_n(S, coll->as.s.data + i, 1));
+        /* Per Clojure, (seq "abc") yields a sequence of chars, not
+         * substrings. Walk UTF-8 codepoint by codepoint and emit
+         * MINO_CHAR values. Malformed bytes are emitted as their
+         * raw byte value (matching the read path's lenient byte
+         * fallback). */
+        mino_val_t  *head = mino_nil(S);
+        mino_val_t  *tail = NULL;
+        const unsigned char *bytes = (const unsigned char *)coll->as.s.data;
+        size_t i = 0;
+        size_t len = coll->as.s.len;
+        if (len == 0) return mino_nil(S);
+        while (i < len) {
+            unsigned int cp;
+            unsigned int b = bytes[i];
+            size_t n;
+            if (b < 0x80u)        { cp = b;          n = 1; }
+            else if ((b & 0xE0u) == 0xC0u) { cp = b & 0x1Fu;  n = 2; }
+            else if ((b & 0xF0u) == 0xE0u) { cp = b & 0x0Fu;  n = 3; }
+            else if ((b & 0xF8u) == 0xF0u) { cp = b & 0x07u;  n = 4; }
+            else                  { cp = b;          n = 1; }
+            if (i + n > len) { cp = b; n = 1; }
+            else {
+                size_t k;
+                int valid = 1;
+                for (k = 1; k < n; k++) {
+                    unsigned int c2 = bytes[i + k];
+                    if ((c2 & 0xC0u) != 0x80u) { valid = 0; break; }
+                    cp = (cp << 6) | (c2 & 0x3Fu);
+                }
+                if (!valid) { cp = b; n = 1; }
+            }
+            seq_cons_append(S, &head, &tail, mino_char(S, (int)cp));
+            i += n;
         }
         return head;
     }

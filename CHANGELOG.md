@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### `(seq string)` Yields Characters Per Clojure
+
+Previously `(seq "abc")` returned a sequence of one-byte strings
+(`("a" "b" "c")`); now it returns a sequence of MINO_CHAR
+codepoints (`(\a \b \c)`), matching Clojure. The implementation
+walks UTF-8 codepoint by codepoint so multi-byte characters like
+`\é` and `\☃` come out as single MINO_CHAR values rather than
+fragmented byte slices.
+
+This unblocks the conformance suite's `interpose`, `cons`,
+`fnext`, `zipmap`, etc. cases that depend on character semantics
+(`(map identity "abc")` → `(\a \b \c)`). Two internal tests
+(`seq-fn`'s string case and `clj-into-concat`) were updated to
+expect `\a \b` instead of `"a" "b"`; the test suite now uses the
+Clojure semantics throughout.
+
+The companion `seq_iter_val` path used by direct iterators
+(`first`, `next` over strings via `seq_iter_*`) still emits
+substrings; that path needs UTF-8 byte-step tracking to switch
+safely and is left for a separate fix.
+
 ### `parse-boolean` Throws on Non-string Input
 
 Per Clojure 1.11+'s contract, `parse-boolean` throws on non-string
