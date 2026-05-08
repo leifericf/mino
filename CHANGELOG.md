@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### `str` Drops the `N` / `M` Suffix on BigInts and BigDecs
+
+`(str 1N)` now returns `"1"` (was `"1N"`) and `(str 1.0M)` returns
+`"1.0"` (was `"1.0M"`). The readable printer (`pr-str`, `prn`) keeps
+emitting the suffix so round-tripping through the reader still works;
+only the non-readable `str` family was wrong. The previous
+implementation routed bigints / bigdecs through `print_to_string`
+which uses the readable form. The fix adds explicit `MINO_BIGINT` and
+`MINO_BIGDEC` cases in `prim_str` that format the digits directly --
+mirroring how `MINO_INT` and `MINO_FLOAT` are already handled.
+
 ### `<` / `<=` / `>` / `>=` -- Strict Numeric Operands and NaN Unordering
 
 The four numeric comparison operators previously accepted nil (silently

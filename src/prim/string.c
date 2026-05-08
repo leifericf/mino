@@ -791,6 +791,96 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             case MINO_INT:
                 n = snprintf(tmp, sizeof(tmp), "%lld", a->as.i);
                 break;
+            case MINO_BIGINT: {
+                /* `str` strips the readable-form N suffix. */
+                char *digits = mino_bigint_to_cstr(a);
+                if (digits != NULL) {
+                    size_t plen = strlen(digits);
+                    size_t need2 = len + plen + 1;
+                    if (need2 > cap) {
+                        cap = cap == 0 ? 128 : cap;
+                        while (cap < need2) cap *= 2;
+                        buf = (char *)realloc(buf, cap);
+                        if (buf == NULL) {
+                            free(digits);
+                            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                                          "internal", "MIN001", "out of memory");
+                            return NULL;
+                        }
+                    }
+                    memcpy(buf + len, digits, plen);
+                    len += plen;
+                    free(digits);
+                }
+                n = 0;
+                break;
+            }
+            case MINO_BIGDEC: {
+                /* `str` strips the readable-form M suffix. */
+                char *digits = mino_bigint_to_cstr(a->as.bigdec.unscaled);
+                if (digits != NULL) {
+                    int scale = a->as.bigdec.scale;
+                    int neg = (digits[0] == '-');
+                    int dlen = (int)strlen(digits);
+                    char fb[256];
+                    int fn2 = 0;
+                    if (scale == 0) {
+                        fn2 = snprintf(fb, sizeof(fb), "%s", digits);
+                    } else {
+                        int int_part_len = dlen - (neg ? 1 : 0) - scale;
+                        if (int_part_len > 0) {
+                            int j, k = 0;
+                            for (j = 0; j < (neg ? 1 : 0) + int_part_len &&
+                                        k < (int)sizeof(fb) - 1; j++) {
+                                fb[k++] = digits[j];
+                            }
+                            if (k < (int)sizeof(fb) - 1) fb[k++] = '.';
+                            for (; j < dlen && k < (int)sizeof(fb) - 1; j++) {
+                                fb[k++] = digits[j];
+                            }
+                            fb[k] = '\0';
+                            fn2 = k;
+                        } else {
+                            int pad;
+                            int k = 0;
+                            if (neg && k < (int)sizeof(fb) - 1) fb[k++] = '-';
+                            if (k + 2 < (int)sizeof(fb)) {
+                                fb[k++] = '0'; fb[k++] = '.';
+                            }
+                            for (pad = 0; pad < -int_part_len &&
+                                          k < (int)sizeof(fb) - 1; pad++) {
+                                fb[k++] = '0';
+                            }
+                            {
+                                const char *src = digits + (neg ? 1 : 0);
+                                while (*src && k < (int)sizeof(fb) - 1) {
+                                    fb[k++] = *src++;
+                                }
+                            }
+                            fb[k] = '\0';
+                            fn2 = k;
+                        }
+                    }
+                    free(digits);
+                    if (fn2 > 0) {
+                        size_t need2 = len + (size_t)fn2 + 1;
+                        if (need2 > cap) {
+                            cap = cap == 0 ? 128 : cap;
+                            while (cap < need2) cap *= 2;
+                            buf = (char *)realloc(buf, cap);
+                            if (buf == NULL) {
+                                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                                              "internal", "MIN001", "out of memory");
+                                return NULL;
+                            }
+                        }
+                        memcpy(buf + len, fb, (size_t)fn2);
+                        len += (size_t)fn2;
+                    }
+                }
+                n = 0;
+                break;
+            }
             case MINO_CHAR: {
                 /* str of a char emits the codepoint's UTF-8 encoding. */
                 unsigned cp = (unsigned)a->as.ch;
