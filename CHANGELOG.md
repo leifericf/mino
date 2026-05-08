@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.100.11
+
+Two fixes that close the last external-suite timeouts:
+
+### `(promise)` no longer blocks process exit
+
+`mino_host_threads_quiesce` was waiting on `impl->cv` for any future
+that never had a worker thread, expecting a pool-managed worker to
+publish the result. Promises (constructed via `(promise)` with no
+backing thunk) match that shape but have no worker -- if the user
+doesn't `(deliver p val)` before exit, the wait blocked forever.
+The quiesce loop now distinguishes "pool-managed pending" (has a
+thunk; will be delivered) from "promise" (no thunk; may stay pending
+forever) and skips the latter.
+
+### `ifn?` recognises promises; `clojure.lang.IPending` bridge
+
+`(ifn? (promise))` now returns true (matches Clojure JVM where
+promises implement IFn). `instance?` works against
+`clojure.lang.IPending` -- mino binds that JVM interface name to the
+keyword `:future` at bootstrap, so cross-dialect tests that detect
+pending values via `(instance? clojure.lang.IPending x)` succeed
+against mino's promise/future type. The bridge is narrow: only
+`clojure.lang.IPending`, no other JVM interfaces are aliased.
+
+External `ifn_qmark.cljc` 19/19, `taps.cljc` 4/4. External suite:
+182 -> 184 OK, 0 crashes, 0 timeouts. Group 7 of the external-suite
+plan is complete.
+
 ## v0.100.10
 
 `let` now follows Clojure's sequential-binding semantics: an init

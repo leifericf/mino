@@ -168,7 +168,7 @@
   "Returns true if x can be called as a function."
   [x]
   (or (fn? x) (keyword? x) (map? x) (vector? x)
-      (set? x) (symbol? x) (var? x)))
+      (set? x) (symbol? x) (var? x) (future? x)))
 
 ;; --- Qualified symbol/keyword predicates ---
 
@@ -3168,6 +3168,15 @@
    be the keyword (type x) returns and the test is keyword equality."
   [t x]
   (= t (type x)))
+
+;; Bridge a small set of JVM interface names to mino's type keywords.
+;; This lets cross-dialect tests that use `(instance? clojure.lang.IFoo
+;; x)` succeed on mino without each test author having to thread a
+;; reader-conditional. The mapping is kept narrow to JVM interfaces
+;; that have an exact mino equivalent; types that mino doesn't support
+;; (Float vs Double, IBlockingDeref distinct from IPending, ...) are
+;; deliberately not bridged.
+(def clojure.lang.IPending :future)
 
 (defmacro with-redefs
   "Temporarily rebinds the root bindings of vars while body executes, restoring

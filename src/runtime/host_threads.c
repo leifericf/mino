@@ -496,12 +496,17 @@ void mino_host_threads_quiesce(mino_state_t *S)
      * never finish and we deadlock. */
     saved_depth = mino_yield_lock(S);
 
-    /* Walk outstanding futures and wait for each. Two cases:
+    /* Walk outstanding futures and wait for each. Three cases:
      *   - Spawn-per-future: pthread_join (Win: WaitForSingleObject).
-     *   - Pool-managed: impl->thread_started is 0 since mino didn't
-     *     pthread_create the worker. Wait on impl->cv until
-     *     state_tag != PENDING; the pool worker publishes the result
-     *     and broadcasts before returning. */
+     *   - Pool-managed: thread_started is 0 because mino didn't
+     *     pthread_create the worker, but a thunk is queued and a
+     *     pool worker will publish a result. Wait on impl->cv until
+     *     state_tag != PENDING.
+     *   - Promise (no thunk, never had a worker): may be undelivered
+     *     forever. Don't block on it -- if the user holds an
+     *     undelivered promise at exit, we must not deadlock the
+     *     process. The future cell is freed by the GC sweep when
+     *     unreachable. */
     impl = S->future_list_head;
     while (impl != NULL) {
         if (impl->thread_started && !impl->thread_joined) {
@@ -512,13 +517,14 @@ void mino_host_threads_quiesce(mino_state_t *S)
             pthread_join(impl->thread, NULL);
 #endif
             impl->thread_joined = 1;
-        } else if (!impl->thread_started) {
+        } else if (!impl->thread_started && impl->thunk != NULL) {
             mu_lock(&impl->mu);
             while (impl->state_tag == MINO_FUTURE_PENDING) {
                 cv_wait(&impl->cv, &impl->mu);
             }
             mu_unlock(&impl->mu);
         }
+        /* else: promise with no thunk -- skip; nothing to wait on. */
         impl = impl->next_in_state;
     }
 
