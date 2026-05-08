@@ -30,6 +30,11 @@
 ;; not reach the loaded file's top-level forms.
 (def suite-mode (atom false))
 
+;; Registered fixtures keyed by namespace name (string). Each entry is
+;; a map {:once [fn ...] :each [fn ...]}. use-fixtures appends; the
+;; runner composes them around test execution.
+(def fixtures-registry (atom {}))
+
 ;; --- Internal helpers ---
 
 (defn assert-pass! []
@@ -93,6 +98,25 @@
       :ns   (str *ns*)
       :fn   (fn [] ~@body)}))
 
+(defn use-fixtures
+  "Register fixture functions for the current namespace. Each fixture
+  is a fn-of-one-arg whose argument is a no-arg thunk that runs the
+  wrapped body; the fixture is responsible for any setup/teardown
+  around invoking the thunk.
+
+  kind is :once (run around the entire batch of tests in this ns) or
+  :each (run around each individual test). Multiple fixtures of the
+  same kind compose left-to-right (the first fixture is outermost).
+
+  Mirrors clojure.test/use-fixtures."
+  [kind & fixtures]
+  (when-not (or (= kind :once) (= kind :each))
+    (throw (ex-info "use-fixtures: kind must be :once or :each" {:kind kind})))
+  (let [ns-name (str *ns*)]
+    (swap! fixtures-registry update ns-name
+           (fn [m] (update (or m {}) kind
+                           (fn [existing] (into (or existing []) fixtures)))))))
+
 (defmacro testing [desc & body]
   `(binding [*testing-contexts* (cons ~desc *testing-contexts*)]
      ~@body))
@@ -131,24 +155,46 @@
           (println ""))
         (recur (rest fs))))))
 
+(defn- compose-fixtures
+  "Compose a sequence of fixture fns (each taking a thunk that runs
+  the wrapped body) into a single fn-of-thunk. The result calls the
+  outermost fixture first; its body invokes the next inner fixture,
+  and so on, with the supplied thunk at the centre."
+  [fixtures]
+  (reduce (fn [inner fixture]
+            (fn [thunk] (fixture (fn [] (inner thunk)))))
+          (fn [thunk] (thunk))
+          (reverse fixtures)))
+
 (defn- run-tests-impl [tests]
   (binding [*report-counters* (atom {:pass 0 :fail 0 :error 0 :failures []})]
-    (let [n (count tests)]
-      (loop [i 0]
-        (when (< i n)
-          (let [t     (nth tests i)
-                tname (get t :name)
-                tfn   (get t :fn)]
-            (binding [*current-test*     tname
-                      *testing-contexts* ()]
-              (try
-                (tfn)
-                (catch e
-                  (do
-                    (swap! *report-counters* update :error inc)
-                    (swap! *report-counters* update :failures conj
-                      {:test tname :error (str e)}))))))
-          (recur (+ i 1))))
+    (let [n (count tests)
+          ;; Group tests by ns so :once fixtures wrap the per-ns run
+          ;; once. Within a ns, :each fixtures wrap each test body.
+          by-ns (reduce (fn [acc t]
+                          (update acc (get t :ns) (fnil conj []) t))
+                        {} tests)
+          ns-list (mapv (fn [t] (get t :ns)) tests)
+          ns-order (vec (distinct ns-list))
+          run-one (fn [t]
+                    (let [tname (get t :name)
+                          tfn   (get t :fn)
+                          tns   (get t :ns)
+                          fxs   (get @fixtures-registry tns)
+                          each-wrap (compose-fixtures (get fxs :each))]
+                      (binding [*current-test*     tname
+                                *testing-contexts* ()]
+                        (try
+                          (each-wrap tfn)
+                          (catch e
+                            (swap! *report-counters* update :error inc)
+                            (swap! *report-counters* update :failures conj
+                              {:test tname :error (str e)}))))))]
+      (doseq [ns-name ns-order]
+        (let [ns-tests  (get by-ns ns-name)
+              fxs       (get @fixtures-registry ns-name)
+              once-wrap (compose-fixtures (get fxs :once))]
+          (once-wrap (fn [] (doseq [t ns-tests] (run-one t))))))
       (let [state    @*report-counters*
             passes   (get state :pass)
             fails    (get state :fail)

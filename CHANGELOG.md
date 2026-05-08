@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### `clojure.test/use-fixtures`
+
+`use-fixtures` now lives in `lib/clojure/test.clj` with the
+familiar `:once` and `:each` kinds. Fixtures are registered per-
+namespace in a `fixtures-registry` atom; the runner groups
+registered tests by namespace, wraps each ns's batch with its
+`:once` fixtures (outermost first), and threads each individual
+test through its `:each` fixtures. Multiple fixtures of the same
+kind compose left-to-right via `compose-fixtures`. This unblocks
+the suite's `descendants.cljc` and `parents.cljc`, which both
+declared `(use-fixtures :once with-global-hierarchy)` to set up
+shared `derive` state.
+
 ### Numeric Predicates Across the Full Tower
 
 `zero?`, `pos?`, `neg?`, `even?`, and `odd?` now accept the full
