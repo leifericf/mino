@@ -1489,33 +1489,58 @@
        (~go))))
 
 (defmacro doseq
-  "Iterates over collections for side effects. Supports nested
-   bindings."
+  "Iterates over collections for side effects, evaluating body once
+   per binding combination, and returns nil. Supports nested
+   bindings and the modifier clauses :let, :when, and :while -- the
+   same surface clojure.core/doseq exposes:
+     :let [name expr ...]  introduces locals visible to inner clauses
+     :when expr            skips this iteration when expr is falsy
+     :while expr           halts all iteration when expr is falsy
+
+  Implementation note: :while needs to stop the outer loop too, not
+  just the inner one. We encode that with a shared 'stop' atom that
+  the outer driver inspects each iteration. Without it, an outer
+  infinite seq paired with a later :while would never terminate."
   [bindings & body]
-  (if (<= (count bindings) 2)
-    ;; Single binding: (doseq [x coll] body...)
-    (let [sym  (first bindings)
-          coll (first (rest bindings))
-          gs   (gensym)
-          go   (gensym)]
-      `(let [~go (fn [~gs]
-                   (when ~gs
-                     (let [~sym (first ~gs)]
-                       ~@body
-                       (~go (next ~gs)))))]
-         (~go (seq ~coll))))
-    ;; Multiple bindings: nest inner doseq
-    (let [sym  (first bindings)
-          coll (first (rest bindings))
-          rest-bindings (into [] (drop 2 bindings))
-          gs   (gensym)
-          go   (gensym)]
-      `(let [~go (fn [~gs]
-                   (when ~gs
-                     (let [~sym (first ~gs)]
-                       (doseq ~rest-bindings ~@body)
-                       (~go (next ~gs)))))]
-         (~go (seq ~coll))))))
+  (let [stop-sym (gensym "doseq-stop_")]
+    (letfn [(emit [bindings]
+              (cond
+                (zero? (count bindings))
+                `(do ~@body nil)
+
+                (= :let (first bindings))
+                (let [bs            (first (rest bindings))
+                      rest-bindings (into [] (drop 2 bindings))]
+                  `(let ~bs ~(emit rest-bindings)))
+
+                (= :when (first bindings))
+                (let [pred          (first (rest bindings))
+                      rest-bindings (into [] (drop 2 bindings))]
+                  `(when ~pred ~(emit rest-bindings)))
+
+                (= :while (first bindings))
+                (let [pred          (first (rest bindings))
+                      rest-bindings (into [] (drop 2 bindings))]
+                  `(if ~pred
+                     ~(emit rest-bindings)
+                     (do (reset! ~stop-sym true) nil)))
+
+                ;; Plain binding sym/coll. Drive a recursive loop.
+                :else
+                (let [sym           (first bindings)
+                      coll          (first (rest bindings))
+                      rest-bindings (into [] (drop 2 bindings))
+                      gs            (gensym)
+                      go            (gensym)]
+                  `(let [~go (fn [~gs]
+                               (when (and ~gs (not @~stop-sym))
+                                 (let [~sym (first ~gs)]
+                                   ~(emit rest-bindings)
+                                   (~go (next ~gs)))))]
+                     (~go (seq ~coll))))))]
+      `(let [~stop-sym (atom false)]
+         ~(emit bindings)
+         nil))))
 
 ;; --- Shuffle (Fisher-Yates) ---
 

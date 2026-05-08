@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### `doseq` Supports `:let`, `:when`, and `:while` Modifier Clauses
+
+`doseq` now recognises the three modifier clauses Clojure's
+version exposes alongside plain bindings:
+
+  - `:let [name expr ...]` introduces locals visible to the
+    remaining clauses and the body.
+  - `:when expr` skips an iteration when expr is falsy.
+  - `:while expr` halts iteration entirely (including outer
+    binding loops) when expr is falsy.
+
+Previously the binding parser stopped at clause-keyword/value pairs
+and tried to call `seq` on the keyword's "value" (e.g. on the
+boolean produced by `:while (< x 3)`), so any modifier triggered a
+"seq: cannot coerce bool to a sequence" error.
+
+`:while`'s "stop everything" semantics is implemented with a
+shared `stop` atom that the outer recursive driver consults each
+iteration; without it an outer infinite seq paired with a later
+`:while` would never terminate.
+
+doseq.cljc: 11 passing / 1 error -> 15/15 clean.
+
 ### `realized?` Throws on Non-pending Inputs
 
 `realized?` previously returned `true` for any value that wasn't
