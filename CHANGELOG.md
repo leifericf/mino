@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `assoc!` Variadic Arity (with Odd-out Nil)
+
+`(assoc! tcoll k v & kvs)` now accepts the variadic Clojure form
+plus the documented JVM quirk: a trailing odd-out key with no
+matching value is treated as `key nil`. Previously only the 3-arg
+form was accepted. Each pair (or trailing nil pair) is assoc'd
+left-to-right against the running transient.
+
 ### `dissoc!` / `disj!` Variadic Arity
 
 Both transient ops now accept the variadic Clojure form

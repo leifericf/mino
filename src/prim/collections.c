@@ -1532,18 +1532,37 @@ mino_val_t *prim_persistent_bang(mino_state_t *S, mino_val_t *args, mino_env_t *
 
 mino_val_t *prim_assoc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    size_t n;
-    mino_val_t *t, *key, *val;
+    /* Clojure: (assoc! tcoll k v & kvs) -- extra args supplied as
+     * key/value pairs and assoc'd left-to-right. Unlike assoc, assoc!
+     * accepts a trailing odd-out key (treats its value as nil); this
+     * is the documented Clojure JVM behaviour the conformance suite
+     * exercises. The final transient is returned. */
+    size_t      n;
+    mino_val_t *t;
+    mino_val_t *p;
     (void)env;
     arg_count(S, args, &n);
-    if (n != 3) {
+    if (n < 3) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "assoc! requires three arguments");
+            "assoc! requires at least three arguments");
     }
-    t   = args->as.cons.car;
-    key = args->as.cons.cdr->as.cons.car;
-    val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-    return mino_assoc_bang(S, t, key, val);
+    t = args->as.cons.car;
+    p = args->as.cons.cdr;
+    while (mino_is_cons(p)) {
+        mino_val_t *k = p->as.cons.car;
+        mino_val_t *v;
+        if (mino_is_cons(p->as.cons.cdr)) {
+            v = p->as.cons.cdr->as.cons.car;
+            p = p->as.cons.cdr->as.cons.cdr;
+        } else {
+            /* Odd-out key: pair value defaults to nil. */
+            v = mino_nil(S);
+            p = p->as.cons.cdr;
+        }
+        t = mino_assoc_bang(S, t, k, v);
+        if (t == NULL) return NULL;
+    }
+    return t;
 }
 
 mino_val_t *prim_conj_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
