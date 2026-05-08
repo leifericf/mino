@@ -508,6 +508,9 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             }
             break;
         }
+        case MINO_REGEX:
+            gc_mark_child_push(S, v->as.regex.source);
+            break;
         default:
             break;
         }

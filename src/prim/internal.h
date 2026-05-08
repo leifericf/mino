@@ -328,8 +328,10 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 
 /* regex.c */
+mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source);
 
 /* stateful.c */
 mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env);

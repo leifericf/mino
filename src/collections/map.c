@@ -296,6 +296,10 @@ uint32_t hash_val(const mino_val_t *v)
         for (i = 0; i < 16; i++) h = fnv_mix(h, v->as.uuid.bytes[i]);
         return h;
     }
+    case MINO_REGEX:
+        /* Identity equality means identity hash too. */
+        h = fnv_mix(h, 0x16);
+        return hash_pointer_bytes(h, (uintptr_t)v);
     default:
         /* PRIM, FN, RECUR: identity-based. */
         h = fnv_mix(h, 0x0b);

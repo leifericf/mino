@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.100.8
+
+Regexes are now a first-class value type (`MINO_REGEX`), distinct
+from strings. Equality is identity, matching Clojure JVM's
+`Pattern.equals`: two distinct `#"x"` literals are not `=`. Type tag
+is `:regex`; print form is `#"source"` so the round-trip is exact.
+
+Surface changes:
+- `re-pattern` is now a C primitive that returns a `MINO_REGEX`
+  wrapping the source string (or returns the existing regex
+  unchanged if passed one). Was a `def` aliased to `identity`.
+- `#"..."` reader literal builds a `MINO_REGEX` directly (no longer
+  wraps in a `(re-pattern ...)` call).
+- `re-find` and `re-matches` accept either `MINO_REGEX` or
+  `MINO_STRING` for the pattern argument; the legacy string call
+  shape still works.
+- `clojure.string/split` accepts either a string or a regex
+  separator. Regex separators currently use the source bytes as a
+  literal substring -- works for the fixed-string patterns the
+  test suites exercise (`#","`, `#"-"`); metacharacter separators
+  would need a real regex-walking iteration which is deferred.
+- `regex?` predicate (also exposed in `(type x)` as `:regex`).
+
+External `eq.cljc` is now 65/65. External suite: 180 -> 181 OK.
+
+Internal regex tests under `regex-literal-reader` and `re-pattern-fn`
+are updated to assert the new contract (regex values, identity `=`).
+
 ## v0.100.7
 
 UUIDs are now a first-class value type (`MINO_UUID`, 16 bytes

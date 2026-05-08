@@ -342,6 +342,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return v->as.record.type;
     case MINO_FUTURE:    return mino_keyword(S, "future");
     case MINO_UUID:      return mino_keyword(S, "uuid");
+    case MINO_REGEX:     return mino_keyword(S, "regex");
     }
     return mino_keyword(S, "unknown");
 }
@@ -384,6 +385,7 @@ DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b =
 DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && v->type == MINO_TYPE), "record-type?")
 DEFINE_TYPE_PRED(prim_record_p,      (v != NULL && v->type == MINO_RECORD), "record?")
 DEFINE_TYPE_PRED(prim_uuid_p,        (v != NULL && v->type == MINO_UUID),    "uuid?")
+DEFINE_TYPE_PRED(prim_regex_p,       (v != NULL && v->type == MINO_REGEX),   "regex?")
 
 #undef DEFINE_TYPE_PRED
 
@@ -1216,6 +1218,8 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns true if x is a record value."},
     {"uuid?",      prim_uuid_p,
      "Returns true if x is a UUID value."},
+    {"regex?",     prim_regex_p,
+     "Returns true if x is a regex value."},
 };
 
 const size_t k_prims_reflection_count =

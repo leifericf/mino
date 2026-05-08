@@ -438,6 +438,18 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputs(buf, out);
         return;
     }
+    case MINO_REGEX: {
+        /* Print as `#"source"` so the regex round-trips through the
+         * reader. The source bytes pass through unescaped -- the
+         * reader's regex literal accepts the same form. */
+        const mino_val_t *src = v->as.regex.source;
+        fputs("#\"", out);
+        if (src != NULL && src->type == MINO_STRING) {
+            fwrite(src->as.s.data, 1, src->as.s.len, out);
+        }
+        fputc('"', out);
+        return;
+    }
     }
 }
 

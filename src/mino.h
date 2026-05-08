@@ -27,7 +27,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 100
-#define MINO_VERSION_PATCH 7
+#define MINO_VERSION_PATCH 8
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -132,10 +132,16 @@ typedef enum {
                      * delivery, and a thread handle. Promises share
                      * this type — a promise is a future that exposes
                      * `deliver` and never has a worker thread. */
-    MINO_UUID       /* RFC 4122 UUID. 16 bytes inline. Equality is
+    MINO_UUID,      /* RFC 4122 UUID. 16 bytes inline. Equality is
                      * byte-wise; hash mixes the 16 bytes. The
                      * `#uuid "..."` reader literal and (random-uuid),
                      * (parse-uuid s) construct it. */
+    MINO_REGEX      /* Compiled-on-use regex pattern. Holds the source
+                     * string only -- mino's regex engine compiles per
+                     * call. Equality is identity (matches Clojure
+                     * JVM's `(= #"x" #"x")` returning false); print
+                     * form is `#"source"`. The reader's `#"..."`
+                     * literal and `(re-pattern s)` construct it. */
 } mino_type_t;
 
 typedef struct mino_val    mino_val_t;
@@ -291,6 +297,9 @@ struct mino_val {
         struct {          /* MINO_UUID: RFC 4122 UUID (16 bytes inline) */
             unsigned char bytes[16];
         } uuid;
+        struct {          /* MINO_REGEX: pattern source */
+            mino_val_t *source;  /* MINO_STRING with pattern bytes */
+        } regex;
     } as;
 };
 

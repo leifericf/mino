@@ -1,9 +1,62 @@
 /*
- * regex.c -- regex primitives: re-find, re-matches.
+ * regex.c -- regex primitives: re-pattern, re-find, re-matches.
  */
 
 #include "prim/internal.h"
 #include "regex/re.h"
+
+/* Construct a MINO_REGEX wrapping the given source string. The source
+ * is held by reference (no copy) -- callers must pass an interned or
+ * already GC-owned string. */
+mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source)
+{
+    mino_val_t *v;
+    if (source == NULL || source->type != MINO_STRING) return NULL;
+    v = alloc_val(S, MINO_REGEX);
+    if (v == NULL) return NULL;
+    v->as.regex.source = source;
+    return v;
+}
+
+/* Pull out the pattern bytes from either a MINO_REGEX (canonical) or a
+ * MINO_STRING (legacy / explicit-string callers). Returns 0 if the
+ * argument is neither. */
+static int regex_source_view(const mino_val_t *v, const char **data, size_t *len)
+{
+    if (v == NULL) return 0;
+    if (v->type == MINO_STRING) {
+        *data = v->as.s.data;
+        *len  = v->as.s.len;
+        return 1;
+    }
+    if (v->type == MINO_REGEX && v->as.regex.source != NULL
+        && v->as.regex.source->type == MINO_STRING) {
+        *data = v->as.regex.source->as.s.data;
+        *len  = v->as.regex.source->as.s.len;
+        return 1;
+    }
+    return 0;
+}
+
+/* (re-pattern s) -- compile a regex from a source string, returning a
+ * MINO_REGEX. Accepts a MINO_REGEX too (re-returned identically) so
+ * `(re-pattern existing-pattern)` is a no-op. */
+mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "re-pattern requires one argument");
+    }
+    x = args->as.cons.car;
+    if (x != NULL && x->type == MINO_REGEX) return x;
+    if (x != NULL && x->type == MINO_STRING) {
+        return mino_regex_from_source(S, x);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001",
+        "re-pattern: argument must be a string or regex");
+}
 
 /* Build the [whole g1 g2 ...] vector for a successful match. The
  * pattern's group ids start at 1; missing/unmatched groups surface as
@@ -41,22 +94,26 @@ mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     re_groups_t groups;
     int         match_len = 0;
     int         match_idx;
+    const char *pat_data;
+    size_t      pat_len;
     (void)env;
+    (void)pat_len;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "re-find requires two arguments");
     }
     pat_val  = args->as.cons.car;
     text_val = args->as.cons.cdr->as.cons.car;
-    if (pat_val == NULL || pat_val->type != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "re-find: first argument must be a pattern string");
+    if (!regex_source_view(pat_val, &pat_data, &pat_len)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "re-find: first argument must be a pattern (regex or string)");
     }
     /* Real Clojure (re-find re nil) returns nil rather than throwing. */
     if (text_val == NULL || text_val->type == MINO_NIL) return mino_nil(S);
     if (text_val->type != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-find: second argument must be a string");
     }
-    compiled = re_compile(pat_val->as.s.data);
+    compiled = re_compile(pat_data);
     if (compiled == NULL) {
         return prim_throw_classified(S, "eval/contract", "MCT001",
             "re-find: invalid regex pattern");
@@ -83,21 +140,25 @@ mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     re_groups_t groups;
     int         match_len = 0;
     int         match_idx;
+    const char *pat_data;
+    size_t      pat_len;
     (void)env;
+    (void)pat_len;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "re-matches requires two arguments");
     }
     pat_val  = args->as.cons.car;
     text_val = args->as.cons.cdr->as.cons.car;
-    if (pat_val == NULL || pat_val->type != MINO_STRING) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: first argument must be a pattern string");
+    if (!regex_source_view(pat_val, &pat_data, &pat_len)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "re-matches: first argument must be a pattern (regex or string)");
     }
     if (text_val == NULL || text_val->type == MINO_NIL) return mino_nil(S);
     if (text_val->type != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: second argument must be a string");
     }
-    compiled = re_compile(pat_val->as.s.data);
+    compiled = re_compile(pat_data);
     if (compiled == NULL) {
         return prim_throw_classified(S, "eval/contract", "MCT001",
             "re-matches: invalid regex pattern");
@@ -115,6 +176,8 @@ mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 const mino_prim_def k_prims_regex[] = {
+    {"re-pattern", prim_re_pattern,
+     "Returns a regex from a string pattern (no-op on an existing regex)."},
     {"re-find",    prim_re_find,
      "Returns the first regex match in the string, or nil."},
     {"re-matches", prim_re_matches,

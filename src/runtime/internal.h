@@ -906,6 +906,10 @@ long long mino_monotonic_ns(void);
 mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b);
 int         mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
 
+/* Regex constructor (defined in src/prim/regex.c) -- declared here so
+ * the reader can build a MINO_REGEX for the `#"..."` literal. */
+mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source);
+
 /* ------------------------------------------------------------------------- */
 /* Ownership conventions used in the per-subsystem internal headers:         */
 /*   GC-owned  — returned pointer is managed by the garbage collector.       */

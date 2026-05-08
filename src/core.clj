@@ -1701,9 +1701,9 @@
 
 ;; --- Regex ---
 
-(def re-pattern
-  "Returns pattern unchanged. Provided for compatibility."
-  identity)
+;; re-pattern is a C primitive that returns a MINO_REGEX from a
+;; string source (and a no-op on an existing regex). Note that
+;; clojure.string/split also accepts both regex and string patterns.
 
 ;; Capture the C primitives before the matcher-aware wrappers below
 ;; shadow them.

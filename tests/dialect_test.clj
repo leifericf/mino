@@ -111,9 +111,14 @@
     (is (nil? (empty nil)))))
 
 (deftest re-pattern-fn
-  (testing "re-pattern is identity for strings"
-    (is (= "\\d+" (re-pattern "\\d+")))
-    (is (= "abc" (re-find (re-pattern "abc") "xabcy")))))
+  (testing "re-pattern returns a regex value"
+    (is (regex? (re-pattern "\\d+")))
+    (is (= :regex (type (re-pattern "\\d+")))))
+  (testing "re-pattern result drives re-find"
+    (is (= "abc" (re-find (re-pattern "abc") "xabcy"))))
+  (testing "re-pattern is a no-op on an existing regex"
+    (let [r #"x"]
+      (is (= r (re-pattern r))))))
 
 ;; --- juxt returns vector ---
 

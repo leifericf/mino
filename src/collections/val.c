@@ -908,6 +908,12 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return a == b;
     case MINO_UUID:
         return memcmp(a->as.uuid.bytes, b->as.uuid.bytes, 16) == 0;
+    case MINO_REGEX:
+        /* Identity equality, matching Java's Pattern.equals. Two
+         * distinct #"x" #"x" literals are NOT `=` -- Clojure's
+         * convention since clojure.core/= delegates Pattern equality
+         * straight to Object.equals for this type. */
+        return a == b;
     }
     return 0;
 }

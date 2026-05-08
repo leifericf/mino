@@ -203,20 +203,32 @@
 ;; --- Regex literals ---
 
 (deftest regex-literal-reader
-  (testing "basic regex literal produces a string"
-    (is (= "hello" #"hello")))
+  (testing "basic regex literal produces a regex value"
+    (is (regex? #"hello"))
+    (is (= :regex (type #"hello"))))
 
   (testing "regex literal works with re-find"
     (is (= "123" (re-find #"[0-9]+" "abc123def"))))
 
   (testing "regex literal in a vector"
-    (is (= ["a" "b"] [#"a" #"b"])))
+    ;; The literals construct distinct regex values; identity equality
+    ;; on MINO_REGEX makes (= #\"a\" #\"a\") false, mirroring Clojure
+    ;; JVM's Pattern.equals.
+    (let [v [#"a" #"b"]]
+      (is (regex? (nth v 0)))
+      (is (regex? (nth v 1)))))
 
   (testing "regex literal in a map"
-    (is (= {:pat "foo"} {:pat #"foo"})))
+    (let [m {:pat #"foo"}]
+      (is (regex? (:pat m)))))
 
   (testing "regex literal with quantifiers"
-    (is (= "hell" (re-find #"hel+" "hello")))))
+    (is (= "hell" (re-find #"hel+" "hello"))))
+
+  (testing "two distinct #\"x\" literals are not = (identity equality)"
+    (is (not (= #"x" #"x")))
+    (let [r #"x"]
+      (is (= r r)))))
 
 ;; --- letfn ---
 

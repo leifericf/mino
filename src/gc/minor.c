@@ -306,6 +306,9 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 }
                 break;
             }
+            case MINO_REGEX:
+                gc_verify_check(S, h, v->as.regex.source);
+                break;
             default: break;
             }
             break;

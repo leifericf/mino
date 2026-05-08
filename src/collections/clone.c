@@ -215,6 +215,12 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         return NULL;
     case MINO_UUID:
         return mino_uuid_from_bytes(dst, v->as.uuid.bytes);
+    case MINO_REGEX: {
+        /* Cross-state cloning isn't meaningful for an identity-equal
+         * type. Return NULL so callers (which already handle NULL for
+         * VAR/TYPE/RECORD/FUTURE) treat regex the same way. */
+        return NULL;
+    }
     case MINO_BIGINT: {
         /* Round-trip through the base-10 string form so the destination
          * state gets its own imath allocation (no cross-state sharing). */
