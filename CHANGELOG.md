@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### `atom` Accepts `:meta` and `:validator` Options
+
+`(atom x)` now accepts the variadic Clojure form `(atom x & opts)`
+where opts is a flat keyword/value sequence including `:meta map-
+or-nil` and `:validator fn-or-nil`. `:meta` attaches metadata
+visible via `(meta the-atom)` (atoms now sit alongside symbols /
+collections / fns / vars in the set of types that carry metadata).
+`:validator` runs the supplied fn against the initial value and
+installs it on the atom so subsequent `swap!` / `reset!` calls go
+through it; an initial value the validator rejects raises an
+`Invalid reference state` error at construction time, matching
+Clojure's contract. Unknown option keys are tolerated silently.
+
 ### Syntax-Quote Auto-Qualification Inside Macro-Generated Closures
 
 Closures created during a macro body's evaluation -- the canonical

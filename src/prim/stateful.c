@@ -145,11 +145,67 @@ static mino_val_t *swap_build_args(mino_state_t *S, mino_val_t *cur,
 
 mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "atom requires one argument");
+    /* (atom x) or (atom x & {:keys [:meta :validator]}) -- options
+     * may be supplied as flat keyword args (:meta m :validator f) or
+     * via apply'd nil pairs. Unknown keys are tolerated to match
+     * Clojure (it accepts any keys, only :meta and :validator have
+     * effect). */
+    mino_val_t *initial;
+    mino_val_t *meta      = NULL;
+    mino_val_t *validator = NULL;
+    mino_val_t *atom;
+    mino_val_t *rest;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "atom requires one argument");
     }
-    return mino_atom(S, args->as.cons.car);
+    initial = args->as.cons.car;
+    rest    = args->as.cons.cdr;
+    while (mino_is_cons(rest)) {
+        mino_val_t *k;
+        mino_val_t *v;
+        k = rest->as.cons.car;
+        if (!mino_is_cons(rest->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "atom: option key requires a value");
+        }
+        v    = rest->as.cons.cdr->as.cons.car;
+        rest = rest->as.cons.cdr->as.cons.cdr;
+        if (k != NULL && k->type == MINO_KEYWORD) {
+            if (strcmp(k->as.s.data, "meta") == 0) {
+                if (v != NULL && v->type != MINO_NIL && v->type != MINO_MAP) {
+                    return prim_throw_classified(S, "eval/type", "MTY001",
+                        "atom: :meta value must be a map or nil");
+                }
+                meta = (v != NULL && v->type == MINO_MAP) ? v : NULL;
+            } else if (strcmp(k->as.s.data, "validator") == 0) {
+                if (v != NULL && v->type != MINO_NIL) {
+                    validator = v;
+                }
+            }
+            /* Unknown keys silently ignored; Clojure does the same. */
+        }
+    }
+    atom = mino_atom(S, initial);
+    if (atom == NULL) return NULL;
+    if (validator != NULL) {
+        /* Run the validator against the initial value before installing
+         * it so a bad initial value is rejected at construction time --
+         * mirrors Clojure's contract for atom + :validator. */
+        mino_val_t *vargs  = mino_cons(S, initial, mino_nil(S));
+        mino_val_t *result = mino_call(S, validator, vargs, env);
+        if (result == NULL) return NULL;
+        if (result->type == MINO_BOOL && result->as.b == 0) {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                "Invalid reference state");
+        }
+        gc_write_barrier(S, atom, atom->as.atom.validator, validator);
+        atom->as.atom.validator = validator;
+    }
+    if (meta != NULL) {
+        atom->meta = meta;
+    }
+    return atom;
 }
 
 mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)

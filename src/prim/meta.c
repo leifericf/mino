@@ -9,7 +9,7 @@ static int supports_meta(mino_type_t t)
 {
     return t == MINO_SYMBOL || t == MINO_CONS || t == MINO_VECTOR
         || t == MINO_MAP    || t == MINO_SET  || t == MINO_FN
-        || t == MINO_MACRO  || t == MINO_VAR;
+        || t == MINO_MACRO  || t == MINO_VAR  || t == MINO_ATOM;
 }
 
 /* Vars don't store an explicit meta map -- :ns and :name come from the
