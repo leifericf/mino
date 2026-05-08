@@ -1596,12 +1596,34 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return coll;
 }
 
+/* Coerce any numeric tier (int, float, bigint, ratio, bigdec) to long
+ * via JVM-style truncation. NaN -> 0, matching Java's (long) cast.
+ * Returns 0 with *ok=0 if v is non-numeric. */
+static long long subvec_to_long(const mino_val_t *v, int *ok)
+{
+    *ok = 1;
+    if (v == NULL) { *ok = 0; return 0; }
+    switch (v->type) {
+    case MINO_INT:    return v->as.i;
+    case MINO_FLOAT:  return v->as.f != v->as.f ? 0 : (long long)v->as.f;
+    case MINO_RATIO:  return (long long)mino_ratio_to_double(v);
+    case MINO_BIGDEC: return (long long)mino_bigdec_to_double(v);
+    case MINO_BIGINT: {
+        long long ll;
+        if (mino_as_ll(v, &ll)) return ll;
+        return (long long)mino_bigint_to_double(v);
+    }
+    default: *ok = 0; return 0;
+    }
+}
+
 mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
     long long   start, end;
     size_t      nargs = 0;
     mino_val_t *p;
+    int         ok;
     (void)env;
     for (p = args; mino_is_cons(p); p = p->as.cons.cdr) nargs++;
     if (nargs < 2 || nargs > 3) {
@@ -1611,17 +1633,15 @@ mino_val_t *prim_subvec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (v == NULL || v->type != MINO_VECTOR) {
         return prim_throw_classified(S, "eval/type", "MTY001", "subvec: first argument must be a vector");
     }
-    if (args->as.cons.cdr->as.cons.car == NULL
-        || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "subvec: start must be an integer");
+    start = subvec_to_long(args->as.cons.cdr->as.cons.car, &ok);
+    if (!ok) {
+        return prim_throw_classified(S, "eval/type", "MTY001", "subvec: start must be a number");
     }
-    start = args->as.cons.cdr->as.cons.car->as.i;
     if (nargs == 3) {
-        if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
-            || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
-            return prim_throw_classified(S, "eval/type", "MTY001", "subvec: end must be an integer");
+        end = subvec_to_long(args->as.cons.cdr->as.cons.cdr->as.cons.car, &ok);
+        if (!ok) {
+            return prim_throw_classified(S, "eval/type", "MTY001", "subvec: end must be a number");
         }
-        end = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
     } else {
         end = (long long)v->as.vec.len;
     }

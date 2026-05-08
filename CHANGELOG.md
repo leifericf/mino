@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.100.15
+
+### `subvec` coerces any number-tier index to long
+
+JVM Clojure's `subvec` happily accepts floats, ratios, bigdecs, and
+NaN as start/end -- it casts them to long via the same JVM `(long)`
+truncation that `(int x)` uses, so `(subvec v 2.72 3.14)` is
+equivalent to `(subvec v 2 3)` and `(subvec v ##NaN ##NaN)` is
+`[]`. mino's `prim_subvec` rejected anything other than `MINO_INT`
+with `"subvec: start must be an integer"`, breaking the external
+test's exhaustive borderline-index coverage. The start/end checks
+now route through a `subvec_to_long` helper covering MINO_INT,
+MINO_FLOAT (NaN -> 0), MINO_BIGINT, MINO_RATIO, and MINO_BIGDEC;
+non-numeric values still throw with a clearer "must be a number"
+message.
+
+External `subvec.cljc` 8/9 -> 34/34. External suite: 186 -> 187 OK.
+
 ## v0.100.14
 
 ### `(nth nil i)` returns nil instead of throwing
