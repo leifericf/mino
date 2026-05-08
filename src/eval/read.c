@@ -797,7 +797,6 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
 static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                                      size_t len, int *err)
 {
-    *err = 0;
     char        stack_buf[64];
     char       *buf            = stack_buf;
     char       *heap_buf       = NULL;
@@ -807,20 +806,18 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
     int         has_dot_or_exp = 0;
     int         looks_numeric  = 1;
     mino_val_t *out            = NULL;
-    int         buf_capacity   = (int)sizeof(stack_buf);
     size_t      i;
 
+    *err = 0;
     /* Bigint / bigdec literals can run hundreds of digits long; fall
      * back to a heap buffer so the parser doesn't punt on them. */
     if (len + 1 > sizeof(stack_buf)) {
         heap_buf = (char *)malloc(len + 1);
         if (heap_buf == NULL) return NULL;
         buf = heap_buf;
-        buf_capacity = (int)(len + 1);
     }
     memcpy(buf, start, len);
     buf[len] = '\0';
-    (void)buf_capacity;
 #define TRY_PARSE_RETURN(v) do { out = (v); goto try_parse_done; } while (0)
 
     /* Sign prefix. */

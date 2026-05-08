@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.99.1
+
+CI plumbing: surface the build log on the job summary page (visible
+without log-in) when a step fails, and print every available `gcc-N`
+version on Linux so a regression triggered by the runner-image
+default GCC change is easier to triage. Also tidy up the
+`try_parse_numeric` reader helper -- drop a dead-store
+`buf_capacity` variable and move the now-late `*err = 0;`
+assignment back to the top of the function body.
+
 ## v0.99.0
 
 External jank-lang/clojure-test-suite compatibility pass: 166/223

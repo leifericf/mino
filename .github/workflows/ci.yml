@@ -22,12 +22,43 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compiler version
-        run: $CC --version
+        run: |
+          $CC --version
+          # On ubuntu-latest the alt-versions are also available; print
+          # them so a future regression that's gcc-13-specific (or
+          # 12-specific) is easier to triage.
+          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+            for v in 12 13 14; do
+              if command -v gcc-$v >/dev/null; then
+                gcc-$v --version | head -1
+              fi
+            done
+          fi
 
       - name: Bootstrap mino
         # Generates the bundled-source headers and compiles ./mino in
         # one step. Anything beyond bootstrap belongs in `./mino task`.
-        run: make
+        # Tee stderr so a build failure leaves a captured log for the
+        # post-step summary below; the live step output stays
+        # unchanged for anyone with log access.
+        run: |
+          set -o pipefail
+          make 2>&1 | tee /tmp/build.log
+
+      - name: Surface build failure
+        # When the build step above fails the actor without log access
+        # cannot diagnose. Surface the captured tail on the job
+        # summary page (visible via the public Actions UI without
+        # signing in) so external contributors can see what broke.
+        if: failure()
+        run: |
+          {
+            echo "## Build failure (${{ matrix.os }})"
+            echo ''
+            echo '```'
+            tail -60 /tmp/build.log 2>/dev/null || echo '(no build log captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Test
         # Run the suite runner directly so stdout streams. `task test`
