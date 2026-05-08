@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### `parse-boolean` Throws on Non-string Input
+
+Per Clojure 1.11+'s contract, `parse-boolean` throws on non-string
+arguments (NullPointerException / ClassCastException on the JVM
+for `nil` / non-string types). Mino's previous implementation
+silently returned `nil` for any non-string input. The function now
+raises an `ex-info` for non-strings; matching strings return their
+boolean and non-matching strings still return `nil`.
+
+The internal `parse-boolean-cases` test was updated to assert the
+new contract (the cases that previously expected `nil` for `nil`
+and `42` now expect a throw).
+
 ### `keys` and `vals` Accept the Empty-List Singleton
 
 Both `keys` and `vals` had explicit "return nil" branches for empty

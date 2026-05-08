@@ -385,11 +385,16 @@
     (is (nil? (parse-boolean "True")))
     (is (nil? (parse-boolean "FALSE"))))
 
-  (testing "non-boolean inputs"
+  (testing "non-matching strings return nil"
     (is (nil? (parse-boolean "")))
-    (is (nil? (parse-boolean "yes")))
-    (is (nil? (parse-boolean nil)))
-    (is (nil? (parse-boolean 42)))))
+    (is (nil? (parse-boolean "yes"))))
+
+  (testing "non-string inputs throw"
+    ;; Per Clojure 1.11+, parse-boolean throws on non-string args
+    ;; (NullPointerException / ClassCastException on the JVM); mino
+    ;; mirrors that contract with an explicit ex-info.
+    (is (thrown? (parse-boolean nil)))
+    (is (thrown? (parse-boolean 42)))))
 
 (deftest parse-uuid-canonicalization
   (testing "canonical lowercase round-trip"

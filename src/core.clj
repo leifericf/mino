@@ -2793,10 +2793,14 @@
 ;; Parsing helpers (Clojure 1.11+).
 (defn parse-boolean
   "Parses 'true' or 'false' (case-sensitive) and returns the boolean.
-   Returns nil for any other input."
+   Returns nil for strings that don't match. Per Clojure's contract
+   raises an error on non-string input (analogous to JVM's
+   ClassCastException / NullPointerException)."
   [s]
-  (when (string? s)
-    (case s "true" true "false" false nil)))
+  (when-not (string? s)
+    (throw (ex-info "parse-boolean: argument must be a string"
+                    {:value s :type (type s)})))
+  (case s "true" true "false" false nil))
 
 (defn parse-uuid
   "Parses s as a UUID. Returns the canonical lowercase string (mino
