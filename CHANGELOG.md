@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Reader Accepts Arbitrarily Long Numeric Literals
+
+`try_parse_numeric` previously bailed out (treated the token as a
+symbol) whenever the literal exceeded a 63-byte stack buffer. That
+meant a bigint literal like `1797693134862315700000...0N` -- standard
+in Clojure for double-overflow tests -- read back as an unbound
+symbol. The parser now falls back to a heap-allocated buffer for long
+tokens so the bigint / bigdec / ratio / radix paths handle digit runs
+of any length.
+
 ### Eager Validation for `cycle`, `mapcat`, `reverse`
 
 `cycle`, `mapcat`, and `reverse` now raise a type error eagerly when

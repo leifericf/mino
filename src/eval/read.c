@@ -798,17 +798,30 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                                      size_t len, int *err)
 {
     *err = 0;
-    char        buf[64];
+    char        stack_buf[64];
+    char       *buf            = stack_buf;
+    char       *heap_buf       = NULL;
     char       *endp           = NULL;
     size_t      scan_start     = 0;
     size_t      num_len        = len;
     int         has_dot_or_exp = 0;
     int         looks_numeric  = 1;
+    mino_val_t *out            = NULL;
+    int         buf_capacity   = (int)sizeof(stack_buf);
     size_t      i;
 
-    if (len >= sizeof(buf)) return NULL;
+    /* Bigint / bigdec literals can run hundreds of digits long; fall
+     * back to a heap buffer so the parser doesn't punt on them. */
+    if (len + 1 > sizeof(stack_buf)) {
+        heap_buf = (char *)malloc(len + 1);
+        if (heap_buf == NULL) return NULL;
+        buf = heap_buf;
+        buf_capacity = (int)(len + 1);
+    }
     memcpy(buf, start, len);
     buf[len] = '\0';
+    (void)buf_capacity;
+#define TRY_PARSE_RETURN(v) do { out = (v); goto try_parse_done; } while (0)
 
     /* Sign prefix. */
     if (buf[0] == '+' || buf[0] == '-') scan_start = 1;
@@ -820,7 +833,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
         && (buf[scan_start + 1] == 'x' || buf[scan_start + 1] == 'X')) {
         long long n = strtoll(buf, &endp, 16);
         if (endp == buf + len)
-            return mino_int(S, n);
+            TRY_PARSE_RETURN(mino_int(S, n));
         looks_numeric = 0;
     }
 
@@ -849,7 +862,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                         {
                             long long n = strtoll(radix_buf, &endp, (int)base);
                             if (endp == radix_buf + radix_len)
-                                return mino_int(S, sign * n);
+                                TRY_PARSE_RETURN(mino_int(S, sign * n));
                         }
                     }
                 }
@@ -890,7 +903,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                                     "invalid ratio literal",
                                     S->reader_line, S->reader_col);
                     *err = 1;
-                    return NULL;
+                    goto try_parse_done;
                 }
                 den_bi = mino_bigint_from_string_n(
                     S, slash + 1, den_str_len);
@@ -899,9 +912,9 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                                     "invalid ratio literal",
                                     S->reader_line, S->reader_col);
                     *err = 1;
-                    return NULL;
+                    goto try_parse_done;
                 }
-                return mino_ratio_make(S, num_bi, den_bi);
+                TRY_PARSE_RETURN(mino_ratio_make(S, num_bi, den_bi));
             }
         }
     }
@@ -926,7 +939,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
             buf[num_len] = '\0';
             bi = mino_bigint_from_string_n(S, buf, num_len);
             buf[num_len] = 'N';
-            if (bi != NULL) return bi;
+            if (bi != NULL) TRY_PARSE_RETURN(bi);
         }
         num_len = len;
     }
@@ -939,7 +952,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
         bd = mino_bigdec_from_string(S, buf);
         buf[num_len] = 'M';
         num_len = len;
-        if (bd != NULL) return bd;
+        if (bd != NULL) TRY_PARSE_RETURN(bd);
     }
 
     /* Standard decimal. */
@@ -960,14 +973,17 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
         if (has_dot_or_exp) {
             double d = strtod(buf, &endp);
             if (endp == buf + len)
-                return mino_float(S, d);
+                TRY_PARSE_RETURN(mino_float(S, d));
         } else {
             long long n = strtoll(buf, &endp, 10);
             if (endp == buf + len)
-                return mino_int(S, n);
+                TRY_PARSE_RETURN(mino_int(S, n));
         }
     }
-    return NULL;
+try_parse_done:
+    if (heap_buf != NULL) free(heap_buf);
+    return out;
+#undef TRY_PARSE_RETURN
 }
 
 static mino_val_t *read_atom(mino_state_t *S, const char **p)
