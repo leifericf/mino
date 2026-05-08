@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## v0.99.0
+
+External jank-lang/clojure-test-suite compatibility pass: 166/223
+files green (74%) at 4472/4542 = 98.5% assertion pass rate. Each
+entry below is a Clojure-parity fix or an intentional divergence
+made explicit.
 
 ### `(get string i)` Returns a `\char`; Other Strict-Predicate Tightenings
 
@@ -283,17 +288,6 @@ matches Clojure's contract: it returns the realized state for
 `MINO_LAZY` (lazy seqs and delays share that representation) and
 `MINO_FUTURE`, and throws `realized? expects a lazy seq, delay,
 promise, or future` for anything else.
-
-### `mod` / `rem` / `quot` Accept the Full Numeric Tower
-
-`mod`, `rem`, and `quot` previously rejected anything but `MINO_INT`
-and `MINO_FLOAT` ("X expects numbers" error). They now route through
-`tower_to_double`, so `BIGINT` / `RATIO` / `BIGDEC` arguments work.
-The result-type heuristic also expands: when both inputs are
-integer-typed (long or bigint), the result is `MINO_INT` rather
-than always `MINO_FLOAT` for mixed-int cases. `BIGDEC` operands
-still coerce through double and return `MINO_FLOAT`; full
-type-preserving bignum arithmetic for these is a separate fix.
 
 ### Keywords as Functions Look Up in Sets
 
