@@ -108,6 +108,9 @@ static int ineg_overflow(long long a, long long *out)
 
 typedef enum { OP_ADD, OP_SUB, OP_MUL, OP_DIV } tower_op_t;
 
+/* Forward decl: defined later alongside prim_compare. */
+static int is_compare_number(const mino_val_t *v);
+
 double tower_to_double(const mino_val_t *v)
 {
     if (v == NULL) return 0.0;
@@ -910,9 +913,14 @@ mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "mod requires two arguments");
     }
-    if (!as_double(args->as.cons.car, &a) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "mod expects numbers");
+    {
+        mino_val_t *xv = args->as.cons.car;
+        mino_val_t *yv = args->as.cons.cdr->as.cons.car;
+        if (!is_compare_number(xv) || !is_compare_number(yv)) {
+            return prim_throw_classified(S, "eval/type", "MTY001", "mod expects numbers");
+        }
+        a = tower_to_double(xv);
+        b = tower_to_double(yv);
     }
     if (isnan(a) || isinf(a))
         return prim_throw_classified(S, "eval/type", "MTY001", "mod: NaN or Infinite dividend");
@@ -925,10 +933,13 @@ mino_val_t *prim_mod(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     r = fmod(a, b);
     /* Floored modulo: result has same sign as divisor. */
     if (r != 0.0 && ((r < 0.0) != (b < 0.0))) r += b;
-    /* Return int if both args are ints. */
-    if (args->as.cons.car->type == MINO_INT &&
-        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int(S, (long long)r);
+    /* Return int if both args are integer-typed (long or bigint). */
+    {
+        mino_type_t ta = args->as.cons.car->type;
+        mino_type_t tb = args->as.cons.cdr->as.cons.car->type;
+        int int_a = (ta == MINO_INT || ta == MINO_BIGINT);
+        int int_b = (tb == MINO_INT || tb == MINO_BIGINT);
+        if (int_a && int_b) return mino_int(S, (long long)r);
     }
     return mino_float(S, r);
 }
@@ -941,9 +952,14 @@ mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "rem requires two arguments");
     }
-    if (!as_double(args->as.cons.car, &a) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "rem expects numbers");
+    {
+        mino_val_t *xv = args->as.cons.car;
+        mino_val_t *yv = args->as.cons.cdr->as.cons.car;
+        if (!is_compare_number(xv) || !is_compare_number(yv)) {
+            return prim_throw_classified(S, "eval/type", "MTY001", "rem expects numbers");
+        }
+        a = tower_to_double(xv);
+        b = tower_to_double(yv);
     }
     if (isnan(a) || isinf(a))
         return prim_throw_classified(S, "eval/type", "MTY001", "rem: NaN or Infinite dividend");
@@ -954,9 +970,12 @@ mino_val_t *prim_rem(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (isinf(b))
         return mino_float(S, NAN);
     r = fmod(a, b);
-    if (args->as.cons.car->type == MINO_INT &&
-        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int(S, (long long)r);
+    {
+        mino_type_t ta = args->as.cons.car->type;
+        mino_type_t tb = args->as.cons.cdr->as.cons.car->type;
+        int int_a = (ta == MINO_INT || ta == MINO_BIGINT);
+        int int_b = (tb == MINO_INT || tb == MINO_BIGINT);
+        if (int_a && int_b) return mino_int(S, (long long)r);
     }
     return mino_float(S, r);
 }
@@ -969,9 +988,14 @@ mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "quot requires two arguments");
     }
-    if (!as_double(args->as.cons.car, &a) ||
-        !as_double(args->as.cons.cdr->as.cons.car, &b)) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "quot expects numbers");
+    {
+        mino_val_t *xv = args->as.cons.car;
+        mino_val_t *yv = args->as.cons.cdr->as.cons.car;
+        if (!is_compare_number(xv) || !is_compare_number(yv)) {
+            return prim_throw_classified(S, "eval/type", "MTY001", "quot expects numbers");
+        }
+        a = tower_to_double(xv);
+        b = tower_to_double(yv);
     }
     if (isnan(a) || isinf(a))
         return prim_throw_classified(S, "eval/type", "MTY001", "quot: NaN or Infinite dividend");
@@ -983,9 +1007,12 @@ mino_val_t *prim_quot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_float(S, 0.0);
     q = a / b;
     q = q >= 0 ? floor(q) : ceil(q);
-    if (args->as.cons.car->type == MINO_INT &&
-        args->as.cons.cdr->as.cons.car->type == MINO_INT) {
-        return mino_int(S, (long long)q);
+    {
+        mino_type_t ta = args->as.cons.car->type;
+        mino_type_t tb = args->as.cons.cdr->as.cons.car->type;
+        int int_a = (ta == MINO_INT || ta == MINO_BIGINT);
+        int int_b = (tb == MINO_INT || tb == MINO_BIGINT);
+        if (int_a && int_b) return mino_int(S, (long long)q);
     }
     return mino_float(S, q);
 }

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### `mod` / `rem` / `quot` Accept the Full Numeric Tower
+
+`mod`, `rem`, and `quot` previously rejected anything but `MINO_INT`
+and `MINO_FLOAT` ("X expects numbers" error). They now route through
+`tower_to_double`, so `BIGINT` / `RATIO` / `BIGDEC` arguments work.
+The result-type heuristic also expands: when both inputs are
+integer-typed (long or bigint), the result is `MINO_INT` rather
+than always `MINO_FLOAT` for mixed-int cases. `BIGDEC` operands
+still coerce through double and return `MINO_FLOAT`; full
+type-preserving bignum arithmetic for these is a separate fix.
+
 ### Keywords as Functions Look Up in Sets
 
 `(:k #{:k :other})` now returns `:k` (and similarly for sorted
