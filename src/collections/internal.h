@@ -172,6 +172,8 @@ mino_rb_node_t *rb_dissoc(mino_state_t *S, const mino_rb_node_t *n,
                            mino_val_t *comparator);                  /* GC-owned */
 void rb_to_list(mino_state_t *S, const mino_rb_node_t *n,
                 mino_val_t **head, mino_val_t **tail);
+int rb_trees_content_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
+                            int compare_vals);
 int rb_trees_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
                    int compare_vals);
 mino_val_t *mino_sorted_map_by(mino_state_t *S, mino_val_t *comparator,

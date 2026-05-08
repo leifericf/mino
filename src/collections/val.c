@@ -851,10 +851,21 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return eq_seq_like(a, b);
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET:
-        /* Structural comparison: same length + identical tree structure. */
+        /* Same length is necessary either way. When the comparators are
+         * identical pointers (or both default) the trees share an
+         * ordering and the cheap structural walk is correct. Otherwise
+         * the trees are arranged differently for the same content
+         * (e.g. `<` vs `>`); fall back to an O(n*log n) content walk
+         * that pairs entries by `mino_eq` on the key, ignoring tree
+         * shape. */
         if (a->as.sorted.len != b->as.sorted.len) return 0;
-        return rb_trees_equal(a->as.sorted.root, b->as.sorted.root,
-                              a->type == MINO_SORTED_MAP);
+        if (a->as.sorted.comparator == b->as.sorted.comparator) {
+            return rb_trees_equal(a->as.sorted.root, b->as.sorted.root,
+                                  a->type == MINO_SORTED_MAP);
+        }
+        return rb_trees_content_equal(a->as.sorted.root,
+                                      b->as.sorted.root,
+                                      a->type == MINO_SORTED_MAP);
     case MINO_RECUR:
         return a == b;
     case MINO_TAIL_CALL:

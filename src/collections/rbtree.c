@@ -52,7 +52,16 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
     return a->type < b->type ? -1 : a->type > b->type ? 1 : 0;
 }
 
-/* Compare with optional custom comparator function. */
+/* Compare with optional custom comparator function.
+ *
+ * Numeric results map directly to -1 / 0 / 1. Boolean / truthy results
+ * are treated as a predicate comparator (e.g. plain `<`): if `(cmp a
+ * b)` is truthy then `a < b` (return -1); otherwise call `(cmp b a)`,
+ * and if truthy then `a > b` (return 1), else `a == b` (return 0).
+ * Without the second probe a predicate comparator can never report
+ * equality, which corrupts rb-tree lookup -- the value side of every
+ * key reads back as `nil` because `rb_get` never lands on the matching
+ * node. */
 int rb_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b,
                mino_val_t *comparator)
 {
@@ -61,12 +70,19 @@ int rb_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b,
         mino_val_t *args = mino_cons(S, (mino_val_t *)a,
                                mino_cons(S, (mino_val_t *)b, mino_nil(S)));
         mino_val_t *result = mino_call(S, comparator, args, NULL);
+        mino_val_t *args2;
+        mino_val_t *result2;
         if (result == NULL) return 0;
         if (result->type == MINO_INT)
             return result->as.i < 0 ? -1 : result->as.i > 0 ? 1 : 0;
         if (result->type == MINO_FLOAT)
             return result->as.f < 0 ? -1 : result->as.f > 0 ? 1 : 0;
-        return mino_is_truthy(result) ? -1 : 1;
+        if (mino_is_truthy(result)) return -1;
+        args2 = mino_cons(S, (mino_val_t *)b,
+                   mino_cons(S, (mino_val_t *)a, mino_nil(S)));
+        result2 = mino_call(S, comparator, args2, NULL);
+        if (result2 == NULL) return 0;
+        return mino_is_truthy(result2) ? 1 : 0;
     }
 }
 
@@ -325,6 +341,40 @@ int rb_trees_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
     if (compare_vals && !mino_eq(a->val, b->val)) return 0;
     return rb_trees_equal(a->left, b->left, compare_vals)
         && rb_trees_equal(a->right, b->right, compare_vals);
+}
+
+/* Locate a node in `n` whose key is `mino_eq` to `key`. Walks the
+ * entire subtree -- doesn't rely on a comparator -- so it works for
+ * sorted collections built with different comparators. */
+static const mino_rb_node_t *rb_find_eq(const mino_rb_node_t *n,
+                                        const mino_val_t *key)
+{
+    if (n == NULL) return NULL;
+    if (mino_eq(n->key, key)) return n;
+    {
+        const mino_rb_node_t *l = rb_find_eq(n->left, key);
+        if (l != NULL) return l;
+        return rb_find_eq(n->right, key);
+    }
+}
+
+/* O(n*log n) content-equality check that ignores the trees' comparators.
+ * For each node in `a`, look up the matching key by `mino_eq` in `b`
+ * and check the value. Used when two sorted collections have differing
+ * comparators (e.g. `<` vs `>`) but identical (k, v) content; the
+ * structural rb_trees_equal can't see that as equal because the trees
+ * are arranged in opposite orders. */
+int rb_trees_content_equal(const mino_rb_node_t *a, const mino_rb_node_t *b,
+                            int compare_vals)
+{
+    if (a == NULL) return 1;
+    {
+        const mino_rb_node_t *match = rb_find_eq(b, a->key);
+        if (match == NULL) return 0;
+        if (compare_vals && !mino_eq(a->val, match->val)) return 0;
+    }
+    return rb_trees_content_equal(a->left, b, compare_vals)
+        && rb_trees_content_equal(a->right, b, compare_vals);
 }
 
 /* --- Constructors -------------------------------------------------------- */

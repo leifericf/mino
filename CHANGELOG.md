@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Sorted Collections: Predicate Comparator + Cross-comparator Equality
+
+Two related fixes for `sorted-map` / `sorted-set` and the `-by`
+variants:
+
+  - `rb_compare` now follows Clojure's "predicate comparator" contract:
+    when the comparator returns a non-numeric truthy value it means
+    `a < b`, but if it returns falsy the function probes the reverse
+    direction `(cmp b a)` to distinguish `a > b` from `a == b`. The
+    previous fall-through always treated falsy as `>`, so a comparator
+    like plain `<` could never report equality. That broke rb-tree
+    lookup -- every key landed slightly off-node and `rb_get` returned
+    `nil` -- so `(get (sorted-map-by < 1 :a) 1)` came back as `nil`
+    even though `(seq ...)` clearly contained `(1 ...)`. The seq path
+    happened to mask the bug differently: it iterated keys via
+    `rb_to_list` then re-`rb_get`-ed each one, so the keys were right
+    but the values were uniformly `nil`.
+  - Equality on two sorted collections with different comparators
+    (e.g. `(sorted-map-by < 1 :a)` vs `(sorted-map-by > 1 :a)`) now
+    returns `true` for matching content. The trees are arranged in
+    opposite orders, so the structural `rb_trees_equal` walk could
+    never see them as equal; the new `rb_trees_content_equal`
+    pairs entries by `mino_eq` on the key (O(n*log n), tree-shape
+    independent) when the two collections share neither a comparator
+    nor the default ordering.
+
 ### `str` Drops the `N` / `M` Suffix on BigInts and BigDecs
 
 `(str 1N)` now returns `"1"` (was `"1N"`) and `(str 1.0M)` returns
