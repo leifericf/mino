@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.100.10
+
+`let` now follows Clojure's sequential-binding semantics: an init
+expression sees only the *previous* bindings in the same `let`, not
+its own binding. Each binding lands in a freshly-created child env,
+so closures captured during init expressions are immune to a later
+shadow of the same name.
+
+The previous (buggy) behavior used a single mutable env that all
+binding inits shared. A nested `(let [f X] (let [f (fn [] (g f))] ...))`
+shape would have the inner closure see the inner-let's `f` (after
+the rebind) instead of the outer `f` it should have captured. The
+external `bound_fn.cljc` test triggered this through nested
+`(let [f (bound-fn [] ...)])` shadowing and segfaulted via
+unbounded recursion.
+
+The change has a knock-on effect: code that relied on mutable-env
+semantics for self-recursive `let` -- `(let [go (fn [...] (go ...))])`
+-- no longer works, because `go` is unbound when the fn body is
+created. Any such pattern must use a named fn:
+`(let [go (fn go [...] (go ...))])`. The named-fn binding is
+established before its body is captured.
+
+Audit and rename the recursive let-fn patterns in mino's bundled
+code: `run!`, `tree-seq`, `interleave`, `shuffle`, `take-last`,
+`trampoline`, the `condp` and `case` macros' `build` helper, and
+`dotimes`/`while`/`doseq`'s emitted recursion shapes. Every callsite
+that previously self-referenced through the mutable-env trick now
+uses `(fn name [...] ...)`.
+
+External `bound_fn.cljc` and `bound_fn_star.cljc` no longer segfault
+(they go from process crashes to 7/8 each, with the one remaining
+failure being a separate dynamic-binding-across-futures issue).
+External suite: 182 OK with 0 crashes (was 0 crashes already after
+prior fixes; this confirms the segv class is closed).
+
 ## v0.100.9
 
 `(add-load-path! path)` adds a directory to the runtime's

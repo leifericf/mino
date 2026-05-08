@@ -643,7 +643,7 @@
   "Returns a lazy sequence of the first item in each collection, then
    the second, and so on."
   (let [interleave2
-        (fn [c1 c2]
+        (fn interleave2 [c1 c2]
           (lazy-seq
             (let [s1 (seq c1) s2 (seq c2)]
               (when (and s1 s2)
@@ -953,7 +953,7 @@
 (defn run!
   "Applies f to each item in coll for side effects. Returns nil."
   [f coll]
-  (let [go (fn [s] (when (seq s) (f (first s)) (go (rest s))))]
+  (let [go (fn go [s] (when (seq s) (f (first s)) (go (rest s))))]
     (go coll)
     nil))
 
@@ -1068,7 +1068,7 @@
 
 (defn take-last "Returns a seq of the last n items in coll." [n coll]
   (let [lead (drop n coll)
-        step (fn [s lead]
+        step (fn step [s lead]
                (if (seq lead)
                  (step (next s) (next lead))
                  s))]
@@ -1456,7 +1456,7 @@
    function."
   [f & args]
   (let [result (apply f args)
-        bounce (fn [r] (if (fn? r) (bounce (r)) r))]
+        bounce (fn bounce [r] (if (fn? r) (bounce (r)) r))]
     (bounce result)))
 
 ;; --- Threading macros ---
@@ -1546,8 +1546,12 @@
         n   (first (rest bindings))
         gn  (gensym)
         go  (gensym)]
+    ;; Named fn so the body can self-reference; mino's let is
+    ;; sequential (init exprs do not see their own binding) per
+    ;; Clojure semantics, so a plain `(let [go (fn [...] (go))])`
+    ;; would leave (go) unbound at fn-body evaluation.
     `(let [~gn ~n
-           ~go (fn [~sym]
+           ~go (fn ~go [~sym]
                  (when (< ~sym ~gn)
                    ~@body
                    (~go (inc ~sym))))]
@@ -1557,7 +1561,7 @@
   "Repeatedly evaluates body while test is truthy."
   [test & body]
   (let [go (gensym)]
-    `(let [~go (fn [] (when ~test ~@body (~go)))]
+    `(let [~go (fn ~go [] (when ~test ~@body (~go)))]
        (~go))))
 
 (defmacro doseq
@@ -1604,7 +1608,12 @@
                       rest-bindings (into [] (drop 2 bindings))
                       gs            (gensym)
                       go            (gensym)]
-                  `(let [~go (fn [~gs]
+                  ;; Use a named fn so the body can self-reference;
+                  ;; mino's `let` follows Clojure's sequential
+                  ;; semantics where init exprs do not see their own
+                  ;; binding, so a plain `(let [go (fn [...] (go))])`
+                  ;; would leave (go) unbound at fn-body evaluation.
+                  `(let [~go (fn ~go [~gs]
                                (when (and ~gs (not @~stop-sym))
                                  (let [~sym (first ~gs)]
                                    ~(emit rest-bindings)
@@ -1622,7 +1631,7 @@
   (when-not (coll? coll) (throw "shuffle requires a collection"))
   (let [v   (vec coll)
         n   (count v)
-        step (fn [v i]
+        step (fn step [v i]
                (if (= i 0)
                  v
                  (let [j (rand-int (inc i))]
@@ -1660,7 +1669,7 @@
 (defn tree-seq
   "Returns a lazy depth-first sequence of nodes in a tree."
   [branch? children root]
-  (let [walk (fn [node]
+  (let [walk (fn walk [node]
                (lazy-seq
                  (cons node
                    (when (branch? node)
@@ -1810,7 +1819,7 @@
   [pred expr & clauses]
   (let [gexpr (gensym)]
     `(let [~gexpr ~expr]
-       ~(let [build (fn [cls]
+       ~(let [build (fn build [cls]
                       (if (< (count cls) 2)
                         (if (= (count cls) 1)
                           (first cls)
@@ -1842,7 +1851,7 @@
                     ;; Multi-match list: (a b c) => (or (= g 'a) (= g 'b) ...)
                     (apply list 'or (map (fn [v] (list '= g (quote-c v))) c))
                     (list '= g (quote-c c))))
-        build   (fn [cls]
+        build   (fn build [cls]
                   (if (< (count cls) 2)
                     (if (= (count cls) 1)
                       (first cls)

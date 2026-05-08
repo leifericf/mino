@@ -347,6 +347,31 @@ static int eval_and_bind(mino_state_t *S, mino_val_t *pat,
     return ok;
 }
 
+/* eval_and_bind_layered -- evaluate val_form in `*local` and bind the
+ * result against pat in a NEW child env that becomes the new `*local`.
+ * This is the semantics that makes `let` closures Clojure-correct: a
+ * fn whose body references a name like `f` captures the env that
+ * existed before the binding `f -> X` was added. A later `let
+ * [f Y]` shadowing must NOT mutate the captured env. By layering one
+ * env per binding we get that for free: each step creates a new env,
+ * leaving the prior layer (with all earlier bindings) untouched. */
+static int eval_and_bind_layered(mino_state_t *S, mino_val_t *pat,
+                                 mino_val_t *val_form, mino_env_t **local,
+                                 const char *ctx)
+{
+    mino_val_t *val = eval_value(S, val_form, *local);
+    mino_env_t *next;
+    int ok;
+    if (val == NULL) return 0;
+    gc_pin(val);
+    next = env_child(S, *local);
+    ok = bind_form(S, next, pat, val, ctx);
+    gc_unpin(1);
+    if (!ok) return 0;
+    *local = next;
+    return 1;
+}
+
 mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
                      mino_val_t *args, mino_env_t *env, int tail)
 {
@@ -370,8 +395,9 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
             return NULL;
         }
         for (vi = 0; vi < vlen; vi += 2) {
-            if (!eval_and_bind(S, vec_nth(bindings, vi),
-                               vec_nth(bindings, vi + 1), local, "let")) {
+            if (!eval_and_bind_layered(S, vec_nth(bindings, vi),
+                                       vec_nth(bindings, vi + 1),
+                                       &local, "let")) {
                 return NULL;
             }
         }
@@ -385,8 +411,8 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
                     "let binding missing value");
                 return NULL;
             }
-            if (!eval_and_bind(S, name_form, rest_pair->as.cons.car,
-                               local, "let")) {
+            if (!eval_and_bind_layered(S, name_form, rest_pair->as.cons.car,
+                                       &local, "let")) {
                 return NULL;
             }
             bindings = rest_pair->as.cons.cdr;

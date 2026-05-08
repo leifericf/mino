@@ -23,6 +23,10 @@ src/lib_mino_*.h
 *.gcov
 coverage/
 
+# Core dumps
+core
+core.*
+
 # OS noise
 .DS_Store
 Thumbs.db
