@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased — Clean Compile Under -Werror
+## Unreleased
+
+### External clojure-test-suite Driver
+
+A new pure-mino driver, `tests/clojure_test_suite.clj`, runs the
+[jank-lang/clojure-test-suite][cts] against mino. The driver expects
+the suite cloned as a sibling directory (`../clojure-test-suite`),
+forks one `./mino` sub-process per `.cljc` file so a single SIGSEGV
+or hang doesn't lose the rest of the run, applies a 30 s per-file
+timeout, parses each summary line, and prints an aggregate report
+plus a categorized breakdown (load errors, crashes, timeouts,
+assertion failures). The same script self-dispatches into a one-file
+harness when given a path argument, used by the driver's sub-fork.
+
+Two new shims under `lib/clojure/core_test/` make the suite
+loadable: `portability.clj` provides `when-var-exists` (the suite's
+per-test "skip if var doesn't exist" macro), `big-int?`, and a no-op
+`sleep`; `number_range.clj` already existed for numeric constants.
+Without those shims every test file fails to load because the
+canonical jank `portability.cljc` is JVM/CLJS-bound (`Throwable`,
+`Thread/sleep`, `cljs.test`).
+
+[cts]: https://github.com/jank-lang/clojure-test-suite
+
+### Clean Compile Under -Werror
 
 The default `make` build now compiles warning-free with `-Wall
 -Wpedantic -Wextra` and treats remaining warnings as errors via a
