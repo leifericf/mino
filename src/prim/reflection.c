@@ -199,7 +199,33 @@ mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (v->type == MINO_KEYWORD) {
         return mino_symbol_n(S, v->as.s.data, v->as.s.len);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "symbol: argument must be a string, symbol, or keyword");
+    if (v->type == MINO_VAR) {
+        /* (symbol #'foo) -> 'ns/foo. Vars are Named in Clojure, so a
+         * fully-qualified symbol falls out of the var's stored ns +
+         * name. Vars without an owning ns (rare; root user defs in
+         * a state with no current_ns) yield just the name. */
+        const char *ns_name = v->as.var.ns;
+        const char *sym     = v->as.var.sym;
+        size_t      sym_len = (sym != NULL) ? strlen(sym) : 0;
+        if (sym == NULL) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "symbol: var has no name");
+        }
+        if (ns_name != NULL && ns_name[0] != '\0') {
+            char        buf[512];
+            size_t      ns_len = strlen(ns_name);
+            if (ns_len + 1 + sym_len >= sizeof(buf)) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "symbol: var name too long");
+            }
+            memcpy(buf, ns_name, ns_len);
+            buf[ns_len] = '/';
+            memcpy(buf + ns_len + 1, sym, sym_len);
+            return mino_symbol_n(S, buf, ns_len + 1 + sym_len);
+        }
+        return mino_symbol_n(S, sym, sym_len);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001", "symbol: argument must be a string, symbol, keyword, or var");
 }
 
 mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)

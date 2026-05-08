@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `(symbol var)` Returns the Var's Qualified Name
+
+`symbol`'s 1-arg form now accepts a Var and returns its
+fully-qualified name as a symbol (e.g. `(symbol #'+)` →
+`'clojure.core/+`). Vars are Named in Clojure, so this matches
+the contract; previously the call raised a type error. Vars
+with no owning namespace yield the bare name.
+
 ### `merge` Accepts MapEntries and Non-map Args via `conj` Semantics
 
 Rewrote `merge` to match Clojure's `(reduce conj (or acc {}) ms)`
