@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### `compare` Cross-numeric, Chars, and Vectors
+
+`compare` now matches Clojure's contract more precisely:
+
+- nil compares as less than every non-nil value (and equal to
+  itself), making `(compare 1 nil)` and `(compare 'a nil)` both
+  positive instead of throwing.
+- Cross-tower numeric comparisons use `tower_to_double` so
+  long/float/bigint/ratio/bigdec all reduce to a single double
+  for ordering. `(compare 0 -100N)` now returns 1 instead of an
+  "incomparable" error.
+- `MINO_CHAR` values compare by codepoint.
+- `MINO_VECTOR` pairs compare lexicographically (element-wise,
+  recursing through `compare`; shorter vector wins ties).
+
+Genuinely incompatible cross-type pairs (e.g. `(compare 1 [])`)
+still throw, matching Clojure's `compareTo` ClassCastException
+behaviour.
+
 ### `(symbol var)` Returns the Var's Qualified Name
 
 `symbol`'s 1-arg form now accepts a Var and returns its

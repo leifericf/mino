@@ -1309,21 +1309,15 @@ mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env
 /* Comparison                                                                */
 /* ------------------------------------------------------------------------- */
 
-/* Total-order tier for cross-type compare. Canon order:
- *   nil < false < true < numbers < strings < symbols < keywords
- * Returns -1 for any type outside this set so the caller can fall
- * through to the "incomparable" error path. */
-static int compare_type_tier(const mino_val_t *v)
+/* Numeric "family" for cross-type compare. Numbers (long/float/bigint/
+ * ratio/bigdec) compare uniformly via their numeric value. Returns 1
+ * for numbers, 0 otherwise. */
+static int is_compare_number(const mino_val_t *v)
 {
-    if (v == NULL || v->type == MINO_NIL) return 0;
-    if (v->type == MINO_BOOL)             return v->as.b ? 2 : 1;
-    if (v->type == MINO_INT || v->type == MINO_FLOAT
+    if (v == NULL) return 0;
+    return v->type == MINO_INT || v->type == MINO_FLOAT
         || v->type == MINO_BIGINT || v->type == MINO_RATIO
-        || v->type == MINO_BIGDEC) return 3;
-    if (v->type == MINO_STRING)  return 4;
-    if (v->type == MINO_SYMBOL)  return 5;
-    if (v->type == MINO_KEYWORD) return 6;
-    return -1;
+        || v->type == MINO_BIGDEC;
 }
 
 /* (compare a b) -- general comparison returning -1, 0, or 1.
@@ -1333,8 +1327,15 @@ static int compare_type_tier(const mino_val_t *v)
  * Clojure's `compare`. */
 mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    /* Mirrors Clojure: nil is less than anything (and equal to itself);
+     * otherwise compareTo on the first arg, which throws on
+     * incompatible types. We model "compareTo" by allowing same-family
+     * comparisons for numbers (across long/float/bigint/ratio/bigdec),
+     * chars, strings, symbols, keywords, bools, and vectors
+     * (lexicographic, recursing through prim_compare). All other
+     * cross-type pairs raise an "incomparable" error. */
     mino_val_t *a, *b;
-    int ta, tb;
+    int a_nil, b_nil;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr) ||
         mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1342,29 +1343,53 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     a = args->as.cons.car;
     b = args->as.cons.cdr->as.cons.car;
-    ta = compare_type_tier(a);
-    tb = compare_type_tier(b);
-    if (ta >= 0 && tb >= 0 && ta != tb) {
-        return mino_int(S, ta < tb ? -1 : 1);
-    }
-    /* Same tier: dispatch by content. */
-    if ((a == NULL || a->type == MINO_NIL) &&
-        (b == NULL || b->type == MINO_NIL)) return mino_int(S, 0);
-    if (a != NULL && b != NULL && a->type == MINO_BOOL && b->type == MINO_BOOL) {
+    a_nil = (a == NULL || a->type == MINO_NIL);
+    b_nil = (b == NULL || b->type == MINO_NIL);
+    if (a_nil && b_nil) return mino_int(S, 0);
+    if (a_nil)          return mino_int(S, -1);
+    if (b_nil)          return mino_int(S,  1);
+    if (a->type == MINO_BOOL && b->type == MINO_BOOL) {
         return mino_int(S, a->as.b < b->as.b ? -1 :
                            a->as.b > b->as.b ? 1 : 0);
     }
-    {
-        double da, db;
-        if (as_double(a, &da) && as_double(b, &db)) {
-            return mino_int(S, da < db ? -1 : da > db ? 1 : 0);
-        }
+    if (is_compare_number(a) && is_compare_number(b)) {
+        /* Use the full numeric tower coercion so bigints, ratios, and
+         * bigdecs all reduce to a comparable double. as_double only
+         * knows about long/double, which would mis-classify e.g.
+         * (compare 0 -100N) as cross-type. */
+        double da = tower_to_double(a);
+        double db = tower_to_double(b);
+        return mino_int(S, da < db ? -1 : da > db ? 1 : 0);
     }
-    if (a != NULL && b != NULL && a->type == b->type
+    if (a->type == b->type
         && (a->type == MINO_STRING || a->type == MINO_KEYWORD
             || a->type == MINO_SYMBOL)) {
         int cmp = strcmp(a->as.s.data, b->as.s.data);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
+    }
+    if (a->type == MINO_CHAR && b->type == MINO_CHAR) {
+        int cmp = a->as.ch - b->as.ch;
+        return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
+    }
+    if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
+        /* Element-wise lexicographic compare; if all aligned elements
+         * are equal, shorter is less. Recurses through prim_compare so
+         * nested vectors / mixed types are handled uniformly. */
+        size_t la = a->as.vec.len;
+        size_t lb = b->as.vec.len;
+        size_t n  = la < lb ? la : lb;
+        size_t i;
+        for (i = 0; i < n; i++) {
+            mino_val_t *ea = vec_nth(a, i);
+            mino_val_t *eb = vec_nth(b, i);
+            mino_val_t *recur_args =
+                mino_cons(S, ea, mino_cons(S, eb, mino_nil(S)));
+            mino_val_t *r = prim_compare(S, recur_args, env);
+            if (r == NULL) return NULL;
+            if (r->type == MINO_INT && r->as.i != 0) return r;
+        }
+        if (la == lb) return mino_int(S, 0);
+        return mino_int(S, la < lb ? -1 : 1);
     }
     return prim_throw_classified(S, "eval/type", "MTY001", "compare: cannot compare values of different types");
 }
