@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### `(dissoc m)` Returns the Map Unchanged
+
+Per Clojure's contract, `dissoc` is variadic with a 1-arg form
+that returns the map untouched. Mino previously required at least
+one key and threw on `(dissoc m)`; now the no-key call short-
+circuits and returns `m` directly.
+
 ### `atom` Accepts `:meta` and `:validator` Options
 
 `(atom x)` now accepts the variadic Clojure form `(atom x & opts)`

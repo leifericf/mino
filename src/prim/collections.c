@@ -1276,12 +1276,16 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     size_t      n;
     (void)env;
     arg_count(S, args, &n);
-    if (n < 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "dissoc requires a map and at least one key");
+    if (n < 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "dissoc requires at least one argument");
     }
     coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
+    }
+    /* (dissoc m) with no keys returns the map unchanged, per Clojure. */
+    if (n == 1) {
+        return coll;
     }
     if (coll->type == MINO_SORTED_MAP) {
         p = args->as.cons.cdr;
