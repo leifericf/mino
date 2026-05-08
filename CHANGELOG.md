@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### `(conj map nil)` is a No-op
+
+Per Clojure, `(conj coll nil)` returns `coll` unchanged on every
+collection type. Mino's `conj` honoured that for vectors / lists /
+sets but mapped `nil` to the "must be a map entry or 2-element
+vector" type error on maps. Mixed sequences like `(conj {:a 1}
+nil [:b 2] nil)` now collapse the nils and apply only the real
+entries.
+
 ### `peek` on the Empty-List Singleton
 
 `peek` now recognises the canonical empty list `()` (a

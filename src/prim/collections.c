@@ -907,13 +907,21 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return acc;
     }
     if (coll->type == MINO_MAP) {
-        /* Each added item must be a 2-element vector [k v]. Assoc each onto
-         * the accumulator so successor maps share structure with the source. */
+        /* Each added item must be a 2-element vector [k v], a map
+         * (entries are merged), or nil (no-op, per Clojure's
+         * (conj coll nil) returning coll unchanged). Assoc each
+         * onto the accumulator so successor maps share structure
+         * with the source. */
         size_t      extra = n - 1;
         mino_val_t *acc   = coll;
         size_t      i;
         for (i = 0; i < extra; i++) {
             mino_val_t *item = p->as.cons.car;
+            if (item == NULL || item->type == MINO_NIL) {
+                /* nil is a no-op for conj on any collection. */
+                p = p->as.cons.cdr;
+                continue;
+            }
             if (item != NULL && item->type == MINO_MAP) {
                 /* Merge map entries: (conj {:a 0} {:b 1}) */
                 size_t j;
