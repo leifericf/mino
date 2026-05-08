@@ -800,8 +800,9 @@
   (let [t (type x)]
     (or (= t :map) (= t :vector) (= t :sorted-map))))
 (defn reversible?
-  "Returns true if x supports rseq (vectors)."
-  [x] (= (type x) :vector))
+  "Returns true if x supports rseq (vectors and sorted collections)."
+  [x] (let [t (type x)]
+        (or (= t :vector) (= t :sorted-map) (= t :sorted-set))))
 (defn any? "Returns true for any argument." [x] true)
 (defn seqable?
   "Returns true if (seq x) is supported."
