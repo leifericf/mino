@@ -7,6 +7,7 @@
  */
 
 #include "prim/internal.h"
+#include "runtime/host_threads.h"
 
 /* ------------------------------------------------------------------------- */
 /* seq and realized?                                                         */
@@ -183,6 +184,10 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    /* Per Clojure, realized? accepts only "pending" values
+     * (lazy seqs, delays, promises, futures) and throws on any
+     * other input. mino's pending types are MINO_LAZY (lazy seqs
+     * and delays share this representation) and MINO_FUTURE. */
     mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
@@ -192,7 +197,11 @@ mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (v != NULL && v->type == MINO_LAZY) {
         return v->as.lazy.realized ? mino_true(S) : mino_false(S);
     }
-    return mino_true(S);
+    if (v != NULL && v->type == MINO_FUTURE) {
+        return mino_future_realized_p(v) ? mino_true(S) : mino_false(S);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001",
+        "realized? expects a lazy seq, delay, promise, or future");
 }
 
 /* ------------------------------------------------------------------------- */

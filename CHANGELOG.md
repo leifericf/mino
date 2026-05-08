@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### `realized?` Throws on Non-pending Inputs
+
+`realized?` previously returned `true` for any value that wasn't
+a lazy seq, which let `(realized? 1)` / `(realized? :foo)` /
+`(realized? [])` etc. silently pass through. Now the prim
+matches Clojure's contract: it returns the realized state for
+`MINO_LAZY` (lazy seqs and delays share that representation) and
+`MINO_FUTURE`, and throws `realized? expects a lazy seq, delay,
+promise, or future` for anything else.
+
 ### `mod` / `rem` / `quot` Accept the Full Numeric Tower
 
 `mod`, `rem`, and `quot` previously rejected anything but `MINO_INT`
