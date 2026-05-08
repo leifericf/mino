@@ -52,7 +52,8 @@
 (deftest sort-fn
   (is (= '(1 1 3 4 5) (sort [3 1 4 1 5])))
   (is (= '("a" "b" "c") (sort ["c" "a" "b"])))
-  (is (= nil (sort []))))
+  ;; Per Clojure, (sort empty-coll) returns () (the empty-list singleton).
+  (is (= '() (sort []))))
 
 (deftest sort-with-comparator
   (testing "boolean comparator"

@@ -30,6 +30,9 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
         double db = (double)b->as.i;
         return a->as.f < db ? -1 : a->as.f > db ? 1 : 0;
     }
+    if (a->type == MINO_CHAR && b->type == MINO_CHAR) {
+        return a->as.ch < b->as.ch ? -1 : a->as.ch > b->as.ch ? 1 : 0;
+    }
     if ((a->type == MINO_STRING || a->type == MINO_SYMBOL
          || a->type == MINO_KEYWORD) && a->type == b->type) {
         size_t min_len = a->as.s.len < b->as.s.len ? a->as.s.len : b->as.s.len;

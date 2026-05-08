@@ -450,6 +450,14 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_set(S, NULL, 0);
     }
+    /* Validate seqability eagerly. */
+    {
+        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        if (seqd == NULL) return NULL;
+        if (seqd->type == MINO_NIL) return mino_set(S, NULL, 0);
+        coll = seqd;
+    }
     result = mino_set(S, NULL, 0);
     gc_pin(result);
     seq_iter_init(S, &it, coll);
@@ -951,13 +959,23 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "sort requires one or two arguments");
     }
     if (coll == NULL || coll->type == MINO_NIL) {
-        return mino_nil(S);
+        return mino_empty_list(S);
+    }
+    /* Validate seqability eagerly: non-coll inputs throw rather than
+     * silently produce an empty result. Routes through prim_seq for the
+     * shared coercion check. */
+    {
+        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        if (seqd == NULL) return NULL;
+        if (seqd->type == MINO_NIL) return mino_empty_list(S);
+        coll = seqd;
     }
     /* Collect elements into an array. */
     n_items = 0;
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) { n_items++; seq_iter_next(S, &it); }
-    if (n_items == 0) return mino_nil(S);
+    if (n_items == 0) return mino_empty_list(S);
     arr = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*arr));
     tmp = (mino_val_t **)gc_alloc_typed(S, GC_T_VALARR, n_items * sizeof(*tmp));
     i = 0;

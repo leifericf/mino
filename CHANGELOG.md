@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### `sort` / `set` -- Char Comparison, Eager Validation, Empty Result
+
+`sort` now orders `MINO_CHAR` values by codepoint (was effectively a
+no-op because `val_compare` had no `MINO_CHAR` arm and fell through
+to type-tag comparison, which is identical for any two chars). Also:
+
+  - `(sort nil)` returns the empty-list singleton `()` instead of
+    `nil`, matching Clojure's "sort always returns a sequence"
+    contract; corrected the internal `sort-fn` test that asserted the
+    nil-tolerant behaviour.
+  - `(sort 1)` and similar non-seqable inputs now route through
+    `prim_seq` for the standard "cannot coerce" type error, instead
+    of silently returning an empty result.
+  - The same eager-seqability check was added to `set` so `(set 1)`
+    throws.
+
 ### `list?` Distinguishes Lists From Other Sequences
 
 `list?` was previously `cons?`, so it returned `true` for any cons cell
