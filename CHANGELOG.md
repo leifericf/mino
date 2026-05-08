@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### `merge` Accepts MapEntries and Non-map Args via `conj` Semantics
+
+Rewrote `merge` to match Clojure's `(reduce conj (or acc {}) ms)`
+shape rather than walking `(seq m)` and assuming each entry is a
+`(k v)` pair. Position-2+ args may now be MapEntries or 2-element
+vectors (e.g. `(merge {:a nil} (first {:a "a"}) {:b "b"})`), and
+non-map first args follow `conj`'s undefined-but-non-throwing
+behaviour. The previous implementation broke as soon as it hit a
+MapEntry because `(seq mapentry)` yielded the bare key as the
+first "kv", which `first` then rejected.
+
 ### `(conj map nil)` is a No-op
 
 Per Clojure, `(conj coll nil)` returns `coll` unchanged on every

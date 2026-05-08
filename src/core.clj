@@ -415,14 +415,14 @@
 
 ;; --- Collection utilities ---
 
-(defn merge "Returns a map that is the merge of the given maps." [& maps]
+(defn merge
+  "Returns a map that is the merge of the maps. If a key occurs in more
+  than one map, the mapping from the latter (left-to-right) will be
+  the mapping in the result. Per Clojure, position-2+ args use `conj`
+  semantics, so MapEntries / 2-element vectors are accepted."
+  [& maps]
   (when (some identity maps)
-    (reduce (fn [acc m]
-      (if m
-        (reduce (fn [a kv] (assoc a (first kv) (second kv)))
-                (if acc acc (with-meta {} (meta m))) (seq m))
-        acc))
-      nil maps)))
+    (reduce (fn [acc m] (conj (or acc {}) m)) maps)))
 
 (defn select-keys
   "Returns a map containing only the entries whose keys are in ks."
