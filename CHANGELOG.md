@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.100.14
+
+### `(nth nil i)` returns nil instead of throwing
+
+Clojure treats `nil` as an empty seq for `nth`: `(nth nil 10)` is
+`nil`, and `(nth nil 10 :default)` is `:default`. mino's `prim_nth`
+threw "nth index out of range" for the 2-arg form, which broke any
+code relying on the nil-as-empty equivalence and the external
+`nth.cljc` test (`(is (nil? (nth nil 10)))`). The nil-coll arm now
+returns `def_val` when supplied, else nil; non-nil out-of-range
+still throws.
+
+External `nth.cljc` 4/5 -> 13/13. External suite: 185 -> 186 OK.
+
 ## v0.100.13
 
 ### Watch exceptions now propagate out of swap! / reset! / compare-and-set!

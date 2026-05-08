@@ -325,8 +325,10 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
     }
     if (coll == NULL || coll->type == MINO_NIL) {
+        /* Clojure treats nil as an empty seq for nth: returns the
+         * default if supplied, otherwise nil (does NOT throw). */
         if (def_val != NULL) return def_val;
-        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        return mino_nil(S);
     }
     if (coll->type == MINO_TRANSIENT) {
         if (!coll->as.transient.valid)
