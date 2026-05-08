@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### `(get string i)` Returns a `\char`; Other Strict-Predicate Tightenings
+
+`(get "ab" 0)` now returns `\a` (was `"a"`). The seq path already
+yielded chars after the earlier UTF-8 walk fix; the indexed `get` was
+the only string accessor still emitting one-byte substrings. Walks
+codepoint by codepoint so multi-byte chars count as a single index.
+
+`numerator` and `denominator` now require a Ratio argument; passing
+a plain integer throws (was: silently returned the integer / 1). 
+
+`intern` requires the target namespace to already exist and throws
+`no namespace: <name> found` otherwise; previously it silently
+created the namespace via `ns_env_ensure`.
+
+The internal `get-fn` test was updated to expect `\char` results.
+
 ### Symbol / Keyword Compare Sorts Unqualified Before Qualified
 
 `compare` and `val_compare` for symbols and keywords now follow

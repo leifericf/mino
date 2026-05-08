@@ -820,9 +820,10 @@ mino_val_t *prim_numerator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (mino_as_ll(x->as.ratio.num, &ll)) return mino_int(S, ll);
         return x->as.ratio.num;
     }
-    if (x->type == MINO_INT || x->type == MINO_BIGINT) return x;
+    /* Per Clojure, numerator/denominator are defined only for Ratio.
+     * Plain integers throw rather than silently returning the value. */
     return prim_throw_classified(S, "eval/type", "MTY001",
-                                 "numerator: argument must be a rational");
+                                 "numerator: argument must be a ratio");
 }
 
 mino_val_t *prim_denominator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -842,10 +843,8 @@ mino_val_t *prim_denominator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (mino_as_ll(x->as.ratio.denom, &ll)) return mino_int(S, ll);
         return x->as.ratio.denom;
     }
-    if (x->type == MINO_INT || x->type == MINO_BIGINT)
-        return mino_int(S, 1);
     return prim_throw_classified(S, "eval/type", "MTY001",
-                                 "denominator: argument must be a rational");
+                                 "denominator: argument must be a ratio");
 }
 
 /* (ratio? x) */

@@ -137,8 +137,9 @@
   (is (= 1 (get {:a 1 :b 2} :a)))
   (is (= :def (get {:a 1} :no :def)))
   (is (= 20 (get [10 20 30] 1)))
-  (is (= "h" (get "hello" 0)))
-  (is (= "o" (get "hello" 4)))
+  ;; Per Clojure, indexing a string returns a `\char`.
+  (is (= \h (get "hello" 0)))
+  (is (= \o (get "hello" 4)))
   (is (= nil (get "hello" 99)))
   (is (= :miss (get "hello" 99 :miss))))
 

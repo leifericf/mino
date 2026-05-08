@@ -963,6 +963,15 @@ mino_val_t *prim_intern(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     memcpy(s_buf, sym_arg->as.s.data, sym_arg->as.s.len);
     s_buf[sym_arg->as.s.len] = '\0';
+    /* Per Clojure, intern requires the target namespace to already
+     * exist; "no namespace named X". Look up rather than create. */
+    target = ns_env_lookup(S, ns_buf);
+    if (target == NULL) {
+        char msg[320];
+        snprintf(msg, sizeof(msg),
+                 "intern: no namespace: %s found", ns_buf);
+        return prim_throw_classified(S, "eval/state", "MST001", msg);
+    }
     var = var_intern(S, ns_buf, s_buf);
     if (var == NULL) return NULL;
     if (val_arg != NULL) {
@@ -970,11 +979,8 @@ mino_val_t *prim_intern(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     /* Make the intern visible to unqualified resolution by also
      * binding into the target ns env. */
-    target = ns_env_ensure(S, ns_buf);
-    if (target != NULL) {
-        env_bind(S, target, s_buf,
-                 val_arg != NULL ? val_arg : var->as.var.root);
-    }
+    env_bind(S, target, s_buf,
+             val_arg != NULL ? val_arg : var->as.var.root);
     return var;
 }
 

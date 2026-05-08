@@ -907,15 +907,45 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             ? key : def_val;
     }
     if (coll->type == MINO_STRING) {
+        /* Match Clojure: indexing a string returns a `\char`. The
+         * walk is codepoint-counted so multi-byte characters count as
+         * one position. ASCII content is unaffected since the
+         * codepoint walk is byte-equivalent there. */
         long long idx;
+        size_t pos = 0;
+        long long seen = 0;
+        unsigned int cp;
+        size_t step;
         if (key == NULL || key->type != MINO_INT) {
             return def_val;
         }
         idx = key->as.i;
-        if (idx < 0 || (size_t)idx >= coll->as.s.len) {
-            return def_val;
+        if (idx < 0) return def_val;
+        while (pos < coll->as.s.len) {
+            const unsigned char *p = (const unsigned char *)coll->as.s.data + pos;
+            if (*p < 0x80) { cp = *p; step = 1; }
+            else if ((*p & 0xE0) == 0xC0 && pos + 1 < coll->as.s.len) {
+                cp = ((unsigned)(*p & 0x1F) << 6) | (p[1] & 0x3F);
+                step = 2;
+            } else if ((*p & 0xF0) == 0xE0 && pos + 2 < coll->as.s.len) {
+                cp = ((unsigned)(*p & 0x0F) << 12)
+                   | ((unsigned)(p[1] & 0x3F) << 6)
+                   | (p[2] & 0x3F);
+                step = 3;
+            } else if ((*p & 0xF8) == 0xF0 && pos + 3 < coll->as.s.len) {
+                cp = ((unsigned)(*p & 0x07) << 18)
+                   | ((unsigned)(p[1] & 0x3F) << 12)
+                   | ((unsigned)(p[2] & 0x3F) << 6)
+                   | (p[3] & 0x3F);
+                step = 4;
+            } else {
+                cp = *p; step = 1;
+            }
+            if (seen == idx) return mino_char(S, cp);
+            seen++;
+            pos += step;
         }
-        return mino_string_n(S, coll->as.s.data + idx, 1);
+        return def_val;
     }
     if (coll->type == MINO_RECORD) {
         int idx = record_field_index(coll, key);
