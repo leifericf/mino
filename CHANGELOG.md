@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.100.12
+
+### `atom` accepts trailing positional args and any persistent map as `:meta`
+
+`(atom v)` now tolerates extra positional args after the initial
+value -- the option-pair loop already absorbed unknown keys, but
+`(atom nil nil nil)` and `(apply atom (take 11 (repeat nil)))` now
+construct an atom with the initial value and ignore the trailing
+nils, matching Clojure JVM. Also broadened the `:meta` value check
+to accept `MINO_SORTED_MAP` in addition to `MINO_MAP`, so
+`(atom nil :meta (sorted-map :a "a"))` succeeds. Vectors, sets,
+numbers, etc. still reject -- the `(p/thrown? ...)` shapes in the
+external suite remain.
+
+### Validator returning nil rejects the new state
+
+`atom`'s `:validator` arm previously only rejected on `false`; nil
+slipped through. Per Clojure's docstring ("validate-fn should
+return false or throw"), nil counts as logical false too. Both the
+construction-time check and the swap!/reset! check now route
+through `mino_is_truthy`, so a `(constantly nil)` validator throws
+"Invalid reference state" both at construction and on every
+attempted update.
+
+External `atom.cljc` 74/74. External suite: 184 -> 185 OK.
+
 ## v0.100.11
 
 Two fixes that close the last external-suite timeouts:

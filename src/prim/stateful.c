@@ -21,7 +21,7 @@ static int atom_validate(mino_state_t *S, mino_val_t *atom,
     vargs = mino_cons(S, new_val, mino_nil(S));
     result = mino_call(S, vfn, vargs, env);
     if (result == NULL) return -1;  /* validator threw */
-    if (result->type == MINO_BOOL && result->as.b == 0) {
+    if (!mino_is_truthy(result)) {
         prim_throw_classified(S, "eval/contract", "MCT001", "Invalid reference state");
         return -1;
     }
@@ -173,11 +173,15 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         rest = rest->as.cons.cdr->as.cons.cdr;
         if (k != NULL && k->type == MINO_KEYWORD) {
             if (strcmp(k->as.s.data, "meta") == 0) {
-                if (v != NULL && v->type != MINO_NIL && v->type != MINO_MAP) {
+                if (v != NULL && v->type != MINO_NIL
+                    && v->type != MINO_MAP
+                    && v->type != MINO_SORTED_MAP) {
                     return prim_throw_classified(S, "eval/type", "MTY001",
                         "atom: :meta value must be a map or nil");
                 }
-                meta = (v != NULL && v->type == MINO_MAP) ? v : NULL;
+                meta = (v != NULL
+                        && (v->type == MINO_MAP || v->type == MINO_SORTED_MAP))
+                       ? v : NULL;
             } else if (strcmp(k->as.s.data, "validator") == 0) {
                 if (v != NULL && v->type != MINO_NIL) {
                     validator = v;
@@ -195,7 +199,7 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *vargs  = mino_cons(S, initial, mino_nil(S));
         mino_val_t *result = mino_call(S, validator, vargs, env);
         if (result == NULL) return NULL;
-        if (result->type == MINO_BOOL && result->as.b == 0) {
+        if (!mino_is_truthy(result)) {
             return prim_throw_classified(S, "eval/contract", "MCT001",
                 "Invalid reference state");
         }
