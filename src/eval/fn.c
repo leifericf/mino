@@ -436,6 +436,22 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                 }
                 return def_val;
             }
+            if (coll != NULL && coll->type == MINO_SET) {
+                /* (:k #{:k :other}) returns :k if present, else default.
+                 * Mirrors Clojure's keyword-as-fn behaviour against a
+                 * set: the set acts as a "is this key present?" check
+                 * and the keyword is its own value. */
+                uint32_t h = hash_val(fn);
+                if (hamt_get(coll->as.set.root, fn, h, 0u) != NULL)
+                    return fn;
+                return def_val;
+            }
+            if (coll != NULL && coll->type == MINO_SORTED_SET) {
+                if (rb_contains(S, coll->as.sorted.root, fn,
+                                coll->as.sorted.comparator))
+                    return fn;
+                return def_val;
+            }
             return def_val;
         }
     }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Keywords as Functions Look Up in Sets
+
+`(:k #{:k :other})` now returns `:k` (and similarly for sorted
+sets) instead of `nil`. Per Clojure, keyword invocation against
+a set treats the set as a membership probe -- the keyword is its
+own value, returned when present and the supplied default (or
+`nil`) when absent. The previous fall-through returned the
+default for any non-map collection.
+
 ### `repeat` Truncates Non-integer `n` Toward Zero
 
 `(repeat 3.14 x)` and `(repeat 3.99 x)` now both return three
