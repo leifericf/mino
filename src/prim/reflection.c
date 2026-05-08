@@ -167,16 +167,18 @@ mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (name_arg == NULL || name_arg->type != MINO_STRING) {
             return prim_throw_classified(S, "eval/type", "MTY001", "symbol: name must be a string");
         }
-        if (ns_arg != NULL && ns_arg->type == MINO_STRING
-            && ns_arg->as.s.len > 0) {
+        if (ns_arg != NULL && ns_arg->type == MINO_STRING) {
+            /* Preserve an explicit (even empty) ns by emitting the
+             * `ns/name` form. Clojure differentiates `(symbol "" "x")`
+             * (namespace returns `""`) from `(symbol nil "x")` (no ns,
+             * namespace returns `nil`). */
             if (ns_arg->as.s.len + 1 + name_arg->as.s.len >= sizeof(buf)) {
                 return prim_throw_classified(S, "eval/type", "MTY001", "symbol: name too long");
             }
             memcpy(buf, ns_arg->as.s.data, ns_arg->as.s.len);
             pos = ns_arg->as.s.len;
             buf[pos++] = '/';
-        } else if (ns_arg != NULL && ns_arg->type != MINO_NIL
-                   && ns_arg->type != MINO_STRING) {
+        } else if (ns_arg != NULL && ns_arg->type != MINO_NIL) {
             return prim_throw_classified(S, "eval/type", "MTY001", "symbol: namespace must be a string");
         }
         if (pos + name_arg->as.s.len >= sizeof(buf)) {

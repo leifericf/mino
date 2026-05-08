@@ -295,6 +295,8 @@
   ([x]
    (lazy-seq (cons x (repeat x))))
   ([n x]
+   (when-not (number? n)
+     (throw (str "repeat: count must be a number, got " (type n))))
    (let [n (if (integer? n) n (long n))]
      (lazy-seq
        (when (> n 0)
@@ -429,11 +431,15 @@
 (defn select-keys
   "Returns a map containing only the entries whose keys are in ks."
   [m ks]
-  (reduce (fn [acc k]
-    (if (contains? m k)
-      (assoc acc k (get m k))
-      acc))
-    (with-meta {} (meta m)) ks))
+  ;; Validate ks is a collection. A bare scalar like a single keyword
+  ;; would otherwise silently produce {} because (reduce ... :a) sees
+  ;; nothing.
+  (let [_ (seq ks)]
+    (reduce (fn [acc k]
+      (if (contains? m k)
+        (assoc acc k (get m k))
+        acc))
+      (with-meta {} (meta m)) ks)))
 
 (defn zipmap "Returns a map with keys mapped to corresponding vals." [ks vs]
   (letfn [(zm-impl [acc ks vs]

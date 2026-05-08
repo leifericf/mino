@@ -1586,10 +1586,17 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         double db = tower_to_double(b);
         return mino_int(S, da < db ? -1 : da > db ? 1 : 0);
     }
-    if (a->type == b->type
-        && (a->type == MINO_STRING || a->type == MINO_KEYWORD
-            || a->type == MINO_SYMBOL)) {
+    if (a->type == b->type && a->type == MINO_STRING) {
         int cmp = strcmp(a->as.s.data, b->as.s.data);
+        return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
+    }
+    if (a->type == b->type
+        && (a->type == MINO_KEYWORD || a->type == MINO_SYMBOL)) {
+        /* Defer to val_compare so namespaced symbols/keywords compare
+         * as Clojure does: unqualified before any qualified, and
+         * within the same ns, by name. Plain strcmp would put `:cat`
+         * after `:animal/cat` because 'c' > 'a'. */
+        int cmp = val_compare(a, b);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
     if (a->type == MINO_CHAR && b->type == MINO_CHAR) {
@@ -1850,7 +1857,7 @@ mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "NaN? requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL)
+    if (!is_compare_number(v))
         return prim_throw_classified(S, "eval/type", "MTY001", "NaN? requires a number");
     return (v->type == MINO_FLOAT && isnan(v->as.f))
            ? mino_true(S) : mino_false(S);

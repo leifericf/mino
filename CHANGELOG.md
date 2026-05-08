@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Symbol / Keyword Compare Sorts Unqualified Before Qualified
+
+`compare` and `val_compare` for symbols and keywords now follow
+`clojure.lang.Symbol.compareTo`: an unqualified name (no namespace)
+sorts before any qualified one, and within a single namespace the
+local names are compared lexicographically. The previous straight
+`strcmp` over the printed form put `:cat` after `:animal/cat` because
+`'c' > 'a'`, so `(compare :cat :animal/cat)` returned `1` instead of
+`-1`. Plain strings still use `strcmp`.
+
+### `(symbol "" "name")` Preserves the Empty Namespace
+
+`symbol` previously dropped an empty-string namespace argument,
+producing a symbol whose `(namespace ...)` returned `nil`. Per
+Clojure, `(namespace (symbol "" "x"))` is `""` (the explicit empty
+namespace differs from `nil`). The 2-arg form now emits the
+`ns/name` cons regardless of whether `ns` is empty, so the empty
+prefix round-trips through `namespace`.
+
+### Misc Eager Validations / Predicate Tightening
+
+- `repeat` rejects non-numeric counts; the previous flow coerced
+  `"a"` into the codepoint 97 and returned 97 repetitions.
+- `select-keys` calls `seq` on `ks` so passing a single keyword
+  raises a coercion error instead of silently returning `{}`.
+- `NaN?` accepts the full numeric tower and rejects everything
+  else; previously it accepted any non-`nil` value.
+
 ### `pos-int?` / `neg-int?` / `nat-int?` Stay Long-only; `counted?` Drops Strings
 
 Per Clojure, the long-tier predicates `pos-int?`, `neg-int?`, and

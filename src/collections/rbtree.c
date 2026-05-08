@@ -33,13 +33,48 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
     if (a->type == MINO_CHAR && b->type == MINO_CHAR) {
         return a->as.ch < b->as.ch ? -1 : a->as.ch > b->as.ch ? 1 : 0;
     }
-    if ((a->type == MINO_STRING || a->type == MINO_SYMBOL
-         || a->type == MINO_KEYWORD) && a->type == b->type) {
+    if (a->type == MINO_STRING && b->type == MINO_STRING) {
         size_t min_len = a->as.s.len < b->as.s.len ? a->as.s.len : b->as.s.len;
         int c = memcmp(a->as.s.data, b->as.s.data, min_len);
         if (c != 0) return c;
         return a->as.s.len < b->as.s.len ? -1
              : a->as.s.len > b->as.s.len ? 1 : 0;
+    }
+    if ((a->type == MINO_SYMBOL || a->type == MINO_KEYWORD)
+         && a->type == b->type) {
+        /* Symbols and keywords compare like Clojure's Symbol.compareTo:
+         * unqualified (nil ns) sorts before any qualified one; within
+         * the same ns the names are compared lexicographically. mino
+         * stores the printed form (`ns/name` or `name`) directly, so
+         * we split on the first `/`. */
+        const char *ad = a->as.s.data;
+        const char *bd = b->as.s.data;
+        size_t      al = a->as.s.len;
+        size_t      bl = b->as.s.len;
+        const char *as = (const char *)memchr(ad, '/', al);
+        const char *bs = (const char *)memchr(bd, '/', bl);
+        size_t a_ns_len = as ? (size_t)(as - ad) : 0;
+        size_t b_ns_len = bs ? (size_t)(bs - bd) : 0;
+        const char *a_name = as ? as + 1 : ad;
+        const char *b_name = bs ? bs + 1 : bd;
+        size_t a_name_len  = as ? al - a_ns_len - 1 : al;
+        size_t b_name_len  = bs ? bl - b_ns_len - 1 : bl;
+        if (as == NULL && bs != NULL) return -1;
+        if (as != NULL && bs == NULL) return 1;
+        if (as != NULL && bs != NULL) {
+            size_t min_ns = a_ns_len < b_ns_len ? a_ns_len : b_ns_len;
+            int c = memcmp(ad, bd, min_ns);
+            if (c != 0) return c;
+            if (a_ns_len < b_ns_len) return -1;
+            if (a_ns_len > b_ns_len) return 1;
+        }
+        {
+            size_t min_n = a_name_len < b_name_len ? a_name_len : b_name_len;
+            int c = memcmp(a_name, b_name, min_n);
+            if (c != 0) return c;
+            return a_name_len < b_name_len ? -1
+                 : a_name_len > b_name_len ? 1 : 0;
+        }
     }
     if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
         size_t i;
