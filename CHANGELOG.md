@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Syntax-Quote Auto-Qualification Inside Macro-Generated Closures
+
+Closures created during a macro body's evaluation -- the canonical
+shape being `(map (fn [row] `(some-sym ...)) rows)` inside a
+macro -- now capture the macro's defining namespace as their
+`defining_ns`, not the caller's. Without this, invoking the
+closure overwrote `fn_ambient_ns` with the caller's namespace, so
+syntax-quote inside the closure couldn't find symbols in the
+macro's namespace and emitted them bare.
+
+The clearest example was `clojure.test/are`. From the test file's
+namespace, `(macroexpand '(are [x] (= x x) 1 2))` produced
+`(do (is (= 1 1)) (is (= 2 2)))` -- bare `is` -- because the inner
+`(fn [row] ...)` ran with `defining_ns = caller's ns`. Predicate
+test files in the external suite that referred only `[are deftest
+testing]` (not `is`) consequently errored on `unbound symbol: is`,
+which is why files like `boolean_qmark`, `coll_qmark`, `map_qmark`,
+and many others reported `0 passed, 1 errors`. Post-fix the same
+expansion produces `(do (clojure.test/is (= 1 1)) ...)` and those
+files run cleanly.
+
+A paired fix in the require/load path clears `fn_ambient_ns` for
+the duration of a file load. File loads are a top-level boundary,
+and the file's own `defn` closures must capture the file's
+namespace as their `defining_ns` -- not whatever macro-expansion
+ambient happened to be active when `require` was called from
+inside a closure. Without this, `(require 'clojure.edn)` from
+inside a `deftest` body bound `clojure.edn/read` with
+`defining_ns = "user"`, breaking subsequent calls to it; mirrors
+the existing `eval` / `load-string` / `load-file` behavior.
+
 ### External clojure-test-suite Driver
 
 A new pure-mino driver, `tests/clojure_test_suite.clj`, runs the

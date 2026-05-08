@@ -699,7 +699,22 @@ mino_val_t *make_fn(mino_state_t *S, mino_val_t *params, mino_val_t *body,
     v->as.fn.params      = params;
     v->as.fn.body        = body;
     v->as.fn.env         = env;
-    v->as.fn.defining_ns = S->current_ns;
+    /* Inside a macro body, current_ns is still the caller's ns (only
+     * fn_ambient_ns is the macro's defining ns). Closures created here
+     * are artifacts of the macro expansion -- they should resolve free
+     * vars and qualify syntax-quoted symbols against the macro's ns,
+     * not the caller's. Without this, `(fn [...] `(sym ...))` inside
+     * a macro body emits bare `sym` instead of `defining-ns/sym` once
+     * the closure runs, since invoking the closure overwrites
+     * fn_ambient_ns with its (caller-derived) defining_ns. */
+    if (S->fn_ambient_ns != NULL
+        && S->fn_ambient_ns != S->current_ns
+        && (S->current_ns == NULL
+            || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
+        v->as.fn.defining_ns = S->fn_ambient_ns;
+    } else {
+        v->as.fn.defining_ns = S->current_ns;
+    }
     return v;
 }
 

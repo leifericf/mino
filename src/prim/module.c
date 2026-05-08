@@ -159,10 +159,16 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
         S->load_stack[S->load_stack_len++] = dup;
     }
     /* Load — save/restore current namespace so ns forms inside the
-     * loaded file don't leak into the caller's namespace. */
+     * loaded file don't leak into the caller's namespace. Also clear
+     * fn_ambient_ns: file loads are a top-level boundary and the
+     * file's defn closures must capture the file's own ns as their
+     * defining_ns, not whatever macro-expansion ambient happened to
+     * be active when require was called from inside a closure. */
     {
-        const char *saved_ns = S->current_ns;
+        const char *saved_ns      = S->current_ns;
+        const char *saved_ambient = S->fn_ambient_ns;
         const char *post_ns;
+        S->fn_ambient_ns = NULL;
         if (bundled_source != NULL) {
             /* Bundled load: eval the in-memory source directly. Set
              * reader_file to a synthetic <bundled name> path so any
@@ -178,7 +184,8 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
             result = mino_load_file(S, path, env);
         }
         post_ns = S->current_ns;
-        S->current_ns = saved_ns;
+        S->current_ns    = saved_ns;
+        S->fn_ambient_ns = saved_ambient;
         /* Re-publish *ns* to track the restored ns. Inside the loaded
          * file, an (ns ...) form will have set the var to the file's
          * declared namespace; the require boundary is not a
