@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### `repeat` Truncates Non-integer `n` Toward Zero
+
+`(repeat 3.14 x)` and `(repeat 3.99 x)` now both return three
+repetitions of `x`, matching Clojure (`repeat` truncates the
+count toward zero before counting). The previous implementation
+recursed with `(- n 1)` and only stopped when `n` reached `0`,
+so floats produced an off-by-one extra element.
+
 ### `reverse` Returns the Empty-list Singleton
 
 `(reverse nil)` and `(reverse <empty>)` now return `()` rather

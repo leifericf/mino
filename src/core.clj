@@ -290,13 +290,15 @@
 
 (defn repeat
   "Returns a lazy sequence of xs. With two args, returns n repetitions
-   of x."
+   of x. Per Clojure, n is truncated toward zero before counting (so
+   3.14 and 3.99 both yield three repetitions)."
   ([x]
    (lazy-seq (cons x (repeat x))))
   ([n x]
-   (lazy-seq
-     (when (> n 0)
-       (cons x (repeat (- n 1) x))))))
+   (let [n (if (integer? n) n (long n))]
+     (lazy-seq
+       (when (> n 0)
+         (cons x (repeat (- n 1) x)))))))
 
 ;; --- Collection utilities ---
 
