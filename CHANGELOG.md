@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.100.13
+
+### Watch exceptions now propagate out of swap! / reset! / compare-and-set!
+
+`atom_notify_watches` previously wrapped each watch call in a try
+frame and swallowed any throw, which meant a watch's exception was
+invisible to the user. Per Clojure JVM semantics the value commits
+via CAS first and then watches fire; if a watch throws, the
+exception propagates to the swap! call site (and any later watches
+in the iteration order are skipped). The `swap!`/`reset!`/`cas!`
+arms now check the watch return code and propagate `NULL` instead.
+Internal `watch-exception-ignored` test renamed to
+`watch-exception-propagates` and updated to assert the throw + the
+post-CAS value.
+
+External `add_watch.cljc` 7/10 -> 9/10 (passes once the watch tests
+run; var-watch + ref-watch portions still error because mino lacks
+var watches and STM, both intentional gaps).
+
 ## v0.100.12
 
 ### `atom` accepts trailing positional args and any persistent map as `:meta`

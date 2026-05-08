@@ -29,48 +29,29 @@ static int atom_validate(mino_state_t *S, mino_val_t *atom,
 }
 
 /* Notify all watches after a state change.  Callback signature:
- * (fn key atom old-state new-state).  Exceptions in watches are ignored:
- * each callback runs inside its own try frame so throws don't escape. */
-static void atom_notify_watches(mino_state_t *S, mino_val_t *atom,
-                                mino_val_t *old_val, mino_val_t *new_val,
-                                mino_env_t *env)
+ * (fn key atom old-state new-state).  Returns -1 if any watch threw
+ * (the exception propagates per Clojure JVM semantics), 0 otherwise. */
+static int atom_notify_watches(mino_state_t *S, mino_val_t *atom,
+                               mino_val_t *old_val, mino_val_t *new_val,
+                               mino_env_t *env)
 {
     mino_val_t *watches = atom->as.atom.watches;
-    volatile size_t i;
-    size_t len;
+    size_t i, len;
     if (watches == NULL || watches->type != MINO_MAP || watches->as.map.len == 0)
-        return;
+        return 0;
     len = watches->as.map.len;
     for (i = 0; i < len; i++) {
         mino_val_t *key = vec_nth(watches->as.map.key_order, i);
         mino_val_t *fn  = map_get_val(watches, key);
         mino_val_t *wargs;
-        int saved_try;
         if (fn == NULL) continue;
         wargs = mino_cons(S, key,
                   mino_cons(S, atom,
                     mino_cons(S, old_val,
                       mino_cons(S, new_val, mino_nil(S)))));
-        /* Wrap in a try frame so watch exceptions don't propagate. */
-        saved_try = mino_current_ctx(S)->try_depth;
-        if (mino_current_ctx(S)->try_depth < MAX_TRY_DEPTH) {
-            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
-            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
-            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
-            mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
-            if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) == 0) {
-                mino_current_ctx(S)->try_depth++;
-                (void)mino_call(S, fn, wargs, env);
-                mino_current_ctx(S)->try_depth = saved_try;
-            } else {
-                /* Watch threw -- swallow and continue. */
-                S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
-                S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
-                load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
-                mino_current_ctx(S)->try_depth = saved_try;
-            }
-        }
+        if (mino_call(S, fn, wargs, env) == NULL) return -1;
     }
+    return 0;
 }
 
 /* Validate, commit, and notify.  Returns 0 on success, -1 if validator
@@ -82,8 +63,7 @@ static int atom_set(mino_state_t *S, mino_val_t *atom,
     if (atom_validate(S, atom, new_val, env) != 0) return -1;
     gc_write_barrier(S, atom, atom->as.atom.val, new_val);
     atom->as.atom.val = new_val;
-    atom_notify_watches(S, atom, old_val, new_val, env);
-    return 0;
+    return atom_notify_watches(S, atom, old_val, new_val, env);
 }
 
 /* Atomic load of an atom's current value.  In single-threaded mode this
@@ -294,7 +274,7 @@ mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (atom_validate(S, a, result, env) != 0) return NULL;
         gc_write_barrier(S, a, cur, result);
         if (atom_cas_ptr(S, a, cur, result)) {
-            atom_notify_watches(S, a, cur, result, env);
+            if (atom_notify_watches(S, a, cur, result, env) != 0) return NULL;
             return result;
         }
         /* Lost the race; another worker won.  Try again with the new
@@ -339,7 +319,7 @@ mino_val_t *prim_compare_and_set_bang(mino_state_t *S, mino_val_t *args, mino_en
     if (!atom_cas_ptr(S, a, expected, new_val)) {
         return mino_false(S);
     }
-    atom_notify_watches(S, a, expected, new_val, env);
+    if (atom_notify_watches(S, a, expected, new_val, env) != 0) return NULL;
     return mino_true(S);
 }
 

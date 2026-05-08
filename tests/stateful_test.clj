@@ -44,10 +44,12 @@
     (reset! a 99)
     (is (= 99 @seen))))
 
-(deftest watch-exception-ignored
+(deftest watch-exception-propagates
   (let [a (atom 0)]
     (add-watch a :bad (fn [k r o n] (throw "boom")))
-    (swap! a inc)
+    (is (thrown? (swap! a inc)))
+    ;; CAS commits before watches fire, so the atom value is updated
+    ;; even when a watch throws -- matches Clojure JVM semantics.
     (is (= 1 @a))))
 
 (deftest watch-replace-fn
