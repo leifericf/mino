@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### `subs` Indexes by Codepoint
+
+`subs` previously interpreted its `start` and `end` indices as raw
+byte offsets, so a multi-byte codepoint (e.g. `֎`, U+05CE, two bytes
+in UTF-8) shifted later characters and slicing through one returned
+a malformed UTF-8 fragment (`�`). It now walks the string by
+codepoint -- matching Clojure's "string is a sequence of chars" model
+-- so `(subs "ab֎de" 0 5)` returns `"ab֎de"` instead of truncating
+mid-codepoint. ASCII strings are unaffected since the codepoint walk
+is byte-equivalent there.
+
 ### `sort` / `set` -- Char Comparison, Eager Validation, Empty Result
 
 `sort` now orders `MINO_CHAR` values by codepoint (was effectively a

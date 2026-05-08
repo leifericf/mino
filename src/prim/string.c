@@ -334,11 +334,52 @@ mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* String primitives                                                         */
 /* ------------------------------------------------------------------------- */
 
+/* Step one UTF-8 codepoint forward starting at byte index `pos` in
+ * `data` (length `bytes`). Returns the byte length of the codepoint;
+ * malformed leading bytes step by 1 to keep the walk bounded. */
+static size_t utf8_codepoint_step(const char *data, size_t bytes, size_t pos)
+{
+    unsigned char b;
+    if (pos >= bytes) return 0;
+    b = (unsigned char)data[pos];
+    if (b < 0x80) return 1;
+    if ((b & 0xE0) == 0xC0 && pos + 1 < bytes) return 2;
+    if ((b & 0xF0) == 0xE0 && pos + 2 < bytes) return 3;
+    if ((b & 0xF8) == 0xF0 && pos + 3 < bytes) return 4;
+    return 1;
+}
+
+/* Walk `n` codepoints into `data` starting at `pos`; return the
+ * resulting byte offset, capped at `bytes`. */
+static size_t utf8_skip_codepoints(const char *data, size_t bytes,
+                                   size_t pos, long long n)
+{
+    while (n > 0 && pos < bytes) {
+        pos += utf8_codepoint_step(data, bytes, pos);
+        n--;
+    }
+    return pos;
+}
+
+/* Count codepoints in [data, data+bytes). */
+static long long utf8_codepoint_count(const char *data, size_t bytes)
+{
+    long long count = 0;
+    size_t pos = 0;
+    while (pos < bytes) {
+        pos += utf8_codepoint_step(data, bytes, pos);
+        count++;
+    }
+    return count;
+}
+
 mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *s_val;
     long long   start, end_idx;
     size_t      n;
+    size_t      byte_start, byte_end;
+    long long   total_cps;
     (void)env;
     arg_count(S, args, &n);
     if (n != 2 && n != 3) {
@@ -353,6 +394,11 @@ mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001", "subs: start index must be an integer");
     }
     start = args->as.cons.cdr->as.cons.car->as.i;
+    /* Indices are codepoint-counted, matching Clojure where strings
+     * are sequences of chars (UTF-16 code units there, codepoints
+     * here -- mino has no surrogates). For ASCII content the byte
+     * walk is identical to the codepoint walk. */
+    total_cps = utf8_codepoint_count(s_val->as.s.data, s_val->as.s.len);
     if (n == 3) {
         if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
             || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
@@ -360,12 +406,17 @@ mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         end_idx = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
     } else {
-        end_idx = (long long)s_val->as.s.len;
+        end_idx = total_cps;
     }
-    if (start < 0 || end_idx < start || (size_t)end_idx > s_val->as.s.len) {
+    if (start < 0 || end_idx < start || end_idx > total_cps) {
         return prim_throw_classified(S, "eval/bounds", "MBD001", "subs: index out of range");
     }
-    return mino_string_n(S, s_val->as.s.data + start, (size_t)(end_idx - start));
+    byte_start = utf8_skip_codepoints(s_val->as.s.data, s_val->as.s.len,
+                                      0, start);
+    byte_end = utf8_skip_codepoints(s_val->as.s.data, s_val->as.s.len,
+                                    byte_start, end_idx - start);
+    return mino_string_n(S, s_val->as.s.data + byte_start,
+                         byte_end - byte_start);
 }
 
 mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
