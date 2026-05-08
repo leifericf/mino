@@ -235,6 +235,37 @@ int seq_iter_done(const seq_iter_t *it)
     }
 }
 
+/* Decode the UTF-8 codepoint at byte position pos in `data` (length
+ * len bytes), writing the decoded codepoint to *cp_out and the byte
+ * step to *step_out. Falls back to a 1-byte literal for malformed
+ * leading bytes or truncated continuations, matching prim_seq's
+ * lenient string walk. Caller must ensure pos < len. */
+static void utf8_step(const unsigned char *data, size_t len, size_t pos,
+                      unsigned int *cp_out, size_t *step_out)
+{
+    unsigned int b = data[pos];
+    unsigned int cp;
+    size_t       n;
+    if (b < 0x80u)                 { cp = b;          n = 1; }
+    else if ((b & 0xE0u) == 0xC0u) { cp = b & 0x1Fu;  n = 2; }
+    else if ((b & 0xF0u) == 0xE0u) { cp = b & 0x0Fu;  n = 3; }
+    else if ((b & 0xF8u) == 0xF0u) { cp = b & 0x07u;  n = 4; }
+    else                           { cp = b;          n = 1; }
+    if (pos + n > len) { cp = b; n = 1; }
+    else {
+        size_t k;
+        int    valid = 1;
+        for (k = 1; k < n; k++) {
+            unsigned int c2 = data[pos + k];
+            if ((c2 & 0xC0u) != 0x80u) { valid = 0; break; }
+            cp = (cp << 6) | (c2 & 0x3Fu);
+        }
+        if (!valid) { cp = b; n = 1; }
+    }
+    *cp_out   = cp;
+    *step_out = n;
+}
+
 mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
 {
     const mino_val_t *c = it->coll;
@@ -256,7 +287,15 @@ mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
         return mino_vector(S, kv, 2);
     }
     case MINO_SET:    return vec_nth(c->as.set.key_order, it->idx);
-    case MINO_STRING: return mino_string_n(S, c->as.s.data + it->idx, 1);
+    case MINO_STRING: {
+        /* Yield a MINO_CHAR per codepoint, matching prim_seq. */
+        unsigned int cp;
+        size_t       step;
+        utf8_step((const unsigned char *)c->as.s.data, c->as.s.len,
+                  it->idx, &cp, &step);
+        (void)step;
+        return mino_char(S, (int)cp);
+    }
     default:          return mino_nil(S);
     }
 }
@@ -301,6 +340,15 @@ void seq_iter_next(mino_state_t *S, seq_iter_t *it)
                 }
             }
         }
+    } else if (it->coll != NULL && it->coll->type == MINO_STRING) {
+        /* Step by the current codepoint's byte length so multi-byte
+         * UTF-8 characters advance correctly. */
+        unsigned int cp;
+        size_t       step;
+        utf8_step((const unsigned char *)it->coll->as.s.data,
+                  it->coll->as.s.len, it->idx, &cp, &step);
+        (void)cp;
+        it->idx += step;
     } else {
         it->idx++;
     }

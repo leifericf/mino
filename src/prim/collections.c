@@ -7,6 +7,12 @@
 
 #include "prim/internal.h"
 
+/* Forward decl: utf8 codepoint decoder used by string-handling
+ * branches of first / rest / str_rest_thunk. The body lives below
+ * (before vec_rest_thunk). */
+static void coll_utf8_step(const unsigned char *data, size_t len, size_t pos,
+                           unsigned int *cp_out, size_t *step_out);
+
 mino_val_t *prim_car(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -92,15 +98,23 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
         return sorted_seq(S, v);
     }
     if (v->type == MINO_STRING) {
+        /* Per Clojure, sequencing a string yields chars, not
+         * substrings. Walk UTF-8 codepoint by codepoint. */
+        const unsigned char *bytes = (const unsigned char *)v->as.s.data;
+        size_t pos = 0;
         if (v->as.s.len == 0) return mino_nil(S);
         head = mino_nil(S);
         tail = NULL;
-        for (i = 0; i < v->as.s.len; i++) {
-            mino_val_t *ch = mino_string_n(S, v->as.s.data + i, 1);
-            mino_val_t *cell = mino_cons(S, ch, mino_nil(S));
+        while (pos < v->as.s.len) {
+            unsigned int cp;
+            size_t       step;
+            mino_val_t  *cell;
+            coll_utf8_step(bytes, v->as.s.len, pos, &cp, &step);
+            cell = mino_cons(S, mino_char(S, (int)cp), mino_nil(S));
             if (tail == NULL) head = cell;
             else mino_cons_cdr_set(S, tail, cell);
             tail = cell;
+            pos += step;
         }
         return head;
     }
@@ -448,8 +462,13 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return ch->as.chunk.vals[coll->as.chunked_cons.off];
     }
     if (coll->type == MINO_STRING) {
+        unsigned int cp;
+        size_t       step;
         if (coll->as.s.len == 0) return mino_nil(S);
-        return mino_string_n(S, coll->as.s.data, 1);
+        coll_utf8_step((const unsigned char *)coll->as.s.data,
+                       coll->as.s.len, 0, &cp, &step);
+        (void)step;
+        return mino_char(S, (int)cp);
     }
     if (coll->type == MINO_MAP) {
         if (coll->as.map.len == 0) return mino_nil(S);
@@ -494,6 +513,33 @@ static mino_val_t *make_c_lazy(mino_state_t *S, mino_val_t *ctx,
     return lz;
 }
 
+/* (Already forward-declared at the top of the file.) */
+static void coll_utf8_step(const unsigned char *data, size_t len, size_t pos,
+                           unsigned int *cp_out, size_t *step_out)
+{
+    unsigned int b = data[pos];
+    unsigned int cp;
+    size_t       n;
+    if (b < 0x80u)                 { cp = b;          n = 1; }
+    else if ((b & 0xE0u) == 0xC0u) { cp = b & 0x1Fu;  n = 2; }
+    else if ((b & 0xF0u) == 0xE0u) { cp = b & 0x0Fu;  n = 3; }
+    else if ((b & 0xF8u) == 0xF0u) { cp = b & 0x07u;  n = 4; }
+    else                           { cp = b;          n = 1; }
+    if (pos + n > len) { cp = b; n = 1; }
+    else {
+        size_t k;
+        int    valid = 1;
+        for (k = 1; k < n; k++) {
+            unsigned int c2 = data[pos + k];
+            if ((c2 & 0xC0u) != 0x80u) { valid = 0; break; }
+            cp = (cp << 6) | (c2 & 0x3Fu);
+        }
+        if (!valid) { cp = b; n = 1; }
+    }
+    *cp_out   = cp;
+    *step_out = n;
+}
+
 static mino_val_t *vec_rest_thunk(mino_state_t *S, mino_val_t *ctx)
 {
     mino_val_t *vec = ctx->as.cons.car;
@@ -506,11 +552,16 @@ static mino_val_t *vec_rest_thunk(mino_state_t *S, mino_val_t *ctx)
 
 static mino_val_t *str_rest_thunk(mino_state_t *S, mino_val_t *ctx)
 {
-    mino_val_t *str = ctx->as.cons.car;
-    size_t idx      = (size_t)ctx->as.cons.cdr->as.i;
+    mino_val_t  *str = ctx->as.cons.car;
+    size_t idx       = (size_t)ctx->as.cons.cdr->as.i;
+    unsigned int cp;
+    size_t       step;
     if (idx >= str->as.s.len) return mino_nil(S);
-    return mino_cons(S, mino_string_n(S, str->as.s.data + idx, 1),
-        make_c_lazy(S, mino_cons(S, str, mino_int(S, (long long)(idx + 1))),
+    coll_utf8_step((const unsigned char *)str->as.s.data, str->as.s.len,
+                   idx, &cp, &step);
+    return mino_cons(S, mino_char(S, (int)cp),
+        make_c_lazy(S, mino_cons(S, str,
+                                 mino_int(S, (long long)(idx + step))),
                     str_rest_thunk));
 }
 
@@ -590,9 +641,24 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return r;
     }
     if (coll->type == MINO_STRING) {
-        if (coll->as.s.len <= 1) return mino_empty_list(S);
-        return mino_cons(S, mino_string_n(S, coll->as.s.data + 1, 1),
-            make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
+        /* Skip the first codepoint (1-4 bytes), then construct a
+         * cons whose car is the next character (decoded as MINO_CHAR)
+         * and whose cdr is a lazy continuation for the remainder. */
+        unsigned int first_cp;
+        size_t       first_step;
+        unsigned int second_cp;
+        size_t       second_step;
+        if (coll->as.s.len == 0) return mino_empty_list(S);
+        coll_utf8_step((const unsigned char *)coll->as.s.data,
+                       coll->as.s.len, 0, &first_cp, &first_step);
+        (void)first_cp;
+        if (first_step >= coll->as.s.len) return mino_empty_list(S);
+        coll_utf8_step((const unsigned char *)coll->as.s.data,
+                       coll->as.s.len, first_step,
+                       &second_cp, &second_step);
+        return mino_cons(S, mino_char(S, (int)second_cp),
+            make_c_lazy(S, mino_cons(S, coll,
+                                     mino_int(S, (long long)(first_step + second_step))),
                         str_rest_thunk));
     }
     if (coll->type == MINO_MAP) {

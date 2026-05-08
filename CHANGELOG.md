@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Char Semantics Across `first`, `rest`, `cons`, and Iterators
+
+The `(seq string)` change shipped chars on the seq path; this
+follow-up brings the rest of mino's string-as-sequence operations
+in line:
+
+- `prim_first` on a string now returns a `MINO_CHAR` codepoint
+  rather than a one-byte substring.
+- `prim_rest` and the lazy `str_rest_thunk` decode the next UTF-8
+  codepoint and return a cons whose car is `MINO_CHAR`; the lazy
+  continuation steps by codepoint length, not byte.
+- `val_to_seq` (used by `cons` to materialize string cdrs into a
+  walkable list) emits a list of `MINO_CHAR` values.
+- `seq_iter_val` / `seq_iter_next` decode UTF-8 step by step, so
+  `(map identity "abc")` and similar iterator-based traversals
+  produce `(\a \b \c)` rather than `("a" "b" "c")`.
+
+`cons.cljc`, `fnext.cljc`, `zipmap.cljc`, `interpose.cljc` etc.
+that depended on character iteration now pass cleanly.
+
 ### `(seq string)` Yields Characters Per Clojure
 
 Previously `(seq "abc")` returned a sequence of one-byte strings
