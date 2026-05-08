@@ -98,7 +98,7 @@
       :ns   (str *ns*)
       :fn   (fn [] ~@body)}))
 
-(defn use-fixtures
+(defmacro use-fixtures
   "Register fixture functions for the current namespace. Each fixture
   is a fn-of-one-arg whose argument is a no-arg thunk that runs the
   wrapped body; the fixture is responsible for any setup/teardown
@@ -108,14 +108,22 @@
   :each (run around each individual test). Multiple fixtures of the
   same kind compose left-to-right (the first fixture is outermost).
 
+  Implemented as a macro so the calling namespace is captured at
+  expansion time -- mino's `*ns*` does not propagate dynamically into
+  function bodies, so a function-based use-fixtures would always
+  register under `clojure.test` instead of the caller's ns.
+
   Mirrors clojure.test/use-fixtures."
   [kind & fixtures]
-  (when-not (or (= kind :once) (= kind :each))
-    (throw (ex-info "use-fixtures: kind must be :once or :each" {:kind kind})))
   (let [ns-name (str *ns*)]
-    (swap! fixtures-registry update ns-name
-           (fn [m] (update (or m {}) kind
-                           (fn [existing] (into (or existing []) fixtures)))))))
+    `(do
+       (when-not (or (= ~kind :once) (= ~kind :each))
+         (throw (ex-info "use-fixtures: kind must be :once or :each"
+                         {:kind ~kind})))
+       (swap! fixtures-registry update ~ns-name
+              (fn [m#] (update (or m# {}) ~kind
+                               (fn [existing#]
+                                 (into (or existing# []) [~@fixtures]))))))))
 
 (defmacro testing [desc & body]
   `(binding [*testing-contexts* (cons ~desc *testing-contexts*)]

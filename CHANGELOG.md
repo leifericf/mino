@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### `use-fixtures` Captures the Caller's Namespace
+
+`use-fixtures` is now a macro so it can capture the calling
+namespace at expansion time. The previous function-based
+implementation read `(str *ns*)` from inside the function body, but
+mino's `*ns*` is the function's *defining* namespace (set when the
+fn was created) rather than a dynamic var that tracks the caller. As
+a result every `(use-fixtures ...)` call registered fixtures under
+`"clojure.test"` instead of the user's namespace, so `:once` and
+`:each` fixtures never fired. This was visible in the external
+suite: `parents.cljc` and `descendants.cljc` use a `:once` fixture
+to install a global hierarchy via `derive`, and without the fixture
+the queries returned `nil`.
+
 ### `subs` Indexes by Codepoint
 
 `subs` previously interpreted its `start` and `end` indices as raw
