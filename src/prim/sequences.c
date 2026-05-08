@@ -108,7 +108,29 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return head;
     }
     if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
-        return sorted_seq(S, coll);
+        /* sorted_seq returns a MINO_CONS chain, but the JVM Clojure
+         * (seq sorted-map) is a Seq, not a PersistentList -- (list?
+         * (seq (sorted-map ...))) is false. Re-package the cons chain
+         * as a single-chunk MINO_CHUNKED_CONS so list? returns false
+         * while everything else (first, rest, count, ...) keeps
+         * working. Sorted collections are typically small enough that
+         * one chunk is fine. */
+        mino_val_t *cons_seq = sorted_seq(S, coll);
+        mino_val_t *p, *buf, *result;
+        unsigned    n, i = 0;
+        if (cons_seq == NULL || !mino_is_cons(cons_seq)) return cons_seq;
+        n = 0;
+        for (p = cons_seq; mino_is_cons(p); p = p->as.cons.cdr) n++;
+        buf = mino_chunk_buffer(S, n);
+        if (buf == NULL) return NULL;
+        for (p = cons_seq; mino_is_cons(p); p = p->as.cons.cdr) {
+            if (!mino_chunk_append(buf, p->as.cons.car)) return NULL;
+            i++;
+        }
+        mino_chunk_seal(buf);
+        result = mino_chunked_cons(S, buf, mino_nil(S));
+        (void)i;
+        return result;
     }
     if (coll->type == MINO_STRING) {
         /* Per Clojure, (seq "abc") yields a sequence of chars, not

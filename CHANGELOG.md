@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.100.18
+
+### `(seq sorted-map/-set)` is no longer a list
+
+`(list? (seq (sorted-map :a 1)))` was returning true on mino because
+sorted_seq returned a `MINO_CONS` chain and `list?` accepts both
+`MINO_CONS` and `MINO_EMPTY_LIST`. JVM Clojure draws a sharper
+distinction: `PersistentList` (literal list / `(list ...)` result)
+matches `list?`; the seq view of any other coll does not. The
+sorted-map and sorted-set arms of `prim_seq` now re-package the
+cons chain produced by sorted_seq into a single-chunk
+`MINO_CHUNKED_CONS`, so `list?` returns false while `first`,
+`rest`, `count`, etc. keep working unchanged.
+
+External `list_qmark.cljc` 20/22 -> 22/22. External suite:
+190 -> 191 OK.
+
 ## v0.100.17
 
 ### Shortest-decimal Double-to-string for `bigint` and `rationalize`
