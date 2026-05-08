@@ -2756,8 +2756,9 @@
   [x] (and (ident? x) (some? (namespace x))))
 
 (def ^:private special-symbols-set
-  '#{if let do fn quote def set! var loop recur try throw new ns
-     refer-clojure binding lazy-seq})
+  '#{& . case* catch def deftype* do finally fn fn* if let let* letfn*
+     loop loop* new ns quote recur refer-clojure set! throw try var
+     binding lazy-seq})
 
 (defn special-symbol?
   "Returns true if x is a symbol that names a special form."

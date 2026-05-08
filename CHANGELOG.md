@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### `special-symbol?` Recognises Clojure's Reserved Special Forms
+
+`special-symbol?` now returns `true` for the Clojure-reserved special
+form names `&`, `.`, `case*`, `catch`, `deftype*`, `finally`, `fn*`,
+`let*`, `letfn*`, and `loop*`. mino implements the unstarred forms
+(`fn`, `let`, `loop`) directly and also accepts the starred aliases
+where applicable; the remaining names are unimplemented but are still
+reserved as a portability courtesy so that code which inspects symbol
+status (linters, code-walkers, syntax-quote logic) does not have to
+special-case the dialect.
+
 ### `mod` / `rem` / `quot` Preserve Operand Type
 
 `mod`, `rem`, and `quot` now dispatch on the higher tier of their two
