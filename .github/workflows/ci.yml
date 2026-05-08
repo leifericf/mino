@@ -44,6 +44,59 @@ jobs:
         # informational on Windows until the suite is portable.
         continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
+  external-test-suite:
+    name: external-test-suite (clojure-test-suite)
+    runs-on: ubuntu-latest
+    needs: build
+    # The external test suite is a snapshot of jank-lang/clojure-test-suite
+    # run against the current mino build. Each .cljc file runs in its own
+    # `./mino` sub-process under a 30s timeout (handled by the driver),
+    # so a segfault or hang in one file doesn't take down the rest.
+    # Informational: the job reports the supported / failed / errored
+    # counts but does not gate merges.
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: mino
+
+      - name: Checkout clojure-test-suite
+        uses: actions/checkout@v4
+        with:
+          repository: jank-lang/clojure-test-suite
+          path: clojure-test-suite
+
+      - name: Bootstrap mino
+        working-directory: mino
+        run: make
+
+      - name: Run external suite
+        working-directory: mino
+        # The driver expects the suite as a sibling of mino/, which the
+        # checkout layout above already gives us. tee the output so the
+        # next step can pull the summary without re-running the suite.
+        run: |
+          set -o pipefail
+          ./mino tests/clojure_test_suite.clj 2>&1 \
+            | tee /tmp/external_suite.log
+
+      - name: Surface aggregate counts
+        # Pull the summary block out of the captured log and post it as
+        # the job summary so the Actions UI shows pass / fail counts
+        # without scrolling.
+        if: always()
+        run: |
+          {
+            echo "## External test suite summary"
+            echo ''
+            echo '```'
+            sed -n '/EXTERNAL TEST SUITE REPORT/,/Per-file raw results/p' \
+              /tmp/external_suite.log 2>/dev/null \
+              | head -100 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   perf-gate:
     name: perf-gate (linux)
     runs-on: ubuntu-latest
