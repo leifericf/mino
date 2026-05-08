@@ -131,9 +131,34 @@ static int append_print_chunk(mino_state_t *S, mino_val_t *v,
     const char *src;
     size_t      slen;
     mino_val_t *formatted = NULL;
+    char        char_buf[4];
     if (!readably && v != NULL && v->type == MINO_STRING) {
         src  = v->as.s.data;
         slen = v->as.s.len;
+    } else if (!readably && v != NULL && v->type == MINO_CHAR) {
+        /* Non-readable print emits the character itself, not the
+         * \name escape form. Encode the codepoint as UTF-8. */
+        int cp = v->as.ch;
+        if (cp < 0x80) {
+            char_buf[0] = (char)cp;
+            slen = 1;
+        } else if (cp < 0x800) {
+            char_buf[0] = (char)(0xC0u | (unsigned)(cp >> 6));
+            char_buf[1] = (char)(0x80u | ((unsigned)cp & 0x3Fu));
+            slen = 2;
+        } else if (cp < 0x10000) {
+            char_buf[0] = (char)(0xE0u | (unsigned)(cp >> 12));
+            char_buf[1] = (char)(0x80u | (((unsigned)cp >> 6) & 0x3Fu));
+            char_buf[2] = (char)(0x80u | ((unsigned)cp & 0x3Fu));
+            slen = 3;
+        } else {
+            char_buf[0] = (char)(0xF0u | (unsigned)(cp >> 18));
+            char_buf[1] = (char)(0x80u | (((unsigned)cp >> 12) & 0x3Fu));
+            char_buf[2] = (char)(0x80u | (((unsigned)cp >> 6)  & 0x3Fu));
+            char_buf[3] = (char)(0x80u | ((unsigned)cp & 0x3Fu));
+            slen = 4;
+        }
+        src = char_buf;
     } else {
         formatted = print_to_string(S, v);
         if (formatted == NULL) return -1;

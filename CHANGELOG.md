@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Non-readable Print of Characters
+
+`print` / `println` (the non-readable family) now emit a
+character's codepoint as UTF-8 bytes instead of its `\name` /
+`\letter` escape form. So `(print \A)` writes `A` (matching
+Clojure) rather than `\A`. The readable `pr` / `prn` family
+still emits the escape form via `print-to-string`. Implemented
+in `append_print_chunk` with a `MINO_CHAR` branch that encodes
+the codepoint inline.
+
 ### `(empty seq)` Returns the Empty-list Singleton
 
 `empty` on a list / cons / lazy-seq / chunked-cons / `()` now
