@@ -1233,24 +1233,94 @@ void mino_bigdec_print(mino_state_t *S, const mino_val_t *v, FILE *out)
     (void)S;
 }
 
-/* Equality for bigdecs is "same unscaled and same scale" — Clojure's
- * BigDecimal.equals is type-strict on representation. (1.00M) and
- * (1.0M) are NOT equal under = even though they're numerically equal.
- * Use `==` for cross-tier numeric equality. */
+/* Equality for bigdecs is numerical: `(= 1.0M 1.00M)` is true.
+ * Mirrors Clojure's `=` (which routes BigDecimal through
+ * `Numbers.equiv` -> `compareTo == 0`) rather than Java's
+ * `BigDecimal.equals` (which is scale-strict). To compare, scale up
+ * the lower-scaled side to match the higher and check unscaled
+ * equality. The hash strips trailing zeros so the equal-implies-
+ * equal-hash invariant holds across scales. */
 int mino_bigdec_equals(const mino_val_t *a, const mino_val_t *b)
 {
+    int   sa, sb, smax;
+    mpz_t au, bu, pw;
+    int   eq;
     if (a == NULL || b == NULL) return 0;
     if (a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) return 0;
-    if (a->as.bigdec.scale != b->as.bigdec.scale) return 0;
-    return mino_bigint_equals(a->as.bigdec.unscaled, b->as.bigdec.unscaled);
+    sa = a->as.bigdec.scale;
+    sb = b->as.bigdec.scale;
+    if (sa == sb) {
+        return mino_bigint_equals(a->as.bigdec.unscaled, b->as.bigdec.unscaled);
+    }
+    smax = sa > sb ? sa : sb;
+    if (mp_int_init(&au) != MP_OK) return 0;
+    if (mp_int_init(&bu) != MP_OK) { mp_int_clear(&au); return 0; }
+    if (mp_int_init(&pw) != MP_OK) { mp_int_clear(&au); mp_int_clear(&bu); return 0; }
+    mp_int_copy((mp_int)a->as.bigdec.unscaled->as.bigint.mpz, &au);
+    mp_int_copy((mp_int)b->as.bigdec.unscaled->as.bigint.mpz, &bu);
+    if (smax - sa > 0) {
+        mp_int_set_value(&pw, 10);
+        if (mp_int_expt(&pw, smax - sa, &pw) != MP_OK) goto fail;
+        if (mp_int_mul(&au, &pw, &au) != MP_OK) goto fail;
+    }
+    if (smax - sb > 0) {
+        mp_int_set_value(&pw, 10);
+        if (mp_int_expt(&pw, smax - sb, &pw) != MP_OK) goto fail;
+        if (mp_int_mul(&bu, &pw, &bu) != MP_OK) goto fail;
+    }
+    eq = (mp_int_compare(&au, &bu) == 0);
+    mp_int_clear(&au); mp_int_clear(&bu); mp_int_clear(&pw);
+    return eq;
+fail:
+    mp_int_clear(&au); mp_int_clear(&bu); mp_int_clear(&pw);
+    return 0;
 }
 
 uint32_t mino_bigdec_hash(const mino_val_t *v)
 {
-    uint32_t h;
+    /* Hash the value in trailing-zero-stripped form so 1.0M and 1.00M
+     * (numerically equal) hash the same. Walk a copy of the unscaled
+     * bigint, dividing by 10 while it has a trailing zero and scale >
+     * 0; the resulting (unscaled, scale) pair is the canonical rep. */
+    mpz_t       acc;
+    mpz_t       ten;
+    mpz_t       q;
+    mpz_t       r;
+    int         scale;
+    uint32_t    h;
     if (v == NULL || v->type != MINO_BIGDEC) return 0;
-    h = mino_bigint_hash(v->as.bigdec.unscaled);
-    h ^= ((uint32_t)v->as.bigdec.scale) * 0x27d4eb2du;
+    scale = v->as.bigdec.scale;
+    if (mp_int_init(&acc) != MP_OK) return 0;
+    if (mp_int_copy((mp_int)v->as.bigdec.unscaled->as.bigint.mpz, &acc)
+        != MP_OK) {
+        mp_int_clear(&acc);
+        return 0;
+    }
+    if (mp_int_init(&ten) != MP_OK) { mp_int_clear(&acc); return 0; }
+    if (mp_int_init(&q)   != MP_OK) { mp_int_clear(&acc); mp_int_clear(&ten); return 0; }
+    if (mp_int_init(&r)   != MP_OK) { mp_int_clear(&acc); mp_int_clear(&ten); mp_int_clear(&q); return 0; }
+    mp_int_set_value(&ten, 10);
+    while (scale > 0 && mp_int_compare_zero(&acc) != 0) {
+        if (mp_int_div(&acc, &ten, &q, &r) != MP_OK) break;
+        if (mp_int_compare_zero(&r) != 0) break;
+        mp_int_copy(&q, &acc);
+        scale--;
+    }
+    if (mp_int_compare_zero(&acc) == 0) scale = 0;
+    {
+        /* Wrap the canonical mpz in a temporary mino_val_t so we can
+         * reuse mino_bigint_hash without copying again. */
+        mino_val_t tmp;
+        memset(&tmp, 0, sizeof(tmp));
+        tmp.type = MINO_BIGINT;
+        tmp.as.bigint.mpz = &acc;
+        h = mino_bigint_hash(&tmp);
+    }
+    mp_int_clear(&acc);
+    mp_int_clear(&ten);
+    mp_int_clear(&q);
+    mp_int_clear(&r);
+    h ^= ((uint32_t)scale) * 0x27d4eb2du;
     return h ^ 0x165667b1u;
 }
 
@@ -1508,6 +1578,81 @@ mino_val_t *mino_bigdec_rem(mino_state_t *S, const mino_val_t *a,
     r = mino_bigint_rem(S, au, bu);
     if (r == NULL) return NULL;
     return mino_bigdec_make(S, r, smax);
+}
+
+/* mino_bigdec_div -- exact bigdec division. Mirrors Java's
+ * BigDecimal.divide(BigDecimal): preferred scale is sa - sb, but the
+ * quotient is computed at whatever scale makes it exact. If the
+ * division has a non-terminating decimal expansion, throw -- matching
+ * Java's ArithmeticException. The trailing-zero canonicalisation on
+ * mino's BigDecimal `=` (numerical equality) means callers can compare
+ * results across scales without worrying about whether the algorithm
+ * picked sa-sb vs sa-sb+k. */
+mino_val_t *mino_bigdec_div(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b)
+{
+    int   sa, sb;
+    mpz_t num, den, q, r, pw;
+    int   extra;
+    int   max_extra = 1024; /* same upper bound as Java's MAX_VALUE-bounded
+                             * non-terminating detector in practice */
+    mino_val_t *result = NULL;
+    if (a == NULL || b == NULL || a->type != MINO_BIGDEC
+        || b->type != MINO_BIGDEC) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "bigdec div: bigdec operands required");
+    }
+    if (mp_int_compare_zero(
+            (mp_int)b->as.bigdec.unscaled->as.bigint.mpz) == 0) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "division by zero");
+    }
+    sa = a->as.bigdec.scale;
+    sb = b->as.bigdec.scale;
+    if (mp_int_init(&num) != MP_OK) goto oom_pre;
+    if (mp_int_init(&den) != MP_OK) { mp_int_clear(&num); goto oom_pre; }
+    if (mp_int_init(&q)   != MP_OK) { mp_int_clear(&num); mp_int_clear(&den); goto oom_pre; }
+    if (mp_int_init(&r)   != MP_OK) { mp_int_clear(&num); mp_int_clear(&den); mp_int_clear(&q); goto oom_pre; }
+    if (mp_int_init(&pw)  != MP_OK) { mp_int_clear(&num); mp_int_clear(&den); mp_int_clear(&q); mp_int_clear(&r); goto oom_pre; }
+    mp_int_copy((mp_int)a->as.bigdec.unscaled->as.bigint.mpz, &num);
+    mp_int_copy((mp_int)b->as.bigdec.unscaled->as.bigint.mpz, &den);
+    /* Try increasing precision: numerator * 10^extra divided by denominator
+     * until exact. The result lives at scale (sa - sb + extra). */
+    for (extra = 0; extra <= max_extra; extra++) {
+        if (mp_int_div(&num, &den, &q, &r) != MP_OK) goto oom;
+        if (mp_int_compare_zero(&r) == 0) {
+            mino_val_t *q_wrapped;
+            mpz_t      *qz_heap = bigint_alloc_zeroed();
+            if (qz_heap == NULL) goto oom;
+            mp_int_copy(&q, qz_heap);
+            q_wrapped = bigint_wrap(S, qz_heap);
+            if (q_wrapped == NULL) goto oom;
+            result = mino_bigdec_make(S, q_wrapped, sa - sb + extra);
+            break;
+        }
+        /* Increase precision: num *= 10 */
+        mp_int_set_value(&pw, 10);
+        if (mp_int_mul(&num, &pw, &num) != MP_OK) goto oom;
+    }
+    mp_int_clear(&num);
+    mp_int_clear(&den);
+    mp_int_clear(&q);
+    mp_int_clear(&r);
+    mp_int_clear(&pw);
+    if (result == NULL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "non-terminating decimal expansion in bigdec division");
+    }
+    return result;
+oom:
+    mp_int_clear(&num);
+    mp_int_clear(&den);
+    mp_int_clear(&q);
+    mp_int_clear(&r);
+    mp_int_clear(&pw);
+oom_pre:
+    return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                                 "out of memory in bigdec div");
 }
 
 mino_val_t *mino_bigdec_mod(mino_state_t *S, const mino_val_t *a,

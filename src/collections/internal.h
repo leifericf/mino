@@ -279,6 +279,8 @@ mino_val_t *mino_bigdec_sub(mino_state_t *S, const mino_val_t *a,
                             const mino_val_t *b);
 mino_val_t *mino_bigdec_mul(mino_state_t *S, const mino_val_t *a,
                             const mino_val_t *b);
+mino_val_t *mino_bigdec_div(mino_state_t *S, const mino_val_t *a,
+                            const mino_val_t *b);
 mino_val_t *mino_bigdec_neg(mino_state_t *S, const mino_val_t *a);
 mino_val_t *mino_to_bigdec(mino_state_t *S, const mino_val_t *v);
 

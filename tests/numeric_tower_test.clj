@@ -268,10 +268,12 @@
   (is (not (decimal? 1.5)))
   (is (not (decimal? 1)))
   (is (rational? 1.5M))
-  ;; Same-rep equality under `=` (decimal scale-aware).
+  ;; Numeric equality under `=` (matches Clojure JVM: BigDecimals
+  ;; compare numerically via compareTo, not scale-strictly).
   (is (= 1.5M 1.5M))
-  (is (not (= 1.0M 1.00M)))
-  ;; Numeric equality across scales under `==`.
+  (is (= 1.0M 1.00M))
+  (is (= 2.0M 2M))
+  ;; Cross-tier numeric equality under `==` (works the same).
   (is (== 1.0M 1.00M))
   (is (== 1.0M 1M))
   (is (== 1.5 1.5M)))

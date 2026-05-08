@@ -184,8 +184,7 @@ static mino_val_t *tower_op_at_tier(mino_state_t *S, tower_op_t op,
         case OP_ADD: return mino_bigdec_add(S, a, b);
         case OP_SUB: return mino_bigdec_sub(S, a, b);
         case OP_MUL: return mino_bigdec_mul(S, a, b);
-        case OP_DIV: return prim_throw_classified(S, "eval/type", "MTY001",
-                                "bigdec division requires explicit precision (with-precision unimplemented)");
+        case OP_DIV: return mino_bigdec_div(S, a, b);
         }
         break;
     }
@@ -694,8 +693,7 @@ static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
             if (op == OP_SUB) {
                 a.vacc = mino_bigdec_sub(S, a.vacc, opd);
             } else {
-                return prim_throw_classified(S, "eval/type", "MTY001",
-                    "bigdec division requires explicit precision (with-precision unimplemented)");
+                a.vacc = mino_bigdec_div(S, a.vacc, opd);
             }
             if (a.vacc == NULL) return NULL;
             break;

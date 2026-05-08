@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.100.6
+
+### Bigdec division
+
+`(/ 2.0M 1.0M)` no longer errors with "with-precision unimplemented".
+The new `mino_bigdec_div` mirrors Java's `BigDecimal.divide(BigDecimal)`:
+preferred scale is `sa - sb`, but the algorithm tries successively
+larger scales (multiplying the numerator by 10 each step) until the
+division is exact. If the quotient has a non-terminating decimal
+expansion the function throws "non-terminating decimal expansion in
+bigdec division" -- same error class as Java's `ArithmeticException`.
+Cap is 1024 extra digits, well past anything that would terminate.
+
+The tower-arithmetic dispatch in `tower_op_at_tier` and
+`tower_reduce_seeded` now both route `OP_DIV` for the BIGDEC tier
+through this primitive. External `slash.cljc` rises from 41/42 (1
+error that aborted the rest of the file) to 158/160 -- the remaining
+two are bigdec-meets-ratio cases (`(/ 2.0M 1/2)`) where mino's
+documented tier-collapse-to-float diverges from JVM Clojure's promote
+ratio-to-bigdec; tracked as a separate intentional divergence.
+
+### `=` on BigDecimals is numerical
+
+`(= 1.0M 1.00M)` is now `true`, matching JVM Clojure's `=` (which
+dispatches BigDecimals through `Numbers.equiv` -> `compareTo == 0`).
+mino was previously scale-strict (`Object.equals`-style), which
+mismatched both Clojure's `=` and the cross-dialect tests in the
+external suite. The hash function now strips trailing zeros from
+the unscaled bigint before mixing in the scale, preserving the
+equal-implies-equal-hash invariant.
+
+This is a breaking change for code that relied on `(= 1.0M 1.00M)`
+being false -- use `mino_bigdec_equals` directly via
+`identical?`-style comparisons or compare the printed forms if you
+need to distinguish scales. Internal `numeric_tower_test` is updated
+to assert the new behavior.
+
 ## v0.100.5
 
 Three small fixes for Clojure parity, all driven by the external
