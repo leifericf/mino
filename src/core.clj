@@ -844,6 +844,13 @@
 (defn force
   "Forces evaluation of a delay. If x is not a delay, returns x."
   [x] (if (delay? x) (deref-delay x) x))
+;; Override C deref so delays (which are map-shaped on mino) participate
+;; in (deref ...) like atoms/futures/vars do.
+(let [c-deref deref]
+  (def deref
+    "Returns the current value of a reference type: atom, var, volatile,
+     future, promise, reduced, or delay. Forces a delay on first call."
+    (fn [x] (if (delay? x) (deref-delay x) (c-deref x)))))
 ;; Override C realized? to also handle delays and futures
 (let [c-realized? realized?]
   (def realized?

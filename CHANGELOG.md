@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.100.1
+
+`(deref delay)` now forces and returns the delay's value. mino's
+delay is map-shaped (`{:delay/fn ... :delay/state ...}`), so the
+C-side `prim_deref` rejected it as "not an atom/var/future/...".
+`force` and `realized?` already special-cased delays mino-side; the
+override here adds the matching `deref` arm so all three reference
+operations agree. External `realized_qmark.cljc` now passes
+end-to-end.
+
 ## v0.100.0
 
 Reader conditionals: drop the `:clj` fallback. mino is not a JVM
