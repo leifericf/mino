@@ -1434,40 +1434,6 @@ mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, min
 /* Type coercion                                                             */
 /* ------------------------------------------------------------------------- */
 
-mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *v;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "int requires one argument");
-    }
-    v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_INT) return v;
-    if (v != NULL && v->type == MINO_FLOAT) return mino_int(S, (long long)v->as.f);
-    if (v != NULL && v->type == MINO_BIGINT) {
-        long long ll;
-        if (mino_as_ll(v, &ll)) return mino_int(S, ll);
-        return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "int: bigint value out of long range");
-    }
-    if (v != NULL && v->type == MINO_RATIO) {
-        /* Truncate toward zero: numerator / denominator using integer div. */
-        return mino_int(S, (long long)mino_ratio_to_double(v));
-    }
-    if (v != NULL && v->type == MINO_BIGDEC) {
-        return mino_int(S, (long long)mino_bigdec_to_double(v));
-    }
-    /* (int \a) -> 97: char value yields its Unicode codepoint. */
-    if (v != NULL && v->type == MINO_CHAR) {
-        return mino_int(S, (long long)v->as.ch);
-    }
-    /* (int "a") -> 97: single-char string to char code (legacy). */
-    if (v != NULL && v->type == MINO_STRING && v->as.s.len == 1) {
-        return mino_int(S, (long long)(unsigned char)v->as.s.data[0]);
-    }
-    return prim_throw_classified(S, "eval/type", "MTY001", "int: expected a number");
-}
-
 /* Helper for narrow integer casts: extract an integer value from any
  * numeric type, checking for NaN/infinity on floats and bigdecs. The
  * caller then range-checks the result against the target tier. */
@@ -1509,6 +1475,85 @@ static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
     }
     *err = "expected a number";
     return 0;
+}
+
+mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    long long ll;
+    const char *err = NULL;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "int requires one argument");
+    }
+    v = args->as.cons.car;
+    /* (int \a) -> 97: char value yields its Unicode codepoint, no range
+     * check (Unicode codepoints fit in int32). */
+    if (v != NULL && v->type == MINO_CHAR) {
+        return mino_int(S, (long long)v->as.ch);
+    }
+    /* For floats and bigdecs, compare against int32 bounds before
+     * truncation. JVM Clojure's int checks the double value itself,
+     * so values like -2147483648.000001 throw even though they
+     * truncate to an in-range long. */
+    if (v != NULL && v->type == MINO_FLOAT) {
+        double d = v->as.f;
+        if (d != d) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "int: NaN cannot be coerced to integer");
+        }
+        if (d < -2147483648.0 || d > 2147483647.0) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "int: value out of int32 range");
+        }
+        return mino_int(S, (long long)d);
+    }
+    if (v != NULL && v->type == MINO_BIGDEC) {
+        double d = mino_bigdec_to_double(v);
+        if (d != d) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "int: NaN cannot be coerced to integer");
+        }
+        if (d < -2147483648.0 || d > 2147483647.0) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "int: value out of int32 range");
+        }
+        return mino_int(S, (long long)d);
+    }
+    if (!extract_integer_for_cast(S, v, &ll, &err)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "int: %s", err ? err : "expected a number");
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    if (ll < -2147483648LL || ll > 2147483647LL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "int: value out of int32 range");
+    }
+    return mino_int(S, ll);
+}
+
+mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    long long ll;
+    const char *err = NULL;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "long requires one argument");
+    }
+    v = args->as.cons.car;
+    /* (long \a) -> 97: char value yields its Unicode codepoint. */
+    if (v != NULL && v->type == MINO_CHAR) {
+        return mino_int(S, (long long)v->as.ch);
+    }
+    if (!extract_integer_for_cast(S, v, &ll, &err)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "long: %s", err ? err : "expected a number");
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    /* mino's MINO_INT is int64 already, so the range check is the same
+     * one extract_integer_for_cast already did against long range. */
+    return mino_int(S, ll);
 }
 
 mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -2046,7 +2091,13 @@ const mino_prim_def k_prims_numeric[] = {
     {"infinite?", prim_infinite_p,
      "Returns true if x is positive or negative infinity."},
     {"int",   prim_int,
-     "Coerces x to an integer."},
+     "Coerces x to an int (32-bit integer). Throws on out-of-range "
+     "values, NaN, or infinity. Returns the value as a MINO_INT (mino "
+     "has only one integer tier); only the contract narrows."},
+    {"long",  prim_long,
+     "Coerces x to a long (64-bit integer). Throws on out-of-range "
+     "values, NaN, or infinity, including bigint and bigdec out of "
+     "long range."},
     {"short", prim_short,
      "Coerces x to a short (16-bit integer). Throws on out-of-range "
      "values, NaN, or infinity. Returns the value as a long since mino "

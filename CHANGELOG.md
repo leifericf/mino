@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.100.23
+
+### Numeric tower: Make `(int x)` and `(long x)` throw on out-of-range
+
+`prim_int` previously silently saturated/clamped on overflow:
+- `bigint` → `mino_as_ll` returned a clamped `long long`
+- `float` → `(long long)v->as.f` saturated to `LLONG_MIN`/`LLONG_MAX`
+- single-char string was a legacy fast-path
+
+JVM Clojure's `(int x)` and `(long x)` narrow with range checks,
+throwing on overflow / NaN / infinity. Tighten mino to match:
+
+- `prim_int` now range-checks against int32 `[-2147483648, 2147483647]`.
+  For floats and bigdecs the check is on the *double value* itself
+  (so `(int -2147483648.000001)` throws even though it truncates to
+  the in-range `-2147483648`). For bigints / ratios / MINO_INT, the
+  check is on the long-long extracted by the new
+  `extract_integer_for_cast` helper. Single-char string fast-path
+  removed (test asserts `(p/thrown? (int "0"))`); chars still pass
+  through as codepoints.
+- New `prim_long` registered as `"long"`. Range checks against int64
+  via `extract_integer_for_cast`, so a bigint or bigdec out of long
+  range throws (previously `mino_as_ll` clamped silently to `0`).
+  Removes the `(def long ... int)` alias in `src/core.clj`.
+
+Verification: `int.cljc` 22 → 27 assertions, all passing.
+`long.cljc` 22 → 25 assertions, all passing. Internal suite 1476 /
+7071 / 0.
+
 ## v0.100.22
 
 ### Numeric tower: Add `(short x)` and `(byte x)` with range checks

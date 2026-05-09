@@ -798,7 +798,6 @@
 (def double?   "Returns true if x is a float." float?)
 ;; ratio? / rational? / decimal? are C primitives that consult the real
 ;; numeric-tower types (MINO_RATIO, MINO_BIGDEC); registered in prim.c.
-(def long      "Coerces x to an integer." int)
 (def double    "Coerces x to a float." float)
 (defn num
   "Returns x if it is a number, nil if x is nil, otherwise throws.
