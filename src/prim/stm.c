@@ -231,12 +231,33 @@ mino_val_t *prim_ref_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
                                     mino_val_t *extra);
 
+/* C-side commute closure: pairs a host transformer with its user
+ * pointer. Stored on the heap and wrapped in a MINO_HANDLE so the
+ * GC sweep finalizer frees the struct when the handle becomes
+ * unreachable. The handle's tag is a static string -- pointer
+ * identity is the discriminator. */
+struct tx_c_closure {
+    mino_tx_xform_fn fn;
+    void            *user;
+};
+
+static const char *const TX_C_CLOSURE_TAG = "mino/tx-c-closure";
+
+static void tx_c_closure_finalize(void *ptr, const char *tag)
+{
+    (void)tag;
+    free(ptr);
+}
+
 /* --- commute log replay -------------------------------------------------- *
  *
- * The commute log is a cons-list of (fn arg1 arg2 ...) tuples stored
- * in REVERSE CHRONOLOGICAL ORDER (cons-prepended so each commute is
- * O(1) to record). Replay reverses the list onto a fresh stack and
- * walks forward, applying each entry to the running accumulator.
+ * The commute log is a list of entries stored in REVERSE CHRONOLOGICAL
+ * ORDER (cons-prepended so each commute is O(1) to record). Each entry
+ * is either:
+ *   - a cons (fn arg1 arg2 ...) for a Clojure-side commute, OR
+ *   - a MINO_HANDLE with TX_C_CLOSURE_TAG for a C-side commute_c.
+ * Replay reverses the list onto a fresh stack and walks forward,
+ * dispatching per entry shape against the running accumulator.
  */
 static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
                                       mino_val_t *base, mino_env_t *env)
@@ -250,15 +271,20 @@ static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
     }
     for (p = reversed; mino_is_cons(p); p = p->as.cons.cdr) {
         mino_val_t *entry = p->as.cons.car;
-        mino_val_t *fn;
-        mino_val_t *extra;
-        mino_val_t *call_args;
-        mino_val_t *result;
-        if (!mino_is_cons(entry)) continue;
-        fn    = entry->as.cons.car;
-        extra = entry->as.cons.cdr;
-        call_args = alter_build_args(S, cur, extra);
-        result = mino_call(S, fn, call_args, env);
+        mino_val_t *result = NULL;
+        if (entry != NULL && entry->type == MINO_HANDLE
+            && entry->as.handle.tag == TX_C_CLOSURE_TAG) {
+            struct tx_c_closure *c = (struct tx_c_closure *)
+                                      entry->as.handle.ptr;
+            result = c->fn(S, cur, c->user, env);
+        } else if (mino_is_cons(entry)) {
+            mino_val_t *fn        = entry->as.cons.car;
+            mino_val_t *extra     = entry->as.cons.cdr;
+            mino_val_t *call_args = alter_build_args(S, cur, extra);
+            result = mino_call(S, fn, call_args, env);
+        } else {
+            continue;
+        }
         if (result == NULL) return NULL;
         cur = result;
     }
@@ -403,30 +429,56 @@ static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
     return head;
 }
 
-mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+/* Compute-new callback: produces the post-transformer value given
+ * the current in-tx value. Implementations bind to either a Clojure
+ * fn invocation (mino_call) or a direct C transformer call. */
+typedef mino_val_t *(*tx_compute_fn)(mino_state_t *S, mino_val_t *cur,
+                                      void *ctx, mino_env_t *env);
+
+struct compute_clj_ctx {
+    mino_val_t *fn;
+    mino_val_t *extra;
+};
+
+static mino_val_t *compute_clj(mino_state_t *S, mino_val_t *cur,
+                                void *ctx, mino_env_t *env)
 {
-    mino_val_t        *ref, *fn, *cur, *call_args, *result, *extra;
+    struct compute_clj_ctx *c = (struct compute_clj_ctx *)ctx;
+    mino_val_t *call_args = alter_build_args(S, cur, c->extra);
+    return mino_call(S, c->fn, call_args, env);
+}
+
+struct compute_c_ctx {
+    mino_tx_xform_fn fn;
+    void            *user;
+};
+
+static mino_val_t *compute_c(mino_state_t *S, mino_val_t *cur,
+                              void *ctx, mino_env_t *env)
+{
+    struct compute_c_ctx *c = (struct compute_c_ctx *)ctx;
+    return c->fn(S, cur, c->user, env);
+}
+
+/* Shared core for prim_alter / mino_tx_alter_c. Caller has already
+ * type-checked ref. The compute callback runs under the in-tx
+ * effective value AFTER the read mark is recorded, since alter
+ * implicitly reads the ref. Returns the new value, or NULL on throw. */
+static mino_val_t *tx_alter_core(mino_state_t *S, mino_val_t *ref,
+                                  tx_compute_fn compute, void *ctx,
+                                  mino_env_t *env)
+{
     tx_ref_state_t    *rs;
-    mino_thread_ctx_t *ctx = mino_current_ctx(S);
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "alter requires at least two arguments: ref and function");
-    }
-    ref   = args->as.cons.car;
-    fn    = args->as.cons.cdr->as.cons.car;
-    extra = args->as.cons.cdr->as.cons.cdr;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "alter: first argument must be a ref");
-    }
-    if (ctx->current_tx == NULL) {
+    mino_val_t        *cur, *result;
+    mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
+    if (t_ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
     /* JVM canon: alter after commute on the same ref throws
-     * "Can't set after commute". See prim_ref_set above. */
+     * "Can't set after commute". See tx_ref_set_core above. */
     if (rs->kind == TX_STATE_COMMUTE_LOG && rs->commute_log != NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "Can't set after commute");
@@ -437,8 +489,7 @@ mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         rs->read             = 1;
         rs->snapshot_version = ref->as.tx_ref.version;
     }
-    call_args = alter_build_args(S, cur, extra);
-    result = mino_call(S, fn, call_args, env);
+    result = compute(S, cur, ctx, env);
     if (result == NULL) return NULL;
     rs->kind        = TX_STATE_ALTER;
     rs->tentative   = result;
@@ -446,25 +497,85 @@ mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
-/* --- commute + ensure ---------------------------------------------------- */
-
-mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t        *ref, *fn, *cur, *call_args, *result, *extra, *entry;
-    tx_ref_state_t    *rs;
-    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    mino_val_t *ref;
+    struct compute_clj_ctx clj_ctx;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "commute requires at least two arguments: ref and function");
+            "alter requires at least two arguments: ref and function");
     }
-    ref   = args->as.cons.car;
-    fn    = args->as.cons.cdr->as.cons.car;
-    extra = args->as.cons.cdr->as.cons.cdr;
+    ref           = args->as.cons.car;
+    clj_ctx.fn    = args->as.cons.cdr->as.cons.car;
+    clj_ctx.extra = args->as.cons.cdr->as.cons.cdr;
     if (ref == NULL || ref->type != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "commute: first argument must be a ref");
+            "alter: first argument must be a ref");
     }
-    if (ctx->current_tx == NULL) {
+    return tx_alter_core(S, ref, compute_clj, &clj_ctx, env);
+}
+
+mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *ref,
+                            mino_tx_xform_fn fn, void *user,
+                            mino_env_t *env)
+{
+    struct compute_c_ctx c_ctx;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_tx_alter_c: argument must be a ref");
+    }
+    if (fn == NULL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_tx_alter_c: transformer fn must not be NULL");
+    }
+    c_ctx.fn   = fn;
+    c_ctx.user = user;
+    return tx_alter_core(S, ref, compute_c, &c_ctx, env);
+}
+
+/* --- commute + ensure ---------------------------------------------------- */
+
+/* Build a log entry for the given commute. For Clojure-side commutes
+ * the entry is a `(fn . extra)` cons; for C-side it is a HANDLE
+ * wrapping a malloc'd struct freed by tx_c_closure_finalize on GC. */
+static mino_val_t *make_clj_log_entry(mino_state_t *S, void *ctx)
+{
+    struct compute_clj_ctx *c = (struct compute_clj_ctx *)ctx;
+    return mino_cons(S, c->fn, c->extra);
+}
+
+static mino_val_t *make_c_log_entry(mino_state_t *S, void *ctx)
+{
+    struct compute_c_ctx *c = (struct compute_c_ctx *)ctx;
+    struct tx_c_closure  *closure = (struct tx_c_closure *)
+                                     malloc(sizeof(*closure));
+    if (closure == NULL) {
+        prim_throw_classified(S, "eval/state", "MST005",
+            "out of memory allocating commute closure");
+        return NULL;
+    }
+    closure->fn   = c->fn;
+    closure->user = c->user;
+    return mino_handle_ex(S, closure, TX_C_CLOSURE_TAG,
+                           tx_c_closure_finalize);
+}
+
+typedef mino_val_t *(*tx_log_entry_fn)(mino_state_t *S, void *ctx);
+
+/* Shared core for prim_commute / mino_tx_commute_c. Caller has
+ * already type-checked ref. Returns the call-site value, or NULL on
+ * throw. The compute callback runs eagerly to produce the call-site
+ * return; if a fresh-or-chained commute, make_log_entry produces the
+ * value pushed onto the log for replay at commit. */
+static mino_val_t *tx_commute_core(mino_state_t *S, mino_val_t *ref,
+                                    tx_compute_fn compute,
+                                    tx_log_entry_fn make_log_entry,
+                                    void *ctx, mino_env_t *env)
+{
+    tx_ref_state_t    *rs;
+    mino_val_t        *cur, *result, *entry;
+    mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
+    if (t_ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
@@ -474,18 +585,20 @@ mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (cur == NULL) return NULL;
     /* commute does NOT mark rs->read -- two transactions commuting on
      * the same ref shouldn't conflict. */
-    call_args = alter_build_args(S, cur, extra);
-    result = mino_call(S, fn, call_args, env);
+    result = compute(S, cur, ctx, env);
     if (result == NULL) return NULL;
     if (rs->kind == TX_STATE_ALTER && (rs->tentative != NULL || rs->read)) {
         /* alter-then-commute: alter has already pinned a value (or at
          * least committed to read-set validation). Fold the commute
-         * into the alter -- it's just another arbitrary recompute. */
+         * into the alter -- it's just another arbitrary recompute.
+         * Matches JVM, which skips commute-log replay at commit for
+         * refs already in the write set. */
         rs->tentative = result;
     } else {
-        /* Fresh commute or commute-then-commute: prepend
-         * (fn arg1 arg2 ...) to the log and switch to COMMUTE_LOG. */
-        entry           = mino_cons(S, fn, extra);
+        /* Fresh commute or commute-then-commute: prepend a log entry
+         * and switch to COMMUTE_LOG. */
+        entry = make_log_entry(S, ctx);
+        if (entry == NULL) return NULL;
         rs->commute_log = mino_cons(S, entry, rs->commute_log != NULL
                                               ? rs->commute_log
                                               : mino_empty_list(S));
@@ -493,6 +606,44 @@ mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         rs->tentative   = NULL;
     }
     return result;
+}
+
+mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ref;
+    struct compute_clj_ctx clj_ctx;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "commute requires at least two arguments: ref and function");
+    }
+    ref           = args->as.cons.car;
+    clj_ctx.fn    = args->as.cons.cdr->as.cons.car;
+    clj_ctx.extra = args->as.cons.cdr->as.cons.cdr;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "commute: first argument must be a ref");
+    }
+    return tx_commute_core(S, ref, compute_clj, make_clj_log_entry,
+                            &clj_ctx, env);
+}
+
+mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *ref,
+                              mino_tx_xform_fn fn, void *user,
+                              mino_env_t *env)
+{
+    struct compute_c_ctx c_ctx;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_tx_commute_c: argument must be a ref");
+    }
+    if (fn == NULL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_tx_commute_c: transformer fn must not be NULL");
+    }
+    c_ctx.fn   = fn;
+    c_ctx.user = user;
+    return tx_commute_core(S, ref, compute_c, make_c_log_entry,
+                            &c_ctx, env);
 }
 
 mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)

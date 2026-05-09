@@ -537,6 +537,37 @@ mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *v);
  * val on success. Equivalent to Clojure's `(ref-set ref val)`. */
 mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *v, mino_val_t *val);
 
+/* C-callable transformer used by mino_tx_alter_c / mino_tx_commute_c.
+ * `cur` is the in-tx effective value at call time; `user` is the
+ * caller-supplied opaque pointer. Returns the new value. May call
+ * mino_call for nested Clojure dispatch and may throw via
+ * prim_throw_classified -- both unwind through the enclosing tx
+ * runner. The function pointer must remain valid for the lifetime of
+ * the transaction (in particular: across retries and through commit-
+ * time replay for commute). */
+typedef mino_val_t *(*mino_tx_xform_fn)(mino_state_t *S, mino_val_t *cur,
+                                         void *user, mino_env_t *env);
+
+/* Apply (fn cur user) to ref's current in-tx value and store the
+ * result. Records a read for read-set validation. Must be called from
+ * inside a transaction. Returns the new value, or NULL if the
+ * transformer threw. Equivalent to (alter ref #(fn % user)). */
+mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *v,
+                            mino_tx_xform_fn fn, void *user,
+                            mino_env_t *env);
+
+/* Like mino_tx_alter_c but does NOT record a read (commute semantics).
+ * The fn is invoked once eagerly to produce the call-site value; if
+ * the ref did not also have an alter / ref-set in the same tx, the fn
+ * is replayed at commit time against the latest committed value (the
+ * fn must therefore be commutative). Otherwise the call-site value is
+ * what gets committed (matching JVM, which skips commute-log replay
+ * for refs in the write set). Returns the call-site value, or NULL if
+ * the transformer threw. */
+mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *v,
+                              mino_tx_xform_fn fn, void *user,
+                              mino_env_t *env);
+
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
  * the primitive variants fill with their type's zero value (0 for

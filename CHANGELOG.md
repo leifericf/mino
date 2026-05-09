@@ -188,6 +188,90 @@ the STM rollout). External suite holds at 212 OK.
 
 Internal suite 1498 / 7127 / 0.
 
+### Layer 1 audits (Clojure-surface fidelity)
+
+A pass through the STM surface comparing it against canonical
+JVM Clojure (`clojure.lang.LockingTransaction`,
+`clojure.lang.Ref`). Two accidental deviations were found and
+corrected; no API additions or removals on the Clojure side.
+
+#### `set-validator!` no longer validates the current value
+
+`set-validator!` previously called the new validator on the
+ref/atom's current value at install time and rejected with
+MCT001 if it failed. JVM Clojure does not do this -- only
+subsequent state transitions are checked. Match the canon: install
+the validator unconditionally. The old test
+`validator-on-current` (which asserted the rejection) is replaced
+with `validator-install-on-failing-current`; the STM
+`validator-rejects` test no longer needs the `(ref 1)` workaround.
+
+#### `alter` / `ref-set` after `commute` throws
+
+JVM Clojure throws `"Can't set after commute"` when `alter` or
+`ref-set` is called on a ref that already has a logged commute in
+the same transaction. mino previously folded the commute log into
+the alter's tentative value -- the final committed value matched
+JVM by accident, but the error contract differed. Throw
+`eval/state` MST002 with the canonical message. The
+commute-after-alter direction is unchanged: alter pins the value,
+the commute folds in, and commit writes the alter+commute
+tentative (matching JVM, which skips the commute log replay for
+refs already in the write set).
+
+#### Documented deviation list in the STM module header
+
+`src/prim/stm.c` now opens with a numbered enumeration of every
+intentional or documented deviation from JVM Clojure: single-
+version optimistic locking, the global commit lock, no barging,
+no mid-body retry, history stubs, the simpler print form, the
+post-A.1 set-validator! semantics, and the post-A.2
+alter-after-commute contract. A reader auditing mino's STM
+against canon should find the answer in one place.
+
+### Layer 2a C API (host-side mirror of the Clojure surface)
+
+Anything a Clojure programmer can do, a C host can do. The new
+`mino_tx_*` entry points sit alongside the existing
+`mino_atom_*` and `mino_volatile_*` API in `src/mino.h`. Each
+shares its core implementation with the corresponding Clojure-
+side primitive via a `tx_*_core` helper, so the two surfaces
+cannot drift.
+
+#### `mino_is_tx_ref` + `mino_tx_ref_deref`
+
+Predicate + reader. The deref's in-tx vs. out-of-tx dispatch is
+unchanged: a host calling it from inside an outer transaction
+gets the in-tx effective value plus read-set bookkeeping;
+outside, the committed value. NULL- and non-ref-tolerant at the
+public entry.
+
+#### `mino_tx_ref_set`
+
+Writer. Refactors `prim_ref_set` to share `tx_ref_set_core`
+with the new C entry; both go through the same kind transition,
+read-set bookkeeping, and post-commute set-rejection check.
+
+#### `mino_tx_alter_c` + `mino_tx_commute_c`
+
+Host transformers. The new typedef
+`mino_val_t *(*mino_tx_xform_fn)(mino_state_t *, mino_val_t *cur,
+void *user, mino_env_t *)` is the C-side analogue of `(fn [cur]
+...)`. `mino_tx_alter_c` applies the fn to the in-tx value and
+records a read; `mino_tx_commute_c` applies it without recording
+a read and -- if the ref has not also been altered in the same tx
+-- replays it at commit against the latest committed value.
+
+The Clojure-side `prim_alter` / `prim_commute` and the new C
+entries share `tx_alter_core` / `tx_commute_core` helpers. The
+compute step is parameterised by a `tx_compute_fn` callback so
+the Clojure side dispatches via `mino_call` and the C side calls
+the host transformer directly. Commute log entries are likewise
+polymorphic: a `(fn . extra)` cons for Clojure entries, or a
+`MINO_HANDLE` wrapping a heap-allocated `{xform_fn, user}` closure
+for C entries (freed via the handle's GC finalizer). Replay
+dispatches per entry shape.
+
 ## v0.100.34
 
 ### Add `aset` for host arrays; tighten `vec` bad-shape rejection
