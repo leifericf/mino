@@ -767,14 +767,19 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_current_ctx(S)->try_depth = saved_try;
         /* Populate last_error from the exception value so the host
-         * can inspect it via mino_last_error(). */
+         * can inspect it via mino_last_error(). Use record_eval_diag
+         * (non-throwing) -- set_eval_diag would re-throw to any
+         * outer try frame, leaking out of pcall's catch arm and
+         * skipping bookkeeping the caller depends on (e.g. the STM
+         * commit lock). */
         if (mino_last_error(S) == NULL || mino_last_error(S)[0] == '\0') {
             const char *s = NULL;
             size_t slen = 0;
             if (ex != NULL && mino_to_string(ex, &s, &slen)) {
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", s);
+                (void)slen;
+                record_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", s);
             } else {
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
+                record_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
             }
         }
         if (out != NULL) {

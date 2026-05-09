@@ -891,6 +891,13 @@ const char *source_cache_get_line(mino_state_t *S, const char *file,
 void        set_eval_diag(mino_state_t *S, const mino_val_t *form,
                           const char *kind, const char *code,
                           const char *msg);
+/* Non-throwing variant: stores the diagnostic without converting it
+ * to a thrown exception. Use from catch arms that have already
+ * absorbed a throw and just need to publish the message via
+ * mino_last_error / mino_last_error_map. */
+void        record_eval_diag(mino_state_t *S, const mino_val_t *form,
+                             const char *kind, const char *code,
+                             const char *msg);
 const char *type_tag_str(const mino_val_t *v);                    /* static string */
 void        push_frame(mino_state_t *S, const char *name,     /* name: borrowed */
                        const char *file, int line,            /* file: borrowed */

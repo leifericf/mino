@@ -361,6 +361,40 @@ fire watches anywhere.
 upstream, and the atom / ref / var arms pass cleanly. The agent
 arm of each still errors (out of scope until agents land).
 
+### Fix `mino_pcall` re-throw via `set_eval_diag`
+
+`mino_pcall`'s catch arm called `set_eval_diag` to publish the
+caught error's message via `mino_last_error` /
+`mino_last_error_map`. But `set_eval_diag` itself longjmps to the
+next-outer try frame when one exists -- so any pcall caller that
+ran inside a Clojure `try` would see its catch path hijacked by
+the longjmp and unwind to the outer frame, **leaking any
+bookkeeping the caller depended on**.
+
+In the STM commit path, that bookkeeping was the global commit
+lock: a validator throw inside a `try (dosync ...) (catch ...)`
+would longjmp out of `run_ref_validator` past `stm_unlock`,
+leaving `S->stm_commit_lock` permanently held. The next
+`dosync` deadlocked.
+
+Fix: extracted a non-throwing variant `record_eval_diag` from
+`set_eval_diag` and routed `mino_pcall`'s catch arm through it.
+The throw-conversion path of `set_eval_diag` is preserved for
+its primary use case (turning eval-phase diagnostics into
+catchable exceptions).
+
+`tests/stm_test.clj`'s new
+`validator-throw-does-not-deadlock-stm-lock` regression test
+proves the lock is released after a validator throw (the first
+tx errors via retry exhaustion; the second tx completes
+normally instead of hanging).
+
+The agent code's `agent_try_call` (added in E.4 to work around
+the same pcall bug) is left in place. It's not strictly
+necessary now but documents the historical pcall contract; a
+follow-up commit can fold it back into `mino_pcall` if the
+agent maintainers prefer one mechanism.
+
 ### Agents (MVP)
 
 mino now ships agents: `agent`, `agent?`, `send`, `send-off`,
