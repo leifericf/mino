@@ -1045,7 +1045,11 @@ mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll->as.vec.len == 0) return mino_nil(S);
         return vec_nth(coll, coll->as.vec.len - 1);
     }
-    if (coll->type == MINO_CONS) return coll->as.cons.car;
+    /* Only list-shaped MINO_CONS cells are stack-eligible. The result
+     * of a (cons x y) call has not_list=1 and falls through to throw,
+     * matching JVM Clojure where Cons is not a stack. */
+    if (coll->type == MINO_CONS && !coll->as.cons.not_list)
+        return coll->as.cons.car;
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "peek: expected a vector or list, got %s",
@@ -1071,7 +1075,8 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return vec_pop(S, coll);
     }
-    if (coll->type == MINO_CONS) return coll->as.cons.cdr;
+    if (coll->type == MINO_CONS && !coll->as.cons.not_list)
+        return coll->as.cons.cdr;
     {
         char msg[96];
         snprintf(msg, sizeof(msg), "pop: expected a vector or list, got %s",

@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.100.27
+
+### Sequences: `(cons x y)` returns non-list shape; peek rejects it
+
+In JVM Clojure `(cons x y)` returns a `clojure.lang.Cons` cell that
+implements `ISeq` but is *not* a list — `(list? (cons 1 nil))` is
+false, and `(peek (cons 1 nil))` throws because Cons is not a
+stack. mino had no such distinction: cons-results and list literals
+were both `MINO_CONS`, so `peek` accepted both and `list?` returned
+true on both.
+
+Add a `not_list` flag to the `MINO_CONS` struct. `mino_cons` zeroes
+it; `prim_cons` (the runtime `(cons x y)`) sets it to 1. `prim_peek`
+and `prim_pop` only accept MINO_CONS cells where `not_list` is 0;
+the cons-call path falls through to the throw branch. `prim_list_p`
+also checks the flag.
+
+Keeping the data shape as MINO_CONS (rather than wrapping in
+chunked-cons or lazy) preserves the eval path for macro-built forms
+— core.clj uses `(cons head body)` extensively to construct
+expansions that are then evaluated as calls.
+
+Internal suite 1476 / 7084 / 0. `peek.cljc` 10/0/1 → 11/0/0.
+`list_qmark.cljc` stays at 22/22.
+
 ## v0.100.26
 
 ### Numeric tower: Widen bigdec / ratio division to bigdec

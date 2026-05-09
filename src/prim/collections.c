@@ -130,13 +130,23 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
 mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *cdr;
+    mino_val_t *result;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "cons requires two arguments");
     }
     cdr = val_to_seq(S, args->as.cons.cdr->as.cons.car);
     if (cdr == NULL) return NULL;
-    return mino_cons(S, args->as.cons.car, cdr);
+    result = mino_cons(S, args->as.cons.car, cdr);
+    if (result == NULL) return NULL;
+    /* `(cons x y)` returns a Cons-shaped seq that is distinct from a
+     * list literal: `(list? ...)` is false, `peek`/`pop` throw. The
+     * data shape stays MINO_CONS so the eval path can still apply
+     * macro-built forms; we just flip a bit to mark the cell as a
+     * cons-call result. List literals from the reader keep the bit
+     * cleared. */
+    result->as.cons.not_list = 1;
+    return result;
 }
 
 /* ------------------------------------------------------------------------- */

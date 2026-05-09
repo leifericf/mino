@@ -27,7 +27,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 100
-#define MINO_VERSION_PATCH 26
+#define MINO_VERSION_PATCH 27
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -180,6 +180,10 @@ struct mino_val {
             const char *file;  /* source file (NULL if unknown) */
             int         line;  /* source line (0 if unknown) */
             int         column;/* source column (0 if unknown) */
+            int         not_list; /* set when this cell came from a
+                                   * (cons x y) call: list? is false,
+                                   * peek/pop throw. List literals from
+                                   * the reader keep this 0. */
         } cons;
         struct {          /* MINO_VECTOR: persistent 32-way trie with tail */
             mino_vec_node_t *root;     /* trie spine (NULL when len <= 32) */

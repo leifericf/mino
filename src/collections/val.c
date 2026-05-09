@@ -219,8 +219,12 @@ mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
 mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
 {
     mino_val_t *v = alloc_val(S, MINO_CONS);
-    v->as.cons.car = car;
-    v->as.cons.cdr = cdr;
+    v->as.cons.car      = car;
+    v->as.cons.cdr      = cdr;
+    v->as.cons.file     = NULL;
+    v->as.cons.line     = 0;
+    v->as.cons.column   = 0;
+    v->as.cons.not_list = 0;
     return v;
 }
 
