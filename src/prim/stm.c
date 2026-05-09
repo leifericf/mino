@@ -46,6 +46,11 @@
  *     writes the alter+commute tentative, matching JVM's behavior of
  *     skipping commute-log replay for refs already in the write set.
  *
+ *  9. mino-only addition: cross-state ref defense. JVM has one global
+ *     transactional surface; mino has many `mino_state_t` per host
+ *     process. Every public C entry checks `tx_ref.owning_state == S`
+ *     and throws `eval/state` MST007 on mismatch.
+ *
  * Concurrency model: per-thread transaction state lives on
  * mino_thread_ctx_t::current_tx; the GC walks it from gc_mark_roots
  * so tentative values stay reachable. The commit lock is held only
@@ -231,6 +236,10 @@ mino_val_t *prim_ref_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
                                     mino_val_t *extra);
 
+/* Forward declaration -- tx_check_ref_owned is defined just below
+ * mino_is_tx_ref but called from mino_tx_ref_deref above it. */
+static int tx_check_ref_owned(mino_state_t *S, mino_val_t *ref);
+
 /* C-side commute closure: pairs a host transformer with its user
  * pointer. Stored on the heap and wrapped in a MINO_HANDLE so the
  * GC sweep finalizer frees the struct when the handle becomes
@@ -328,6 +337,7 @@ mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *ref)
     tx_ref_state_t    *rs;
     mino_val_t        *val;
     if (ref == NULL || ref->type != MINO_TX_REF) return NULL;
+    if (tx_check_ref_owned(S, ref)) return NULL;
     ctx = mino_current_ctx(S);
     tx  = ctx->current_tx;
     if (tx == NULL) {
@@ -347,6 +357,27 @@ mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *ref)
 int mino_is_tx_ref(const mino_val_t *v)
 {
     return v != NULL && v->type == MINO_TX_REF;
+}
+
+/* Cross-state defense: throw eval/state MST007 if the ref was
+ * allocated in a different state than S. mino_tx_ref records its
+ * allocating state in tx_ref.owning_state at construction time, so
+ * the check is one pointer comparison. Catches a host that passes a
+ * ref between states without going through serialization. Returns 0
+ * on success, 1 if a throw was raised (caller should propagate NULL).
+ *
+ * Called from the public C entries only. The Clojure-side primitives
+ * receive refs that the eval loop has already located in S's env, so
+ * a foreign-state ref would already be unreachable from a Clojure
+ * program. */
+static int tx_check_ref_owned(mino_state_t *S, mino_val_t *ref)
+{
+    if (ref->as.tx_ref.owning_state != S) {
+        prim_throw_classified(S, "eval/state", "MST007",
+            "ref from foreign state");
+        return 1;
+    }
+    return 0;
 }
 
 /* --- ref-set + alter ----------------------------------------------------- */
@@ -408,6 +439,7 @@ mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *ref, mino_val_t *val)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ref_set: argument must be a ref");
     }
+    if (tx_check_ref_owned(S, ref)) return NULL;
     return tx_ref_set_core(S, ref, val);
 }
 
@@ -524,6 +556,7 @@ mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_alter_c: argument must be a ref");
     }
+    if (tx_check_ref_owned(S, ref)) return NULL;
     if (fn == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_alter_c: transformer fn must not be NULL");
@@ -636,6 +669,7 @@ mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_commute_c: argument must be a ref");
     }
+    if (tx_check_ref_owned(S, ref)) return NULL;
     if (fn == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_commute_c: transformer fn must not be NULL");
@@ -697,6 +731,7 @@ mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ensure: argument must be a ref");
     }
+    if (tx_check_ref_owned(S, ref)) return NULL;
     return tx_ensure_core(S, ref, env);
 }
 

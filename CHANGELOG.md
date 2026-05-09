@@ -323,6 +323,25 @@ the task's explicit list had been missing it -- a benign drift
 that became a broken link as soon as the C-side test referenced
 the new public symbols).
 
+### Cross-state ref defense (MST007)
+
+A C host that accidentally passes a ref allocated in one
+`mino_state_t` to another's `mino_tx_*` entries used to silently
+mutate the foreign heap. Now every public C entry that takes a
+ref (`mino_tx_ref_deref` / `mino_tx_ref_set` / `mino_tx_alter_c` /
+`mino_tx_commute_c` / `mino_tx_ensure`) checks the ref's
+allocating state via a new `tx_ref.owning_state` back-pointer
+recorded by `mino_tx_ref` at construction time, and throws
+`eval/state` MST007 ("ref from foreign state") on mismatch. The
+check is one pointer comparison; the back-pointer adds 8 bytes
+to each ref but no GC traversal cost (the state itself outlives
+all its refs and is not a GC value).
+
+`tests/embed_stm_test.c` now covers this with a second-state ref
+passed into the first state's entries (deref, ref-set, alter_c,
+commute_c, ensure); each must error and the foreign state's own
+ops must keep working unchanged.
+
 ### Internal suite
 
 `1499 / 7137 / 0` (one new alter-after-commute-throws case + one

@@ -248,6 +248,72 @@ static void test_watch_fires_from_c_tx(mino_state_t *S, mino_env_t *env)
     }
 }
 
+/* Pass a ref allocated in another mino_state_t to S's mino_tx_*
+ * entries. Each must throw eval/state MST007 ("ref from foreign
+ * state") rather than silently mutate the foreign heap. */
+static void test_cross_state_ref_throws(mino_state_t *S, mino_env_t *env)
+{
+    mino_state_t *S2     = mino_state_new();
+    mino_env_t   *env2   = mino_new(S2);
+    mino_val_t   *foreign_r = mino_tx_ref(S2, mino_int(S2, 0));
+    const char   *err;
+
+    /* deref returns NULL but does not throw (the public deref tolerates
+     * non-ref input as a NULL-result; cross-state goes through the
+     * same NULL path). */
+    REQUIRE(mino_tx_ref_deref(S, foreign_r) == NULL,
+            "cross-state deref should return NULL");
+
+    /* ref_set must throw MST007. */
+    {
+        mino_val_t *v = mino_tx_ref_set(S, foreign_r, mino_int(S, 1));
+        REQUIRE(v == NULL, "cross-state ref_set should return NULL");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "foreign state") != NULL,
+                "cross-state ref_set should mention 'foreign state'");
+    }
+
+    /* alter_c must throw MST007. */
+    {
+        mino_val_t *v = mino_tx_alter_c(S, foreign_r, xform_inc,
+                                         (void *)(intptr_t)1, env);
+        REQUIRE(v == NULL, "cross-state alter_c should return NULL");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "foreign state") != NULL,
+                "cross-state alter_c should mention 'foreign state'");
+    }
+
+    /* commute_c must throw MST007. */
+    {
+        mino_val_t *v = mino_tx_commute_c(S, foreign_r, xform_inc,
+                                           (void *)(intptr_t)1, env);
+        REQUIRE(v == NULL, "cross-state commute_c should return NULL");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "foreign state") != NULL,
+                "cross-state commute_c should mention 'foreign state'");
+    }
+
+    /* ensure must throw MST007. */
+    {
+        mino_val_t *v = mino_tx_ensure(S, foreign_r, env);
+        REQUIRE(v == NULL, "cross-state ensure should return NULL");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "foreign state") != NULL,
+                "cross-state ensure should mention 'foreign state'");
+    }
+
+    /* The foreign state's own ref operations still work normally. */
+    {
+        long long n;
+        mino_val_t *v = mino_tx_ref_deref(S2, foreign_r);
+        REQUIRE(v != NULL && mino_to_int(v, &n) && n == 0,
+                "foreign state's own ref should still read");
+    }
+
+    mino_env_free(S2, env2);
+    mino_state_free(S2);
+}
+
 int main(void)
 {
     mino_state_t *S   = mino_state_new();
@@ -260,6 +326,7 @@ int main(void)
     test_outside_tx_throws(S, env);
     test_type_check_throws(S, env);
     test_watch_fires_from_c_tx(S, env);
+    test_cross_state_ref_throws(S, env);
 
     mino_env_free(S, env);
     mino_state_free(S);

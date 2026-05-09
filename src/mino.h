@@ -357,12 +357,19 @@ struct mino_val {
             mino_val_t *v;
         } map_entry;
         struct {          /* MINO_TX_REF: STM ref */
-            mino_val_t *val;       /* committed value */
-            mino_val_t *watches;   /* MINO_MAP key->callback, or NULL */
-            mino_val_t *validator; /* validator fn, or NULL */
-            uint64_t    version;   /* bumped on each commit; read-set
-                                    * validation compares to snapshot */
-            uint64_t    ref_id;    /* monotonic ID assigned at construction */
+            mino_val_t    *val;       /* committed value */
+            mino_val_t    *watches;   /* MINO_MAP key->callback, or NULL */
+            mino_val_t    *validator; /* validator fn, or NULL */
+            uint64_t       version;   /* bumped on each commit; read-set
+                                       * validation compares to snapshot */
+            uint64_t       ref_id;    /* monotonic ID at construction */
+            mino_state_t  *owning_state; /* the state that allocated this
+                                          * ref. Used by the C API entries
+                                          * to throw MST007 if a host
+                                          * passes a ref from another
+                                          * state. Not traced -- the state
+                                          * itself outlives all its refs
+                                          * and is not a GC value. */
         } tx_ref;
     } as;
 };
