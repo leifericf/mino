@@ -836,11 +836,12 @@
   "Returns true if x supports assoc (maps and vectors)."
   [x]
   (let [t (type x)]
-    (or (= t :map) (= t :vector) (= t :sorted-map))))
+    (or (= t :map) (= t :vector) (= t :sorted-map) (= t :map-entry))))
 (defn reversible?
   "Returns true if x supports rseq (vectors and sorted collections)."
   [x] (let [t (type x)]
-        (or (= t :vector) (= t :sorted-map) (= t :sorted-set))))
+        (or (= t :vector) (= t :sorted-map) (= t :sorted-set)
+            (= t :map-entry))))
 (defn any? "Returns true for any argument." [x] true)
 (defn seqable?
   "Returns true if (seq x) is supported."
@@ -912,8 +913,20 @@
 
 ;; --- Map entry accessors ---
 
-(defn key "Returns the key of a map entry." [entry] (first entry))
-(defn val "Returns the value of a map entry." [entry] (second entry))
+(defn key
+  "Returns the key of a map entry. Throws on values that are not
+   map entries (a literal 2-vector, for instance)."
+  [entry]
+  (if (= :map-entry (type entry))
+    (first entry)
+    (throw (str "key: expected a map entry, got " (type entry)))))
+(defn val
+  "Returns the value of a map entry. Throws on values that are not
+   map entries (a literal 2-vector, for instance)."
+  [entry]
+  (if (= :map-entry (type entry))
+    (second entry)
+    (throw (str "val: expected a map entry, got " (type entry)))))
 
 (defn counted?
   "Returns true if (count x) is a constant-time operation. Per
@@ -923,7 +936,7 @@
   [x]
   (let [t (type x)]
     (or (= t :vector) (= t :map) (= t :set)
-        (= t :sorted-map) (= t :sorted-set))))
+        (= t :sorted-map) (= t :sorted-set) (= t :map-entry))))
 
 (defn bounded-count
   "Returns the count of coll, but stops counting at n."
@@ -3193,12 +3206,12 @@
 (def clojure.lang.IPending :future)
 (def clojure.lang.BigInt :bigint)
 
-;; Bridge `clojure.lang.MapEntry/create` to a 2-vector constructor.
+;; Bridge `clojure.lang.MapEntry/create` to mino's MAP_ENTRY type.
 ;; Cross-dialect tests use it under `:default` to build a map entry
-;; literal; mino represents map entries as 2-vectors and `key`/`val`
-;; already accept that shape, so the only missing piece is the ctor.
+;; literal; the C primitive `map-entry` returns a MINO_MAP_ENTRY,
+;; which `key`/`val` accept.
 (ns clojure.lang.MapEntry)
-(defn create [k v] [k v])
+(defn create [k v] (clojure.core/map-entry k v))
 (in-ns 'clojure.core)
 
 ;; In Clojure JVM the primed arithmetic forms (`+'`, `-'`, `*'`,

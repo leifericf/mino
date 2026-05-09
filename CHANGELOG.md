@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.100.32
+
+### Add `MINO_MAP_ENTRY` value type
+
+JVM Clojure's MapEntry is a vector-shaped seq returned by `first` /
+`seq` of a map; `key` and `val` accept it but throw on a plain
+2-vector. mino conflated map entries and 2-vectors, so
+`(p/thrown? (key [1 2]))` failed. Add a distinct `MINO_MAP_ENTRY`
+type with `(k, v)` slots, GC mark + verify, hash that matches a
+2-vector (so cross-type equality works in hash maps), `(type x)`
+returns `:map-entry`, and `vector?` / `coll?` / `counted?` /
+`associative?` / `reversible?` / `sequential?` return true on it.
+Equality with `[k v]` is element-wise via the existing cross-type
+sequential path. `seq` of a map / sorted-map / record now produces
+MAP_ENTRY values; `find`, `first`, `rest`, `nth`, `get`, `count`,
+`empty?`, vector destructuring, `compare`, `into`-map, `conj`-map,
+and `conj`-of-MAP_ENTRY all dispatch through it. `key` / `val` in
+`src/core.clj` accept only MAP_ENTRY and throw otherwise.
+`clojure.lang.MapEntry/create` now constructs a MAP_ENTRY (via the
+new `map-entry` C primitive). `aset` is intentionally not
+implemented for MAP_ENTRY since entries are immutable.
+
+External `key.cljc` 8/17 -> 17/17, `val.cljc` 7/16 -> 16/16. External
+suite: 209 -> 211 OK.
+
 ## v0.100.31
 
 ### `(float x)` narrows to 32-bit float precision

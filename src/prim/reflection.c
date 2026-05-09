@@ -353,6 +353,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (k >= sizeof(kinds) / sizeof(kinds[0])) k = 0;
         return mino_keyword(S, kinds[k]);
     }
+    case MINO_MAP_ENTRY: return mino_keyword(S, "map-entry");
     }
     return mino_keyword(S, "unknown");
 }
@@ -377,7 +378,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 DEFINE_TYPE_PRED(prim_nil_p,     (v == NULL || v->type == MINO_NIL),           "nil?")
 DEFINE_TYPE_PRED(prim_cons_p,    (v != NULL && (v->type == MINO_CONS || v->type == MINO_CHUNKED_CONS)),          "cons?")
 DEFINE_TYPE_PRED(prim_list_p,    (v != NULL && ((v->type == MINO_CONS && !v->as.cons.not_list) || v->type == MINO_EMPTY_LIST)),             "list?")
-DEFINE_TYPE_PRED(prim_vector_p,  (v != NULL && v->type == MINO_VECTOR),        "vector?")
+DEFINE_TYPE_PRED(prim_vector_p,  (v != NULL && (v->type == MINO_VECTOR || v->type == MINO_MAP_ENTRY)),        "vector?")
 DEFINE_TYPE_PRED(prim_int_p,     (v != NULL && v->type == MINO_INT),           "int?")
 DEFINE_TYPE_PRED(prim_float_p,   (v != NULL && v->type == MINO_FLOAT),         "float?")
 DEFINE_TYPE_PRED(prim_string_p,  (v != NULL && v->type == MINO_STRING),        "string?")
@@ -450,6 +451,7 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_CHUNKED_CONS: return mino_false(S);
     case MINO_CHUNK:        return v->as.chunk.len == 0 ? mino_true(S) : mino_false(S);
     case MINO_HOST_ARRAY:   return v->as.host_array.len == 0 ? mino_true(S) : mino_false(S);
+    case MINO_MAP_ENTRY:    return mino_false(S);
     default:
         return prim_throw_classified(S, "eval/type", "MTY001",
             "empty? expects a collection or nil");

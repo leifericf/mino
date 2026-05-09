@@ -24,13 +24,13 @@ static void seq_cons_append(mino_state_t *S, mino_val_t **head,
     *tail = cell;
 }
 
-/* seq_kv_pair -- build the [k v] vector value used for map/record seqs. */
+/* seq_kv_pair -- build the (k, v) entry value used for map/record
+ * seqs. Returns a MINO_MAP_ENTRY so key / val type-check on the
+ * result; equality with `[k v]` compares element-wise via the
+ * cross-type sequential path in mino_eq. */
 static mino_val_t *seq_kv_pair(mino_state_t *S, mino_val_t *k, mino_val_t *v)
 {
-    mino_val_t *kv[2];
-    kv[0] = k;
-    kv[1] = v;
-    return mino_vector(S, kv, 2);
+    return mino_map_entry(S, k, v);
 }
 
 mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -85,6 +85,15 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             if (more == NULL) return NULL;
         }
         return more;
+    }
+    if (coll->type == MINO_MAP_ENTRY) {
+        /* Two-element chunked-seq over (k, v). */
+        mino_val_t *buf = mino_chunk_buffer(S, 2);
+        if (buf == NULL) return NULL;
+        if (!mino_chunk_append(buf, coll->as.map_entry.k)) return NULL;
+        if (!mino_chunk_append(buf, coll->as.map_entry.v)) return NULL;
+        mino_chunk_seal(buf);
+        return mino_chunked_cons(S, buf, mino_nil(S));
     }
     if (coll->type == MINO_HOST_ARRAY) {
         /* Emit a single-chunk MINO_CHUNKED_CONS so seq? is true and
@@ -768,12 +777,19 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         while (!seq_iter_done(&it)) {
             mino_val_t *item = seq_iter_val(S, &it);
             mino_val_t *pair_args;
-            if (item == NULL || item->type != MINO_VECTOR
-                || item->as.vec.len != 2) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "into map: each element must be a 2-element vector");
+            mino_val_t *ek, *ev;
+            if (item != NULL && item->type == MINO_VECTOR
+                && item->as.vec.len == 2) {
+                ek = vec_nth(item, 0);
+                ev = vec_nth(item, 1);
+            } else if (item != NULL && item->type == MINO_MAP_ENTRY) {
+                ek = item->as.map_entry.k;
+                ev = item->as.map_entry.v;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "into map: each element must be a map entry or 2-element vector");
             }
-            pair_args = mino_cons(S, vec_nth(item, 0),
-                                   mino_cons(S, vec_nth(item, 1), mino_nil(S)));
+            pair_args = mino_cons(S, ek, mino_cons(S, ev, mino_nil(S)));
             acc = prim_assoc(S, mino_cons(S, acc, pair_args), env);
             seq_iter_next(S, &it);
         }
@@ -793,10 +809,19 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             mino_val_t *item = seq_iter_val(S, &it);
-            if (item == NULL || item->type != MINO_VECTOR || item->as.vec.len != 2) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "into sorted-map: each element must be a 2-element vector");
+            mino_val_t *ek, *ev;
+            if (item != NULL && item->type == MINO_VECTOR
+                && item->as.vec.len == 2) {
+                ek = vec_nth(item, 0);
+                ev = vec_nth(item, 1);
+            } else if (item != NULL && item->type == MINO_MAP_ENTRY) {
+                ek = item->as.map_entry.k;
+                ev = item->as.map_entry.v;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "into sorted-map: each element must be a map entry or 2-element vector");
             }
-            acc = sorted_map_assoc1(S, acc, vec_nth(item, 0), vec_nth(item, 1));
+            acc = sorted_map_assoc1(S, acc, ek, ev);
             seq_iter_next(S, &it);
         }
         return acc;
@@ -1107,7 +1132,6 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *m;
     mino_val_t *k;
     mino_val_t *v;
-    mino_val_t *kv[2];
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -1129,33 +1153,25 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (!rb_contains(S, m->as.sorted.root, k, m->as.sorted.comparator))
             return mino_nil(S);
         v = rb_get(S, m->as.sorted.root, k, m->as.sorted.comparator);
-        kv[0] = k; kv[1] = v;
-        return mino_vector(S, kv, 2);
+        return mino_map_entry(S, k, v);
     }
     if (m->type == MINO_VECTOR) {
         long long idx;
         if (k->type != MINO_INT) return mino_nil(S);
         idx = k->as.i;
         if (idx < 0 || (size_t)idx >= m->as.vec.len) return mino_nil(S);
-        kv[0] = k;
-        kv[1] = vec_nth(m, (size_t)idx);
-        return mino_vector(S, kv, 2);
+        return mino_map_entry(S, k, vec_nth(m, (size_t)idx));
     }
     if (m->type == MINO_RECORD) {
         int idx = record_field_index(m, k);
         if (idx >= 0) {
             mino_val_t *fields = m->as.record.type->as.record_type.fields;
-            kv[0] = vec_nth(fields, idx);
-            kv[1] = m->as.record.vals[idx];
-            return mino_vector(S, kv, 2);
+            return mino_map_entry(S, vec_nth(fields, idx),
+                                     m->as.record.vals[idx]);
         }
         if (m->as.record.ext != NULL) {
             v = map_get_val(m->as.record.ext, k);
-            if (v != NULL) {
-                kv[0] = k;
-                kv[1] = v;
-                return mino_vector(S, kv, 2);
-            }
+            if (v != NULL) return mino_map_entry(S, k, v);
         }
         return mino_nil(S);
     }
@@ -1164,9 +1180,7 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     v = map_get_val(m, k);
     if (v == NULL) return mino_nil(S);
-    kv[0] = k;
-    kv[1] = v;
-    return mino_vector(S, kv, 2);
+    return mino_map_entry(S, k, v);
 }
 
 mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)

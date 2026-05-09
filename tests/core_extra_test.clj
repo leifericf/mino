@@ -47,8 +47,14 @@
 ;; --- Map entry accessors ---
 
 (deftest key-val-fns
-  (is (= :a (key [:a 1])))
-  (is (= 1 (val [:a 1]))))
+  ;; key/val accept only map entries (matches JVM Clojure: key/val
+  ;; on a plain vector throws). Construct an entry via map iteration
+  ;; or `clojure.lang.MapEntry/create`.
+  (let [e (first {:a 1})]
+    (is (= :a (key e)))
+    (is (= 1 (val e))))
+  (is (thrown? (key [:a 1])))
+  (is (thrown? (val [:a 1]))))
 
 ;; --- Collection conversions ---
 

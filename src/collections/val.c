@@ -228,6 +228,14 @@ mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
     return v;
 }
 
+mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v)
+{
+    mino_val_t *e = alloc_val(S, MINO_MAP_ENTRY);
+    e->as.map_entry.k = k;
+    e->as.map_entry.v = v;
+    return e;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Host arrays                                                               */
 /* ------------------------------------------------------------------------- */
@@ -626,7 +634,8 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
 static int is_sequential(mino_type_t t)
 {
     return (t == MINO_CONS || t == MINO_VECTOR || t == MINO_EMPTY_LIST
-            || t == MINO_LAZY || t == MINO_CHUNKED_CONS);
+            || t == MINO_LAZY || t == MINO_CHUNKED_CONS
+            || t == MINO_MAP_ENTRY);
 }
 
 /*
@@ -666,7 +675,7 @@ static void eq_seq_step(const mino_val_t **cur, size_t *idx)
         }
         return;
     }
-    /* MINO_VECTOR */
+    /* MINO_VECTOR or MINO_MAP_ENTRY (treated as 2-element vector). */
     (*idx)++;
 }
 
@@ -691,10 +700,12 @@ static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
         a_end = (ca == NULL || ca->type == MINO_NIL
                  || ca->type == MINO_EMPTY_LIST
                  || (ca->type == MINO_VECTOR && ia >= ca->as.vec.len)
+                 || (ca->type == MINO_MAP_ENTRY && ia >= 2)
                  || ca->type == MINO_LAZY /* unrealized */);
         b_end = (cb == NULL || cb->type == MINO_NIL
                  || cb->type == MINO_EMPTY_LIST
                  || (cb->type == MINO_VECTOR && ib >= cb->as.vec.len)
+                 || (cb->type == MINO_MAP_ENTRY && ib >= 2)
                  || cb->type == MINO_LAZY /* unrealized */);
 
         if (a_end && b_end) return 1;
@@ -703,11 +714,15 @@ static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
         if (ca->type == MINO_CONS) ea = ca->as.cons.car;
         else if (ca->type == MINO_CHUNKED_CONS)
             ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
+        else if (ca->type == MINO_MAP_ENTRY)
+            ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
         else ea = vec_nth(ca, ia);
 
         if (cb->type == MINO_CONS) eb = cb->as.cons.car;
         else if (cb->type == MINO_CHUNKED_CONS)
             eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
+        else if (cb->type == MINO_MAP_ENTRY)
+            eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
         else eb = vec_nth(cb, ib);
 
         if (!mino_eq(ea, eb)) return 0;
@@ -1020,6 +1035,9 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
          * (object-array 3) calls are NOT `=` even if their elements
          * match. */
         return a == b;
+    case MINO_MAP_ENTRY:
+        return mino_eq(a->as.map_entry.k, b->as.map_entry.k)
+            && mino_eq(a->as.map_entry.v, b->as.map_entry.v);
     }
     return 0;
 }
@@ -1053,10 +1071,12 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
 
         a_end = (ca == NULL || ca->type == MINO_NIL
                  || ca->type == MINO_EMPTY_LIST
-                 || (ca->type == MINO_VECTOR && ia >= ca->as.vec.len));
+                 || (ca->type == MINO_VECTOR && ia >= ca->as.vec.len)
+                 || (ca->type == MINO_MAP_ENTRY && ia >= 2));
         b_end = (cb == NULL || cb->type == MINO_NIL
                  || cb->type == MINO_EMPTY_LIST
-                 || (cb->type == MINO_VECTOR && ib >= cb->as.vec.len));
+                 || (cb->type == MINO_VECTOR && ib >= cb->as.vec.len)
+                 || (cb->type == MINO_MAP_ENTRY && ib >= 2));
 
         if (a_end && b_end) return 1;
         if (a_end || b_end) return 0;
@@ -1064,11 +1084,15 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
         if (ca->type == MINO_CONS) ea = ca->as.cons.car;
         else if (ca->type == MINO_CHUNKED_CONS)
             ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
+        else if (ca->type == MINO_MAP_ENTRY)
+            ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
         else ea = vec_nth(ca, ia);
 
         if (cb->type == MINO_CONS) eb = cb->as.cons.car;
         else if (cb->type == MINO_CHUNKED_CONS)
             eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
+        else if (cb->type == MINO_MAP_ENTRY)
+            eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
         else eb = vec_nth(cb, ib);
 
         if (!mino_eq_force(S, ea, eb)) return 0;

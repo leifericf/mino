@@ -50,6 +50,10 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
             lst = mino_cons(S, vec_nth(val, j), lst);
         }
         args = lst;
+    } else if (val != NULL && val->type == MINO_MAP_ENTRY) {
+        /* Map entry behaves like a 2-vector for destructuring. */
+        args = mino_cons(S, val->as.map_entry.k,
+                            mino_cons(S, val->as.map_entry.v, mino_nil(S)));
     }
     for (i = 0; i < plen; i++) {
         mino_val_t *p = vec_nth(pattern, i);

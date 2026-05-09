@@ -450,6 +450,16 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputc('"', out);
         return;
     }
+    case MINO_MAP_ENTRY: {
+        /* Print as `[k v]` so map-entry round-trips through equality
+         * with a 2-vector and matches Clojure's pr/print form. */
+        fputc('[', out);
+        mino_print_to(S, out, v->as.map_entry.k);
+        fputc(' ', out);
+        mino_print_to(S, out, v->as.map_entry.v);
+        fputc(']', out);
+        return;
+    }
     case MINO_HOST_ARRAY: {
         /* Mirror Clojure JVM's #object[...] form for arrays since
          * arrays don't round-trip through the reader. */

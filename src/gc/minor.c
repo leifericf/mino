@@ -276,6 +276,10 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 }
                 break;
             }
+            case MINO_MAP_ENTRY:
+                gc_verify_check(S, h, v->as.map_entry.k);
+                gc_verify_check(S, h, v->as.map_entry.v);
+                break;
             case MINO_CHUNKED_CONS:
                 gc_verify_check(S, h, v->as.chunked_cons.chunk);
                 gc_verify_check(S, h, v->as.chunked_cons.more); break;

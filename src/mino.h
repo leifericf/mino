@@ -27,7 +27,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 100
-#define MINO_VERSION_PATCH 31
+#define MINO_VERSION_PATCH 32
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -142,6 +142,16 @@ typedef enum {
                      * JVM's `(= #"x" #"x")` returning false); print
                      * form is `#"source"`. The reader's `#"..."`
                      * literal and `(re-pattern s)` construct it. */
+    MINO_MAP_ENTRY, /* Map entry: a (k, v) pair returned by first/seq
+                     * of a map. Distinct from MINO_VECTOR -- key and
+                     * val accept only MAP_ENTRY, throwing on plain
+                     * 2-vectors -- but vector-shaped: vector?, coll?,
+                     * sequential?, indexed?, counted?, associative?,
+                     * reversible? all true; equality with a 2-vector
+                     * compares element-wise. count is 2; nth 0 / 1
+                     * yield k / v; first/second/last/peek dispatch
+                     * accordingly. Constructed by first/seq of a map
+                     * and by `clojure.lang.MapEntry/create`. */
     MINO_HOST_ARRAY /* JVM-style host array: a fixed-length container
                      * with element-kind tag (:object, :int, :long,
                      * etc.) for printing and zero-fill semantics.
@@ -320,6 +330,10 @@ struct mino_val {
             size_t       len;
             unsigned char element_kind; /* host_array_kind_t enum below */
         } host_array;
+        struct {          /* MINO_MAP_ENTRY: (k, v) from a map */
+            mino_val_t *k;
+            mino_val_t *v;
+        } map_entry;
     } as;
 };
 
@@ -454,6 +468,11 @@ mino_val_t *mino_volatile_deref(const mino_val_t *v);
 
 /* Set the value of an atom. */
 void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
+
+/* Construct a map entry holding (k, v). Used by first / seq of a map
+ * to publish entries with the right type identity (so key / val can
+ * type-check), and by `clojure.lang.MapEntry/create`. */
+mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v);
 
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;

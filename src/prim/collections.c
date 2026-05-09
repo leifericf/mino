@@ -215,6 +215,18 @@ mino_val_t *prim_to_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "to-array");
 }
 
+mino_val_t *prim_map_entry(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "map-entry requires two arguments");
+    }
+    return mino_map_entry(S, args->as.cons.car,
+                          args->as.cons.cdr->as.cons.car);
+}
+
 mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *cdr;
@@ -319,6 +331,8 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_CHUNK: return mino_int(S, (long long)coll->as.chunk.len);
     case MINO_HOST_ARRAY:
         return mino_int(S, (long long)coll->as.host_array.len);
+    case MINO_MAP_ENTRY:
+        return mino_int(S, 2);
     case MINO_CHUNKED_CONS: {
         long long          n = 0;
         const mino_val_t  *cur = coll;
@@ -470,6 +484,12 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return coll->as.host_array.vals[(size_t)idx];
     }
+    if (coll->type == MINO_MAP_ENTRY) {
+        if (idx == 0) return coll->as.map_entry.k;
+        if (idx == 1) return coll->as.map_entry.v;
+        if (def_val != NULL) return def_val;
+        return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+    }
     if (coll->type == MINO_CONS) {
         mino_val_t *p = coll;
         long long   i;
@@ -592,6 +612,9 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll->as.host_array.len == 0) return mino_nil(S);
         return coll->as.host_array.vals[0];
     }
+    if (coll->type == MINO_MAP_ENTRY) {
+        return coll->as.map_entry.k;
+    }
     if (coll->type == MINO_STRING) {
         unsigned int cp;
         size_t       step;
@@ -606,10 +629,7 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         {
             mino_val_t *key = vec_nth(coll->as.map.key_order, 0);
             mino_val_t *val = map_get_val(coll, key);
-            mino_val_t *kv[2];
-            kv[0] = key;
-            kv[1] = val;
-            return mino_vector(S, kv, 2);
+            return mino_map_entry(S, key, val);
         }
     }
     if (coll->type == MINO_SET) {
@@ -621,8 +641,7 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (n == NULL) return mino_nil(S);
         while (n->left != NULL) n = n->left;
         if (coll->type == MINO_SORTED_MAP) {
-            mino_val_t *kv[2]; kv[0] = n->key; kv[1] = n->val;
-            return mino_vector(S, kv, 2);
+            return mino_map_entry(S, n->key, n->val);
         }
         return n->key;
     }
@@ -700,13 +719,14 @@ static mino_val_t *map_rest_thunk(mino_state_t *S, mino_val_t *ctx)
 {
     mino_val_t *m  = ctx->as.cons.car;
     size_t idx     = (size_t)ctx->as.cons.cdr->as.i;
-    mino_val_t *kv[2];
     if (idx >= m->as.map.len) return mino_nil(S);
-    kv[0] = vec_nth(m->as.map.key_order, idx);
-    kv[1] = map_get_val(m, kv[0]);
-    return mino_cons(S, mino_vector(S, kv, 2),
-        make_c_lazy(S, mino_cons(S, m, mino_int(S, (long long)(idx + 1))),
-                    map_rest_thunk));
+    {
+        mino_val_t *k = vec_nth(m->as.map.key_order, idx);
+        mino_val_t *v = map_get_val(m, k);
+        return mino_cons(S, mino_map_entry(S, k, v),
+            make_c_lazy(S, mino_cons(S, m, mino_int(S, (long long)(idx + 1))),
+                        map_rest_thunk));
+    }
 }
 
 static mino_val_t *set_rest_thunk(mino_state_t *S, mino_val_t *ctx)
@@ -785,6 +805,10 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return mino_empty_list(S);
     }
+    if (coll->type == MINO_MAP_ENTRY) {
+        /* Rest of (k v) is a 1-element seq holding v. */
+        return mino_cons(S, coll->as.map_entry.v, mino_nil(S));
+    }
     if (coll->type == MINO_STRING) {
         /* Skip the first codepoint (1-4 bytes), then construct a
          * cons whose car is the next character (decoded as MINO_CHAR)
@@ -807,13 +831,14 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                         str_rest_thunk));
     }
     if (coll->type == MINO_MAP) {
-        mino_val_t *kv[2];
         if (coll->as.map.len <= 1) return mino_empty_list(S);
-        kv[0] = vec_nth(coll->as.map.key_order, 1);
-        kv[1] = map_get_val(coll, kv[0]);
-        return mino_cons(S, mino_vector(S, kv, 2),
-            make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
-                        map_rest_thunk));
+        {
+            mino_val_t *k = vec_nth(coll->as.map.key_order, 1);
+            mino_val_t *v = map_get_val(coll, k);
+            return mino_cons(S, mino_map_entry(S, k, v),
+                make_c_lazy(S, mino_cons(S, coll, mino_int(S, 2)),
+                            map_rest_thunk));
+        }
     }
     if (coll->type == MINO_SET) {
         if (coll->as.set.len <= 1) return mino_empty_list(S);
@@ -1045,6 +1070,13 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (idx < 0 || (size_t)idx >= coll->as.host_array.len) return def_val;
         return coll->as.host_array.vals[(size_t)idx];
     }
+    if (coll->type == MINO_MAP_ENTRY) {
+        if (key != NULL && key->type == MINO_INT) {
+            if (key->as.i == 0) return coll->as.map_entry.k;
+            if (key->as.i == 1) return coll->as.map_entry.v;
+        }
+        return def_val;
+    }
     if (coll->type == MINO_SET) {
         uint32_t h = hash_val(key);
         mino_val_t *found = hamt_get(coll->as.set.root, key, h, 0u);
@@ -1154,6 +1186,22 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
+    if (coll->type == MINO_MAP_ENTRY) {
+        /* (conj entry x ...) is JVM-equivalent to (conj [k v] x ...).
+         * Promote to a 2-vector then fall through to vector conj. */
+        size_t extra = n - 1;
+        mino_val_t *kv[2];
+        mino_val_t *acc;
+        size_t i;
+        kv[0] = coll->as.map_entry.k;
+        kv[1] = coll->as.map_entry.v;
+        acc = mino_vector(S, kv, 2);
+        for (i = 0; i < extra; i++) {
+            acc = vec_conj1(S, acc, p->as.cons.car);
+            p = p->as.cons.cdr;
+        }
+        return acc;
+    }
     if (coll->type == MINO_MAP) {
         /* Each added item must be a 2-element vector [k v], a map
          * (entries are merged), or nil (no-op, per Clojure's
@@ -1184,6 +1232,11 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 mino_val_t *pair_args = mino_cons(S, vec_nth(item, 0),
                                        mino_cons(S, vec_nth(item, 1), mino_nil(S)));
                 acc = map_assoc_pairs(S, acc, pair_args, 1);
+            } else if (item != NULL && item->type == MINO_MAP_ENTRY) {
+                mino_val_t *pair_args =
+                    mino_cons(S, item->as.map_entry.k,
+                        mino_cons(S, item->as.map_entry.v, mino_nil(S)));
+                acc = map_assoc_pairs(S, acc, pair_args, 1);
             } else {
                 return prim_throw_classified(S, "eval/type", "MTY001", "conj on map requires map entries or 2-element vectors");
             }
@@ -1203,10 +1256,19 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *v = coll;
         while (mino_is_cons(p)) {
             mino_val_t *item = p->as.cons.car;
-            if (item == NULL || item->type != MINO_VECTOR || item->as.vec.len != 2) {
-                return prim_throw_classified(S, "eval/type", "MTY001", "conj on sorted-map requires 2-element vectors");
+            mino_val_t *ek, *ev;
+            if (item != NULL && item->type == MINO_VECTOR
+                && item->as.vec.len == 2) {
+                ek = vec_nth(item, 0);
+                ev = vec_nth(item, 1);
+            } else if (item != NULL && item->type == MINO_MAP_ENTRY) {
+                ek = item->as.map_entry.k;
+                ev = item->as.map_entry.v;
+            } else {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "conj on sorted-map requires map entries or 2-element vectors");
             }
-            v = sorted_map_assoc1(S, v, vec_nth(item, 0), vec_nth(item, 1));
+            v = sorted_map_assoc1(S, v, ek, ev);
             p = p->as.cons.cdr;
         }
         return v;
@@ -2040,6 +2102,10 @@ const mino_prim_def k_prims_collections[] = {
      "copies elements from a collection."},
     {"to-array",   prim_to_array,
      "Converts a collection to an Object array (host-style)."},
+    {"map-entry",  prim_map_entry,
+     "Constructs a (k, v) map entry. Distinct from a 2-vector: "
+     "key/val accept only map entries, not plain vectors. Equality "
+     "with [k v] still compares element-wise."},
 };
 
 const size_t k_prims_collections_count =

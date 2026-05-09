@@ -187,6 +187,15 @@ uint32_t hash_val(const mino_val_t *v)
         }
         return h;
     }
+    case MINO_MAP_ENTRY: {
+        /* Hashes as a 2-vector of (k, v) so cross-type equality with
+         * MINO_VECTOR also gives identical hashes (so a hash-map keyed
+         * by entries vs. by 2-vectors still compares equal). */
+        h = fnv_mix(h, 0x09);
+        h = hash_uint32_bytes(h, hash_val(v->as.map_entry.k));
+        h = hash_uint32_bytes(h, hash_val(v->as.map_entry.v));
+        return h;
+    }
     case MINO_MAP: {
         /* XOR-fold of per-entry hashes for order independence. Each entry's
          * hash mixes key and value hashes with a prime to avoid (k ^ v)

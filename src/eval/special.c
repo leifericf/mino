@@ -716,6 +716,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_UUID:
     case MINO_REGEX:
     case MINO_HOST_ARRAY:
+    case MINO_MAP_ENTRY:
         return form;
     case MINO_SYMBOL:
         return eval_symbol(S, form, env);

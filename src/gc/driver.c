@@ -454,6 +454,10 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             }
             break;
         }
+        case MINO_MAP_ENTRY:
+            gc_mark_child_push(S, v->as.map_entry.k);
+            gc_mark_child_push(S, v->as.map_entry.v);
+            break;
         case MINO_CHUNKED_CONS:
             gc_mark_child_push(S, v->as.chunked_cons.chunk);
             gc_mark_child_push(S, v->as.chunked_cons.more);

@@ -1861,25 +1861,34 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         int cmp = a->as.ch - b->as.ch;
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
-    if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
-        /* Element-wise lexicographic compare; if all aligned elements
-         * are equal, shorter is less. Recurses through prim_compare so
-         * nested vectors / mixed types are handled uniformly. */
-        size_t la = a->as.vec.len;
-        size_t lb = b->as.vec.len;
-        size_t n  = la < lb ? la : lb;
-        size_t i;
-        for (i = 0; i < n; i++) {
-            mino_val_t *ea = vec_nth(a, i);
-            mino_val_t *eb = vec_nth(b, i);
-            mino_val_t *recur_args =
-                mino_cons(S, ea, mino_cons(S, eb, mino_nil(S)));
-            mino_val_t *r = prim_compare(S, recur_args, env);
-            if (r == NULL) return NULL;
-            if (r->type == MINO_INT && r->as.i != 0) return r;
+    {
+        /* Vectors and map entries compare lexicographically as
+         * sequences. A MAP_ENTRY behaves like a 2-element vector for
+         * compare purposes (matches JVM Clojure where MapEntry's
+         * compareTo delegates to AbstractVector). */
+        int a_vec = (a->type == MINO_VECTOR || a->type == MINO_MAP_ENTRY);
+        int b_vec = (b->type == MINO_VECTOR || b->type == MINO_MAP_ENTRY);
+        if (a_vec && b_vec) {
+            size_t la = a->type == MINO_VECTOR ? a->as.vec.len : 2;
+            size_t lb = b->type == MINO_VECTOR ? b->as.vec.len : 2;
+            size_t n  = la < lb ? la : lb;
+            size_t i;
+            for (i = 0; i < n; i++) {
+                mino_val_t *ea = a->type == MINO_VECTOR
+                    ? vec_nth(a, i)
+                    : (i == 0 ? a->as.map_entry.k : a->as.map_entry.v);
+                mino_val_t *eb = b->type == MINO_VECTOR
+                    ? vec_nth(b, i)
+                    : (i == 0 ? b->as.map_entry.k : b->as.map_entry.v);
+                mino_val_t *recur_args =
+                    mino_cons(S, ea, mino_cons(S, eb, mino_nil(S)));
+                mino_val_t *r = prim_compare(S, recur_args, env);
+                if (r == NULL) return NULL;
+                if (r->type == MINO_INT && r->as.i != 0) return r;
+            }
+            if (la == lb) return mino_int(S, 0);
+            return mino_int(S, la < lb ? -1 : 1);
         }
-        if (la == lb) return mino_int(S, 0);
-        return mino_int(S, la < lb ? -1 : 1);
     }
     return prim_throw_classified(S, "eval/type", "MTY001", "compare: cannot compare values of different types");
 }
