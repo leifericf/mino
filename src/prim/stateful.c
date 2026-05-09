@@ -357,6 +357,11 @@ static int watchable_get(mino_val_t *v, mino_val_t ***out_watches,
         *out_validator = &v->as.tx_ref.validator;
         return 1;
     }
+    if (v->type == MINO_VAR) {
+        *out_watches   = &v->as.var.watches;
+        *out_validator = &v->as.var.validator;
+        return 1;
+    }
     return 0;
 }
 

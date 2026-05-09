@@ -224,6 +224,8 @@ mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
     v->as.var.dynamic    = 0;
     v->as.var.bound      = 0;
     v->as.var.is_private = 0;
+    v->as.var.watches    = NULL;
+    v->as.var.validator  = NULL;
     return v;
 }
 
@@ -982,8 +984,14 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_VOLATILE:
         return a == b;
     case MINO_LAZY:
-        /* Should not reach here — lazy seqs are forced above. */
-        return 0;
+        /* Both sides are MINO_LAZY of the same realized state. Two
+         * realized-to-empty lazy seqs both keep the LAZY tag (the
+         * unwrap policy at the top of mino_eq preserves it so cross-
+         * type seq equality routes through eq_seq_like), so this
+         * arm fires for the empty-empty case. eq_seq_like handles
+         * any pair of seq-shaped values uniformly, including two
+         * empty lazies (both walks immediately terminate). */
+        return eq_seq_like(a, b);
     case MINO_CHUNK:
         /* Internal seq leaf; identity equality (chunk-buffer state
          * is mutable and not meaningfully comparable across instances). */

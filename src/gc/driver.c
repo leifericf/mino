@@ -482,6 +482,8 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             break;
         case MINO_VAR:
             gc_mark_child_push(S, v->as.var.root);
+            gc_mark_child_push(S, v->as.var.watches);
+            gc_mark_child_push(S, v->as.var.validator);
             break;
         case MINO_TRANSIENT:
             gc_mark_child_push(S, v->as.transient.current);

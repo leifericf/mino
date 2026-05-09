@@ -7,6 +7,7 @@
 
 (require "../clojure-test-suite/test/clojure/core_test/abs.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/aclone.cljc")
+(require "../clojure-test-suite/test/clojure/core_test/add_watch.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/and.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/any_qmark.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/assoc.cljc")
@@ -110,6 +111,7 @@
 (require "../clojure-test-suite/test/clojure/core_test/random_uuid.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/rationalize.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/reduce.cljc")
+(require "../clojure-test-suite/test/clojure/core_test/remove_watch.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/rest.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/rseq.cljc")
 (require "../clojure-test-suite/test/clojure/core_test/second.cljc")

@@ -312,6 +312,8 @@ struct mino_val {
             int         dynamic;   /* 1 if ^:dynamic */
             int         bound;     /* 0 if (def x) with no init; 1 once bound */
             int         is_private; /* 1 if ^:private */
+            mino_val_t *watches;   /* MINO_MAP key->callback, or NULL */
+            mino_val_t *validator; /* validator fn, or NULL */
         } var;
         struct {          /* MINO_TRANSIENT: batch-mutation wrapper */
             mino_val_t *current; /* current persistent value (vec/map/set) */

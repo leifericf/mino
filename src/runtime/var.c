@@ -4,6 +4,9 @@
 
 #include "runtime/internal.h"
 
+extern mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
+                                          const char *code, const char *msg);
+
 /* Intern a string into the state's var-string table.
  * Strings are malloc-owned and freed at state teardown. */
 static const char *intern_var_str(mino_state_t *S, const char *s)
@@ -81,9 +84,65 @@ mino_val_t *var_intern(mino_state_t *S, const char *ns, const char *name)
 
 void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
 {
+    mino_val_t *old_val   = var->as.var.root;
+    mino_val_t *validator = var->as.var.validator;
+    mino_val_t *watches   = var->as.var.watches;
+    mino_env_t *env;
+
+    /* Fast path: no watches, no validator, no env lookup. Early-bound
+     * install paths (state init, runtime/install_stdlib bootstrap)
+     * stay zero-cost. */
+    if (validator == NULL
+        && (watches == NULL || watches->type != MINO_MAP
+            || watches->as.map.len == 0)) {
+        gc_write_barrier(S, var, var->as.var.root, val);
+        var->as.var.root  = val;
+        var->as.var.bound = 1;
+        return;
+    }
+
+    /* Watches and validators run user code, which means we need an
+     * env. Use the current ns's env -- this is the natural one for
+     * runtime def / alter-var-root, which always run from inside an
+     * eval context with current_ns set. */
+    env = current_ns_env(S);
+
+    /* Validator: run before publishing the new root. A throw from
+     * the validator (via prim_throw_classified) longjmps out without
+     * mutating the var. */
+    if (validator != NULL) {
+        mino_val_t *vargs  = mino_cons(S, val, mino_nil(S));
+        mino_val_t *result = mino_call(S, validator, vargs, env);
+        if (result == NULL) return;  /* validator threw */
+        if (!mino_is_truthy(result)) {
+            prim_throw_classified(S, "eval/contract", "MCT001",
+                "Invalid reference state");
+            return;
+        }
+    }
     gc_write_barrier(S, var, var->as.var.root, val);
     var->as.var.root  = val;
     var->as.var.bound = 1;
+    /* Watches: dispatch after the publish. JVM Clojure's Var watches
+     * fire on (alter-var-root v f) and on def with rebind. The
+     * callback signature is (fn key var old new). A watch that throws
+     * propagates via mino_call returning NULL, matching atoms/refs. */
+    if (watches != NULL && watches->type == MINO_MAP
+        && watches->as.map.len > 0) {
+        size_t n = watches->as.map.len;
+        size_t i;
+        for (i = 0; i < n; i++) {
+            mino_val_t *key = vec_nth(watches->as.map.key_order, i);
+            mino_val_t *fn  = map_get_val(watches, key);
+            mino_val_t *wargs;
+            if (fn == NULL) continue;
+            wargs = mino_cons(S, key,
+                      mino_cons(S, var,
+                        mino_cons(S, old_val,
+                          mino_cons(S, val, mino_nil(S)))));
+            if (mino_call(S, fn, wargs, env) == NULL) return;
+        }
+    }
 }
 
 mino_val_t *var_find(mino_state_t *S, const char *ns, const char *name)

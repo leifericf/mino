@@ -341,6 +341,38 @@ holds either way: a yielding inner call (e.g. blocking on a
 future) would let another thread bump the version and fire the
 retry path, and the body fn must survive that.
 
+### Var watches and validators
+
+`add-watch`, `remove-watch`, `set-validator!`, and `get-validator`
+now accept vars. The `MINO_VAR` struct gains `watches` and
+`validator` slots; `var_set_root` runs the validator before
+publishing the new root and dispatches watches after, matching
+the atom / ref behaviour. The fast path (no watches, no validator,
+no env lookup) is unchanged for early-bound install paths --
+state init and the `install_stdlib` bootstrap stay zero-cost.
+
+JVM Clojure fires var watches on `alter-var-root` (and on `def`
+with rebind); mino does the same. Watches in mino are
+non-`^:dynamic` only -- a thread-local `binding` push does not
+fire watches anywhere.
+
+`tests/external_runner.clj` now requires
+`core_test/add_watch.cljc` and `core_test/remove_watch.cljc`
+upstream, and the atom / ref / var arms pass cleanly. The agent
+arm of each still errors (out of scope until agents land).
+
+### Equality of empty lazy seqs
+
+Fix: `(= (filter pred []) (filter pred []))` returned `false`.
+The `case MINO_LAZY` arm in `mino_eq` was a leftover stub from
+a previous force-then-compare design; the realized-to-empty
+case stayed `MINO_LAZY` per the unwrap policy and fell into
+the stub. Route both-LAZY equality through `eq_seq_like` so it
+walks element-wise (immediately terminating for two empty
+seqs). Unblocks the var arm of the upstream `add-watch` test,
+which compares two `(filter ...)` results that both yield
+empty.
+
 ### Cross-state ref defense (MST007)
 
 A C host that accidentally passes a ref allocated in one
