@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.101.0
+
+### Add software transactional memory (refs + `dosync`)
+
+mino gains Clojure's STM surface: refs (`MINO_TX_REF`), `dosync`,
+`alter`, `commute`, `ref-set`, `ensure`, `io!`. Single-version
+optimistic locking with a global commit lock; coarse on purpose,
+since mino's typical workload is single-digit refs and a handful
+of worker threads. `ref-min-history`, `ref-max-history`,
+`ref-history-count` are no-op stubs (return 0 / 10 / 0); long
+readers under sustained writer contention may exhaust the
+10000-retry cap rather than serve an older snapshot from history.
+
+STM is opt-in for embedders via `mino_install_stm(S, env)` and is
+auto-included in the standalone `./mino` binary through
+`mino_install_all`. An embedder that never calls the install
+function pays nothing beyond one enum tag and a NULL pointer per
+context.
+
+#### Type plumbing
+
+Introduce `MINO_TX_REF` enum tag plus the `tx_ref` struct holding
+the committed value, watches map, validator, version counter, and
+monotonic ID. Wire the tag through GC mark / verify, the type-tag
+string, the print form (`#ref[ID VAL]`), self-evaluation, the
+clone non-transferable list, identity equality, and `prim_type`
+(`:ref`). Add `stm_commit_lock`, `stm_lock_inited`, and
+`stm_next_ref_id` fields on `mino_state_t`; the lock itself is
+lazy-initialized only on the first call to `mino_install_stm`.
+
+Internal suite 1476 / 7091 / 0.
+
 ## v0.100.34
 
 ### Add `aset` for host arrays; tighten `vec` bad-shape rejection

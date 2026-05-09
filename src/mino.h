@@ -8,6 +8,7 @@
 #define MINO_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* ------------------------------------------------------------------------- */
 /* Version                                                                   */
@@ -26,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 100
-#define MINO_VERSION_PATCH 34
+#define MINO_VERSION_MINOR 101
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -159,7 +160,7 @@ typedef enum {
                      * yield k / v; first/second/last/peek dispatch
                      * accordingly. Constructed by first/seq of a map
                      * and by `clojure.lang.MapEntry/create`. */
-    MINO_HOST_ARRAY /* JVM-style host array: a fixed-length container
+    MINO_HOST_ARRAY, /* JVM-style host array: a fixed-length container
                      * with element-kind tag (:object, :int, :long,
                      * etc.) for printing and zero-fill semantics.
                      * Distinct from MINO_VECTOR: predicates like
@@ -170,6 +171,17 @@ typedef enum {
                      * seq over the elements. Equality is identity.
                      * Constructed via object-array, int-array,
                      * long-array, etc. */
+    MINO_TX_REF     /* Software transactional memory ref: identity cell
+                     * holding a single committed value plus per-cell
+                     * watches and validator. Mutations are confined to
+                     * `dosync` transactions and serialized through a
+                     * single-version optimistic protocol (read-set
+                     * validation at commit; conflicts trigger retry).
+                     * Equality is identity, matching atoms.
+                     * Constructed via `(ref v)`. The MINO_REF symbol
+                     * was already taken by the embedder rooting handle
+                     * (mino_ref_t), so the enum tag is MINO_TX_REF; the
+                     * Clojure-level type keyword is `:ref`. */
 } mino_type_t;
 
 typedef struct mino_val    mino_val_t;
@@ -344,6 +356,14 @@ struct mino_val {
             mino_val_t *k;
             mino_val_t *v;
         } map_entry;
+        struct {          /* MINO_TX_REF: STM ref */
+            mino_val_t *val;       /* committed value */
+            mino_val_t *watches;   /* MINO_MAP key->callback, or NULL */
+            mino_val_t *validator; /* validator fn, or NULL */
+            uint64_t    version;   /* bumped on each commit; read-set
+                                    * validation compares to snapshot */
+            uint64_t    ref_id;    /* monotonic ID assigned at construction */
+        } tx_ref;
     } as;
 };
 

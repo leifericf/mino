@@ -215,6 +215,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     case MINO_FUTURE:
     case MINO_HOST_ARRAY:
     case MINO_MAP_ENTRY:
+    case MINO_TX_REF:
         return NULL;
     case MINO_UUID:
         return mino_uuid_from_bytes(dst, v->as.uuid.bytes);

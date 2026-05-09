@@ -461,6 +461,16 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputc(']', out);
         return;
     }
+    case MINO_TX_REF:
+        /* `#ref[ID VAL]` -- not round-trippable, but consistent with
+         * the rest of mino's identity-cell prints (atom, volatile). */
+        fprintf(out, "#ref[0x%llx ",
+                (unsigned long long)v->as.tx_ref.ref_id);
+        S->print_depth++;
+        mino_print_to(S, out, v->as.tx_ref.val);
+        S->print_depth--;
+        fputc(']', out);
+        return;
     case MINO_HOST_ARRAY: {
         /* Mirror Clojure JVM's #object[...] form for arrays since
          * arrays don't round-trip through the reader. */

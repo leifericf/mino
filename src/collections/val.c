@@ -1050,6 +1050,9 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_MAP_ENTRY:
         return mino_eq(a->as.map_entry.k, b->as.map_entry.k)
             && mino_eq(a->as.map_entry.v, b->as.map_entry.v);
+    case MINO_TX_REF:
+        /* Identity equality matches atoms and Clojure's JVM Ref. */
+        return a == b;
     }
     return 0;
 }

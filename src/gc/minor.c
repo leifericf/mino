@@ -323,6 +323,11 @@ static void gc_verify_remset_complete(mino_state_t *S)
             case MINO_REGEX:
                 gc_verify_check(S, h, v->as.regex.source);
                 break;
+            case MINO_TX_REF:
+                gc_verify_check(S, h, v->as.tx_ref.val);
+                gc_verify_check(S, h, v->as.tx_ref.watches);
+                gc_verify_check(S, h, v->as.tx_ref.validator);
+                break;
             default: break;
             }
             break;

@@ -524,6 +524,11 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         case MINO_REGEX:
             gc_mark_child_push(S, v->as.regex.source);
             break;
+        case MINO_TX_REF:
+            gc_mark_child_push(S, v->as.tx_ref.val);
+            gc_mark_child_push(S, v->as.tx_ref.watches);
+            gc_mark_child_push(S, v->as.tx_ref.validator);
+            break;
         default:
             break;
         }

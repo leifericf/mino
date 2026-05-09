@@ -108,6 +108,8 @@ static void state_init(mino_state_t *S)
     S->thread_limit        = 1;
     S->thread_count        = 0;
     S->multi_threaded      = 0;
+    S->stm_lock_inited     = 0;
+    S->stm_next_ref_id     = 0;
     mino_state_lock_init(S);
     gc_evt_init(S);
 }
@@ -381,6 +383,12 @@ void mino_state_free(mino_state_t *S)
     state_free_async(S);
     state_free_heap(S);
     mino_state_lock_destroy(S);
+    if (S->stm_lock_inited) {
+#if !(defined(_WIN32) && defined(_MSC_VER))
+        pthread_mutex_destroy(&S->stm_commit_lock);
+#endif
+        S->stm_lock_inited = 0;
+    }
     free(S);
 }
 

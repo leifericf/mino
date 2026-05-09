@@ -355,6 +355,7 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_keyword(S, kinds[k]);
     }
     case MINO_MAP_ENTRY: return mino_keyword(S, "map-entry");
+    case MINO_TX_REF:    return mino_keyword(S, "ref");
     }
     return mino_keyword(S, "unknown");
 }

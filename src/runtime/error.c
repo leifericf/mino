@@ -159,6 +159,7 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_REGEX:     return "regex";
     case MINO_HOST_ARRAY: return "host-array";
     case MINO_MAP_ENTRY: return "map-entry";
+    case MINO_TX_REF:    return "ref";
     }
     return "unknown";
 }

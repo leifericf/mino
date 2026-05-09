@@ -671,6 +671,29 @@ struct mino_state {
      * used by atom CAS). */
     volatile int    stw_request;
 
+    /* === STM (refs / dosync) ============================================ */
+
+    /* Global STM commit lock. Held only across the commit phase of a
+     * transaction (read-set validation + writes + version bumps); watch
+     * dispatch runs outside it. Lazy-initialized on the first call to
+     * mino_install_stm so embedders that never opt into STM pay only
+     * the bool tracking cost. Coarse-grained on purpose: mino's typical
+     * embedded workload is single-digit refs and a handful of worker
+     * threads, where contention from a single mutex is far cheaper than
+     * the per-ref pthread_mutex_t alternative. */
+#if defined(_WIN32) && defined(_MSC_VER)
+    void           *stm_commit_lock;   /* CRITICAL_SECTION; lazy */
+#else
+    pthread_mutex_t stm_commit_lock;
+#endif
+    int             stm_lock_inited;
+
+    /* Monotonic counter for tx-ref IDs. Refs get a stable identity
+     * value at construction; not currently used for lock ordering
+     * (single global commit lock) but kept reserved for a future
+     * fine-grained lock matrix. */
+    uint64_t        stm_next_ref_id;
+
     /* === Async scheduler and timers ==================================== */
 
     /* Async scheduler run queue. */
