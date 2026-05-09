@@ -284,7 +284,9 @@ int seq_iter_done(const seq_iter_t *it)
     case MINO_CONS:   return it->cons_p == NULL || it->cons_p->type != MINO_CONS;
     case MINO_CHUNKED_CONS:
         return it->cons_p == NULL || it->cons_p->type != MINO_CHUNKED_CONS;
-    case MINO_VECTOR: return it->idx >= c->as.vec.len;
+    case MINO_VECTOR:     return it->idx >= c->as.vec.len;
+    case MINO_HOST_ARRAY: return it->idx >= c->as.host_array.len;
+    case MINO_MAP_ENTRY:  return it->idx >= 2;
     case MINO_MAP:    return it->idx >= c->as.map.len;
     case MINO_SET:    return it->idx >= c->as.set.len;
     case MINO_STRING: return it->idx >= c->as.s.len;
@@ -334,6 +336,9 @@ mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
         return ch->as.chunk.vals[it->idx];
     }
     case MINO_VECTOR: return vec_nth(c, it->idx);
+    case MINO_HOST_ARRAY: return c->as.host_array.vals[it->idx];
+    case MINO_MAP_ENTRY:
+        return it->idx == 0 ? c->as.map_entry.k : c->as.map_entry.v;
     case MINO_MAP: {
         /* Yield [key value] vectors for maps. */
         mino_val_t *key = vec_nth(c->as.map.key_order, it->idx);

@@ -215,6 +215,48 @@ mino_val_t *prim_to_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "to-array");
 }
 
+/* aset: in-place mutation of a host array slot. JVM Clojure's aset
+ * mutates the underlying Java array; mino's MINO_HOST_ARRAY likewise
+ * carries a malloc-owned vals[] that we can update in place. This is
+ * the *only* mutation path mino offers outside MINO_ATOM /
+ * MINO_VOLATILE -- the host-array tier exists specifically to mirror
+ * JVM array semantics for cross-dialect tests. */
+mino_val_t *prim_aset(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *arr;
+    mino_val_t *idx_val;
+    mino_val_t *new_val;
+    long long   idx;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "aset requires three arguments (array, index, value)");
+    }
+    arr     = args->as.cons.car;
+    idx_val = args->as.cons.cdr->as.cons.car;
+    new_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    if (arr == NULL || arr->type != MINO_HOST_ARRAY) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "aset: first argument must be a host array");
+    }
+    if (idx_val == NULL || idx_val->type != MINO_INT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "aset: index must be an integer");
+    }
+    idx = idx_val->as.i;
+    if (idx < 0 || (size_t)idx >= arr->as.host_array.len) {
+        return prim_throw_classified(S, "eval/bounds", "MBD001",
+            "aset: index out of range");
+    }
+    /* The host-array's vals[] is GC-traced via gc_mark_child_push, so
+     * the new pointer becomes a live reference for the next collection
+     * cycle. The old pointer drops out of the array's reachability. */
+    arr->as.host_array.vals[(size_t)idx] = new_val;
+    return new_val;
+}
+
 mino_val_t *prim_map_entry(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
@@ -2106,6 +2148,10 @@ const mino_prim_def k_prims_collections[] = {
      "Constructs a (k, v) map entry. Distinct from a 2-vector: "
      "key/val accept only map entries, not plain vectors. Equality "
      "with [k v] still compares element-wise."},
+    {"aset",       prim_aset,
+     "Mutates the host array at index, storing val. Returns val. The "
+     "host-array tier is the only path that exposes in-place mutation "
+     "outside MINO_ATOM / MINO_VOLATILE."},
 };
 
 const size_t k_prims_collections_count =

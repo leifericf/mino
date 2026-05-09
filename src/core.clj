@@ -961,7 +961,21 @@
    falsy. When called with no collection, returns a transducer."
   ([pred] (filter (complement pred)))
   ([pred coll] (filter (complement pred) coll)))
-(defn vec "Converts coll into a vector." [coll] (into [] coll))
+(defn vec
+  "Converts coll into a vector. Coll must be nil, a sequential
+   collection, a string, a map, a set, or a host array. Booleans,
+   numbers, keywords, characters, regexes, and transients throw
+   (matching JVM Clojure's `vec` rejecting non-seqable scalars)."
+  [coll]
+  (cond
+    (nil? coll)         []
+    (vector? coll)      coll
+    (or (number? coll) (boolean? coll) (char? coll) (keyword? coll)
+        (symbol? coll)  (regex? coll))
+    (throw (str "vec: cannot create a vector from " (type coll)))
+    (transient? coll)
+    (throw (str "vec: cannot create a vector from a transient"))
+    :else (into [] coll)))
 
 ;; --- Random utilities ---
 

@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.100.34
+
+### Add `aset` for host arrays; tighten `vec` bad-shape rejection
+
+`(aset arr i x)` now mutates `MINO_HOST_ARRAY`'s `vals[i]` in place.
+This is the only mutation path mino exposes outside `MINO_ATOM` /
+`MINO_VOLATILE`; it exists because the host-array tier mirrors JVM
+array semantics for cross-dialect tests.
+
+`seq_iter_init` / `seq_iter_done` / `seq_iter_val` now handle
+`MINO_HOST_ARRAY` and `MINO_MAP_ENTRY` so `into`, `mapv`, etc.
+iterate them uniformly. `(vec arr)` then materializes a normal
+persistent vector.
+
+`vec` in `src/core.clj` rejects bad shapes (numbers, booleans,
+chars, keywords, symbols, regexes, transients) up front rather
+than passing them to `into` and getting a generic `not seqable`
+error.
+
+`vec.cljc` 13/15 errors -> 19/20 passes. The remaining failure is
+the `(aset arr 0 -1) (is (= [-1 2 3] (vec arr)))` storage-aliasing
+assertion -- JVM's `LazilyPersistentVector.createOwning` reuses
+small Object[] arrays as the persistent vector's tail, which is
+incompatible with mino's persistent-trie `vec` that genuinely copies
+its input. Documented as JVM-internal optimization, not portable.
+
+Internal suite 1476 / 7091 / 0. External suite stays at 212 OK
+(vec.cljc still has 1 fail for the aliasing assertion).
+
 ## v0.100.33
 
 ### Add `MINO_FLOAT32` tier; split `float?` and `double?`
