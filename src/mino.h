@@ -27,7 +27,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 100
-#define MINO_VERSION_PATCH 32
+#define MINO_VERSION_PATCH 33
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -48,7 +48,14 @@ typedef enum {
     MINO_NIL,
     MINO_BOOL,
     MINO_INT,
-    MINO_FLOAT,
+    MINO_FLOAT,    /* 64-bit IEEE 754 double. */
+    MINO_FLOAT32,  /* 32-bit IEEE 754 single. Distinct tag so float?
+                    * matches both tiers and double? matches only
+                    * MINO_FLOAT. Stored in the same `as.f` field as
+                    * MINO_FLOAT (the 32-bit cast precision narrowing
+                    * happens at construction); arithmetic always
+                    * promotes to MINO_FLOAT, matching JVM Clojure
+                    * where Float arithmetic yields Double. */
     MINO_CHAR,       /* Unicode scalar value (codepoint) */
     MINO_STRING,
     MINO_SYMBOL,
@@ -189,7 +196,10 @@ struct mino_val {
     union {
         int b;            /* MINO_BOOL: 0 or 1 */
         long long i;      /* MINO_INT */
-        double f;         /* MINO_FLOAT */
+        double f;         /* MINO_FLOAT or MINO_FLOAT32 (32-bit value
+                           * already narrowed via (double)(float)d at
+                           * construction so equality / hash / print
+                           * see the rounded value). */
         int ch;           /* MINO_CHAR: Unicode codepoint (0..0x10FFFF) */
         struct {          /* MINO_STRING, MINO_SYMBOL, MINO_KEYWORD */
             char *data;   /* byte content (NUL-terminated) */
@@ -377,6 +387,12 @@ mino_val_t *mino_int(mino_state_t *S, long long n);
 /* Create a floating-point value. */
 mino_val_t *mino_float(mino_state_t *S, double f);
 
+/* Create a 32-bit single-precision floating-point value. The double
+ * argument is narrowed to float and stored back as a double so
+ * equality / print see the rounded value; the type tag distinguishes
+ * it from `MINO_FLOAT` so `double?` returns false on the result. */
+mino_val_t *mino_float32(mino_state_t *S, double f);
+
 /* Create a bigint from a signed long long. */
 mino_val_t *mino_bigint_from_ll(mino_state_t *S, long long n);
 
@@ -477,7 +493,7 @@ mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v);
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
  * the primitive variants fill with their type's zero value (0 for
- * the integer / float kinds, false for boolean,   for char).
+ * the integer / float kinds, false for boolean, NUL for char).
  * The vals[] storage is malloc-owned and freed during GC sweep. */
 mino_val_t *mino_host_array_new(mino_state_t *S, size_t len,
                                 host_array_kind_t kind);

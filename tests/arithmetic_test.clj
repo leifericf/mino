@@ -99,11 +99,14 @@
 (deftest numeric-coercion
   (is (= 3 (int 3.7)))
   (is (= 5 (int 5)))
-  (is (= 5.0 (float 5)))
-  ;; (float x) narrows to 32-bit float precision then widens back to
-  ;; double; values that fit exactly round-trip cleanly. 3.14 is not
-  ;; representable in float32 and rounds to the nearest float and back.
-  (is (= (float 3.14) (double (float 3.14))))
+  ;; `(float x)` returns a 32-bit MINO_FLOAT32 distinct from a
+  ;; 64-bit MINO_FLOAT, so equality with a double literal is false
+  ;; (matching JVM Clojure where `(= 5.0 (float 5))` is false).
+  ;; Same-tier comparisons work normally; `(double x)` widens.
+  (is (float? (float 5)))
+  (is (false? (double? (float 5))))
+  (is (= (float 5) (float 5.0)))
+  (is (= 5.0 (double (float 5))))
   (is (NaN? (float ##NaN)))
   (is (thrown? (float ##Inf)))
   (is (thrown? (float ##-Inf))))

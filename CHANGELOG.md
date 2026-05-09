@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.100.33
+
+### Add `MINO_FLOAT32` tier; split `float?` and `double?`
+
+`double_qmark.cljc` asserts `(double? (float 0.0))` is false. mino had
+one float tier (MINO_FLOAT, double-precision), so `(float x)` and
+`(double x)` produced indistinguishable values. Introduce a separate
+`MINO_FLOAT32` value tag sharing the same `as.f` storage (the 32-bit
+narrowing happens at `mino_float32` construction) so `double?` can
+distinguish 64-bit doubles from 32-bit floats. `float?` matches both
+tiers; `double?` matches only `MINO_FLOAT`. `(type x)` returns
+`:float` for 64-bit and `:float32` for 32-bit.
+
+Arithmetic always promotes to `MINO_FLOAT` (matching JVM Clojure
+where Float arithmetic yields Double): `tower_to_double`,
+`classify_or_throw`, `is_compare_number`, `tower_cmp`, `has_nan`,
+`prim_inc` / `prim_dec` fast paths, unary `-`,
+`extract_integer_for_cast`, `narrow_cast`, `prim_NaN_p`,
+`prim_infinite_p`, GC clone, hash, print all dispatch through both
+tags. Equality between `MINO_FLOAT` and `MINO_FLOAT32` is false even
+if the value matches (matches JVM where `(= 5.0 (float 5))` is
+false).
+
+New C primitive `prim_double` returns a `MINO_FLOAT`; replaces the
+prior `(def double float)` alias. `prim_float` now returns
+`MINO_FLOAT32`.
+
+Internal `numeric-coercion` test updated to cover the new contract.
+Internal suite 1476 / 7091 / 0. External `double_qmark.cljc` 43/46
+-> 46/46. External suite: 211 -> 212 OK.
+
 ## v0.100.32
 
 ### Add `MINO_MAP_ENTRY` value type

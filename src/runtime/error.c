@@ -123,6 +123,7 @@ const char *type_tag_str(const mino_val_t *v)
     case MINO_BOOL:    return "bool";
     case MINO_INT:     return "int";
     case MINO_FLOAT:   return "float";
+    case MINO_FLOAT32: return "float32";
     case MINO_CHAR:    return "char";
     case MINO_STRING:  return "string";
     case MINO_SYMBOL:  return "symbol";

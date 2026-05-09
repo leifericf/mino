@@ -147,7 +147,8 @@ uint32_t hash_val(const mino_val_t *v)
     case MINO_INT:
         h = fnv_mix(h, 0x03);
         return hash_long_long_bytes(h, v->as.i);
-    case MINO_FLOAT: {
+    case MINO_FLOAT:
+    case MINO_FLOAT32: {
         double    d  = v->as.f;
         long long ll = (long long)d;
         if ((double)ll == d) {

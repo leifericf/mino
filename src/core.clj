@@ -795,10 +795,16 @@
 (defn nat-int?
   "Returns true if x is a non-negative integer (long tier)."
   [x] (and (int? x) (not (neg? x))))
-(def double?   "Returns true if x is a float." float?)
+(defn double?
+  "Returns true if x is a 64-bit double (mino's `:float` tier).
+   Distinct from `float?`, which also returns true for the 32-bit
+   `:float32` tier produced by `(float x)`. Matches JVM Clojure
+   where `double?` is `(instance? Double x)`."
+  [x] (= :float (type x)))
 ;; ratio? / rational? / decimal? are C primitives that consult the real
 ;; numeric-tower types (MINO_RATIO, MINO_BIGDEC); registered in prim.c.
-(def double    "Coerces x to a float." float)
+;; double is a C primitive that returns a 64-bit MINO_FLOAT;
+;; registered in prim/numeric.c alongside int / long / short / byte.
 (defn num
   "Returns x if it is a number, nil if x is nil, otherwise throws.
    Nil pass-through matches the cross-dialect convention used by the

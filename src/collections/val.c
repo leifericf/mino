@@ -50,6 +50,17 @@ mino_val_t *mino_float(mino_state_t *S, double f)
     return v;
 }
 
+mino_val_t *mino_float32(mino_state_t *S, double f)
+{
+    mino_val_t *v = alloc_val(S, MINO_FLOAT32);
+    /* Narrow precision via the hardware float cast so the stored
+     * double sees the rounding -- equality with another float32 then
+     * compares values bit-equivalent to a Java float. NaN passes
+     * through unchanged. */
+    v->as.f = f != f ? f : (double)(float)f;
+    return v;
+}
+
 mino_val_t *mino_char(mino_state_t *S, int codepoint)
 {
     mino_val_t *v = alloc_val(S, MINO_CHAR);
@@ -884,6 +895,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_INT:
         return a->as.i == b->as.i;
     case MINO_FLOAT:
+    case MINO_FLOAT32:
         return a->as.f == b->as.f;
     case MINO_CHAR:
         return a->as.ch == b->as.ch;

@@ -117,12 +117,13 @@ double tower_to_double(const mino_val_t *v)
 {
     if (v == NULL) return 0.0;
     switch (v->type) {
-    case MINO_INT:    return (double)v->as.i;
-    case MINO_FLOAT:  return v->as.f;
-    case MINO_BIGINT: return mino_bigint_to_double(v);
-    case MINO_RATIO:  return mino_ratio_to_double(v);
-    case MINO_BIGDEC: return mino_bigdec_to_double(v);
-    default:          return 0.0;
+    case MINO_INT:     return (double)v->as.i;
+    case MINO_FLOAT:   return v->as.f;
+    case MINO_FLOAT32: return v->as.f;
+    case MINO_BIGINT:  return mino_bigint_to_double(v);
+    case MINO_RATIO:   return mino_ratio_to_double(v);
+    case MINO_BIGDEC:  return mino_bigdec_to_double(v);
+    default:           return 0.0;
     }
 }
 
@@ -141,11 +142,12 @@ static int classify_or_throw(mino_state_t *S, const mino_val_t *v,
 {
     if (v == NULL) goto err;
     switch (v->type) {
-    case MINO_INT:    *out_tier = TT_INT;    return 1;
-    case MINO_BIGINT: *out_tier = TT_BIGINT; return 1;
-    case MINO_RATIO:  *out_tier = TT_RATIO;  return 1;
-    case MINO_BIGDEC: *out_tier = TT_BIGDEC; return 1;
-    case MINO_FLOAT:  *out_tier = TT_FLOAT;  return 1;
+    case MINO_INT:     *out_tier = TT_INT;    return 1;
+    case MINO_BIGINT:  *out_tier = TT_BIGINT; return 1;
+    case MINO_RATIO:   *out_tier = TT_RATIO;  return 1;
+    case MINO_BIGDEC:  *out_tier = TT_BIGDEC; return 1;
+    case MINO_FLOAT:   *out_tier = TT_FLOAT;  return 1;
+    case MINO_FLOAT32: *out_tier = TT_FLOAT;  return 1;
     default: break;
     }
 err: {
@@ -593,7 +595,9 @@ static mino_val_t *prim_inc_impl(mino_state_t *S, mino_val_t *args,
         }
         return mino_int(S, x->as.i + 1);
     }
-    if (x != NULL && x->type == MINO_FLOAT) {
+    if (x != NULL && (x->type == MINO_FLOAT || x->type == MINO_FLOAT32)) {
+        /* JVM Clojure's `(inc (float 1))` returns a Double; arithmetic
+         * with floats always promotes to double. Match that. */
         return mino_float(S, x->as.f + 1.0);
     }
     if (x != NULL && (x->type == MINO_BIGINT || x->type == MINO_RATIO
@@ -645,7 +649,7 @@ static mino_val_t *prim_dec_impl(mino_state_t *S, mino_val_t *args,
         }
         return mino_int(S, x->as.i - 1);
     }
-    if (x != NULL && x->type == MINO_FLOAT) {
+    if (x != NULL && (x->type == MINO_FLOAT || x->type == MINO_FLOAT32)) {
         return mino_float(S, x->as.f - 1.0);
     }
     if (x != NULL && (x->type == MINO_BIGINT || x->type == MINO_RATIO
@@ -846,7 +850,8 @@ static mino_val_t *prim_sub_impl(mino_state_t *S, mino_val_t *args,
             }
             return mino_int(S, neg);
         }
-        if (first->type == MINO_FLOAT)  return mino_float(S, -first->as.f);
+        if (first->type == MINO_FLOAT || first->type == MINO_FLOAT32)
+            return mino_float(S, -first->as.f);
         if (first->type == MINO_BIGINT) return mino_bigint_neg(S, first);
         if (first->type == MINO_RATIO) {
             mino_val_t *zero_n = mino_bigint_from_ll(S, 0);
@@ -1565,7 +1570,7 @@ static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
     (void)S;
     if (v == NULL) { *err = "expected a number"; return 0; }
     if (v->type == MINO_INT) { *out = v->as.i; return 1; }
-    if (v->type == MINO_FLOAT) {
+    if (v->type == MINO_FLOAT || v->type == MINO_FLOAT32) {
         double d = v->as.f;
         if (d != d) { *err = "NaN cannot be coerced to integer"; return 0; }
         if (d > 9.2233720368547748e18 || d < -9.2233720368547758e18) {
@@ -1621,7 +1626,7 @@ static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
         }
         return mino_int(S, cp);
     }
-    if (v != NULL && v->type == MINO_FLOAT) {
+    if (v != NULL && (v->type == MINO_FLOAT || v->type == MINO_FLOAT32)) {
         double d = v->as.f;
         if (d != d) {
             snprintf(buf, sizeof(buf), "%s: NaN cannot be coerced to integer", opname);
@@ -1721,25 +1726,45 @@ mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001", "float: expected a number");
     }
-    if (v->type == MINO_FLOAT)  d = v->as.f;
-    else if (v->type == MINO_INT)    d = (double)v->as.i;
-    else if (v->type == MINO_BIGINT) d = mino_bigint_to_double(v);
-    else if (v->type == MINO_RATIO)  d = mino_ratio_to_double(v);
-    else if (v->type == MINO_BIGDEC) d = mino_bigdec_to_double(v);
+    if      (v->type == MINO_FLOAT)   d = v->as.f;
+    else if (v->type == MINO_FLOAT32) d = v->as.f;
+    else if (v->type == MINO_INT)     d = (double)v->as.i;
+    else if (v->type == MINO_BIGINT)  d = mino_bigint_to_double(v);
+    else if (v->type == MINO_RATIO)   d = mino_ratio_to_double(v);
+    else if (v->type == MINO_BIGDEC)  d = mino_bigdec_to_double(v);
     else
         return prim_throw_classified(S, "eval/type", "MTY001", "float: expected a number");
-    /* mino has only one float tier (double), but the `float` cast
-     * narrows the contract to the 32-bit float range: values outside
-     * [-FLT_MAX, FLT_MAX] (including +/- infinity) throw, and
-     * underflow rounds toward zero. NaN passes through. */
+    /* Narrow the contract to the 32-bit float range: values outside
+     * [-FLT_MAX, FLT_MAX] (including +/- infinity) throw; underflow
+     * rounds toward zero. NaN passes through. The result is tagged
+     * MINO_FLOAT32 so `double?` returns false on it. */
     if (d == d) {
         if (d > FLT_MAX || d < -FLT_MAX) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "float: value out of float range");
         }
-        d = (double)(float)d;
     }
-    return mino_float(S, d);
+    return mino_float32(S, d);
+}
+
+mino_val_t *prim_double(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "double requires one argument");
+    }
+    v = args->as.cons.car;
+    if (v == NULL)
+        return prim_throw_classified(S, "eval/type", "MTY001", "double: expected a number");
+    if (v->type == MINO_FLOAT)   return v;
+    if (v->type == MINO_FLOAT32) return mino_float(S, v->as.f);
+    if (v->type == MINO_INT)     return mino_float(S, (double)v->as.i);
+    if (v->type == MINO_BIGINT)  return mino_float(S, mino_bigint_to_double(v));
+    if (v->type == MINO_RATIO)   return mino_float(S, mino_ratio_to_double(v));
+    if (v->type == MINO_BIGDEC)  return mino_float(S, mino_bigdec_to_double(v));
+    return prim_throw_classified(S, "eval/type", "MTY001", "double: expected a number");
 }
 
 mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1799,6 +1824,7 @@ static int is_compare_number(const mino_val_t *v)
 {
     if (v == NULL) return 0;
     return v->type == MINO_INT || v->type == MINO_FLOAT
+        || v->type == MINO_FLOAT32
         || v->type == MINO_BIGINT || v->type == MINO_RATIO
         || v->type == MINO_BIGDEC;
 }
@@ -1999,6 +2025,7 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
         case MINO_INT:
             return a->as.i < b->as.i ? -1 : a->as.i > b->as.i ? 1 : 0;
         case MINO_FLOAT:
+        case MINO_FLOAT32:
             return a->as.f < b->as.f ? -1 : a->as.f > b->as.f ? 1 : 0;
         case MINO_BIGINT:
             return mino_bigint_cmp(a, b);
@@ -2047,7 +2074,8 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
  */
 static int has_nan(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_FLOAT && isnan(v->as.f);
+    return v != NULL && (v->type == MINO_FLOAT || v->type == MINO_FLOAT32)
+        && isnan(v->as.f);
 }
 
 static mino_val_t *compare_chain(mino_state_t *S, mino_val_t *args, const char *name, int op)
@@ -2126,7 +2154,8 @@ mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (!is_compare_number(v))
         return prim_throw_classified(S, "eval/type", "MTY001", "NaN? requires a number");
-    return (v->type == MINO_FLOAT && isnan(v->as.f))
+    return ((v->type == MINO_FLOAT || v->type == MINO_FLOAT32)
+            && isnan(v->as.f))
            ? mino_true(S) : mino_false(S);
 }
 
@@ -2140,7 +2169,8 @@ mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (v == NULL || v->type == MINO_NIL)
         return prim_throw_classified(S, "eval/type", "MTY001", "infinite? requires a number");
-    return (v->type == MINO_FLOAT && isinf(v->as.f))
+    return ((v->type == MINO_FLOAT || v->type == MINO_FLOAT32)
+            && isinf(v->as.f))
            ? mino_true(S) : mino_false(S);
 }
 
@@ -2255,7 +2285,12 @@ const mino_prim_def k_prims_numeric[] = {
      "values, NaN, or infinity. Returns the value as a long since mino "
      "has only one integer tier."},
     {"float", prim_float,
-     "Coerces x to a float."},
+     "Coerces x to a 32-bit float (returns a MINO_FLOAT32). Throws "
+     "on out-of-float32-range, +/-Infinity. NaN passes through. "
+     "Underflow rounds toward zero."},
+    {"double", prim_double,
+     "Coerces x to a 64-bit double (returns a MINO_FLOAT). Identity "
+     "on existing doubles."},
     {"parse-long",   prim_parse_long,
      "Parses a string into a long integer, or returns nil on failure."},
     {"parse-double", prim_parse_double,
