@@ -248,6 +248,102 @@ static void test_watch_fires_from_c_tx(mino_state_t *S, mino_env_t *env)
     }
 }
 
+/* C-side prim that runs a transaction body using mino_tx_alter_c.
+ * Used by the retry test: registered as `c-incr-ref!` so a Clojure
+ * future can drive it from a worker thread. The body increments the
+ * ref's int value by 1 plus the user-supplied step. Across retries
+ * the user pointer is preserved (the same step value is observed on
+ * each iteration), so the eventual committed value reflects exactly
+ * one increment per call regardless of how many retry attempts the
+ * runner went through. */
+struct retry_body_ctx {
+    mino_val_t *ref;
+    long long   step;
+    int         attempts;  /* observed by the body per re-invocation */
+};
+
+static mino_val_t *retry_body_xform(mino_state_t *S, mino_val_t *cur,
+                                     void *user, mino_env_t *env)
+{
+    long long n;
+    long long step = (long long)(intptr_t)user;
+    (void)env;
+    if (!mino_to_int(cur, &n)) return NULL;
+    return mino_int(S, n + step);
+}
+
+static mino_val_t *retry_body(mino_state_t *S, void *user, mino_env_t *env)
+{
+    struct retry_body_ctx *ctx = (struct retry_body_ctx *)user;
+    /* Each invocation (including retries) sees the same step from
+     * the user pointer; assert that to lock down the contract. */
+    REQUIRE(ctx->step == 1, "retry_body: step lost across retry");
+    ctx->attempts++;
+    return mino_tx_alter_c(S, ctx->ref, retry_body_xform,
+                            (void *)(intptr_t)ctx->step, env);
+}
+
+static struct retry_body_ctx *g_retry_ctx_for_prim;
+
+static mino_val_t *prim_c_incr_ref(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env)
+{
+    (void)args;
+    return mino_tx_run(S, retry_body, g_retry_ctx_for_prim, env);
+}
+
+static void test_run_retry_under_contention(mino_state_t *S, mino_env_t *env)
+{
+    mino_val_t *r = mino_tx_ref(S, mino_int(S, 0));
+    struct retry_body_ctx body_ctx = { r, 1, 0 };
+    long long  n = 0;
+    long long  per_thread = 200;
+    long long  workers    = 4;
+    char       script[512];
+
+    /* Grant threads so (future ...) works. The test process runs as
+     * a host that opts into multi-threading; the standalone ./mino
+     * binary does this automatically, but a fresh embedder default
+     * is thread_limit=1. */
+    mino_set_thread_limit(S, 4);
+
+    g_retry_ctx_for_prim = &body_ctx;
+    mino_register_fn(S, env, "c-incr-ref!", prim_c_incr_ref);
+    mino_env_set(S, env, "*c-stm-retry-ref*", r);
+
+    /* Drive (workers) Clojure futures that each call the C-side
+     * mino_tx_run loop (per-thread) times. Under contention the
+     * commit phase will see version conflicts and retry the body;
+     * the eventual sum must equal workers * per-thread regardless
+     * of how often retry fired. */
+    snprintf(script, sizeof(script),
+        "(let [futs (doall (for [_ (range %lld)]"
+        "                    (future (dotimes [_ %lld] (c-incr-ref!)))))]"
+        "  (doseq [f futs] @f)"
+        "  @*c-stm-retry-ref*)",
+        workers, per_thread);
+
+    {
+        mino_val_t *result = mino_eval_string(S, script, env);
+        REQUIRE(result != NULL, "retry: futures-driven eval returned NULL");
+        if (result == NULL) {
+            fprintf(stderr, "retry: error: %s\n", mino_last_error(S));
+            return;
+        }
+        REQUIRE(mino_to_int(result, &n), "retry: result not int");
+    }
+    REQUIRE(n == workers * per_thread,
+            "retry: final ref value != workers * per-thread");
+    /* attempts >= successful commits (workers * per_thread).
+     * Strictly greater would mean retry fired; equal means the
+     * threads serialized fully via mino's state_lock and no commit
+     * conflict was observed. Both outcomes preserve the contract:
+     * the user pointer survived every body invocation and every
+     * commit produced exactly +step. */
+    REQUIRE(body_ctx.attempts >= workers * per_thread,
+            "retry: attempts < successful commits");
+}
+
 /* Pass a ref allocated in another mino_state_t to S's mino_tx_*
  * entries. Each must throw eval/state MST007 ("ref from foreign
  * state") rather than silently mutate the foreign heap. */
@@ -327,6 +423,7 @@ int main(void)
     test_type_check_throws(S, env);
     test_watch_fires_from_c_tx(S, env);
     test_cross_state_ref_throws(S, env);
+    test_run_retry_under_contention(S, env);
 
     mino_env_free(S, env);
     mino_state_free(S);

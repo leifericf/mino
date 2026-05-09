@@ -323,6 +323,24 @@ the task's explicit list had been missing it -- a benign drift
 that became a broken link as soon as the C-side test referenced
 the new public symbols).
 
+### C-side retry test
+
+Added `test_run_retry_under_contention` to
+`tests/embed_stm_test.c`: spawns four Clojure futures that each
+drive 200 calls to a registered C primitive
+(`c-incr-ref!`); the prim runs `mino_tx_run` with a body that uses
+`mino_tx_alter_c` to increment a shared ref. Asserts the
+post-commit value equals `workers * per-thread` and that
+`body_attempts >= successful_commits` (so the user pointer survived
+every body invocation, including any retries).
+
+mino's eval loop holds a per-state lock that serializes worker
+threads on the same state, so on this run the threads typically
+do not race for commits and `attempts == commits`. The contract
+holds either way: a yielding inner call (e.g. blocking on a
+future) would let another thread bump the version and fire the
+retry path, and the body fn must survive that.
+
 ### Cross-state ref defense (MST007)
 
 A C host that accidentally passes a ref allocated in one
