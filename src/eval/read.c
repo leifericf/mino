@@ -3,6 +3,7 @@
  */
 
 #include "runtime/internal.h"
+#include <errno.h>
 
 /* ------------------------------------------------------------------------- */
 /* Reader                                                                    */
@@ -973,9 +974,20 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
             if (endp == buf + len)
                 TRY_PARSE_RETURN(mino_float(S, d));
         } else {
-            long long n = strtoll(buf, &endp, 10);
-            if (endp == buf + len)
+            long long n;
+            errno = 0;
+            n = strtoll(buf, &endp, 10);
+            if (endp == buf + len) {
+                /* strtoll saturates at LLONG_MIN/LLONG_MAX with
+                 * errno=ERANGE on overflow. Promote to bigint so
+                 * literals like 9223372036854775808 don't silently
+                 * collapse into the long range. */
+                if (errno == ERANGE) {
+                    mino_val_t *bi = mino_bigint_from_string_n(S, buf, len);
+                    if (bi != NULL) TRY_PARSE_RETURN(bi);
+                }
                 TRY_PARSE_RETURN(mino_int(S, n));
+            }
         }
     }
 try_parse_done:
