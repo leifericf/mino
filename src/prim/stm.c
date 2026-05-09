@@ -301,12 +301,18 @@ mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
+    /* JVM canon: ref-set after commute on the same ref throws
+     * "Can't set after commute". The commute log captures values
+     * that should survive replay; an explicit set would silently
+     * discard them, which JVM forbids. */
+    if (rs->kind == TX_STATE_COMMUTE_LOG && rs->commute_log != NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "Can't set after commute");
+    }
     if (!rs->read) {
         rs->read             = 1;
         rs->snapshot_version = ref->as.tx_ref.version;
     }
-    /* ref-set after a logged commute drops the log: the explicit
-     * value supersedes anything the commute would have computed. */
     rs->kind        = TX_STATE_ALTER;
     rs->tentative   = val;
     rs->commute_log = NULL;
@@ -353,9 +359,12 @@ mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
-    /* alter-after-commute fold: if a commute log is pending, replay
-     * it now to materialize the in-tx value, then apply alter on
-     * top. The fold drops the log -- alter has pinned the value. */
+    /* JVM canon: alter after commute on the same ref throws
+     * "Can't set after commute". See prim_ref_set above. */
+    if (rs->kind == TX_STATE_COMMUTE_LOG && rs->commute_log != NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "Can't set after commute");
+    }
     cur = tx_effective_value(S, rs, env);
     if (cur == NULL) return NULL;
     if (!rs->read) {

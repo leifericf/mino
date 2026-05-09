@@ -115,12 +115,36 @@
       (is (= 2 @r)))
     (is (= 2 @r))))
 
-(deftest commute-then-alter-fold
+(deftest alter-after-commute-throws
+  ;; JVM canon: ref-set / alter on a ref that already has a logged
+  ;; commute throws "Can't set after commute". The commute log captures
+  ;; replay-at-commit semantics that an explicit set would silently
+  ;; discard, so the rule rejects the combination outright.
   (let [r (ref 0)]
+    (is (thrown? (dosync
+                   (commute r inc)
+                   (alter r * 10))))
+    (is (= 0 @r))
+    (is (thrown? (dosync
+                   (commute r inc)
+                   (ref-set r 99))))
+    (is (= 0 @r))))
+
+(deftest alter-then-commute-folds
+  ;; alter-then-commute on the same ref: the commute folds into the
+  ;; alter's tentative value (commute is observed at the call site as
+  ;; (g (f current))), and the final committed value is (g (f orig)).
+  ;; Matches JVM, which skips the commute log replay at commit when
+  ;; the ref is already in the write set.
+  (let [r (ref 1)
+        seen (atom [])]
+    (add-watch r :w (fn [_ _ o n] (swap! seen conj [o n])))
     (dosync
-      (commute r inc)
-      (alter r * 10))
-    (is (= 10 @r))))
+      (alter r + 10)            ; tentative = 11
+      (let [v (commute r * 2)]  ; tentative = 22, returns 22
+        (is (= 22 v))))
+    (is (= 22 @r))
+    (is (= [[1 22]] @seen))))
 
 (deftest ref-history-stubs
   (let [r (ref 0)]
