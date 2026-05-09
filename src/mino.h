@@ -516,6 +516,19 @@ mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v);
  * monotonic ID) is unique within S. */
 mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val);
 
+/* Return 1 if v is an STM ref (MINO_TX_REF), 0 otherwise. NULL-safe. */
+int         mino_is_tx_ref(const mino_val_t *v);
+
+/* Read a ref. Outside any transaction: atomic load of the ref's
+ * committed value. Inside a transaction on the calling thread: the
+ * in-tx effective value (alter tentative, commute-log replay, or
+ * committed) AND records the read for read-set validation. Equivalent
+ * to Clojure's @ref. The caller must already be on a thread that has
+ * either entered an outer mino_tx_run or is executing inside a Clojure
+ * dosync; outside both, the committed value is returned without any
+ * tx bookkeeping. Returns NULL if v is not a ref. */
+mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *v);
+
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
  * the primitive variants fill with their type's zero value (0 for

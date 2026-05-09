@@ -284,19 +284,26 @@ static mino_val_t *tx_effective_value(mino_state_t *S, tx_ref_state_t *rs,
 /* --- deref dispatch for refs --------------------------------------------- *
  *
  * The main `deref` primitive lives in prim/stateful.c; refs hook in
- * via mino_ref_deref which prim_deref calls when it sees MINO_TX_REF.
+ * via mino_tx_ref_deref which prim_deref calls when it sees MINO_TX_REF.
  *
  * Inside a transaction: return the in-tx effective value (tentative
  * for alter, log-replayed for commute, committed otherwise) and
  * record a read for read-set validation. Outside a transaction:
  * return the committed value.
+ *
+ * Public-API entry point: also called by C hosts as the C-level @ref.
+ * Tolerates NULL or non-ref input (returns NULL) so a host can
+ * defensively pass any mino_val_t * without pre-checking the type.
  */
-mino_val_t *mino_ref_deref(mino_state_t *S, mino_val_t *ref)
+mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *ref)
 {
-    mino_thread_ctx_t *ctx = mino_current_ctx(S);
-    tx_state_t        *tx  = ctx->current_tx;
+    mino_thread_ctx_t *ctx;
+    tx_state_t        *tx;
     tx_ref_state_t    *rs;
     mino_val_t        *val;
+    if (ref == NULL || ref->type != MINO_TX_REF) return NULL;
+    ctx = mino_current_ctx(S);
+    tx  = ctx->current_tx;
     if (tx == NULL) {
         return ref->as.tx_ref.val;
     }
@@ -309,6 +316,11 @@ mino_val_t *mino_ref_deref(mino_state_t *S, mino_val_t *ref)
         rs->snapshot_version = ref->as.tx_ref.version;
     }
     return val;
+}
+
+int mino_is_tx_ref(const mino_val_t *v)
+{
+    return v != NULL && v->type == MINO_TX_REF;
 }
 
 /* --- ref-set + alter ----------------------------------------------------- */
