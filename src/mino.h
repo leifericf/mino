@@ -529,6 +529,14 @@ int         mino_is_tx_ref(const mino_val_t *v);
  * tx bookkeeping. Returns NULL if v is not a ref. */
 mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *v);
 
+/* Set the ref's in-transaction tentative value to val. Must be called
+ * from inside a transaction (started either by a Clojure dosync or by
+ * mino_tx_run); throws eval/state MST002 outside a tx. Throws MST002
+ * "Can't set after commute" if commute was called on this ref earlier
+ * in the same tx. Throws eval/type MTY001 if v is not a ref. Returns
+ * val on success. Equivalent to Clojure's `(ref-set ref val)`. */
+mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *v, mino_val_t *val);
+
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
  * the primitive variants fill with their type's zero value (0 for

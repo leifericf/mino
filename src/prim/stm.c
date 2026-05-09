@@ -325,24 +325,14 @@ int mino_is_tx_ref(const mino_val_t *v)
 
 /* --- ref-set + alter ----------------------------------------------------- */
 
-mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+/* Shared core for prim_ref_set / mino_tx_ref_set. Caller has already
+ * type-checked ref. Returns val on success; NULL on throw (the throw
+ * has already been raised via prim_throw_classified). */
+static mino_val_t *tx_ref_set_core(mino_state_t *S, mino_val_t *ref,
+                                    mino_val_t *val)
 {
-    mino_val_t        *ref;
-    mino_val_t        *val;
     tx_ref_state_t    *rs;
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
-    (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
-        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "ref-set requires two arguments: ref and value");
-    }
-    ref = args->as.cons.car;
-    val = args->as.cons.cdr->as.cons.car;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "ref-set: first argument must be a ref");
-    }
     if (ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
@@ -365,6 +355,34 @@ mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     rs->tentative   = val;
     rs->commute_log = NULL;
     return val;
+}
+
+mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ref;
+    mino_val_t *val;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "ref-set requires two arguments: ref and value");
+    }
+    ref = args->as.cons.car;
+    val = args->as.cons.cdr->as.cons.car;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "ref-set: first argument must be a ref");
+    }
+    return tx_ref_set_core(S, ref, val);
+}
+
+mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *ref, mino_val_t *val)
+{
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_tx_ref_set: argument must be a ref");
+    }
+    return tx_ref_set_core(S, ref, val);
 }
 
 /* Build the argument list (cur-val arg1 arg2 ...) for invoking f
