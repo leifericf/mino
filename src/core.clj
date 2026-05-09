@@ -69,6 +69,13 @@
   [& body]
   `(dosync* (fn [] ~@body)))
 
+(defmacro io!
+  "If invoked within an STM transaction, throws an
+  IllegalStateException-equivalent before evaluating body. Marks a
+  body as having unsafe side effects so dosync can refuse it."
+  [& body]
+  `(do (io!-check) ~@body))
+
 ;; --- Definitions ---
 
 ;; defn is lifted above the early type predicates so they can use it.

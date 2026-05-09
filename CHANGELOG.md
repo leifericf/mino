@@ -138,6 +138,24 @@ MCT001 ("Invalid reference state") after the lock is released.
 Both retry and validator-rejection paths free the per-ref state
 nodes before throwing.
 
+#### `io!`, `in-transaction?`, history stubs
+
+Add `io!` as a `defmacro` in `core.clj` that expands to
+`(do (io!-check) body...)`; `io!-check` is a primitive that
+throws `eval/state` MST003 ("I/O in transaction") when called
+inside `dosync`, otherwise returns nil. The macro form ensures
+the throw fires before the body evaluates.
+
+Add `in-transaction?` predicate primitive returning true inside
+`dosync`. Add `ref-min-history`, `ref-max-history`,
+`ref-history-count` as no-op stubs returning 0 / 10 / 0 -- mino
+uses single-version optimistic locking, not MVCC with history,
+so the values are not configurable.
+
+(The MST002 contract for `ref-set` / `alter` / `commute` /
+`ensure` outside `dosync` was already wired in commits #5 and
+#6 -- this entry records the rest of the surface.)
+
 Internal suite 1476 / 7091 / 0.
 
 ## v0.100.34

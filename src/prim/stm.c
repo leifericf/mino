@@ -93,6 +93,76 @@ static void tx_clear_ref_states(tx_state_t *tx)
     tx->refs_head = NULL;
 }
 
+/* --- io! support, history stubs, in-tx predicate ------------------------- */
+
+/* (io!-check) -- throws if a transaction is active on the current
+ * thread. The `io!` macro in core.clj expands to
+ * (do (io!-check) body...) so the throw fires before body evaluates. */
+mino_val_t *prim_io_bang_check(mino_state_t *S, mino_val_t *args,
+                                mino_env_t *env)
+{
+    mino_thread_ctx_t *ctx;
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "io!-check takes no arguments");
+    }
+    ctx = mino_current_ctx(S);
+    if (ctx->current_tx != NULL) {
+        return prim_throw_classified(S, "eval/state", "MST003",
+            "I/O in transaction");
+    }
+    return mino_nil(S);
+}
+
+mino_val_t *prim_in_tx_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_thread_ctx_t *ctx;
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "in-transaction? takes no arguments");
+    }
+    ctx = mino_current_ctx(S);
+    return ctx->current_tx != NULL ? mino_true(S) : mino_false(S);
+}
+
+/* History stubs. mino's STM uses single-version optimistic locking,
+ * NOT MVCC with history. The min/max/count surface exists for
+ * Clojure-script compatibility but the value is fixed. */
+mino_val_t *prim_ref_min_history(mino_state_t *S, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "ref-min-history requires a ref");
+    }
+    return mino_int(S, 0);
+}
+
+mino_val_t *prim_ref_max_history(mino_state_t *S, mino_val_t *args,
+                                  mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "ref-max-history requires a ref");
+    }
+    return mino_int(S, 10);
+}
+
+mino_val_t *prim_ref_history_count(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "ref-history-count requires a ref");
+    }
+    return mino_int(S, 0);
+}
+
 /* --- ref construction + identity predicate -------------------------------- */
 
 mino_val_t *prim_ref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -673,6 +743,21 @@ const mino_prim_def k_prims_stm[] = {
     {"dosync*",   prim_dosync_star,
      "Runs a zero-arg thunk inside an STM transaction. The `dosync` "
      "macro expands to (dosync* (fn [] body...))."},
+    {"io!-check", prim_io_bang_check,
+     "Internal: throws when called inside a transaction. The io! "
+     "macro expands to (do (io!-check) body...) so the check runs "
+     "before the body evaluates."},
+    {"in-transaction?", prim_in_tx_p,
+     "Returns true when called from inside a `dosync` body."},
+    {"ref-min-history", prim_ref_min_history,
+     "Returns the ref's min-history. mino uses single-version "
+     "optimistic locking; this stub always returns 0."},
+    {"ref-max-history", prim_ref_max_history,
+     "Returns the ref's max-history. mino uses single-version "
+     "optimistic locking; this stub always returns 10."},
+    {"ref-history-count", prim_ref_history_count,
+     "Returns the ref's current history-count. mino uses single-"
+     "version optimistic locking; this stub always returns 0."},
 };
 
 const size_t k_prims_stm_count = sizeof(k_prims_stm) / sizeof(k_prims_stm[0]);
