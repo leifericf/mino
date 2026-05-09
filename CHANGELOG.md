@@ -280,6 +280,25 @@ ref's snapshot version so any concurrent committer fails this
 tx's read-set validation; the JVM "block any other write" semantic
 falls out of the version-bump-on-commit rule for free.
 
+#### `mino_tx_run`
+
+Host-level `dosync`. The new typedef
+`mino_val_t *(*mino_tx_body_fn)(mino_state_t *, void *user,
+mino_env_t *)` is the C-side analogue of a `(fn [] ...)` body
+thunk. `mino_tx_run` owns the setjmp / try-frame, retry loop,
+commit phase, and watch dispatch.
+
+`prim_dosync_star`'s body invocation extracts cleanly into a
+`tx_invoke_body_fn` callback shared with the new C entry: the
+Clojure side wires it to `mino_call(thunk, [])`, the C side wires
+it to a direct `body(S, user, env)`. The setjmp-bearing
+`tx_outer_run` is shared verbatim (same `-Wclobbered` discipline,
+same try-stack overflow guard, same outer-vs-nested dispatch), and
+both entry points absorb a nested call into the active tx without
+touching the setjmp frame. Cross-thread defense is unchanged --
+the active `current_tx` lives on the per-thread context, so a
+host calling `mino_tx_run` on a worker sees its own retry loop.
+
 ## v0.100.34
 
 ### Add `aset` for host arrays; tighten `vec` bad-shape rejection

@@ -574,6 +574,31 @@ mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *v,
 mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *v,
                            mino_env_t *env);
 
+/* C-callable transaction body, used by mino_tx_run. Returns the
+ * body's last value. The body may invoke any in-tx accessor
+ * (mino_tx_ref_deref / mino_tx_alter_c / ...), call mino_call to
+ * dispatch into Clojure code, and throw via prim_throw_classified.
+ *
+ * The body is re-invoked on commit-time conflict, up to 10000 retries
+ * before throwing eval/state MST004. Any user state mutated through
+ * `user` survives across retries; if clean retry semantics matter,
+ * snapshot mutable state into a retry-local buffer at the top of the
+ * body. mino_val_t * pointers captured in user state should not be
+ * relied on across retries (the GC may relocate or finalize between
+ * iterations); re-derive them from the ref / world on each call. */
+typedef mino_val_t *(*mino_tx_body_fn)(mino_state_t *S, void *user,
+                                        mino_env_t *env);
+
+/* Run body inside a transaction. Returns body's result on commit,
+ * or NULL if the body threw an unhandled exception or the retry cap
+ * was exhausted. Nests cleanly: if a transaction is already running
+ * on the calling thread (started by an outer dosync or mino_tx_run),
+ * the inner call is absorbed into the outer's tx and runs once
+ * without its own setjmp / retry frame. Equivalent to the host-level
+ * (dosync (body)). */
+mino_val_t *mino_tx_run(mino_state_t *S, mino_tx_body_fn body,
+                        void *user, mino_env_t *env);
+
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
  * the primitive variants fill with their type's zero value (0 for

@@ -823,12 +823,39 @@ static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
  * commit-time conflict, clear tentatives, free per-ref state nodes,
  * and re-run the body up to STM_RETRY_CAP times.
  */
-/* Body of dosync*: extracted so the setjmp-bearing function does
- * minimal work. Splitting the retry-loop into its own non-setjmp
- * frame sidesteps -Wclobbered for every local that mutates across
- * the loop. */
-static mino_val_t *dosync_run(mino_state_t *S, mino_val_t *thunk,
-                              mino_env_t *env, tx_state_t *tx)
+/* Body invoker: runs the user-supplied transaction body once and
+ * returns its result. Implementations bind to either a Clojure thunk
+ * call (mino_call) or a direct C body invocation. Re-invoked on
+ * retry, so the body must be idempotent w.r.t. user state outside
+ * the tx. */
+typedef mino_val_t *(*tx_invoke_body_fn)(mino_state_t *S, void *body_user,
+                                          mino_env_t *env);
+
+struct invoke_clj_thunk { mino_val_t *thunk; };
+
+static mino_val_t *invoke_clj_thunk(mino_state_t *S, void *body_user,
+                                     mino_env_t *env)
+{
+    struct invoke_clj_thunk *c = (struct invoke_clj_thunk *)body_user;
+    return mino_call(S, c->thunk, mino_nil(S), env);
+}
+
+struct invoke_c_body { mino_tx_body_fn fn; void *user; };
+
+static mino_val_t *invoke_c_body(mino_state_t *S, void *body_user,
+                                  mino_env_t *env)
+{
+    struct invoke_c_body *c = (struct invoke_c_body *)body_user;
+    return c->fn(S, c->user, env);
+}
+
+/* Retry loop body: split off the setjmp-bearing tx_outer_run so it
+ * does minimal work, sidestepping -Wclobbered for locals that mutate
+ * across iterations. */
+static mino_val_t *tx_run_loop(mino_state_t *S,
+                                tx_invoke_body_fn invoke,
+                                void *body_user, mino_env_t *env,
+                                tx_state_t *tx)
 {
     for (;;) {
         mino_val_t *r;
@@ -842,7 +869,7 @@ static mino_val_t *dosync_run(mino_state_t *S, mino_val_t *thunk,
                 "transaction retry limit exceeded");
             return NULL; /* unreachable -- prim_throw_classified longjmps */
         }
-        r = mino_call(S, thunk, mino_nil(S), env);
+        r = invoke(S, body_user, env);
         if (r == NULL) {
             return NULL;
         }
@@ -861,10 +888,20 @@ static mino_val_t *dosync_run(mino_state_t *S, mino_val_t *thunk,
     }
 }
 
-mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
-                              mino_env_t *env)
+/* Outer runner shared by prim_dosync_star and mino_tx_run. Owns the
+ * setjmp / try-frame, retry loop, commit, and watch dispatch. The
+ * body invoker is parameterised so the Clojure side dispatches to
+ * mino_call(thunk) and the C side calls the host fn directly.
+ *
+ * The caller must guarantee no enclosing transaction is active --
+ * that case (nested dosync / mino_tx_run) is handled at the public
+ * entry by absorbing the inner into the outer's tx without touching
+ * the setjmp frame. */
+static mino_val_t *tx_outer_run(mino_state_t *S,
+                                 tx_invoke_body_fn invoke,
+                                 void *body_user, mino_env_t *env,
+                                 const char *origin_label)
 {
-    mino_val_t                *thunk;
     /* Volatile-qualified so the setjmp-clobber analysis stays clean:
      * any local needed in both the success and longjmp arms must be
      * either declared volatile or reloaded after setjmp. */
@@ -874,30 +911,7 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
     tx_state_t                   tx;
     try_frame_t                 *frame;
 
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "dosync* requires one argument (a thunk)");
-    }
-    thunk = args->as.cons.car;
-    if (thunk == NULL || (thunk->type != MINO_FN
-                          && thunk->type != MINO_PRIM
-                          && thunk->type != MINO_MACRO)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "dosync*: expected a thunk");
-    }
-    ctx_v = mino_current_ctx(S);
-    /* Nested dosync: bump depth, reuse the outer tx, run the thunk. */
-    if (ctx_v->current_tx != NULL) {
-        mino_val_t        *r;
-        mino_thread_ctx_t *ctx = ctx_v;
-        ctx->current_tx->depth++;
-        r = mino_call(S, thunk, mino_nil(S), env);
-        if (ctx->current_tx != NULL) ctx->current_tx->depth--;
-        return r;
-    }
-    /* Outermost dosync: tx state on the C stack. Push a try frame so
-     * an in-body throw is intercepted long enough to clear
-     * ctx->current_tx and free per-ref state before propagating. */
+    ctx_v                 = mino_current_ctx(S);
     saved_try             = ctx_v->try_depth;
     tx.depth              = 1;
     tx.refs_head          = NULL;
@@ -907,7 +921,7 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
 
     if (ctx_v->try_depth >= MAX_TRY_DEPTH) {
         return prim_throw_classified(S, "eval/state", "MST006",
-            "dosync*: try-stack overflow");
+            origin_label);
     }
     frame                 = &ctx_v->try_stack[ctx_v->try_depth];
     frame->exception      = NULL;
@@ -942,7 +956,7 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
     ctx_v->try_depth++;
     ctx_v->current_tx = &tx;
 
-    result_v = dosync_run(S, thunk, env, &tx);
+    result_v = tx_run_loop(S, invoke, body_user, env, &tx);
 
     {
         mino_thread_ctx_t *c = ctx_v;
@@ -960,6 +974,64 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
         c->try_depth  = saved_try;
     }
     return result_v;
+}
+
+mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
+                              mino_env_t *env)
+{
+    mino_val_t              *thunk;
+    mino_thread_ctx_t       *ctx;
+    struct invoke_clj_thunk  body_ctx;
+
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "dosync* requires one argument (a thunk)");
+    }
+    thunk = args->as.cons.car;
+    if (thunk == NULL || (thunk->type != MINO_FN
+                          && thunk->type != MINO_PRIM
+                          && thunk->type != MINO_MACRO)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "dosync*: expected a thunk");
+    }
+    ctx = mino_current_ctx(S);
+    /* Nested dosync: bump depth, reuse the outer tx, run the thunk. */
+    if (ctx->current_tx != NULL) {
+        mino_val_t *r;
+        ctx->current_tx->depth++;
+        r = mino_call(S, thunk, mino_nil(S), env);
+        if (ctx->current_tx != NULL) ctx->current_tx->depth--;
+        return r;
+    }
+    body_ctx.thunk = thunk;
+    return tx_outer_run(S, invoke_clj_thunk, &body_ctx, env,
+                         "dosync*: try-stack overflow");
+}
+
+mino_val_t *mino_tx_run(mino_state_t *S, mino_tx_body_fn body, void *user,
+                        mino_env_t *env)
+{
+    mino_thread_ctx_t    *ctx;
+    struct invoke_c_body  body_ctx;
+
+    if (body == NULL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_tx_run: body fn must not be NULL");
+    }
+    ctx = mino_current_ctx(S);
+    /* Nested tx: absorb into the outer just like a Clojure dosync
+     * inside another dosync. The body runs once, no retry frame. */
+    if (ctx->current_tx != NULL) {
+        mino_val_t *r;
+        ctx->current_tx->depth++;
+        r = body(S, user, env);
+        if (ctx->current_tx != NULL) ctx->current_tx->depth--;
+        return r;
+    }
+    body_ctx.fn   = body;
+    body_ctx.user = user;
+    return tx_outer_run(S, invoke_c_body, &body_ctx, env,
+                         "mino_tx_run: try-stack overflow");
 }
 
 /* --- primitive table ----------------------------------------------------- */
