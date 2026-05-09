@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <limits.h>
+#include <float.h>
 
 /* Integer-overflow-safe arithmetic helpers. GCC >= 5 and Clang >= 3.9
  * expose __builtin_*_overflow; MSVC and older compilers fall back to
@@ -1711,20 +1712,34 @@ mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
+    double      d;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "float requires one argument");
     }
     v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_FLOAT) return v;
-    if (v != NULL && v->type == MINO_INT) return mino_float(S, (double)v->as.i);
-    if (v != NULL && v->type == MINO_BIGINT)
-        return mino_float(S, mino_bigint_to_double(v));
-    if (v != NULL && v->type == MINO_RATIO)
-        return mino_float(S, mino_ratio_to_double(v));
-    if (v != NULL && v->type == MINO_BIGDEC)
-        return mino_float(S, mino_bigdec_to_double(v));
-    return prim_throw_classified(S, "eval/type", "MTY001", "float: expected a number");
+    if (v == NULL) {
+        return prim_throw_classified(S, "eval/type", "MTY001", "float: expected a number");
+    }
+    if (v->type == MINO_FLOAT)  d = v->as.f;
+    else if (v->type == MINO_INT)    d = (double)v->as.i;
+    else if (v->type == MINO_BIGINT) d = mino_bigint_to_double(v);
+    else if (v->type == MINO_RATIO)  d = mino_ratio_to_double(v);
+    else if (v->type == MINO_BIGDEC) d = mino_bigdec_to_double(v);
+    else
+        return prim_throw_classified(S, "eval/type", "MTY001", "float: expected a number");
+    /* mino has only one float tier (double), but the `float` cast
+     * narrows the contract to the 32-bit float range: values outside
+     * [-FLT_MAX, FLT_MAX] (including +/- infinity) throw, and
+     * underflow rounds toward zero. NaN passes through. */
+    if (d == d) {
+        if (d > FLT_MAX || d < -FLT_MAX) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                                         "float: value out of float range");
+        }
+        d = (double)(float)d;
+    }
+    return mino_float(S, d);
 }
 
 mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)

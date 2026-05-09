@@ -100,7 +100,13 @@
   (is (= 3 (int 3.7)))
   (is (= 5 (int 5)))
   (is (= 5.0 (float 5)))
-  (is (= 3.14 (float 3.14))))
+  ;; (float x) narrows to 32-bit float precision then widens back to
+  ;; double; values that fit exactly round-trip cleanly. 3.14 is not
+  ;; representable in float32 and rounds to the nearest float and back.
+  (is (= (float 3.14) (double (float 3.14))))
+  (is (NaN? (float ##NaN)))
+  (is (thrown? (float ##Inf)))
+  (is (thrown? (float ##-Inf))))
 
 (deftest integer-overflow-strict-and-primed
   ;; Plain +/-/*/inc/dec throw on long overflow (matching JVM Clojure's
