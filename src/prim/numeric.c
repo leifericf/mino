@@ -252,8 +252,23 @@ static int promote_acc(mino_state_t *S, tower_acc_t *acc, int new_tier,
             }
             break;
         case TT_RATIO:
-            if (new_tier == TT_BIGDEC || new_tier == TT_FLOAT) {
-                /* Ratio meets bigdec: collapse to float (documented). */
+            if (new_tier == TT_BIGDEC) {
+                /* Ratio meets bigdec: widen to bigdec via exact
+                 * num/denom division (matches JVM Clojure contagion:
+                 * bigdec is "higher" than ratio). */
+                mino_val_t *num_bd = mino_bigdec_make(S,
+                    acc->vacc->as.ratio.num, 0);
+                mino_val_t *den_bd;
+                if (num_bd == NULL) return 0;
+                den_bd = mino_bigdec_make(S,
+                    acc->vacc->as.ratio.denom, 0);
+                if (den_bd == NULL) return 0;
+                acc->vacc = mino_bigdec_div(S, num_bd, den_bd);
+                if (acc->vacc == NULL) return 0;
+                acc->tier = TT_BIGDEC;
+                continue;
+            }
+            if (new_tier == TT_FLOAT) {
                 acc->dacc = mino_ratio_to_double(acc->vacc);
                 acc->vacc = NULL;
                 acc->tier = TT_FLOAT;
@@ -313,6 +328,15 @@ static mino_val_t *coerce_at_tier(mino_state_t *S, mino_val_t *v, int tier,
         }
         if (v->type == MINO_BIGINT) {
             return mino_bigdec_make(S, (mino_val_t *)v, 0);
+        }
+        if (v->type == MINO_RATIO) {
+            /* Widen the ratio to bigdec via exact division. */
+            mino_val_t *num_bd, *den_bd;
+            num_bd = mino_bigdec_make(S, v->as.ratio.num, 0);
+            if (num_bd == NULL) return NULL;
+            den_bd = mino_bigdec_make(S, v->as.ratio.denom, 0);
+            if (den_bd == NULL) return NULL;
+            return mino_bigdec_div(S, num_bd, den_bd);
         }
         break;
     }
@@ -491,15 +515,15 @@ static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
             continue;
         }
         /* Promote the running accumulator if the new operand is at a
-         * higher tier. Ratio meeting bigdec triggers a float collapse. */
+         * higher tier. Ratio meeting bigdec widens to bigdec via
+         * exact ratio→bigdec conversion (matches JVM Clojure's
+         * contagion: bigdec is "higher" than ratio). */
         if (at > (int)acc.tier
             || (acc.tier == TT_RATIO && at == TT_BIGDEC)
             || (acc.tier == TT_BIGDEC && at == TT_RATIO)) {
             int target = at;
-            if ((acc.tier == TT_RATIO && at == TT_BIGDEC)
-                || (acc.tier == TT_BIGDEC && at == TT_RATIO)) {
-                target = TT_FLOAT;
-            }
+            if (acc.tier == TT_RATIO && at == TT_BIGDEC) target = TT_BIGDEC;
+            if (acc.tier == TT_BIGDEC && at == TT_RATIO) target = TT_BIGDEC;
             if (!promote_acc(S, &acc, target, opname)) return NULL;
         }
         switch (acc.tier) {
@@ -672,8 +696,8 @@ static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
             (a.tier == TT_RATIO  && xt == TT_BIGDEC) ||
             (a.tier == TT_BIGDEC && xt == TT_RATIO)) {
             int target = xt;
-            if ((a.tier == TT_RATIO  && xt == TT_BIGDEC) ||
-                (a.tier == TT_BIGDEC && xt == TT_RATIO)) target = TT_FLOAT;
+            if (a.tier == TT_RATIO  && xt == TT_BIGDEC) target = TT_BIGDEC;
+            if (a.tier == TT_BIGDEC && xt == TT_RATIO)  target = TT_BIGDEC;
             if (!promote_acc(S, &a, target, opname)) return NULL;
         }
         switch (a.tier) {

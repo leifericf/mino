@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.100.26
+
+### Numeric tower: Widen bigdec / ratio division to bigdec
+
+`slash.cljc` asserts `(= 4M (/ 2.0M 1/2))` and
+`(= 0.25M (/ 1/2 2.0M))`. mino was returning `4.0` and `0.25` (float)
+because the tower's RATIO + BIGDEC contagion rule documented "ratio
+meeting bigdec collapses to float" — a punt from before mino had
+exact bigdec division.
+
+Switch the rule to widen to bigdec:
+
+- `coerce_at_tier` for TT_BIGDEC now handles `MINO_RATIO` by computing
+  `bigdec(num) / bigdec(denom)` via `mino_bigdec_div` (exact, throws
+  on non-terminating expansions).
+- `promote_acc` for `TT_RATIO` → `TT_BIGDEC` does the same widening
+  on the running accumulator.
+- The two ratio/bigdec arms in `tower_reduce` and `tower_reduce_seeded`
+  pick `target = TT_BIGDEC` instead of `TT_FLOAT`.
+
+Internal suite 1476 / 7084 / 0. `slash.cljc` 158/0/2 → 160/0/0.
+
 ## v0.100.25
 
 ### Numeric tower: Strict overflow on +/-/\*; auto-promote on primed forms
