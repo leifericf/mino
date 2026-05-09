@@ -229,6 +229,103 @@ mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Host arrays                                                               */
+/* ------------------------------------------------------------------------- */
+
+mino_val_t *mino_host_array_new(mino_state_t *S, size_t len,
+                                host_array_kind_t kind)
+{
+    mino_val_t  *v;
+    mino_val_t **vals = NULL;
+    mino_val_t  *fill;
+    size_t       i;
+    if (len > 0) {
+        vals = (mino_val_t **)malloc(len * sizeof(*vals));
+        if (vals == NULL) return NULL;
+    }
+    /* Object arrays nil-fill; numeric primitive variants 0-fill;
+     * boolean false-fills; char nul-fills. Matches JVM array
+     * default initialization. */
+    if (kind == HOST_ARRAY_OBJECT) {
+        fill = mino_nil(S);
+    } else if (kind == HOST_ARRAY_BOOLEAN) {
+        fill = mino_false(S);
+    } else if (kind == HOST_ARRAY_FLOAT || kind == HOST_ARRAY_DOUBLE) {
+        fill = mino_float(S, 0.0);
+    } else if (kind == HOST_ARRAY_CHAR) {
+        fill = mino_char(S, '\0');
+    } else {
+        fill = mino_int(S, 0);
+    }
+    for (i = 0; i < len; i++) vals[i] = fill;
+    v = alloc_val(S, MINO_HOST_ARRAY);
+    if (v == NULL) {
+        free(vals);
+        return NULL;
+    }
+    v->as.host_array.vals         = vals;
+    v->as.host_array.len          = len;
+    v->as.host_array.element_kind = (unsigned char)kind;
+    return v;
+}
+
+mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
+                                      host_array_kind_t kind)
+{
+    mino_val_t  *v;
+    mino_val_t **vals = NULL;
+    size_t       len = 0, i;
+    /* Vector fast path. */
+    if (coll != NULL && coll->type == MINO_VECTOR) {
+        len = coll->as.vec.len;
+        if (len > 0) {
+            vals = (mino_val_t **)malloc(len * sizeof(*vals));
+            if (vals == NULL) return NULL;
+            for (i = 0; i < len; i++) vals[i] = vec_nth(coll, i);
+        }
+        v = alloc_val(S, MINO_HOST_ARRAY);
+        if (v == NULL) { free(vals); return NULL; }
+        v->as.host_array.vals = vals;
+        v->as.host_array.len  = len;
+        v->as.host_array.element_kind = (unsigned char)kind;
+        return v;
+    }
+    /* Generic seq path: walk the seq into a temp dynamic buffer. */
+    {
+        size_t cap = 0;
+        mino_val_t *s = coll;
+        while (s != NULL && s->type == MINO_LAZY) s = lazy_force(S, s);
+        while (mino_is_cons(s) || (s != NULL && s->type == MINO_CHUNKED_CONS)) {
+            mino_val_t *head;
+            if (mino_is_cons(s)) {
+                head = s->as.cons.car;
+                s    = s->as.cons.cdr;
+            } else {
+                head = s->as.chunked_cons.chunk
+                          ->as.chunk.vals[s->as.chunked_cons.off];
+                s    = mino_chunked_cons_advance(S, s);
+            }
+            while (s != NULL && s->type == MINO_LAZY) s = lazy_force(S, s);
+            if (len >= cap) {
+                size_t ncap = cap == 0 ? 8 : cap * 2;
+                mino_val_t **nvals = (mino_val_t **)realloc(vals,
+                    ncap * sizeof(*nvals));
+                if (nvals == NULL) { free(vals); return NULL; }
+                vals = nvals;
+                cap  = ncap;
+            }
+            vals[len++] = head;
+        }
+        v = alloc_val(S, MINO_HOST_ARRAY);
+        if (v == NULL) { free(vals); return NULL; }
+        v->as.host_array.vals = vals;
+        v->as.host_array.len  = len;
+        v->as.host_array.element_kind = (unsigned char)kind;
+        return v;
+    }
+}
+
+/* ------------------------------------------------------------------------- */
 /* Record types                                                              */
 /* ------------------------------------------------------------------------- */
 
@@ -917,6 +1014,11 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
          * distinct #"x" #"x" literals are NOT `=` -- Clojure's
          * convention since clojure.core/= delegates Pattern equality
          * straight to Object.equals for this type. */
+        return a == b;
+    case MINO_HOST_ARRAY:
+        /* Identity equality, matching JVM Java arrays. Two distinct
+         * (object-array 3) calls are NOT `=` even if their elements
+         * match. */
         return a == b;
     }
     return 0;

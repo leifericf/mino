@@ -27,7 +27,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 100
-#define MINO_VERSION_PATCH 28
+#define MINO_VERSION_PATCH 29
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -136,12 +136,23 @@ typedef enum {
                      * byte-wise; hash mixes the 16 bytes. The
                      * `#uuid "..."` reader literal and (random-uuid),
                      * (parse-uuid s) construct it. */
-    MINO_REGEX      /* Compiled-on-use regex pattern. Holds the source
+    MINO_REGEX,     /* Compiled-on-use regex pattern. Holds the source
                      * string only -- mino's regex engine compiles per
                      * call. Equality is identity (matches Clojure
                      * JVM's `(= #"x" #"x")` returning false); print
                      * form is `#"source"`. The reader's `#"..."`
                      * literal and `(re-pattern s)` construct it. */
+    MINO_HOST_ARRAY /* JVM-style host array: a fixed-length container
+                     * with element-kind tag (:object, :int, :long,
+                     * etc.) for printing and zero-fill semantics.
+                     * Distinct from MINO_VECTOR: predicates like
+                     * vector?, coll?, sequential?, counted?,
+                     * associative? all return false (matching JVM's
+                     * Java arrays which don't implement
+                     * IPersistentCollection). seq returns a chunked
+                     * seq over the elements. Equality is identity.
+                     * Constructed via object-array, int-array,
+                     * long-array, etc. */
 } mino_type_t;
 
 typedef struct mino_val    mino_val_t;
@@ -304,8 +315,28 @@ struct mino_val {
         struct {          /* MINO_REGEX: pattern source */
             mino_val_t *source;  /* MINO_STRING with pattern bytes */
         } regex;
+        struct {          /* MINO_HOST_ARRAY: JVM-style host array */
+            mino_val_t **vals;        /* malloc-owned: vals[len] */
+            size_t       len;
+            unsigned char element_kind; /* host_array_kind_t enum below */
+        } host_array;
     } as;
 };
+
+/* MINO_HOST_ARRAY element kind tag — used for printing and zero-fill
+ * semantics on (int-array n) etc. Pure-object arrays nil-fill; the
+ * primitive-element variants fill with their type's zero value. */
+typedef enum {
+    HOST_ARRAY_OBJECT = 0,
+    HOST_ARRAY_INT,
+    HOST_ARRAY_LONG,
+    HOST_ARRAY_SHORT,
+    HOST_ARRAY_BYTE,
+    HOST_ARRAY_FLOAT,
+    HOST_ARRAY_DOUBLE,
+    HOST_ARRAY_CHAR,
+    HOST_ARRAY_BOOLEAN
+} host_array_kind_t;
 
 /* ------------------------------------------------------------------------- */
 /* Constructors                                                              */
@@ -423,6 +454,20 @@ mino_val_t *mino_volatile_deref(const mino_val_t *v);
 
 /* Set the value of an atom. */
 void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
+
+/* Create a host-style array of the given length, fill-initialized
+ * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
+ * the primitive variants fill with their type's zero value (0 for
+ * the integer / float kinds, false for boolean,   for char).
+ * The vals[] storage is malloc-owned and freed during GC sweep. */
+mino_val_t *mino_host_array_new(mino_state_t *S, size_t len,
+                                host_array_kind_t kind);
+
+/* Create a host-style array from an existing collection (vec, list,
+ * seq, set, ...). Element kind tags the array; the values are
+ * copied as-is without coercion. */
+mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
+                                      host_array_kind_t kind);
 
 /* Create an empty chunk buffer with the given capacity. The returned
  * value is mutable until `mino_chunk_seal` is called; subsequent

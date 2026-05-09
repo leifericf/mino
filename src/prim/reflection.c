@@ -343,6 +343,16 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_FUTURE:    return mino_keyword(S, "future");
     case MINO_UUID:      return mino_keyword(S, "uuid");
     case MINO_REGEX:     return mino_keyword(S, "regex");
+    case MINO_HOST_ARRAY: {
+        static const char *kinds[] = {
+            "object-array", "int-array", "long-array", "short-array",
+            "byte-array",   "float-array", "double-array", "char-array",
+            "boolean-array"
+        };
+        unsigned k = v->as.host_array.element_kind;
+        if (k >= sizeof(kinds) / sizeof(kinds[0])) k = 0;
+        return mino_keyword(S, kinds[k]);
+    }
     }
     return mino_keyword(S, "unknown");
 }
@@ -439,6 +449,7 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     case MINO_CHUNKED_CONS: return mino_false(S);
     case MINO_CHUNK:        return v->as.chunk.len == 0 ? mino_true(S) : mino_false(S);
+    case MINO_HOST_ARRAY:   return v->as.host_array.len == 0 ? mino_true(S) : mino_false(S);
     default:
         return prim_throw_classified(S, "eval/type", "MTY001",
             "empty? expects a collection or nil");

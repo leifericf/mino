@@ -86,6 +86,23 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return more;
     }
+    if (coll->type == MINO_HOST_ARRAY) {
+        /* Emit a single-chunk MINO_CHUNKED_CONS so seq? is true and
+         * first/rest/count walk the elements; predicates like
+         * vector? / coll? / counted? remain false (no MINO_HOST_ARRAY
+         * in their type-tag lists). */
+        size_t total = coll->as.host_array.len;
+        mino_val_t *buf;
+        size_t i;
+        if (total == 0) return mino_nil(S);
+        buf = mino_chunk_buffer(S, (unsigned)total);
+        if (buf == NULL) return NULL;
+        for (i = 0; i < total; i++) {
+            if (!mino_chunk_append(buf, coll->as.host_array.vals[i])) return NULL;
+        }
+        mino_chunk_seal(buf);
+        return mino_chunked_cons(S, buf, mino_nil(S));
+    }
     if (coll->type == MINO_MAP) {
         mino_val_t *head = mino_nil(S), *tail = NULL;
         size_t i;

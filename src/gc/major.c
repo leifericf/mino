@@ -200,6 +200,9 @@ void gc_sweep(mino_state_t *S)
             } else if (v->type == MINO_CHUNK) {
                 free(v->as.chunk.vals);
                 v->as.chunk.vals = NULL;
+            } else if (v->type == MINO_HOST_ARRAY) {
+                free(v->as.host_array.vals);
+                v->as.host_array.vals = NULL;
             } else if (v->type == MINO_FUTURE) {
                 /* Hosted-thread future: tear down mu/cv and free
                  * the impl struct. quiesce should have joined any

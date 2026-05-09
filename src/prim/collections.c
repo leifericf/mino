@@ -127,6 +127,94 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
     }
 }
 
+/* host-array constructor primitive: ((<kind>) size-or-coll). When
+ * given a non-negative integer, allocates a fresh host array of that
+ * length filled with the kind's zero value (nil for Object, 0 for
+ * int / long, etc.). When given a collection, copies its elements
+ * into a host array of the corresponding length. */
+static mino_val_t *prim_host_array_helper(mino_state_t *S, mino_val_t *args,
+                                          host_array_kind_t kind,
+                                          const char *opname)
+{
+    mino_val_t *arg;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        char buf[80];
+        snprintf(buf, sizeof(buf), "%s requires one argument", opname);
+        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+    }
+    arg = args->as.cons.car;
+    if (arg != NULL && arg->type == MINO_INT) {
+        if (arg->as.i < 0) {
+            char buf[80];
+            snprintf(buf, sizeof(buf), "%s: negative array size", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        }
+        return mino_host_array_new(S, (size_t)arg->as.i, kind);
+    }
+    /* Treat as a collection (vector / seq / list / set / map). */
+    return mino_host_array_from_coll(S, arg, kind);
+}
+
+mino_val_t *prim_object_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "object-array");
+}
+
+mino_val_t *prim_int_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_INT, "int-array");
+}
+
+mino_val_t *prim_long_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_LONG, "long-array");
+}
+
+mino_val_t *prim_short_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_SHORT, "short-array");
+}
+
+mino_val_t *prim_byte_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_BYTE, "byte-array");
+}
+
+mino_val_t *prim_float_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_FLOAT, "float-array");
+}
+
+mino_val_t *prim_double_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_DOUBLE, "double-array");
+}
+
+mino_val_t *prim_char_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_CHAR, "char-array");
+}
+
+mino_val_t *prim_boolean_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_BOOLEAN, "boolean-array");
+}
+
+mino_val_t *prim_to_array(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return prim_host_array_helper(S, args, HOST_ARRAY_OBJECT, "to-array");
+}
+
 mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *cdr;
@@ -229,6 +317,8 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_int(S, (long long)list_length(S, forced));
     }
     case MINO_CHUNK: return mino_int(S, (long long)coll->as.chunk.len);
+    case MINO_HOST_ARRAY:
+        return mino_int(S, (long long)coll->as.host_array.len);
     case MINO_CHUNKED_CONS: {
         long long          n = 0;
         const mino_val_t  *cur = coll;
@@ -373,6 +463,13 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return coll->as.chunk.vals[(size_t)idx];
     }
+    if (coll->type == MINO_HOST_ARRAY) {
+        if ((size_t)idx >= coll->as.host_array.len) {
+            if (def_val != NULL) return def_val;
+            return prim_throw_classified(S, "eval/bounds", "MBD001", "nth index out of range");
+        }
+        return coll->as.host_array.vals[(size_t)idx];
+    }
     if (coll->type == MINO_CONS) {
         mino_val_t *p = coll;
         long long   i;
@@ -490,6 +587,10 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (coll->type == MINO_CHUNKED_CONS) {
         const mino_val_t *ch = coll->as.chunked_cons.chunk;
         return ch->as.chunk.vals[coll->as.chunked_cons.off];
+    }
+    if (coll->type == MINO_HOST_ARRAY) {
+        if (coll->as.host_array.len == 0) return mino_nil(S);
+        return coll->as.host_array.vals[0];
     }
     if (coll->type == MINO_STRING) {
         unsigned int cp;
@@ -669,6 +770,20 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *r = mino_chunked_cons_advance(S, coll);
         if (r == NULL || r->type == MINO_NIL) return mino_empty_list(S);
         return r;
+    }
+    if (coll->type == MINO_HOST_ARRAY) {
+        /* Defer to seq, which builds a chunked-cons; rest of that is
+         * the chunked-cons advance. Seq returns nil on empty. */
+        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val_t *s = prim_seq(S, seq_args, env);
+        if (s == NULL) return NULL;
+        if (s->type == MINO_NIL) return mino_empty_list(S);
+        if (s->type == MINO_CHUNKED_CONS) {
+            mino_val_t *r = mino_chunked_cons_advance(S, s);
+            if (r == NULL || r->type == MINO_NIL) return mino_empty_list(S);
+            return r;
+        }
+        return mino_empty_list(S);
     }
     if (coll->type == MINO_STRING) {
         /* Skip the first codepoint (1-4 bytes), then construct a
@@ -922,6 +1037,13 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return def_val;
         }
         return vec_nth(coll, (size_t)idx);
+    }
+    if (coll->type == MINO_HOST_ARRAY) {
+        long long idx;
+        if (key == NULL || key->type != MINO_INT) return def_val;
+        idx = key->as.i;
+        if (idx < 0 || (size_t)idx >= coll->as.host_array.len) return def_val;
+        return coll->as.host_array.vals[(size_t)idx];
     }
     if (coll->type == MINO_SET) {
         uint32_t h = hash_val(key);
@@ -1886,6 +2008,38 @@ const mino_prim_def k_prims_collections[] = {
      "Removes the last element from a transient vector."},
     {"transient?",  prim_transient_p,
      "Returns true if x is a transient."},
+    {"object-array", prim_object_array,
+     "Creates a host-style Object array. With a non-negative integer, "
+     "returns an array of that length filled with nil. With a "
+     "collection, returns an array of its elements. Distinct from "
+     "vector: vector? / coll? / counted? / sequential? / associative? "
+     "all return false on the result, matching JVM Java arrays."},
+    {"int-array",  prim_int_array,
+     "Creates a host-style int array. Zero-fills on size argument; "
+     "copies elements from a collection."},
+    {"long-array", prim_long_array,
+     "Creates a host-style long array. Zero-fills on size argument; "
+     "copies elements from a collection."},
+    {"short-array", prim_short_array,
+     "Creates a host-style short array. Zero-fills on size argument; "
+     "copies elements from a collection."},
+    {"byte-array", prim_byte_array,
+     "Creates a host-style byte array. Zero-fills on size argument; "
+     "copies elements from a collection."},
+    {"float-array", prim_float_array,
+     "Creates a host-style float array. Zero-fills (0.0) on size; "
+     "copies elements from a collection."},
+    {"double-array", prim_double_array,
+     "Creates a host-style double array. Zero-fills (0.0) on size; "
+     "copies elements from a collection."},
+    {"char-array", prim_char_array,
+     "Creates a host-style char array. Nul-fills on size argument; "
+     "copies elements from a collection."},
+    {"boolean-array", prim_boolean_array,
+     "Creates a host-style boolean array. Fills with false on size; "
+     "copies elements from a collection."},
+    {"to-array",   prim_to_array,
+     "Converts a collection to an Object array (host-style)."},
 };
 
 const size_t k_prims_collections_count =

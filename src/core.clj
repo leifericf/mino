@@ -844,7 +844,16 @@
 (defn any? "Returns true for any argument." [x] true)
 (defn seqable?
   "Returns true if (seq x) is supported."
-  [x] (or (nil? x) (coll? x) (string? x)))
+  [x] (or (nil? x) (coll? x) (string? x)
+          (instance? :object-array x)
+          (instance? :int-array x)
+          (instance? :long-array x)
+          (instance? :short-array x)
+          (instance? :byte-array x)
+          (instance? :float-array x)
+          (instance? :double-array x)
+          (instance? :char-array x)
+          (instance? :boolean-array x)))
 (defn indexed?
   "Returns true if x supports nth in constant time (vectors)."
   [x] (vector? x))
@@ -2790,26 +2799,22 @@
       (sequence (first xfs) coll)
       (sequence (apply comp xfs) coll))))
 
-;; --- Array constructors (vectors are mino's array equivalent) ---
+;; --- Array constructors ---
+;;
+;; object-array, int-array, long-array, etc. are now C primitives that
+;; build a MINO_HOST_ARRAY value -- a fixed-length container distinct
+;; from MINO_VECTOR. (vector? (object-array 3)) is false, matching JVM
+;; arrays. The element-kind tag drives zero-fill semantics on the
+;; primitive variants and printing as `#object[...]`. seq returns the
+;; elements; aset is not supported (mino has no in-place mutation
+;; outside MINO_ATOM/MINO_VOLATILE).
+;;
+;; into-array is still in Clojure since it's a thin wrapper.
 
-(defn object-array "Creates a vector from a size or collection."
-  ([size-or-coll]
-   (if (number? size-or-coll)
-     (vec (repeat size-or-coll nil))
-     (vec size-or-coll))))
-
-(def to-array    "Converts a collection to a vector." vec)
 (defn into-array
-  "Converts a collection to a vector."
-  [& args] (vec (last args)))
-(def int-array   "Creates a vector from a size or collection." object-array)
-(def long-array  "Creates a vector from a size or collection." object-array)
-(def float-array "Creates a vector from a size or collection." object-array)
-(def double-array "Creates a vector from a size or collection." object-array)
-(def short-array "Creates a vector from a size or collection." object-array)
-(def byte-array  "Creates a vector from a size or collection." object-array)
-(def char-array  "Creates a vector from a size or collection." object-array)
-(def boolean-array "Creates a vector from a size or collection." object-array)
+  "Converts a collection to an Object array."
+  ([coll]      (to-array coll))
+  ([_typ coll] (to-array coll)))
 
 ;; --- Compatibility vars ---
 

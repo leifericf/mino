@@ -450,6 +450,26 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputc('"', out);
         return;
     }
+    case MINO_HOST_ARRAY: {
+        /* Mirror Clojure JVM's #object[...] form for arrays since
+         * arrays don't round-trip through the reader. */
+        static const char *kinds[] = {
+            "Object", "int", "long", "short", "byte",
+            "float",  "double", "char", "boolean"
+        };
+        unsigned k = v->as.host_array.element_kind;
+        if (k >= sizeof(kinds) / sizeof(kinds[0])) k = 0;
+        fprintf(out, "#object[\"[L%s;\" 0x%p {", kinds[k], (const void *)v);
+        {
+            size_t i;
+            for (i = 0; i < v->as.host_array.len; i++) {
+                if (i > 0) fputs(", ", out);
+                mino_print_to(S, out, v->as.host_array.vals[i]);
+            }
+        }
+        fputs("}]", out);
+        return;
+    }
     }
 }
 

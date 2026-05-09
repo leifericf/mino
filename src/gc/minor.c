@@ -100,6 +100,9 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
             } else if (v->type == MINO_CHUNK) {
                 free(v->as.chunk.vals);
                 v->as.chunk.vals = NULL;
+            } else if (v->type == MINO_HOST_ARRAY) {
+                free(v->as.host_array.vals);
+                v->as.host_array.vals = NULL;
             } else if (v->type == MINO_FUTURE) {
                 extern void mino_future_gc_sweep(mino_val_t *fut);
                 mino_future_gc_sweep(v);
@@ -263,6 +266,13 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 unsigned k;
                 for (k = 0; k < v->as.chunk.len; k++) {
                     gc_verify_check(S, h, v->as.chunk.vals[k]);
+                }
+                break;
+            }
+            case MINO_HOST_ARRAY: {
+                size_t k;
+                for (k = 0; k < v->as.host_array.len; k++) {
+                    gc_verify_check(S, h, v->as.host_array.vals[k]);
                 }
                 break;
             }
