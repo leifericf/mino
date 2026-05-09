@@ -471,6 +471,13 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         S->print_depth--;
         fputc(']', out);
         return;
+    case MINO_AGENT:
+        fputs("#agent[", out);
+        S->print_depth++;
+        mino_print_to(S, out, v->as.agent.val);
+        S->print_depth--;
+        fputc(']', out);
+        return;
     case MINO_HOST_ARRAY: {
         /* Mirror Clojure JVM's #object[...] form for arrays since
          * arrays don't round-trip through the reader. */

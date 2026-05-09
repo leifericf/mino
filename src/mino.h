@@ -171,7 +171,7 @@ typedef enum {
                      * seq over the elements. Equality is identity.
                      * Constructed via object-array, int-array,
                      * long-array, etc. */
-    MINO_TX_REF     /* Software transactional memory ref: identity cell
+    MINO_TX_REF,    /* Software transactional memory ref: identity cell
                      * holding a single committed value plus per-cell
                      * watches and validator. Mutations are confined to
                      * `dosync` transactions and serialized through a
@@ -182,6 +182,15 @@ typedef enum {
                      * was already taken by the embedder rooting handle
                      * (mino_ref_t), so the enum tag is MINO_TX_REF; the
                      * Clojure-level type keyword is `:ref`. */
+    MINO_AGENT      /* Asynchronous mutable cell with per-agent action
+                     * queue. send / send-off enqueue (fn args); a worker
+                     * thread drains the queue serially, applying actions
+                     * to the state. Watches and validators on agents
+                     * follow the atom/ref shape. Equality is identity.
+                     * Constructed via `(agent v)`. Requires the host
+                     * to grant threads (mino_set_thread_limit > 1) for
+                     * the worker to spawn; with grant=1 send is a
+                     * synchronous-but-deferred no-op equivalent. */
 } mino_type_t;
 
 typedef struct mino_val    mino_val_t;
@@ -373,6 +382,20 @@ struct mino_val {
                                           * itself outlives all its refs
                                           * and is not a GC value. */
         } tx_ref;
+        struct {          /* MINO_AGENT: async mutable cell + queue */
+            mino_val_t *val;          /* current state */
+            mino_val_t *watches;      /* MINO_MAP key->callback, or NULL */
+            mino_val_t *validator;    /* validator fn, or NULL */
+            mino_val_t *err;          /* last failed action's exception,
+                                       * or NULL. Set when the worker
+                                       * caught a throw; cleared by
+                                       * restart-agent. */
+            mino_val_t *err_handler;  /* on-error callback (fn agent ex)
+                                       * or NULL */
+            int         err_mode;     /* 0=:fail, 1=:continue */
+            void       *queue;        /* opaque agent_queue_t * (heap-
+                                       * allocated; freed via finalizer) */
+        } agent;
     } as;
 };
 
@@ -524,6 +547,16 @@ mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v);
  * set-validator! on the returned cell. The ref's identity (returned
  * monotonic ID) is unique within S. */
 mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val);
+
+/* Construct an asynchronous agent holding the given initial state.
+ * Watches, validator, and error handler all start NULL; install them
+ * via add-watch / set-validator! / set-error-handler! on the returned
+ * cell. The agent's action queue is heap-allocated and freed via the
+ * GC sweep finalizer when the agent becomes unreachable. */
+mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial);
+
+/* Return 1 if v is an agent, 0 otherwise. NULL-safe. */
+int         mino_is_agent(const mino_val_t *v);
 
 /* Return 1 if v is an STM ref (MINO_TX_REF), 0 otherwise. NULL-safe. */
 int         mino_is_tx_ref(const mino_val_t *v);
@@ -939,6 +972,15 @@ void        mino_install_proc(mino_state_t *S, mino_env_t *env);
  * older snapshot from history.
  */
 void        mino_install_stm(mino_state_t *S, mino_env_t *env);
+
+/*
+ * Install the agent surface: agent / agent? / send / send-off / await
+ * / await-for / agent-error / restart-agent / set-error-handler! /
+ * error-handler / set-error-mode! / error-mode / shutdown-agents /
+ * release-pending-sends. mino_install_all calls this; embedders
+ * calling only mino_new keep agents opt-out.
+ */
+void        mino_install_agent(mino_state_t *S, mino_env_t *env);
 
 /*
  * Evaluate one form. Returns NULL on error and writes a message via

@@ -226,6 +226,9 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a != NULL && a->type == MINO_TX_REF) {
         return mino_tx_ref_deref(S, a);
     }
+    if (a != NULL && a->type == MINO_AGENT) {
+        return a->as.agent.val;
+    }
     return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, or reduced");
 }
 
@@ -360,6 +363,11 @@ static int watchable_get(mino_val_t *v, mino_val_t ***out_watches,
     if (v->type == MINO_VAR) {
         *out_watches   = &v->as.var.watches;
         *out_validator = &v->as.var.validator;
+        return 1;
+    }
+    if (v->type == MINO_AGENT) {
+        *out_watches   = &v->as.agent.watches;
+        *out_validator = &v->as.agent.validator;
         return 1;
     }
     return 0;

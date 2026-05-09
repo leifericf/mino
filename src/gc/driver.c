@@ -531,6 +531,13 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             gc_mark_child_push(S, v->as.tx_ref.watches);
             gc_mark_child_push(S, v->as.tx_ref.validator);
             break;
+        case MINO_AGENT:
+            gc_mark_child_push(S, v->as.agent.val);
+            gc_mark_child_push(S, v->as.agent.watches);
+            gc_mark_child_push(S, v->as.agent.validator);
+            gc_mark_child_push(S, v->as.agent.err);
+            gc_mark_child_push(S, v->as.agent.err_handler);
+            break;
         default:
             break;
         }

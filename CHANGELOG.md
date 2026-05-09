@@ -361,6 +361,40 @@ fire watches anywhere.
 upstream, and the atom / ref / var arms pass cleanly. The agent
 arm of each still errors (out of scope until agents land).
 
+### Agents (MVP)
+
+mino now ships agents: `agent`, `agent?`, `send`, `send-off`,
+`await`, `await-for`, `agent-error`, `restart-agent`,
+`set-error-handler!`, `error-handler`, `set-error-mode!`,
+`error-mode`, plus `shutdown-agents` / `release-pending-sends`
+stubs. Watches and validators on agents go through the same
+`watchable_get` machinery as atoms / refs / vars.
+
+The MVP runs sends synchronously on the calling thread. mino's
+eval loop holds a per-state mutex so a worker-pool design would
+serialize on it anyway; running synchronously is observably
+equivalent for any program that does not race against the agent
+itself, and `await` becomes a trivial no-op (the queue is always
+drained on send return). Action throws and watch throws are both
+captured into `agent-error` via a manual try frame in
+`src/prim/agent.c` (mino's `mino_pcall` re-throws to any
+enclosing try via `set_eval_diag`'s longjmp path, which would
+defeat the catch contract here).
+
+Documented deviations: `send-via` is not implemented (no public
+Executor type); `shutdown-agents` and `release-pending-sends`
+are stubs; the `:fail` error mode is the default and rejects
+further sends until `restart-agent` clears the err.
+
+`tests/agent_test.clj` exercises construct / send / send-off /
+watches / validators / restart / error-mode / await and is in
+the internal run.clj. The agent arms of the upstream
+`add_watch.cljc` / `remove_watch.cljc` tests now pass cleanly,
+bringing the external runner to **134 / 2680, 1 fail + 2 errors**
+(matching the pre-STM baseline; remaining failures are
+pre-existing test-abs / test-reduce / test-short, unrelated to
+STM or watches).
+
 ### Equality of empty lazy seqs
 
 Fix: `(= (filter pred []) (filter pred []))` returned `false`.

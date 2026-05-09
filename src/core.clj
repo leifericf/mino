@@ -2056,21 +2056,12 @@
       (:mino/message ex)
       (:message ex))))
 
-(defn agent [& _]
-  (throw (ex-info
-           (str "agent is not supported on mino — use atoms for"
-                " synchronous mutable state or core.async for async"
-                " dispatch")
-           {:mino/unsupported :agent})))
-
-(defn send-to [& _]
-  (throw (ex-info
-           "send-to is not supported on mino — see (atom) and core.async"
-           {:mino/unsupported :send-to})))
-
-(defn agent-error [& _]
-  (throw (ex-info "agent-error is not supported on mino"
-                  {:mino/unsupported :agent-error})))
+;; agent / send / send-off / await / agent-error / restart-agent /
+;; set-error-handler! / error-handler / set-error-mode! / error-mode /
+;; agent? / await-for / shutdown-agents / release-pending-sends are
+;; provided by mino_install_agent (src/prim/agent.c). mino's MVP runs
+;; sends synchronously on the calling thread, so await is a no-op.
+;; See /documentation/stm/ for the full deviation list.
 
 ;; ---------------------------------------------------------------------------
 ;; Host threads.

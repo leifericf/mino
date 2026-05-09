@@ -25,6 +25,7 @@
 (require "tests/atom_test")
 (require "tests/stm_test")
 (require "tests/stm_concurrent_test")
+(require "tests/agent_test")
 (require "tests/predicate_test")
 (require "tests/io_test")
 (require "tests/reflection_test")

@@ -1076,6 +1076,9 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_TX_REF:
         /* Identity equality matches atoms and Clojure's JVM Ref. */
         return a == b;
+    case MINO_AGENT:
+        /* Identity equality matches atoms and JVM Agent. */
+        return a == b;
     }
     return 0;
 }

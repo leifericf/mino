@@ -1,0 +1,115 @@
+(require "tests/test")
+
+;; Agents (asynchronous mutable cells with serialized actions).
+;; mino's MVP runs sends synchronously on the calling thread; await
+;; is a no-op since the queue is always drained on send return.
+
+(deftest agent-construct
+  (let [a (agent 0)]
+    (is (agent? a))
+    (is (not (agent? 0)))
+    (is (not (agent? (atom 0))))
+    (is (not (agent? (ref 0))))
+    (is (= 0 @a))
+    (is (= :agent (type a)))))
+
+(deftest agent-send-basic
+  (let [a (agent 0)]
+    (send a inc)
+    (await a)
+    (is (= 1 @a))
+    (send a + 5)
+    (await a)
+    (is (= 6 @a))))
+
+(deftest agent-send-off
+  ;; send and send-off share the synchronous path in mino's MVP.
+  (let [a (agent 10)]
+    (send-off a dec)
+    (is (= 9 @a))))
+
+(deftest agent-watches
+  (let [a    (agent 0)
+        seen (atom [])]
+    (add-watch a :w (fn [_ _ o n] (swap! seen conj [o n])))
+    (send a inc)
+    (send a inc)
+    (await a)
+    (is (= [[0 1] [1 2]] @seen))))
+
+(deftest agent-watch-removed
+  (let [a    (agent 0)
+        seen (atom [])]
+    (add-watch a :w (fn [_ _ _ n] (swap! seen conj n)))
+    (send a inc)
+    (remove-watch a :w)
+    (send a inc)
+    (is (= [1] @seen))))
+
+(deftest agent-validator-accepts
+  (let [a (agent 0)]
+    (set-validator! a number?)
+    (send a inc)
+    (is (= 1 @a))
+    (is (nil? (agent-error a)))))
+
+(deftest agent-validator-rejects
+  ;; Validator rejection sets agent-error and does NOT publish the
+  ;; new state. Mirrors the action-throw path.
+  (let [a (agent 5)]
+    (set-validator! a pos?)
+    (send a (fn [_] -1))
+    (is (some? (agent-error a)))
+    (is (= 5 @a))))
+
+(deftest agent-action-throws
+  (let [a (agent 0)]
+    (send a (fn [_] (throw (ex-info "boom" {:kind :test}))))
+    (is (some? (agent-error a)))
+    (is (= 0 @a))
+    ;; Subsequent send on a faulted agent throws by default (:fail).
+    (is (thrown? (send a inc)))))
+
+(deftest agent-restart
+  (let [a (agent 0)]
+    (send a (fn [_] (throw (ex-info "boom" {}))))
+    (is (some? (agent-error a)))
+    (restart-agent a 99)
+    (is (nil? (agent-error a)))
+    (is (= 99 @a))
+    (send a inc)
+    (is (= 100 @a))))
+
+(deftest agent-error-mode-continue
+  (let [a (agent 0)]
+    (set-error-mode! a :continue)
+    (is (= :continue (error-mode a)))
+    (send a (fn [_] (throw (ex-info "boom" {}))))
+    (is (some? (agent-error a)))
+    ;; In :continue mode, further sends do not throw on the failed
+    ;; agent. mino's MVP captures only the latest err.
+    (send a inc)))
+
+(deftest agent-watch-throws-captured
+  ;; Watch throws are captured into agent.err, matching JVM-ish
+  ;; behavior where agent watch errors surface via agent-error.
+  (let [a (agent 0)]
+    (add-watch a :w (fn [_ _ _ _] (throw (ex-info "watch-boom" {}))))
+    (send a inc)
+    (is (some? (agent-error a)))
+    ;; The publish itself succeeded; the watch threw after.
+    (is (= 1 @a))))
+
+(deftest agent-await-no-op
+  ;; await is a no-op in the sync MVP -- the queue is always drained.
+  (let [a (agent 0)]
+    (send a inc)
+    (await a)
+    (is (= 1 @a)))
+  ;; await with no agents.
+  (await))
+
+(deftest agent-send-returns-agent
+  (let [a (agent 0)]
+    (is (= a (send a inc)))
+    (is (= a (send-off a inc)))))

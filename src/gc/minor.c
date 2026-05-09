@@ -331,6 +331,13 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 gc_verify_check(S, h, v->as.tx_ref.watches);
                 gc_verify_check(S, h, v->as.tx_ref.validator);
                 break;
+            case MINO_AGENT:
+                gc_verify_check(S, h, v->as.agent.val);
+                gc_verify_check(S, h, v->as.agent.watches);
+                gc_verify_check(S, h, v->as.agent.validator);
+                gc_verify_check(S, h, v->as.agent.err);
+                gc_verify_check(S, h, v->as.agent.err_handler);
+                break;
             default: break;
             }
             break;
