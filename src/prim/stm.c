@@ -23,12 +23,37 @@
  */
 
 #include "prim/internal.h"
+#include "eval/internal.h"
+#include <setjmp.h>
+
+#define STM_RETRY_CAP 10000
 
 /* --- helpers -------------------------------------------------------------- */
 
+/* Acquire / release the global STM commit lock. No-op when STM has
+ * never been installed (the bool stays 0); otherwise a plain pthread
+ * mutex acquire. The single-threaded fast path skips the lock since
+ * no other thread can interfere with the commit phase. */
+static void stm_lock(mino_state_t *S)
+{
+    if (!S->stm_lock_inited) return;
+    if (S->thread_limit <= 1) return;
+#if !(defined(_WIN32) && defined(_MSC_VER))
+    pthread_mutex_lock(&S->stm_commit_lock);
+#endif
+}
+
+static void stm_unlock(mino_state_t *S)
+{
+    if (!S->stm_lock_inited) return;
+    if (S->thread_limit <= 1) return;
+#if !(defined(_WIN32) && defined(_MSC_VER))
+    pthread_mutex_unlock(&S->stm_commit_lock);
+#endif
+}
+
 /* Fetch or create the per-tx state node for a given ref within the
- * active transaction. Returns NULL and throws when called outside a
- * transaction. */
+ * active transaction. Returns NULL outside a transaction. */
 static tx_ref_state_t *tx_get_or_create_ref_state(mino_state_t *S,
                                                    mino_val_t *ref)
 {
@@ -57,7 +82,7 @@ static tx_ref_state_t *tx_get_or_create_ref_state(mino_state_t *S,
 }
 
 /* Release every per-ref state node attached to tx. Called on every
- * transaction exit, including on error and on retry. */
+ * transaction exit, including on retry, error, and successful commit. */
 static void tx_clear_ref_states(tx_state_t *tx)
 {
     tx_ref_state_t *rs, *next;
@@ -124,24 +149,189 @@ mino_val_t *mino_ref_deref(mino_state_t *S, mino_val_t *ref)
     return ref->as.tx_ref.val;
 }
 
+/* --- ref-set + alter ----------------------------------------------------- */
+
+mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t        *ref;
+    mino_val_t        *val;
+    tx_ref_state_t    *rs;
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "ref-set requires two arguments: ref and value");
+    }
+    ref = args->as.cons.car;
+    val = args->as.cons.cdr->as.cons.car;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "ref-set: first argument must be a ref");
+    }
+    if (ctx->current_tx == NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "No transaction running");
+    }
+    rs = tx_get_or_create_ref_state(S, ref);
+    if (rs == NULL) return NULL;
+    if (!rs->read) {
+        rs->read             = 1;
+        rs->snapshot_version = ref->as.tx_ref.version;
+    }
+    rs->kind        = TX_STATE_ALTER;
+    rs->tentative   = val;
+    rs->commute_log = NULL;
+    return val;
+}
+
+/* Build the argument list (cur-val arg1 arg2 ...) for invoking f
+ * during alter / commute. The cur-val is the tentative or committed
+ * value as of this call site. */
+static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
+                                    mino_val_t *extra)
+{
+    mino_val_t *cell, *head;
+    head = mino_cons(S, cur, mino_nil(S));
+    cell = head;
+    while (mino_is_cons(extra)) {
+        mino_val_t *next = mino_cons(S, extra->as.cons.car, mino_nil(S));
+        cell->as.cons.cdr = next;
+        cell = next;
+        extra = extra->as.cons.cdr;
+    }
+    return head;
+}
+
+mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t        *ref, *fn, *cur, *call_args, *result, *extra;
+    tx_ref_state_t    *rs;
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "alter requires at least two arguments: ref and function");
+    }
+    ref   = args->as.cons.car;
+    fn    = args->as.cons.cdr->as.cons.car;
+    extra = args->as.cons.cdr->as.cons.cdr;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "alter: first argument must be a ref");
+    }
+    if (ctx->current_tx == NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "No transaction running");
+    }
+    rs = tx_get_or_create_ref_state(S, ref);
+    if (rs == NULL) return NULL;
+    /* Read the current in-tx value, recording the read for read-set
+     * validation. */
+    if (rs->tentative != NULL) {
+        cur = rs->tentative;
+    } else {
+        cur = ref->as.tx_ref.val;
+    }
+    if (!rs->read) {
+        rs->read             = 1;
+        rs->snapshot_version = ref->as.tx_ref.version;
+    }
+    call_args = alter_build_args(S, cur, extra);
+    result = mino_call(S, fn, call_args, env);
+    if (result == NULL) return NULL;
+    rs->kind        = TX_STATE_ALTER;
+    rs->tentative   = result;
+    rs->commute_log = NULL;
+    return result;
+}
+
+/* --- commit phase --------------------------------------------------------- *
+ *
+ * Validate the read set against current ref versions; if any
+ * mismatched, return 0 to signal retry. Otherwise apply every
+ * recorded write under the global commit lock with a write barrier
+ * + version bump and return 1 (committed).
+ */
+static int tx_commit(mino_state_t *S, tx_state_t *tx)
+{
+    tx_ref_state_t *rs;
+    /* Acquire commit lock for the validation + write window. */
+    stm_lock(S);
+    /* Validate read set: every ref that the tx read must still be at
+     * its snapshot version. */
+    for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
+        if (rs->read
+            && rs->ref->as.tx_ref.version != rs->snapshot_version) {
+            stm_unlock(S);
+            return 0;
+        }
+    }
+    /* Apply every write. */
+    for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
+        if (rs->kind == TX_STATE_ALTER && rs->tentative != NULL) {
+            mino_val_t *old = rs->ref->as.tx_ref.val;
+            gc_write_barrier(S, rs->ref, old, rs->tentative);
+            rs->ref->as.tx_ref.val = rs->tentative;
+            rs->ref->as.tx_ref.version++;
+        }
+        /* TX_STATE_COMMUTE_LOG handled in the next step. */
+    }
+    stm_unlock(S);
+    return 1;
+}
+
 /* --- dosync entry point --------------------------------------------------- *
  *
- * `dosync*` takes a thunk (zero-arg fn) and runs it inside a
- * transaction. Nested dosync is a no-op around the outer one: the
- * inner thunk runs against the same tx state, and only the
- * outermost frame commits.
- *
- * The retry mechanism is fully wired in subsequent commits when
- * ref-set / alter / commute land. For now the body runs once, the
- * commit phase is empty (no writes are recorded yet), and the result
- * propagates out as if it were a plain `(thunk)`.
+ * The retry loop: push our own try frame so a throw inside the body
+ * lands here for cleanup before propagating outward (otherwise
+ * ctx->current_tx would dangle past the now-unwound C stack). On
+ * commit-time conflict, clear tentatives, free per-ref state nodes,
+ * and re-run the body up to STM_RETRY_CAP times.
  */
+/* Body of dosync*: extracted so the setjmp-bearing function does
+ * minimal work. Splitting the retry-loop into its own non-setjmp
+ * frame sidesteps -Wclobbered for every local that mutates across
+ * the loop. */
+static mino_val_t *dosync_run(mino_state_t *S, mino_val_t *thunk,
+                              mino_env_t *env, tx_state_t *tx)
+{
+    for (;;) {
+        mino_val_t *r;
+        tx->refs_head    = NULL;
+        tx->retry_signal = 0;
+
+        if (tx->retry_count > STM_RETRY_CAP) {
+            tx->retry_count = 0;
+            prim_throw_classified(S, "eval/state", "MST004",
+                "transaction retry limit exceeded");
+            return NULL; /* unreachable -- prim_throw_classified longjmps */
+        }
+        r = mino_call(S, thunk, mino_nil(S), env);
+        if (r == NULL) {
+            return NULL;
+        }
+        if (tx_commit(S, tx)) {
+            return r;
+        }
+        /* Conflict: free per-ref state and retry. */
+        tx_clear_ref_states(tx);
+        tx->retry_count++;
+    }
+}
+
 mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
                               mino_env_t *env)
 {
-    mino_val_t        *thunk;
-    mino_val_t        *result;
-    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    mino_val_t                *thunk;
+    /* Volatile-qualified so the setjmp-clobber analysis stays clean:
+     * any local needed in both the success and longjmp arms must be
+     * either declared volatile or reloaded after setjmp. */
+    mino_thread_ctx_t * volatile ctx_v;
+    mino_val_t        * volatile result_v = NULL;
+    int                          saved_try;
+    tx_state_t                   tx;
+    try_frame_t                 *frame;
+
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "dosync* requires one argument (a thunk)");
@@ -153,30 +343,72 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "dosync*: expected a thunk");
     }
+    ctx_v = mino_current_ctx(S);
     /* Nested dosync: bump depth, reuse the outer tx, run the thunk. */
-    if (ctx->current_tx != NULL) {
+    if (ctx_v->current_tx != NULL) {
+        mino_val_t        *r;
+        mino_thread_ctx_t *ctx = ctx_v;
         ctx->current_tx->depth++;
-        result = mino_call(S, thunk, mino_nil(S), env);
-        ctx->current_tx->depth--;
-        return result;
+        r = mino_call(S, thunk, mino_nil(S), env);
+        if (ctx->current_tx != NULL) ctx->current_tx->depth--;
+        return r;
     }
-    /* Outermost dosync: allocate tx state on the C stack, attach. */
-    {
-        tx_state_t tx;
-        tx.depth              = 1;
-        tx.refs_head          = NULL;
-        tx.retry_count        = 0;
-        tx.try_depth_at_start = ctx->try_depth;
-        tx.retry_signal       = 0;
-        ctx->current_tx       = &tx;
-        result = mino_call(S, thunk, mino_nil(S), env);
-        /* Commit phase will land in commit #5 (read-set validation,
-         * write barrier, version bump). For now there are no writes
-         * to commit, so detaching and returning is the whole story. */
+    /* Outermost dosync: tx state on the C stack. Push a try frame so
+     * an in-body throw is intercepted long enough to clear
+     * ctx->current_tx and free per-ref state before propagating. */
+    saved_try             = ctx_v->try_depth;
+    tx.depth              = 1;
+    tx.refs_head          = NULL;
+    tx.retry_count        = 0;
+    tx.try_depth_at_start = saved_try;
+    tx.retry_signal       = 0;
+
+    if (ctx_v->try_depth >= MAX_TRY_DEPTH) {
+        return prim_throw_classified(S, "eval/state", "MST006",
+            "dosync*: try-stack overflow");
+    }
+    frame                 = &ctx_v->try_stack[ctx_v->try_depth];
+    frame->exception      = NULL;
+    frame->saved_ns       = S->current_ns;
+    frame->saved_ambient  = S->fn_ambient_ns;
+    frame->saved_load_len = S->load_stack_len;
+    if (setjmp(frame->buf) != 0) {
+        /* Body threw. Use the volatile ctx_v captured before setjmp so
+         * we don't re-enter the inlined mino_current_ctx (whose locals
+         * trigger -Wclobbered). */
+        mino_thread_ctx_t *c  = ctx_v;
+        mino_val_t        *ex = c->try_stack[saved_try].exception;
         tx_clear_ref_states(&tx);
-        ctx->current_tx = NULL;
+        c->current_tx    = NULL;
+        c->try_depth     = saved_try;
+        S->current_ns    = c->try_stack[saved_try].saved_ns;
+        S->fn_ambient_ns = c->try_stack[saved_try].saved_ambient;
+        if (c->try_depth > 0) {
+            c->try_stack[c->try_depth - 1].exception = ex;
+            longjmp(c->try_stack[c->try_depth - 1].buf, 1);
+        }
+        if (ex != NULL && ex->type == MINO_STRING) {
+            set_eval_diag(S, c->eval_current_form,
+                          "user", "MUS001", ex->as.s.data);
+        } else {
+            set_eval_diag(S, c->eval_current_form,
+                          "internal", "MIN001",
+                          "unhandled exception in dosync");
+        }
+        return NULL;
     }
-    return result;
+    ctx_v->try_depth++;
+    ctx_v->current_tx = &tx;
+
+    result_v = dosync_run(S, thunk, env, &tx);
+
+    {
+        mino_thread_ctx_t *c = ctx_v;
+        tx_clear_ref_states(&tx);
+        c->current_tx = NULL;
+        c->try_depth  = saved_try;
+    }
+    return result_v;
 }
 
 /* --- primitive table ----------------------------------------------------- */
@@ -187,6 +419,11 @@ const mino_prim_def k_prims_stm[] = {
      "ref-set / alter / commute inside dosync."},
     {"ref?",      prim_ref_p,
      "Returns true if x is an STM ref."},
+    {"ref-set",   prim_ref_set,
+     "Sets the value of ref. Must be in dosync. Returns the new value."},
+    {"alter",     prim_alter,
+     "Sets ref to (apply f current-value args). Must be in dosync. "
+     "Returns the new value."},
     {"dosync*",   prim_dosync_star,
      "Runs a zero-arg thunk inside an STM transaction. The `dosync` "
      "macro expands to (dosync* (fn [] body...))."},

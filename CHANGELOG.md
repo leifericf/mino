@@ -68,6 +68,28 @@ ships with the install hook in a later step. Until then the
 symbols are unbound at runtime, so existing programs are
 unaffected.
 
+#### `ref-set`, `alter`, commit phase
+
+Add the two simplest write primitives. Both throw `eval/state`
+MST002 (`No transaction running`) when called outside `dosync`.
+`ref-set` sets the in-tx tentative directly. `alter` reads the
+current in-tx value, calls `(apply f cur args)`, and stores
+the result.
+
+The commit phase, run on every successful body return, validates
+the read set under the global commit lock: every ref the
+transaction touched must still be at its captured snapshot
+version. On mismatch the lock is released and the body re-runs
+(up to 10000 times before throwing MST004). On match, every
+recorded write is applied with `gc_write_barrier` plus a version
+bump, then the lock is released.
+
+`dosync*` now pushes its own try frame so an in-body throw is
+intercepted long enough to clear `ctx->current_tx` and free the
+per-ref state nodes before re-throwing -- otherwise a longjmp
+past the now-unwound stack frame would leave a dangling
+`current_tx` pointer.
+
 Internal suite 1476 / 7091 / 0.
 
 ## v0.100.34
