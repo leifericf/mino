@@ -272,6 +272,14 @@ polymorphic: a `(fn . extra)` cons for Clojure entries, or a
 for C entries (freed via the handle's GC finalizer). Replay
 dispatches per entry shape.
 
+#### `mino_tx_ensure`
+
+Read pin. Refactors `prim_ensure` to share `tx_ensure_core` with
+the new C entry. As before, the implementation captures the
+ref's snapshot version so any concurrent committer fails this
+tx's read-set validation; the JVM "block any other write" semantic
+falls out of the version-bump-on-commit rule for free.
+
 ## v0.100.34
 
 ### Add `aset` for host arrays; tighten `vec` bad-shape rejection

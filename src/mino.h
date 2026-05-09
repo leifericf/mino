@@ -568,6 +568,12 @@ mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *v,
                               mino_tx_xform_fn fn, void *user,
                               mino_env_t *env);
 
+/* Pin the ref against any concurrent committer until this transaction
+ * commits or aborts. Returns the in-tx effective value. Must be in a
+ * transaction. Equivalent to (ensure ref). */
+mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *v,
+                           mino_env_t *env);
+
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
  * the primitive variants fill with their type's zero value (0 for

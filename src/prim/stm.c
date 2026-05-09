@@ -646,21 +646,15 @@ mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *ref,
                             &c_ctx, env);
 }
 
-mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+/* Shared core for prim_ensure / mino_tx_ensure. Caller has already
+ * type-checked ref. Returns the in-tx effective value, or NULL on
+ * throw. */
+static mino_val_t *tx_ensure_core(mino_state_t *S, mino_val_t *ref,
+                                   mino_env_t *env)
 {
-    mino_val_t        *ref, *val;
     tx_ref_state_t    *rs;
+    mino_val_t        *val;
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "ensure requires one argument");
-    }
-    ref = args->as.cons.car;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "ensure: argument must be a ref");
-    }
     if (ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
@@ -679,6 +673,31 @@ mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         rs->snapshot_version = ref->as.tx_ref.version;
     }
     return val;
+}
+
+mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ref;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "ensure requires one argument");
+    }
+    ref = args->as.cons.car;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "ensure: argument must be a ref");
+    }
+    return tx_ensure_core(S, ref, env);
+}
+
+mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *ref,
+                           mino_env_t *env)
+{
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_tx_ensure: argument must be a ref");
+    }
+    return tx_ensure_core(S, ref, env);
 }
 
 /* --- commit phase --------------------------------------------------------- *
