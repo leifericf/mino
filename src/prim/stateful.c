@@ -8,6 +8,13 @@
 #include "prim/internal.h"
 #include "runtime/host_threads.h"
 
+/* Forward declaration from prim/stm.c -- deref of a ref needs to
+ * consult the active transaction to return the in-tx tentative value
+ * if any, otherwise the committed value. The symbol is unconditionally
+ * defined in prim/stm.c (which always builds, even when STM is not
+ * installed). */
+mino_val_t *mino_ref_deref(mino_state_t *S, mino_val_t *ref);
+
 /* ---- shared helpers ---------------------------------------------------- */
 
 /* Validate new_val against atom's validator.  Returns 0 on success,
@@ -219,7 +226,10 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a != NULL && a->type == MINO_FUTURE) {
         return mino_future_deref(S, a);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, or reduced");
+    if (a != NULL && a->type == MINO_TX_REF) {
+        return mino_ref_deref(S, a);
+    }
+    return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, or reduced");
 }
 
 mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)

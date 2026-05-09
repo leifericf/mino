@@ -476,4 +476,7 @@ extern const size_t        k_prims_fs_count;
 extern const mino_prim_def k_prims_proc[];
 extern const size_t        k_prims_proc_count;
 
+extern const mino_prim_def k_prims_stm[];
+extern const size_t        k_prims_stm_count;
+
 #endif /* PRIM_INTERNAL_H */

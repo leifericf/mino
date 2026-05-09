@@ -61,6 +61,14 @@
         `(->> (~(first step) ~@(rest step) ~x) ~@(rest forms))
         `(->> (~step ~x) ~@(rest forms))))))
 
+(defmacro dosync
+  "Runs body in an STM transaction. Refs may be altered, set, ensured,
+  or commuted within. The transaction retries on write conflicts in
+  multi-threaded mode. Side effects via (io! ...) inside the body
+  throw. Requires STM to be installed (mino_install_stm)."
+  [& body]
+  `(dosync* (fn [] ~@body)))
+
 ;; --- Definitions ---
 
 ;; defn is lifted above the early type predicates so they can use it.

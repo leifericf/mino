@@ -831,6 +831,24 @@ void        mino_install_fs(mino_state_t *S, mino_env_t *env);
 void        mino_install_proc(mino_state_t *S, mino_env_t *env);
 
 /*
+ * Install Software Transactional Memory primitives: ref, ref?,
+ * dosync*, ref-set, alter, commute, ensure, io!, plus the watch /
+ * validator extensions on refs.
+ *
+ * Lazy-initializes the per-state global commit lock on first call.
+ * Embedders that never call this pay nothing beyond a NULL
+ * `current_tx` pointer per thread context. The standalone `./mino`
+ * binary calls this through `mino_install_all`.
+ *
+ * mino's STM uses single-version optimistic locking, NOT MVCC with
+ * history. ref-min-history / ref-max-history / ref-history-count are
+ * stubs returning 0 / 10 / 0. Long readers under sustained writer
+ * contention may exhaust the 10000-retry cap rather than serve an
+ * older snapshot from history.
+ */
+void        mino_install_stm(mino_state_t *S, mino_env_t *env);
+
+/*
  * Evaluate one form. Returns NULL on error and writes a message via
  * mino_last_error(). Returns mino_nil() for an explicit nil result.
  *

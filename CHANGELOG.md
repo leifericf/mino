@@ -47,6 +47,27 @@ ctxs so tentative values, commute log cells, and the refs
 themselves stay reachable mid-transaction. The pointer is NULL
 outside `dosync` and on every freshly-allocated thread context.
 
+#### `dosync*`, `ref`, `ref?`, ref-aware `deref`
+
+Add `src/prim/stm.c` with the entry-point primitives. `ref`
+constructs a `MINO_TX_REF`. `ref?` is the identity predicate.
+`dosync*` takes a thunk, allocates a `tx_state_t` on the C
+stack, attaches it to the active context, runs the thunk, and
+detaches; the commit phase is empty until `ref-set` / `alter`
+land in the next step. `dosync` itself is a `defmacro` in
+`core.clj` that expands to `(dosync* (fn [] body...))`.
+
+`deref` (in `prim/stateful.c`) gains a `MINO_TX_REF` arm that
+delegates to `mino_ref_deref`: inside a transaction, it returns
+the in-tx tentative if any, else records a read with the ref's
+current `version` and returns the committed value; outside, it
+returns the committed value directly.
+
+The primitives are not yet installed -- `mino_install_stm`
+ships with the install hook in a later step. Until then the
+symbols are unbound at runtime, so existing programs are
+unaffected.
+
 Internal suite 1476 / 7091 / 0.
 
 ## v0.100.34
