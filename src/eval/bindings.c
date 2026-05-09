@@ -106,6 +106,21 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
             args = args->as.cons.cdr;
         }
     }
+    /* Reject extra args. fn argument-list destructuring (ctx tagged
+     * "fn") is the strict-arity path for Clojure-style `(fn [x] x)`:
+     * passing extra args throws ArityException. let / loop / for /
+     * doseq destructuring use their own ctx tags and intentionally
+     * ignore tail elements (vector destructuring binds available
+     * positions and stops). */
+    if (mino_is_cons(args) && ctx != NULL
+        && (strcmp(ctx, "fn") == 0 || strcmp(ctx, "defn") == 0)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "wrong number of args (more than %zu) passed", plen);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "eval/arity", "MAR001", msg);
+        return 0;
+    }
     return 1;
 }
 

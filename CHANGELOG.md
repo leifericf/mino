@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.100.28
+
+### Eval: Enforce fixed-arity contracts at fn apply
+
+`update.cljc` asserts
+`(p/thrown? (apply update [{:k 1} :k identity 1 2 3 4]))`. mino was
+returning `1` (the value `(get {:k 1} :k)`) silently because vector
+parameter destructuring in `bind_vec_destructure` discarded extra
+args once `plen` patterns were bound. JVM Clojure throws
+`ArityException` in this case — `identity`'s contract is fixed
+arity 1.
+
+Tighten `bind_vec_destructure` (`src/eval/bindings.c`) to throw
+`eval/arity` MAR001 when the call has more args than the parameter
+vector has positions, but only when the binding context is `"fn"`
+or `"defn"` (the strict-arity destructure paths). `let` / `loop` /
+`for` / `doseq` keep their lenient destructuring semantics where
+unmatched tail elements are simply ignored.
+
+Internal suite 1476 / 7084 / 0. `update.cljc` 62/0/1 → 63/0/0.
+
 ## v0.100.27
 
 ### Sequences: `(cons x y)` returns non-list shape; peek rejects it
