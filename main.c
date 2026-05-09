@@ -110,18 +110,16 @@ static const char *cwd_resolve(const char *name, void *ctx)
         snprintf(path_buf, sizeof(path_buf), "lib/%s", name);
         if (file_exists(path_buf)) return path_buf;
         if (initial_dir[0] != '\0') {
-            size_t dlen = strlen(initial_dir);
-            if (dlen + nlen + 6 < sizeof(path_buf)) {
-                snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", initial_dir, name);
-                if (file_exists(path_buf)) return path_buf;
-            }
+            int w = snprintf(path_buf, sizeof(path_buf), "%s/lib/%s",
+                             initial_dir, name);
+            if (w > 0 && (size_t)w < sizeof(path_buf)
+                && file_exists(path_buf)) return path_buf;
         }
         if (binary_dir[0] != '\0') {
-            size_t dlen = strlen(binary_dir);
-            if (dlen + nlen + 6 < sizeof(path_buf)) {
-                snprintf(path_buf, sizeof(path_buf), "%s/lib/%s", binary_dir, name);
-                if (file_exists(path_buf)) return path_buf;
-            }
+            int w = snprintf(path_buf, sizeof(path_buf), "%s/lib/%s",
+                             binary_dir, name);
+            if (w > 0 && (size_t)w < sizeof(path_buf)
+                && file_exists(path_buf)) return path_buf;
         }
         return NULL;
     }

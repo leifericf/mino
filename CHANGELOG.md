@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.100.20
+
+### Build: Make `make` clean on gcc-11 (Ubuntu 22.04)
+
+The `release-build` workflow runs on `ubuntu-22.04`, where the
+default `cc` is gcc-11. Two `-Werror` regressions broke linux-amd64
+and linux-arm64 there (and the v0.99.0 - v0.99.4 attempts to
+diagnose only added log capture, never the underlying fix):
+
+- `src/gc/driver.c` named `-Wdangling-pointer` in a
+  `#pragma GCC diagnostic ignored` block, but that flag was added
+  in gcc-12. On gcc-11 the pragma fires `-Werror=pragmas`. Both
+  the push and pop guards now require `__GNUC__ >= 12`.
+
+- `main.c`'s two `snprintf(path_buf, sizeof(path_buf), "%s/lib/%s",
+  dir, name)` calls in the `.cljc/.cljs/.clj` arm tripped
+  `-Werror=format-truncation`. The pre-snprintf bound check
+  (`dlen + nlen + 6 < sizeof(path_buf)`) is sound but gcc-11 can't
+  propagate it through to `snprintf`. Replaced with a check on the
+  `snprintf` return value: a truncated write skips the candidate
+  rather than silently using a clipped path. Same end result, no
+  pragma needed.
+
+Verified locally with gcc-11.3 (matches Ubuntu 22.04), gcc-12.4,
+and gcc-14.2. All three build clean with `-Werror`. Internal suite
+1476 / 7071 / 0.
+
 ## v0.100.19
 
 ### Future spawn now conveys the caller's dynamic bindings

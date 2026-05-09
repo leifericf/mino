@@ -15,7 +15,9 @@
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the
  * maximum address (shallowest frame on a downward-growing stack). */
-#if defined(__GNUC__) && !defined(__clang__)
+/* -Wdangling-pointer was added in gcc-12; older gcc warns "unknown
+ * option" with -Werror=pragmas if we name it unconditionally. */
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdangling-pointer"
 #endif
@@ -26,7 +28,7 @@ void gc_note_host_frame(mino_state_t *S, void *addr)
         mino_current_ctx(S)->gc_stack_bottom = addr;
     }
 }
-#if defined(__GNUC__) && !defined(__clang__)
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ >= 12
 #pragma GCC diagnostic pop
 #endif
 
