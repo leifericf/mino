@@ -1,20 +1,56 @@
 /*
  * stm.c -- Software Transactional Memory: refs and dosync.
  *
- * mino's STM uses single-version optimistic locking, NOT MVCC with
- * history. ref-min-history, ref-max-history, ref-history-count are
- * stubs (return 0 / 10 / 0). Long readers under high writer
- * contention may exhaust the 10000-retry cap rather than serve an
- * older snapshot from history. For mino's typical workload (single-
- * digit refs, a handful of worker threads, mostly single-threaded
- * embedders), that trade-off is the right one.
+ * Documented deviations from JVM Clojure (clojure.lang.LockingTransaction).
+ * The Clojure-level surface (ref, dosync, alter, commute, ensure,
+ * ref-set, io!, watches, validators, in-transaction?) matches canon
+ * for any program that does not depend on the items below.
  *
- * Concurrency model: a single global commit lock (S->stm_commit_lock)
- * lazy-initialized in mino_install_stm. Held only across the commit
- * phase of a transaction (read-set validation, writes, version
- * bumps); watch dispatch runs outside it. Per-thread transaction
- * state lives on mino_thread_ctx_t::current_tx; the GC walks it from
- * gc_mark_roots so tentative values stay reachable.
+ *  1. Single-version optimistic locking. JVM uses MVCC with a
+ *     ref-history ring buffer; we hold one committed value per ref.
+ *     A long-running reader competing with sustained writer pressure
+ *     may exhaust the retry cap (STM_RETRY_CAP = 10000) where JVM
+ *     would serve an older snapshot. Trade-off chosen for mino's
+ *     typical workload (small ref sets, handful of worker threads,
+ *     mostly single-threaded embedders).
+ *
+ *  2. Global commit lock. JVM uses per-ref read/write locks plus
+ *     write-skew detection; mino serializes all commits behind one
+ *     mutex (S->stm_commit_lock) lazy-initialized in
+ *     mino_install_stm. Coarser, simpler, and on a single thread
+ *     completely free (the lock is skipped when thread_limit <= 1).
+ *
+ *  3. No barging. JVM's older-tx-bumps-younger-tx mechanism is
+ *     intentionally absent. Every retry restarts the body from
+ *     scratch.
+ *
+ *  4. No mid-body retry. JVM detects conflicts as soon as a read
+ *     observes a stale version; mino only checks the read set at
+ *     commit time. Wasted work bounded by the retry cap.
+ *
+ *  5. ref-min-history, ref-max-history, ref-history-count are stubs
+ *     returning 0 / 10 / 0 (no MVCC history to introspect).
+ *
+ *  6. Print form is `#ref[ID VAL]`. JVM prints
+ *     `#object[clojure.lang.Ref 0x... {:status :ready, :val ...}]`,
+ *     a JVM-specific shape. mino's form is deliberately simpler and
+ *     not pretending to be a JVM class.
+ *
+ *  7. set-validator! does not validate the current value at install
+ *     time. JVM matches this; mino's earlier behavior of throwing
+ *     MCT001 on install was the deviation, removed in v0.101.0.
+ *
+ *  8. alter-after-commute and ref-set-after-commute throw
+ *     "Can't set after commute" (JVM canon). The commute-after-alter
+ *     direction folds the commute into the alter's tentative; commit
+ *     writes the alter+commute tentative, matching JVM's behavior of
+ *     skipping commute-log replay for refs already in the write set.
+ *
+ * Concurrency model: per-thread transaction state lives on
+ * mino_thread_ctx_t::current_tx; the GC walks it from gc_mark_roots
+ * so tentative values stay reachable. The commit lock is held only
+ * across read-set validation, write application, and version bumps;
+ * watch dispatch runs outside it.
  *
  * Embedder optionality: the public surface (ref, ref?, dosync*, ...)
  * is gated behind mino_install_stm. mino_install_all calls it, so
