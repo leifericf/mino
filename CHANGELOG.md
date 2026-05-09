@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.100.25
+
+### Numeric tower: Strict overflow on +/-/\*; auto-promote on primed forms
+
+mino historically auto-promoted to bigint on long overflow for the
+unprimed arithmetic forms `+`, `-`, `*`, `inc`, `dec`, with the primed
+forms aliased to the unprimed (added v0.100.17). JVM Clojure splits
+the contract differently: unprimed throws on long overflow; primed
+auto-promotes. Cross-dialect tests in `jank-lang/clojure-test-suite`
+(`star.cljc`, `plus.cljc`, `minus.cljc`, ...) assert
+`(p/thrown? (* -1 r/min-int))` and similar — they fail when mino
+auto-promotes the unprimed form.
+
+Realign with JVM Clojure:
+
+- `tower_apply_int` and the int-tier branch of `tower_reduce_seeded`
+  take a new `strict` flag. When strict, long-overflow throws an
+  `eval/contract` MCT001 with message `"integer overflow"`. When not,
+  the accumulator promotes to bigint as before.
+- `prim_inc` / `prim_dec` similarly factor a `strict` flag through a
+  shared `prim_inc_impl` / `prim_dec_impl`.
+- New C primitives `prim_addp` / `prim_subp` / `prim_mulp` /
+  `prim_incp` / `prim_decp` carry the auto-promote behavior, registered
+  as `+'`, `-'`, `*'`, `inc'`, `dec'`. The previous `(def +' +)` etc.
+  aliases in `src/core.clj` are removed — both arms are first-class.
+- Unary `-` on `LLONG_MIN` (`(- LLONG_MIN)`) now throws under the
+  strict path; `-' LLONG_MIN` still auto-promotes.
+
+Also tightens narrow integer casts: `prim_short` and `prim_byte` now
+share a `narrow_cast` helper with `prim_int` that compares the
+*double value* against the target tier's bounds before truncation.
+This catches `(byte -128.000001)` and `(short 32767.000001)` even
+though they truncate to in-range longs.
+
+Internal-suite numeric tests updated to match: `nt-arithmetic-plain-tower`,
+`nt-arithmetic-mixed-tower`, `nt-iterated-promotion`, and
+`integer-overflow-strict-and-primed` cover both arms now. Internal
+suite 1476 / 7084 / 0.
+
+External suite: `star.cljc` 121/0/4 → 125/0/0, `plus.cljc` 127/0/2 →
+129/0/0, `minus.cljc` 137/0/2 → 139/0/0, `byte.cljc` 25/0/2 →
+27/0/0. One regression: `abs.cljc` errors because the test's `:default`
+arm computes its own expected value via `(* -1 r/min-int)` — which
+now throws under the strict contract. The test relies on auto-promote
+behavior in that expected-value computation; mino can't fix that
+without modifying the test file (out of scope per "no test fooling").
+
 ## v0.100.24
 
 ### Records: Recognize `Foo.` trailing-dot constructor as factory call

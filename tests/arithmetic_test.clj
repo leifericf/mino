@@ -102,33 +102,48 @@
   (is (= 5.0 (float 5)))
   (is (= 3.14 (float 3.14))))
 
-(deftest integer-overflow-promotes
-  ;; Plain +/-/*/inc/dec auto-promote to bigint on long overflow rather
-  ;; than wrap silently or throw. The unchecked-* family is the named
+(deftest integer-overflow-strict-and-primed
+  ;; Plain +/-/*/inc/dec throw on long overflow (matching JVM Clojure's
+  ;; unprimed contracts). The primed forms +' / -' / *' / inc' / dec'
+  ;; auto-promote to bigint. The unchecked-* family is a separate
   ;; opt-in for two's-complement-wraparound int64 semantics.
   (let [max-int 9223372036854775807
         min-int -9223372036854775808]
-    (is (= 9223372036854775808N (+ max-int 1)))
-    (is (= 9223372036854775808N (+ 1 max-int)))
-    (is (= -9223372036854775809N (+ min-int -1)))
-    (is (= 9223372036854775810N (+ 1 2 max-int)))
-    (is (= -9223372036854775809N (- min-int 1)))
-    (is (= 9223372036854775808N (- max-int -1)))
-    (is (= 9223372036854775808N (- min-int)))
-    (is (= 18446744073709551614N (* max-int 2)))
-    (is (= 9223372036854775808N (* -1 min-int)))
-    (is (= 9223372036854775808N (* min-int -1)))
-    (is (= 9223372036854775808N (inc max-int)))
-    (is (= -9223372036854775809N (dec min-int)))
-    ;; Each promoted result is a bigint.
-    (is (= :bigint (type (+ max-int 1))))
-    (is (= :bigint (type (* max-int 2))))
-    ;; In-range arithmetic still works and stays in long.
-    (is (= max-int (+ (dec max-int) 1)))
+    ;; Strict forms throw on overflow.
+    (is (thrown? (+ max-int 1)))
+    (is (thrown? (+ 1 max-int)))
+    (is (thrown? (+ min-int -1)))
+    (is (thrown? (+ 1 2 max-int)))
+    (is (thrown? (- min-int 1)))
+    (is (thrown? (- max-int -1)))
+    (is (thrown? (- min-int)))
+    (is (thrown? (* max-int 2)))
+    (is (thrown? (* -1 min-int)))
+    (is (thrown? (* min-int -1)))
+    (is (thrown? (inc max-int)))
+    (is (thrown? (dec min-int)))
+    ;; Primed forms auto-promote.
+    (is (= 9223372036854775808N (+' max-int 1)))
+    (is (= 9223372036854775808N (+' 1 max-int)))
+    (is (= -9223372036854775809N (+' min-int -1)))
+    (is (= 9223372036854775810N (+' 1 2 max-int)))
+    (is (= -9223372036854775809N (-' min-int 1)))
+    (is (= 9223372036854775808N (-' max-int -1)))
+    (is (= 9223372036854775808N (-' min-int)))
+    (is (= 18446744073709551614N (*' max-int 2)))
+    (is (= 9223372036854775808N (*' -1 min-int)))
+    (is (= 9223372036854775808N (*' min-int -1)))
+    (is (= 9223372036854775808N (inc' max-int)))
+    (is (= -9223372036854775809N (dec' min-int)))
+    (is (= :bigint (type (+' max-int 1))))
+    (is (= :bigint (type (*' max-int 2))))
+    ;; In-range arithmetic stays in long for both forms.
+    (is (= max-int (+ (dec' max-int) 1)))
     (is (= (- max-int 1) (+ max-int -1)))
     (is (= -1 (+ max-int min-int)))
     (is (= max-int (* max-int 1)))
     (is (= :int (type (+ 1 2))))
+    (is (= :int (type (+' 1 2))))
     ;; Float arithmetic is not range-checked; IEEE 754 handles it.
     (is (float? (+ max-int 1.0)))
     ;; unchecked-* wraps without promoting.

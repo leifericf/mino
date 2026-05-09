@@ -3196,17 +3196,12 @@
 (defn create [k v] [k v])
 (in-ns 'clojure.core)
 
-;; In Clojure JVM the primed arithmetic forms (`+'`, `-'`, `*'`, `inc'`,
-;; `dec'`) auto-promote to BigInt rather than overflowing in long; the
-;; unprimed forms throw on overflow. mino's unprimed forms already
-;; auto-promote (an intentional divergence -- see
-;; `intentional_divergences.clj`), so the primed forms are just
-;; aliases that let portable code compile without rewriting.
-(def +' "Auto-promoting +. Alias for + on mino." +)
-(def -' "Auto-promoting -. Alias for - on mino." -)
-(def *' "Auto-promoting *. Alias for * on mino." *)
-(def inc' "Auto-promoting inc. Alias for inc on mino." inc)
-(def dec' "Auto-promoting dec. Alias for dec on mino." dec)
+;; In Clojure JVM the primed arithmetic forms (`+'`, `-'`, `*'`,
+;; `inc'`, `dec'`) auto-promote to BigInt; the unprimed forms throw
+;; on overflow. mino now matches that contract: the unprimed +/-/*/
+;; inc/dec primitives throw on long overflow, and the primed forms
+;; have their own C primitives that auto-promote. No aliases needed
+;; -- both arms are first-class.
 
 (defmacro with-redefs
   "Temporarily rebinds the root bindings of vars while body executes, restoring

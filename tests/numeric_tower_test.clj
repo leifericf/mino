@@ -106,7 +106,7 @@
   (is (= :bigint (type 1N)))
   (is (= :bigint (type (bigint "12345678901234567890")))))
 
-;; --- plain arithmetic: tower-dispatched, with auto-promote on overflow ---
+;; --- plain arithmetic: tower-dispatched ---
 
 (deftest nt-arithmetic-plain-tower
   ;; Plain +/-/* tier-dispatch when given non-int operands. Mixed-type
@@ -120,18 +120,20 @@
   ;; their sum is `3M`. `1.0M + 2.0M` would be `3.0M`.
   (is (= 3M (+ 1M 2M)))
   (is (= 3.0M (+ 1.0M 2.0M)))
-  ;; Long overflow on homogeneous-int arithmetic auto-promotes to
-  ;; bigint instead of throwing.
-  (is (= 9223372036854775808N (+ 9223372036854775807 1)))
-  (is (= :bigint (type (+ 9223372036854775807 1))))
+  ;; Long overflow on homogeneous-int arithmetic throws on the
+  ;; unprimed forms (matching JVM Clojure). The primed forms +' / *' /
+  ;; inc' / dec' / -' auto-promote to bigint -- see
+  ;; integer-overflow-strict-and-primed.
+  (is (thrown? (+ 9223372036854775807 1)))
+  (is (= 9223372036854775808N (+' 9223372036854775807 1)))
+  (is (= :bigint (type (+' 9223372036854775807 1))))
+  ;; Mixed-tier multiplication where at least one operand is a bigint
+  ;; literal stays in the tower path -- no overflow throw because the
+  ;; accumulator promoted to bigint before multiplying.
   (is (= 1000000000000000000000000000N
-         (* 1000000000 1000000000 1000000000)))
-  (is (= 9223372036854775808N (inc 9223372036854775807)))
-  (is (= -9223372036854775809N (dec -9223372036854775808)))
-  ;; Unary - on LLONG_MIN promotes.
-  (is (= 9223372036854775808N (- -9223372036854775808)))
-  ;; Binary - that crosses LLONG_MIN promotes.
-  (is (= -9223372036854775809N (- -9223372036854775808 1))))
+         (* 1000000000 1000000000 1000000000N)))
+  (is (= 9223372036854775808N (inc' 9223372036854775807)))
+  (is (= -9223372036854775809N (dec' -9223372036854775808))))
 
 ;; --- ratio / bigdec / float in plain arithmetic ---
 
@@ -151,8 +153,12 @@
   (is (= 12 (* 3 4)))
   (is (= 24 (* 1 2 3 4)))
   (is (= 6N (* 1N 2N 3N)))
-  (is (= 10000000000000000000000N (* 100000000000 100000000000)))
-  (is (= :bigint (type (* 100000000000 100000000000))))
+  ;; (* 100000000000 100000000000) overflows long; the tower-strict
+  ;; form throws. *' auto-promotes; the bigint-seeded form stays in
+  ;; the bigint tier from the start.
+  (is (thrown? (* 100000000000 100000000000)))
+  (is (= 10000000000000000000000N (*' 100000000000 100000000000)))
+  (is (= :bigint (type (*' 100000000000 100000000000))))
   (is (= 6.0 (* 2 3.0))))
 
 ;; --- inc / dec on the full tower ---
@@ -174,13 +180,15 @@
 ;; --- promotion boundary: iterated inc crosses long/bigint seam cleanly ---
 
 (deftest nt-iterated-promotion
+  ;; The primed inc' / dec' cross the long/bigint seam by promoting;
+  ;; once in the bigint tier subsequent inc/dec calls stay there.
   (let [max-long 9223372036854775807
-        over (inc max-long)]
+        over (inc' max-long)]
     (is (= :bigint (type over)))
     (is (= over 9223372036854775808N))
     (is (= (inc over) 9223372036854775809N)))
   (let [min-long -9223372036854775808
-        under (dec min-long)]
+        under (dec' min-long)]
     (is (= :bigint (type under)))
     (is (= under -9223372036854775809N))
     (is (= (dec under) -9223372036854775810N))))

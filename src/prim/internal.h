@@ -101,10 +101,18 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
 
 /* numeric.c */
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_addp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_incp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_decp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_subp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_mulp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_unchecked_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_unchecked_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_unchecked_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env);

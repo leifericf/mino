@@ -335,13 +335,15 @@ static void tower_seed_div(tower_acc_t *acc, const mino_val_t *a, int at)
     }
 }
 
-/* tower_apply_int -- INT-tier step. add/sub/mul auto-promote the acc to
- * bigint on long-overflow; div promotes to ratio when the quotient is
- * not exact. Returns 0 on success, -1 on a runtime error (diag set or
- * thrown). */
+/* tower_apply_int -- INT-tier step. add/sub/mul behavior depends on
+ * `strict`: when strict, long-overflow throws (matching JVM Clojure's
+ * unprimed arithmetic contracts); when not, the acc auto-promotes
+ * to bigint (matching Clojure's primed forms). div promotes to ratio
+ * when the quotient is not exact. Returns 0 on success, -1 on a
+ * runtime error (diag set or thrown). */
 static int tower_apply_int(mino_state_t *S, tower_acc_t *acc,
                            const mino_val_t *a, tower_op_t op,
-                           const char *opname)
+                           const char *opname, int strict)
 {
     long long x = a->as.i;
     int (*overflow_op)(long long, long long, long long *) =
@@ -351,13 +353,21 @@ static int tower_apply_int(mino_state_t *S, tower_acc_t *acc,
     if (op == OP_ADD || op == OP_SUB || op == OP_MUL) {
         long long out;
         if (overflow_op(acc->iacc, x, &out)) {
-            mino_val_t *la = mino_bigint_from_ll(S, acc->iacc);
-            mino_val_t *lb = mino_bigint_from_ll(S, x);
-            if (la == NULL || lb == NULL) return -1;
-            acc->vacc = tower_op_at_tier(S, op, TT_BIGINT, la, lb, opname);
-            if (acc->vacc == NULL) return -1;
-            acc->tier = TT_BIGINT;
-            return 0;
+            if (strict) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "integer overflow");
+                prim_throw_classified(S, "eval/contract", "MCT001", buf);
+                return -1;
+            }
+            {
+                mino_val_t *la = mino_bigint_from_ll(S, acc->iacc);
+                mino_val_t *lb = mino_bigint_from_ll(S, x);
+                if (la == NULL || lb == NULL) return -1;
+                acc->vacc = tower_op_at_tier(S, op, TT_BIGINT, la, lb, opname);
+                if (acc->vacc == NULL) return -1;
+                acc->tier = TT_BIGINT;
+                return 0;
+            }
         }
         acc->iacc = out;
         return 0;
@@ -459,7 +469,8 @@ static int tower_apply_float(tower_acc_t *acc, const mino_val_t *a,
  * increase, and dispatches to the per-tier step. Returns the final
  * value, or NULL on error with diag already set. */
 static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
-                                tower_op_t op, const char *opname)
+                                tower_op_t op, const char *opname,
+                                int strict)
 {
     tower_acc_t acc;
     int         seeded   = 0;
@@ -492,7 +503,7 @@ static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
             if (!promote_acc(S, &acc, target, opname)) return NULL;
         }
         switch (acc.tier) {
-        case TT_INT:    step = tower_apply_int(S, &acc, a, op, opname); break;
+        case TT_INT:    step = tower_apply_int(S, &acc, a, op, opname, strict); break;
         case TT_BIGINT: step = tower_apply_bigint(S, &acc, a, op, opname); break;
         case TT_RATIO:  step = tower_apply_ratio(S, &acc, a, op, opname); break;
         case TT_BIGDEC: step = tower_apply_bigdec(S, &acc, a, op, opname); break;
@@ -514,16 +525,28 @@ static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
-    return tower_reduce(S, args, OP_ADD, "+");
+    return tower_reduce(S, args, OP_ADD, "+", 1);
 }
 
-/* (inc x) -- x + 1. Fast path for the dominant integer case; long
- * overflow at LLONG_MAX promotes to bigint. Non-int operands defer to
- * the generic + primitive so tier semantics stay identical. */
-mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_addp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return tower_reduce(S, args, OP_ADD, "+'", 0);
+}
+
+/* Forward decl: prim_subp is defined alongside prim_sub later, but
+ * prim_dec_impl needs to call it from this location. */
+mino_val_t *prim_subp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+
+/* (inc x) -- x + 1. Fast path for the dominant integer case; behavior
+ * on long overflow at LLONG_MAX depends on `strict`: throw (default
+ * inc, matches JVM Clojure) or auto-promote to bigint (inc'). Non-int
+ * operands defer to the generic + primitive so tier semantics stay
+ * identical. */
+static mino_val_t *prim_inc_impl(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env, int strict)
 {
     mino_val_t *x;
-    (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "inc requires exactly 1 argument");
@@ -531,11 +554,17 @@ mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
         if (x->as.i == LLONG_MAX) {
-            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
-            mino_val_t *one;
-            if (lhs == NULL) return NULL;
-            one = mino_int(S, 1);
-            return mino_bigint_add(S, lhs, one);
+            if (strict) {
+                return prim_throw_classified(S, "eval/contract", "MCT001",
+                                             "integer overflow");
+            }
+            {
+                mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+                mino_val_t *one;
+                if (lhs == NULL) return NULL;
+                one = mino_int(S, 1);
+                return mino_bigint_add(S, lhs, one);
+            }
         }
         return mino_int(S, x->as.i + 1);
     }
@@ -544,19 +573,32 @@ mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (x != NULL && (x->type == MINO_BIGINT || x->type == MINO_RATIO
                       || x->type == MINO_BIGDEC)) {
-        /* Defer to the tower-aware (+) by passing (x 1). */
+        /* Defer to the tower-aware (+) by passing (x 1). The bigint /
+         * ratio / bigdec tiers don't overflow long, so the strict flag
+         * doesn't change behavior here -- both inc and inc' route to
+         * the strict (+) path safely. */
         mino_val_t *one = mino_int(S, 1);
         mino_val_t *pair = mino_cons(S, x, mino_cons(S, one, mino_nil(S)));
-        return prim_add(S, pair, env);
+        return strict ? prim_add(S, pair, env) : prim_addp(S, pair, env);
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
         "inc expects a number");
 }
 
-mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    return prim_inc_impl(S, args, env, 1);
+}
+
+mino_val_t *prim_incp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    return prim_inc_impl(S, args, env, 0);
+}
+
+static mino_val_t *prim_dec_impl(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env, int strict)
 {
     mino_val_t *x;
-    (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "dec requires exactly 1 argument");
@@ -564,11 +606,17 @@ mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
         if (x->as.i == LLONG_MIN) {
-            mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
-            mino_val_t *one;
-            if (lhs == NULL) return NULL;
-            one = mino_int(S, 1);
-            return mino_bigint_sub(S, lhs, one);
+            if (strict) {
+                return prim_throw_classified(S, "eval/contract", "MCT001",
+                                             "integer overflow");
+            }
+            {
+                mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+                mino_val_t *one;
+                if (lhs == NULL) return NULL;
+                one = mino_int(S, 1);
+                return mino_bigint_sub(S, lhs, one);
+            }
         }
         return mino_int(S, x->as.i - 1);
     }
@@ -579,18 +627,30 @@ mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                       || x->type == MINO_BIGDEC)) {
         mino_val_t *one = mino_int(S, 1);
         mino_val_t *pair = mino_cons(S, x, mino_cons(S, one, mino_nil(S)));
-        return prim_sub(S, pair, env);
+        return strict ? prim_sub(S, pair, env) : prim_subp(S, pair, env);
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
         "dec expects a number");
 }
 
+mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    return prim_dec_impl(S, args, env, 1);
+}
+
+mino_val_t *prim_decp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    return prim_dec_impl(S, args, env, 0);
+}
+
 /* Apply the n-ary subtract/divide step starting from a seeded acc and
- * walking the rest. Long-overflow on int-tier arithmetic auto-promotes
- * the accumulator to bigint. Reused by prim_sub and prim_div. */
+ * walking the rest. Long-overflow on int-tier subtraction throws when
+ * `strict`, otherwise auto-promotes to bigint. Division never throws
+ * on overflow (it dispatches to ratio). Reused by prim_sub, prim_subp,
+ * and prim_div. */
 static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
                                        mino_val_t *rest, tower_op_t op,
-                                       const char *opname)
+                                       const char *opname, int strict)
 {
     tower_acc_t a;
     int seed_tier;
@@ -621,13 +681,20 @@ static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
             long long out;
             if (op == OP_SUB) {
                 if (isub_overflow(a.iacc, x->as.i, &out)) {
-                    mino_val_t *la = mino_bigint_from_ll(S, a.iacc);
-                    mino_val_t *lb = mino_bigint_from_ll(S, x->as.i);
-                    if (la == NULL || lb == NULL) return NULL;
-                    a.vacc = mino_bigint_sub(S, la, lb);
-                    if (a.vacc == NULL) return NULL;
-                    a.tier = TT_BIGINT;
-                    break;
+                    if (strict) {
+                        prim_throw_classified(S, "eval/contract", "MCT001",
+                                              "integer overflow");
+                        return NULL;
+                    }
+                    {
+                        mino_val_t *la = mino_bigint_from_ll(S, a.iacc);
+                        mino_val_t *lb = mino_bigint_from_ll(S, x->as.i);
+                        if (la == NULL || lb == NULL) return NULL;
+                        a.vacc = mino_bigint_sub(S, la, lb);
+                        if (a.vacc == NULL) return NULL;
+                        a.tier = TT_BIGINT;
+                        break;
+                    }
                 }
                 a.iacc = out;
             } else { /* OP_DIV */
@@ -720,26 +787,37 @@ static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
     }
 }
 
-mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_sub_impl(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env, int strict, const char *opname)
 {
     mino_val_t *first;
     (void)env;
-    if (!mino_is_cons(args))
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-                                     "- requires at least one argument");
+    if (!mino_is_cons(args)) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s requires at least one argument", opname);
+        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+    }
     first = args->as.cons.car;
     /* Unary: negate. */
     if (!mino_is_cons(args->as.cons.cdr)) {
-        if (first == NULL)
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                                         "- expects numbers");
+        if (first == NULL) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s expects numbers", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        }
         if (first->type == MINO_INT) {
             long long neg;
             if (ineg_overflow(first->as.i, &neg)) {
+                if (strict) {
+                    return prim_throw_classified(S, "eval/contract", "MCT001",
+                                                 "integer overflow");
+                }
                 /* Negating LLONG_MIN doesn't fit in long; promote. */
-                mino_val_t *bi = mino_bigint_from_ll(S, first->as.i);
-                if (bi == NULL) return NULL;
-                return mino_bigint_neg(S, bi);
+                {
+                    mino_val_t *bi = mino_bigint_from_ll(S, first->as.i);
+                    if (bi == NULL) return NULL;
+                    return mino_bigint_neg(S, bi);
+                }
             }
             return mino_int(S, neg);
         }
@@ -755,16 +833,35 @@ mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return mino_ratio_sub(S, zero, first);
         }
         if (first->type == MINO_BIGDEC) return mino_bigdec_neg(S, first);
-        return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "- expects numbers");
+        {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s expects numbers", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        }
     }
-    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_SUB, "-");
+    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_SUB, opname, strict);
+}
+
+mino_val_t *prim_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    return prim_sub_impl(S, args, env, 1, "-");
+}
+
+mino_val_t *prim_subp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    return prim_sub_impl(S, args, env, 0, "-'");
 }
 
 mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
-    return tower_reduce(S, args, OP_MUL, "*");
+    return tower_reduce(S, args, OP_MUL, "*", 1);
+}
+
+mino_val_t *prim_mulp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    return tower_reduce(S, args, OP_MUL, "*'", 0);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -899,9 +996,9 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!mino_is_cons(args->as.cons.cdr)) {
         mino_val_t *one  = mino_int(S, 1);
         if (one == NULL) return NULL;
-        return tower_reduce_seeded(S, one, args, OP_DIV, "/");
+        return tower_reduce_seeded(S, one, args, OP_DIV, "/", 0);
     }
-    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_DIV, "/");
+    return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_DIV, "/", 0);
 }
 
 /* mod/rem/quot dispatcher.
@@ -1477,59 +1574,70 @@ static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
     return 0;
 }
 
-mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+/* Helper for narrow integer casts with int32-or-smaller targets: if
+ * the input is a float or bigdec, compares the *double value* against
+ * the target tier's bounds before truncation. JVM Clojure's int / short /
+ * byte all check the double value itself, so values like
+ * -128.000001 throw for byte even though they truncate to the
+ * in-range -128. */
+static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
+                               long long lo, long long hi,
+                               const char *opname)
 {
-    mino_val_t *v;
-    long long ll;
+    long long   ll;
     const char *err = NULL;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "int requires one argument");
-    }
-    v = args->as.cons.car;
-    /* (int \a) -> 97: char value yields its Unicode codepoint, no range
-     * check (Unicode codepoints fit in int32). */
+    char        buf[160];
+    /* (cast \a) -> codepoint: chars don't take the float-bound path. */
     if (v != NULL && v->type == MINO_CHAR) {
-        return mino_int(S, (long long)v->as.ch);
+        long long cp = (long long)v->as.ch;
+        if (cp < lo || cp > hi) {
+            snprintf(buf, sizeof(buf), "%s: value out of range", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
+        }
+        return mino_int(S, cp);
     }
-    /* For floats and bigdecs, compare against int32 bounds before
-     * truncation. JVM Clojure's int checks the double value itself,
-     * so values like -2147483648.000001 throw even though they
-     * truncate to an in-range long. */
     if (v != NULL && v->type == MINO_FLOAT) {
         double d = v->as.f;
         if (d != d) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                                         "int: NaN cannot be coerced to integer");
+            snprintf(buf, sizeof(buf), "%s: NaN cannot be coerced to integer", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
         }
-        if (d < -2147483648.0 || d > 2147483647.0) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                                         "int: value out of int32 range");
+        if (d < (double)lo || d > (double)hi) {
+            snprintf(buf, sizeof(buf), "%s: value out of range", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
         }
         return mino_int(S, (long long)d);
     }
     if (v != NULL && v->type == MINO_BIGDEC) {
         double d = mino_bigdec_to_double(v);
         if (d != d) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                                         "int: NaN cannot be coerced to integer");
+            snprintf(buf, sizeof(buf), "%s: NaN cannot be coerced to integer", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
         }
-        if (d < -2147483648.0 || d > 2147483647.0) {
-            return prim_throw_classified(S, "eval/type", "MTY001",
-                                         "int: value out of int32 range");
+        if (d < (double)lo || d > (double)hi) {
+            snprintf(buf, sizeof(buf), "%s: value out of range", opname);
+            return prim_throw_classified(S, "eval/type", "MTY001", buf);
         }
         return mino_int(S, (long long)d);
     }
     if (!extract_integer_for_cast(S, v, &ll, &err)) {
-        char buf[160];
-        snprintf(buf, sizeof(buf), "int: %s", err ? err : "expected a number");
+        snprintf(buf, sizeof(buf), "%s: %s", opname, err ? err : "expected a number");
         return prim_throw_classified(S, "eval/type", "MTY001", buf);
     }
-    if (ll < -2147483648LL || ll > 2147483647LL) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "int: value out of int32 range");
+    if (ll < lo || ll > hi) {
+        snprintf(buf, sizeof(buf), "%s: value out of range", opname);
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
     }
     return mino_int(S, ll);
+}
+
+mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "int requires one argument");
+    }
+    return narrow_cast(S, args->as.cons.car, -2147483648LL, 2147483647LL, "int");
 }
 
 mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1558,48 +1666,22 @@ mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *v;
-    long long ll;
-    const char *err = NULL;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
                                      "short requires one argument");
     }
-    v = args->as.cons.car;
-    if (!extract_integer_for_cast(S, v, &ll, &err)) {
-        char buf[160];
-        snprintf(buf, sizeof(buf), "short: %s", err ? err : "expected a number");
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
-    }
-    if (ll < -32768 || ll > 32767) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "short: value out of short range");
-    }
-    return mino_int(S, ll);
+    return narrow_cast(S, args->as.cons.car, -32768LL, 32767LL, "short");
 }
 
 mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *v;
-    long long ll;
-    const char *err = NULL;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
                                      "byte requires one argument");
     }
-    v = args->as.cons.car;
-    if (!extract_integer_for_cast(S, v, &ll, &err)) {
-        char buf[160];
-        snprintf(buf, sizeof(buf), "byte: %s", err ? err : "expected a number");
-        return prim_throw_classified(S, "eval/type", "MTY001", buf);
-    }
-    if (ll < -128 || ll > 127) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-                                     "byte: value out of byte range");
-    }
-    return mino_int(S, ll);
+    return narrow_cast(S, args->as.cons.car, -128LL, 127LL, "byte");
 }
 
 mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -2016,15 +2098,33 @@ mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 const mino_prim_def k_prims_numeric[] = {
     {"+",   prim_add,
-     "Returns the sum of the arguments."},
+     "Returns the sum of the arguments. Throws on long overflow; "
+     "use +' to auto-promote to bigint."},
+    {"+'",  prim_addp,
+     "Returns the sum of the arguments. Auto-promotes to bigint on "
+     "long overflow; use + to throw on overflow."},
     {"inc", prim_inc,
-     "Returns x plus 1."},
+     "Returns x plus 1. Throws on long overflow; use inc' to "
+     "auto-promote."},
+    {"inc'", prim_incp,
+     "Returns x plus 1. Auto-promotes to bigint on long overflow."},
     {"dec", prim_dec,
-     "Returns x minus 1."},
+     "Returns x minus 1. Throws on long overflow; use dec' to "
+     "auto-promote."},
+    {"dec'", prim_decp,
+     "Returns x minus 1. Auto-promotes to bigint on long overflow."},
     {"-",   prim_sub,
-     "Returns the difference of the arguments. With one arg, returns the negation."},
+     "Returns the difference of the arguments. With one arg, returns "
+     "the negation. Throws on long overflow; use -' to auto-promote."},
+    {"-'",  prim_subp,
+     "Returns the difference of the arguments. With one arg, returns "
+     "the negation. Auto-promotes to bigint on long overflow."},
     {"*",   prim_mul,
-     "Returns the product of the arguments."},
+     "Returns the product of the arguments. Throws on long overflow; "
+     "use *' to auto-promote."},
+    {"*'",  prim_mulp,
+     "Returns the product of the arguments. Auto-promotes to bigint "
+     "on long overflow."},
     {"/",   prim_div,
      "Returns the quotient of the arguments."},
     {"=",   prim_eq,
