@@ -157,11 +157,12 @@
 
 (deftest validator-throw-does-not-deadlock-stm-lock
   ;; Regression: a validator that throws would previously leak the
-  ;; STM commit lock because mino_pcall's catch arm called set_eval_diag,
-  ;; which longjmps to any enclosing try frame -- bypassing tx_commit's
-  ;; stm_unlock. The next dosync would then hang on the leaked lock.
-  ;; Fixed by routing pcall's catch arm through record_eval_diag (the
-  ;; non-throwing variant). The first tx errors via the retry path; the
+  ;; STM commit lock because mino_pcall's catch arm called
+  ;; set_eval_diag, which longjmps to any enclosing try frame --
+  ;; bypassing tx_commit's stm_unlock. The next dosync would then
+  ;; hang on the leaked lock. Fixed by removing the publish-to-
+  ;; last_error step from pcall's catch arm; pcall now just unwinds
+  ;; to the caller without re-throwing. The first tx errors; the
   ;; second tx must complete instead of hanging.
   (let [r (ref 1)]
     (set-validator! r (fn [v] (if (zero? v)

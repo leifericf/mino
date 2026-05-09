@@ -377,23 +377,22 @@ would longjmp out of `run_ref_validator` past `stm_unlock`,
 leaving `S->stm_commit_lock` permanently held. The next
 `dosync` deadlocked.
 
-Fix: extracted a non-throwing variant `record_eval_diag` from
-`set_eval_diag` and routed `mino_pcall`'s catch arm through it.
-The throw-conversion path of `set_eval_diag` is preserved for
-its primary use case (turning eval-phase diagnostics into
-catchable exceptions).
+Fix: `mino_pcall`'s catch arm no longer publishes anything to
+`last_error` / `last_diag`. Callers that want a diag set after
+`pcall` returns -1 do it explicitly. (An interim attempt routed
+the publish through a non-throwing `record_eval_diag` variant,
+but that left a stale diag in `last_error` that `eval_impl`'s
+`evaled == NULL && mino_last_error != NULL` check would then
+misread as a fresh error during a later call — flushed via the
+follow-up commit that drops the publish entirely.)
 
-`tests/stm_test.clj`'s new
-`validator-throw-does-not-deadlock-stm-lock` regression test
-proves the lock is released after a validator throw (the first
-tx errors via retry exhaustion; the second tx completes
-normally instead of hanging).
+`tests/stm_test.clj`'s `validator-throw-does-not-deadlock-stm-lock`
+regression test proves the lock is released after a validator
+throw.
 
-The agent code's `agent_try_call` (added in E.4 to work around
-the same pcall bug) is left in place. It's not strictly
-necessary now but documents the historical pcall contract; a
-follow-up commit can fold it back into `mino_pcall` if the
-agent maintainers prefer one mechanism.
+The agent code's `agent_try_call` workaround (added in E.4) is
+left in place by this commit; the follow-up replaces it with a
+direct `mino_pcall` call now that the catch arm is well-behaved.
 
 ### Agents (MVP)
 

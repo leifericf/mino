@@ -87,33 +87,6 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
     }
 }
 
-/* Store an eval-phase diagnostic without converting to a thrown
- * exception. Use this from places that need to record an error
- * without disturbing control flow -- in particular from a catch
- * arm that has already absorbed a thrown exception and now needs
- * to publish a message via mino_last_error / mino_last_error_map.
- *
- * set_eval_diag's longjmp path is the right behavior for primitive
- * error reporting (an error inside a try block becomes a catchable
- * exception). It is the wrong behavior in a catch arm: a second
- * longjmp would unwind further than the catcher intends, leaving
- * locks held and bookkeeping unrun. */
-void record_eval_diag(mino_state_t *S, const mino_val_t *form,
-                      const char *kind, const char *code, const char *msg)
-{
-    mino_diag_t *d = diag_new(kind, code, "eval", msg);
-    if (d != NULL && form != NULL && form->type == MINO_CONS
-        && form->as.cons.file != NULL && form->as.cons.line > 0) {
-        mino_span_t span;
-        memset(&span, 0, sizeof(span));
-        span.file   = form->as.cons.file;
-        span.line   = form->as.cons.line;
-        span.column = form->as.cons.column;
-        diag_set_span(d, span);
-    }
-    set_diag(S, d);
-}
-
 /* Classified eval-phase diagnostic from a form with source info. */
 void set_eval_diag(mino_state_t *S, const mino_val_t *form,
                    const char *kind, const char *code, const char *msg)
@@ -125,7 +98,19 @@ void set_eval_diag(mino_state_t *S, const mino_val_t *form,
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
         longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     }
-    record_eval_diag(S, form, kind, code, msg);
+    {
+        mino_diag_t *d = diag_new(kind, code, "eval", msg);
+        if (d != NULL && form != NULL && form->type == MINO_CONS
+            && form->as.cons.file != NULL && form->as.cons.line > 0) {
+            mino_span_t span;
+            memset(&span, 0, sizeof(span));
+            span.file   = form->as.cons.file;
+            span.line   = form->as.cons.line;
+            span.column = form->as.cons.column;
+            diag_set_span(d, span);
+        }
+        set_diag(S, d);
+    }
 }
 
 /* Return a short human-readable label for a value's type. */

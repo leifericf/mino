@@ -761,30 +761,20 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
     if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
         /* Landed here from longjmp -- error was thrown. */
-        mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
         S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_current_ctx(S)->try_depth = saved_try;
-        /* Populate last_error from the exception value so the host
-         * can inspect it via mino_last_error(). Use record_eval_diag
-         * (non-throwing) -- set_eval_diag would re-throw to any
-         * outer try frame, leaking out of pcall's catch arm and
-         * skipping bookkeeping the caller depends on (e.g. the STM
-         * commit lock). */
-        if (mino_last_error(S) == NULL || mino_last_error(S)[0] == '\0') {
-            const char *s = NULL;
-            size_t slen = 0;
-            if (ex != NULL && mino_to_string(ex, &s, &slen)) {
-                (void)slen;
-                record_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", s);
-            } else {
-                record_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
-            }
-        }
-        if (out != NULL) {
-            *out = NULL;
-        }
+        /* pcall does NOT publish to last_error / last_diag on a caught
+         * throw. The eval loop has read sites that treat
+         * mino_last_error as "an error happened during my call" (see
+         * eval_impl's "evaled == NULL && mino_last_error != NULL"
+         * gate), so leaving a stale diag from a successfully-caught
+         * pcall would mislead the next failing call into thinking
+         * its own error had already been reported. Callers that
+         * want a diag published after pcall returns -1 call
+         * set_eval_diag explicitly. */
+        if (out != NULL) *out = NULL;
         return -1;
     }
     mino_current_ctx(S)->try_depth++;
