@@ -3184,6 +3184,14 @@
 (def clojure.lang.IPending :future)
 (def clojure.lang.BigInt :bigint)
 
+;; Bridge `clojure.lang.MapEntry/create` to a 2-vector constructor.
+;; Cross-dialect tests use it under `:default` to build a map entry
+;; literal; mino represents map entries as 2-vectors and `key`/`val`
+;; already accept that shape, so the only missing piece is the ctor.
+(ns clojure.lang.MapEntry)
+(defn create [k v] [k v])
+(in-ns 'clojure.core)
+
 ;; In Clojure JVM the primed arithmetic forms (`+'`, `-'`, `*'`, `inc'`,
 ;; `dec'`) auto-promote to BigInt rather than overflowing in long; the
 ;; unprimed forms throw on overflow. mino's unprimed forms already

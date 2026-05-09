@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.100.21
+
+### Bridge: Expose `clojure.lang.MapEntry/create` as a 2-vector ctor
+
+Cross-dialect tests in `jank-lang/clojure-test-suite` (e.g. `key.cljc`,
+`val.cljc`) build a map-entry literal under their `:default` arm via
+`(clojure.lang.MapEntry/create k v)`. mino's map entries are 2-element
+vectors, so the data shape already matches — only the constructor
+namespace was missing. Define `clojure.lang.MapEntry/create` in
+`src/core.clj` next to the existing `clojure.lang.IPending` and
+`clojure.lang.BigInt` bridges:
+
+```clj
+(ns clojure.lang.MapEntry)
+(defn create [k v] [k v])
+(in-ns 'clojure.core)
+```
+
+This unblocks the affected `is` lines in `key.cljc` and `val.cljc`
+(previously errored on namespace lookup), surfacing the remaining
+`(p/thrown? (key [1 2]))` semantic gaps that need a distinct
+`MapEntry` value type to reject non-entry 2-vectors. That type
+addition is deliberately deferred — the bridge is the smaller fix
+that stands on its own. Internal suite 1476 / 7071 / 0; external
+suite aggregate 5252 → 5278 assertions, errors 10 → 8.
+
 ## v0.100.20
 
 ### Build: Make `make` clean on gcc-11 (Ubuntu 22.04)
