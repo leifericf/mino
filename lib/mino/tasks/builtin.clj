@@ -41,7 +41,7 @@
    "src/prim/sequences.c" "src/prim/lazy.c"
    "src/prim/string.c" "src/prim/io.c"
    "src/prim/reflection.c" "src/prim/meta.c" "src/prim/regex.c"
-   "src/prim/stateful.c" "src/prim/module.c"
+   "src/prim/stateful.c" "src/prim/stm.c" "src/prim/module.c"
    "src/prim/ns.c"
    "src/prim/fs.c" "src/prim/proc.c"
    "src/prim/host.c" "src/interop/syntax.c"
@@ -301,14 +301,10 @@
   []
   (println (sh! "env" "MINO_GC_STRESS=1" mino-bin "tests/gc_stress_runner.clj")))
 
-(defn test-embed
-  "Compile and run the C embedding stress tests (embed_multi_state).
-   Exercises 16 mino_state_t * 16 pthreads to assert the embedding API
-   is safe under the documented one-state-per-thread contract."
-  []
-  (let [src     "tests/embed_multi_state.c"
-        bin     "embed_multi_state"
-        objs    (mapv src->obj lib-srcs)
+(defn- compile-and-run-embed-test
+  "Compile a tests/embed_*.c harness against the lib srcs and run it."
+  [src bin]
+  (let [objs    (mapv src->obj lib-srcs)
         pthread (if windows? [] ["-pthread"])
         args    (into [cc] (concat cflags pthread ldflags
                                    ["-o" bin src]
@@ -316,6 +312,18 @@
     (println (str "  " (str/join " " args)))
     (apply sh! args)
     (println (sh! (str "./" bin)))))
+
+(defn test-embed
+  "Compile and run the C embedding tests:
+     - embed_multi_state: 16 mino_state_t x 16 pthreads, asserts the
+       embedding API is safe under the one-state-per-thread contract.
+     - embed_stm_test: STM Layer 2a smoke test (mino_tx_run,
+       mino_tx_alter_c, mino_tx_commute_c, mino_tx_ensure, watches)."
+  []
+  (compile-and-run-embed-test "tests/embed_multi_state.c"
+                              "embed_multi_state")
+  (compile-and-run-embed-test "tests/embed_stm_test.c"
+                              "embed_stm_test"))
 
 ;; ---- Architecture quality gates ----
 

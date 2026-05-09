@@ -299,6 +299,41 @@ touching the setjmp frame. Cross-thread defense is unchanged --
 the active `current_tx` lives on the per-thread context, so a
 host calling `mino_tx_run` on a worker sees its own retry loop.
 
+### C-side embed test + task wiring
+
+New `tests/embed_stm_test.c` exercises every Layer 2a entry point
+end-to-end: predicate / construction / outside-tx deref, a full
+`mino_tx_run` body that mixes `mino_tx_ref_deref` /
+`mino_tx_alter_c` / `mino_tx_commute_c` / `mino_tx_ensure`,
+`mino_tx_ref_set`, a commute-only path that goes through the
+log-replay code, the outside-tx error contract (every entry
+throws MST002 outside any transaction), the type-check throws on
+non-ref input, and a watch installed from Clojure observing a
+C-side commit through the side-atom that `add-watch` records into.
+
+The `./mino task test-embed` task gains a second invocation: it
+now compiles and runs `embed_multi_state` and `embed_stm_test`
+against the same lib srcs. The task helper
+`compile-and-run-embed-test` factors the shared compile + run
+recipe.
+
+`src/prim/stm.c` is also added to the task-driven lib-srcs list
+(the bootstrap Makefile already picked it up via wildcard, but
+the task's explicit list had been missing it -- a benign drift
+that became a broken link as soon as the C-side test referenced
+the new public symbols).
+
+### Internal suite
+
+`1499 / 7137 / 0` (one new alter-after-commute-throws case + one
+new alter-then-commute-folds case + one new
+validator-install-on-failing-current case). External suite holds
+at the prior baseline; no STM-specific test files exist in
+clojure-test-suite, and the `add_watch.cljc` / `remove_watch.cljc`
+files (which would exercise the ref arm) remain out of the
+external runner because their var arm still fails (var watches
+are out of scope for this work).
+
 ## v0.100.34
 
 ### Add `aset` for host arrays; tighten `vec` bad-shape rejection
