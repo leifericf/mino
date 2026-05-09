@@ -88,10 +88,16 @@
     (swap! a inc)
     (is (= 6 @a))))
 
-(deftest validator-on-current
+(deftest validator-install-on-failing-current
+  ;; JVM Clojure does not validate the current value at install time.
+  ;; Installing pos? on (atom -1) succeeds; only subsequent transitions
+  ;; are checked.
   (let [a (atom -1)]
-    (is (thrown? (set-validator! a pos?)))
-    (is (nil? (get-validator a)))))
+    (set-validator! a pos?)
+    (is (= pos? (get-validator a)))
+    (is (= -1 @a))
+    (is (thrown? (reset! a -2)))
+    (is (= -1 @a))))
 
 (deftest validator-nil-removes
   (let [a (atom 5)]

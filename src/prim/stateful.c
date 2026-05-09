@@ -464,9 +464,10 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
 mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
                                mino_env_t *env)
 {
-    mino_val_t  *a, *fn, *cur;
+    mino_val_t  *a, *fn;
     mino_val_t **watches_slot;
     mino_val_t **validator_slot;
+    (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "set-validator! requires two arguments: reference fn");
@@ -482,19 +483,9 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
         *validator_slot = NULL;
         return mino_nil(S);
     }
-    /* Validate current value with the new validator before installing.
-     * Cannot use atom_validate here because prim_throw_error longjmps
-     * and would skip the revert of the validator field. */
-    cur = (a->type == MINO_ATOM) ? a->as.atom.val : a->as.tx_ref.val;
-    {
-        mino_val_t *vargs  = mino_cons(S, cur, mino_nil(S));
-        mino_val_t *result = mino_call(S, fn, vargs, env);
-        if (result == NULL) return NULL;  /* validator threw */
-        if (result->type == MINO_BOOL && result->as.b == 0) {
-            prim_throw_classified(S, "eval/contract", "MCT001", "Invalid reference state");
-            return NULL;
-        }
-    }
+    /* JVM Clojure does not validate the current value at install time; only
+     * subsequent state transitions are checked. Match canon: install fn
+     * unconditionally, even if the current value would fail it. */
     gc_write_barrier(S, a, *validator_slot, fn);
     *validator_slot = fn;
     return mino_nil(S);

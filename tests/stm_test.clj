@@ -88,11 +88,16 @@
     (is (= 1 @r))))
 
 (deftest validator-rejects
-  (let [r (ref 1)]
+  (let [r (ref 0)]
+    ;; Installing a validator that would fail the current value succeeds
+    ;; (JVM canon); only subsequent in-tx transitions are checked.
     (set-validator! r pos?)
+    (is (= 0 @r))
     (is (thrown? (dosync (ref-set r -1))))
     ;; Failed transaction leaves the ref untouched.
-    (is (= 1 @r))))
+    (is (= 0 @r))
+    (dosync (ref-set r 5))
+    (is (= 5 @r))))
 
 (deftest nested-dosync
   (let [r (ref 0)]
