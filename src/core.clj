@@ -801,8 +801,13 @@
 (def long      "Coerces x to an integer." int)
 (def double    "Coerces x to a float." float)
 (defn num
-  "Returns x if it is a number, otherwise throws."
-  [x] (if (number? x) x (throw "num expects a number")))
+  "Returns x if it is a number, nil if x is nil, otherwise throws.
+   Nil pass-through matches the cross-dialect convention used by the
+   `:default` arm of `clojure.core-test.num` (no-op on numeric inputs
+   plus nil), where JVM Clojure's NPE-on-nil is platform-specific."
+  [x] (cond (nil? x)    nil
+            (number? x) x
+            :else       (throw "num expects a number")))
 (defn coll?
   "Returns true if x is a collection."
   [x] (or (seq? x) (vector? x) (map? x) (set? x)))

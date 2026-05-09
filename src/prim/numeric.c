@@ -1468,6 +1468,95 @@ mino_val_t *prim_int(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_throw_classified(S, "eval/type", "MTY001", "int: expected a number");
 }
 
+/* Helper for narrow integer casts: extract an integer value from any
+ * numeric type, checking for NaN/infinity on floats and bigdecs. The
+ * caller then range-checks the result against the target tier. */
+static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
+                                    long long *out, const char **err)
+{
+    (void)S;
+    if (v == NULL) { *err = "expected a number"; return 0; }
+    if (v->type == MINO_INT) { *out = v->as.i; return 1; }
+    if (v->type == MINO_FLOAT) {
+        double d = v->as.f;
+        if (d != d) { *err = "NaN cannot be coerced to integer"; return 0; }
+        if (d > 9.2233720368547748e18 || d < -9.2233720368547758e18) {
+            *err = "value out of long range"; return 0;
+        }
+        *out = (long long)d;
+        return 1;
+    }
+    if (v->type == MINO_BIGINT) {
+        if (mino_as_ll(v, out)) return 1;
+        *err = "bigint value out of long range"; return 0;
+    }
+    if (v->type == MINO_RATIO) {
+        double d = mino_ratio_to_double(v);
+        if (d > 9.2233720368547748e18 || d < -9.2233720368547758e18) {
+            *err = "ratio value out of long range"; return 0;
+        }
+        *out = (long long)d;
+        return 1;
+    }
+    if (v->type == MINO_BIGDEC) {
+        double d = mino_bigdec_to_double(v);
+        if (d != d) { *err = "NaN cannot be coerced to integer"; return 0; }
+        if (d > 9.2233720368547748e18 || d < -9.2233720368547758e18) {
+            *err = "bigdec value out of long range"; return 0;
+        }
+        *out = (long long)d;
+        return 1;
+    }
+    *err = "expected a number";
+    return 0;
+}
+
+mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    long long ll;
+    const char *err = NULL;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "short requires one argument");
+    }
+    v = args->as.cons.car;
+    if (!extract_integer_for_cast(S, v, &ll, &err)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "short: %s", err ? err : "expected a number");
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    if (ll < -32768 || ll > 32767) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "short: value out of short range");
+    }
+    return mino_int(S, ll);
+}
+
+mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    long long ll;
+    const char *err = NULL;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "byte requires one argument");
+    }
+    v = args->as.cons.car;
+    if (!extract_integer_for_cast(S, v, &ll, &err)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "byte: %s", err ? err : "expected a number");
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    if (ll < -128 || ll > 127) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+                                     "byte: value out of byte range");
+    }
+    return mino_int(S, ll);
+}
+
 mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -1958,6 +2047,14 @@ const mino_prim_def k_prims_numeric[] = {
      "Returns true if x is positive or negative infinity."},
     {"int",   prim_int,
      "Coerces x to an integer."},
+    {"short", prim_short,
+     "Coerces x to a short (16-bit integer). Throws on out-of-range "
+     "values, NaN, or infinity. Returns the value as a long since mino "
+     "has only one integer tier."},
+    {"byte",  prim_byte,
+     "Coerces x to a byte (8-bit integer). Throws on out-of-range "
+     "values, NaN, or infinity. Returns the value as a long since mino "
+     "has only one integer tier."},
     {"float", prim_float,
      "Coerces x to a float."},
     {"parse-long",   prim_parse_long,

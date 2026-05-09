@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.100.22
+
+### Numeric tower: Add `(short x)` and `(byte x)` with range checks
+
+`clojure.core-test.num` exercises `(short 1)` and `(byte 1)` in its
+`:default` arm to verify that `num` is a no-op on every fixed-width
+integer cast. mino had `int` and the `long` alias but no `short` or
+`byte`, so the test errored on the first `(short 1)` call and skipped
+the rest of the body.
+
+Add `prim_short` and `prim_byte` to `src/prim/numeric.c`, sharing a
+new `extract_integer_for_cast` helper that handles MINO_INT,
+MINO_FLOAT, MINO_BIGINT, MINO_RATIO, and MINO_BIGDEC, with NaN /
+infinity / out-of-long-range checks. The new primitives then range
+check the extracted value against int8 (`[-128, 127]`) or int16
+(`[-32768, 32767]`) and throw on overflow. The result is returned as
+a MINO_INT since mino has no narrow-int tier — only the *contract*
+narrows.
+
+Also relax `num` in `src/core.clj` to pass nil through (returning
+`nil`) instead of throwing. Cross-dialect callers using the
+`:default` arm of `clojure.core-test.num` assert `(= nil (num nil))`,
+matching CLJS / non-JVM no-op semantics. Non-numeric, non-nil inputs
+still throw.
+
+Internal suite 1476 / 7071 / 0. External suite: `num.cljc` 7 → 13
+assertions, errors 1 → 0 — file now passes.
+
 ## v0.100.21
 
 ### Bridge: Expose `clojure.lang.MapEntry/create` as a 2-vector ctor
