@@ -394,9 +394,32 @@ mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * against the latest committed value so concurrent commutes against
  * the same ref do not conflict.
  */
-static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env)
+/* Run a ref's validator (if any) against the proposed new value via
+ * mino_pcall so a thrown validator does not longjmp out while we still
+ * hold the commit lock. Returns 1 on success, 0 on validator throw,
+ * -1 on validator returning falsy (which is also a rejection but
+ * surfaces a different error). */
+static int run_ref_validator(mino_state_t *S, mino_val_t *ref,
+                              mino_val_t *new_val, mino_env_t *env)
+{
+    mino_val_t *vfn = ref->as.tx_ref.validator;
+    mino_val_t *vargs;
+    mino_val_t *result = NULL;
+    int         pc;
+    if (vfn == NULL) return 1;
+    vargs = mino_cons(S, new_val, mino_nil(S));
+    pc = mino_pcall(S, vfn, vargs, env, &result);
+    if (pc != 0) return 0;
+    if (result == NULL) return 0;
+    if (!mino_is_truthy(result)) return -1;
+    return 1;
+}
+
+static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
+                     int *out_validator_rejected)
 {
     tx_ref_state_t *rs;
+    if (out_validator_rejected != NULL) *out_validator_rejected = 0;
     stm_lock(S);
     /* Validate read set: every ref that the tx read must still be at
      * its snapshot version. */
@@ -407,9 +430,11 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env)
             return 0;
         }
     }
-    /* Apply every write. */
+    /* Compute new values + run validators + apply writes. */
     for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
         mino_val_t *new_val = NULL;
+        rs->committed_old = NULL;
+        rs->committed_new = NULL;
         if (rs->kind == TX_STATE_ALTER && rs->tentative != NULL) {
             new_val = rs->tentative;
         } else if (rs->kind == TX_STATE_COMMUTE_LOG
@@ -422,14 +447,57 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env)
             }
         }
         if (new_val != NULL) {
-            mino_val_t *old = rs->ref->as.tx_ref.val;
-            gc_write_barrier(S, rs->ref, old, new_val);
+            int vc = run_ref_validator(S, rs->ref, new_val, env);
+            if (vc != 1) {
+                stm_unlock(S);
+                if (out_validator_rejected != NULL && vc == -1) {
+                    *out_validator_rejected = 1;
+                }
+                return 0;
+            }
+            rs->committed_old = rs->ref->as.tx_ref.val;
+            rs->committed_new = new_val;
+            gc_write_barrier(S, rs->ref, rs->committed_old, new_val);
             rs->ref->as.tx_ref.val = new_val;
             rs->ref->as.tx_ref.version++;
         }
     }
     stm_unlock(S);
     return 1;
+}
+
+/* Walk the per-ref state list and dispatch watch callbacks for every
+ * ref that committed a write. Runs OUTSIDE the commit lock with
+ * ctx->current_tx already cleared so a watch fn that itself calls
+ * dosync allocates fresh transaction state. A watch that throws
+ * propagates out of the commit; later watches do not fire. */
+static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
+                             mino_env_t *env)
+{
+    tx_ref_state_t *rs;
+    for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
+        mino_val_t *watches;
+        size_t      i, n;
+        if (rs->committed_new == NULL) continue;
+        watches = rs->ref->as.tx_ref.watches;
+        if (watches == NULL || watches->type != MINO_MAP
+            || watches->as.map.len == 0) {
+            continue;
+        }
+        n = watches->as.map.len;
+        for (i = 0; i < n; i++) {
+            mino_val_t *key = vec_nth(watches->as.map.key_order, i);
+            mino_val_t *fn  = map_get_val(watches, key);
+            mino_val_t *wargs;
+            if (fn == NULL) continue;
+            wargs = mino_cons(S, key,
+                      mino_cons(S, rs->ref,
+                        mino_cons(S, rs->committed_old,
+                          mino_cons(S, rs->committed_new, mino_nil(S)))));
+            if (mino_call(S, fn, wargs, env) == NULL) return -1;
+        }
+    }
+    return 0;
 }
 
 /* --- dosync entry point --------------------------------------------------- *
@@ -449,6 +517,7 @@ static mino_val_t *dosync_run(mino_state_t *S, mino_val_t *thunk,
 {
     for (;;) {
         mino_val_t *r;
+        int         validator_rejected = 0;
         tx->refs_head    = NULL;
         tx->retry_signal = 0;
 
@@ -462,8 +531,14 @@ static mino_val_t *dosync_run(mino_state_t *S, mino_val_t *thunk,
         if (r == NULL) {
             return NULL;
         }
-        if (tx_commit(S, tx, env)) {
+        if (tx_commit(S, tx, env, &validator_rejected)) {
             return r;
+        }
+        if (validator_rejected) {
+            tx_clear_ref_states(tx);
+            prim_throw_classified(S, "eval/contract", "MCT001",
+                "Invalid reference state");
+            return NULL; /* unreachable */
         }
         /* Conflict: free per-ref state and retry. */
         tx_clear_ref_states(tx);
@@ -556,8 +631,17 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
 
     {
         mino_thread_ctx_t *c = ctx_v;
-        tx_clear_ref_states(&tx);
+        /* Clear current_tx BEFORE watch dispatch so a watch fn that
+         * itself calls dosync allocates fresh transaction state. The
+         * try frame is still active so a thrown watch still cleans up
+         * via the catch arm (refs_head freed there). */
         c->current_tx = NULL;
+        if (result_v != NULL) {
+            (void)dispatch_watches(S, &tx, env);
+            /* If a watch threw, the longjmp landed at our setjmp and
+             * cleanup ran there; this branch only sees clean returns. */
+        }
+        tx_clear_ref_states(&tx);
         c->try_depth  = saved_try;
     }
     return result_v;

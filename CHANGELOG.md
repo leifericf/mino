@@ -115,6 +115,29 @@ after-`commute` does the same but skips the fn application.
 than appending to a log -- the alter has already pinned a value
 that the next commute should refine, not commute against.
 
+#### Watches and validators on refs
+
+Extend `add-watch`, `remove-watch`, `set-validator!`, and
+`get-validator` to accept `MINO_TX_REF` in addition to
+`MINO_ATOM`. The implementations share a small `watchable_get`
+accessor that dispatches between the atom and ref watch /
+validator slots so each primitive's body stays single-pass.
+
+The transaction commit phase now captures `committed_old` and
+`committed_new` per write and dispatches watch callbacks
+`(key ref old new)` after the commit lock is released.
+`ctx->current_tx` is cleared before dispatch so a watch that
+itself enters `dosync` allocates fresh transaction state. A
+watch that throws propagates out of the commit; later watches
+do not fire (matches atom semantics).
+
+Validators run inside the commit phase via `mino_pcall` against
+the proposed new value -- a thrown validator does not longjmp
+out while the lock is held; a falsy return raises `eval/contract`
+MCT001 ("Invalid reference state") after the lock is released.
+Both retry and validator-rejection paths free the per-ref state
+nodes before throwing.
+
 Internal suite 1476 / 7091 / 0.
 
 ## v0.100.34

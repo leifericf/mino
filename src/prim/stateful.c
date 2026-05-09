@@ -343,9 +343,31 @@ mino_val_t *prim_atom_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 }
 
 /* (add-watch atom key fn) -- register a watch callback. */
+/* Accessor helpers so the watch / validator primitives can target
+ * either MINO_ATOM or MINO_TX_REF without duplicating per-field
+ * dispatch through every code path. Returns 0 for invalid input. */
+static int watchable_get(mino_val_t *v, mino_val_t ***out_watches,
+                          mino_val_t ***out_validator)
+{
+    if (v == NULL) return 0;
+    if (v->type == MINO_ATOM) {
+        *out_watches   = &v->as.atom.watches;
+        *out_validator = &v->as.atom.validator;
+        return 1;
+    }
+    if (v->type == MINO_TX_REF) {
+        *out_watches   = &v->as.tx_ref.watches;
+        *out_validator = &v->as.tx_ref.validator;
+        return 1;
+    }
+    return 0;
+}
+
 mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t       *a, *key, *fn, *watches, *new_map;
+    mino_val_t      **watches_slot;
+    mino_val_t      **validator_slot;
     mino_hamt_node_t *root;
     mino_val_t       *order;
     size_t            len;
@@ -356,15 +378,15 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "add-watch requires three arguments: atom key fn");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "add-watch requires three arguments: reference key fn");
     }
     a   = args->as.cons.car;
     key = args->as.cons.cdr->as.cons.car;
     fn  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "add-watch: first argument must be an atom");
+    if (!watchable_get(a, &watches_slot, &validator_slot)) {
+        return prim_throw_classified(S, "eval/type", "MTY001", "add-watch: first argument must be an atom or ref");
     }
-    watches = a->as.atom.watches;
+    watches = *watches_slot;
     if (watches == NULL || watches->type != MINO_MAP) {
         root  = NULL;
         order = mino_vector(S, NULL, 0);
@@ -385,28 +407,30 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     new_map->as.map.root      = root;
     new_map->as.map.key_order = order;
     new_map->as.map.len       = len;
-    gc_write_barrier(S, a, a->as.atom.watches, new_map);
-    a->as.atom.watches = new_map;
+    gc_write_barrier(S, a, *watches_slot, new_map);
+    *watches_slot = new_map;
     return a;
 }
 
-/* (remove-watch atom key) -- unregister a watch callback. */
+/* (remove-watch ref key) -- unregister a watch callback. */
 mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
                               mino_env_t *env)
 {
-    mino_val_t       *a, *key, *watches;
-    uint32_t          h;
+    mino_val_t  *a, *key, *watches;
+    mino_val_t **watches_slot;
+    mino_val_t **validator_slot;
+    uint32_t     h;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "remove-watch requires two arguments: atom key");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "remove-watch requires two arguments: reference key");
     }
     a   = args->as.cons.car;
     key = args->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "remove-watch: first argument must be an atom");
+    if (!watchable_get(a, &watches_slot, &validator_slot)) {
+        return prim_throw_classified(S, "eval/type", "MTY001", "remove-watch: first argument must be an atom or ref");
     }
-    watches = a->as.atom.watches;
+    watches = *watches_slot;
     if (watches == NULL || watches->type != MINO_MAP) return a;
     h = hash_val(key);
     if (hamt_get(watches->as.map.root, key, h, 0u) != NULL) {
@@ -430,37 +454,40 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
         new_map->as.map.root      = root;
         new_map->as.map.key_order = order;
         new_map->as.map.len       = new_len;
-        gc_write_barrier(S, a, a->as.atom.watches, new_map);
-        a->as.atom.watches = new_map;
+        gc_write_barrier(S, a, *watches_slot, new_map);
+        *watches_slot = new_map;
     }
     return a;
 }
 
-/* (set-validator! atom fn) -- set or remove a validator on an atom. */
+/* (set-validator! ref fn) -- set or remove a validator on an atom or ref. */
 mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
                                mino_env_t *env)
 {
-    mino_val_t *a, *fn;
+    mino_val_t  *a, *fn, *cur;
+    mino_val_t **watches_slot;
+    mino_val_t **validator_slot;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "set-validator! requires two arguments: atom fn");
+        return prim_throw_classified(S, "eval/arity", "MAR001", "set-validator! requires two arguments: reference fn");
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "set-validator!: first argument must be an atom");
+    if (!watchable_get(a, &watches_slot, &validator_slot)) {
+        return prim_throw_classified(S, "eval/type", "MTY001", "set-validator!: first argument must be an atom or ref");
     }
     /* nil removes the validator. */
     if (fn == NULL || fn->type == MINO_NIL) {
-        gc_write_barrier(S, a, a->as.atom.validator, NULL);
-        a->as.atom.validator = NULL;
+        gc_write_barrier(S, a, *validator_slot, NULL);
+        *validator_slot = NULL;
         return mino_nil(S);
     }
     /* Validate current value with the new validator before installing.
      * Cannot use atom_validate here because prim_throw_error longjmps
      * and would skip the revert of the validator field. */
+    cur = (a->type == MINO_ATOM) ? a->as.atom.val : a->as.tx_ref.val;
     {
-        mino_val_t *vargs  = mino_cons(S, a->as.atom.val, mino_nil(S));
+        mino_val_t *vargs  = mino_cons(S, cur, mino_nil(S));
         mino_val_t *result = mino_call(S, fn, vargs, env);
         if (result == NULL) return NULL;  /* validator threw */
         if (result->type == MINO_BOOL && result->as.b == 0) {
@@ -468,25 +495,27 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
             return NULL;
         }
     }
-    gc_write_barrier(S, a, a->as.atom.validator, fn);
-    a->as.atom.validator = fn;
+    gc_write_barrier(S, a, *validator_slot, fn);
+    *validator_slot = fn;
     return mino_nil(S);
 }
 
-/* (get-validator atom) -- return the current validator fn or nil. */
+/* (get-validator ref) -- return the current validator fn or nil. */
 mino_val_t *prim_get_validator(mino_state_t *S, mino_val_t *args,
                                mino_env_t *env)
 {
-    mino_val_t *a;
+    mino_val_t  *a;
+    mino_val_t **watches_slot;
+    mino_val_t **validator_slot;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "get-validator requires one argument");
     }
     a = args->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "get-validator: argument must be an atom");
+    if (!watchable_get(a, &watches_slot, &validator_slot)) {
+        return prim_throw_classified(S, "eval/type", "MTY001", "get-validator: argument must be an atom or ref");
     }
-    return a->as.atom.validator != NULL ? a->as.atom.validator : mino_nil(S);
+    return *validator_slot != NULL ? *validator_slot : mino_nil(S);
 }
 
 /* (reset-vals! atom val) -- like reset! but returns [old new]. */

@@ -312,6 +312,8 @@ static void gc_mark_ctx_tx(mino_state_t *S, mino_thread_ctx_t *ctx)
         gc_mark_interior(S, rs->ref);
         gc_mark_interior(S, rs->tentative);
         gc_mark_interior(S, rs->commute_log);
+        gc_mark_interior(S, rs->committed_old);
+        gc_mark_interior(S, rs->committed_new);
     }
 }
 

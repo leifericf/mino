@@ -202,6 +202,12 @@ typedef struct tx_ref_state {
     tx_ref_state_kind_t  kind;
     mino_val_t          *tentative;        /* in-tx value; NULL if no write */
     mino_val_t          *commute_log;      /* MINO_CONS of (fn args...); or NULL */
+    /* Populated by tx_commit when a write is applied: the ref's value
+     * before the commit (for watch dispatch's `old` arg) and the new
+     * committed value (`new` arg). Both NULL if no write happened on
+     * this ref. */
+    mino_val_t          *committed_old;
+    mino_val_t          *committed_new;
     struct tx_ref_state *next;
 } tx_ref_state_t;
 
