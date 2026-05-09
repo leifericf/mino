@@ -745,22 +745,29 @@ mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *ref,
  * the same ref do not conflict.
  */
 /* Run a ref's validator (if any) against the proposed new value via
- * mino_pcall so a thrown validator does not longjmp out while we still
- * hold the commit lock. Returns 1 on success, 0 on validator throw,
- * -1 on validator returning falsy (which is also a rejection but
- * surfaces a different error). */
+ * mino_pcall so a thrown validator does not longjmp out while we
+ * still hold the commit lock. Returns:
+ *   1  -- validator returned truthy
+ *   0  -- validator threw; *out_ex set to the thrown value
+ *  -1  -- validator returned falsy (no throw); *out_ex unchanged.
+ * vfn==NULL is treated as "no validator" and returns 1. */
 static int run_ref_validator(mino_state_t *S, mino_val_t *ref,
-                              mino_val_t *new_val, mino_env_t *env)
+                              mino_val_t *new_val, mino_env_t *env,
+                              mino_val_t **out_ex)
 {
     mino_val_t *vfn = ref->as.tx_ref.validator;
     mino_val_t *vargs;
     mino_val_t *result = NULL;
+    mino_val_t *thrown = NULL;
     int         pc;
     if (vfn == NULL) return 1;
     vargs = mino_cons(S, new_val, mino_nil(S));
-    pc = mino_pcall(S, vfn, vargs, env, &result);
-    if (pc != 0) return 0;
-    if (result == NULL) return 0;
+    pc = mino_pcall(S, vfn, vargs, env, &result, &thrown);
+    if (pc != 0) {
+        if (out_ex != NULL) *out_ex = thrown;
+        return 0;
+    }
+    if (result == NULL) return 0;  /* defensive; shouldn't happen */
     if (!mino_is_truthy(result)) return -1;
     return 1;
 }
@@ -770,6 +777,7 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
 {
     tx_ref_state_t *rs;
     if (out_validator_rejected != NULL) *out_validator_rejected = 0;
+    tx->validator_thrown_ex = NULL;
     stm_lock(S);
     /* Validate read set: every ref that the tx read must still be at
      * its snapshot version. */
@@ -797,12 +805,20 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
             }
         }
         if (new_val != NULL) {
-            int vc = run_ref_validator(S, rs->ref, new_val, env);
+            mino_val_t *vex = NULL;
+            int vc = run_ref_validator(S, rs->ref, new_val, env, &vex);
             if (vc != 1) {
                 stm_unlock(S);
-                if (out_validator_rejected != NULL && vc == -1) {
+                /* Both throws and falsy-rejects are validator
+                 * rejections (hard failures), distinct from read-set
+                 * conflicts that should retry. dosync_run inspects
+                 * tx->validator_thrown_ex to decide whether to
+                 * propagate the user's exception or throw the generic
+                 * "Invalid reference state" message. */
+                if (out_validator_rejected != NULL) {
                     *out_validator_rejected = 1;
                 }
+                tx->validator_thrown_ex = vex;
                 return 0;
             }
             rs->committed_old = rs->ref->as.tx_ref.val;
@@ -912,9 +928,19 @@ static mino_val_t *tx_run_loop(mino_state_t *S,
             return r;
         }
         if (validator_rejected) {
+            mino_val_t *vex = tx->validator_thrown_ex;
             tx_clear_ref_states(tx);
-            prim_throw_classified(S, "eval/contract", "MCT001",
-                "Invalid reference state");
+            tx->validator_thrown_ex = NULL;
+            if (vex != NULL) {
+                /* Validator threw -- propagate the user's original
+                 * exception value. JVM Clojure surfaces a validator
+                 * throw to the dosync caller as that exception, not
+                 * as a generic IllegalStateException. */
+                mino_throw(S, vex);
+            } else {
+                prim_throw_classified(S, "eval/contract", "MCT001",
+                    "Invalid reference state");
+            }
             return NULL; /* unreachable */
         }
         /* Conflict: free per-ref state and retry. */
@@ -948,11 +974,12 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
 
     ctx_v                 = mino_current_ctx(S);
     saved_try             = ctx_v->try_depth;
-    tx.depth              = 1;
-    tx.refs_head          = NULL;
-    tx.retry_count        = 0;
-    tx.try_depth_at_start = saved_try;
-    tx.retry_signal       = 0;
+    tx.depth                = 1;
+    tx.refs_head            = NULL;
+    tx.retry_count          = 0;
+    tx.try_depth_at_start   = saved_try;
+    tx.retry_signal         = 0;
+    tx.validator_thrown_ex  = NULL;
 
     if (ctx_v->try_depth >= MAX_TRY_DEPTH) {
         return prim_throw_classified(S, "eval/state", "MST006",

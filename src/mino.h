@@ -1025,12 +1025,19 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                       mino_env_t *env);
 
 /*
- * Protected call: same as mino_call but returns 0 on success (writing the
- * result to *out) or -1 on error. The error message is available via
- * mino_last_error(). *out is set to NULL on error.
+ * Protected call: same as mino_call but returns 0 on success (writing
+ * the result to *out) or -1 on error. The error message is available
+ * via mino_last_error(). *out is set to NULL on error.
+ *
+ * If out_ex is non-NULL, on error *out_ex is set to the raw thrown
+ * exception value (the cell passed to (throw ...) by the inner code).
+ * This is the original payload, not a diagnostic map -- useful for
+ * captures-and-stores callers like agent dispatch and STM validator
+ * handling that want to surface the user's ex-info / map / etc.
+ * unchanged. *out_ex is set to NULL on success or if out_ex is NULL.
  */
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
-               mino_env_t *env, mino_val_t **out);
+               mino_env_t *env, mino_val_t **out, mino_val_t **out_ex);
 
 /* ------------------------------------------------------------------------- */
 /* Exceptions                                                                */

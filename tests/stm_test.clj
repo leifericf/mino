@@ -155,20 +155,39 @@
 (deftest type-keyword
   (is (= :ref (type (ref 1)))))
 
-(deftest validator-throw-does-not-deadlock-stm-lock
-  ;; Regression: a validator that throws would previously leak the
-  ;; STM commit lock because mino_pcall's catch arm called
-  ;; set_eval_diag, which longjmps to any enclosing try frame --
-  ;; bypassing tx_commit's stm_unlock. The next dosync would then
-  ;; hang on the leaked lock. Fixed by removing the publish-to-
-  ;; last_error step from pcall's catch arm; pcall now just unwinds
-  ;; to the caller without re-throwing. The first tx errors; the
-  ;; second tx must complete instead of hanging.
+(deftest validator-throw-propagates-original-exception
+  ;; A validator that throws aborts the transaction with the
+  ;; validator's original exception value (matching JVM Clojure).
+  ;; Previously mino_pcall's catch arm published a diag via
+  ;; set_eval_diag, which longjmped past tx_commit's stm_unlock and
+  ;; leaked the commit lock; now pcall captures the exception via
+  ;; out_ex and tx_commit threads it through tx_state_t so dosync_run
+  ;; can re-throw the user's payload directly. The retry path is no
+  ;; longer entered for validator throws -- they are hard failures.
   (let [r (ref 1)]
     (set-validator! r (fn [v] (if (zero? v)
-                                 (throw (ex-info "validator-boom" {}))
+                                 (throw (ex-info "validator-boom"
+                                                  {:value v}))
                                  (pos? v))))
-    (is (thrown? (dosync (alter r dec))))
+    ;; First tx: validator throws. Catch the throw and inspect the
+    ;; original ex-info data.
+    (let [caught (try (dosync (alter r dec)) nil
+                      (catch e (ex-data e)))]
+      (is (= {:value 0} caught)))
     (is (= 1 @r))
+    ;; Second tx must complete normally (proves the commit lock
+    ;; was released after the validator throw).
     (dosync (alter r inc))
     (is (= 2 @r))))
+
+(deftest validator-falsy-reject-throws-MCT001
+  ;; Validator that returns falsy (without throwing) still aborts
+  ;; the transaction with the canonical MCT001 "Invalid reference
+  ;; state" message -- distinct from a validator throw which carries
+  ;; its own payload.
+  (let [r (ref 1)]
+    (set-validator! r pos?)
+    (let [caught (try (dosync (ref-set r -1)) nil
+                      (catch e (:mino/code e)))]
+      (is (= "MCT001" caught)))
+    (is (= 1 @r))))

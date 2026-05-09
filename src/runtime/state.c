@@ -743,38 +743,43 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_en
 }
 
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
-               mino_val_t **out)
+               mino_val_t **out, mino_val_t **out_ex)
 {
     int saved_try = mino_current_ctx(S)->try_depth;
     mino_val_t *result;
 
-    if (mino_current_ctx(S)->try_depth >= MAX_TRY_DEPTH) {
-        if (out != NULL) {
-            *out = NULL;
-        }
+    if (out_ex != NULL) *out_ex = NULL;
+
+    if (saved_try >= MAX_TRY_DEPTH) {
+        if (out != NULL) *out = NULL;
         return -1;
     }
 
-    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].exception      = NULL;
-    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ns       = S->current_ns;
-    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_ambient  = S->fn_ambient_ns;
-    mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
-    if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
-        /* Landed here from longjmp -- error was thrown. */
+    mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->current_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->fn_ambient_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->load_stack_len;
+    if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
+        /* Landed here from longjmp -- error was thrown. Restore the
+         * eval bookkeeping that was active at pcall entry, then
+         * surface the raw thrown value via out_ex without touching
+         * last_error / last_diag.
+         *
+         * pcall does NOT publish to last_error on purpose: the eval
+         * loop has read sites that treat mino_last_error as "an error
+         * happened during my call" (see eval_impl's "evaled == NULL
+         * && mino_last_error != NULL" gate), so leaving a stale diag
+         * from a successfully-caught pcall would mislead the next
+         * failing call into thinking its own error had already been
+         * reported. Callers that want a diag published after pcall
+         * returns -1 call set_eval_diag explicitly. */
+        mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
         S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_current_ctx(S)->try_depth = saved_try;
-        /* pcall does NOT publish to last_error / last_diag on a caught
-         * throw. The eval loop has read sites that treat
-         * mino_last_error as "an error happened during my call" (see
-         * eval_impl's "evaled == NULL && mino_last_error != NULL"
-         * gate), so leaving a stale diag from a successfully-caught
-         * pcall would mislead the next failing call into thinking
-         * its own error had already been reported. Callers that
-         * want a diag published after pcall returns -1 call
-         * set_eval_diag explicitly. */
         if (out != NULL) *out = NULL;
+        if (out_ex != NULL) *out_ex = ex;
         return -1;
     }
     mino_current_ctx(S)->try_depth++;
@@ -782,9 +787,7 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
     result = mino_call(S, fn, args, env);
     mino_current_ctx(S)->try_depth = saved_try;
 
-    if (out != NULL) {
-        *out = result;
-    }
+    if (out != NULL) *out = result;
     return result == NULL ? -1 : 0;
 }
 

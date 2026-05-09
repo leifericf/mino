@@ -217,6 +217,11 @@ typedef struct tx_state {
     int                  retry_count;
     int                  try_depth_at_start; /* try-stack snapshot for retry */
     int                  retry_signal;     /* set by retry-trigger; consumed by loop */
+    /* Set by tx_commit to the validator's thrown exception (if any)
+     * so dosync_run can re-throw the original payload instead of a
+     * generic MCT001 message. NULL when the validator returned falsy
+     * without throwing or when no validator ran. */
+    mino_val_t          *validator_thrown_ex;
 } tx_state_t;
 
 /* ------------------------------------------------------------------------- */

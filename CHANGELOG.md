@@ -394,6 +394,56 @@ The agent code's `agent_try_call` workaround (added in E.4) is
 left in place by this commit; the follow-up replaces it with a
 direct `mino_pcall` call now that the catch arm is well-behaved.
 
+### `mino_pcall` exposes the raw thrown value; STM validator throws propagate
+
+Two coupled changes follow on from the catch-arm fix:
+
+`mino_pcall`'s signature gains an `out_ex` parameter:
+
+```c
+int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
+               mino_env_t *env,
+               mino_val_t **out, mino_val_t **out_ex);
+```
+
+When the call throws, `*out_ex` receives the raw thrown value (the
+cell passed to `(throw ...)` -- typically an `ex-info` map or
+similar payload). Callers like agent dispatch and STM validator
+handling that want to surface the user's exception unchanged read
+from `out_ex` directly. **Breaking ABI change: existing pcall
+callers need to add the extra parameter (NULL is fine if the value
+isn't needed).** mino is alpha; no compat shim.
+
+The agent code's `agent_try_call` workaround is removed:
+`src/prim/agent.c` now calls `mino_pcall(...&new_state, &thrown_ex)`
+for actions, validators, and watches, getting the same exception
+capture in 1 line where `agent_try_call` took 30. The custom try
+frame is gone.
+
+`run_ref_validator` in `src/prim/stm.c` likewise uses `out_ex`,
+threading the captured exception through `tx_state_t`'s new
+`validator_thrown_ex` slot. `tx_commit` sets the
+`validator_rejected` flag for both throws and falsy-rejects (both
+are hard failures, distinct from read-set-conflict retries) and
+parks the captured exception on `tx`. `dosync_run` consumes it: if
+`validator_thrown_ex` is set, it propagates the user's original
+payload via `mino_throw`; otherwise it raises the canonical
+`MCT001 "Invalid reference state"`.
+
+Net behavior: a validator that throws now aborts the transaction
+with the validator's own exception (matching JVM Clojure's
+"propagate the validator's exception" semantic), where the
+previous code retried until the cap and then threw `MST004
+"transaction retry limit exceeded"`. A validator that returns
+falsy without throwing still produces `MCT001`.
+
+`tests/stm_test.clj` covers both cases:
+`validator-throw-propagates-original-exception` checks that
+`(ex-data e)` returns the original ex-info data; the new
+`validator-falsy-reject-throws-MCT001` pins the falsy-reject path.
+
+Internal suite 1514 / 7171 / 0.
+
 ### Agents (MVP)
 
 mino now ships agents: `agent`, `agent?`, `send`, `send-off`,

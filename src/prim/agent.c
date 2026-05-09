@@ -5,7 +5,8 @@
  * thread. JVM Clojure dispatches the action on a worker thread pool
  * and returns the agent immediately; mino runs the action eagerly,
  * validates against the agent's validator, captures any throw into
- * the agent's error slot, dispatches watches, and returns the agent.
+ * the agent's error slot via mino_pcall's out_ex parameter, dispatches
+ * watches, and returns the agent.
  *
  * Why sync: mino's eval loop is serialized under a per-state mutex
  * (mino_state_lock_acquire). A future-driven worker would acquire
@@ -35,55 +36,7 @@
 #include "prim/internal.h"
 #include "eval/internal.h"
 
-#include <setjmp.h>
 #include <string.h>
-
-/* Run fn synchronously and capture any thrown exception into *out_ex.
- * Returns 0 on success (with result in *out_result), -1 on throw.
- *
- * mino_pcall does not work for our needs because its catch arm calls
- * set_eval_diag, which itself longjmps to the next-outer try frame
- * when one is present (mino's diagnostic mechanism converts errors
- * to catchable exceptions outside try blocks). The pcall behavior is
- * "intercept then re-throw if any outer try exists"; we want
- * "intercept and swallow without re-throwing" so a thrown action /
- * watch is captured into the agent's err slot. We push our own try
- * frame and skip the diagnostic conversion. */
-static int agent_try_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
-                           mino_env_t *env, mino_val_t **out_result,
-                           mino_val_t **out_ex)
-{
-    int saved_try = mino_current_ctx(S)->try_depth;
-    mino_val_t *result;
-
-    if (saved_try >= MAX_TRY_DEPTH) {
-        if (out_result != NULL) *out_result = NULL;
-        if (out_ex != NULL) *out_ex = NULL;
-        return -1;
-    }
-    mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->current_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->fn_ambient_ns;
-    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->load_stack_len;
-    if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
-        /* Caught a throw. Capture the exception, restore state, and
-         * return -1 WITHOUT calling set_eval_diag (which would
-         * re-throw to any enclosing try). */
-        mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
-        S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
-        S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
-        mino_current_ctx(S)->try_depth = saved_try;
-        if (out_result != NULL) *out_result = NULL;
-        if (out_ex != NULL) *out_ex = ex;
-        return -1;
-    }
-    mino_current_ctx(S)->try_depth++;
-    result = mino_call(S, fn, args, env);
-    mino_current_ctx(S)->try_depth = saved_try;
-    if (out_result != NULL) *out_result = result;
-    if (out_ex != NULL) *out_ex = NULL;
-    return result == NULL ? -1 : 0;
-}
 
 /* --- public-API constructor + predicate ----------------------------------- */
 
@@ -136,7 +89,7 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
     mino_val_t *thrown_ex = NULL;
     int         pc;
 
-    pc = agent_try_call(S, fn, call_args, env, &new_state, &thrown_ex);
+    pc = mino_pcall(S, fn, call_args, env, &new_state, &thrown_ex);
     if (pc != 0 || new_state == NULL) {
         gc_write_barrier(S, agent, agent->as.agent.err, thrown_ex);
         agent->as.agent.err = thrown_ex;
@@ -147,8 +100,8 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
     if (agent->as.agent.validator != NULL) {
         mino_val_t *vargs = mino_cons(S, new_state, mino_nil(S));
         mino_val_t *vresult = NULL;
-        pc = agent_try_call(S, agent->as.agent.validator, vargs, env,
-                              &vresult, &thrown_ex);
+        pc = mino_pcall(S, agent->as.agent.validator, vargs, env,
+                          &vresult, &thrown_ex);
         if (pc != 0 || vresult == NULL || !mino_is_truthy(vresult)) {
             mino_val_t *ex = thrown_ex;
             if (ex == NULL) {
@@ -187,7 +140,7 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
                       mino_cons(S, agent,
                         mino_cons(S, old_state,
                           mino_cons(S, new_state, mino_nil(S)))));
-            pc = agent_try_call(S, wfn, wargs, env, &wresult, &wthrown);
+            pc = mino_pcall(S, wfn, wargs, env, &wresult, &wthrown);
             if (pc != 0 && wthrown != NULL) {
                 /* Capture the watch's thrown payload into agent.err.
                  * Continue dispatching remaining watches: a thrown
