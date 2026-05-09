@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.100.24
+
+### Records: Recognize `Foo.` trailing-dot constructor as factory call
+
+In JVM Clojure, `(Foo. a b c)` is reader sugar for the positional
+constructor of the type `Foo`. mino's defrecord generates a
+positional factory `->Foo`, but had no way to dispatch the
+trailing-dot syntax — `(TestDissocRecord. 1 2 3)` errored on
+"unbound symbol: TestDissocRecord.".
+
+Add a path to `eval_try_host_syntax` (`src/eval/special.c`) that
+detects a head symbol ending in `.`, looks up the stem in the
+lexical → current-ns → ambient-ns chain, and if the stem resolves
+to a `MINO_TYPE` value, rewrites the call to invoke the matching
+`->stem` factory. Restricted to MINO_TYPE stems so this does not
+enable arbitrary-class JVM constructor syntax (which mino has no
+way to honor anyway).
+
+Internal suite 1476 / 7071 / 0. `dissoc.cljc` 13 / 1 error → 22 /
+0, all passing.
+
 ## v0.100.23
 
 ### Numeric tower: Make `(int x)` and `(long x)` throw on out-of-range
