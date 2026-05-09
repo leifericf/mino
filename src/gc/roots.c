@@ -299,6 +299,22 @@ static void gc_mark_ctx_gc_save(mino_state_t *S, mino_thread_ctx_t *ctx)
     }
 }
 
+/* gc_mark_ctx_tx -- mark the per-ref tentative values and commute log
+ * cells held by this thread's active transaction (if any). Without
+ * this, a tentative value not yet committed could be collected
+ * mid-transaction since it has no other reachable owner. */
+static void gc_mark_ctx_tx(mino_state_t *S, mino_thread_ctx_t *ctx)
+{
+    tx_state_t     *tx = ctx->current_tx;
+    tx_ref_state_t *rs;
+    if (tx == NULL) return;
+    for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
+        gc_mark_interior(S, rs->ref);
+        gc_mark_interior(S, rs->tentative);
+        gc_mark_interior(S, rs->commute_log);
+    }
+}
+
 /* Pin lexical environments published as GC roots and the symbol/keyword
  * intern tables that anchor every interned name in the runtime. */
 static void gc_mark_envs_and_interns(mino_state_t *S)
@@ -356,6 +372,10 @@ static void gc_mark_thread_state(mino_state_t *S)
     gc_mark_ctx_gc_save(S, &S->main_ctx);
     for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_gc_save(S, w);
+    }
+    gc_mark_ctx_tx(S, &S->main_ctx);
+    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+        gc_mark_ctx_tx(S, w);
     }
     if (mino_current_ctx(S)->last_diag != NULL) {
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->data);

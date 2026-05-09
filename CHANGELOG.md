@@ -37,6 +37,16 @@ directly without going through the `(ref v)` primitive. The
 returned cell has empty watches/validator slots and a fresh
 monotonic ID drawn from the per-state counter.
 
+#### Transaction state plumbing
+
+Define `tx_state_t` and `tx_ref_state_t` in `runtime/internal.h`.
+Add a `current_tx` pointer on `mino_thread_ctx_t` so an active
+transaction is reachable per-thread; `gc_mark_roots` walks
+`current_tx->refs_head` for both the main ctx and all worker
+ctxs so tentative values, commute log cells, and the refs
+themselves stay reachable mid-transaction. The pointer is NULL
+outside `dosync` and on every freshly-allocated thread context.
+
 Internal suite 1476 / 7091 / 0.
 
 ## v0.100.34

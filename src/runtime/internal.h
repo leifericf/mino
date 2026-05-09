@@ -179,6 +179,41 @@ struct mino_env {
 };
 
 /* ------------------------------------------------------------------------- */
+/* STM transaction state                                                     */
+/*                                                                           */
+/* Per-thread state for a running `dosync` invocation. tx_ref_state_t is the */
+/* node tracking what a transaction has done with a single ref since it     */
+/* opened: snapshot version captured on first read, the kind of pending     */
+/* mutation (alter vs. logged commute), the tentative value or commute log, */
+/* and the next-pointer for the linked list owned by tx_state_t. The list  */
+/* itself is GC-traced via gc_mark_roots so tentative values stay reachable */
+/* during a transaction's lifetime.                                          */
+/* ------------------------------------------------------------------------- */
+
+typedef enum {
+    TX_STATE_ALTER       = 0,
+    TX_STATE_COMMUTE_LOG = 1
+} tx_ref_state_kind_t;
+
+typedef struct tx_ref_state {
+    mino_val_t          *ref;              /* MINO_TX_REF this state tracks */
+    uint64_t             snapshot_version; /* version at first read */
+    int                  read;             /* 1 if this tx read the ref */
+    tx_ref_state_kind_t  kind;
+    mino_val_t          *tentative;        /* in-tx value; NULL if no write */
+    mino_val_t          *commute_log;      /* MINO_CONS of (fn args...); or NULL */
+    struct tx_ref_state *next;
+} tx_ref_state_t;
+
+typedef struct tx_state {
+    int                  depth;            /* outermost dosync = 1 */
+    tx_ref_state_t      *refs_head;        /* per-ref state chain */
+    int                  retry_count;
+    int                  try_depth_at_start; /* try-stack snapshot for retry */
+    int                  retry_signal;     /* set by retry-trigger; consumed by loop */
+} tx_state_t;
+
+/* ------------------------------------------------------------------------- */
 /* Per-thread runtime context                                                */
 /*                                                                           */
 /* Every field that mutates with eval progress lives here, separately from   */
@@ -240,6 +275,13 @@ typedef struct mino_thread_ctx {
      * the waiter can park on the future's cv without holding the
      * state_lock and starving the worker. */
     int             lock_depth;
+
+    /* Active STM transaction on this thread, or NULL outside `dosync`.
+     * Allocated on the C stack at the dosync* entry; nested dosyncs reuse
+     * the outermost frame and only bump the depth counter. The collector
+     * walks ->refs_head from gc_mark_roots so tentative values stay
+     * reachable during a transaction. */
+    struct tx_state        *current_tx;
 
     /* Linked list of live worker ctxs. Walked during gc_mark_roots so
      * values pinned by gc_save / dyn_stack / etc. on a blocked worker
