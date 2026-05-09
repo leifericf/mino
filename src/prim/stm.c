@@ -120,33 +120,89 @@ mino_val_t *prim_ref_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                                   : mino_false(S);
 }
 
+/* Forward declaration -- alter_build_args is defined below the deref
+ * dispatch but used by commute_log_replay above. */
+static mino_val_t *alter_build_args(mino_state_t *S, mino_val_t *cur,
+                                    mino_val_t *extra);
+
+/* --- commute log replay -------------------------------------------------- *
+ *
+ * The commute log is a cons-list of (fn arg1 arg2 ...) tuples stored
+ * in REVERSE CHRONOLOGICAL ORDER (cons-prepended so each commute is
+ * O(1) to record). Replay reverses the list onto a fresh stack and
+ * walks forward, applying each entry to the running accumulator.
+ */
+static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
+                                      mino_val_t *base, mino_env_t *env)
+{
+    mino_val_t *reversed = mino_empty_list(S);
+    mino_val_t *p = log;
+    mino_val_t *cur = base;
+    while (mino_is_cons(p)) {
+        reversed = mino_cons(S, p->as.cons.car, reversed);
+        p = p->as.cons.cdr;
+    }
+    for (p = reversed; mino_is_cons(p); p = p->as.cons.cdr) {
+        mino_val_t *entry = p->as.cons.car;
+        mino_val_t *fn;
+        mino_val_t *extra;
+        mino_val_t *call_args;
+        mino_val_t *result;
+        if (!mino_is_cons(entry)) continue;
+        fn    = entry->as.cons.car;
+        extra = entry->as.cons.cdr;
+        call_args = alter_build_args(S, cur, extra);
+        result = mino_call(S, fn, call_args, env);
+        if (result == NULL) return NULL;
+        cur = result;
+    }
+    return cur;
+}
+
+/* Compute the in-transaction value of a ref WITHOUT marking the read.
+ * Used by deref / alter / ref-set (which then mark the read) and by
+ * commute (which deliberately does not). */
+static mino_val_t *tx_effective_value(mino_state_t *S, tx_ref_state_t *rs,
+                                      mino_env_t *env)
+{
+    if (rs->kind == TX_STATE_ALTER && rs->tentative != NULL) {
+        return rs->tentative;
+    }
+    if (rs->kind == TX_STATE_COMMUTE_LOG && rs->commute_log != NULL) {
+        return commute_log_replay(S, rs->commute_log,
+                                   rs->ref->as.tx_ref.val, env);
+    }
+    return rs->ref->as.tx_ref.val;
+}
+
 /* --- deref dispatch for refs --------------------------------------------- *
  *
  * The main `deref` primitive lives in prim/stateful.c; refs hook in
  * via mino_ref_deref which prim_deref calls when it sees MINO_TX_REF.
  *
- * Inside a transaction: if a tentative value is set, return it; else
- * record the read (snapshot version captured) and return the committed
- * value. Outside a transaction: return the committed value.
+ * Inside a transaction: return the in-tx effective value (tentative
+ * for alter, log-replayed for commute, committed otherwise) and
+ * record a read for read-set validation. Outside a transaction:
+ * return the committed value.
  */
 mino_val_t *mino_ref_deref(mino_state_t *S, mino_val_t *ref)
 {
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     tx_state_t        *tx  = ctx->current_tx;
     tx_ref_state_t    *rs;
+    mino_val_t        *val;
     if (tx == NULL) {
         return ref->as.tx_ref.val;
     }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
-    if (rs->tentative != NULL) {
-        return rs->tentative;
-    }
+    val = tx_effective_value(S, rs, NULL);
+    if (val == NULL) return NULL;
     if (!rs->read) {
         rs->read             = 1;
         rs->snapshot_version = ref->as.tx_ref.version;
     }
-    return ref->as.tx_ref.val;
+    return val;
 }
 
 /* --- ref-set + alter ----------------------------------------------------- */
@@ -179,6 +235,8 @@ mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         rs->read             = 1;
         rs->snapshot_version = ref->as.tx_ref.version;
     }
+    /* ref-set after a logged commute drops the log: the explicit
+     * value supersedes anything the commute would have computed. */
     rs->kind        = TX_STATE_ALTER;
     rs->tentative   = val;
     rs->commute_log = NULL;
@@ -225,13 +283,11 @@ mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
-    /* Read the current in-tx value, recording the read for read-set
-     * validation. */
-    if (rs->tentative != NULL) {
-        cur = rs->tentative;
-    } else {
-        cur = ref->as.tx_ref.val;
-    }
+    /* alter-after-commute fold: if a commute log is pending, replay
+     * it now to materialize the in-tx value, then apply alter on
+     * top. The fold drops the log -- alter has pinned the value. */
+    cur = tx_effective_value(S, rs, env);
+    if (cur == NULL) return NULL;
     if (!rs->read) {
         rs->read             = 1;
         rs->snapshot_version = ref->as.tx_ref.version;
@@ -245,17 +301,102 @@ mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return result;
 }
 
+/* --- commute + ensure ---------------------------------------------------- */
+
+mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t        *ref, *fn, *cur, *call_args, *result, *extra, *entry;
+    tx_ref_state_t    *rs;
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "commute requires at least two arguments: ref and function");
+    }
+    ref   = args->as.cons.car;
+    fn    = args->as.cons.cdr->as.cons.car;
+    extra = args->as.cons.cdr->as.cons.cdr;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "commute: first argument must be a ref");
+    }
+    if (ctx->current_tx == NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "No transaction running");
+    }
+    rs = tx_get_or_create_ref_state(S, ref);
+    if (rs == NULL) return NULL;
+    cur = tx_effective_value(S, rs, env);
+    if (cur == NULL) return NULL;
+    /* commute does NOT mark rs->read -- two transactions commuting on
+     * the same ref shouldn't conflict. */
+    call_args = alter_build_args(S, cur, extra);
+    result = mino_call(S, fn, call_args, env);
+    if (result == NULL) return NULL;
+    if (rs->kind == TX_STATE_ALTER && (rs->tentative != NULL || rs->read)) {
+        /* alter-then-commute: alter has already pinned a value (or at
+         * least committed to read-set validation). Fold the commute
+         * into the alter -- it's just another arbitrary recompute. */
+        rs->tentative = result;
+    } else {
+        /* Fresh commute or commute-then-commute: prepend
+         * (fn arg1 arg2 ...) to the log and switch to COMMUTE_LOG. */
+        entry           = mino_cons(S, fn, extra);
+        rs->commute_log = mino_cons(S, entry, rs->commute_log != NULL
+                                              ? rs->commute_log
+                                              : mino_empty_list(S));
+        rs->kind        = TX_STATE_COMMUTE_LOG;
+        rs->tentative   = NULL;
+    }
+    return result;
+}
+
+mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t        *ref, *val;
+    tx_ref_state_t    *rs;
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "ensure requires one argument");
+    }
+    ref = args->as.cons.car;
+    if (ref == NULL || ref->type != MINO_TX_REF) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "ensure: argument must be a ref");
+    }
+    if (ctx->current_tx == NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "No transaction running");
+    }
+    rs = tx_get_or_create_ref_state(S, ref);
+    if (rs == NULL) return NULL;
+    val = tx_effective_value(S, rs, env);
+    if (val == NULL) return NULL;
+    /* In our single-version optimistic model, ensure is structurally
+     * the same as a deref -- it captures the snapshot version so any
+     * other tx that mutates the ref will fail this tx's read-set
+     * validation. The Clojure semantic of "block any other write" is
+     * automatically enforced via the version-bump-on-commit rule. */
+    if (!rs->read) {
+        rs->read             = 1;
+        rs->snapshot_version = ref->as.tx_ref.version;
+    }
+    return val;
+}
+
 /* --- commit phase --------------------------------------------------------- *
  *
  * Validate the read set against current ref versions; if any
  * mismatched, return 0 to signal retry. Otherwise apply every
  * recorded write under the global commit lock with a write barrier
- * + version bump and return 1 (committed).
+ * + version bump and return 1 (committed). Commute logs replay
+ * against the latest committed value so concurrent commutes against
+ * the same ref do not conflict.
  */
-static int tx_commit(mino_state_t *S, tx_state_t *tx)
+static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env)
 {
     tx_ref_state_t *rs;
-    /* Acquire commit lock for the validation + write window. */
     stm_lock(S);
     /* Validate read set: every ref that the tx read must still be at
      * its snapshot version. */
@@ -268,13 +409,24 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx)
     }
     /* Apply every write. */
     for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
+        mino_val_t *new_val = NULL;
         if (rs->kind == TX_STATE_ALTER && rs->tentative != NULL) {
+            new_val = rs->tentative;
+        } else if (rs->kind == TX_STATE_COMMUTE_LOG
+                   && rs->commute_log != NULL) {
+            new_val = commute_log_replay(S, rs->commute_log,
+                                          rs->ref->as.tx_ref.val, env);
+            if (new_val == NULL) {
+                stm_unlock(S);
+                return 0;
+            }
+        }
+        if (new_val != NULL) {
             mino_val_t *old = rs->ref->as.tx_ref.val;
-            gc_write_barrier(S, rs->ref, old, rs->tentative);
-            rs->ref->as.tx_ref.val = rs->tentative;
+            gc_write_barrier(S, rs->ref, old, new_val);
+            rs->ref->as.tx_ref.val = new_val;
             rs->ref->as.tx_ref.version++;
         }
-        /* TX_STATE_COMMUTE_LOG handled in the next step. */
     }
     stm_unlock(S);
     return 1;
@@ -310,7 +462,7 @@ static mino_val_t *dosync_run(mino_state_t *S, mino_val_t *thunk,
         if (r == NULL) {
             return NULL;
         }
-        if (tx_commit(S, tx)) {
+        if (tx_commit(S, tx, env)) {
             return r;
         }
         /* Conflict: free per-ref state and retry. */
@@ -424,6 +576,16 @@ const mino_prim_def k_prims_stm[] = {
     {"alter",     prim_alter,
      "Sets ref to (apply f current-value args). Must be in dosync. "
      "Returns the new value."},
+    {"commute",   prim_commute,
+     "Sets ref to (apply f current-value args). Like alter but does "
+     "not participate in read-set validation -- two transactions "
+     "commuting on the same ref do not conflict. The fn is replayed "
+     "against the latest committed value at commit time. Must be in "
+     "dosync."},
+    {"ensure",    prim_ensure,
+     "Reads ref and prevents any other transaction from changing it "
+     "before this transaction commits. Must be in dosync. Returns "
+     "the current in-tx value."},
     {"dosync*",   prim_dosync_star,
      "Runs a zero-arg thunk inside an STM transaction. The `dosync` "
      "macro expands to (dosync* (fn [] body...))."},

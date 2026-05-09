@@ -90,6 +90,31 @@ per-ref state nodes before re-throwing -- otherwise a longjmp
 past the now-unwound stack frame would leave a dangling
 `current_tx` pointer.
 
+#### `commute` and `ensure`
+
+`commute` records `(fn arg1 arg2 ...)` in a per-ref log instead of
+materializing a tentative value; the log is replayed against the
+latest committed value at commit time. `commute` does NOT mark the
+ref as read in the read-set, so two transactions commuting on the
+same ref do not conflict (matches Clojure JVM semantics). The fn
+is invoked once eagerly inside the body so its return value is
+visible to subsequent in-tx code, but that result is informational
+-- the authoritative value is recomputed at commit.
+
+`ensure` reads a ref and pins the snapshot version so any other
+transaction that mutates the same ref will fail this transaction's
+read-set validation. In our single-version optimistic model that
+is structurally identical to a `deref`-with-read-recording.
+
+`alter`-after-`commute` on the same ref folds the log: the
+effective in-tx value is computed by replaying the log against
+the committed value, the alter fn is applied to that, the
+resulting value is pinned, and the log is dropped. `ref-set`-
+after-`commute` does the same but skips the fn application.
+`commute`-after-`alter` degrades to a fold-into-alter rather
+than appending to a log -- the alter has already pinned a value
+that the next commute should refine, not commute against.
+
 Internal suite 1476 / 7091 / 0.
 
 ## v0.100.34
