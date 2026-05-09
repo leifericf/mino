@@ -30,6 +30,13 @@ clone non-transferable list, identity equality, and `prim_type`
 `stm_next_ref_id` fields on `mino_state_t`; the lock itself is
 lazy-initialized only on the first call to `mino_install_stm`.
 
+#### Embedder constructor
+
+Add `mino_tx_ref(S, val)` for hosts that want to publish refs
+directly without going through the `(ref v)` primitive. The
+returned cell has empty watches/validator slots and a fresh
+monotonic ID drawn from the per-state counter.
+
 Internal suite 1476 / 7091 / 0.
 
 ## v0.100.34

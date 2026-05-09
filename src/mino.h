@@ -510,6 +510,12 @@ void        mino_atom_reset(mino_val_t *a, mino_val_t *val);
  * type-check), and by `clojure.lang.MapEntry/create`. */
 mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v);
 
+/* Construct an STM ref holding the given committed value. The watches
+ * map and validator slots start NULL; install them via add-watch /
+ * set-validator! on the returned cell. The ref's identity (returned
+ * monotonic ID) is unique within S. */
+mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val);
+
 /* Create a host-style array of the given length, fill-initialized
  * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
  * the primitive variants fill with their type's zero value (0 for

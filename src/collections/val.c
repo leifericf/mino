@@ -247,6 +247,20 @@ mino_val_t *mino_map_entry(mino_state_t *S, mino_val_t *k, mino_val_t *v)
     return e;
 }
 
+/* Construct an STM ref holding the given committed value. The watches
+ * map and validator slots start empty; install them via add-watch /
+ * set-validator! on the returned cell. */
+mino_val_t *mino_tx_ref(mino_state_t *S, mino_val_t *val)
+{
+    mino_val_t *v = alloc_val(S, MINO_TX_REF);
+    v->as.tx_ref.val       = val;
+    v->as.tx_ref.watches   = NULL;
+    v->as.tx_ref.validator = NULL;
+    v->as.tx_ref.version   = 0;
+    v->as.tx_ref.ref_id    = ++S->stm_next_ref_id;
+    return v;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Host arrays                                                               */
 /* ------------------------------------------------------------------------- */
