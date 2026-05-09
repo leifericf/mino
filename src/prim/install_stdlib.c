@@ -177,6 +177,7 @@ void mino_install_all(mino_state_t *S, mino_env_t *env)
     mino_install_io(S, env);
     mino_install_fs(S, env);
     mino_install_proc(S, env);
+    mino_install_stm(S, env);
     mino_install_clojure_string(S, env);
     mino_install_clojure_set(S, env);
     mino_install_clojure_walk(S, env);

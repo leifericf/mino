@@ -23,6 +23,7 @@
 (require "tests/macro_test")
 (require "tests/error_test")
 (require "tests/atom_test")
+(require "tests/stm_test")
 (require "tests/predicate_test")
 (require "tests/io_test")
 (require "tests/reflection_test")

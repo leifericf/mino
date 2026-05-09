@@ -156,7 +156,21 @@ so the values are not configurable.
 `ensure` outside `dosync` was already wired in commits #5 and
 #6 -- this entry records the rest of the surface.)
 
-Internal suite 1476 / 7091 / 0.
+#### `mino_install_stm` wired into `mino_install_all`
+
+The standalone `./mino` binary now installs the STM primitives
+out of the box. Embedders calling `mino_new` (which only
+installs core + io) still opt in explicitly via
+`mino_install_stm(S, env)`.
+
+Add `tests/stm_test.clj` with single-threaded coverage of every
+primitive: ref / ref?, ref-set, alter (with multi-arg), commute,
+ensure, in-transaction?, watches (add / remove / commit
+dispatch), validators (accept / reject), nested dosync,
+deref-in-tx-sees-tentative, commute-then-alter fold, history
+stubs, and the io! / io!-check contract.
+
+Internal suite 1495 / 7124 / 0.
 
 ## v0.100.34
 
