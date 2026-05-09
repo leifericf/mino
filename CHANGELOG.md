@@ -170,7 +170,23 @@ dispatch), validators (accept / reject), nested dosync,
 deref-in-tx-sees-tentative, commute-then-alter fold, history
 stubs, and the io! / io!-check contract.
 
-Internal suite 1495 / 7124 / 0.
+#### Concurrent test coverage
+
+Add `tests/stm_concurrent_test.clj` exercising the multi-thread
+retry path. N worker `future`s each run M `dosync` increments
+against a shared ref via `alter` and `commute`; a third test
+verifies post-commit watch dispatch fires exactly once per
+successful commit (retries do not double-fire). Skipped when
+`mino-thread-limit` is 1.
+
+#### External suite impact
+
+`add_watch.cljc` and `remove_watch.cljc` now pass their atom and
+ref arms; the var arm still fails because mino does not yet
+support `add-watch` on vars (separate feature, not in scope for
+the STM rollout). External suite holds at 212 OK.
+
+Internal suite 1498 / 7127 / 0.
 
 ## v0.100.34
 
