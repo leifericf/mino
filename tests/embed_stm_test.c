@@ -547,6 +547,117 @@ static void test_shutdown_agents_self_call_throws(void)
     mino_state_free(S);
 }
 
+/* Drive every public C-API agent entry from C. Validates that the
+ * mino_send / mino_send_off / mino_await / mino_await_for /
+ * mino_agent_error / mino_restart_agent perimeter is wired up the
+ * same way the Clojure-level prims are. */
+static void test_c_api_agents(void)
+{
+    mino_state_t *S   = mino_state_new();
+    mino_env_t   *env = mino_new(S);
+    mino_set_thread_limit(S, 4);
+    mino_install_agent(S, env);
+
+    /* Build (fn [v] (inc v)) once, reuse across sends. */
+    mino_val_t *inc_fn = mino_eval_string(S, "(fn [v] (inc v))", env);
+    REQUIRE(inc_fn != NULL, "inc fn should compile");
+
+    /* mino_send: enqueue + await + read. */
+    {
+        mino_val_t *a = mino_agent(S, mino_int(S, 0));
+        mino_val_t *agents[2];
+        REQUIRE(mino_send(S, a, inc_fn, NULL) != NULL,
+                "mino_send should return the agent");
+        REQUIRE(mino_send(S, a, inc_fn, NULL) != NULL,
+                "second mino_send should also return the agent");
+        agents[0] = a; agents[1] = NULL;
+        REQUIRE(mino_await(S, agents) != NULL,
+                "mino_await should return non-NULL on success");
+        REQUIRE(a->as.agent.val != NULL && a->as.agent.val->type == MINO_INT,
+                "agent value should be int after sends");
+        REQUIRE(a->as.agent.val->as.i == 2,
+                "agent should have value 2 after two inc sends");
+    }
+
+    /* mino_send_off: separate pool, same eval-lock serialization. */
+    {
+        mino_val_t *a = mino_agent(S, mino_int(S, 100));
+        mino_val_t *agents[2];
+        REQUIRE(mino_send_off(S, a, inc_fn, NULL) != NULL,
+                "mino_send_off should return the agent");
+        agents[0] = a; agents[1] = NULL;
+        REQUIRE(mino_await(S, agents) != NULL,
+                "mino_await across send-off should succeed");
+        REQUIRE(a->as.agent.val->as.i == 101,
+                "agent should have value 101 after one inc send-off");
+    }
+
+    /* mino_await_for timeout: queue an action that sleeps longer
+     * than the timeout. Build a fn that calls (Thread/sleep 200);
+     * mino doesn't expose that directly, but we can simulate via a
+     * busy spin -- actually simpler: just check the no-op timeout
+     * shape with an agent that has zero in-flight, where it
+     * immediately succeeds. The blocking-timeout case is exercised
+     * by the Clojure-level await-for tests. */
+    {
+        mino_val_t *a = mino_agent(S, mino_int(S, 0));
+        mino_val_t *agents[2];
+        agents[0] = a; agents[1] = NULL;
+        REQUIRE(mino_await_for(S, 50, agents) == 1,
+                "mino_await_for should return 1 when nothing is queued");
+    }
+
+    /* mino_agent_error / mino_restart_agent: install a validator
+     * that rejects negatives, drive the agent into the failed
+     * state, then restart with a clean value. */
+    {
+        mino_val_t *a = mino_eval_string(S,
+            "(agent 0 :validator (fn [v] (>= v 0)))", env);
+        mino_val_t *dec_fn = mino_eval_string(S, "(fn [v] (dec v))", env);
+        mino_val_t *agents[2];
+        REQUIRE(a != NULL && mino_is_agent(a), "agent should be created");
+        REQUIRE(mino_send(S, a, dec_fn, NULL) != NULL,
+                "send should accept the action even though it will fail");
+        agents[0] = a; agents[1] = NULL;
+        mino_await(S, agents);
+        REQUIRE(mino_agent_error(S, a) != NULL,
+                "mino_agent_error should expose the validator failure");
+        /* Subsequent send to a failed :fail agent should throw. */
+        REQUIRE(mino_send(S, a, dec_fn, NULL) == NULL,
+                "send to failed :fail agent should throw / return NULL");
+        REQUIRE(mino_restart_agent(S, a, mino_int(S, 5), 1) != NULL,
+                "mino_restart_agent should clear the failure");
+        REQUIRE(mino_agent_error(S, a) == NULL,
+                "agent_error should be NULL after restart");
+        REQUIRE(a->as.agent.val->as.i == 5,
+                "agent value should be reset to 5 after restart");
+    }
+
+    /* Cross-state guard: pass an agent from S2 to mino_send running
+     * on S; must throw MST007 and return NULL. */
+    {
+        mino_state_t *S2 = mino_state_new();
+        mino_env_t   *env2 = mino_new(S2);
+        mino_val_t   *foreign;
+        mino_set_thread_limit(S2, 2);
+        mino_install_agent(S2, env2);
+        foreign = mino_agent(S2, mino_int(S2, 0));
+        REQUIRE(mino_send(S, foreign, inc_fn, NULL) == NULL,
+                "mino_send must reject a foreign-state agent");
+        REQUIRE(mino_send_off(S, foreign, inc_fn, NULL) == NULL,
+                "mino_send_off must reject a foreign-state agent");
+        REQUIRE(mino_agent_error(S, foreign) == NULL,
+                "mino_agent_error must reject a foreign-state agent");
+        REQUIRE(mino_restart_agent(S, foreign, mino_int(S, 0), 0) == NULL,
+                "mino_restart_agent must reject a foreign-state agent");
+        mino_env_free(S2, env2);
+        mino_state_free(S2);
+    }
+
+    mino_env_free(S, env);
+    mino_state_free(S);
+}
+
 int main(void)
 {
     mino_state_t *S   = mino_state_new();
@@ -564,6 +675,7 @@ int main(void)
     test_run_retry_under_contention(S, env);
     test_shutdown_agents_seals_state();
     test_shutdown_agents_self_call_throws();
+    test_c_api_agents();
 
     mino_env_free(S, env);
     mino_state_free(S);

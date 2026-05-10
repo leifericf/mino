@@ -577,6 +577,63 @@ mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial);
 /* Return 1 if v is an agent, 0 otherwise. NULL-safe. */
 int         mino_is_agent(const mino_val_t *v);
 
+/* Enqueue (fn current-value arg1 arg2 ...) onto the agent's POOLED
+ * run-queue and return the agent immediately. `extra_args` is a cons
+ * list (or nil) holding the extra arguments after the agent's
+ * current value; the action fn is called as
+ *   (fn current-value arg1 arg2 ...)
+ *
+ * Throws (and returns NULL) if:
+ *   - agent is NULL or not an agent (MTY001),
+ *   - agent was created in a different state (MST007),
+ *   - agents have been shut down (MST008),
+ *   - the agent is failed and its error mode is :fail (MST002),
+ *   - the host has not granted enough threads to spawn the worker
+ *     (MTH001) -- raise via mino_set_thread_limit (>= 2).
+ *
+ * Inside a transaction, the action is queued and only fires after a
+ * successful commit, matching JVM canon. */
+mino_val_t *mino_send(mino_state_t *S, mino_val_t *agent,
+                      mino_val_t *fn, mino_val_t *extra_args);
+
+/* Like mino_send but routes the action onto the SOLO pool. Same
+ * error semantics. mino's per-state eval lock means actions across
+ * the two pools still serialize, but the queues are independent. */
+mino_val_t *mino_send_off(mino_state_t *S, mino_val_t *agent,
+                          mino_val_t *fn, mino_val_t *extra_args);
+
+/* Block the calling thread until each named agent's in-flight count
+ * reaches zero. `agents` is a NULL-terminated array of MINO_AGENT
+ * values (or NULL/empty for a no-op). Throws (and returns NULL) if
+ * called from inside an agent action (MST002, would self-deadlock)
+ * or if any agent is from a foreign state (MST007). Returns nil on
+ * success. */
+mino_val_t *mino_await(mino_state_t *S, mino_val_t **agents);
+
+/* Like mino_await with a millisecond timeout. Returns 1 if every
+ * named agent reached zero in-flight before the deadline, 0 on
+ * timeout. Throws on cross-state misuse or self-await (returns 0
+ * after the throw is published). */
+int         mino_await_for(mino_state_t *S, long long timeout_ms,
+                            mino_val_t **agents);
+
+/* Return the agent's most recent captured exception value, or NULL
+ * if the agent is in a clean state. Throws on cross-state misuse
+ * (returns NULL). */
+mino_val_t *mino_agent_error(mino_state_t *S, mino_val_t *agent);
+
+/* Restart a failed agent: clears its captured error and resets its
+ * value to `new_state`. With clear_actions=1, drops every queued
+ * action targeting this agent across both pools. Returns the new
+ * state on success, or NULL after throwing if:
+ *   - agent is not an agent (MTY001),
+ *   - agent is from a foreign state (MST007),
+ *   - agent is not failed (MST002),
+ *   - the validator (if any) rejects new_state (MCT001). */
+mino_val_t *mino_restart_agent(mino_state_t *S, mino_val_t *agent,
+                                mino_val_t *new_state,
+                                int clear_actions);
+
 /* Return 1 if v is an STM ref (MINO_TX_REF), 0 otherwise. NULL-safe. */
 int         mino_is_tx_ref(const mino_val_t *v);
 

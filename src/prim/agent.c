@@ -99,6 +99,21 @@ static void agent_mu_ensure_inited(mino_state_t *S)
     }
 }
 
+/* Forward declarations for the C-API perimeter (defined further down
+ * with the prim handlers and the shared core helpers). */
+static int          agent_check_state(mino_state_t *S, mino_val_t *agent);
+static mino_val_t  *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
+                                     mino_val_t *agent, mino_val_t *fn,
+                                     mino_val_t *extra, mino_env_t *env,
+                                     const char *prim_name);
+static mino_val_t  *agent_array_to_list(mino_state_t *S, mino_val_t **agents);
+mino_val_t         *prim_await(mino_state_t *S, mino_val_t *args,
+                                mino_env_t *env);
+mino_val_t         *prim_await_for(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env);
+mino_val_t         *prim_restart_agent(mino_state_t *S, mino_val_t *args,
+                                        mino_env_t *env);
+
 /* --- public-API constructor + predicate ----------------------------------- */
 
 mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
@@ -119,6 +134,24 @@ mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
 int mino_is_agent(const mino_val_t *v)
 {
     return v != NULL && v->type == MINO_AGENT;
+}
+
+/* Convert a NULL-terminated array of agents to a cons list, matching
+ * the shape that prim_await / prim_await_for already consume. Returns
+ * an empty list when agents is NULL or its first slot is NULL.
+ * Caller must already hold state_lock so cons allocations are safe. */
+static mino_val_t *agent_array_to_list(mino_state_t *S, mino_val_t **agents)
+{
+    mino_val_t *head;
+    size_t      i, n;
+    if (agents == NULL) return mino_empty_list(S);
+    n = 0;
+    while (agents[n] != NULL) n++;
+    head = mino_empty_list(S);
+    for (i = n; i > 0; i--) {
+        head = mino_cons(S, agents[i - 1], head);
+    }
+    return head;
 }
 
 /* Cross-state defense, mirroring tx_check_ref_owned. Throws MST007
@@ -656,6 +689,178 @@ void mino_agent_quiesce_workers(mino_state_t *S)
     }
 }
 
+/* --- public C-API for embedders ------------------------------------------ *
+ *
+ * Each entry is a thin perimeter around the same core helpers the
+ * Clojure-level primitives use, with the embedder mino_lock /
+ * mino_unlock perimeter that mino_call / mino_eval_string already
+ * use. The cross-state guard catches a host that mistakenly hands an
+ * agent from another mino_state_t into S.
+ *
+ * The action env passed at queue time is NULL; closures bring their
+ * own captured env via the closure value, and unbound symbols would
+ * resolve through the agent's owning state's namespace fallbacks
+ * regardless of what env we pass here. Embedders that need a custom
+ * env for symbol resolution within an action should hand in a
+ * closure built from mino_eval_string. */
+
+mino_val_t *mino_send(mino_state_t *S, mino_val_t *agent,
+                      mino_val_t *fn, mino_val_t *extra_args)
+{
+    mino_val_t   *result;
+    volatile char probe = 0;
+    mino_lock(S);
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+    if (extra_args == NULL) extra_args = mino_nil(S);
+    result = agent_send_core(S, AGENT_POOL_POOLED, agent, fn, extra_args,
+                             NULL,
+                             "mino_send: first argument must be an agent");
+    mino_unlock(S);
+    return result;
+}
+
+mino_val_t *mino_send_off(mino_state_t *S, mino_val_t *agent,
+                          mino_val_t *fn, mino_val_t *extra_args)
+{
+    mino_val_t   *result;
+    volatile char probe = 0;
+    mino_lock(S);
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+    if (extra_args == NULL) extra_args = mino_nil(S);
+    result = agent_send_core(S, AGENT_POOL_SOLO, agent, fn, extra_args,
+                             NULL,
+                             "mino_send_off: first argument must be an agent");
+    mino_unlock(S);
+    return result;
+}
+
+mino_val_t *mino_await(mino_state_t *S, mino_val_t **agents)
+{
+    mino_val_t   *list;
+    mino_val_t   *result;
+    volatile char probe = 0;
+    mino_lock(S);
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+    list   = agent_array_to_list(S, agents);
+    result = prim_await(S, list, NULL);
+    mino_unlock(S);
+    return result;
+}
+
+int mino_await_for(mino_state_t *S, long long timeout_ms,
+                   mino_val_t **agents)
+{
+    mino_val_t   *list, *args;
+    mino_val_t   *result;
+    volatile char probe = 0;
+    int           ok;
+    mino_lock(S);
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+    list   = agent_array_to_list(S, agents);
+    args   = mino_cons(S, mino_int(S, timeout_ms), list);
+    result = prim_await_for(S, args, NULL);
+    /* prim_await_for returns true on success, false on timeout. A
+     * throw publishes the exception via S; result is NULL in that
+     * case and we propagate timeout=0 so the caller treats it as a
+     * failure. */
+    ok = (result != NULL && mino_is_truthy(result)) ? 1 : 0;
+    mino_unlock(S);
+    return ok;
+}
+
+mino_val_t *mino_agent_error(mino_state_t *S, mino_val_t *agent)
+{
+    mino_val_t   *err;
+    volatile char probe = 0;
+    mino_lock(S);
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+    if (!mino_is_agent(agent)) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+            "mino_agent_error: argument must be an agent");
+        mino_unlock(S);
+        return NULL;
+    }
+    if (agent_check_state(S, agent)) { mino_unlock(S); return NULL; }
+    err = agent->as.agent.err;
+    mino_unlock(S);
+    return err;
+}
+
+mino_val_t *mino_restart_agent(mino_state_t *S, mino_val_t *agent,
+                                mino_val_t *new_state, int clear_actions)
+{
+    mino_val_t   *args, *result;
+    volatile char probe = 0;
+    mino_lock(S);
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+    /* Build (agent new-state :clear-actions <bool>) for prim_restart_agent. */
+    args = mino_cons(S, agent,
+             mino_cons(S, new_state,
+               mino_cons(S, mino_keyword(S, "clear-actions"),
+                 mino_cons(S, clear_actions ? mino_true(S) : mino_false(S),
+                           mino_nil(S)))));
+    result = prim_restart_agent(S, args, NULL);
+    mino_unlock(S);
+    return result;
+}
+
+/* Shared core for send / send-off (and the public C-API mino_send /
+ * mino_send_off). Validates the agent, applies the cross-state and
+ * shutdown / failed-:fail / dosync-defer guards, then either parks
+ * the action onto the current tx's pending-send list or enqueues it
+ * onto the named pool's run-queue (lazy-spawning the pool's worker).
+ *
+ * Returns the agent on success, NULL on throw (caller propagates).
+ * The caller must already hold state_lock (the prims do via their
+ * mino_lock perimeter; the C-API entries acquire it themselves). */
+static mino_val_t *agent_send_core(mino_state_t *S, agent_pool_kind_t kind,
+                                    mino_val_t *agent, mino_val_t *fn,
+                                    mino_val_t *extra, mino_env_t *env,
+                                    const char *prim_name)
+{
+    mino_thread_ctx_t *ctx;
+    if (!mino_is_agent(agent)) {
+        prim_throw_classified(S, "eval/type", "MTY001",
+            prim_name);
+        return NULL;
+    }
+    if (agent_check_state(S, agent)) return NULL;
+    if (S->agents_shutdown) {
+        prim_throw_classified(S, "eval/state", "MST008",
+            "Agents have been shut down; new sends are not accepted");
+        return NULL;
+    }
+    if (agent->as.agent.err != NULL && agent->as.agent.err_mode == 0) {
+        prim_throw_classified(S, "eval/state", "MST002",
+            "Agent is failed, needs restart");
+        return NULL;
+    }
+    ctx = mino_current_ctx(S);
+    if (ctx->current_tx != NULL) {
+        mino_val_t *triple = mino_cons(S, agent,
+                                mino_cons(S, fn, extra));
+        ctx->current_tx->pending_sends =
+            mino_cons(S, triple,
+                ctx->current_tx->pending_sends != NULL
+                    ? ctx->current_tx->pending_sends
+                    : mino_empty_list(S));
+        return agent;
+    }
+    if (agent_worker_ensure(S, kind)) return NULL;
+    if (agent_enqueue(S, kind, agent, fn, extra, env)) {
+        prim_throw_classified(S, "eval/state", "MST002",
+            "send: out of memory enqueueing action");
+        return NULL;
+    }
+    return agent;
+}
+
 /* --- pending-sends drain ------------------------------------------------- *
  *
  * Used by stm.c after a successful commit. Pending entries were
@@ -819,8 +1024,7 @@ mino_val_t *prim_agent_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t        *agent, *fn, *extra;
-    mino_thread_ctx_t *ctx;
+    mino_val_t *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "send requires at least two arguments: agent and fn");
@@ -828,62 +1032,13 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     agent = args->as.cons.car;
     fn    = args->as.cons.cdr->as.cons.car;
     extra = args->as.cons.cdr->as.cons.cdr;
-    if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "send: first argument must be an agent");
-    }
-    if (agent_check_state(S, agent)) return NULL;
-    /* Post-shutdown sends throw -- matches JVM canon. The state
-     * flag is flipped by (shutdown-agents). */
-    if (S->agents_shutdown) {
-        return prim_throw_classified(S, "eval/state", "MST008",
-            "Agents have been shut down; new sends are not accepted");
-    }
-    /* JVM-canon: dispatching to an agent in the failed state throws
-     * unless error-mode is :continue. */
-    if (agent->as.agent.err != NULL && agent->as.agent.err_mode == 0) {
-        return prim_throw_classified(S, "eval/state", "MST002",
-            "Agent is failed, needs restart");
-    }
-    /* Defer when running inside a transaction. JVM canon: agent
-     * sends from inside dosync are queued and only fire once, on
-     * successful commit. mino's commit drains via
-     * mino_agent_drain_pending which enqueues onto the worker. */
-    ctx = mino_current_ctx(S);
-    if (ctx->current_tx != NULL) {
-        mino_val_t *triple = mino_cons(S, agent,
-                                mino_cons(S, fn, extra));
-        ctx->current_tx->pending_sends =
-            mino_cons(S, triple,
-                ctx->current_tx->pending_sends != NULL
-                    ? ctx->current_tx->pending_sends
-                    : mino_empty_list(S));
-        return agent;
-    }
-    /* Async dispatch: spawn the POOLED worker if needed (gates on
-     * thread_limit -- throws MTH001 if the host hasn't granted a
-     * thread budget), then append (agent fn extra env) to the
-     * runq and return. The worker drains and runs each action
-     * under state_lock. */
-    if (agent_worker_ensure(S, AGENT_POOL_POOLED)) return NULL;
-    if (agent_enqueue(S, AGENT_POOL_POOLED, agent, fn, extra, env)) {
-        return prim_throw_classified(S, "eval/state", "MST002",
-            "send: out of memory enqueueing action");
-    }
-    return agent;
+    return agent_send_core(S, AGENT_POOL_POOLED, agent, fn, extra, env,
+                           "send: first argument must be an agent");
 }
 
-/* send-off is structurally identical to send except it routes the
- * action onto the SOLO pool. mino's per-state eval lock means
- * actions across the two pools still serialize, so the user-visible
- * effect today is the same as send -- but the queues are independent
- * (a long-running send-off action cannot stall pending sends, and
- * vice versa), and the seam is in place for a future SOLO-yields-
- * eval-lock-during-blocking-IO design. */
 mino_val_t *prim_send_off(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t        *agent, *fn, *extra;
-    mino_thread_ctx_t *ctx;
+    mino_val_t *agent, *fn, *extra;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "send-off requires at least two arguments: agent and fn");
@@ -891,41 +1046,8 @@ mino_val_t *prim_send_off(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     agent = args->as.cons.car;
     fn    = args->as.cons.cdr->as.cons.car;
     extra = args->as.cons.cdr->as.cons.cdr;
-    if (!mino_is_agent(agent)) {
-        return prim_throw_classified(S, "eval/type", "MTY001",
-            "send-off: first argument must be an agent");
-    }
-    if (agent_check_state(S, agent)) return NULL;
-    if (S->agents_shutdown) {
-        return prim_throw_classified(S, "eval/state", "MST008",
-            "Agents have been shut down; new sends are not accepted");
-    }
-    if (agent->as.agent.err != NULL && agent->as.agent.err_mode == 0) {
-        return prim_throw_classified(S, "eval/state", "MST002",
-            "Agent is failed, needs restart");
-    }
-    /* Defer in-tx sends. JVM-canon: send-off inside dosync queues
-     * onto the same pending-send list as send, and JVM's commit
-     * dispatcher routes via the action's pool. mino's commit drain
-     * runs on POOLED to keep the implementation tight; document as
-     * a deviation if/when SOLO yields the eval lock. */
-    ctx = mino_current_ctx(S);
-    if (ctx->current_tx != NULL) {
-        mino_val_t *triple = mino_cons(S, agent,
-                                mino_cons(S, fn, extra));
-        ctx->current_tx->pending_sends =
-            mino_cons(S, triple,
-                ctx->current_tx->pending_sends != NULL
-                    ? ctx->current_tx->pending_sends
-                    : mino_empty_list(S));
-        return agent;
-    }
-    if (agent_worker_ensure(S, AGENT_POOL_SOLO)) return NULL;
-    if (agent_enqueue(S, AGENT_POOL_SOLO, agent, fn, extra, env)) {
-        return prim_throw_classified(S, "eval/state", "MST002",
-            "send-off: out of memory enqueueing action");
-    }
-    return agent;
+    return agent_send_core(S, AGENT_POOL_SOLO, agent, fn, extra, env,
+                           "send-off: first argument must be an agent");
 }
 
 /* Block until in_flight == 0 for every named agent. Drops state_lock
