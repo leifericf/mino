@@ -225,6 +225,12 @@
     (is (= 1 @a))
     (is (nil? (agent-error a)))))
 
+(deftest send-via-throws-not-implemented
+  ;; send-via takes an Executor in JVM; mino's sync MVP has no
+  ;; Executor type. Throw with a clear MST008 rather than alias to
+  ;; send (which would silently lose the executor argument).
+  (is (thrown? (send-via :exec (agent 0) inc))))
+
 (deftest agent-print-form-includes-identity
   ;; Two agents with the same value must print as distinct strings
   ;; -- otherwise they're indistinguishable in logs / debug output.

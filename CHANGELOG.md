@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Implement `shutdown-agents` And `send-via` Properly
+
+`shutdown-agents` was a no-op stub returning nil. `send-via`
+wasn't installed, so calling it produced `unbound symbol`. Fix
+both:
+
+- `shutdown-agents` flips a state-level flag (`agents_shutdown`).
+  Subsequent `send` / `send-off` throw MST008. Idempotent. mino's
+  sync MVP has no thread pool to terminate, but the flag still
+  gives embedders a clean teardown signal.
+
+- `send-via` throws MST008 with a clear "not yet implemented"
+  message that points at `send` / `send-off`. Aliasing to `send`
+  would silently drop the user's executor argument, so a loud
+  failure is the right move until executors land.
+
 ### Remove Dead `tx_state_t.retry_signal` Field
 
 Initialized in two places, set in zero, read in zero. Likely a

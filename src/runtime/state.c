@@ -111,6 +111,7 @@ static void state_init(mino_state_t *S)
     S->stm_lock_inited     = 0;
     S->stm_next_ref_id     = 0;
     S->agent_next_id       = 0;
+    S->agents_shutdown     = 0;
     mino_state_lock_init(S);
     gc_evt_init(S);
 }

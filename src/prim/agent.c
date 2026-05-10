@@ -340,6 +340,12 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "send: first argument must be an agent");
     }
     if (agent_check_state(S, agent)) return NULL;
+    /* Post-shutdown sends throw -- matches JVM canon. The state
+     * flag is flipped by (shutdown-agents). */
+    if (S->agents_shutdown) {
+        return prim_throw_classified(S, "eval/state", "MST008",
+            "Agents have been shut down; new sends are not accepted");
+    }
     /* JVM-canon: dispatching to an agent in the failed state throws
      * unless error-mode is :continue. mino's MVP captures the failure
      * but allows further dispatch (matches :continue). */
@@ -585,9 +591,31 @@ mino_val_t *prim_error_mode(mino_state_t *S, mino_val_t *args,
 mino_val_t *prim_shutdown_agents(mino_state_t *S, mino_val_t *args,
                                   mino_env_t *env)
 {
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "shutdown-agents takes no arguments");
+    }
+    /* mino's sync MVP has no thread pool to terminate, but the
+     * state flag still gives embedders a clean teardown signal:
+     * subsequent send / send-off throw MST008. Idempotent --
+     * calling twice is fine. */
+    S->agents_shutdown = 1;
+    return mino_nil(S);
+}
+
+mino_val_t *prim_send_via(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
     (void)args;
     (void)env;
-    return mino_nil(S);
+    /* JVM-canon (send-via executor a fn & args) routes the action
+     * through a host-supplied Executor. mino's sync MVP has no
+     * Executor type; aliasing it to send would silently drop the
+     * user's executor argument. Throw with a clear message so the
+     * caller can switch to send / send-off until executors land. */
+    return prim_throw_classified(S, "eval/state", "MST008",
+        "send-via not yet implemented; mino's agent MVP runs actions "
+        "synchronously. Use send / send-off.");
 }
 
 mino_val_t *prim_release_pending_sends(mino_state_t *S, mino_val_t *args,
@@ -627,6 +655,11 @@ const mino_prim_def k_prims_agent[] = {
      "the action synchronously; in JVM Clojure send is async."},
     {"send-off",    prim_send_off,
      "Like send. mino runs both shapes through one synchronous path."},
+    {"send-via",    prim_send_via,
+     "JVM-canon dispatches the action through a host-supplied "
+     "Executor. mino's sync MVP has no Executor type; this prim "
+     "throws with a clear MST008 error rather than aliasing to "
+     "send and silently losing the executor argument."},
     {"await",       prim_await,
      "No-op in mino's MVP. The synchronous send leaves no pending "
      "actions to wait for."},
@@ -648,7 +681,11 @@ const mino_prim_def k_prims_agent[] = {
     {"error-mode", prim_error_mode,
      "Returns the agent's current error mode."},
     {"shutdown-agents", prim_shutdown_agents,
-     "Stub. Returns nil."},
+     "Permanently seals the agent surface for this state: subsequent "
+     "send / send-off throw MST008. Idempotent. Has no thread pool to "
+     "terminate (mino's MVP runs actions synchronously) but lets "
+     "embedders cleanly stop accepting new agent traffic during "
+     "teardown."},
     {"release-pending-sends", prim_release_pending_sends,
      "Returns the count of sends queued by the current transaction "
      "and clears them so they will NOT fire on commit. Outside a "

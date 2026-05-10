@@ -768,6 +768,14 @@ struct mino_state {
      * from the ref print form. */
     uint64_t        agent_next_id;
 
+    /* Flipped to 1 by (shutdown-agents). After shutdown, every send
+     * / send-off throws MST008 instead of running its action --
+     * matches JVM canon's "after shutdown agents stop accepting
+     * actions." mino's sync MVP has no thread pool to actually
+     * stop, but the state flag still gives embedders a clean way
+     * to seal the agent surface during teardown. */
+    int             agents_shutdown;
+
     /* === Async scheduler and timers ==================================== */
 
     /* Async scheduler run queue. */

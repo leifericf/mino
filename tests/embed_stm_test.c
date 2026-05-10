@@ -473,6 +473,47 @@ static void test_cross_state_agent_throws(mino_state_t *S, mino_env_t *env)
     mino_state_free(S2);
 }
 
+/* shutdown-agents flips a state-level flag that makes every
+ * subsequent send / send-off throw MST008. The flag is permanent
+ * (no reverse), so this test runs in a private state to avoid
+ * poisoning the rest of the suite. */
+static void test_shutdown_agents_seals_state(void)
+{
+    mino_state_t *S   = mino_state_new();
+    mino_env_t   *env = mino_new(S);
+    mino_install_agent(S, env);
+    {
+        /* Pre-shutdown: send works. */
+        mino_val_t *r = mino_eval_string(S,
+            "(let [a (agent 0)] (send a inc) @a)", env);
+        long long n = 0;
+        REQUIRE(r != NULL && mino_to_int(r, &n) && n == 1,
+                "pre-shutdown send should publish");
+    }
+    {
+        /* Trigger shutdown. */
+        mino_val_t *r = mino_eval_string(S, "(shutdown-agents)", env);
+        REQUIRE(r != NULL, "shutdown-agents returned NULL");
+    }
+    {
+        /* Post-shutdown: send must throw MST008. */
+        const char *err;
+        mino_val_t *r = mino_eval_string(S,
+            "(send (agent 0) inc)", env);
+        REQUIRE(r == NULL, "post-shutdown send should error");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "shut down") != NULL,
+                "post-shutdown error should mention 'shut down'");
+    }
+    {
+        /* Idempotent: calling shutdown again is fine. */
+        mino_val_t *r = mino_eval_string(S, "(shutdown-agents)", env);
+        REQUIRE(r != NULL, "second shutdown-agents should not error");
+    }
+    mino_env_free(S, env);
+    mino_state_free(S);
+}
+
 int main(void)
 {
     mino_state_t *S   = mino_state_new();
@@ -488,6 +529,7 @@ int main(void)
     test_cross_state_ref_throws(S, env);
     test_cross_state_agent_throws(S, env);
     test_run_retry_under_contention(S, env);
+    test_shutdown_agents_seals_state();
 
     mino_env_free(S, env);
     mino_state_free(S);
