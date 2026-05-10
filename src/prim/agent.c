@@ -75,6 +75,35 @@ static mino_val_t *agent_build_call(mino_state_t *S, mino_val_t *cur,
     return head;
 }
 
+/* Report an action failure. JVM canon: if the agent has an
+ * error-handler installed, invoke (handler agent ex) and leave the
+ * agent's err slot clean -- the handler is responsible for any
+ * latching it wants. If the handler itself throws, capture its
+ * thrown payload into err so the failure isn't silently lost. With
+ * no handler, latch ex into err directly. */
+static void agent_report_failure(mino_state_t *S, mino_val_t *agent,
+                                  mino_val_t *ex, mino_env_t *env)
+{
+    mino_val_t *handler = agent->as.agent.err_handler;
+    mino_val_t *result  = NULL;
+    mino_val_t *hthrown = NULL;
+    int         pc;
+    if (handler == NULL) {
+        gc_write_barrier(S, agent, agent->as.agent.err, ex);
+        agent->as.agent.err = ex;
+        return;
+    }
+    {
+        mino_val_t *args = mino_cons(S, agent,
+                              mino_cons(S, ex, mino_nil(S)));
+        pc = mino_pcall(S, handler, args, env, &result, &hthrown);
+    }
+    if (pc != 0 && hthrown != NULL) {
+        gc_write_barrier(S, agent, agent->as.agent.err, hthrown);
+        agent->as.agent.err = hthrown;
+    }
+}
+
 /* Apply one action synchronously: run validator, update state, fire
  * watches. Each user-callback invocation goes through mino_pcall so a
  * throw is captured into the agent's err slot rather than propagated
@@ -91,8 +120,7 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
 
     pc = mino_pcall(S, fn, call_args, env, &new_state, &thrown_ex);
     if (pc != 0 || new_state == NULL) {
-        gc_write_barrier(S, agent, agent->as.agent.err, thrown_ex);
-        agent->as.agent.err = thrown_ex;
+        agent_report_failure(S, agent, thrown_ex, env);
         return;
     }
 
@@ -108,8 +136,7 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
                 /* Validator returned falsy without throwing: synthesize. */
                 ex = mino_string(S, "Invalid reference state");
             }
-            gc_write_barrier(S, agent, agent->as.agent.err, ex);
-            agent->as.agent.err = ex;
+            agent_report_failure(S, agent, ex, env);
             return;
         }
     }

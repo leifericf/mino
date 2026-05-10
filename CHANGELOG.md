@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Invoke Agent `error-handler` on Action and Validator Failure
+
+`set-error-handler!` stored a fn but `agent_apply_action` never
+called it -- on action throw or validator rejection mino latched
+the exception into `agent.err` regardless. JVM canon: when an
+error-handler is installed, route the failure through `(handler
+agent ex)` and leave the agent in a clean state. With no handler,
+keep the latching behavior. If the handler itself throws, capture
+the handler's payload into `agent.err` so the failure isn't
+silently lost.
+
 ### Wire Up Agent Constructor Options
 
 `(agent state :validator pred :error-handler h :error-mode m)`

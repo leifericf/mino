@@ -149,3 +149,40 @@
 
 (deftest agent-constructor-options-odd-args-throws
   (is (thrown? (agent 0 :validator))))
+
+(deftest agent-error-handler-invoked-on-action-throw
+  ;; JVM canon: when error-handler is installed, an action throw
+  ;; routes through it instead of latching the agent into a failed
+  ;; state. The agent stays clean (agent-error returns nil) unless
+  ;; the handler itself throws.
+  (let [seen (atom nil)
+        a (agent 0)]
+    (set-error-handler! a (fn [agent ex] (reset! seen [agent (ex-message ex)])))
+    (send a (fn [_] (throw (ex-info "boom" {}))))
+    (is (= "boom" (second @seen)))
+    (is (= a (first @seen)))
+    (is (nil? (agent-error a)))
+    ;; Subsequent sends still work since the agent isn't latched.
+    (send a inc)
+    (is (= 1 @a))))
+
+(deftest agent-error-handler-throw-latches-agent
+  ;; If the error-handler itself throws, the handler's exception
+  ;; is captured into agent-error so the failure isn't silently
+  ;; lost. The original action's exception is the one passed in;
+  ;; this asserts only that *some* error is latched.
+  (let [a (agent 0)]
+    (set-error-handler! a (fn [_ _] (throw (ex-info "handler-boom" {}))))
+    (send a (fn [_] (throw (ex-info "action-boom" {}))))
+    (is (some? (agent-error a)))))
+
+(deftest agent-error-handler-also-invoked-on-validator-reject
+  ;; Validator failure is treated as an action failure.
+  (let [seen (atom 0)
+        a (agent 1)]
+    (set-validator! a pos?)
+    (set-error-handler! a (fn [_ _] (swap! seen inc)))
+    (send a (fn [_] -1))
+    (is (= 1 @seen))
+    (is (nil? (agent-error a)))
+    (is (= 1 @a))))
