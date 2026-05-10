@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Ref Watch Dispatch Continues Past A Throwing Watch
+
+Earlier `dispatch_watches` invoked each ref watch through
+`mino_call`, so the first throw longjmped out and every later
+watch -- including watches on unrelated refs in the same commit
+-- silently never fired. Agent watches were already invoked
+through `mino_pcall`; the inconsistency meant a misbehaving ref
+watch could swallow legitimate notifications.
+
+Wrap each ref watch in `mino_pcall`, capture the first thrown
+exception, finish dispatching every other watch, then re-throw
+the captured exception so the dosync caller still surfaces an
+error. No watch is silently lost; the caller still sees a watch
+failure when one occurs.
+
 ### Pending-Sends Drain Honors Failed-State In `:fail` Mode
 
 `prim_send` rejects sends to agents already in failed-`:fail`

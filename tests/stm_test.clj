@@ -245,6 +245,27 @@
     (is (= 0 @r1))
     (is (= 0 @r2))))
 
+(deftest watch-throw-does-not-abort-other-watches
+  ;; A throwing watch on r1 used to abort dispatch entirely so a
+  ;; watch on r2 wouldn't fire. Now every watch on every committed
+  ;; ref runs first; the first thrown exception is then re-thrown
+  ;; after dispatch finishes.
+  (let [r1 (ref 0)
+        r2 (ref 0)
+        r2-watch-fired (atom 0)]
+    (add-watch r1 :crash (fn [_ _ _ _] (throw (ex-info "r1-boom" {}))))
+    (add-watch r2 :w (fn [_ _ _ _] (swap! r2-watch-fired inc)))
+    (try (dosync (alter r1 inc) (alter r2 inc)) (catch e nil))
+    ;; r2's watch fired even though r1's watch threw.
+    (is (= 1 @r2-watch-fired))))
+
+(deftest watch-throw-still-surfaces-to-caller
+  (let [r (ref 0)]
+    (add-watch r :crash (fn [_ _ _ _] (throw (ex-info "boom" {:k :v}))))
+    (let [caught (try (dosync (alter r inc)) nil
+                      (catch e (ex-data e)))]
+      (is (= {:k :v} caught)))))
+
 (deftest commit-is-atomic-late-validator-throw
   (let [r1 (ref 0)
         r2 (ref 0)]

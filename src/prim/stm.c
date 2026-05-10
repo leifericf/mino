@@ -902,12 +902,21 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
 /* Walk the per-ref state list and dispatch watch callbacks for every
  * ref that committed a write. Runs OUTSIDE the commit lock with
  * ctx->current_tx already cleared so a watch fn that itself calls
- * dosync allocates fresh transaction state. A watch that throws
- * propagates out of the commit; later watches do not fire. */
+ * dosync allocates fresh transaction state.
+ *
+ * Each watch is invoked through mino_pcall so a throw doesn't
+ * abort dispatch -- earlier behavior was inconsistent with agent
+ * watch dispatch (which already pcall'd) and could swallow watches
+ * registered against later refs. The first thrown exception is
+ * captured and re-thrown after every watch has been given a chance
+ * to fire, so the dosync caller still surfaces a watch error but
+ * never silently loses unrelated watches.
+ */
 static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
                              mino_env_t *env)
 {
     tx_ref_state_t *rs;
+    mino_val_t     *first_thrown = NULL;
     for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
         mino_val_t *watches;
         size_t      i, n;
@@ -922,13 +931,23 @@ static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
             mino_val_t *key = vec_nth(watches->as.map.key_order, i);
             mino_val_t *fn  = map_get_val(watches, key);
             mino_val_t *wargs;
+            mino_val_t *result = NULL;
+            mino_val_t *thrown = NULL;
+            int         pc;
             if (fn == NULL) continue;
             wargs = mino_cons(S, key,
                       mino_cons(S, rs->ref,
                         mino_cons(S, rs->committed_old,
                           mino_cons(S, rs->committed_new, mino_nil(S)))));
-            if (mino_call(S, fn, wargs, env) == NULL) return -1;
+            pc = mino_pcall(S, fn, wargs, env, &result, &thrown);
+            if (pc != 0 && first_thrown == NULL) {
+                first_thrown = thrown;
+            }
         }
+    }
+    if (first_thrown != NULL) {
+        mino_throw(S, first_thrown);
+        return -1; /* unreachable -- mino_throw longjmps */
     }
     return 0;
 }
