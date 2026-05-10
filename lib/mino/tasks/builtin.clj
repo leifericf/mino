@@ -333,7 +333,8 @@
 ;; Files allowed to exceed the TU size limit, with rationale.
 (def ^:private tu-allowlist
   {"src/eval/read.c"            "lexer/parser -- inherently sequential, not decomposable"
-   "src/prim/collections.c"     "14 domain primitives in one module, barely over limit"})
+   "src/prim/collections.c"     "14 domain primitives in one module, barely over limit"
+   "src/prim/agent.c"           "agent subsystem -- worker thread, queue, prims kept together"})
 
 ;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
 (def ^:private fn-allowlist
