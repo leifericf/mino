@@ -48,6 +48,18 @@ semantics are unchanged.
   running, the GC keeps register values and constants reachable
   without explicit pinning at every allocation site.
 
+- **Compiler entry stub + apply_callable wiring.**
+  `src/eval/bc/compile.c` defines the lazy `mino_bc_compile_fn`
+  entry and the `mino_bc_declined` sentinel; the entry currently
+  declines every fn (form coverage lands form-by-form in
+  subsequent commits). `src/eval/fn.c` consults the fn's `bc`
+  slot on each `apply_callable`, attempting compile on first
+  call and dispatching through `mino_bc_run` when the fn has a
+  runnable program. The decline-sentinel skips the retry on
+  subsequent calls. With Phase 1's stub returning declined for
+  every fn, all 1557 tests pass unchanged through the
+  tree-walker fallback.
+
 ## v0.104.0 — Eval-Floor Performance Cycle
 
 A non-JIT performance cycle. Each entry below is a self-contained

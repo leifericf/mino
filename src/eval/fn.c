@@ -3,6 +3,7 @@
  */
 
 #include "eval/special_internal.h"
+#include "eval/bc/internal.h"
 
 /* Build the clause list for a multi-arity fn or defmacro.
  * `arity_list` is the cons list of arity clauses: (([p] b...) ([p q] b...) ...).
@@ -311,6 +312,72 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
     }
     if (fn->type == MINO_FN || fn->type == MINO_MACRO) {
         const char *tag       = fn->type == MINO_MACRO ? "macro" : "fn";
+        /* Lazy compile-on-first-call. Macros stay tree-walked; their
+         * call frequency is low and the bc compiler's macro-body
+         * handling lives in Phase 2. Plain fns get one compile attempt
+         * the first time they're invoked; the attempt either populates
+         * fn->as.fn.bc with a runnable program or leaves the
+         * declined sentinel so the next call skips the retry. */
+        if (fn->type == MINO_FN && fn->as.fn.bc == NULL) {
+            (void)mino_bc_compile_fn(S, fn);
+        }
+        if (fn->type == MINO_FN && MINO_BC_RUNNABLE(fn)) {
+            /* argv ABI: walk the cons spine into a stack scratch array.
+             * The slots are kept alive across any GC the body triggers
+             * because the conservative stack scan covers this frame
+             * AND the bc register stack is a GC root once mino_bc_run
+             * copies the values in. */
+            mino_val_t  *scratch[16];
+            mino_val_t **argv = scratch;
+            int          argc = 0;
+            int          cap  = (int)(sizeof(scratch) / sizeof(scratch[0]));
+            mino_val_t  *cur  = args;
+            const char  *file = NULL;
+            int          line = 0;
+            int          col  = 0;
+            const char  *saved_ns      = S->current_ns;
+            const char  *saved_ambient = S->fn_ambient_ns;
+            mino_val_t  *result;
+            while (mino_is_cons(cur)) {
+                if (argc == cap) {
+                    int new_cap = cap * 2;
+                    mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                        S, GC_T_VALARR, (size_t)new_cap * sizeof(*grown));
+                    if (grown == NULL) return NULL;
+                    memcpy(grown, argv, (size_t)argc * sizeof(*argv));
+                    argv = grown;
+                    cap  = new_cap;
+                }
+                argv[argc++] = cur->as.cons.car;
+                cur = cur->as.cons.cdr;
+            }
+            if (fn->as.fn.defining_ns != NULL) {
+                S->current_ns    = fn->as.fn.defining_ns;
+                S->fn_ambient_ns = fn->as.fn.defining_ns;
+            }
+            if (mino_current_ctx(S)->eval_current_form != NULL
+                && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+                file = mino_current_ctx(S)->eval_current_form->as.cons.file;
+                line = mino_current_ctx(S)->eval_current_form->as.cons.line;
+                col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
+            }
+            push_frame(S, tag, file, line, col);
+            result = mino_bc_run(S, fn, argv, argc, env);
+            if (result == NULL) {
+                /* bc returned NULL: either an opcode bailed (which it
+                 * does on any unsupported runtime shape) or a real
+                 * error. Restore ns and propagate; the diagnostic, if
+                 * any, was set by a primitive on the way out. The frame
+                 * stays for the trace. */
+                S->current_ns    = saved_ns;
+                S->fn_ambient_ns = saved_ambient;
+                return NULL;
+            }
+            pop_frame(S);
+            S->current_ns    = saved_ns;
+            S->fn_ambient_ns = saved_ambient;
+            return result;
+        }
         mino_val_t *cur_params = fn->as.fn.params;
         mino_val_t *cur_body   = fn->as.fn.body;
         mino_env_t *local     = env_child(S, fn->as.fn.env);

@@ -122,4 +122,15 @@ mino_val_t *mino_bc_run(struct mino_state *S, mino_val_t *fn,
  * across allocations. */
 void mino_bc_fn_mark(struct mino_state *S, const mino_bc_fn_t *bc);
 
+/* Sentinel placed in MINO_FN.bc after a failed compile attempt so the
+ * next call doesn't re-attempt compilation. apply_callable sees this
+ * pointer and routes straight to the tree-walker. The fields are zero
+ * (code == NULL, code_len == 0, consts == NULL, ...). */
+extern const mino_bc_fn_t mino_bc_declined;
+
+/* True iff the fn's bc slot was populated with a real compiled program
+ * (as opposed to NULL = not yet tried, or &mino_bc_declined = declined). */
+#define MINO_BC_RUNNABLE(fn) \
+    ((fn)->as.fn.bc != NULL && (fn)->as.fn.bc != &mino_bc_declined)
+
 #endif /* MINO_EVAL_BC_INTERNAL_H */
