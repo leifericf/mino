@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+## v0.102.1 — Agents adversarial-test pass: doc accuracy fixes
+
+Adversarial whitebox test of the v0.102.0 STM + Agent surfaces
+(both Clojure-level and the new C-API perimeter, individually and
+in combination) ran 70+ probes. All real findings are
+documentation accuracy issues -- no behavior changed.
+
+- Fix the misleading thread-budget message in `agent_worker_ensure`
+  (and the corresponding mino-site / `mino.h` / Coming-from-Clojure
+  copy). The embedder thread does NOT count against
+  `thread_limit`, so the previous wording (">= 2 to allow one
+  agent worker plus the embedder thread") was wrong. Correct
+  wording: ">= 1 for one agent worker; >= 2 if both send and
+  send-off are used concurrently". The cookbook's `agents.c`,
+  the STM page, the Compatibility Matrix, the Intentional
+  Divergences page, and the Coming-from-Clojure page all updated
+  to match.
+- Coming-from-Clojure previously said `agent / send / send-off
+  / pmap are not provided` when `thread_limit <= 1`. Updated:
+  `agent` itself ships and constructors work; `send` /
+  `send-off` throw MTH001 when their pool's worker can't spawn;
+  only `pmap` is genuinely absent.
+- Compatibility Matrix's `send-via` row said "send and send-off
+  share the same per-state worker." Stale -- v0.102.0 split them
+  into POOLED + SOLO. Updated.
+- STM page intro paragraph said "a worker thread drains the queue."
+  Updated to reflect both pools.
+- New adversarial probes added under `.local/adversarial/` for
+  future regression coverage of the agent surfaces.
+
+A pre-existing thread-count bookkeeping issue (`(future ...)`
+worker decrements lag the embedder under tight-loop contention,
+so a subsequent `(send ...)` may throw MTH001 even when fire-
+and-forget futures have logically completed) was identified and
+filed as NEEDS-DESIGN in `.local/BUGS.md`. The fix requires a
+non-trivial threading-model refactor; deferred to a dedicated
+cycle. Workaround: deref the last future or await an agent before
+spawning more workers.
+
 ## v0.102.0 — Agents finish MVP: async dispatch + pool split + C-API
 
 Agent execution model removes the synchronous-on-the-calling-thread
@@ -64,9 +103,9 @@ public C-API perimeter for embedders.
   pools still serialize, so the user-visible effect is the same
   as before, but the queues are independent: a long-running
   send-off action does not stall pending sends, and vice versa.
-  Each pool's worker counts against `thread_limit`, so embedders
-  that want both shapes alive concurrently must raise the limit
-  to at least 3 (embedder + POOLED + SOLO worker). The split is
+  Each pool's worker counts against `thread_limit` (the embedder
+  thread does not). Embedders that want both shapes alive
+  concurrently must raise the limit to at least 2. The split is
   also a clean seam for a future SOLO-yields-eval-lock-during-
   blocking-IO design without further user-facing churn.
 - Public C-API entries: `mino_send`, `mino_send_off`, `mino_await`,

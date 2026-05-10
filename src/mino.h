@@ -28,7 +28,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 102
-#define MINO_VERSION_PATCH 0
+#define MINO_VERSION_PATCH 1
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -588,8 +588,11 @@ int         mino_is_agent(const mino_val_t *v);
  *   - agent was created in a different state (MST007),
  *   - agents have been shut down (MST008),
  *   - the agent is failed and its error mode is :fail (MST002),
- *   - the host has not granted enough threads to spawn the worker
- *     (MTH001) -- raise via mino_set_thread_limit (>= 2).
+ *   - the host has not granted enough thread budget to spawn the
+ *     pool's worker (MTH001) -- the embedder thread does not count
+ *     against the limit; raise via mino_set_thread_limit (>= 1 for
+ *     one agent worker; >= 2 if both send and send-off are used
+ *     concurrently; more if mixing with futures / host threads).
  *
  * Inside a transaction, the action is queued and only fires after a
  * successful commit, matching JVM canon. */

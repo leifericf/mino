@@ -11,13 +11,15 @@
  *
  * Threading contract:
  *
- *  - Each pool's worker counts against S->thread_limit, so a host
- *    that has granted only one thread (default thread_limit == 1)
- *    can have only one shape of send alive at a time. send /
- *    send-off throw MTH001 if the host hasn't granted enough threads
- *    to spawn the requested pool's worker; embedders that want both
- *    shapes concurrently must raise the limit to >= 2 (in addition
- *    to the embedder thread). Standalone `./mino` raises thread_limit
+ *  - Each pool's worker counts against S->thread_limit (the embedder
+ *    thread does NOT). Default thread_limit is 1, so a host that
+ *    hasn't called mino_set_thread_limit can have one agent worker
+ *    OR one future OR one host thread alive at a time. send /
+ *    send-off throw MTH001 if the host hasn't granted enough thread
+ *    budget to spawn the requested pool's worker. Embedders that
+ *    want both POOLED and SOLO alive concurrently must raise the
+ *    limit to >= 2; mixing with futures / host threads requires
+ *    correspondingly more. Standalone `./mino` raises thread_limit
  *    to cpu_count after install_all so the REPL works out of the box.
  *
  *  - Each worker is lazy-spawned on the first send/send-off into its
@@ -573,9 +575,10 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
     if (S->thread_count >= S->thread_limit) {
         prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
             "agent dispatch requires a host-granted worker thread; "
-            "raise via mino_set_thread_limit (>= 2 to allow one agent "
-            "worker plus the embedder thread; >= 3 if both send and "
-            "send-off are used concurrently)");
+            "raise via mino_set_thread_limit (>= 1 for one agent "
+            "worker; >= 2 if both send and send-off are used "
+            "concurrently). The embedder thread does not count "
+            "against the limit -- only spawned workers do.");
         return 1;
     }
     S->multi_threaded = 1;
