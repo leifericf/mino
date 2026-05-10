@@ -178,6 +178,7 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
         v = alloc_val(S, type);
         v->as.s.data = data;
         v->as.s.len  = len;
+        v->as.s.hash = h;
     }
     mino_current_ctx(S)->gc_depth--;
     tbl->entries[tbl->len] = v;

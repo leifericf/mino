@@ -144,6 +144,16 @@ allocation shape come down.
   multi-arity recur loops, where one allocation per iteration is
   dropped.
 
+- **Cached symbol hash on the val.** `mino_val_t.as.s` now carries
+  a `uint32_t hash` field populated by `intern_lookup_or_create`
+  (FNV-1a of the symbol/keyword/string bytes, same seed as
+  `env_hash_name`). `mino_env_get_sym` reads it via a new internal
+  `env_find_here_hashed` probe so the hot lookup skips one FNV
+  rehash per probed parent frame. Non-interned strings leave
+  `hash == 0` and fall through to the existing computed-hash path,
+  so freshly-`dup_n`-allocated names still work. The struct
+  doesn't grow because the union is dominated by larger members.
+
 - **Symbol-aware env lookup.** `mino_env_get_sym(env, sym)` walks
   the parent chain with the symbol's cached length in hand, so the
   inner hash-indexed probes skip `strlen(name)` per frame.

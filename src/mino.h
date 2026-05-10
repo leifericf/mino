@@ -236,6 +236,11 @@ struct mino_val {
         struct {          /* MINO_STRING, MINO_SYMBOL, MINO_KEYWORD */
             char *data;   /* byte content (NUL-terminated) */
             size_t len;   /* length in bytes (excluding NUL) */
+            uint32_t hash;/* FNV-1a of (data, len); 0 means "not cached"
+                           * — recompute on the spot. Populated by the
+                           * intern path; non-interned strings leave it
+                           * zero. Internal use only; do not set
+                           * externally. */
         } s;
         struct {          /* MINO_CONS */
             mino_val_t *car;   /* first element */

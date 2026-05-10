@@ -97,14 +97,16 @@ static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
     env->ht_cap = new_cap;
 }
 
-/* Length-aware variant. The caller already paid for strlen(name)
- * (typically reading sym->as.s.len from an interned symbol), so we
- * skip recomputing it on every probe. */
-env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen)
+/* Hash-aware probe. `hash` is non-zero iff the caller already knows
+ * `env_hash_name(name, nlen)` (e.g. from an interned symbol's
+ * `sym->as.s.hash`). When zero, the hashed-frame path computes it on
+ * the spot. Linear-scan frames ignore `hash` entirely. */
+static env_binding_t *env_find_here_hashed(mino_env_t *env, const char *name,
+                                           size_t nlen, uint32_t hash)
 {
     /* Hash-indexed lookup for large frames. */
     if (env->ht_buckets != NULL) {
-        uint32_t h    = env_hash_name(name, nlen);
+        uint32_t h    = hash != 0 ? hash : env_hash_name(name, nlen);
         size_t   mask = env->ht_cap - 1;
         size_t   idx  = h & mask;
         while (env->ht_buckets[idx] != SIZE_MAX) {
@@ -128,6 +130,14 @@ env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen)
         }
     }
     return NULL;
+}
+
+/* Length-aware variant. The caller already paid for strlen(name)
+ * (typically reading sym->as.s.len from an interned symbol), so we
+ * skip recomputing it on every probe. */
+env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen)
+{
+    return env_find_here_hashed(env, name, nlen, 0);
 }
 
 env_binding_t *env_find_here(mino_env_t *env, const char *name)
@@ -305,14 +315,16 @@ mino_val_t *mino_env_get(mino_env_t *env, const char *name)
 }
 
 /* Symbol-aware variant: caller has the symbol's interned len in hand
- * (sym->as.s.len), so we skip strlen entirely. Used by eval_symbol on
- * the hot lookup path. */
+ * (sym->as.s.len), so we skip strlen entirely. Also reads
+ * sym->as.s.hash to skip FNV recomputation per probed parent frame.
+ * Used by eval_symbol on the hot lookup path. */
 mino_val_t *mino_env_get_sym(mino_env_t *env, const mino_val_t *sym)
 {
     const char *name = sym->as.s.data;
     size_t      nlen = sym->as.s.len;
+    uint32_t    h    = sym->as.s.hash;
     while (env != NULL) {
-        env_binding_t *b = env_find_here_n(env, name, nlen);
+        env_binding_t *b = env_find_here_hashed(env, name, nlen, h);
         if (b != NULL) return b->val;
         env = env->parent;
     }
