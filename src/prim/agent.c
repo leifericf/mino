@@ -626,23 +626,24 @@ void mino_agent_quiesce_workers(mino_state_t *S)
  * pushed cons-prepended (LIFO) by prim_send when called inside a
  * dosync; reverse onto a fresh stack so the dispatch order matches
  * the order the user called send. Each entry is a (agent fn . extra)
- * triple. We invoke agent_apply_action directly so each action runs
- * synchronously on the calling thread, matching the rest of mino's
- * agent MVP.
+ * triple. Drain enqueues onto the worker's runq so post-commit
+ * sends run on the worker thread (same path as a top-level send),
+ * not on the embedder's mutator thread.
  *
- * The send-time failed-state check (prim_send) caught agents
- * already failed at queue time, but an earlier pending action can
- * fail an agent that a later pending action also targets. Re-check
- * the failed-state at dispatch time:
- *
+ * Failed-state at drain time:
  *   :fail mode + err set -- skip silently. JVM's dispatcher would
  *     throw into the agent's executor thread, never reaching the
- *     dosync caller; mino's sync drain models that by dropping the
+ *     dosync caller; mino's drain models that by dropping the
  *     action with no caller-visible signal (the agent.err latch
  *     remains the failure record).
- *   :continue mode -- run regardless. Matches prim_send: failed
+ *   :continue mode -- enqueue regardless. Matches prim_send: failed
  *     agents in :continue keep accepting actions.
- */
+ *
+ * If the worker can't be spawned (e.g. host hasn't granted threads)
+ * the drain silently drops; the dosync commit has already happened,
+ * so throwing here would not undo the ref writes and would surprise
+ * a caller that wasn't holding state_lock. Document this contract:
+ * STM dosync sends require the same thread budget as direct sends. */
 void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
                                mino_env_t *env)
 {
@@ -665,7 +666,21 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
             && agent_v->as.agent.err_mode == 0) {
             continue;
         }
-        agent_apply_action(S, agent_v, fn, extra, env);
+        if (S->agents_shutdown) continue;
+        if (agent_worker_ensure(S)) {
+            /* Worker spawn refused (no thread budget). Pending
+             * sends are silently dropped; the commit has already
+             * gone through. Clear the error that
+             * agent_worker_ensure -> prim_throw_classified set so
+             * the post-commit drain doesn't surface as a failed
+             * dosync. */
+            clear_error(S);
+            return;
+        }
+        if (agent_enqueue(S, agent_v, fn, extra, env)) {
+            /* OOM enqueueing: same logic as above. */
+            return;
+        }
     }
 }
 

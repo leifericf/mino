@@ -46,6 +46,14 @@ cycle.
   targeting the failed agent, decrements its `in_flight`, and
   rebroadcasts `agent_cv` so any await waiter wakes. The dropped
   actions are released without running.
+- `dosync`'s post-commit drain enqueues pending sends onto the
+  worker's runq instead of running them synchronously on the
+  embedder thread. Same path as a top-level send, so the action
+  body sees post-commit ref state via `*agent*` bindings and
+  doesn't tie up the embedder. STM dosync sends now require the
+  same thread budget as direct sends; spawn refusals (host hasn't
+  granted threads) silently drop the queued sends rather than
+  surfacing the post-commit drain as a failed dosync.
 
 ## v0.101.1 — STM and agent hardening pass
 
