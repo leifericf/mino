@@ -978,8 +978,9 @@ static mino_val_t *tx_run_loop(mino_state_t *S,
     for (;;) {
         mino_val_t *r;
         int         validator_rejected = 0;
-        tx->refs_head    = NULL;
-        tx->retry_signal = 0;
+        tx->refs_head     = NULL;
+        tx->retry_signal  = 0;
+        tx->pending_sends = NULL;
 
         if (tx->retry_count > STM_RETRY_CAP) {
             tx->retry_count = 0;
@@ -998,6 +999,7 @@ static mino_val_t *tx_run_loop(mino_state_t *S,
             mino_val_t *vex = tx->validator_thrown_ex;
             tx_clear_ref_states(tx);
             tx->validator_thrown_ex = NULL;
+            tx->pending_sends       = NULL;
             if (vex != NULL) {
                 /* Validator threw -- propagate the user's original
                  * exception value. JVM Clojure surfaces a validator
@@ -1010,8 +1012,11 @@ static mino_val_t *tx_run_loop(mino_state_t *S,
             }
             return NULL; /* unreachable */
         }
-        /* Conflict: free per-ref state and retry. */
+        /* Conflict: free per-ref state and retry. JVM canon also
+         * clears pending sends -- the failed attempt's queued
+         * dispatches must not fire on a later successful run. */
         tx_clear_ref_states(tx);
+        tx->pending_sends = NULL;
         tx->retry_count++;
     }
 }
@@ -1048,6 +1053,7 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
     tx.retry_signal         = 0;
     tx.in_commit            = 0;
     tx.validator_thrown_ex  = NULL;
+    tx.pending_sends        = NULL;
 
     if (ctx_v->try_depth >= MAX_TRY_DEPTH) {
         return prim_throw_classified(S, "eval/state", "MST006",
@@ -1096,9 +1102,18 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
          * via the catch arm (refs_head freed there). */
         c->current_tx = NULL;
         if (result_v != NULL) {
+            mino_val_t *pending = tx.pending_sends;
+            tx.pending_sends = NULL;
             (void)dispatch_watches(S, &tx, env);
-            /* If a watch threw, the longjmp landed at our setjmp and
-             * cleanup ran there; this branch only sees clean returns. */
+            /* Drain agent pending sends queued during the body. JVM
+             * canon: send/send-off from inside dosync queue actions
+             * that fire only on successful commit; mino's MVP runs
+             * each synchronously here, AFTER current_tx is cleared
+             * so an action body can itself open a fresh dosync. */
+            mino_agent_drain_pending(S, pending, env);
+            /* If a watch or pending-send action threw, the longjmp
+             * landed at our setjmp and cleanup ran there; this
+             * branch only sees clean returns. */
         }
         tx_clear_ref_states(&tx);
         c->try_depth  = saved_try;

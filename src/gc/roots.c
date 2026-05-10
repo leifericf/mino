@@ -316,6 +316,7 @@ static void gc_mark_ctx_tx(mino_state_t *S, mino_thread_ctx_t *ctx)
         gc_mark_interior(S, rs->committed_new);
     }
     gc_mark_interior(S, tx->validator_thrown_ex);
+    gc_mark_interior(S, tx->pending_sends);
 }
 
 /* Pin lexical environments published as GC roots and the symbol/keyword

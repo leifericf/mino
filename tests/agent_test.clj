@@ -141,6 +141,57 @@
   ;; Unknown option keys must throw rather than be silently ignored.
   (is (thrown? (agent 0 :no-such-option 1))))
 
+(deftest send-from-dosync-deferred-until-commit
+  ;; JVM canon: send / send-off from inside dosync queue actions
+  ;; that fire only on successful commit. Earlier mino ran them
+  ;; synchronously, so the action saw mid-tx tentative state, fired
+  ;; on every retry attempt, and falsely tripped io! checks.
+  (let [a (agent 0)
+        r (ref 0)
+        action-runs (atom 0)]
+    (dosync
+      (alter r inc)
+      (send a (fn [v] (swap! action-runs inc) (inc v)))
+      (is (= 0 @a) "action must NOT have run while tx still in flight"))
+    ;; After commit the action has fired exactly once.
+    (await a)
+    (is (= 1 @a))
+    (is (= 1 @action-runs))))
+
+(deftest send-from-dosync-cleared-on-abort
+  (let [a (agent 0)]
+    (try (dosync
+           (send a inc)
+           (throw (ex-info "boom" {})))
+         (catch e nil))
+    (await a)
+    ;; Aborted dosync's pending sends must not fire.
+    (is (= 0 @a))))
+
+(deftest send-from-dosync-fires-once-per-call
+  ;; Multiple sends in the body each fire once.
+  (let [a (agent [])
+        r (ref 0)]
+    (dosync
+      (alter r inc)
+      (send a conj :a)
+      (send a conj :b)
+      (send a conj :c))
+    (await a)
+    (is (= [:a :b :c] @a))))
+
+(deftest io-bang-allowed-in-action-from-dosync
+  ;; Because the action runs post-commit (current_tx cleared), io! does
+  ;; NOT trip even when the send was queued from inside dosync.
+  (let [a (agent 0)
+        side (atom :unset)]
+    (dosync
+      (send a (fn [v] (io! (reset! side :ran)) (inc v))))
+    (await a)
+    (is (= :ran @side))
+    (is (= 1 @a))
+    (is (nil? (agent-error a)))))
+
 (deftest agent-constructor-options-meta
   ;; :meta is wired through to the cell's meta field. (meta a) reads
   ;; it; with-meta is intentionally not supported for agents (shallow

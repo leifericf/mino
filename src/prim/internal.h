@@ -479,4 +479,14 @@ extern const size_t        k_prims_proc_count;
 extern const mino_prim_def k_prims_stm[];
 extern const size_t        k_prims_stm_count;
 
+/* Defined in prim/agent.c. Walks a tx_state_t.pending_sends list
+ * (LIFO -- head holds the most recent (agent fn . extra) triple),
+ * reverses onto a fresh stack, and dispatches each action through
+ * the same path as a top-level synchronous send. Called from stm.c
+ * after a successful commit with the list already detached from
+ * the tx, so a recursive dosync triggered by an action's body
+ * cannot mutate the list being walked. */
+void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
+                               mino_env_t *env);
+
 #endif /* PRIM_INTERNAL_H */

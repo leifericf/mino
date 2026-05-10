@@ -229,6 +229,13 @@ typedef struct tx_state {
      * generic MCT001 message. NULL when the validator returned falsy
      * without throwing or when no validator ran. */
     mino_val_t          *validator_thrown_ex;
+    /* (send / send-off) called from inside the transaction body
+     * appends (agent fn extra) triples to this cons list (LIFO --
+     * head holds the most recent send) instead of dispatching
+     * synchronously. JVM canon: pending sends fire only on
+     * successful commit, are silently discarded on retry or abort
+     * so a body that's run multiple times sends the action once. */
+    mino_val_t          *pending_sends;
 } tx_state_t;
 
 /* ------------------------------------------------------------------------- */

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Defer Agent `send` From Inside `dosync` Until Successful Commit
+
+`send` and `send-off` from inside a transaction body used to fire
+the action synchronously: the action saw mid-tx tentative state
+through `(deref ref)`, fired again on every retry attempt (so an
+N-retry tx ran the action N+1 times), and the action's `(io! ...)`
+falsely tripped because `current_tx` was still set. JVM canon
+queues these as pending sends and only dispatches them once, on
+successful commit.
+
+Add `tx_state_t.pending_sends` (a cons list of `(agent fn .
+extra)` triples), check `current_tx` in `prim_send` and prepend
+the triple instead of dispatching, then drain in `tx_outer_run`
+after a clean commit (between `current_tx = NULL` and watch
+dispatch, so the action body can itself open a fresh dosync).
+Pending sends are cleared on retry and on transaction abort, so a
+failed attempt never produces side effects through agents.
+
 ### Wire `:meta` Constructor Option for Agents
 
 `(agent state :meta m)` previously threw "not yet supported".

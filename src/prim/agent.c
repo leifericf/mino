@@ -196,6 +196,38 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
     }
 }
 
+/* --- pending-sends drain ------------------------------------------------- *
+ *
+ * Used by stm.c after a successful commit. Pending entries were
+ * pushed cons-prepended (LIFO) by prim_send when called inside a
+ * dosync; reverse onto a fresh stack so the dispatch order matches
+ * the order the user called send. Each entry is a (agent fn . extra)
+ * triple. We invoke agent_apply_action directly so each action runs
+ * synchronously on the calling thread, matching the rest of mino's
+ * agent MVP. The agent's failed-state guard was already evaluated
+ * at send time and isn't re-checked here. */
+void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
+                               mino_env_t *env)
+{
+    mino_val_t *reversed = mino_empty_list(S);
+    mino_val_t *p;
+    if (pending == NULL) return;
+    for (p = pending; mino_is_cons(p); p = p->as.cons.cdr) {
+        reversed = mino_cons(S, p->as.cons.car, reversed);
+    }
+    for (p = reversed; mino_is_cons(p); p = p->as.cons.cdr) {
+        mino_val_t *triple = p->as.cons.car;
+        mino_val_t *agent_v, *fn, *extra;
+        if (!mino_is_cons(triple)) continue;
+        agent_v = triple->as.cons.car;
+        if (!mino_is_cons(triple->as.cons.cdr)) continue;
+        fn      = triple->as.cons.cdr->as.cons.car;
+        extra   = triple->as.cons.cdr->as.cons.cdr;
+        if (!mino_is_agent(agent_v)) continue;
+        agent_apply_action(S, agent_v, fn, extra, env);
+    }
+}
+
 /* --- primitives ----------------------------------------------------------- */
 
 mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -293,7 +325,8 @@ mino_val_t *prim_agent_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *agent, *fn, *extra;
+    mino_val_t        *agent, *fn, *extra;
+    mino_thread_ctx_t *ctx;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "send requires at least two arguments: agent and fn");
@@ -312,6 +345,24 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (agent->as.agent.err != NULL && agent->as.agent.err_mode == 0) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "Agent is failed, needs restart");
+    }
+    /* Defer when running inside a transaction. JVM canon: agent
+     * sends from inside dosync are queued and only fire once, on
+     * successful commit. Without this, mino's sync MVP fires the
+     * action on every retry attempt (visible side effects multiply)
+     * and the action sees mid-transaction tentative state via
+     * (deref ref) instead of the committed value. The pending entry
+     * is a (agent fn . extra) cons cell appended to tx->pending_sends. */
+    ctx = mino_current_ctx(S);
+    if (ctx->current_tx != NULL) {
+        mino_val_t *triple = mino_cons(S, agent,
+                                mino_cons(S, fn, extra));
+        ctx->current_tx->pending_sends =
+            mino_cons(S, triple,
+                ctx->current_tx->pending_sends != NULL
+                    ? ctx->current_tx->pending_sends
+                    : mino_empty_list(S));
+        return agent;
     }
     agent_apply_action(S, agent, fn, extra, env);
     return agent;
