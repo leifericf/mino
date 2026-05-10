@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+## v0.101.1 — STM and agent hardening pass
+
+Concentrated correctness, consistency, and safety pass over the
+STM and agent surfaces that landed in v0.101.0. No new features;
+every change closes a real or latent bug or aligns mino with JVM
+canon. Highlights:
+
+- STM commit is now atomic via a two-pass split (stage all new
+  values + run all validators, then apply); a late-iteration
+  validator throw or commute-replay throw used to leave earlier
+  refs already committed.
+- Commute log replay routes through `mino_pcall` so a throwing
+  commute fn no longer leaks the global commit lock.
+- `tx_state_t.in_commit` rejects re-entered `alter` / `ref-set` /
+  `commute` from inside commute-replay or validator callbacks.
+- `send` and `send-off` from inside `dosync` are queued and
+  dispatched only on successful commit (cleared on retry / abort).
+  `release-pending-sends` actually counts and clears that queue.
+- Cross-state defense: agents now track `owning_state` and every
+  agent prim throws MST007 on mismatch. The ref check moved into
+  the shared cores so the Clojure path (not just the C API) is
+  covered.
+- Agent constructor accepts `:validator`, `:error-handler`,
+  `:error-mode`, `:meta`; unknown options throw.
+- `error-handler` is invoked on action and validator failure
+  (was stored but never called). `restart-agent` runs the
+  validator on the new state. `set-error-mode!` /
+  `set-error-handler!` / `add-watch` / `set-validator!` reject
+  invalid arguments at install time.
+- `*agent*` is bound to the dispatching agent across action /
+  validator / watch bodies.
+- `shutdown-agents` flips a state-level flag; subsequent sends
+  throw MST008. `send-via` throws MST008 with a clear directive
+  rather than being unbound or aliasing to `send`.
+- Watch dispatch goes through `mino_pcall` for both refs and
+  agents; first thrown exception is captured, every other watch
+  still runs, captured exception re-thrown so the caller surfaces
+  it. Pending-sends drain runs before watch dispatch so a
+  misbehaving watch can't drop queued agent sends.
+- `with-meta` / `vary-meta` on stateful types (atom / agent)
+  throw with a clear directive; `(meta x)` and `alter-meta!` keep
+  working (the latter now also write-barriers).
+- Agent print form carries identity: `#agent[ID VAL]` matches
+  `#ref[ID VAL]`.
+
 ### Bind `*agent*` During Action / Validator / Watch Dispatch
 
 JVM canon binds the dynamic var `*agent*` to the dispatching agent
