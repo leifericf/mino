@@ -444,6 +444,56 @@ mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ? mino_true(S) : mino_false(S);
 }
 
+/* Numeric reducer fast path: (reduce <op> [init] (range start end step))
+ * where <op> is one of the canonical arithmetic prims (currently +).
+ * Walks the range as a tight integer loop, never materialising chunks
+ * or boxing intermediates. Returns NULL on miss (overflow or
+ * unsupported reducer); the caller falls through to the generic path. */
+static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
+                                     mino_val_t *init, int has_init,
+                                     long long start, long long end,
+                                     long long step)
+{
+    long long acc = 0;
+    long long i;
+    if (fn == NULL || fn->type != MINO_PRIM) return NULL;
+    if (fn->as.prim.fn != prim_add) return NULL;  /* extend later */
+    /* Compute element count; range is finite (caller already checked). */
+    if (step == 0) return NULL;
+    if (has_init) {
+        if (init == NULL || init->type != MINO_INT) return NULL;
+        acc = init->as.i;
+    } else {
+        if (step > 0 ? start >= end : start <= end) {
+            return apply_callable(S, fn, mino_nil(S), NULL);
+        }
+        acc   = start;
+        start = start + step;
+    }
+    if (step > 0) {
+        for (i = start; i < end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_add_overflow(acc, i, &r)) return NULL;
+            acc = r;
+#else
+            acc += i;
+#endif
+        }
+    } else {
+        for (i = start; i > end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_add_overflow(acc, i, &r)) return NULL;
+            acc = r;
+#else
+            acc += i;
+#endif
+        }
+    }
+    return mino_int(S, acc);
+}
+
 mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn;
@@ -451,6 +501,8 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *coll;
     seq_iter_t  it;
     size_t      n;
+    long long   r_start = 0, r_end = 0, r_step = 1;
+    int         r_inf   = 0;
     arg_count(S, args, &n);
     if (n == 2) {
         /* (reduce f coll) — first element is the initial accumulator. */
@@ -459,6 +511,12 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll == NULL || coll->type == MINO_NIL) {
             /* (reduce f nil) → (f) */
             return apply_callable(S, fn, mino_nil(S), env);
+        }
+        if (lazy_is_int_range(coll, &r_start, &r_end, &r_step, &r_inf)
+            && !r_inf) {
+            mino_val_t *fast = reduce_int_range(
+                S, fn, NULL, 0, r_start, r_end, r_step);
+            if (fast != NULL) return fast;
         }
         seq_iter_init(S, &it, coll);
         if (seq_iter_done(&it)) {
@@ -474,14 +532,57 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll == NULL || coll->type == MINO_NIL) {
             return acc;
         }
+        if (lazy_is_int_range(coll, &r_start, &r_end, &r_step, &r_inf)
+            && !r_inf) {
+            mino_val_t *fast = reduce_int_range(
+                S, fn, acc, 1, r_start, r_end, r_step);
+            if (fast != NULL) return fast;
+        }
         seq_iter_init(S, &it, coll);
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reduce requires 2 or 3 arguments");
     }
+    /* Inner loop. The numeric int+int fast lane checks fn against the
+     * canonical arithmetic / comparison prims and computes directly
+     * with __builtin_*_overflow when both operands are MINO_INT, just
+     * like eval_apply_regular_call's lane but on the C-side reduce
+     * iterator. Saves the per-step 2-element cons spine. */
     while (!seq_iter_done(&it)) {
-        mino_val_t *elem   = seq_iter_val(S, &it);
-        mino_val_t *call_a = mino_cons(S, acc, mino_cons(S, elem, mino_nil(S)));
-        acc = apply_callable(S, fn, call_a, env);
+        mino_val_t *elem = seq_iter_val(S, &it);
+        if (fn != NULL && fn->type == MINO_PRIM
+            && fn->as.prim.fn != NULL
+            && acc != NULL && acc->type == MINO_INT
+            && elem != NULL && elem->type == MINO_INT) {
+            mino_prim_fn p  = fn->as.prim.fn;
+            long long    ai = acc->as.i;
+            long long    bi = elem->as.i;
+            long long    r;
+            int          handled = 0;
+            if (p == prim_add) {
+#if defined(__GNUC__) || defined(__clang__)
+                if (!__builtin_add_overflow(ai, bi, &r)) {
+                    acc = mino_int(S, r);
+                    handled = 1;
+                }
+#endif
+            } else if (p == prim_mul) {
+#if defined(__GNUC__) || defined(__clang__)
+                if (!__builtin_mul_overflow(ai, bi, &r)) {
+                    acc = mino_int(S, r);
+                    handled = 1;
+                }
+#endif
+            }
+            if (handled) {
+                seq_iter_next(S, &it);
+                continue;
+            }
+        }
+        {
+            mino_val_t *call_a = mino_cons(
+                S, acc, mino_cons(S, elem, mino_nil(S)));
+            acc = apply_callable(S, fn, call_a, env);
+        }
         if (acc == NULL) return NULL;
         if (acc->type == MINO_REDUCED) return acc->as.reduced.val;
         seq_iter_next(S, &it);

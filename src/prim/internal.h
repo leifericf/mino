@@ -209,6 +209,12 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+/* Recognise a not-yet-realized lazy seq emitted by prim_range, used by
+ * prim_reduce's int-range fast path. Returns 1 and fills the param
+ * pointers on a hit, 0 otherwise. */
+int         lazy_is_int_range(const mino_val_t *coll, long long *start_out,
+                              long long *end_out, long long *step_out,
+                              int *infinite_out);
 mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env);

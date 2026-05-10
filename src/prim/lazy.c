@@ -304,6 +304,30 @@ mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  */
 static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx);
 
+/* Recognise a lazy seq created by prim_range. Used by prim_reduce's
+ * int-range fast path to lift the iteration into a tight C loop
+ * instead of forcing every chunk and rebuilding a 2-arg cons spine
+ * per call. Returns 1 and fills the params on a hit, 0 on a miss. */
+int lazy_is_int_range(const mino_val_t *coll, long long *start_out,
+                      long long *end_out, long long *step_out,
+                      int *infinite_out)
+{
+    const mino_val_t *ctx;
+    if (coll == NULL || coll->type != MINO_LAZY) return 0;
+    if (coll->as.lazy.c_thunk != range_thunk) return 0;
+    if (coll->as.lazy.realized) return 0;  /* would be a chunked cons by now */
+    ctx = coll->as.lazy.body;
+    if (ctx == NULL || !mino_is_cons(ctx)) return 0;
+    *start_out    = ctx->as.cons.car->as.i;
+    *end_out      = ctx->as.cons.cdr->as.cons.car->as.i;
+    *step_out     = ctx->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
+    *infinite_out = (ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr
+                       ->as.cons.car->type == MINO_BOOL
+                     && ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr
+                       ->as.cons.car->as.b == 1);
+    return 1;
+}
+
 static mino_val_t *range_make_lazy(mino_state_t *S, long long start,
                                    long long end, long long step,
                                    int infinite)

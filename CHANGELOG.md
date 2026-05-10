@@ -28,6 +28,23 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **Reduce / range fast paths.** `prim_reduce` now has two fast
+  lanes for numeric work:
+  - **Range source pre-detection.** `lazy_is_int_range` recognises
+    a not-yet-realized lazy seq emitted by `prim_range`; when the
+    reducer is `+` and the source is a finite range, `reduce`
+    walks the integer range directly with overflow-aware C
+    arithmetic, never materialising chunks. Bounded by the
+    `__builtin_add_overflow` guard so any roll-up overflow falls
+    through to the generic path.
+  - **Per-step int+int fast lane.** Mirroring step 8's eval-side
+    lane, the inner loop in `prim_reduce` checks the reducer
+    against the canonical `+` / `*` prims and computes
+    `(acc, elem)` directly when both are `MINO_INT`. Saves the
+    2-cell cons spine per iteration.
+
+  Microbenchmark: `(reduce + (range 1M))` was ~870 ms; now ~514 ms.
+
 - **Numeric int+int fast lane.** `eval_apply_regular_call` now
   recognises the binary call shape `(op a b)` for the canonical
   `+ - * = < <= > >=` prims. When both args evaluate to `MINO_INT`
