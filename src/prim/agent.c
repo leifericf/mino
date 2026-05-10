@@ -214,9 +214,25 @@ mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 "agent: option key must be a keyword");
         }
         if (strcmp(key->as.s.data, "validator") == 0) {
+            if (val == NULL || (val->type != MINO_FN
+                                 && val->type != MINO_PRIM
+                                 && val->type != MINO_MACRO
+                                 && val->type != MINO_NIL)) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "agent: :validator must be a fn or nil");
+            }
+            if (val->type == MINO_NIL) val = NULL;
             gc_write_barrier(S, agent, agent->as.agent.validator, val);
             agent->as.agent.validator = val;
         } else if (strcmp(key->as.s.data, "error-handler") == 0) {
+            if (val == NULL || (val->type != MINO_FN
+                                 && val->type != MINO_PRIM
+                                 && val->type != MINO_MACRO
+                                 && val->type != MINO_NIL)) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "agent: :error-handler must be a fn or nil");
+            }
+            if (val->type == MINO_NIL) val = NULL;
             gc_write_barrier(S, agent, agent->as.agent.err_handler, val);
             agent->as.agent.err_handler = val;
         } else if (strcmp(key->as.s.data, "error-mode") == 0) {

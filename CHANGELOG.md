@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Validate Callability of Watch / Validator Arguments
+
+`add-watch` and `set-validator!` accepted any value as the watch
+or validator -- a non-callable was stored quietly and only
+exploded later when the dispatcher tried to call it. Reject
+anything that isn't a fn/prim/macro at install time across all
+watchable references (atom, ref, var, agent). Same rule applies
+to the agent constructor's `:validator` and `:error-handler`
+options. `set-validator!` still accepts `nil` (clears the
+validator) per JVM canon.
+
 ### Make STM Commits Atomic and Reject Mid-Commit Mutation
 
 `tx_commit` walked the write set in iteration order, applying each

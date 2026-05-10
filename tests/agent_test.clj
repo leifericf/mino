@@ -187,6 +187,25 @@
     (is (nil? (agent-error a)))
     (is (= 1 @a))))
 
+(deftest set-validator-rejects-non-callable
+  (let [a (atom 0)] (is (thrown? (set-validator! a 5))))
+  (let [r (ref 0)] (is (thrown? (set-validator! r "fn"))))
+  (let [a (agent 0)] (is (thrown? (set-validator! a :keyword))))
+  ;; Real fns and nil work.
+  (let [a (atom 0)]
+    (set-validator! a number?)
+    (set-validator! a nil)
+    (is (nil? (get-validator a)))))
+
+(deftest add-watch-rejects-non-callable
+  (let [a (atom 0)] (is (thrown? (add-watch a :w 5))))
+  (let [r (ref 0)] (is (thrown? (add-watch r :w "fn"))))
+  (let [a (agent 0)] (is (thrown? (add-watch a :w :keyword)))))
+
+(deftest agent-constructor-validator-must-be-fn
+  (is (thrown? (agent 0 :validator 5)))
+  (is (thrown? (agent 0 :error-handler "fn"))))
+
 (deftest set-error-handler-validates-fn
   ;; set-error-handler! used to silently store any value -- (set-error-handler! a 5)
   ;; would put 5 in the slot, which then crashed on the call site

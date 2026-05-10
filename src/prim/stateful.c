@@ -396,6 +396,16 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!watchable_get(a, &watches_slot, &validator_slot)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "add-watch: first argument must be an atom or ref");
     }
+    /* The watch fn is invoked as (fn key ref old-value new-value) on
+     * every committed state change. Storing a non-callable here just
+     * defers the failure to the dispatch site, which is far from the
+     * install. Reject at install. */
+    if (fn == NULL || (fn->type != MINO_FN
+                        && fn->type != MINO_PRIM
+                        && fn->type != MINO_MACRO)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "add-watch: watch fn must be a fn");
+    }
     watches = *watches_slot;
     if (watches == NULL || watches->type != MINO_MAP) {
         root  = NULL;
@@ -492,6 +502,16 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
         gc_write_barrier(S, a, *validator_slot, NULL);
         *validator_slot = NULL;
         return mino_nil(S);
+    }
+    /* The validator is invoked as (fn new-value) on every state
+     * transition. Storing a non-callable just defers the failure to
+     * the next mutation, far from this install site -- reject loudly
+     * here so user typos surface immediately. */
+    if (fn->type != MINO_FN
+        && fn->type != MINO_PRIM
+        && fn->type != MINO_MACRO) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "set-validator!: validator must be a fn or nil");
     }
     /* JVM Clojure does not validate the current value at install time; only
      * subsequent state transitions are checked. Match canon: install fn
