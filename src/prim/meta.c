@@ -4,12 +4,30 @@
 
 #include "prim/internal.h"
 
-/* Type tags that can carry metadata. */
+/* Type tags whose meta can be CHANGED through with-meta / vary-meta
+ * (which return a copy of the value carrying the new metadata).
+ * Stateful types -- atom / agent -- are intentionally NOT here:
+ * with-meta would shallow-copy the cell, producing a sibling whose
+ * `val` slot diverges from the original on the next mutation. The
+ * proper Clojure-canon fix needs a separate indirection cell so two
+ * with-meta'd atoms share their state; absent that, throw a clear
+ * error and direct callers at alter-meta! (in-place) or the
+ * constructor's :meta option. */
 static int supports_meta(mino_type_t t)
 {
     return t == MINO_SYMBOL || t == MINO_CONS || t == MINO_VECTOR
         || t == MINO_MAP    || t == MINO_SET  || t == MINO_FN
-        || t == MINO_MACRO  || t == MINO_VAR  || t == MINO_ATOM;
+        || t == MINO_MACRO  || t == MINO_VAR;
+}
+
+/* Type tags whose meta can be READ via (meta x) and MUTATED in
+ * place via alter-meta!. Includes everything supports_meta covers
+ * plus the stateful types (atom / agent) -- alter-meta! does an
+ * in-place mutation of obj->meta rather than copying the cell, so
+ * it stays safe for stateful values, and (meta x) is read-only. */
+static int meta_readable(mino_type_t t)
+{
+    return supports_meta(t) || t == MINO_ATOM || t == MINO_AGENT;
 }
 
 /* Vars don't store an explicit meta map -- :ns and :name come from the
@@ -54,14 +72,7 @@ mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
     }
     obj = args->as.cons.car;
     if (obj == NULL) return mino_nil(S);
-    /* Agents carry meta on the cell but are NOT in supports_meta:
-     * with-meta would shallow-copy the agent struct (val / err /
-     * watches pointers), producing a sibling that diverges on the
-     * next send. Read here directly; with-meta still throws. */
-    if (obj->type == MINO_AGENT) {
-        return obj->meta != NULL ? obj->meta : mino_nil(S);
-    }
-    if (!supports_meta(obj->type)) {
+    if (!meta_readable(obj->type)) {
         return mino_nil(S);
     }
     if (obj->type == MINO_VAR) {
@@ -81,7 +92,17 @@ mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
     }
     obj = args->as.cons.car;
     m   = args->as.cons.cdr->as.cons.car;
-    if (obj == NULL || !supports_meta(obj->type)) {
+    if (obj == NULL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "with-meta: type does not support metadata");
+    }
+    if (obj->type == MINO_ATOM || obj->type == MINO_AGENT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "with-meta: stateful types (atom/agent) cannot be copied "
+            "to attach new meta; use alter-meta! for in-place mutation "
+            "or the constructor's :meta option");
+    }
+    if (!supports_meta(obj->type)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "with-meta: type does not support metadata");
     }
     if (m != NULL && m->type != MINO_NIL && m->type != MINO_MAP) {
@@ -104,7 +125,17 @@ mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
     obj = args->as.cons.car;
     f   = args->as.cons.cdr->as.cons.car;
     extra = args->as.cons.cdr->as.cons.cdr; /* remaining args (cons list or nil) */
-    if (obj == NULL || !supports_meta(obj->type)) {
+    if (obj == NULL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "vary-meta: type does not support metadata");
+    }
+    if (obj->type == MINO_ATOM || obj->type == MINO_AGENT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "vary-meta: stateful types (atom/agent) cannot be copied "
+            "to attach new meta; use alter-meta! for in-place mutation "
+            "or the constructor's :meta option");
+    }
+    if (!supports_meta(obj->type)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "vary-meta: type does not support metadata");
     }
     old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
@@ -133,7 +164,10 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
     obj   = args->as.cons.car;
     f     = args->as.cons.cdr->as.cons.car;
     extra = args->as.cons.cdr->as.cons.cdr;
-    if (obj == NULL || !supports_meta(obj->type)) {
+    /* alter-meta! mutates obj->meta in place; safe for atom / agent
+     * (their identity is preserved) so use the broader meta_readable
+     * gate rather than supports_meta. */
+    if (obj == NULL || !meta_readable(obj->type)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "alter-meta!: type does not support metadata");
     }
     old_meta = (obj->meta != NULL) ? obj->meta : mino_nil(S);
@@ -145,7 +179,11 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
     if (new_meta->type != MINO_NIL && new_meta->type != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "alter-meta!: f must return a map or nil");
     }
-    obj->meta = (new_meta->type == MINO_NIL) ? NULL : new_meta;
+    {
+        mino_val_t *next = (new_meta->type == MINO_NIL) ? NULL : new_meta;
+        gc_write_barrier(S, obj, obj->meta, next);
+        obj->meta = next;
+    }
     return obj->meta != NULL ? obj->meta : mino_nil(S);
 }
 

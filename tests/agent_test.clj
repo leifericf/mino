@@ -225,6 +225,33 @@
     (is (= 1 @a))
     (is (nil? (agent-error a)))))
 
+(deftest with-meta-on-stateful-throws
+  ;; with-meta on atom or agent used to do a shallow cell copy --
+  ;; the sibling got its own val/err pointers and diverged from the
+  ;; original on the next mutation. Throw with a clear directive
+  ;; pointing at alter-meta! / constructor :meta instead.
+  (is (thrown? (with-meta (atom 0) {:m 1})))
+  (is (thrown? (with-meta (agent 0) {:m 1})))
+  (is (thrown? (vary-meta (atom 0) assoc :m 1)))
+  (is (thrown? (vary-meta (agent 0) assoc :m 1))))
+
+(deftest alter-meta-on-stateful-still-works
+  ;; alter-meta! is in-place; identity is preserved and state is
+  ;; not duplicated. Stays available for stateful types.
+  (let [a (atom 0)]
+    (alter-meta! a (constantly {:doc "x"}))
+    (is (= {:doc "x"} (meta a))))
+  (let [a (agent 0)]
+    (alter-meta! a (constantly {:doc "y"}))
+    (is (= {:doc "y"} (meta a)))))
+
+(deftest meta-on-stateful-reads-cell-meta
+  ;; (meta x) returns the cell-level meta on stateful types.
+  (let [a (atom 0)]
+    (is (nil? (meta a)))
+    (alter-meta! a (constantly {:k :v}))
+    (is (= {:k :v} (meta a)))))
+
 (deftest send-via-throws-not-implemented
   ;; send-via takes an Executor in JVM; mino's sync MVP has no
   ;; Executor type. Throw with a clear MST008 rather than alias to

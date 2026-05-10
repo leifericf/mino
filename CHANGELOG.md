@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### Reject `with-meta` / `vary-meta` On Stateful Types
+
+`(with-meta (atom 0) m)` used to shallow-copy the atom struct, so
+the sibling cell got its own `val` slot and diverged from the
+original on the next `swap!` -- a silent identity split. JVM
+canon decouples atom storage from atom identity (Atom-with-meta
+shares the AtomicReference); without that indirection, the
+faithful behavior would require restructuring atom storage.
+
+Until that refactor lands, throw a clear MTY001 with the
+directive "use alter-meta! for in-place mutation or the
+constructor's :meta option" on `with-meta` / `vary-meta` for
+both atoms and agents. `alter-meta!` keeps working (it mutates
+`obj->meta` in place, so identity is preserved) and `(meta x)`
+keeps working (read-only). Refs already threw because they
+weren't in `supports_meta`; no change there.
+
+While in `alter-meta!`, add the missing `gc_write_barrier` around
+the in-place meta update -- stale OLD-to-YOUNG pointer was a
+latent issue.
+
 ### Implement `shutdown-agents` And `send-via` Properly
 
 `shutdown-agents` was a no-op stub returning nil. `send-via`
