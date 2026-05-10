@@ -12,8 +12,31 @@ cycle.
   worker thread fields. Lifecycle hooks in `state_init` /
   `mino_state_free`. GC root-marking walks the runq so queued
   actions keep their fn / args / dyn snapshot live until the
-  worker pops them. No behavior change yet -- the queue is
-  inert until the worker is wired up.
+  worker pops them.
+- `send` and `send-off` now enqueue the action onto the per-state
+  run-queue and return the agent immediately. A worker thread is
+  lazy-spawned on the first send (gated on `thread_limit`; throws
+  MTH001 if the host hasn't granted a thread budget). The worker
+  drains the queue, acquiring `state_lock` for each action body so
+  eval invariants hold, then decrements the agent's `in_flight`
+  counter and signals `agent_cv`. The worker exits when the queue
+  drains so it stops counting against `thread_count` and doesn't
+  suppress GC for the rest of the state's lifetime; the next send
+  re-spawns. `await` and `await-for` are now actually blocking:
+  the caller yields `state_lock` and waits on `agent_cv` until
+  every named agent's `in_flight` reaches zero. `await-for`
+  returns `false` on timeout. Self-await from inside an agent
+  action throws MST002.
+- `mino_pcall` now restores `lock_depth` after a longjmp from a
+  throwing body. The embedder thread tolerated the imbalance
+  because it never yielded the recursive `state_lock`, but a host
+  worker (futures, agents) that catches a throw via pcall and then
+  yields ended up unable to fully release the lock and deadlocked
+  on resume. This was a latent bug; agents make it observable.
+- `mino_agent_quiesce_workers` flips `agents_shutdown`, broadcasts
+  the cv so any drain-pending worker exits, then reaps the
+  pthread handle. Called by `mino_state_free` before heap teardown
+  so a worker can't run after free.
 
 ## v0.101.1 — STM and agent hardening pass
 

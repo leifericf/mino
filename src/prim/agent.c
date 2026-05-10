@@ -1,42 +1,98 @@
 /*
  * agent.c -- agents (asynchronous mutable cells with serialized actions).
  *
- * mino's MVP implementation runs sends synchronously on the calling
- * thread. JVM Clojure dispatches the action on a worker thread pool
- * and returns the agent immediately; mino runs the action eagerly,
- * validates against the agent's validator, captures any throw into
- * the agent's error slot via mino_pcall's out_ex parameter, dispatches
- * watches, and returns the agent.
+ * Execution model: send / send-off enqueue (fn args) onto a per-state
+ * FIFO and return the agent immediately. A single worker thread per
+ * state drains the FIFO, acquires state_lock, runs each action under
+ * the agent's validator + watches via agent_apply_action, and signals
+ * await waiters when the agent's in-flight count reaches zero.
  *
- * Why sync: mino's eval loop is serialized under a per-state mutex
- * (mino_state_lock_acquire). A future-driven worker would acquire
- * that lock to run its action and otherwise idle, so the parallelism
- * advantage of JVM's worker pool does not exist here. Running
- * synchronously is observably equivalent for any program that does
- * not race against the agent itself, with the bonus that await is
- * trivially a no-op (the queue is always drained on return from
- * send).
+ * Threading contract:
  *
- * Documented deviations from JVM Clojure:
+ *  - The worker thread counts against S->thread_limit, so a host that
+ *    has not granted threads (default thread_limit == 1) cannot send;
+ *    send/send-off throws MTH001 in that case, the same shape
+ *    future / promise / thread already use. Standalone `./mino`
+ *    raises thread_limit to cpu_count after install_all so the
+ *    standalone REPL works out of the box.
  *
- *  1. send / send-off run synchronously on the calling thread. await
- *     and await-for are no-ops -- the queue is always drained.
+ *  - The worker is lazy-spawned on the first send/send-off. It exits
+ *    when the queue is drained AND S->agents_shutdown is set
+ *    (typically by the shutdown-agents primitive, or by
+ *    mino_state_free during teardown).
  *
- *  2. send-via is not implemented (no public Executor type exposed).
+ *  - Lock order: state_lock outer, S->agent_mu inner. The send caller
+ *    holds state_lock while it enqueues under agent_mu. The worker
+ *    takes agent_mu to pop, releases agent_mu, then acquires
+ *    state_lock to run the action; no nested hold across the action
+ *    body. await callers yield state_lock before blocking on
+ *    agent_cv so the worker can run.
  *
- *  3. shutdown-agents and release-pending-sends are stubs (mino's
- *     workload doesn't have an agent-shutdown contract to honor).
+ *  - mino's per-state eval lock means actions on multiple agents in
+ *    one state still run one at a time; the worker exists to decouple
+ *    send (returns immediately) from action execution and to give
+ *    await meaningful blocking semantics. A send vs send-off pool
+ *    split (where send-off may run blocking IO outside the eval lock)
+ *    is left for a follow-up cycle.
  *
- *  4. Action throws and watch throws both set the agent's err slot
- *     via mino_pcall so the caller sees the thrown payload via
- *     agent-error. JVM routes action throws through error-handler /
- *     error-mode similarly; mino's MVP captures the bare exception.
+ *  - Per-action *agent* and conveyed dynamic bindings are pushed onto
+ *    the worker's dyn_stack before the action body runs, mirroring
+ *    JVM Clojure's binding conveyance for futures.
+ *
+ *  - If an agent fails (action or validator throw) and its error mode
+ *    is :fail, send throws on the caller. Actions queued before the
+ *    failure that haven't run yet are dropped silently when the
+ *    worker pops them and observes err != NULL: mino's single-worker
+ *    model can't park them per agent without starving the others.
+ *    With error mode :continue, the worker runs every queued action
+ *    regardless of intermediate failures, matching JVM canon.
  */
 
 #include "prim/internal.h"
 #include "eval/internal.h"
+#include "runtime/host_threads.h"
 
+#include <limits.h>
 #include <string.h>
+
+#if defined(_WIN32) && defined(_MSC_VER)
+#  include <windows.h>
+#  include <process.h>
+#else
+#  include <pthread.h>
+#  include <time.h>
+#endif
+
+/* --- agent_mu / agent_cv portability ------------------------------------- */
+
+#if defined(_WIN32) && defined(_MSC_VER)
+static void agent_mu_init(CRITICAL_SECTION *m)    { InitializeCriticalSection(m); }
+static void agent_mu_lock(CRITICAL_SECTION *m)    { EnterCriticalSection(m); }
+static void agent_mu_unlock(CRITICAL_SECTION *m)  { LeaveCriticalSection(m); }
+static void agent_cv_init(CONDITION_VARIABLE *c)  { InitializeConditionVariable(c); }
+static void agent_cv_wait(CONDITION_VARIABLE *c, CRITICAL_SECTION *m)
+{ SleepConditionVariableCS(c, m, INFINITE); }
+static void agent_cv_broadcast(CONDITION_VARIABLE *c) { WakeAllConditionVariable(c); }
+#else
+static void agent_mu_init(pthread_mutex_t *m)     { pthread_mutex_init(m, NULL); }
+static void agent_mu_lock(pthread_mutex_t *m)     { pthread_mutex_lock(m); }
+static void agent_mu_unlock(pthread_mutex_t *m)   { pthread_mutex_unlock(m); }
+static void agent_cv_init(pthread_cond_t *c)      { pthread_cond_init(c, NULL); }
+static void agent_cv_wait(pthread_cond_t *c, pthread_mutex_t *m)
+{ pthread_cond_wait(c, m); }
+static void agent_cv_broadcast(pthread_cond_t *c) { pthread_cond_broadcast(c); }
+#endif
+
+/* Lazy-init agent_mu/cv. Called under state_lock (so the inited flag
+ * read is race-free against concurrent sends from other threads). */
+static void agent_mu_ensure_inited(mino_state_t *S)
+{
+    if (!S->agent_mu_inited) {
+        agent_mu_init(&S->agent_mu);
+        agent_cv_init(&S->agent_cv);
+        S->agent_mu_inited = 1;
+    }
+}
 
 /* --- public-API constructor + predicate ----------------------------------- */
 
@@ -219,6 +275,351 @@ out:
     ctx->dyn_stack = ag_frame.prev;
 }
 
+/* --- worker thread + queue dispatch --------------------------------------- */
+
+/* Pop the head node of S->agent_run_head. Caller must hold agent_mu. */
+static agent_action_node_t *agent_runq_pop(mino_state_t *S)
+{
+    agent_action_node_t *n = S->agent_run_head;
+    if (n == NULL) return NULL;
+    S->agent_run_head = n->next;
+    if (S->agent_run_head == NULL) S->agent_run_tail = NULL;
+    n->next = NULL;
+    return n;
+}
+
+/* Append node to the tail of S->agent_run_head. Caller must hold agent_mu. */
+static void agent_runq_push_tail(mino_state_t *S, agent_action_node_t *n)
+{
+    n->next = NULL;
+    if (S->agent_run_tail != NULL) {
+        S->agent_run_tail->next = n;
+    } else {
+        S->agent_run_head = n;
+    }
+    S->agent_run_tail = n;
+}
+
+/* Run one queued action on the worker thread. Holds state_lock for
+ * the duration of the action body. Conveys the dyn-binding snapshot
+ * captured at send time as a single dyn_frame so the action sees the
+ * caller's binding context (matches future / promise dyn conveyance).
+ *
+ * Skip-on-failed: if the agent has err != NULL && err_mode == :fail,
+ * drop the action silently. mino's single-worker model can't park
+ * per-agent without starving other agents; users get a loud send-
+ * time throw before the queue gets here, so the only way to land in
+ * this branch is for an earlier action to have failed the agent
+ * mid-queue. Document this as a deviation. */
+static void agent_worker_run_one(mino_state_t *S, agent_action_node_t *n)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    dyn_frame_t       *conveyed = NULL;
+    dyn_binding_t     *bhead = NULL;
+
+    /* Build conveyed dyn-binding chain from the caller's snapshot map. */
+    if (n->dyn_snap != NULL && n->dyn_snap->type == MINO_MAP
+        && n->dyn_snap->as.map.len > 0) {
+        size_t i;
+        int    oom = 0;
+        for (i = 0; i < n->dyn_snap->as.map.len; i++) {
+            mino_val_t    *key = vec_nth(n->dyn_snap->as.map.key_order, i);
+            mino_val_t    *val = map_get_val(n->dyn_snap, key);
+            dyn_binding_t *b;
+            if (key == NULL
+                || (key->type != MINO_SYMBOL && key->type != MINO_STRING)) {
+                continue;
+            }
+            b = (dyn_binding_t *)malloc(sizeof(*b));
+            if (b == NULL) { oom = 1; break; }
+            b->name = mino_symbol(S, key->as.s.data)->as.s.data;
+            b->val  = val;
+            b->next = bhead;
+            bhead   = b;
+        }
+        if (!oom) {
+            conveyed = (dyn_frame_t *)malloc(sizeof(*conveyed));
+            if (conveyed == NULL) { dyn_binding_list_free(bhead); bhead = NULL; }
+            else {
+                conveyed->bindings = bhead;
+                conveyed->prev     = ctx->dyn_stack;
+                ctx->dyn_stack     = conveyed;
+            }
+        } else {
+            dyn_binding_list_free(bhead);
+            bhead = NULL;
+        }
+    }
+
+    /* Failed-:fail short-circuit: skip silently. */
+    if (n->agent->as.agent.err != NULL
+        && n->agent->as.agent.err_mode == 0) {
+        goto cleanup;
+    }
+    agent_apply_action(S, n->agent, n->fn, n->extra, n->env);
+
+cleanup:
+    if (conveyed != NULL) {
+        ctx->dyn_stack = conveyed->prev;
+        dyn_binding_list_free(conveyed->bindings);
+        free(conveyed);
+    }
+}
+
+/* Worker entry. Pops actions from the runq, running each under
+ * state_lock. Exits as soon as the queue drains (or when shutdown
+ * is set) so a long-idle agent worker doesn't keep thread_count > 0
+ * and suppress GC for the rest of the state's lifetime. The next
+ * send re-spawns; the spawn cost is paid only by burst transitions.
+ *
+ * Lock acquisition order: state_lock outer, agent_mu inner. The
+ * worker takes agent_mu to pop, releases it before taking
+ * state_lock to run, retakes agent_mu to decrement in_flight and
+ * broadcast. Awaiters yield state_lock before blocking on agent_cv,
+ * so they don't block the worker. */
+static void agent_worker_run(mino_state_t *S, char *stack_anchor)
+{
+    mino_thread_ctx_t *ctx;
+
+    ctx = (mino_thread_ctx_t *)calloc(1, sizeof(*ctx));
+    if (ctx == NULL) {
+        /* Best-effort: without a ctx we can't run any action. Mark
+         * the worker as gone so the next send re-spawns; pending
+         * nodes leak (memory is reclaimed by mino_state_free's
+         * drain). */
+        agent_mu_lock(&S->agent_mu);
+        S->agent_worker_alive = 0;
+        agent_cv_broadcast(&S->agent_cv);
+        agent_mu_unlock(&S->agent_mu);
+        return;
+    }
+    ctx->gc_stack_bottom = (void *)stack_anchor;
+    mino_tls_ctx = ctx;
+
+    /* Link onto S->worker_ctxs_head so gc_mark_roots reaches the
+     * worker's pinned values while it's blocked. */
+    mino_state_lock_acquire(S);
+    ctx->next_worker = S->worker_ctxs_head;
+    S->worker_ctxs_head = ctx;
+    mino_state_lock_release(S);
+
+    for (;;) {
+        agent_action_node_t *n;
+
+        agent_mu_lock(&S->agent_mu);
+        if (S->agent_run_head == NULL) {
+            /* Queue drained or shutdown: exit the worker so it
+             * stops counting against thread_count. The next send
+             * re-spawns. */
+            S->agent_worker_alive = 0;
+            agent_cv_broadcast(&S->agent_cv);
+            agent_mu_unlock(&S->agent_mu);
+            break;
+        }
+        n = agent_runq_pop(S);
+        agent_mu_unlock(&S->agent_mu);
+
+        /* Run the action under state_lock so eval invariants hold. */
+        mino_state_lock_acquire(S);
+        agent_worker_run_one(S, n);
+        mino_state_lock_release(S);
+
+        /* Decrement the agent's in_flight and signal await waiters. */
+        agent_mu_lock(&S->agent_mu);
+        if (n->agent->as.agent.in_flight > 0) {
+            n->agent->as.agent.in_flight--;
+        }
+        agent_cv_broadcast(&S->agent_cv);
+        agent_mu_unlock(&S->agent_mu);
+
+        free(n);
+    }
+
+    /* Detach worker ctx from S->worker_ctxs_head and decrement the
+     * thread count. The pthread_t is left intact for a follow-up
+     * pthread_join from agent_worker_ensure or
+     * mino_agent_quiesce_workers (signaled by
+     * agent_worker_pending_join, which the spawn path set when it
+     * created us). Joining an already-exited joinable pthread
+     * returns immediately. */
+    mino_state_lock_acquire(S);
+    {
+        mino_thread_ctx_t **pp = &S->worker_ctxs_head;
+        while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
+        if (*pp == ctx) { *pp = ctx->next_worker; }
+    }
+    if (S->thread_count > 0) { S->thread_count--; }
+    mino_state_lock_release(S);
+
+    mino_tls_ctx = NULL;
+    free(ctx);
+}
+
+#if defined(_WIN32) && defined(_MSC_VER)
+static unsigned __stdcall agent_worker_entry(void *arg)
+{
+    char anchor;
+    agent_worker_run((mino_state_t *)arg, &anchor);
+    return 0;
+}
+#else
+static void *agent_worker_entry(void *arg)
+{
+    char anchor;
+    agent_worker_run((mino_state_t *)arg, &anchor);
+    return NULL;
+}
+#endif
+
+/* Reap a previously-exited (drain-exit) worker so its pthread
+ * handle can be released before the next spawn. Caller must hold
+ * state_lock; the join itself yields the lock so the exiting
+ * worker can finish its ctx detach + thread_count decrement. */
+static void agent_worker_reap_pending(mino_state_t *S)
+{
+    int saved_depth;
+    if (!S->agent_worker_pending_join) return;
+    S->agent_worker_pending_join = 0;
+    saved_depth = mino_yield_lock(S);
+#if defined(_WIN32) && defined(_MSC_VER)
+    WaitForSingleObject(S->agent_worker, INFINITE);
+    CloseHandle(S->agent_worker);
+#else
+    pthread_join(S->agent_worker, NULL);
+#endif
+    mino_resume_lock(S, saved_depth);
+}
+
+/* Lazy-spawn the agent worker. Caller must hold state_lock. Throws
+ * MTH001 if thread budget is exhausted. Returns 0 on success, 1 on
+ * throw (caller should propagate NULL). Idempotent: returns 0 fast
+ * when a worker is already running. If a previous worker exited
+ * (queue drained), reap its pthread handle before spawning a
+ * fresh one so thread_count is accurate. */
+static int agent_worker_ensure(mino_state_t *S)
+{
+    int alive;
+    if (!S->agent_mu_inited) {
+        agent_mu_ensure_inited(S);
+    }
+    agent_mu_lock(&S->agent_mu);
+    alive = S->agent_worker_alive;
+    agent_mu_unlock(&S->agent_mu);
+    if (alive) return 0;
+
+    /* Reap any pthread handle left by a previously-drained worker. */
+    agent_worker_reap_pending(S);
+
+    if (S->thread_count >= S->thread_limit) {
+        prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+            "agent dispatch requires a host-granted worker thread; "
+            "raise via mino_set_thread_limit (>= 2 to allow one agent "
+            "worker plus the embedder thread)");
+        return 1;
+    }
+    S->multi_threaded = 1;
+    S->thread_count++;
+    /* Mark alive BEFORE pthread_create returns so a concurrent send
+     * on the embedder thread (impossible in single-thread mode but
+     * defensive) doesn't race. */
+    agent_mu_lock(&S->agent_mu);
+    S->agent_worker_alive = 1;
+    agent_mu_unlock(&S->agent_mu);
+#if defined(_WIN32) && defined(_MSC_VER)
+    {
+        unsigned stack = (unsigned)S->thread_stack_size;
+        uintptr_t h = _beginthreadex(NULL, stack, agent_worker_entry, S,
+                                     0, NULL);
+        if (h == 0) {
+            agent_mu_lock(&S->agent_mu);
+            S->agent_worker_alive = 0;
+            agent_mu_unlock(&S->agent_mu);
+            S->thread_count--;
+            prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+                "host refused agent worker thread");
+            return 1;
+        }
+        S->agent_worker = (HANDLE)h;
+    }
+#else
+    {
+        pthread_attr_t attr;
+        pthread_attr_t *attrp = NULL;
+        int rc;
+        if (S->thread_stack_size > 0) {
+            if (pthread_attr_init(&attr) == 0) {
+                pthread_attr_setstacksize(&attr, S->thread_stack_size);
+                attrp = &attr;
+            }
+        }
+        rc = pthread_create(&S->agent_worker, attrp,
+                            agent_worker_entry, S);
+        if (attrp != NULL) { pthread_attr_destroy(attrp); }
+        if (rc != 0) {
+            agent_mu_lock(&S->agent_mu);
+            S->agent_worker_alive = 0;
+            agent_mu_unlock(&S->agent_mu);
+            S->thread_count--;
+            prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
+                "host refused agent worker thread");
+            return 1;
+        }
+    }
+#endif
+    S->agent_worker_pending_join = 1;
+    return 0;
+}
+
+/* Enqueue (agent fn extra env dyn_snap) onto S->agent_run_*. Caller
+ * holds state_lock. agent_worker_ensure has spawned the worker if
+ * needed. Returns 0 on success, 1 on OOM (caller propagates NULL). */
+static int agent_enqueue(mino_state_t *S, mino_val_t *agent,
+                          mino_val_t *fn, mino_val_t *extra,
+                          mino_env_t *env)
+{
+    agent_action_node_t *n = (agent_action_node_t *)calloc(1, sizeof(*n));
+    if (n == NULL) return 1;
+    n->agent    = agent;
+    n->fn       = fn;
+    n->extra    = extra;
+    n->env      = env;
+    n->dyn_snap = mino_snapshot_thread_bindings(S);
+    n->next     = NULL;
+    agent_mu_lock(&S->agent_mu);
+    agent_runq_push_tail(S, n);
+    if (agent->as.agent.in_flight < INT_MAX) {
+        agent->as.agent.in_flight++;
+    }
+    agent_cv_broadcast(&S->agent_cv);
+    agent_mu_unlock(&S->agent_mu);
+    return 0;
+}
+
+/* Public quiesce hook: flip agents_shutdown so a live worker exits
+ * after draining the queue, then reap any pending pthread handle.
+ * Idempotent. Called by prim_shutdown_agents and by mino_state_free
+ * during teardown.
+ *
+ * Self-join detection: if the calling thread IS the worker, we
+ * cannot join ourselves. prim_shutdown_agents catches that case
+ * and throws; this helper is a no-op when invoked in that
+ * pathological state since agent_worker_pending_join is set only
+ * by the spawn path on a different thread. */
+void mino_agent_quiesce_workers(mino_state_t *S)
+{
+    /* Flag shutdown + wake worker so it can drain + exit. */
+    if (S->agent_mu_inited) {
+        agent_mu_lock(&S->agent_mu);
+        S->agents_shutdown = 1;
+        agent_cv_broadcast(&S->agent_cv);
+        agent_mu_unlock(&S->agent_mu);
+    } else {
+        S->agents_shutdown = 1;
+    }
+
+    agent_worker_reap_pending(S);
+}
+
 /* --- pending-sends drain ------------------------------------------------- *
  *
  * Used by stm.c after a successful commit. Pending entries were
@@ -386,19 +787,15 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "Agents have been shut down; new sends are not accepted");
     }
     /* JVM-canon: dispatching to an agent in the failed state throws
-     * unless error-mode is :continue. mino's MVP captures the failure
-     * but allows further dispatch (matches :continue). */
+     * unless error-mode is :continue. */
     if (agent->as.agent.err != NULL && agent->as.agent.err_mode == 0) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "Agent is failed, needs restart");
     }
     /* Defer when running inside a transaction. JVM canon: agent
      * sends from inside dosync are queued and only fire once, on
-     * successful commit. Without this, mino's sync MVP fires the
-     * action on every retry attempt (visible side effects multiply)
-     * and the action sees mid-transaction tentative state via
-     * (deref ref) instead of the committed value. The pending entry
-     * is a (agent fn . extra) cons cell appended to tx->pending_sends. */
+     * successful commit. mino's commit drains via
+     * mino_agent_drain_pending which enqueues onto the worker. */
     ctx = mino_current_ctx(S);
     if (ctx->current_tx != NULL) {
         mino_val_t *triple = mino_cons(S, agent,
@@ -410,52 +807,185 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     : mino_empty_list(S));
         return agent;
     }
-    agent_apply_action(S, agent, fn, extra, env);
+    /* Async dispatch: spawn the worker if needed (gates on
+     * thread_limit -- throws MTH001 if the host hasn't granted a
+     * thread budget), then append (agent fn extra env) to the
+     * runq and return. The worker drains and runs each action
+     * under state_lock. */
+    if (agent_worker_ensure(S)) return NULL;
+    if (agent_enqueue(S, agent, fn, extra, env)) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "send: out of memory enqueueing action");
+    }
     return agent;
 }
 
 mino_val_t *prim_send_off(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    /* Phase 1 routes both shapes through the single shared worker;
+     * a dedicated send-off pool for blocking IO actions is left for
+     * a follow-up cycle. */
     return prim_send(S, args, env);
 }
 
+/* Block until in_flight == 0 for every named agent. Drops state_lock
+ * across the wait so the worker thread can run the queued actions
+ * (the worker takes state_lock before each action body). The wait
+ * loop is per-agent: agent_cv is broadcast after every action
+ * completes, so a sleeping waiter wakes once for any change and
+ * rechecks every agent's counter.
+ *
+ * Self-await detection: if the calling thread IS the worker, await
+ * would deadlock (the worker is the one that decrements in_flight).
+ * mino_tls_ctx is non-NULL on the worker; check before yielding the
+ * lock and throw MST002. The embedder thread leaves tls_ctx NULL so
+ * the normal path is unaffected. */
 mino_val_t *prim_await(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
+    int saved_depth;
+    mino_val_t *iter;
     (void)env;
-    /* No-op: the sync MVP drains the queue on every send return. We
-     * still type-check and cross-state-check so a misuse is loud. */
-    while (mino_is_cons(args)) {
-        mino_val_t *a = args->as.cons.car;
+    /* Validate args + cross-state guard before any blocking. */
+    for (iter = args; mino_is_cons(iter); iter = iter->as.cons.cdr) {
+        mino_val_t *a = iter->as.cons.car;
         if (!mino_is_agent(a)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "await: argument must be an agent");
         }
         if (agent_check_state(S, a)) return NULL;
-        args = args->as.cons.cdr;
     }
+    if (!S->agent_mu_inited) {
+        /* No worker has spawned: every agent's in_flight is 0,
+         * await is trivially complete. */
+        return mino_nil(S);
+    }
+    if (mino_tls_ctx != NULL) {
+        /* Calling thread is a host worker (the agent worker is the
+         * only writer of mino_tls_ctx in this state); await would
+         * self-deadlock. */
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "await called from agent action body would deadlock");
+    }
+    saved_depth = mino_yield_lock(S);
+    agent_mu_lock(&S->agent_mu);
+    for (;;) {
+        int still_busy = 0;
+        for (iter = args; mino_is_cons(iter); iter = iter->as.cons.cdr) {
+            mino_val_t *a = iter->as.cons.car;
+            if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
+        }
+        if (!still_busy) break;
+        agent_cv_wait(&S->agent_cv, &S->agent_mu);
+    }
+    agent_mu_unlock(&S->agent_mu);
+    mino_resume_lock(S, saved_depth);
     return mino_nil(S);
 }
+
+#if !(defined(_WIN32) && defined(_MSC_VER))
+/* Add ms milliseconds to abs_ts (a struct timespec). */
+static void timespec_add_ms(struct timespec *ts, long long ms)
+{
+    long long secs = ms / 1000;
+    long long nsec = (ms % 1000) * 1000000LL;
+    ts->tv_sec += (time_t)secs;
+    ts->tv_nsec += (long)nsec;
+    if (ts->tv_nsec >= 1000000000L) {
+        ts->tv_sec += ts->tv_nsec / 1000000000L;
+        ts->tv_nsec %= 1000000000L;
+    }
+}
+#endif
 
 mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
                             mino_env_t *env)
 {
+    long long timeout_ms;
+    mino_val_t *first;
+    mino_val_t *agents;
+    mino_val_t *iter;
+    int saved_depth;
+    int timed_out = 0;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "await-for requires a timeout and at least one agent");
     }
-    /* MVP: same as await; timeout is irrelevant when send is sync. */
-    args = args->as.cons.cdr;
-    while (mino_is_cons(args)) {
-        mino_val_t *a = args->as.cons.car;
+    first = args->as.cons.car;
+    if (first == NULL || first->type != MINO_INT) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "await-for: timeout must be an integer (milliseconds)");
+    }
+    timeout_ms = first->as.i;
+    if (timeout_ms < 0) timeout_ms = 0;
+    agents = args->as.cons.cdr;
+    for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
+        mino_val_t *a = iter->as.cons.car;
         if (!mino_is_agent(a)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "await-for: argument must be an agent");
         }
         if (agent_check_state(S, a)) return NULL;
-        args = args->as.cons.cdr;
     }
-    return mino_true(S);
+    if (!S->agent_mu_inited) return mino_true(S);
+    if (mino_tls_ctx != NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "await-for called from agent action body would deadlock");
+    }
+    saved_depth = mino_yield_lock(S);
+    agent_mu_lock(&S->agent_mu);
+#if defined(_WIN32) && defined(_MSC_VER)
+    {
+        DWORD deadline_ms = GetTickCount() + (DWORD)timeout_ms;
+        for (;;) {
+            int still_busy = 0;
+            DWORD now;
+            for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
+                mino_val_t *a = iter->as.cons.car;
+                if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
+            }
+            if (!still_busy) break;
+            now = GetTickCount();
+            if (now >= deadline_ms) { timed_out = 1; break; }
+            if (!SleepConditionVariableCS(&S->agent_cv, &S->agent_mu,
+                                          deadline_ms - now)) {
+                timed_out = 1;
+                break;
+            }
+        }
+    }
+#else
+    {
+        struct timespec deadline;
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        timespec_add_ms(&deadline, timeout_ms);
+        for (;;) {
+            int still_busy = 0;
+            int rc;
+            for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
+                mino_val_t *a = iter->as.cons.car;
+                if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
+            }
+            if (!still_busy) break;
+            rc = pthread_cond_timedwait(&S->agent_cv, &S->agent_mu,
+                                        &deadline);
+            if (rc != 0) { timed_out = 1; break; }
+        }
+    }
+#endif
+    /* On timeout, recheck once more under the lock -- a wakeup could
+     * have raced with the timeout. */
+    if (timed_out) {
+        int still_busy = 0;
+        for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
+            mino_val_t *a = iter->as.cons.car;
+            if (a->as.agent.in_flight > 0) { still_busy = 1; break; }
+        }
+        if (!still_busy) timed_out = 0;
+    }
+    agent_mu_unlock(&S->agent_mu);
+    mino_resume_lock(S, saved_depth);
+    return timed_out ? mino_false(S) : mino_true(S);
 }
 
 mino_val_t *prim_agent_error(mino_state_t *S, mino_val_t *args,

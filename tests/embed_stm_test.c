@@ -442,7 +442,10 @@ static void test_cross_state_agent_throws(mino_state_t *S, mino_env_t *env)
     size_t i;
 
     /* Install the agent prims on S so (send / await / ...) resolve.
-     * S2 needs the same install so its own agent ops still work below. */
+     * S2 needs the same install so its own agent ops still work below.
+     * Both states need a thread budget for async send to spawn its
+     * worker (default thread_limit == 1 makes send throw MTH001). */
+    mino_set_thread_limit(S2, 2);
     mino_install_agent(S, env);
     mino_install_agent(S2, env2);
     foreign_a = mino_agent(S2, mino_int(S2, 0));
@@ -463,6 +466,7 @@ static void test_cross_state_agent_throws(mino_state_t *S, mino_env_t *env)
         long long n;
         mino_env_set(S2, env2, "*own-agent*", foreign_a);
         mino_eval_string(S2, "(send *own-agent* inc)", env2);
+        mino_eval_string(S2, "(await *own-agent*)", env2);
         REQUIRE(foreign_a->as.agent.val != NULL
                 && mino_to_int(foreign_a->as.agent.val, &n)
                 && n == 1,
@@ -481,11 +485,12 @@ static void test_shutdown_agents_seals_state(void)
 {
     mino_state_t *S   = mino_state_new();
     mino_env_t   *env = mino_new(S);
+    mino_set_thread_limit(S, 2);
     mino_install_agent(S, env);
     {
         /* Pre-shutdown: send works. */
         mino_val_t *r = mino_eval_string(S,
-            "(let [a (agent 0)] (send a inc) @a)", env);
+            "(let [a (agent 0)] (send a inc) (await a) @a)", env);
         long long n = 0;
         REQUIRE(r != NULL && mino_to_int(r, &n) && n == 1,
                 "pre-shutdown send should publish");

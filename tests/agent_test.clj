@@ -1,8 +1,9 @@
 (require "tests/test")
 
 ;; Agents (asynchronous mutable cells with serialized actions).
-;; mino's MVP runs sends synchronously on the calling thread; await
-;; is a no-op since the queue is always drained on send return.
+;; send / send-off enqueue an action onto a per-state run-queue and
+;; return the agent immediately; a worker thread drains the queue
+;; under state_lock. Tests await before reading agent state.
 
 (deftest agent-construct
   (let [a (agent 0)]
@@ -23,9 +24,10 @@
     (is (= 6 @a))))
 
 (deftest agent-send-off
-  ;; send and send-off share the synchronous path in mino's MVP.
+  ;; Phase 1 routes both shapes through the single shared worker.
   (let [a (agent 10)]
     (send-off a dec)
+    (await a)
     (is (= 9 @a))))
 
 (deftest agent-watches
@@ -42,14 +44,17 @@
         seen (atom [])]
     (add-watch a :w (fn [_ _ _ n] (swap! seen conj n)))
     (send a inc)
+    (await a)
     (remove-watch a :w)
     (send a inc)
+    (await a)
     (is (= [1] @seen))))
 
 (deftest agent-validator-accepts
   (let [a (agent 0)]
     (set-validator! a number?)
     (send a inc)
+    (await a)
     (is (= 1 @a))
     (is (nil? (agent-error a)))))
 
@@ -59,12 +64,14 @@
   (let [a (agent 5)]
     (set-validator! a pos?)
     (send a (fn [_] -1))
+    (await a)
     (is (some? (agent-error a)))
     (is (= 5 @a))))
 
 (deftest agent-action-throws
   (let [a (agent 0)]
     (send a (fn [_] (throw (ex-info "boom" {:kind :test}))))
+    (await a)
     (is (some? (agent-error a)))
     (is (= 0 @a))
     ;; Subsequent send on a faulted agent throws by default (:fail).
@@ -73,11 +80,13 @@
 (deftest agent-restart
   (let [a (agent 0)]
     (send a (fn [_] (throw (ex-info "boom" {}))))
+    (await a)
     (is (some? (agent-error a)))
     (restart-agent a 99)
     (is (nil? (agent-error a)))
     (is (= 99 @a))
     (send a inc)
+    (await a)
     (is (= 100 @a))))
 
 (deftest agent-error-mode-continue
@@ -85,10 +94,12 @@
     (set-error-mode! a :continue)
     (is (= :continue (error-mode a)))
     (send a (fn [_] (throw (ex-info "boom" {}))))
+    (await a)
     (is (some? (agent-error a)))
     ;; In :continue mode, further sends do not throw on the failed
-    ;; agent. mino's MVP captures only the latest err.
-    (send a inc)))
+    ;; agent. The agent.err latch holds the most recent failure.
+    (send a inc)
+    (await a)))
 
 (deftest agent-watch-throws-captured
   ;; Watch throws are captured into agent.err, matching JVM-ish
@@ -96,6 +107,7 @@
   (let [a (agent 0)]
     (add-watch a :w (fn [_ _ _ _] (throw (ex-info "watch-boom" {}))))
     (send a inc)
+    (await a)
     (is (some? (agent-error a)))
     ;; The publish itself succeeded; the watch threw after.
     (is (= 1 @a))))
@@ -122,6 +134,7 @@
   (let [a (agent 5 :validator pos?)]
     (is (= pos? (get-validator a)))
     (send a (fn [_] -1))
+    (await a)
     (is (some? (agent-error a)))
     (is (= 5 @a))))
 
@@ -350,11 +363,13 @@
         a (agent 0)]
     (set-error-handler! a (fn [agent ex] (reset! seen [agent (ex-message ex)])))
     (send a (fn [_] (throw (ex-info "boom" {}))))
+    (await a)
     (is (= "boom" (second @seen)))
     (is (= a (first @seen)))
     (is (nil? (agent-error a)))
     ;; Subsequent sends still work since the agent isn't latched.
     (send a inc)
+    (await a)
     (is (= 1 @a))))
 
 (deftest agent-error-handler-throw-latches-agent
@@ -365,6 +380,7 @@
   (let [a (agent 0)]
     (set-error-handler! a (fn [_ _] (throw (ex-info "handler-boom" {}))))
     (send a (fn [_] (throw (ex-info "action-boom" {}))))
+    (await a)
     (is (some? (agent-error a)))))
 
 (deftest agent-error-handler-also-invoked-on-validator-reject
@@ -374,6 +390,7 @@
     (set-validator! a pos?)
     (set-error-handler! a (fn [_ _] (swap! seen inc)))
     (send a (fn [_] -1))
+    (await a)
     (is (= 1 @seen))
     (is (nil? (agent-error a)))
     (is (= 1 @a))))
@@ -435,6 +452,7 @@
   (let [a (agent 1)]
     (set-validator! a pos?)
     (send a (fn [_] (throw (ex-info "boom" {}))))
+    (await a)
     (is (some? (agent-error a)))
     (is (thrown? (restart-agent a -99)))
     ;; Agent stays in failed state with original value untouched.

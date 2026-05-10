@@ -830,8 +830,22 @@ struct mino_state {
     pthread_cond_t       agent_cv;
     pthread_t            agent_worker;
 #endif
-    int                  agent_worker_started;
-    int                  agent_worker_joined;
+    /* agent_worker_alive: a worker thread is currently in its loop
+     * (mutated under agent_mu). Cleared by the worker before exit so
+     * the next send observes "no live worker" and re-spawns.
+     *
+     * agent_worker_pending_join: agent_worker holds a joinable handle
+     * for a worker that has exited (or is exiting) but has not been
+     * joined yet (mutated under state_lock). Cleared after the join.
+     * The worker exits lazily when its run-queue drains so a long-
+     * idle agent worker doesn't keep S->thread_count > 0 and suppress
+     * GC for the rest of the state's lifetime; the spawn cost on a
+     * subsequent burst is the price.
+     *
+     * agent_mu_inited: has agent_mu/agent_cv been pthread_*_init'd
+     * yet (lazy on first send). */
+    int                  agent_worker_alive;
+    int                  agent_worker_pending_join;
     int                  agent_mu_inited;
 
     /* === Async scheduler and timers ==================================== */

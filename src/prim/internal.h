@@ -489,4 +489,14 @@ extern const size_t        k_prims_stm_count;
 void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
                                mino_env_t *env);
 
+/* Stop the per-state agent worker thread. Sets agents_shutdown,
+ * wakes the worker, drops state_lock, joins. Idempotent. Safe to
+ * call when no worker has spawned -- becomes a flag flip.
+ *
+ * Must NOT be called from inside an agent action body running on
+ * the worker thread (would self-join). prim_shutdown_agents catches
+ * that case and throws; mino_state_free runs after eval has
+ * unwound, so the embedder thread is the caller. */
+void mino_agent_quiesce_workers(mino_state_t *S);
+
 #endif /* PRIM_INTERNAL_H */

@@ -16,6 +16,7 @@
 
 #include "runtime/internal.h"
 #include "runtime/host_threads.h"
+#include "prim/internal.h"
 #include "async/scheduler.h"
 #include "async/timer.h"
 
@@ -114,8 +115,8 @@ static void state_init(mino_state_t *S)
     S->agents_shutdown     = 0;
     S->agent_run_head      = NULL;
     S->agent_run_tail      = NULL;
-    S->agent_worker_started = 0;
-    S->agent_worker_joined = 0;
+    S->agent_worker_alive  = 0;
+    S->agent_worker_pending_join = 0;
     S->agent_mu_inited     = 0;
     mino_state_lock_init(S);
     gc_evt_init(S);
@@ -371,6 +372,7 @@ void mino_state_free(mino_state_t *S)
     /* Join every outstanding worker before tearing down any heap
      * state. Workers depend on S being live; freeing under them
      * would crash. */
+    mino_agent_quiesce_workers(S);
     mino_host_threads_quiesce(S);
     state_free_root_envs(S);
     state_free_refs(S);
@@ -781,7 +783,8 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_en
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
                mino_val_t **out, mino_val_t **out_ex)
 {
-    int saved_try = mino_current_ctx(S)->try_depth;
+    int saved_try   = mino_current_ctx(S)->try_depth;
+    int saved_lock  = mino_current_ctx(S)->lock_depth;
     mino_val_t *result;
 
     if (out_ex != NULL) *out_ex = NULL;
@@ -808,12 +811,25 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
          * from a successfully-caught pcall would mislead the next
          * failing call into thinking its own error had already been
          * reported. Callers that want a diag published after pcall
-         * returns -1 call set_eval_diag explicitly. */
+         * returns -1 call set_eval_diag explicitly.
+         *
+         * Lock-depth restoration: mino_call inside the body increments
+         * lock_depth via mino_lock; a longjmp escaping past the
+         * matching mino_unlock leaves both the counter and the
+         * underlying recursive pthread mutex held one extra level.
+         * The embedder thread typically tolerates the imbalance
+         * because it never yields the lock, but a host worker (futures,
+         * agents) that calls pcall and later yields ends up unable to
+         * fully release state_lock, deadlocking await/deref. Unwind
+         * here while we still hold the lock. */
         mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
         S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
         S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
         mino_current_ctx(S)->try_depth = saved_try;
+        while (mino_current_ctx(S)->lock_depth > saved_lock) {
+            mino_unlock(S);
+        }
         if (out != NULL) *out = NULL;
         if (out_ex != NULL) *out_ex = ex;
         return -1;
