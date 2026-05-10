@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Agent Print Form Carries Identity
+
+`(pr-str (agent 0))` and `(pr-str (agent 0))` produced the same
+string for distinct agents, so two agents holding the same value
+were indistinguishable in logs and debug output. Add
+`agent_id` (a monotonic counter on `mino_state_t.agent_next_id`,
+mirroring `stm_next_ref_id`) and emit `#agent[ID VAL]` to match
+the existing `#ref[ID VAL]` form.
+
 ### Wire `release-pending-sends` And Drain Agents Before Watches
 
 Two follow-ups to the in-tx send deferral.

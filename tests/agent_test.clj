@@ -225,6 +225,15 @@
     (is (= 1 @a))
     (is (nil? (agent-error a)))))
 
+(deftest agent-print-form-includes-identity
+  ;; Two agents with the same value must print as distinct strings
+  ;; -- otherwise they're indistinguishable in logs / debug output.
+  (let [a1 (agent 0)
+        a2 (agent 0)]
+    (is (not= (pr-str a1) (pr-str a2)))
+    ;; Format check: starts with #agent[0x and contains the value.
+    (is (re-find #"#agent\[0x[0-9a-f]+ 0\]" (pr-str a1)))))
+
 (deftest agent-constructor-options-meta
   ;; :meta is wired through to the cell's meta field. (meta a) reads
   ;; it; with-meta is intentionally not supported for agents (shallow

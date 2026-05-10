@@ -761,6 +761,14 @@ struct mino_state {
      * fine-grained lock matrix. */
     uint64_t        stm_next_ref_id;
 
+    /* Monotonic counter for agent IDs. Mirrors stm_next_ref_id so
+     * the agent print form (#agent[ID VAL]) can distinguish two
+     * agents that happen to hold the same value. Without it,
+     * (= (pr-str a1) (pr-str a2)) was true for distinct agents
+     * with equal state -- a debugging foot-gun and a divergence
+     * from the ref print form. */
+    uint64_t        agent_next_id;
+
     /* === Async scheduler and timers ==================================== */
 
     /* Async scheduler run queue. */

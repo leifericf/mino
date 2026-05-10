@@ -472,7 +472,12 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputc(']', out);
         return;
     case MINO_AGENT:
-        fputs("#agent[", out);
+        /* `#agent[ID VAL]` -- not round-trippable, but ID gives
+         * each agent a stable identity in the print form so two
+         * distinct agents holding the same value are still
+         * distinguishable. Mirrors `#ref[ID VAL]`. */
+        fprintf(out, "#agent[0x%llx ",
+                (unsigned long long)v->as.agent.agent_id);
         S->print_depth++;
         mino_print_to(S, out, v->as.agent.val);
         S->print_depth--;

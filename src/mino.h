@@ -395,6 +395,10 @@ struct mino_val {
             int         err_mode;     /* 0=:fail, 1=:continue */
             void       *queue;        /* opaque agent_queue_t * (heap-
                                        * allocated; freed via finalizer) */
+            uint64_t    agent_id;     /* monotonic identity at construction
+                                       * (mirrors tx_ref.ref_id) so the
+                                       * print form distinguishes two
+                                       * agents that hold the same value. */
             mino_state_t *owning_state; /* the state that allocated this
                                           * agent. Mirrors tx_ref's
                                           * cross-state defense: every
