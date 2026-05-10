@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Validate `set-error-mode!` Argument
+
+`set-error-mode!` accepted any value silently: a non-keyword like
+`"fail"` or `99` was a no-op, and an invalid keyword like
+`:silent` flipped any agent to `:fail` regardless of its previous
+mode -- silent data loss. Reject anything other than `:fail` or
+`:continue` with a classified type error so user typos surface.
+
 ### Run Validator on `restart-agent`
 
 `restart-agent` cleared the failed agent's error and published the

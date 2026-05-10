@@ -433,10 +433,19 @@ mino_val_t *prim_set_error_mode_bang(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-error-mode!: first argument must be an agent");
     }
-    if (mode != NULL && mode->type == MINO_KEYWORD) {
-        agent->as.agent.err_mode =
-            (strcmp(mode->as.s.data, "continue") == 0) ? 1 : 0;
+    /* Only :fail and :continue are accepted. Earlier mino silently
+     * routed any unrecognised keyword to :fail (so :silent on a
+     * previously :continue agent quietly flipped it) and silently
+     * ignored non-keywords. Both behaviors are loud surprises; the
+     * fix throws so the caller sees the typo. */
+    if (mode == NULL || mode->type != MINO_KEYWORD
+        || (strcmp(mode->as.s.data, "fail") != 0
+            && strcmp(mode->as.s.data, "continue") != 0)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "set-error-mode!: mode must be :fail or :continue");
     }
+    agent->as.agent.err_mode =
+        (strcmp(mode->as.s.data, "continue") == 0) ? 1 : 0;
     return mino_nil(S);
 }
 

@@ -187,6 +187,23 @@
     (is (nil? (agent-error a)))
     (is (= 1 @a))))
 
+(deftest set-error-mode-validates-arg
+  ;; Only :fail and :continue are accepted. mino used to either
+  ;; silently re-route an invalid keyword to :fail (e.g. :silent
+  ;; flipped a previously :continue agent to :fail) or silently
+  ;; ignore non-keywords. Both modes are silent surprises; throw.
+  (let [a (agent 0)]
+    (set-error-mode! a :continue)
+    (is (= :continue (error-mode a)))
+    (is (thrown? (set-error-mode! a :silent)))
+    (is (= :continue (error-mode a)))
+    (is (thrown? (set-error-mode! a "fail")))
+    (is (= :continue (error-mode a)))
+    (is (thrown? (set-error-mode! a 99)))
+    (is (= :continue (error-mode a)))
+    (set-error-mode! a :fail)
+    (is (= :fail (error-mode a)))))
+
 (deftest restart-agent-runs-validator
   ;; JVM canon: restart-agent validates the new state. mino used to
   ;; bypass the validator, so a failed agent could be restarted into
