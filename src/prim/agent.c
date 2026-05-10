@@ -177,10 +177,10 @@ static void agent_report_failure(mino_state_t *S, mino_val_t *agent,
     }
 }
 
-/* Apply one action synchronously: run validator, update state, fire
- * watches. Each user-callback invocation goes through mino_pcall so a
- * throw is captured into the agent's err slot rather than propagated
- * to the sender.
+/* Apply one action: run validator, update state, fire watches.
+ * Each user-callback invocation goes through mino_pcall so a throw
+ * is captured into the agent's err slot rather than propagated to
+ * the worker loop.
  *
  * The agent is bound to the `*agent*` dynamic var across the action
  * invocation, matching JVM canon (`(send a (fn [v] (= *agent* a)))`
@@ -1255,13 +1255,16 @@ mino_val_t *prim_send_via(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)args;
     (void)env;
     /* JVM-canon (send-via executor a fn & args) routes the action
-     * through a host-supplied Executor. mino's sync MVP has no
-     * Executor type; aliasing it to send would silently drop the
-     * user's executor argument. Throw with a clear message so the
-     * caller can switch to send / send-off until executors land. */
+     * through a host-supplied Executor. mino has no public Executor
+     * type yet (the embedder API surface for handing in a custom
+     * dispatcher is intentionally deferred), so this prim throws
+     * with a clear message rather than aliasing to send and
+     * silently dropping the executor argument. Use send / send-off
+     * to dispatch through the per-state worker. */
     return prim_throw_classified(S, "eval/state", "MST008",
-        "send-via not yet implemented; mino's agent MVP runs actions "
-        "synchronously. Use send / send-off.");
+        "send-via is intentionally deferred -- mino has no public "
+        "Executor type. Use send or send-off to dispatch through the "
+        "per-state worker.");
 }
 
 mino_val_t *prim_release_pending_sends(mino_state_t *S, mino_val_t *args,
@@ -1292,31 +1295,40 @@ mino_val_t *prim_release_pending_sends(mino_state_t *S, mino_val_t *args,
 const mino_prim_def k_prims_agent[] = {
     {"agent",       prim_agent,
      "Creates an asynchronous agent holding the given initial state. "
-     "Mutate via send / send-off; read via @agent. mino's MVP runs "
-     "actions synchronously on the calling thread."},
+     "Mutate via send / send-off; read via @agent. The action runs "
+     "on a per-state worker thread; await blocks until queued "
+     "actions complete."},
     {"agent?",      prim_agent_p,
      "Returns true if x is an agent."},
     {"send",        prim_send,
-     "Dispatches an action to an agent. Returns the agent. mino runs "
-     "the action synchronously; in JVM Clojure send is async."},
+     "Dispatches an action to an agent's run-queue and returns the "
+     "agent immediately. The action runs on the per-state worker "
+     "under state_lock. Throws MTH001 if the host has not granted "
+     "a thread budget for the worker."},
     {"send-off",    prim_send_off,
-     "Like send. mino runs both shapes through one synchronous path."},
+     "Like send. Phase 1 routes both shapes through the single "
+     "shared worker; a separate pool for blocking IO actions is "
+     "left for a follow-up cycle."},
     {"send-via",    prim_send_via,
      "JVM-canon dispatches the action through a host-supplied "
-     "Executor. mino's sync MVP has no Executor type; this prim "
-     "throws with a clear MST008 error rather than aliasing to "
-     "send and silently losing the executor argument."},
+     "Executor. mino has no public Executor type yet; this prim "
+     "throws MST008 rather than aliasing to send and dropping the "
+     "executor argument. Use send / send-off."},
     {"await",       prim_await,
-     "No-op in mino's MVP. The synchronous send leaves no pending "
-     "actions to wait for."},
+     "Blocks the calling thread until every named agent's queued "
+     "actions have finished. Throws MST002 if called from inside "
+     "an agent action body (would self-deadlock)."},
     {"await-for",   prim_await_for,
-     "Like await with a timeout (milliseconds). Always returns true "
-     "in mino's MVP since the queue is always drained."},
+     "Like await with a millisecond timeout. Returns true if every "
+     "named agent reached zero in-flight actions before the deadline, "
+     "false on timeout."},
     {"agent-error", prim_agent_error,
      "Returns the exception captured by the agent's most recent failed "
      "action or watch, or nil if the agent is in a clean state."},
     {"restart-agent", prim_restart_agent,
-     "Clears the agent's error and resets its state to the given value."},
+     "Clears the agent's error and resets its state to the given "
+     "value. Trailing :clear-actions true also drops every queued "
+     "action targeting this agent."},
     {"set-error-handler!", prim_set_error_handler_bang,
      "Sets the agent's error-handler fn (called with [agent ex] when an "
      "action throws)."},
@@ -1327,11 +1339,10 @@ const mino_prim_def k_prims_agent[] = {
     {"error-mode", prim_error_mode,
      "Returns the agent's current error mode."},
     {"shutdown-agents", prim_shutdown_agents,
-     "Permanently seals the agent surface for this state: subsequent "
-     "send / send-off throw MST008. Idempotent. Has no thread pool to "
-     "terminate (mino's MVP runs actions synchronously) but lets "
-     "embedders cleanly stop accepting new agent traffic during "
-     "teardown."},
+     "Quiesces the per-state agent worker: signals it to drain the "
+     "remaining queue, joins the pthread, seals the agent surface so "
+     "subsequent send / send-off throw MST008. Idempotent. Throws "
+     "MST002 if called from inside an action body (self-join)."},
     {"release-pending-sends", prim_release_pending_sends,
      "Returns the count of sends queued by the current transaction "
      "and clears them so they will NOT fire on commit. Outside a "

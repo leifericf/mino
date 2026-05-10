@@ -27,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 101
-#define MINO_VERSION_PATCH 1
+#define MINO_VERSION_MINOR 102
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -182,15 +182,19 @@ typedef enum {
                      * was already taken by the embedder rooting handle
                      * (mino_ref_t), so the enum tag is MINO_TX_REF; the
                      * Clojure-level type keyword is `:ref`. */
-    MINO_AGENT      /* Asynchronous mutable cell with per-agent action
-                     * queue. send / send-off enqueue (fn args); a worker
-                     * thread drains the queue serially, applying actions
-                     * to the state. Watches and validators on agents
-                     * follow the atom/ref shape. Equality is identity.
-                     * Constructed via `(agent v)`. Requires the host
-                     * to grant threads (mino_set_thread_limit > 1) for
-                     * the worker to spawn; with grant=1 send is a
-                     * synchronous-but-deferred no-op equivalent. */
+    MINO_AGENT      /* Asynchronous mutable cell with a per-state
+                     * action run-queue. send / send-off enqueue
+                     * (fn args) onto the queue and return the agent
+                     * immediately; a worker thread drains the queue
+                     * serially, applies actions under state_lock,
+                     * and signals await waiters when the agent's
+                     * in-flight count reaches zero. Watches and
+                     * validators follow the atom/ref shape.
+                     * Equality is identity. Constructed via
+                     * `(agent v)`. The worker counts against
+                     * thread_limit, so send / send-off throw MTH001
+                     * if the host hasn't granted a thread budget
+                     * (default thread_limit == 1 means no agents). */
 } mino_type_t;
 
 typedef struct mino_val    mino_val_t;
