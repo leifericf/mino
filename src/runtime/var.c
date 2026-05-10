@@ -349,6 +349,10 @@ void var_unintern(mino_state_t *S, const char *ns, const char *name)
             }
             S->var_registry_len--;
             var_hash_rebuild(S);
+            /* Same rationale as env_unbind: removing a var changes how
+             * its symbol resolves, and the inline call cache must
+             * notice. Bumping ic_gen invalidates every slot. */
+            S->ic_gen++;
             return;
         }
     }

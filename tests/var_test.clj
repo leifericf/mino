@@ -32,3 +32,14 @@
 
 (deftest resolve-core-fn
   (is (var? (resolve 'map))))
+
+;; A call site whose head is unmapped must throw on the next call.
+(defn ic-unmap-target-fn [] :before-unmap)
+(defn ic-unmap-call-site [] (ic-unmap-target-fn))
+
+(deftest ns-unmap-invalidates-call-resolution
+  (is (= :before-unmap (ic-unmap-call-site)))
+  (ns-unmap *ns* 'ic-unmap-target-fn)
+  (let [result (try (ic-unmap-call-site)
+                    (catch __e :got-error))]
+    (is (= :got-error result))))

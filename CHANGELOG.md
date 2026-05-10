@@ -70,14 +70,20 @@ allocation shape come down.
 
 - **Monomorphic inline call cache.** Per-state hashed slot table
   keyed on the call form pointer, with a head-symbol-data tag and a
-  `gen_at_fill` snapshot. `var_set_root` bumps `S->ic_gen` to
-  invalidate every slot in one shot. Filled only when the head is
-  an unqualified symbol that resolves past every local lexical
-  frame (no `let`/fn-param shadow), no dynamic binding context is
-  active, and the resolved value is neither an unbound var nor a
-  macro. The GC root walk pins both the form and the cached
-  callable in every filled slot, so a freed-and-reused form
-  address cannot alias to a stale entry.
+  `gen_at_fill` snapshot. `var_set_root`, `env_unbind`, and
+  `var_unintern` all bump `S->ic_gen` to invalidate every slot in
+  one shot. Filled only when the head is an unqualified symbol that
+  resolves past every local lexical frame (no `let`/fn-param
+  shadow), no dynamic binding context is active, and the resolved
+  value is neither an unbound var nor a macro. The GC root walk
+  pins both the form and the cached callable in every filled slot,
+  so a freed-and-reused form address cannot alias to a stale entry.
+
+- **Fixed: `ns-unmap` now invalidates the inline call cache.**
+  Removing a binding via `ns-unmap` (or any path that reaches
+  `env_unbind` / `var_unintern`) previously left the cache holding
+  the pre-unmap callable; subsequent calls returned the old value
+  instead of throwing. Both paths now bump `S->ic_gen`.
 
 - **Per-var version counter.** `MINO_VAR.version` is bumped by
   `var_set_root`; the inline call cache uses it as part of the
