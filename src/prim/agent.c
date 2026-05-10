@@ -205,8 +205,21 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
  * the order the user called send. Each entry is a (agent fn . extra)
  * triple. We invoke agent_apply_action directly so each action runs
  * synchronously on the calling thread, matching the rest of mino's
- * agent MVP. The agent's failed-state guard was already evaluated
- * at send time and isn't re-checked here. */
+ * agent MVP.
+ *
+ * The send-time failed-state check (prim_send) caught agents
+ * already failed at queue time, but an earlier pending action can
+ * fail an agent that a later pending action also targets. Re-check
+ * the failed-state at dispatch time:
+ *
+ *   :fail mode + err set -- skip silently. JVM's dispatcher would
+ *     throw into the agent's executor thread, never reaching the
+ *     dosync caller; mino's sync drain models that by dropping the
+ *     action with no caller-visible signal (the agent.err latch
+ *     remains the failure record).
+ *   :continue mode -- run regardless. Matches prim_send: failed
+ *     agents in :continue keep accepting actions.
+ */
 void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
                                mino_env_t *env)
 {
@@ -225,6 +238,10 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
         fn      = triple->as.cons.cdr->as.cons.car;
         extra   = triple->as.cons.cdr->as.cons.cdr;
         if (!mino_is_agent(agent_v)) continue;
+        if (agent_v->as.agent.err != NULL
+            && agent_v->as.agent.err_mode == 0) {
+            continue;
+        }
         agent_apply_action(S, agent_v, fn, extra, env);
     }
 }

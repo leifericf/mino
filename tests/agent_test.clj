@@ -225,6 +225,34 @@
     (is (= 1 @a))
     (is (nil? (agent-error a)))))
 
+(deftest drain-skips-pending-on-failed-agent-in-fail-mode
+  ;; Agent A enters :fail state mid-drain because pending action #1
+  ;; throws; pending action #2 targets the same agent. Match
+  ;; prim_send's contract: skip the second action silently. The
+  ;; agent.err latch is the surviving record of the first failure.
+  (let [a (agent 0)
+        b (agent :init)]
+    (dosync
+      (send a (fn [_] (throw (ex-info "boom" {}))))
+      (send a inc)        ;; this one must NOT run; a is now failed
+      (send b (fn [_] :survived)))
+    (await a)
+    (await b)
+    (is (some? (agent-error a)))
+    (is (= 0 @a) "second pending send to failed-:fail agent dropped")
+    (is (= :survived @b) "unrelated agent's send still fires")))
+
+(deftest drain-runs-pending-on-continue-mode-failed-agent
+  ;; In :continue mode, failed agents keep accepting actions. Match
+  ;; prim_send: drain must also run them.
+  (let [a (agent 0)]
+    (set-error-mode! a :continue)
+    (dosync
+      (send a (fn [_] (throw (ex-info "boom" {}))))
+      (send a (fn [_] :recovered)))
+    (await a)
+    (is (= :recovered @a))))
+
 (deftest with-meta-on-stateful-throws
   ;; with-meta on atom or agent used to do a shallow cell copy --
   ;; the sibling got its own val/err pointers and diverged from the

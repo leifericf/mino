@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Pending-Sends Drain Honors Failed-State In `:fail` Mode
+
+`prim_send` rejects sends to agents already in failed-`:fail`
+state at queue time, but a pending send queued earlier in the
+same dosync can fail an agent that a later pending send also
+targets. The drain used to call `agent_apply_action`
+unconditionally, so the second action ran against the failed
+agent's state -- inconsistent with the send-time contract.
+
+Re-check at dispatch: if the agent has `err` set and
+`err_mode == :fail`, skip the action silently. JVM canon would
+throw in the agent's executor thread, never reaching the dosync
+caller; mino's sync drain models that by dropping the action and
+leaving `agent-error` as the surviving failure record.
+`:continue` mode keeps accepting actions, matching `prim_send`.
+
 ### Reject `with-meta` / `vary-meta` On Stateful Types
 
 `(with-meta (atom 0) m)` used to shallow-copy the atom struct, so
