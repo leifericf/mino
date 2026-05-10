@@ -78,4 +78,29 @@
       (doseq [f futs] @f)
       (is (= (* n m) @a)))))
 
+(deftest future-thread-count-not-stuck-under-tight-loop
+  ;; Regression: pre-v0.103.0, the worker entry-link and exit-detach
+  ;; took the recursive state_lock. A tight embedder loop holding
+  ;; state_lock across a single form (e.g. a dotimes wrapper around
+  ;; many dosyncs) could starve workers at both ends, leaving
+  ;; thread_count inflated even after the workers' bodies had
+  ;; finished. v0.103.0 moves this bookkeeping onto worker_list_lock,
+  ;; so workers attach + detach concurrently with the embedder loop.
+  (when (> (mino-thread-limit) 1)
+    (let [n    (min 4 (max 1 (dec (mino-thread-limit))))
+          futs (doall (for [_ (range n)] (future :done)))]
+      ;; Tight loop: 200 trivial dosyncs on the main thread. The
+      ;; whole dotimes runs as one form, so state_lock is held
+      ;; continuously across all 200 iterations.
+      (dotimes [_ 200] (dosync))
+      ;; Confirm the workers' bodies completed.
+      (doseq [f futs] (is (= :done @f)))
+      ;; Bounded poll: with the lock split in place, exit-detach
+      ;; happens off state_lock so this converges immediately.
+      ;; Without the split, workers could still be stalled.
+      (loop [iters 200]
+        (when (and (pos? (mino-thread-count)) (pos? iters))
+          (recur (dec iters))))
+      (is (= 0 (mino-thread-count))))))
+
 (run-tests-and-exit)
