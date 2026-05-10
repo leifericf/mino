@@ -411,6 +411,10 @@ static mino_val_t *tx_ref_set_core(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
+    if (ctx->current_tx->in_commit) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "ref-set not allowed during commit-phase replay");
+    }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
     /* JVM canon: ref-set after commute on the same ref throws
@@ -524,6 +528,10 @@ static mino_val_t *tx_alter_core(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
     }
+    if (t_ctx->current_tx->in_commit) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "alter not allowed during commit-phase replay");
+    }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
     /* JVM canon: alter after commute on the same ref throws
@@ -628,6 +636,10 @@ static mino_val_t *tx_commute_core(mino_state_t *S, mino_val_t *ref,
     if (t_ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
+    }
+    if (t_ctx->current_tx->in_commit) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "commute not allowed during commit-phase replay");
     }
     rs = tx_get_or_create_ref_state(S, ref);
     if (rs == NULL) return NULL;
@@ -805,7 +817,22 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
             return 0;
         }
     }
-    /* Compute new values + run validators + apply writes. */
+    /* Mark in_commit so user code re-entered through commute log
+     * replay or validator pcall sees a clean error if it tries to
+     * mutate refs (alter / ref-set / commute). Without this flag
+     * the new tentative would be appended to refs_head past the
+     * iterator and silently lost, or invalidate the active replay
+     * walk. Cleared on every exit path below. */
+    tx->in_commit = 1;
+    /* Two-pass commit for atomicity. Pass 1 computes every new
+     * value and runs every validator; any throw or rejection
+     * aborts the whole commit before a single ref->val is touched.
+     * Pass 2 applies the staged writes -- no user code there, so
+     * it cannot fail mid-flight. The earlier single-pass walk wrote
+     * committed refs in iteration order, so a late-iteration
+     * validator rejection or commute throw left earlier refs
+     * already committed (atomicity violation). */
+    /* Pass 1: stage. */
     for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
         mino_val_t *new_val = NULL;
         rs->committed_old = NULL;
@@ -819,6 +846,7 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
                                           rs->ref->as.tx_ref.val, env,
                                           &replay_ex);
             if (new_val == NULL) {
+                tx->in_commit = 0;
                 stm_unlock(S);
                 /* A commute fn throw during replay is a hard failure,
                  * not a retry-able read-set conflict. Funnel through
@@ -836,6 +864,7 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
             mino_val_t *vex = NULL;
             int vc = run_ref_validator(S, rs->ref, new_val, env, &vex);
             if (vc != 1) {
+                tx->in_commit = 0;
                 stm_unlock(S);
                 /* Both throws and falsy-rejects are validator
                  * rejections (hard failures), distinct from read-set
@@ -849,13 +878,20 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
                 tx->validator_thrown_ex = vex;
                 return 0;
             }
-            rs->committed_old = rs->ref->as.tx_ref.val;
             rs->committed_new = new_val;
-            gc_write_barrier(S, rs->ref, rs->committed_old, new_val);
-            rs->ref->as.tx_ref.val = new_val;
+        }
+    }
+    /* Pass 2: apply. Pure memory writes; cannot abort. */
+    for (rs = tx->refs_head; rs != NULL; rs = rs->next) {
+        if (rs->committed_new != NULL) {
+            rs->committed_old = rs->ref->as.tx_ref.val;
+            gc_write_barrier(S, rs->ref, rs->committed_old,
+                              rs->committed_new);
+            rs->ref->as.tx_ref.val = rs->committed_new;
             rs->ref->as.tx_ref.version++;
         }
     }
+    tx->in_commit = 0;
     stm_unlock(S);
     return 1;
 }
@@ -1007,6 +1043,7 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
     tx.retry_count          = 0;
     tx.try_depth_at_start   = saved_try;
     tx.retry_signal         = 0;
+    tx.in_commit            = 0;
     tx.validator_thrown_ex  = NULL;
 
     if (ctx_v->try_depth >= MAX_TRY_DEPTH) {

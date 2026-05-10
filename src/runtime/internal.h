@@ -217,6 +217,13 @@ typedef struct tx_state {
     int                  retry_count;
     int                  try_depth_at_start; /* try-stack snapshot for retry */
     int                  retry_signal;     /* set by retry-trigger; consumed by loop */
+    /* Non-zero while tx_commit is walking the write set and invoking
+     * user code (commute log replay, validators). Mutating ops
+     * (alter / ref-set / commute) re-entered through that user code
+     * cannot be honoured -- the iterator has already moved past the
+     * affected ref node, so the new tentative would be silently lost.
+     * Throw MST002 instead. */
+    int                  in_commit;
     /* Set by tx_commit to the validator's thrown exception (if any)
      * so dosync_run can re-throw the original payload instead of a
      * generic MCT001 message. NULL when the validator returned falsy

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Make STM Commits Atomic and Reject Mid-Commit Mutation
+
+`tx_commit` walked the write set in iteration order, applying each
+ref's new value (write barrier + version bump) before validating
+the next ref. A late-iteration validator rejection or commute
+throw therefore left earlier refs already committed -- atomicity
+violation.
+
+Restructure the commit into two passes. Pass 1 walks every ref,
+runs commute log replay and validators, and stages the new value
+on `rs->committed_new` without touching `ref->val`. Any failure
+aborts the whole commit before a single write hits memory. Pass 2
+applies the staged writes; it runs no user code and cannot fail
+mid-flight. Adds a `tx_state_t.in_commit` flag and rejects
+`alter` / `ref-set` / `commute` re-entered through pass 1's user
+callbacks (commute fns, validators) -- their new tentatives would
+otherwise dangle past the iterator and silently disappear.
+
 ### Validate `set-error-handler!` Handler Argument
 
 `set-error-handler!` previously stored any value -- so

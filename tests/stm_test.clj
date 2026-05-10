@@ -192,6 +192,71 @@
       (is (= "MCT001" caught)))
     (is (= 1 @r))))
 
+(deftest mutate-during-commute-replay-throws
+  ;; A commute fn that calls (alter / ref-set / commute) on another
+  ;; ref during commit-phase replay used to silently lose the new
+  ;; tentative -- the iterator in tx_commit had already moved past
+  ;; the affected ref node. Now throws MST002.
+  (let [r1 (ref 0)
+        r3 (ref 0)]
+    (is (thrown? (dosync
+                   (commute r1 (fn [v]
+                                 (dosync (alter r3 inc))
+                                 (inc v))))))
+    ;; Whole transaction aborted; r1 and r3 untouched.
+    (is (= 0 @r1))
+    (is (= 0 @r3))))
+
+(deftest mutate-self-during-commute-replay-throws
+  (let [r (ref 0)
+        depth (atom 0)]
+    (is (thrown? (dosync
+                   (commute r (fn [v]
+                                (swap! depth inc)
+                                (when (< @depth 3)
+                                  (commute r identity))
+                                (inc v))))))
+    (is (= 0 @r))))
+
+(deftest commit-is-atomic-late-validator-reject
+  ;; A late-iteration validator rejection used to leave earlier
+  ;; iteration writes already committed (committed in order). The
+  ;; two-pass commit stages every new value first, then applies
+  ;; them as a single block -- so any rejection cancels the whole
+  ;; transaction with no partial state.
+  (let [r1 (ref 0)
+        r2 (ref 0)]
+    (set-validator! r2 pos?)
+    ;; Order matters: r1 is touched first, so it appears last in the
+    ;; LIFO refs_head iteration -- under single-pass commit it would
+    ;; be committed before r2's validator rejected.
+    (try (dosync (alter r2 (fn [_] -1))
+                 (alter r1 inc))
+         (catch e nil))
+    (is (= 0 @r1) "r1 must not be committed when r2's validator rejects")
+    (is (= 0 @r2)))
+  ;; Inverse touch order: same expectation.
+  (let [r1 (ref 0)
+        r2 (ref 0)]
+    (set-validator! r1 pos?)
+    (try (dosync (alter r2 inc)
+                 (alter r1 (fn [_] -1)))
+         (catch e nil))
+    (is (= 0 @r1))
+    (is (= 0 @r2))))
+
+(deftest commit-is-atomic-late-validator-throw
+  (let [r1 (ref 0)
+        r2 (ref 0)]
+    (set-validator! r2 (fn [v] (if (neg? v)
+                                  (throw (ex-info "bad" {:value v}))
+                                  true)))
+    (try (dosync (alter r1 inc)
+                 (alter r2 (fn [_] -1)))
+         (catch e nil))
+    (is (= 0 @r1))
+    (is (= 0 @r2))))
+
 (deftest commute-throw-during-replay-does-not-leak-commit-lock
   ;; A commute fn that succeeds during the body but throws during
   ;; commute_log_replay (under the commit lock) used to longjmp past
