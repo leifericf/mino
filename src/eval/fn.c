@@ -393,13 +393,21 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                  * For multi-arity, re-dispatch on new arg count. */
                 call_args = result->as.recur.args;
                 if (fn->as.fn.params == NULL) {
+                    mino_val_t *prev_params = cur_params;
                     if (dispatch_multi_arity(S, fn->as.fn.body, call_args,
                                              " in recur",
                                              &cur_params, &cur_body) != 0) {
                         S->current_ns = saved_ns;
                         return NULL;
                     }
-                    local = env_child(S, fn->as.fn.env);
+                    /* Reuse `local` only when the recur lands on the
+                     * same clause: the binding slots line up with the
+                     * existing env and bind_params will overwrite them
+                     * in place. A different clause may have a
+                     * different param shape (different arity, rest
+                     * arg, destructuring), so allocate a fresh env. */
+                    if (cur_params != prev_params)
+                        local = env_child(S, fn->as.fn.env);
                 }
                 /* Safepoint poll at the fn-self-recur backward
                  * branch — same rationale as the loop trampoline in

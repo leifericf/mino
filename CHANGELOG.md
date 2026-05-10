@@ -134,6 +134,16 @@ allocation shape come down.
   `prim_sub_negate` so the cons-spine and argv variants share one
   body.
 
+- **Multi-arity recur env reuse.** `apply_callable`'s recur branch
+  previously allocated a fresh `env_child` on every multi-arity
+  recur, even when the recur landed on the same clause. The branch
+  now snapshots the pre-dispatch params pointer and only allocates
+  a new env when the dispatched clause changes (different arity,
+  rest arg, destructuring shape). Same-clause recur reuses the
+  existing slots in place. Marginal win except in tight
+  multi-arity recur loops, where one allocation per iteration is
+  dropped.
+
 - **Symbol-aware env lookup.** `mino_env_get_sym(env, sym)` walks
   the parent chain with the symbol's cached length in hand, so the
   inner hash-indexed probes skip `strlen(name)` per frame.
