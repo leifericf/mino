@@ -113,11 +113,16 @@ static void state_init(mino_state_t *S)
     S->stm_next_ref_id     = 0;
     S->agent_next_id       = 0;
     S->agents_shutdown     = 0;
-    S->agent_run_head      = NULL;
-    S->agent_run_tail      = NULL;
-    S->agent_worker_alive  = 0;
-    S->agent_worker_pending_join = 0;
-    S->agent_mu_inited     = 0;
+    {
+        int pi;
+        for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
+            S->agent_pool[pi].run_head            = NULL;
+            S->agent_pool[pi].run_tail            = NULL;
+            S->agent_pool[pi].worker_alive        = 0;
+            S->agent_pool[pi].worker_pending_join = 0;
+        }
+    }
+    S->agent_mu_inited = 0;
     mino_state_lock_init(S);
     gc_evt_init(S);
 }
@@ -387,14 +392,17 @@ void mino_state_free(mino_state_t *S)
      * heap teardown ordering -- the heap is freed last, so we just
      * release the malloc-owned shells. */
     {
-        agent_action_node_t *n = S->agent_run_head;
-        while (n != NULL) {
-            agent_action_node_t *next = n->next;
-            free(n);
-            n = next;
+        int pi;
+        for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
+            agent_action_node_t *n = S->agent_pool[pi].run_head;
+            while (n != NULL) {
+                agent_action_node_t *next = n->next;
+                free(n);
+                n = next;
+            }
+            S->agent_pool[pi].run_head = NULL;
+            S->agent_pool[pi].run_tail = NULL;
         }
-        S->agent_run_head = NULL;
-        S->agent_run_tail = NULL;
     }
 #if defined(_WIN32) && defined(_MSC_VER)
     if (S->agent_mu_inited) {

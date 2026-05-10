@@ -436,13 +436,16 @@ static void gc_mark_record_types(mino_state_t *S)
  * workers via the safepoint mechanism). */
 static void gc_mark_agent_runq(mino_state_t *S)
 {
-    agent_action_node_t *n;
-    for (n = S->agent_run_head; n != NULL; n = n->next) {
-        gc_mark_interior(S, n->agent);
-        gc_mark_interior(S, n->fn);
-        gc_mark_interior(S, n->extra);
-        gc_mark_interior(S, n->dyn_snap);
-        gc_mark_interior(S, (mino_val_t *)n->env);
+    int pi;
+    for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
+        agent_action_node_t *n;
+        for (n = S->agent_pool[pi].run_head; n != NULL; n = n->next) {
+            gc_mark_interior(S, n->agent);
+            gc_mark_interior(S, n->fn);
+            gc_mark_interior(S, n->extra);
+            gc_mark_interior(S, n->dyn_snap);
+            gc_mark_interior(S, (mino_val_t *)n->env);
+        }
     }
 }
 

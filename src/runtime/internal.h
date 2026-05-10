@@ -350,6 +350,22 @@ typedef struct agent_action_node {
     struct agent_action_node  *next;
 } agent_action_node_t;
 
+/* Two agent pools live alongside each other: POOLED is the target of
+ * `send` (canonical CPU-bound shape), SOLO is the target of `send-off`
+ * (canonical IO-bound shape). Each pool has its own FIFO and its own
+ * worker thread, but all pools share agent_mu/agent_cv so an await
+ * waiter sleeps once and wakes for either pool's progress.
+ *
+ * mino's per-state eval lock still serializes one action at a time,
+ * so the split is architectural -- it preserves enqueue-order within
+ * each shape, and gives us a clean seam if we later let SOLO actions
+ * yield the eval lock during blocking IO. */
+typedef enum {
+    AGENT_POOL_POOLED = 0, /* send */
+    AGENT_POOL_SOLO   = 1, /* send-off */
+    AGENT_POOL_COUNT  = 2
+} agent_pool_kind_t;
+
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */
@@ -790,12 +806,14 @@ struct mino_state {
      * Idempotent: calling twice is a no-op. */
     int             agents_shutdown;
 
-    /* Per-state agent worker thread + run queue.
+    /* Per-state agent workers + run queues (split into POOLED and
+     * SOLO; see agent_pool_kind_t above).
      *
-     * One worker thread serves all agents in this state. The worker
-     * counts against thread_limit, so a host that never grants threads
-     * (default thread_limit == 1) cannot use agents -- send/send-off
-     * throw MTH001 in that case, the same shape future/promise/thread
+     * One worker thread per pool serves all agents in this state.
+     * Each worker counts against thread_limit, so a host that never
+     * grants threads (default thread_limit == 1) cannot use agents
+     * -- send/send-off throw MTH001 in that case, the same shape
+     * future/promise/thread
      * already use. Standalone `./mino` raises thread_limit to cpu_count
      * after install_all so the standalone REPL works out of the box.
      *
@@ -808,44 +826,48 @@ struct mino_state {
      * a send vs send-off split for IO-bound actions that release the
      * lock during blocking calls.
      *
-     * agent_run_head / agent_run_tail form a singly-linked FIFO of
+     * Each pool's run_head / run_tail form a singly-linked FIFO of
      * (agent, fn, extra, dyn_snap) tuples. agent_mu serializes access
-     * to the queue and to per-agent in_flight counters. agent_cv is
-     * shared by the worker (waiting for work) and by await callers
-     * (waiting for an agent's in_flight to reach zero); broadcasts
-     * happen on enqueue and after each action completes.
+     * to all pool queues and to per-agent in_flight counters. agent_cv
+     * is shared by the workers (waiting for their pool's work) and by
+     * await callers (waiting for an agent's in_flight to reach zero);
+     * broadcasts happen on enqueue and after each action completes.
      *
-     * The worker is lazy-spawned on first send/send-off, and joined
-     * by shutdown-agents. The queue lives entirely outside the GC
-     * heap (malloc-owned nodes); GC tracing reaches the held
-     * mino_val_t pointers via a per-state walk in gc_mark_roots. */
-    agent_action_node_t *agent_run_head;
-    agent_action_node_t *agent_run_tail;
+     * Each pool's worker is lazy-spawned on first send/send-off into
+     * that pool, and joined by shutdown-agents. Queues live entirely
+     * outside the GC heap (malloc-owned nodes); GC tracing reaches
+     * the held mino_val_t pointers via gc_mark_agent_runq. */
 #if defined(_WIN32) && defined(_MSC_VER)
     CRITICAL_SECTION     agent_mu;
     CONDITION_VARIABLE   agent_cv;
-    HANDLE               agent_worker;
 #else
     pthread_mutex_t      agent_mu;
     pthread_cond_t       agent_cv;
-    pthread_t            agent_worker;
 #endif
-    /* agent_worker_alive: a worker thread is currently in its loop
-     * (mutated under agent_mu). Cleared by the worker before exit so
-     * the next send observes "no live worker" and re-spawns.
-     *
-     * agent_worker_pending_join: agent_worker holds a joinable handle
-     * for a worker that has exited (or is exiting) but has not been
-     * joined yet (mutated under state_lock). Cleared after the join.
-     * The worker exits lazily when its run-queue drains so a long-
-     * idle agent worker doesn't keep S->thread_count > 0 and suppress
-     * GC for the rest of the state's lifetime; the spawn cost on a
-     * subsequent burst is the price.
-     *
-     * agent_mu_inited: has agent_mu/agent_cv been pthread_*_init'd
-     * yet (lazy on first send). */
-    int                  agent_worker_alive;
-    int                  agent_worker_pending_join;
+    /* Per-pool state. worker_alive: worker thread is currently in its
+     * loop (mutated under agent_mu); cleared before the worker exits
+     * so the next send observes "no live worker" and re-spawns.
+     * worker_pending_join: worker holds a joinable handle for a thread
+     * that has exited (or is exiting) but has not been joined yet
+     * (mutated under state_lock). Cleared after the join. The worker
+     * exits lazily when its run-queue drains so a long-idle agent
+     * worker doesn't keep S->thread_count > 0 and suppress GC for the
+     * rest of the state's lifetime; the spawn cost on a subsequent
+     * burst is the price. */
+    struct {
+        agent_action_node_t *run_head;
+        agent_action_node_t *run_tail;
+#if defined(_WIN32) && defined(_MSC_VER)
+        HANDLE               worker;
+#else
+        pthread_t            worker;
+#endif
+        int                  worker_alive;
+        int                  worker_pending_join;
+    } agent_pool[AGENT_POOL_COUNT];
+
+    /* agent_mu_inited: has agent_mu/agent_cv been pthread_*_init'd
+     * yet (lazy on first send into either pool). */
     int                  agent_mu_inited;
 
     /* === Async scheduler and timers ==================================== */

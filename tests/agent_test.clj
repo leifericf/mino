@@ -24,11 +24,25 @@
     (is (= 6 @a))))
 
 (deftest agent-send-off
-  ;; Phase 1 routes both shapes through the single shared worker.
+  ;; send-off routes onto the SOLO pool. mino's eval lock means
+  ;; actions across send and send-off still serialize, but the
+  ;; queues are independent.
   (let [a (agent 10)]
     (send-off a dec)
     (await a)
     (is (= 9 @a))))
+
+(deftest agent-send-and-send-off-interleave
+  ;; Both pools serve the same agent. await waits across both
+  ;; queues -- the broadcast on agent_cv wakes await regardless of
+  ;; which pool's worker drained the action.
+  (let [a (agent 0)]
+    (send a inc)
+    (send-off a inc)
+    (send a inc)
+    (send-off a inc)
+    (await a)
+    (is (= 4 @a))))
 
 (deftest agent-watches
   (let [a    (agent 0)

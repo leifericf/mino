@@ -2,38 +2,43 @@
  * agent.c -- agents (asynchronous mutable cells with serialized actions).
  *
  * Execution model: send / send-off enqueue (fn args) onto a per-state
- * FIFO and return the agent immediately. A single worker thread per
- * state drains the FIFO, acquires state_lock, runs each action under
- * the agent's validator + watches via agent_apply_action, and signals
+ * FIFO and return the agent immediately. Two pools live alongside each
+ * other -- POOLED (target of `send`) and SOLO (target of `send-off`)
+ * -- each with its own queue and worker thread. Each worker drains
+ * its pool's FIFO, acquires state_lock, runs the action under the
+ * agent's validator + watches via agent_apply_action, and signals
  * await waiters when the agent's in-flight count reaches zero.
  *
  * Threading contract:
  *
- *  - The worker thread counts against S->thread_limit, so a host that
- *    has not granted threads (default thread_limit == 1) cannot send;
- *    send/send-off throws MTH001 in that case, the same shape
- *    future / promise / thread already use. Standalone `./mino`
- *    raises thread_limit to cpu_count after install_all so the
- *    standalone REPL works out of the box.
+ *  - Each pool's worker counts against S->thread_limit, so a host
+ *    that has granted only one thread (default thread_limit == 1)
+ *    can have only one shape of send alive at a time. send /
+ *    send-off throw MTH001 if the host hasn't granted enough threads
+ *    to spawn the requested pool's worker; embedders that want both
+ *    shapes concurrently must raise the limit to >= 2 (in addition
+ *    to the embedder thread). Standalone `./mino` raises thread_limit
+ *    to cpu_count after install_all so the REPL works out of the box.
  *
- *  - The worker is lazy-spawned on the first send/send-off. It exits
- *    when the queue is drained AND S->agents_shutdown is set
- *    (typically by the shutdown-agents primitive, or by
- *    mino_state_free during teardown).
+ *  - Each worker is lazy-spawned on the first send/send-off into its
+ *    pool. It exits when its queue is drained so a long-idle worker
+ *    doesn't keep S->thread_count > 0 and suppress GC for the rest
+ *    of the state's lifetime; the next send into that pool re-spawns.
+ *    shutdown-agents and mino_state_free quiesce both pools.
  *
  *  - Lock order: state_lock outer, S->agent_mu inner. The send caller
  *    holds state_lock while it enqueues under agent_mu. The worker
  *    takes agent_mu to pop, releases agent_mu, then acquires
  *    state_lock to run the action; no nested hold across the action
  *    body. await callers yield state_lock before blocking on
- *    agent_cv so the worker can run.
+ *    agent_cv so the workers can run.
  *
  *  - mino's per-state eval lock means actions on multiple agents in
- *    one state still run one at a time; the worker exists to decouple
- *    send (returns immediately) from action execution and to give
- *    await meaningful blocking semantics. A send vs send-off pool
- *    split (where send-off may run blocking IO outside the eval lock)
- *    is left for a follow-up cycle.
+ *    one state still run one at a time, even across the two pools.
+ *    The split is architectural: it preserves enqueue-order within
+ *    each shape (a long send-off action queue does not delay sends),
+ *    and gives a clean seam for a future SOLO-yields-eval-lock-during-
+ *    blocking-IO design without further user-facing churn.
  *
  *  - Per-action *agent* and conveyed dynamic bindings are pushed onto
  *    the worker's dyn_stack before the action body runs, mirroring
@@ -277,27 +282,32 @@ out:
 
 /* --- worker thread + queue dispatch --------------------------------------- */
 
-/* Pop the head node of S->agent_run_head. Caller must hold agent_mu. */
-static agent_action_node_t *agent_runq_pop(mino_state_t *S)
+/* Pop the head node of S->agent_pool[kind].run_head. Caller must hold agent_mu. */
+static agent_action_node_t *agent_runq_pop(mino_state_t *S,
+                                            agent_pool_kind_t kind)
 {
-    agent_action_node_t *n = S->agent_run_head;
+    agent_action_node_t *n = S->agent_pool[kind].run_head;
     if (n == NULL) return NULL;
-    S->agent_run_head = n->next;
-    if (S->agent_run_head == NULL) S->agent_run_tail = NULL;
+    S->agent_pool[kind].run_head = n->next;
+    if (S->agent_pool[kind].run_head == NULL) {
+        S->agent_pool[kind].run_tail = NULL;
+    }
     n->next = NULL;
     return n;
 }
 
-/* Append node to the tail of S->agent_run_head. Caller must hold agent_mu. */
-static void agent_runq_push_tail(mino_state_t *S, agent_action_node_t *n)
+/* Append node to the tail of S->agent_pool[kind].run_head. Caller must
+ * hold agent_mu. */
+static void agent_runq_push_tail(mino_state_t *S, agent_pool_kind_t kind,
+                                  agent_action_node_t *n)
 {
     n->next = NULL;
-    if (S->agent_run_tail != NULL) {
-        S->agent_run_tail->next = n;
+    if (S->agent_pool[kind].run_tail != NULL) {
+        S->agent_pool[kind].run_tail->next = n;
     } else {
-        S->agent_run_head = n;
+        S->agent_pool[kind].run_head = n;
     }
-    S->agent_run_tail = n;
+    S->agent_pool[kind].run_tail = n;
 }
 
 /* Run one queued action on the worker thread. Holds state_lock for
@@ -366,7 +376,7 @@ cleanup:
     }
 }
 
-/* Worker entry. Pops actions from the runq, running each under
+/* Worker entry. Pops actions from the pool's runq, running each under
  * state_lock. Exits as soon as the queue drains (or when shutdown
  * is set) so a long-idle agent worker doesn't keep thread_count > 0
  * and suppress GC for the rest of the state's lifetime. The next
@@ -377,7 +387,8 @@ cleanup:
  * state_lock to run, retakes agent_mu to decrement in_flight and
  * broadcast. Awaiters yield state_lock before blocking on agent_cv,
  * so they don't block the worker. */
-static void agent_worker_run(mino_state_t *S, char *stack_anchor)
+static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
+                              char *stack_anchor)
 {
     mino_thread_ctx_t *ctx;
 
@@ -388,7 +399,7 @@ static void agent_worker_run(mino_state_t *S, char *stack_anchor)
          * nodes leak (memory is reclaimed by mino_state_free's
          * drain). */
         agent_mu_lock(&S->agent_mu);
-        S->agent_worker_alive = 0;
+        S->agent_pool[kind].worker_alive = 0;
         agent_cv_broadcast(&S->agent_cv);
         agent_mu_unlock(&S->agent_mu);
         return;
@@ -407,16 +418,16 @@ static void agent_worker_run(mino_state_t *S, char *stack_anchor)
         agent_action_node_t *n;
 
         agent_mu_lock(&S->agent_mu);
-        if (S->agent_run_head == NULL) {
+        if (S->agent_pool[kind].run_head == NULL) {
             /* Queue drained or shutdown: exit the worker so it
              * stops counting against thread_count. The next send
-             * re-spawns. */
-            S->agent_worker_alive = 0;
+             * into this pool re-spawns. */
+            S->agent_pool[kind].worker_alive = 0;
             agent_cv_broadcast(&S->agent_cv);
             agent_mu_unlock(&S->agent_mu);
             break;
         }
-        n = agent_runq_pop(S);
+        n = agent_runq_pop(S, kind);
         agent_mu_unlock(&S->agent_mu);
 
         /* Run the action under state_lock so eval invariants hold. */
@@ -439,7 +450,7 @@ static void agent_worker_run(mino_state_t *S, char *stack_anchor)
      * thread count. The pthread_t is left intact for a follow-up
      * pthread_join from agent_worker_ensure or
      * mino_agent_quiesce_workers (signaled by
-     * agent_worker_pending_join, which the spawn path set when it
+     * worker_pending_join, which the spawn path set when it
      * created us). Joining an already-exited joinable pthread
      * returns immediately. */
     mino_state_lock_acquire(S);
@@ -455,66 +466,83 @@ static void agent_worker_run(mino_state_t *S, char *stack_anchor)
     free(ctx);
 }
 
+/* Per-pool entry stubs. pthread_create takes one void*; encoding the
+ * pool kind in two static stubs avoids a tiny malloc on every spawn
+ * and keeps the spawn path branch-free. */
 #if defined(_WIN32) && defined(_MSC_VER)
-static unsigned __stdcall agent_worker_entry(void *arg)
+static unsigned __stdcall agent_worker_entry_pooled(void *arg)
 {
     char anchor;
-    agent_worker_run((mino_state_t *)arg, &anchor);
+    agent_worker_run((mino_state_t *)arg, AGENT_POOL_POOLED, &anchor);
+    return 0;
+}
+static unsigned __stdcall agent_worker_entry_solo(void *arg)
+{
+    char anchor;
+    agent_worker_run((mino_state_t *)arg, AGENT_POOL_SOLO, &anchor);
     return 0;
 }
 #else
-static void *agent_worker_entry(void *arg)
+static void *agent_worker_entry_pooled(void *arg)
 {
     char anchor;
-    agent_worker_run((mino_state_t *)arg, &anchor);
+    agent_worker_run((mino_state_t *)arg, AGENT_POOL_POOLED, &anchor);
+    return NULL;
+}
+static void *agent_worker_entry_solo(void *arg)
+{
+    char anchor;
+    agent_worker_run((mino_state_t *)arg, AGENT_POOL_SOLO, &anchor);
     return NULL;
 }
 #endif
 
-/* Reap a previously-exited (drain-exit) worker so its pthread
- * handle can be released before the next spawn. Caller must hold
- * state_lock; the join itself yields the lock so the exiting
- * worker can finish its ctx detach + thread_count decrement. */
-static void agent_worker_reap_pending(mino_state_t *S)
+/* Reap a previously-exited (drain-exit) worker for the given pool so
+ * its pthread handle can be released before the next spawn. Caller
+ * must hold state_lock; the join itself yields the lock so the
+ * exiting worker can finish its ctx detach + thread_count decrement. */
+static void agent_worker_reap_pending(mino_state_t *S, agent_pool_kind_t kind)
 {
     int saved_depth;
-    if (!S->agent_worker_pending_join) return;
-    S->agent_worker_pending_join = 0;
+    if (!S->agent_pool[kind].worker_pending_join) return;
+    S->agent_pool[kind].worker_pending_join = 0;
     saved_depth = mino_yield_lock(S);
 #if defined(_WIN32) && defined(_MSC_VER)
-    WaitForSingleObject(S->agent_worker, INFINITE);
-    CloseHandle(S->agent_worker);
+    WaitForSingleObject(S->agent_pool[kind].worker, INFINITE);
+    CloseHandle(S->agent_pool[kind].worker);
 #else
-    pthread_join(S->agent_worker, NULL);
+    pthread_join(S->agent_pool[kind].worker, NULL);
 #endif
     mino_resume_lock(S, saved_depth);
 }
 
-/* Lazy-spawn the agent worker. Caller must hold state_lock. Throws
- * MTH001 if thread budget is exhausted. Returns 0 on success, 1 on
- * throw (caller should propagate NULL). Idempotent: returns 0 fast
- * when a worker is already running. If a previous worker exited
- * (queue drained), reap its pthread handle before spawning a
- * fresh one so thread_count is accurate. */
-static int agent_worker_ensure(mino_state_t *S)
+/* Lazy-spawn the agent worker for the given pool. Caller must hold
+ * state_lock. Throws MTH001 if thread budget is exhausted. Returns 0
+ * on success, 1 on throw (caller should propagate NULL). Idempotent:
+ * returns 0 fast when a worker is already running. If a previous
+ * worker exited (queue drained), reap its pthread handle before
+ * spawning a fresh one so thread_count is accurate. */
+static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
 {
     int alive;
     if (!S->agent_mu_inited) {
         agent_mu_ensure_inited(S);
     }
     agent_mu_lock(&S->agent_mu);
-    alive = S->agent_worker_alive;
+    alive = S->agent_pool[kind].worker_alive;
     agent_mu_unlock(&S->agent_mu);
     if (alive) return 0;
 
-    /* Reap any pthread handle left by a previously-drained worker. */
-    agent_worker_reap_pending(S);
+    /* Reap any pthread handle left by a previously-drained worker
+     * for this pool. */
+    agent_worker_reap_pending(S, kind);
 
     if (S->thread_count >= S->thread_limit) {
         prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
             "agent dispatch requires a host-granted worker thread; "
             "raise via mino_set_thread_limit (>= 2 to allow one agent "
-            "worker plus the embedder thread)");
+            "worker plus the embedder thread; >= 3 if both send and "
+            "send-off are used concurrently)");
         return 1;
     }
     S->multi_threaded = 1;
@@ -523,23 +551,25 @@ static int agent_worker_ensure(mino_state_t *S)
      * on the embedder thread (impossible in single-thread mode but
      * defensive) doesn't race. */
     agent_mu_lock(&S->agent_mu);
-    S->agent_worker_alive = 1;
+    S->agent_pool[kind].worker_alive = 1;
     agent_mu_unlock(&S->agent_mu);
 #if defined(_WIN32) && defined(_MSC_VER)
     {
         unsigned stack = (unsigned)S->thread_stack_size;
-        uintptr_t h = _beginthreadex(NULL, stack, agent_worker_entry, S,
-                                     0, NULL);
+        uintptr_t h = _beginthreadex(NULL, stack,
+            kind == AGENT_POOL_POOLED ? agent_worker_entry_pooled
+                                       : agent_worker_entry_solo,
+            S, 0, NULL);
         if (h == 0) {
             agent_mu_lock(&S->agent_mu);
-            S->agent_worker_alive = 0;
+            S->agent_pool[kind].worker_alive = 0;
             agent_mu_unlock(&S->agent_mu);
             S->thread_count--;
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;
         }
-        S->agent_worker = (HANDLE)h;
+        S->agent_pool[kind].worker = (HANDLE)h;
     }
 #else
     {
@@ -552,12 +582,14 @@ static int agent_worker_ensure(mino_state_t *S)
                 attrp = &attr;
             }
         }
-        rc = pthread_create(&S->agent_worker, attrp,
-                            agent_worker_entry, S);
+        rc = pthread_create(&S->agent_pool[kind].worker, attrp,
+            kind == AGENT_POOL_POOLED ? agent_worker_entry_pooled
+                                       : agent_worker_entry_solo,
+            S);
         if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
             agent_mu_lock(&S->agent_mu);
-            S->agent_worker_alive = 0;
+            S->agent_pool[kind].worker_alive = 0;
             agent_mu_unlock(&S->agent_mu);
             S->thread_count--;
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
@@ -566,16 +598,17 @@ static int agent_worker_ensure(mino_state_t *S)
         }
     }
 #endif
-    S->agent_worker_pending_join = 1;
+    S->agent_pool[kind].worker_pending_join = 1;
     return 0;
 }
 
-/* Enqueue (agent fn extra env dyn_snap) onto S->agent_run_*. Caller
- * holds state_lock. agent_worker_ensure has spawned the worker if
- * needed. Returns 0 on success, 1 on OOM (caller propagates NULL). */
-static int agent_enqueue(mino_state_t *S, mino_val_t *agent,
-                          mino_val_t *fn, mino_val_t *extra,
-                          mino_env_t *env)
+/* Enqueue (agent fn extra env dyn_snap) onto the named pool's queue.
+ * Caller holds state_lock. agent_worker_ensure has spawned the
+ * pool's worker if needed. Returns 0 on success, 1 on OOM (caller
+ * propagates NULL). */
+static int agent_enqueue(mino_state_t *S, agent_pool_kind_t kind,
+                          mino_val_t *agent, mino_val_t *fn,
+                          mino_val_t *extra, mino_env_t *env)
 {
     agent_action_node_t *n = (agent_action_node_t *)calloc(1, sizeof(*n));
     if (n == NULL) return 1;
@@ -586,7 +619,7 @@ static int agent_enqueue(mino_state_t *S, mino_val_t *agent,
     n->dyn_snap = mino_snapshot_thread_bindings(S);
     n->next     = NULL;
     agent_mu_lock(&S->agent_mu);
-    agent_runq_push_tail(S, n);
+    agent_runq_push_tail(S, kind, n);
     if (agent->as.agent.in_flight < INT_MAX) {
         agent->as.agent.in_flight++;
     }
@@ -595,19 +628,20 @@ static int agent_enqueue(mino_state_t *S, mino_val_t *agent,
     return 0;
 }
 
-/* Public quiesce hook: flip agents_shutdown so a live worker exits
- * after draining the queue, then reap any pending pthread handle.
- * Idempotent. Called by prim_shutdown_agents and by mino_state_free
- * during teardown.
+/* Public quiesce hook: flip agents_shutdown so live workers exit
+ * after draining their queues, then reap any pending pthread
+ * handles. Idempotent. Called by prim_shutdown_agents and by
+ * mino_state_free during teardown.
  *
- * Self-join detection: if the calling thread IS the worker, we
- * cannot join ourselves. prim_shutdown_agents catches that case
+ * Self-join detection: if the calling thread IS one of the workers,
+ * we cannot join ourselves. prim_shutdown_agents catches that case
  * and throws; this helper is a no-op when invoked in that
- * pathological state since agent_worker_pending_join is set only
- * by the spawn path on a different thread. */
+ * pathological state since each pool's worker_pending_join is set
+ * only by the spawn path on a different thread. */
 void mino_agent_quiesce_workers(mino_state_t *S)
 {
-    /* Flag shutdown + wake worker so it can drain + exit. */
+    int pi;
+    /* Flag shutdown + wake workers so they can drain + exit. */
     if (S->agent_mu_inited) {
         agent_mu_lock(&S->agent_mu);
         S->agents_shutdown = 1;
@@ -617,7 +651,9 @@ void mino_agent_quiesce_workers(mino_state_t *S)
         S->agents_shutdown = 1;
     }
 
-    agent_worker_reap_pending(S);
+    for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
+        agent_worker_reap_pending(S, (agent_pool_kind_t)pi);
+    }
 }
 
 /* --- pending-sends drain ------------------------------------------------- *
@@ -667,7 +703,9 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
             continue;
         }
         if (S->agents_shutdown) continue;
-        if (agent_worker_ensure(S)) {
+        /* In-tx send is the JVM-canon shape -- post-commit pending
+         * drains route through the POOLED pool. */
+        if (agent_worker_ensure(S, AGENT_POOL_POOLED)) {
             /* Worker spawn refused (no thread budget). Pending
              * sends are silently dropped; the commit has already
              * gone through. Clear the error that
@@ -677,7 +715,7 @@ void mino_agent_drain_pending(mino_state_t *S, mino_val_t *pending,
             clear_error(S);
             return;
         }
-        if (agent_enqueue(S, agent_v, fn, extra, env)) {
+        if (agent_enqueue(S, AGENT_POOL_POOLED, agent_v, fn, extra, env)) {
             /* OOM enqueueing: same logic as above. */
             return;
         }
@@ -822,25 +860,72 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     : mino_empty_list(S));
         return agent;
     }
-    /* Async dispatch: spawn the worker if needed (gates on
+    /* Async dispatch: spawn the POOLED worker if needed (gates on
      * thread_limit -- throws MTH001 if the host hasn't granted a
      * thread budget), then append (agent fn extra env) to the
      * runq and return. The worker drains and runs each action
      * under state_lock. */
-    if (agent_worker_ensure(S)) return NULL;
-    if (agent_enqueue(S, agent, fn, extra, env)) {
+    if (agent_worker_ensure(S, AGENT_POOL_POOLED)) return NULL;
+    if (agent_enqueue(S, AGENT_POOL_POOLED, agent, fn, extra, env)) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "send: out of memory enqueueing action");
     }
     return agent;
 }
 
+/* send-off is structurally identical to send except it routes the
+ * action onto the SOLO pool. mino's per-state eval lock means
+ * actions across the two pools still serialize, so the user-visible
+ * effect today is the same as send -- but the queues are independent
+ * (a long-running send-off action cannot stall pending sends, and
+ * vice versa), and the seam is in place for a future SOLO-yields-
+ * eval-lock-during-blocking-IO design. */
 mino_val_t *prim_send_off(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    /* Phase 1 routes both shapes through the single shared worker;
-     * a dedicated send-off pool for blocking IO actions is left for
-     * a follow-up cycle. */
-    return prim_send(S, args, env);
+    mino_val_t        *agent, *fn, *extra;
+    mino_thread_ctx_t *ctx;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "send-off requires at least two arguments: agent and fn");
+    }
+    agent = args->as.cons.car;
+    fn    = args->as.cons.cdr->as.cons.car;
+    extra = args->as.cons.cdr->as.cons.cdr;
+    if (!mino_is_agent(agent)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "send-off: first argument must be an agent");
+    }
+    if (agent_check_state(S, agent)) return NULL;
+    if (S->agents_shutdown) {
+        return prim_throw_classified(S, "eval/state", "MST008",
+            "Agents have been shut down; new sends are not accepted");
+    }
+    if (agent->as.agent.err != NULL && agent->as.agent.err_mode == 0) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "Agent is failed, needs restart");
+    }
+    /* Defer in-tx sends. JVM-canon: send-off inside dosync queues
+     * onto the same pending-send list as send, and JVM's commit
+     * dispatcher routes via the action's pool. mino's commit drain
+     * runs on POOLED to keep the implementation tight; document as
+     * a deviation if/when SOLO yields the eval lock. */
+    ctx = mino_current_ctx(S);
+    if (ctx->current_tx != NULL) {
+        mino_val_t *triple = mino_cons(S, agent,
+                                mino_cons(S, fn, extra));
+        ctx->current_tx->pending_sends =
+            mino_cons(S, triple,
+                ctx->current_tx->pending_sends != NULL
+                    ? ctx->current_tx->pending_sends
+                    : mino_empty_list(S));
+        return agent;
+    }
+    if (agent_worker_ensure(S, AGENT_POOL_SOLO)) return NULL;
+    if (agent_enqueue(S, AGENT_POOL_SOLO, agent, fn, extra, env)) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "send-off: out of memory enqueueing action");
+    }
+    return agent;
 }
 
 /* Block until in_flight == 0 for every named agent. Drops state_lock
@@ -1085,33 +1170,34 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
     }
     /* JVM canon: with :clear-actions true, drop any actions the
      * agent has queued (they would have been blocked behind the
-     * failure latch anyway). Walk the runq under agent_mu, splice
-     * out entries targeting this agent, decrement in_flight per
-     * removal, broadcast in case an await waiter is sleeping. */
+     * failure latch anyway). Walk both pools' runqs under agent_mu,
+     * splice out entries targeting this agent, decrement in_flight
+     * per removal, broadcast in case an await waiter is sleeping. */
     if (clear_actions && S->agent_mu_inited) {
-        agent_action_node_t **pp;
+        int pi;
         agent_mu_lock(&S->agent_mu);
-        pp = &S->agent_run_head;
-        while (*pp != NULL) {
-            agent_action_node_t *cur = *pp;
-            if (cur->agent == agent) {
-                *pp = cur->next;
-                if (S->agent_run_tail == cur) S->agent_run_tail = NULL;
-                if (agent->as.agent.in_flight > 0) {
-                    agent->as.agent.in_flight--;
+        for (pi = 0; pi < AGENT_POOL_COUNT; pi++) {
+            agent_action_node_t **pp = &S->agent_pool[pi].run_head;
+            while (*pp != NULL) {
+                agent_action_node_t *cur = *pp;
+                if (cur->agent == agent) {
+                    *pp = cur->next;
+                    if (agent->as.agent.in_flight > 0) {
+                        agent->as.agent.in_flight--;
+                    }
+                    free(cur);
+                } else {
+                    pp = &cur->next;
                 }
-                free(cur);
-            } else {
-                pp = &cur->next;
             }
-        }
-        /* Re-establish run_tail by walking once. */
-        if (S->agent_run_head == NULL) {
-            S->agent_run_tail = NULL;
-        } else {
-            agent_action_node_t *t = S->agent_run_head;
-            while (t->next != NULL) t = t->next;
-            S->agent_run_tail = t;
+            /* Re-establish run_tail by walking once. */
+            if (S->agent_pool[pi].run_head == NULL) {
+                S->agent_pool[pi].run_tail = NULL;
+            } else {
+                agent_action_node_t *t = S->agent_pool[pi].run_head;
+                while (t->next != NULL) t = t->next;
+                S->agent_pool[pi].run_tail = t;
+            }
         }
         agent_cv_broadcast(&S->agent_cv);
         agent_mu_unlock(&S->agent_mu);
@@ -1301,14 +1387,16 @@ const mino_prim_def k_prims_agent[] = {
     {"agent?",      prim_agent_p,
      "Returns true if x is an agent."},
     {"send",        prim_send,
-     "Dispatches an action to an agent's run-queue and returns the "
-     "agent immediately. The action runs on the per-state worker "
-     "under state_lock. Throws MTH001 if the host has not granted "
-     "a thread budget for the worker."},
+     "Dispatches an action onto the agent's POOLED run-queue and "
+     "returns the agent immediately. The action runs on the POOLED "
+     "worker under state_lock. Throws MTH001 if the host has not "
+     "granted a thread budget for the worker."},
     {"send-off",    prim_send_off,
-     "Like send. Phase 1 routes both shapes through the single "
-     "shared worker; a separate pool for blocking IO actions is "
-     "left for a follow-up cycle."},
+     "Dispatches an action onto the agent's SOLO run-queue. mino's "
+     "per-state eval lock means actions across the two pools still "
+     "serialize, but the queues are independent: a long-running "
+     "send-off action does not stall pending sends, and vice versa. "
+     "Throws MTH001 if the host has not granted a thread budget."},
     {"send-via",    prim_send_via,
      "JVM-canon dispatches the action through a host-supplied "
      "Executor. mino has no public Executor type yet; this prim "
@@ -1339,10 +1427,11 @@ const mino_prim_def k_prims_agent[] = {
     {"error-mode", prim_error_mode,
      "Returns the agent's current error mode."},
     {"shutdown-agents", prim_shutdown_agents,
-     "Quiesces the per-state agent worker: signals it to drain the "
-     "remaining queue, joins the pthread, seals the agent surface so "
-     "subsequent send / send-off throw MST008. Idempotent. Throws "
-     "MST002 if called from inside an action body (self-join)."},
+     "Quiesces both per-state agent workers: signals each to drain "
+     "its remaining queue, joins the pthreads, seals the agent "
+     "surface so subsequent send / send-off throw MST008. "
+     "Idempotent. Throws MST002 if called from inside an action "
+     "body (self-join)."},
     {"release-pending-sends", prim_release_pending_sends,
      "Returns the count of sends queued by the current transaction "
      "and clears them so they will NOT fire on commit. Outside a "
