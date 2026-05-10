@@ -32,6 +32,8 @@
  */
 
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "mino.h"
@@ -44,6 +46,26 @@ extern mino_val_t *mino_nil(mino_state_t *S);
 /* Sentinel for failed compiles. apply_callable checks against this
  * pointer to skip the retry on subsequent calls. */
 const mino_bc_fn_t mino_bc_declined = {0};
+
+/* Bytecode-required mode. When non-zero, the tree-walker fallback at
+ * apply_callable's bc-entry path is treated as a fatal error so VM
+ * regressions surface loudly instead of degrading silently. Set from
+ * the embedder (e.g., by reading the MINO_BC_REQUIRE env var at
+ * startup). Defaults to zero in production builds. */
+int mino_bc_require_flag = 0;
+
+void mino_bc_check_require(mino_state_t *S, mino_val_t *fn)
+{
+    (void)S;
+    if (!mino_bc_require_flag) return;
+    if (fn == NULL || fn->type != MINO_FN) return;
+    if (MINO_BC_RUNNABLE(fn)) return;
+    /* Decline mode: report and abort. The fn's params/body are not
+     * compilable yet; whoever flipped require_flag should run with
+     * an expanded compiler. */
+    fprintf(stderr, "MINO_BC_REQUIRE: fn declined by compiler\n");
+    abort();
+}
 
 #define BC_MAX_LOCALS 256
 #define BC_MAX_REGS   255            /* operand width fits in 8 bits */

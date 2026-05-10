@@ -321,6 +321,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         if (fn->type == MINO_FN && fn->as.fn.bc == NULL) {
             (void)mino_bc_compile_fn(S, fn);
         }
+        mino_bc_check_require(S, fn);
         if (fn->type == MINO_FN && MINO_BC_RUNNABLE(fn)) {
             /* argv ABI: walk the cons spine into a stack scratch array.
              * The slots are kept alive across any GC the body triggers

@@ -819,6 +819,18 @@ int main(int argc, char **argv)
     mino_install_all(S, env);
     mino_set_resolver(S, runtime_paths_resolve, S);
 
+    /* Bytecode require knob. With MINO_BC_REQUIRE=1 set, the bc layer
+     * aborts on any tree-walker fallback so VM regressions surface
+     * during development. Default (unset / "0") leaves the silent
+     * fallback path in place. */
+    {
+        extern int mino_bc_require_flag;
+        const char *raw = getenv("MINO_BC_REQUIRE");
+        if (raw != NULL && raw[0] != '\0' && raw[0] != '0') {
+            mino_bc_require_flag = 1;
+        }
+    }
+
     /* Standalone mode: grant the runtime permission to spawn cpu_count
      * host threads. Embedded users start at thread_limit=1 and opt in
      * via mino_set_thread_limit. The actual host-thread implementation

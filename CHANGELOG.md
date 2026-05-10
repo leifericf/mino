@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.107.0 — Bytecode Require Mode
+
+`MINO_BC_REQUIRE=1` flips the tree-walker fallback in
+`apply_callable`'s bc path from a silent recovery into a hard
+abort. With the knob on, every fn that the compiler declines
+prints `MINO_BC_REQUIRE: fn declined by compiler` and aborts;
+production builds default to unset / `0` and keep the silent
+fallback in place. The knob is the standing development gate
+for the cycle that retires the tree-walker: once the compiler
+covers every form that the test suite exercises, CI runs with
+`MINO_BC_REQUIRE=1` set and any silent decline turns into a
+loud failure.
+
+The flag lives on a single global (`mino_bc_require_flag`) that
+the runtime initialises from the env var at startup. Embedders
+that want to opt in programmatically can flip it via the
+externally-visible symbol; the runtime does not gate behind a
+public C API entry until the form-coverage cycle lands.
+
+ABI surface and semantics unchanged when the knob is off; all
+1557 tests, 7279 assertions pass on release / ASan / UBSan with
+`MINO_BC_REQUIRE` unset, and abort cleanly with it set as
+expected on the current Phase-1/2 declined shapes.
+
 ## v0.106.0 — Bytecode Tail-Call Trampoline
 
 A flat trampoline at the bc dispatch boundary. The VM's
