@@ -124,21 +124,38 @@ static void agent_report_failure(mino_state_t *S, mino_val_t *agent,
 /* Apply one action synchronously: run validator, update state, fire
  * watches. Each user-callback invocation goes through mino_pcall so a
  * throw is captured into the agent's err slot rather than propagated
- * to the sender. */
+ * to the sender.
+ *
+ * The agent is bound to the `*agent*` dynamic var across the action
+ * invocation, matching JVM canon (`(send a (fn [v] (= *agent* a)))`
+ * is true). The dyn_frame is stack-allocated; mino_pcall catches
+ * throws within itself so the push/pop bracket cannot be skipped by
+ * a longjmp escaping past us. */
 static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
                                 mino_val_t *fn, mino_val_t *extra,
                                 mino_env_t *env)
 {
-    mino_val_t *call_args = agent_build_call(S, agent->as.agent.val, extra);
-    mino_val_t *new_state = NULL;
-    mino_val_t *old_state = agent->as.agent.val;
-    mino_val_t *thrown_ex = NULL;
-    int         pc;
+    mino_val_t        *call_args = agent_build_call(S, agent->as.agent.val,
+                                                     extra);
+    mino_val_t        *new_state = NULL;
+    mino_val_t        *old_state = agent->as.agent.val;
+    mino_val_t        *thrown_ex = NULL;
+    mino_thread_ctx_t *ctx       = mino_current_ctx(S);
+    dyn_binding_t      ag_bind;
+    dyn_frame_t        ag_frame;
+    int                pc;
+
+    ag_bind.name  = "*agent*";
+    ag_bind.val   = agent;
+    ag_bind.next  = NULL;
+    ag_frame.bindings = &ag_bind;
+    ag_frame.prev     = ctx->dyn_stack;
+    ctx->dyn_stack    = &ag_frame;
 
     pc = mino_pcall(S, fn, call_args, env, &new_state, &thrown_ex);
     if (pc != 0 || new_state == NULL) {
         agent_report_failure(S, agent, thrown_ex, env);
-        return;
+        goto out;
     }
 
     /* Validator: rejects bypass the publish + watch dispatch. */
@@ -154,7 +171,7 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
                 ex = mino_string(S, "Invalid reference state");
             }
             agent_report_failure(S, agent, ex, env);
-            return;
+            goto out;
         }
     }
 
@@ -195,6 +212,11 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
             }
         }
     }
+
+out:
+    /* Pop *agent* binding. mino_pcall caught any throws so this
+     * runs regardless of which branch above we took. */
+    ctx->dyn_stack = ag_frame.prev;
 }
 
 /* --- pending-sends drain ------------------------------------------------- *
@@ -716,4 +738,18 @@ void mino_install_agent(mino_state_t *S, mino_env_t *env)
 {
     prim_install_table(S, env, "clojure.core",
                        k_prims_agent, k_prims_agent_count);
+    /* Intern *agent* as a dynamic var with nil default. The
+     * dispatcher (agent_apply_action) pushes a thread binding for
+     * this name to the running agent so action/validator/watch
+     * bodies can refer to themselves via *agent*. Outside any
+     * dispatch the var resolves to nil through dyn_lookup falling
+     * back on the var's root value. */
+    {
+        mino_val_t *agent_var = var_intern(S, "clojure.core", "*agent*");
+        if (agent_var != NULL) {
+            agent_var->as.var.dynamic = 1;
+            var_set_root(S, agent_var, mino_nil(S));
+            mino_env_set(S, env, "*agent*", agent_var->as.var.root);
+        }
+    }
 }

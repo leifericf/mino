@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Bind `*agent*` During Action / Validator / Watch Dispatch
+
+JVM canon binds the dynamic var `*agent*` to the dispatching agent
+across the entire body of an action, validator, and watch fn. mino
+had no such binding, so an action that wanted to refer to itself
+had to capture the agent in a closure.
+
+Install `*agent*` as a dynamic var (nil default) in
+`mino_install_agent`. Push a stack-allocated `dyn_frame_t` binding
+`*agent*` to the running agent across `agent_apply_action`'s
+mino_pcall calls; pop on every exit path via single-exit goto. The
+existing symbol-lookup path already consults `dyn_stack` first, so
+user code reading `*agent*` finds the binding without any
+custom-resolver wiring.
+
 ### Ref Watch Dispatch Continues Past A Throwing Watch
 
 Earlier `dispatch_watches` invoked each ref watch through

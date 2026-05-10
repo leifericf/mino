@@ -225,6 +225,34 @@
     (is (= 1 @a))
     (is (nil? (agent-error a)))))
 
+(deftest agent-dynamic-var-bound-in-action
+  ;; Inside an action body *agent* resolves to the dispatching agent.
+  ;; Matches JVM canon. Outside any dispatch it's nil.
+  (let [a (agent 0)
+        seen (atom :unset)]
+    (send a (fn [v] (reset! seen *agent*) (inc v)))
+    (await a)
+    (is (= a @seen)))
+  (is (nil? *agent*)))
+
+(deftest agent-dynamic-var-visible-in-validator
+  ;; Validator runs while *agent* is still bound.
+  (let [a (agent 0)
+        seen (atom :unset)]
+    (set-validator! a (fn [_] (reset! seen *agent*) true))
+    (send a inc)
+    (await a)
+    (is (= a @seen))))
+
+(deftest agent-dynamic-var-visible-in-watch
+  ;; Agent watch dispatch happens while *agent* is still bound.
+  (let [a (agent 0)
+        seen (atom :unset)]
+    (add-watch a :w (fn [_ _ _ _] (reset! seen *agent*)))
+    (send a inc)
+    (await a)
+    (is (= a @seen))))
+
 (deftest drain-skips-pending-on-failed-agent-in-fail-mode
   ;; Agent A enters :fail state mid-drain because pending action #1
   ;; throws; pending action #2 targets the same agent. Match
