@@ -207,7 +207,7 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
                 r = apply_callable(S, pred, call_args, NULL);
                 gc_unpin(1);
                 if (r == NULL) { gc_unpin(1); return NULL; }
-                if (mino_is_truthy(r)) {
+                if (mino_is_truthy_inline(r)) {
                     gc_write_barrier(S, buf, NULL, elem);
                     buf->as.chunk.vals[buf->as.chunk.len++] = elem;
                 }
@@ -246,7 +246,7 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
         ok = apply_callable(S, pred, call_args, NULL);
         gc_unpin(1);
         if (ok == NULL) return NULL;
-        if (mino_is_truthy(ok)) {
+        if (mino_is_truthy_inline(ok)) {
             mino_val_t *next_ctx;
             mino_val_t *next_lz;
             gc_pin(head);

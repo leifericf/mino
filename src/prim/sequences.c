@@ -825,7 +825,7 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
         mino_val_t *test = apply_callable(S, pred, call_args, env);
         if (test == NULL) { gc_unpin(1); return NULL; }
-        if (mino_is_truthy(test)) {
+        if (mino_is_truthy_inline(test)) {
             if (len >= cap) {
                 cap *= 2;
                 items = ptrarr_grow(S, items, len, cap, pin_slot);
@@ -1078,7 +1078,7 @@ static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *
             return result->as.f < 0 ? -1 : result->as.f > 0 ? 1 : 0;
         }
         /* Boolean result: true means a < b, false means a >= b */
-        return mino_is_truthy(result) ? -1 : 1;
+        return mino_is_truthy_inline(result) ? -1 : 1;
     }
     /* Default comparator: route through prim_compare so cross-type
      * pairs throw a typed error instead of silently ordering by tag.

@@ -1195,6 +1195,19 @@ int         mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
  * the reader can build a MINO_REGEX for the `#"..."` literal. */
 mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source);
 
+/* Inline truthiness for hot branch-dispatch paths (eval_if, eval_when,
+ * eval_and, eval_or). The exported `mino_is_truthy` in src/mino.h
+ * stays available for embedders; this internal sibling sidesteps the
+ * function-call cost on the eval-side hot loop. The two must stay in
+ * lockstep — adversarial tests catch divergence. */
+static inline int mino_is_truthy_inline(const mino_val_t *v)
+{
+    if (v == NULL) return 0;
+    if (v->type == MINO_NIL) return 0;
+    if (v->type == MINO_BOOL) return v->as.b != 0;
+    return 1;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Ownership conventions used in the per-subsystem internal headers:         */
 /*   GC-owned  — returned pointer is managed by the garbage collector.       */

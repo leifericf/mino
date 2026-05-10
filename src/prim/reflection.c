@@ -422,7 +422,7 @@ mino_val_t *prim_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "not requires one argument");
     }
-    return mino_is_truthy(args->as.cons.car) ? mino_false(S) : mino_true(S);
+    return mino_is_truthy_inline(args->as.cons.car) ? mino_false(S) : mino_true(S);
 }
 
 mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)

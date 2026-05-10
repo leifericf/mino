@@ -167,7 +167,7 @@ static mino_val_t *eval_if(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
     /* Branch is tail position: propagate recur/tail-call. */
-    return eval_impl(S, mino_is_truthy(cond) ? then_form : else_form,
+    return eval_impl(S, mino_is_truthy_inline(cond) ? then_form : else_form,
                      env, tail);
 }
 
@@ -215,7 +215,7 @@ static mino_val_t *eval_when(mino_state_t *S, mino_val_t *form,
     }
     cond = eval_value(S, args->as.cons.car, env);
     if (cond == NULL) return NULL;
-    if (!mino_is_truthy(cond)) return mino_nil(S);
+    if (!mino_is_truthy_inline(cond)) return mino_nil(S);
     return eval_implicit_do_impl(S, args->as.cons.cdr, env, tail);
 }
 
@@ -232,7 +232,7 @@ static mino_val_t *eval_and(mino_state_t *S, mino_val_t *form,
         }
         result = eval_value(S, args->as.cons.car, env);
         if (result == NULL) return NULL;
-        if (!mino_is_truthy(result)) return result;
+        if (!mino_is_truthy_inline(result)) return result;
         args = rest;
     }
     return result;
@@ -250,7 +250,7 @@ static mino_val_t *eval_or(mino_state_t *S, mino_val_t *form,
         }
         result = eval_value(S, args->as.cons.car, env);
         if (result == NULL) return NULL;
-        if (mino_is_truthy(result)) return result;
+        if (mino_is_truthy_inline(result)) return result;
         args = rest;
     }
     return result;

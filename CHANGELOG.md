@@ -154,6 +154,16 @@ allocation shape come down.
   so freshly-`dup_n`-allocated names still work. The struct
   doesn't grow because the union is dominated by larger members.
 
+- **Inline truthiness for branch dispatch.** Added an internal
+  `mino_is_truthy_inline` (static inline in `runtime/internal.h`)
+  alongside the exported `mino_is_truthy` function. The hottest
+  callers — `eval_if`, `eval_when`, `eval_and`, `eval_or`,
+  `prim_not`, plus the predicate inner loops in `prim_filter` /
+  `prim_take_while` / `prim_drop_while` / lazy-filter / take-while
+  — now hit the inline form, skipping the function-call overhead
+  per branch decision. The exported function stays available for
+  embedders.
+
 - **Symbol-aware env lookup.** `mino_env_get_sym(env, sym)` walks
   the parent chain with the symbol's cached length in hand, so the
   inner hash-indexed probes skip `strlen(name)` per frame.
