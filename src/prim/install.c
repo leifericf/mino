@@ -31,6 +31,13 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
         mino_val_t *pv = (defs[i].fn2 != NULL)
                          ? mino_prim_argv(S, defs[i].name, defs[i].fn2)
                          : mino_prim(S, defs[i].name, defs[i].fn);
+        /* When a def supplies both ABIs, keep the legacy fn pointer
+         * populated so identity-by-fn checks (e.g. classify_subseq_test)
+         * still recognise the prim. The argv dispatch path runs first
+         * because it checks fn2 != NULL before falling back. */
+        if (defs[i].fn2 != NULL && defs[i].fn != NULL) {
+            pv->as.prim.fn = defs[i].fn;
+        }
         mino_env_set(S, env, defs[i].name, pv);
         if (ns_name != NULL) {
             mino_val_t *var = var_intern(S, ns_name, defs[i].name);

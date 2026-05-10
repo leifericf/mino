@@ -492,6 +492,56 @@ static int tower_apply_float(tower_acc_t *acc, const mino_val_t *a,
     return 0;
 }
 
+/* Promote acc and dispatch one operand. Returns 0 on success, -1 on
+ * error (diag set or thrown). Shared between cons-spine and argv
+ * tower_reduce / tower_reduce_seeded entry points. */
+static int tower_advance(mino_state_t *S, tower_acc_t *acc, mino_val_t *a,
+                         tower_op_t op, const char *opname, int strict)
+{
+    int at;
+    int step;
+    if (!classify_or_throw(S, a, opname, &at)) return -1;
+    /* Promote the running accumulator if the new operand is at a higher
+     * tier. Ratio meeting bigdec widens to bigdec via exact ratio→bigdec
+     * conversion (matches JVM Clojure's contagion: bigdec is "higher"
+     * than ratio). */
+    if (at > (int)acc->tier
+        || (acc->tier == TT_RATIO && at == TT_BIGDEC)
+        || (acc->tier == TT_BIGDEC && at == TT_RATIO)) {
+        int target = at;
+        if (acc->tier == TT_RATIO && at == TT_BIGDEC) target = TT_BIGDEC;
+        if (acc->tier == TT_BIGDEC && at == TT_RATIO) target = TT_BIGDEC;
+        if (!promote_acc(S, acc, target, opname)) return -1;
+    }
+    switch (acc->tier) {
+    case TT_INT:    step = tower_apply_int(S, acc, a, op, opname, strict); break;
+    case TT_BIGINT: step = tower_apply_bigint(S, acc, a, op, opname); break;
+    case TT_RATIO:  step = tower_apply_ratio(S, acc, a, op, opname); break;
+    case TT_BIGDEC: step = tower_apply_bigdec(S, acc, a, op, opname); break;
+    case TT_FLOAT:  step = tower_apply_float(acc, a, op); break;
+    default:        step = -1; break;
+    }
+    return step;
+}
+
+/* Pack the final accumulator into a result val. */
+static mino_val_t *tower_finish(mino_state_t *S, const tower_acc_t *acc)
+{
+    switch (acc->tier) {
+    case TT_INT:    return mino_int(S, acc->iacc);
+    case TT_FLOAT:  return mino_float(S, acc->dacc);
+    default:        return acc->vacc;
+    }
+}
+
+static void tower_acc_init(tower_acc_t *acc, tower_op_t op)
+{
+    acc->tier = TT_INT;
+    acc->iacc = (op == OP_MUL) ? 1 : 0;
+    acc->vacc = NULL;
+    acc->dacc = 0.0;
+}
+
 /* Driver. Walks args, classifies each, promotes accumulator on tier
  * increase, and dispatches to the per-tier step. Returns the final
  * value, or NULL on error with diag already set. */
@@ -500,53 +550,44 @@ static mino_val_t *tower_reduce(mino_state_t *S, mino_val_t *args,
                                 int strict)
 {
     tower_acc_t acc;
-    int         seeded   = 0;
-    long long   identity = (op == OP_MUL) ? 1 : 0;
-    acc.tier = TT_INT;
-    acc.iacc = identity;
-    acc.vacc = NULL;
-    acc.dacc = 0.0;
+    int         seeded = 0;
+    tower_acc_init(&acc, op);
     while (mino_is_cons(args)) {
         mino_val_t *a = args->as.cons.car;
-        int         at;
-        int         step;
-        if (!classify_or_throw(S, a, opname, &at)) return NULL;
         if (op == OP_DIV && !seeded) {
+            int at;
+            if (!classify_or_throw(S, a, opname, &at)) return NULL;
             tower_seed_div(&acc, a, at);
             seeded = 1;
             args = args->as.cons.cdr;
             continue;
         }
-        /* Promote the running accumulator if the new operand is at a
-         * higher tier. Ratio meeting bigdec widens to bigdec via
-         * exact ratio→bigdec conversion (matches JVM Clojure's
-         * contagion: bigdec is "higher" than ratio). */
-        if (at > (int)acc.tier
-            || (acc.tier == TT_RATIO && at == TT_BIGDEC)
-            || (acc.tier == TT_BIGDEC && at == TT_RATIO)) {
-            int target = at;
-            if (acc.tier == TT_RATIO && at == TT_BIGDEC) target = TT_BIGDEC;
-            if (acc.tier == TT_BIGDEC && at == TT_RATIO) target = TT_BIGDEC;
-            if (!promote_acc(S, &acc, target, opname)) return NULL;
-        }
-        switch (acc.tier) {
-        case TT_INT:    step = tower_apply_int(S, &acc, a, op, opname, strict); break;
-        case TT_BIGINT: step = tower_apply_bigint(S, &acc, a, op, opname); break;
-        case TT_RATIO:  step = tower_apply_ratio(S, &acc, a, op, opname); break;
-        case TT_BIGDEC: step = tower_apply_bigdec(S, &acc, a, op, opname); break;
-        case TT_FLOAT:  step = tower_apply_float(&acc, a, op); break;
-        default:        step = -1; break;
-        }
-        if (step != 0) return NULL;
+        if (tower_advance(S, &acc, a, op, opname, strict) != 0) return NULL;
         seeded = 1;
         args = args->as.cons.cdr;
     }
-    /* Pack the result. */
-    switch (acc.tier) {
-    case TT_INT:    return mino_int(S, acc.iacc);
-    case TT_FLOAT:  return mino_float(S, acc.dacc);
-    default:        return acc.vacc;
+    return tower_finish(S, &acc);
+}
+
+/* argv-ABI sibling of tower_reduce. Shape-equivalent; no cons walk. */
+static mino_val_t *tower_reduce_argv(mino_state_t *S, mino_val_t **argv,
+                                     int argc, tower_op_t op,
+                                     const char *opname, int strict)
+{
+    tower_acc_t acc;
+    int         i = 0;
+    tower_acc_init(&acc, op);
+    if (op == OP_DIV && argc > 0) {
+        int at;
+        if (!classify_or_throw(S, argv[0], opname, &at)) return NULL;
+        tower_seed_div(&acc, argv[0], at);
+        i = 1;
     }
+    for (; i < argc; i++) {
+        if (tower_advance(S, &acc, argv[i], op, opname, strict) != 0)
+            return NULL;
+    }
+    return tower_finish(S, &acc);
 }
 
 mino_val_t *prim_add(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -720,78 +761,80 @@ mino_val_t *prim_decp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_dec_impl(S, args, env, 0);
 }
 
-/* Apply the n-ary subtract/divide step starting from a seeded acc and
- * walking the rest. Long-overflow on int-tier subtraction throws when
- * `strict`, otherwise auto-promotes to bigint. Division never throws
- * on overflow (it dispatches to ratio). Reused by prim_sub, prim_subp,
- * and prim_div. */
-static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
-                                       mino_val_t *rest, tower_op_t op,
-                                       const char *opname, int strict)
+/* Seed the accumulator with a single classified operand. */
+static int tower_seed(mino_state_t *S, tower_acc_t *a, mino_val_t *seed,
+                      const char *opname)
 {
-    tower_acc_t a;
     int seed_tier;
-    if (!classify_or_throw(S, seed, opname, &seed_tier)) return NULL;
-    a.iacc = 0; a.dacc = 0; a.vacc = NULL;
+    if (!classify_or_throw(S, seed, opname, &seed_tier)) return -1;
+    a->iacc = 0; a->dacc = 0; a->vacc = NULL;
     switch (seed_tier) {
-    case TT_INT:    a.iacc = seed->as.i; a.tier = TT_INT;    break;
-    case TT_FLOAT:  a.dacc = seed->as.f; a.tier = TT_FLOAT;  break;
-    case TT_BIGINT: a.vacc = seed;       a.tier = TT_BIGINT; break;
-    case TT_RATIO:  a.vacc = seed;       a.tier = TT_RATIO;  break;
-    case TT_BIGDEC: a.vacc = seed;       a.tier = TT_BIGDEC; break;
-    default:        a.tier = TT_INT;     break;
+    case TT_INT:    a->iacc = seed->as.i; a->tier = TT_INT;    break;
+    case TT_FLOAT:  a->dacc = seed->as.f; a->tier = TT_FLOAT;  break;
+    case TT_BIGINT: a->vacc = seed;       a->tier = TT_BIGINT; break;
+    case TT_RATIO:  a->vacc = seed;       a->tier = TT_RATIO;  break;
+    case TT_BIGDEC: a->vacc = seed;       a->tier = TT_BIGDEC; break;
+    default:        a->tier = TT_INT;     break;
     }
-    while (mino_is_cons(rest)) {
-        mino_val_t *x = rest->as.cons.car;
-        int xt;
-        if (!classify_or_throw(S, x, opname, &xt)) return NULL;
-        if (xt > (int)a.tier ||
-            (a.tier == TT_RATIO  && xt == TT_BIGDEC) ||
-            (a.tier == TT_BIGDEC && xt == TT_RATIO)) {
-            int target = xt;
-            if (a.tier == TT_RATIO  && xt == TT_BIGDEC) target = TT_BIGDEC;
-            if (a.tier == TT_BIGDEC && xt == TT_RATIO)  target = TT_BIGDEC;
-            if (!promote_acc(S, &a, target, opname)) return NULL;
-        }
-        switch (a.tier) {
+    return 0;
+}
+
+/* Apply one step of (- ...) or (/ ...) against a seeded acc. Returns
+ * 0 on success, -1 on error. Shared by cons-spine and argv variants. */
+static int tower_seeded_step(mino_state_t *S, tower_acc_t *a, mino_val_t *x,
+                             tower_op_t op, const char *opname, int strict)
+{
+    int xt;
+    if (!classify_or_throw(S, x, opname, &xt)) return -1;
+    if (xt > (int)a->tier ||
+        (a->tier == TT_RATIO  && xt == TT_BIGDEC) ||
+        (a->tier == TT_BIGDEC && xt == TT_RATIO)) {
+        int target = xt;
+        if (a->tier == TT_RATIO  && xt == TT_BIGDEC) target = TT_BIGDEC;
+        if (a->tier == TT_BIGDEC && xt == TT_RATIO)  target = TT_BIGDEC;
+        if (!promote_acc(S, a, target, opname)) return -1;
+    }
+    switch (a->tier) {
         case TT_INT: {
             long long out;
             if (op == OP_SUB) {
-                if (isub_overflow(a.iacc, x->as.i, &out)) {
+                if (isub_overflow(a->iacc, x->as.i, &out)) {
                     if (strict) {
                         prim_throw_classified(S, "eval/contract", "MCT001",
                                               "integer overflow");
-                        return NULL;
+                        return -1;
                     }
                     {
-                        mino_val_t *la = mino_bigint_from_ll(S, a.iacc);
+                        mino_val_t *la = mino_bigint_from_ll(S, a->iacc);
                         mino_val_t *lb = mino_bigint_from_ll(S, x->as.i);
-                        if (la == NULL || lb == NULL) return NULL;
-                        a.vacc = mino_bigint_sub(S, la, lb);
-                        if (a.vacc == NULL) return NULL;
-                        a.tier = TT_BIGINT;
+                        if (la == NULL || lb == NULL) return -1;
+                        a->vacc = mino_bigint_sub(S, la, lb);
+                        if (a->vacc == NULL) return -1;
+                        a->tier = TT_BIGINT;
                         break;
                     }
                 }
-                a.iacc = out;
+                a->iacc = out;
             } else { /* OP_DIV */
-                if (x->as.i == 0)
-                    return prim_throw_classified(S, "eval/type", "MTY001",
-                                                 "division by zero");
-                if (a.iacc % x->as.i == 0) {
-                    a.iacc /= x->as.i;
+                if (x->as.i == 0) {
+                    prim_throw_classified(S, "eval/type", "MTY001",
+                                          "division by zero");
+                    return -1;
+                }
+                if (a->iacc % x->as.i == 0) {
+                    a->iacc /= x->as.i;
                 } else {
-                    mino_val_t *bn = mino_bigint_from_ll(S, a.iacc);
+                    mino_val_t *bn = mino_bigint_from_ll(S, a->iacc);
                     mino_val_t *bd = mino_bigint_from_ll(S, x->as.i);
-                    if (bn == NULL || bd == NULL) return NULL;
-                    a.vacc = mino_ratio_make(S, bn, bd);
-                    if (a.vacc == NULL) return NULL;
-                    if (a.vacc->type == MINO_INT) {
-                        a.iacc = a.vacc->as.i; a.vacc = NULL; a.tier = TT_INT;
-                    } else if (a.vacc->type == MINO_BIGINT) {
-                        a.tier = TT_BIGINT;
+                    if (bn == NULL || bd == NULL) return -1;
+                    a->vacc = mino_ratio_make(S, bn, bd);
+                    if (a->vacc == NULL) return -1;
+                    if (a->vacc->type == MINO_INT) {
+                        a->iacc = a->vacc->as.i; a->vacc = NULL; a->tier = TT_INT;
+                    } else if (a->vacc->type == MINO_BIGINT) {
+                        a->tier = TT_BIGINT;
                     } else {
-                        a.tier = TT_RATIO;
+                        a->tier = TT_RATIO;
                     }
                 }
             }
@@ -799,68 +842,140 @@ static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
         }
         case TT_BIGINT: {
             mino_val_t *opd = coerce_at_tier(S, x, TT_BIGINT, opname);
-            if (opd == NULL) return NULL;
+            if (opd == NULL) return -1;
             if (op == OP_SUB) {
-                a.vacc = mino_bigint_sub(S, a.vacc, opd);
+                a->vacc = mino_bigint_sub(S, a->vacc, opd);
             } else {
-                a.vacc = mino_ratio_div(S, a.vacc, opd);
-                if (a.vacc != NULL) {
-                    if (a.vacc->type == MINO_INT) {
-                        a.iacc = a.vacc->as.i; a.vacc = NULL; a.tier = TT_INT;
-                    } else if (a.vacc->type == MINO_BIGINT) {
-                        a.tier = TT_BIGINT;
+                a->vacc = mino_ratio_div(S, a->vacc, opd);
+                if (a->vacc != NULL) {
+                    if (a->vacc->type == MINO_INT) {
+                        a->iacc = a->vacc->as.i; a->vacc = NULL; a->tier = TT_INT;
+                    } else if (a->vacc->type == MINO_BIGINT) {
+                        a->tier = TT_BIGINT;
                     } else {
-                        a.tier = TT_RATIO;
+                        a->tier = TT_RATIO;
                     }
                 }
             }
-            if (a.vacc == NULL && a.tier != TT_INT && a.tier != TT_BIGINT) return NULL;
+            if (a->vacc == NULL && a->tier != TT_INT && a->tier != TT_BIGINT) return -1;
             break;
         }
         case TT_RATIO: {
             mino_val_t *opd = coerce_at_tier(S, x, TT_RATIO, opname);
-            if (opd == NULL) return NULL;
-            a.vacc = (op == OP_SUB)
-                ? mino_ratio_sub(S, a.vacc, opd)
-                : mino_ratio_div(S, a.vacc, opd);
-            if (a.vacc == NULL) return NULL;
-            if (a.vacc->type == MINO_INT) {
-                a.iacc = a.vacc->as.i; a.vacc = NULL; a.tier = TT_INT;
-            } else if (a.vacc->type == MINO_BIGINT) {
-                a.tier = TT_BIGINT;
+            if (opd == NULL) return -1;
+            a->vacc = (op == OP_SUB)
+                ? mino_ratio_sub(S, a->vacc, opd)
+                : mino_ratio_div(S, a->vacc, opd);
+            if (a->vacc == NULL) return -1;
+            if (a->vacc->type == MINO_INT) {
+                a->iacc = a->vacc->as.i; a->vacc = NULL; a->tier = TT_INT;
+            } else if (a->vacc->type == MINO_BIGINT) {
+                a->tier = TT_BIGINT;
             }
             break;
         }
         case TT_BIGDEC: {
             mino_val_t *opd = coerce_at_tier(S, x, TT_BIGDEC, opname);
-            if (opd == NULL) return NULL;
+            if (opd == NULL) return -1;
             if (op == OP_SUB) {
-                a.vacc = mino_bigdec_sub(S, a.vacc, opd);
+                a->vacc = mino_bigdec_sub(S, a->vacc, opd);
             } else {
-                a.vacc = mino_bigdec_div(S, a.vacc, opd);
+                a->vacc = mino_bigdec_div(S, a->vacc, opd);
             }
-            if (a.vacc == NULL) return NULL;
+            if (a->vacc == NULL) return -1;
             break;
         }
         case TT_FLOAT: {
             double dx = tower_to_double(x);
-            if (op == OP_SUB) a.dacc -= dx;
+            if (op == OP_SUB) a->dacc -= dx;
             else {
                 /* IEEE division: x/0 yields Inf or -Inf for float; only
                  * the all-integer case throws division-by-zero (handled
                  * in the TT_INT branch above). Float div mirrors the
                  * historical mino behaviour. */
-                a.dacc /= dx;
+                a->dacc /= dx;
             }
             break;
         }
-        }
+    }
+    return 0;
+}
+
+/* Driver. Walks `rest` cons spine, applying tower_seeded_step against
+ * the seeded accumulator. Returns the final value, or NULL on error
+ * with diag already set. */
+static mino_val_t *tower_reduce_seeded(mino_state_t *S, mino_val_t *seed,
+                                       mino_val_t *rest, tower_op_t op,
+                                       const char *opname, int strict)
+{
+    tower_acc_t a;
+    if (tower_seed(S, &a, seed, opname) != 0) return NULL;
+    while (mino_is_cons(rest)) {
+        mino_val_t *x = rest->as.cons.car;
+        if (tower_seeded_step(S, &a, x, op, opname, strict) != 0) return NULL;
         rest = rest->as.cons.cdr;
     }
-    switch (a.tier) {
-    case TT_INT:    return mino_int(S, a.iacc);
-    case TT_FLOAT:  return mino_float(S, a.dacc);
-    default:        return a.vacc;
+    return tower_finish(S, &a);
+}
+
+/* argv-ABI sibling of tower_reduce_seeded. */
+static mino_val_t *tower_reduce_seeded_argv(mino_state_t *S, mino_val_t *seed,
+                                            mino_val_t **argv, int argc,
+                                            tower_op_t op, const char *opname,
+                                            int strict)
+{
+    tower_acc_t a;
+    int i;
+    if (tower_seed(S, &a, seed, opname) != 0) return NULL;
+    for (i = 0; i < argc; i++) {
+        if (tower_seeded_step(S, &a, argv[i], op, opname, strict) != 0)
+            return NULL;
+    }
+    return tower_finish(S, &a);
+}
+
+/* Unary (-) / (-'): negate. Shared by cons-spine and argv variants. */
+static mino_val_t *prim_sub_negate(mino_state_t *S, mino_val_t *first,
+                                   int strict, const char *opname)
+{
+    if (first == NULL) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s expects numbers", opname);
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    if (first->type == MINO_INT) {
+        long long neg;
+        if (ineg_overflow(first->as.i, &neg)) {
+            if (strict) {
+                return prim_throw_classified(S, "eval/contract", "MCT001",
+                                             "integer overflow");
+            }
+            /* Negating LLONG_MIN doesn't fit in long; promote. */
+            {
+                mino_val_t *bi = mino_bigint_from_ll(S, first->as.i);
+                if (bi == NULL) return NULL;
+                return mino_bigint_neg(S, bi);
+            }
+        }
+        return mino_int(S, neg);
+    }
+    if (first->type == MINO_FLOAT || first->type == MINO_FLOAT32)
+        return mino_float(S, -first->as.f);
+    if (first->type == MINO_BIGINT) return mino_bigint_neg(S, first);
+    if (first->type == MINO_RATIO) {
+        mino_val_t *zero_n = mino_bigint_from_ll(S, 0);
+        mino_val_t *zero_d = mino_bigint_from_ll(S, 1);
+        mino_val_t *zero;
+        if (zero_n == NULL || zero_d == NULL) return NULL;
+        zero = mino_ratio_make_unchecked(S, zero_n, zero_d);
+        if (zero == NULL) return NULL;
+        return mino_ratio_sub(S, zero, first);
+    }
+    if (first->type == MINO_BIGDEC) return mino_bigdec_neg(S, first);
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s expects numbers", opname);
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
     }
 }
 
@@ -875,48 +990,8 @@ static mino_val_t *prim_sub_impl(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/arity", "MAR001", buf);
     }
     first = args->as.cons.car;
-    /* Unary: negate. */
-    if (!mino_is_cons(args->as.cons.cdr)) {
-        if (first == NULL) {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "%s expects numbers", opname);
-            return prim_throw_classified(S, "eval/type", "MTY001", buf);
-        }
-        if (first->type == MINO_INT) {
-            long long neg;
-            if (ineg_overflow(first->as.i, &neg)) {
-                if (strict) {
-                    return prim_throw_classified(S, "eval/contract", "MCT001",
-                                                 "integer overflow");
-                }
-                /* Negating LLONG_MIN doesn't fit in long; promote. */
-                {
-                    mino_val_t *bi = mino_bigint_from_ll(S, first->as.i);
-                    if (bi == NULL) return NULL;
-                    return mino_bigint_neg(S, bi);
-                }
-            }
-            return mino_int(S, neg);
-        }
-        if (first->type == MINO_FLOAT || first->type == MINO_FLOAT32)
-            return mino_float(S, -first->as.f);
-        if (first->type == MINO_BIGINT) return mino_bigint_neg(S, first);
-        if (first->type == MINO_RATIO) {
-            mino_val_t *zero_n = mino_bigint_from_ll(S, 0);
-            mino_val_t *zero_d = mino_bigint_from_ll(S, 1);
-            mino_val_t *zero;
-            if (zero_n == NULL || zero_d == NULL) return NULL;
-            zero = mino_ratio_make_unchecked(S, zero_n, zero_d);
-            if (zero == NULL) return NULL;
-            return mino_ratio_sub(S, zero, first);
-        }
-        if (first->type == MINO_BIGDEC) return mino_bigdec_neg(S, first);
-        {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "%s expects numbers", opname);
-            return prim_throw_classified(S, "eval/type", "MTY001", buf);
-        }
-    }
+    if (!mino_is_cons(args->as.cons.cdr))
+        return prim_sub_negate(S, first, strict, opname);
     return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_SUB, opname, strict);
 }
 
@@ -940,6 +1015,61 @@ mino_val_t *prim_mulp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     return tower_reduce(S, args, OP_MUL, "*'", 0);
+}
+
+mino_val_t *prim_add_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    (void)env;
+    return tower_reduce_argv(S, argv, argc, OP_ADD, "+", 1);
+}
+
+mino_val_t *prim_addp_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                           mino_env_t *env)
+{
+    (void)env;
+    return tower_reduce_argv(S, argv, argc, OP_ADD, "+'", 0);
+}
+
+mino_val_t *prim_mul_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    (void)env;
+    return tower_reduce_argv(S, argv, argc, OP_MUL, "*", 1);
+}
+
+mino_val_t *prim_mulp_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                           mino_env_t *env)
+{
+    (void)env;
+    return tower_reduce_argv(S, argv, argc, OP_MUL, "*'", 0);
+}
+
+static mino_val_t *prim_sub_argv_impl(mino_state_t *S, mino_val_t **argv,
+                                      int argc, int strict, const char *opname)
+{
+    if (argc == 0) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s requires at least one argument", opname);
+        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+    }
+    if (argc == 1) return prim_sub_negate(S, argv[0], strict, opname);
+    return tower_reduce_seeded_argv(S, argv[0], argv + 1, argc - 1,
+                                    OP_SUB, opname, strict);
+}
+
+mino_val_t *prim_sub_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    (void)env;
+    return prim_sub_argv_impl(S, argv, argc, 1, "-");
+}
+
+mino_val_t *prim_subp_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                           mino_env_t *env)
+{
+    (void)env;
+    return prim_sub_argv_impl(S, argv, argc, 0, "-'");
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1077,6 +1207,24 @@ mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return tower_reduce_seeded(S, one, args, OP_DIV, "/", 0);
     }
     return tower_reduce_seeded(S, first, args->as.cons.cdr, OP_DIV, "/", 0);
+}
+
+mino_val_t *prim_div_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    (void)env;
+    if (argc == 0) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "/ requires at least one argument");
+    }
+    if (argc == 1) {
+        /* (/ x) → 1 / x. */
+        mino_val_t *one = mino_int(S, 1);
+        if (one == NULL) return NULL;
+        return tower_reduce_seeded_argv(S, one, argv, 1, OP_DIV, "/", 0);
+    }
+    return tower_reduce_seeded_argv(S, argv[0], argv + 1, argc - 1,
+                                    OP_DIV, "/", 0);
 }
 
 /* mod/rem/quot dispatcher.
@@ -2192,6 +2340,70 @@ mino_val_t *prim_gte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return compare_chain(S, args, ">=", 3);
 }
 
+/* argv-ABI sibling of compare_chain. */
+static mino_val_t *compare_chain_argv(mino_state_t *S, mino_val_t **argv,
+                                      int argc, const char *name, int op)
+{
+    int i;
+    const mino_val_t *prev;
+    if (argc <= 1) return mino_true(S);
+    prev = argv[0];
+    if (!is_compare_number(prev)) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "%s expects numbers", name);
+        return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    }
+    for (i = 1; i < argc; i++) {
+        const mino_val_t *cur = argv[i];
+        int cmp;
+        int ok;
+        if (!is_compare_number(cur)) {
+            char msg[64];
+            snprintf(msg, sizeof(msg), "%s expects numbers", name);
+            return prim_throw_classified(S, "eval/type", "MTY001", msg);
+        }
+        if (has_nan(prev) || has_nan(cur)) return mino_false(S);
+        cmp = tower_cmp(prev, cur);
+        switch (op) {
+        case 0:  ok = cmp <  0; break;
+        case 1:  ok = cmp <= 0; break;
+        case 2:  ok = cmp >  0; break;
+        default: ok = cmp >= 0; break;
+        }
+        if (!ok) return mino_false(S);
+        prev = cur;
+    }
+    return mino_true(S);
+}
+
+mino_val_t *prim_lt_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                         mino_env_t *env)
+{
+    (void)env;
+    return compare_chain_argv(S, argv, argc, "<", 0);
+}
+
+mino_val_t *prim_lte_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    (void)env;
+    return compare_chain_argv(S, argv, argc, "<=", 1);
+}
+
+mino_val_t *prim_gt_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                         mino_env_t *env)
+{
+    (void)env;
+    return compare_chain_argv(S, argv, argc, ">", 2);
+}
+
+mino_val_t *prim_gte_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    (void)env;
+    return compare_chain_argv(S, argv, argc, ">=", 3);
+}
+
 mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -2225,10 +2437,10 @@ mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 const mino_prim_def k_prims_numeric[] = {
     {"+",   prim_add,
      "Returns the sum of the arguments. Throws on long overflow; "
-     "use +' to auto-promote to bigint."},
+     "use +' to auto-promote to bigint.", prim_add_argv},
     {"+'",  prim_addp,
      "Returns the sum of the arguments. Auto-promotes to bigint on "
-     "long overflow; use + to throw on overflow."},
+     "long overflow; use + to throw on overflow.", prim_addp_argv},
     {"inc", prim_inc,
      "Returns x plus 1. Throws on long overflow; use inc' to "
      "auto-promote.", prim_inc_argv},
@@ -2243,18 +2455,20 @@ const mino_prim_def k_prims_numeric[] = {
      prim_decp_argv},
     {"-",   prim_sub,
      "Returns the difference of the arguments. With one arg, returns "
-     "the negation. Throws on long overflow; use -' to auto-promote."},
+     "the negation. Throws on long overflow; use -' to auto-promote.",
+     prim_sub_argv},
     {"-'",  prim_subp,
      "Returns the difference of the arguments. With one arg, returns "
-     "the negation. Auto-promotes to bigint on long overflow."},
+     "the negation. Auto-promotes to bigint on long overflow.",
+     prim_subp_argv},
     {"*",   prim_mul,
      "Returns the product of the arguments. Throws on long overflow; "
-     "use *' to auto-promote."},
+     "use *' to auto-promote.", prim_mul_argv},
     {"*'",  prim_mulp,
      "Returns the product of the arguments. Auto-promotes to bigint "
-     "on long overflow."},
+     "on long overflow.", prim_mulp_argv},
     {"/",   prim_div,
-     "Returns the quotient of the arguments."},
+     "Returns the quotient of the arguments.", prim_div_argv},
     {"=",   prim_eq,
      "Returns true if all arguments are equal."},
     {"==",  prim_num_eq,
@@ -2263,13 +2477,17 @@ const mino_prim_def k_prims_numeric[] = {
     {"identical?", prim_identical,
      "Returns true if the arguments are the same object."},
     {"<",   prim_lt,
-     "Returns true if nums are in monotonically increasing order."},
+     "Returns true if nums are in monotonically increasing order.",
+     prim_lt_argv},
     {"<=",  prim_lte,
-     "Returns true if nums are in monotonically non-decreasing order."},
+     "Returns true if nums are in monotonically non-decreasing order.",
+     prim_lte_argv},
     {">",   prim_gt,
-     "Returns true if nums are in monotonically decreasing order."},
+     "Returns true if nums are in monotonically decreasing order.",
+     prim_gt_argv},
     {">=",  prim_gte,
-     "Returns true if nums are in monotonically non-increasing order."},
+     "Returns true if nums are in monotonically non-increasing order.",
+     prim_gte_argv},
     {"mod", prim_mod,
      "Returns the modulus of dividing num by div. Truncates toward negative infinity."},
     {"rem", prim_rem,

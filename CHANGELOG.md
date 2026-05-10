@@ -119,6 +119,21 @@ allocation shape come down.
   Microbenchmark: `(loop [i 0 acc 0] (if (< i 1M) (recur (inc i)
   (+ acc i)) acc))` was ~941 ms before this push, now ~787 ms.
 
+- **argv migration of `+ +' - -' * *' / < <= > >=`.** The variadic
+  arithmetic and comparison prims now expose `fn2` argv-ABI
+  entry points alongside the existing cons-spine variants. Calls
+  with three or more arguments now skip the `eval_args` cons spine
+  on the way in and walk an indexed argument array straight into
+  `tower_advance` / `tower_seeded_step` / `compare_chain_argv`.
+  The existing int+int binary fast lane and the install path are
+  unchanged; identity-by-fn-pointer checks
+  (`classify_subseq_test`) keep working because the install path
+  now preserves both `fn` and `fn2` when a def supplies both.
+  Refactor extracted `tower_advance`, `tower_finish`,
+  `tower_acc_init`, `tower_seed`, `tower_seeded_step`, and
+  `prim_sub_negate` so the cons-spine and argv variants share one
+  body.
+
 - **Symbol-aware env lookup.** `mino_env_get_sym(env, sym)` walks
   the parent chain with the symbol's cached length in hand, so the
   inner hash-indexed probes skip `strlen(name)` per frame.

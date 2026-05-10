@@ -357,6 +357,19 @@ mino_val_t *prim_first_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_e
 mino_val_t *prim_rest_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
 mino_val_t *prim_cons_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
 
+/* argv-ABI variants for variadic numeric / comparison prims. */
+mino_val_t *prim_add_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_addp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_sub_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_subp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_mul_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_mulp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_div_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_lt_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_lte_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_gt_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_gte_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+
 /* argv-ABI variants emitted by DEFINE_TYPE_PRED. fn_name##_argv. */
 mino_val_t *prim_nil_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
 mino_val_t *prim_cons_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
