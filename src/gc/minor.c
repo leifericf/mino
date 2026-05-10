@@ -157,7 +157,7 @@ static inline void gc_verify_check(mino_state_t *S, gc_hdr_t *h, void *p)
             (unsigned)child->mark, (unsigned)child->age);
     gc_classify_offender(S, h);
     gc_evt_dump_around(S, (void *)h, (void *)child, p);
-    abort();
+    abort(); /* Class I: remset/write-barrier invariant violated */
 }
 
 /* Diagnostic helper (opt-in via MINO_GC_VERIFY=1): asserts that every

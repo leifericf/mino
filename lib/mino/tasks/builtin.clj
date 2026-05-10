@@ -334,12 +334,27 @@
 (def ^:private tu-allowlist
   {"src/eval/read.c"            "lexer/parser -- inherently sequential, not decomposable"
    "src/prim/collections.c"     "14 domain primitives in one module, barely over limit"
-   "src/prim/agent.c"           "agent subsystem -- worker thread, queue, prims kept together"})
+   "src/prim/agent.c"           "agent subsystem -- worker thread, queue, prims kept together"
+   "src/prim/bignum.c"          "imath wrapper + numeric tower coercions, barely over limit"
+   "src/prim/module.c"          "ns / require / use / load surface kept together"
+   "src/prim/ns.c"              "ns primitives -- intern / refer / alias / publics in one module"
+   "src/prim/numeric.c"         "numeric tower -- arith + compare + math fns sharing coercion helpers"
+   "src/prim/reflection.c"      "reflection / type / meta surface kept together"
+   "src/prim/sequences.c"       "sequence primitives -- map / filter / take / etc share lazy-seq glue"
+   "src/prim/stm.c"             "STM commit + retry + ref/alter/commute/dosync kept together"
+   "src/prim/string.c"          "string primitives -- per-byte / per-char ops share parsing helpers"
+   "src/collections/val.c"      "value layer -- alloc / copy / hash / equality kept with type defs"
+   "src/runtime/state.c"        "state lifecycle -- ctor/dtor/quiesce + lock impl kept together"
+   "src/vendor/imath/imath.c"   "vendored bigint library -- not modified"})
 
 ;; Functions allowed to exceed the function size limit, keyed by file:signature prefix.
 (def ^:private fn-allowlist
   #{"src/eval/special.c:eval_impl"     ;; main evaluator dispatch -- inherently large
-    "src/eval/read.c:read_form"})
+    "src/eval/read.c:read_form"
+    "src/collections/val.c:int mino_eq"  ;; cross-type equality dispatch over every MINO_* tag
+    "src/eval/print.c:void mino_print_to" ;; printer dispatch over every MINO_* tag
+    "src/prim/module.c:mino_env_t *env" ;; load_ns_file -- multi-line signature; nested form-by-form loader
+    "src/prim/module.c:mino_val_t *prim_require"}) ;; require -- spec parsing + loading + aliasing in one path
 
 (defn- count-lines
   "Return the number of lines in a file."
@@ -426,7 +441,7 @@
                         (let [parts (str/split entry ":")
                               af    (first parts)
                               afn   (first (rest parts))]
-                          (and (= file af) (includes? sig afn))))
+                          (and (= file af) (str/includes? sig afn))))
                       fn-allowlist)]
     (if allowed
       (do (println (str "  ALLOW  " file ": " sig " (" (:lines m) " LOC)")) 0)

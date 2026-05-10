@@ -1251,9 +1251,7 @@ static void stm_lazy_init_commit_lock(mino_state_t *S)
     if (S->stm_lock_inited) return;
 #if !(defined(_WIN32) && defined(_MSC_VER))
     if (pthread_mutex_init(&S->stm_commit_lock, NULL) != 0) {
-        /* Mutex init failure is unrecoverable for STM; if the host's
-         * pthread layer is broken we cannot run dosync safely. */
-        abort();
+        abort(); /* Class I: pthread_mutex_init failure means dosync cannot run safely */
     }
 #endif
     S->stm_lock_inited = 1;

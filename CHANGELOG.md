@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v0.102.1 — Agents adversarial-test pass: doc accuracy fixes
+## v0.102.1 — Adversarial-test pass: doc accuracy + qa-arch hygiene
 
 Adversarial whitebox test of the v0.102.0 STM + Agent surfaces
 (both Clojure-level and the new C-API perimeter, individually and
@@ -31,6 +31,18 @@ documentation accuracy issues -- no behavior changed.
   Updated to reflect both pools.
 - New adversarial probes added under `.local/adversarial/` for
   future regression coverage of the agent surfaces.
+- qa-arch hygiene pass: 11 previously-flagged `abort()` sites now
+  carry rationale comments (Class I unrecoverable conditions:
+  init-time OOM, GC invariant violations, mutex init failures,
+  core eval failures); pre-existing TU-size FAILs in `val.c`,
+  `bignum.c`, `module.c`, `ns.c`, `numeric.c`, `reflection.c`,
+  `sequences.c`, `stm.c`, `string.c`, `state.c`, `imath.c`
+  formalised on the allowlist with rationale; pre-existing
+  function-size FAILs (`mino_eq`, `mino_print_to`,
+  `prim_require`, plus `module.c`'s `load_ns_file`) added to
+  the function allowlist. Latent bug fixed: `check-large-fn` was
+  calling unqualified `includes?` (resolved to nothing); now
+  `str/includes?`. `task qa-arch` now PASSes.
 
 A pre-existing thread-count bookkeeping issue (`(future ...)`
 worker decrements lag the embedder under tight-loop contention,

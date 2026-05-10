@@ -17,8 +17,8 @@ static void ns_env_register_root(mino_state_t *S, mino_env_t *env)
 {
     root_env_t *r = (root_env_t *)malloc(sizeof(*r));
     if (r == NULL) {
-        /* Init-time path: no try-frame to recover through. */
         fprintf(stderr, "ns_env: out of memory registering root\n");
+        /* unrecoverable: init-time OOM, no try-frame to recover through */
         abort();
     }
     r->env  = env;
@@ -33,6 +33,7 @@ static void ns_env_table_grow(mino_state_t *S)
         S->ns_env_table, new_cap * sizeof(*nb));
     if (nb == NULL) {
         fprintf(stderr, "ns_env: out of memory growing table\n");
+        /* unrecoverable: init-time OOM, no try-frame to recover through */
         abort();
     }
     S->ns_env_table = nb;

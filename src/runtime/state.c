@@ -1016,6 +1016,7 @@ void gc_release_stw(mino_state_t *S)
 void mino_state_lock_init(mino_state_t *S)
 {
     CRITICAL_SECTION *cs = (CRITICAL_SECTION *)calloc(1, sizeof(*cs));
+    /* unrecoverable: init-time OOM allocating state_lock */
     if (cs == NULL) { abort(); }
     InitializeCriticalSection(cs);
     S->state_lock = cs;

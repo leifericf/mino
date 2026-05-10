@@ -114,6 +114,7 @@ static void gc_verify_roots_marked(mino_state_t *S)
         if (h->gen == GC_GEN_OLD && !h->mark) {
             fprintf(stderr, "[gc-verify] sym_intern[%zu] OLD unmarked at sweep "
                 "(e=%p h=%p)\n", i, (void *)e, (void *)h);
+            /* unrecoverable: heap invariant violated, would corrupt sweep */
             abort();
         }
     }
@@ -125,6 +126,7 @@ static void gc_verify_roots_marked(mino_state_t *S)
         if (h->gen == GC_GEN_OLD && !h->mark) {
             fprintf(stderr, "[gc-verify] kw_intern[%zu] OLD unmarked at sweep "
                 "(e=%p h=%p)\n", i, (void *)e, (void *)h);
+            /* unrecoverable: heap invariant violated, would corrupt sweep */
             abort();
         }
     }

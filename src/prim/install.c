@@ -92,9 +92,9 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
             mino_val_t *form = mino_read(S, src, &end);
             if (form == NULL) {
                 if (mino_last_error(S) != NULL) {
-                    /* Class I: core library parse failure is unrecoverable */
                     fprintf(stderr, "core.clj parse error: %s\n",
                             mino_last_error(S));
+                    /* Class I: core parse failure is unrecoverable */
                     abort();
                 }
                 if (end != NULL && end > src) {
@@ -108,16 +108,16 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
                 S->core_forms = realloc(S->core_forms,
                                         cap * sizeof(mino_val_t *));
                 if (!S->core_forms) {
-                    /* Class I: init-time; no try-frame to recover through */
                     fprintf(stderr, "core.clj: out of memory\n");
+                    /* Class I: init-time OOM; no try-frame to recover through */
                     abort();
                 }
             }
             S->core_forms[S->core_forms_len++] = form;
             if (mino_eval(S, form, env) == NULL) {
-                /* Class I: core library eval failure is unrecoverable */
                 fprintf(stderr, "core.clj eval error: %s\n",
                         mino_last_error(S));
+                /* Class I: core eval failure is unrecoverable */
                 abort();
             }
             src = end;
@@ -129,8 +129,8 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
 
     for (i = 0; i < S->core_forms_len; i++) {
         if (mino_eval(S, S->core_forms[i], env) == NULL) {
-            /* Class I: cached core form eval failure is unrecoverable */
             fprintf(stderr, "core.clj eval error: %s\n", mino_last_error(S));
+            /* Class I: cached core form eval failure is unrecoverable */
             abort();
         }
     }
