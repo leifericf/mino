@@ -18,6 +18,19 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#if defined(_WIN32) && defined(_MSC_VER)
+#  include <windows.h>
+#  define test_sleep_ms(ms) Sleep((DWORD)(ms))
+#else
+#  include <time.h>
+static void test_sleep_ms(long long ms)
+{
+    struct timespec ts;
+    ts.tv_sec  = (time_t)(ms / 1000);
+    ts.tv_nsec = (long)((ms % 1000) * 1000000L);
+    nanosleep(&ts, NULL);
+}
+#endif
 
 static int failures = 0;
 
@@ -547,6 +560,23 @@ static void test_shutdown_agents_self_call_throws(void)
     mino_state_free(S);
 }
 
+/* Sleep for N milliseconds inside an action, so an embed-side test
+ * can block an agent's in-flight long enough to make await_for
+ * actually time out. Registered in env as `test-sleep`. */
+static mino_val_t *prim_test_sleep(mino_state_t *S, mino_val_t *args,
+                                    mino_env_t *env)
+{
+    long long ms = 0;
+    (void)env;
+    if (args != NULL && args->type == MINO_CONS
+        && args->as.cons.car != NULL
+        && args->as.cons.car->type == MINO_INT) {
+        ms = args->as.cons.car->as.i;
+    }
+    test_sleep_ms(ms);
+    return mino_nil(S);
+}
+
 /* Drive every public C-API agent entry from C. Validates that the
  * mino_send / mino_send_off / mino_await / mino_await_for /
  * mino_agent_error / mino_restart_agent perimeter is wired up the
@@ -592,19 +622,45 @@ static void test_c_api_agents(void)
                 "agent should have value 101 after one inc send-off");
     }
 
-    /* mino_await_for timeout: queue an action that sleeps longer
-     * than the timeout. Build a fn that calls (Thread/sleep 200);
-     * mino doesn't expose that directly, but we can simulate via a
-     * busy spin -- actually simpler: just check the no-op timeout
-     * shape with an agent that has zero in-flight, where it
-     * immediately succeeds. The blocking-timeout case is exercised
-     * by the Clojure-level await-for tests. */
+    /* mino_await_for trivial path: zero in-flight means it returns 1
+     * immediately without blocking. */
     {
         mino_val_t *a = mino_agent(S, mino_int(S, 0));
         mino_val_t *agents[2];
         agents[0] = a; agents[1] = NULL;
         REQUIRE(mino_await_for(S, 50, agents) == 1,
                 "mino_await_for should return 1 when nothing is queued");
+    }
+
+    /* mino_await_for fires the timeout: register a C-side test-sleep
+     * primitive, queue an action that sleeps 250ms, then call
+     * mino_await_for with a 50ms deadline. The first call must time
+     * out (return 0). A subsequent mino_await with no deadline must
+     * drain. Asserts both sides of the perimeter -- the timed wait
+     * actually waits, and the cv broadcast on action completion
+     * wakes the next await. */
+    {
+        mino_val_t *a = mino_agent(S, mino_int(S, 0));
+        mino_val_t *agents[2];
+        mino_val_t *slow_fn;
+        mino_register_fn(S, env, "test-sleep", prim_test_sleep);
+        slow_fn = mino_eval_string(S,
+            "(fn [v] (test-sleep 250) (inc v))", env);
+        REQUIRE(slow_fn != NULL, "slow_fn should compile");
+        REQUIRE(mino_send(S, a, slow_fn, NULL) != NULL,
+                "mino_send of slow action should enqueue");
+        agents[0] = a; agents[1] = NULL;
+        REQUIRE(mino_await_for(S, 50, agents) == 0,
+                "mino_await_for should return 0 when the deadline "
+                "fires before the action completes");
+        /* Action is still running on the worker; await with no
+         * deadline drains it. */
+        REQUIRE(mino_await(S, agents) != NULL,
+                "mino_await must drain the action started above");
+        REQUIRE(a->as.agent.val != NULL && a->as.agent.val->type == MINO_INT,
+                "agent value should be int after the slow action runs");
+        REQUIRE(a->as.agent.val->as.i == 1,
+                "agent value should be 1 after one slow inc action");
     }
 
     /* mino_agent_error / mino_restart_agent: install a validator
