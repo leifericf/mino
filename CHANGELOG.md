@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.104.0 — Eval-Floor Performance Cycle
 
-### Performance Push
-
-A non-JIT performance cycle. Each step is a self-contained commit;
-the user-visible surface stays put while the eval floor and
-allocation shape come down.
+A non-JIT performance cycle. Each entry below is a self-contained
+commit; the user-visible surface stays put while the eval floor
+and allocation shape come down. Cumulative result on the
+microbenchmark gate: average per-op cost reduced about 24 percent
+across 15 benches, allocation per op unchanged. A tight integer
+`loop/recur` bench dropped from 941 ms to 375 ms.
 
 - **Allocation profiler.** New compile-time-gated profiler
   (`-DMINO_ALLOC_PROFILE=1`, exposed as `./mino task
@@ -45,7 +46,7 @@ allocation shape come down.
     arithmetic, never materialising chunks. Bounded by the
     `__builtin_add_overflow` guard so any roll-up overflow falls
     through to the generic path.
-  - **Per-step int+int fast lane.** Mirroring step 8's eval-side
+  - **Per-step int+int fast lane.** Mirroring the eval-side fast
     lane, the inner loop in `prim_reduce` checks the reducer
     against the canonical `+` / `*` prims and computes
     `(acc, elem)` directly when both are `MINO_INT`. Saves the
@@ -65,8 +66,9 @@ allocation shape come down.
   the dominant tight-loop shape.
 
   Microbenchmark: `(loop [i 0 acc 0] (if (< i 1M) (recur (+ i 1)
-  (+ acc i)) acc))` was ~941 ms at the start of the push and ~787
-  ms after step 5; this step takes it to ~375 ms (-60% overall).
+  (+ acc i)) acc))` was ~941 ms at the start of the cycle and
+  ~787 ms after the argv-ABI work; this entry takes it to ~375
+  ms (-60 percent overall).
 
 - **Monomorphic inline call cache.** Per-state hashed slot table
   keyed on the call form pointer, with a head-symbol-data tag and a
@@ -111,13 +113,13 @@ allocation shape come down.
   back to cons), so the fixed-arity hot prims now skip the
   per-call cons spine entirely. `apply_callable` walks the cons
   spine into the same scratch when called externally with cons.
-  Migrated this round: `inc inc' dec dec' count first rest cons`
+  Migrated initially: `inc inc' dec dec' count first rest cons`
   plus all 22 type predicates emitted by `DEFINE_TYPE_PRED`. The
-  variadic arithmetic / comparison ops stay on the cons ABI; their
-  binary fast path is the subject of a later step.
+  variadic arithmetic / comparison ops follow in the migration
+  entry below.
 
   Microbenchmark: `(loop [i 0 acc 0] (if (< i 1M) (recur (inc i)
-  (+ acc i)) acc))` was ~941 ms before this push, now ~787 ms.
+  (+ acc i)) acc))` was ~941 ms before this cycle, now ~787 ms.
 
 - **argv migration of `+ +' - -' * *' / < <= > >=`.** The variadic
   arithmetic and comparison prims now expose `fn2` argv-ABI
@@ -157,12 +159,12 @@ allocation shape come down.
 - **Inline truthiness for branch dispatch.** Added an internal
   `mino_is_truthy_inline` (static inline in `runtime/internal.h`)
   alongside the exported `mino_is_truthy` function. The hottest
-  callers — `eval_if`, `eval_when`, `eval_and`, `eval_or`,
-  `prim_not`, plus the predicate inner loops in `prim_filter` /
-  `prim_take_while` / `prim_drop_while` / lazy-filter / take-while
-  — now hit the inline form, skipping the function-call overhead
-  per branch decision. The exported function stays available for
-  embedders.
+  callers (`eval_if`, `eval_when`, `eval_and`, `eval_or`,
+  `prim_not`, plus the predicate inner loops in `prim_filter`,
+  `prim_take_while`, `prim_drop_while`, lazy-filter, and lazy-
+  take-while) now hit the inline form, skipping the function-call
+  overhead per branch decision. The exported function stays
+  available for embedders.
 
 - **Symbol-aware env lookup.** `mino_env_get_sym(env, sym)` walks
   the parent chain with the symbol's cached length in hand, so the
@@ -183,7 +185,7 @@ allocation shape come down.
   monotonic growth past trial ~5. Recommendation for benchmarks:
   median of 5 after a 3-run warmup; the perf gate already does
   median-of-3. Reducing per-major mark cost is downstream work
-  outside this push.
+  outside this cycle.
 
 ## v0.103.0 — Worker-List Lock Split
 
