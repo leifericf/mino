@@ -205,6 +205,7 @@ typedef struct mino_ref   mino_ref_t;
 typedef struct mino_vec_node  mino_vec_node_t;   /* opaque to embedders */
 typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque to embedders */
 typedef struct mino_rb_node   mino_rb_node_t;    /* opaque to embedders */
+struct mino_bc_fn;                               /* compiled-fn record, opaque */
 
 typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);
@@ -294,6 +295,16 @@ struct mino_val {
              * params need the full bind_params walk. Set by
              * apply_callable on first call, never invalidated. */
             int         shape;
+            /* Compiled bytecode for the fn body. NULL means "not yet
+             * compiled" or "compilation declined" -- the tree-walker
+             * is the fallback. Set lazily on first call by
+             * mino_bc_compile_fn; the compile attempt is a
+             * tri-state: NULL stays NULL on success when the form
+             * shape isn't compilable, points at a populated
+             * mino_bc_fn_t on success when it is. Never invalidated;
+             * redefinition of a fn produces a new MINO_FN with a
+             * fresh `bc` slot. */
+            const struct mino_bc_fn *bc;
         } fn;
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
             void       *ptr;   /* host-owned pointer */

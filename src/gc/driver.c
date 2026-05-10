@@ -11,6 +11,7 @@
  */
 
 #include "runtime/internal.h"
+#include "eval/bc/internal.h"
 
 /* Record a stack address from a host-called entry point so the collector's
  * conservative scan covers the entire host-to-mino call chain. We keep the
@@ -431,6 +432,19 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             gc_mark_child_push(S, v->as.fn.params);
             gc_mark_child_push(S, v->as.fn.body);
             gc_mark_child_push(S, v->as.fn.env);
+            /* Compiled bytecode: walk the const pool so symbols,
+             * literal child fns, and any nested constant values stay
+             * reachable. The bc record itself and its code/consts
+             * buffers are GC_T_RAW / GC_T_PTRARR allocations carried
+             * along by the GC's tag-walk; only the mino_val_t
+             * pointers inside consts need an explicit push. */
+            if (v->as.fn.bc != NULL) {
+                const struct mino_bc_fn *bc = v->as.fn.bc;
+                size_t bi;
+                for (bi = 0; bi < bc->consts_len; bi++) {
+                    gc_mark_child_push(S, bc->consts[bi]);
+                }
+            }
             break;
         case MINO_ATOM:
             gc_mark_child_push(S, v->as.atom.val);

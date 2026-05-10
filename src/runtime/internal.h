@@ -680,6 +680,17 @@ struct mino_state {
     size_t          var_hash_cap;
     size_t          var_hash_len;
 
+    /* Bytecode VM register stack. The bytecode VM (src/eval/bc/vm.c)
+     * runs each compiled fn in a slot window inside this single stack;
+     * a fn entry pushes n_regs slots, a fn exit pops them. Every slot
+     * in [0, bc_top) is a live GC root walked by gc_mark_roots so the
+     * GC keeps the values reachable across collections triggered from
+     * inside the VM. Allocated lazily on first compile + run; NULL
+     * until then. */
+    mino_val_t    **bc_regs;
+    size_t          bc_regs_cap;
+    size_t          bc_top;
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;

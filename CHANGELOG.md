@@ -38,6 +38,16 @@ semantics are unchanged.
   returns NULL for every program; opcode handlers and the
   register-stack window plumb in across subsequent commits.
 
+- **`MINO_FN.bc` field, register stack, and GC integration.**
+  Adds `const struct mino_bc_fn *bc` to the `MINO_FN` struct
+  (forward-declared in `mino.h`) and a `(bc_regs, bc_regs_cap,
+  bc_top)` register stack to `mino_state_t`. The GC root walk
+  in `src/gc/roots.c` scans every live register slot in
+  `[0, bc_top)`; the `MINO_FN` mark pass in `src/gc/driver.c`
+  follows the bc fn's const pool. Once compiled programs start
+  running, the GC keeps register values and constants reachable
+  without explicit pinning at every allocation site.
+
 ## v0.104.0 — Eval-Floor Performance Cycle
 
 A non-JIT performance cycle. Each entry below is a self-contained

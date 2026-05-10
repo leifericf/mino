@@ -429,6 +429,21 @@ static void gc_mark_runtime_globals(mino_state_t *S)
             }
         }
     }
+    /* Bytecode VM register stack. Every slot in [0, bc_top) is a live
+     * register value held by some active VM frame. Without this walk,
+     * a value computed into a register but not yet stored elsewhere
+     * could be collected mid-call. The bc_regs buffer itself is a
+     * GC_T_VALARR, so it's already kept alive through the state's
+     * indirect-pointer scan; the explicit per-slot mark is what
+     * keeps the values they point at alive. */
+    if (S->bc_regs != NULL) {
+        size_t bi;
+        for (bi = 0; bi < S->bc_top; bi++) {
+            if (S->bc_regs[bi] != NULL) {
+                gc_mark_interior(S, S->bc_regs[bi]);
+            }
+        }
+    }
 }
 
 /* Pin async-subsystem live values: scheduler run-queue callbacks/values
