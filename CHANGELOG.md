@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Remove Dead `tx_state_t.retry_signal` Field
+
+Initialized in two places, set in zero, read in zero. Likely a
+left-over from a never-landed `(retry)` user-facing trigger. Drop
+the field and the two write sites; no behavior change.
+
 ### Agent Print Form Carries Identity
 
 `(pr-str (agent 0))` and `(pr-str (agent 0))` produced the same

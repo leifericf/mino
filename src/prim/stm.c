@@ -979,7 +979,6 @@ static mino_val_t *tx_run_loop(mino_state_t *S,
         mino_val_t *r;
         int         validator_rejected = 0;
         tx->refs_head     = NULL;
-        tx->retry_signal  = 0;
         tx->pending_sends = NULL;
 
         if (tx->retry_count > STM_RETRY_CAP) {
@@ -1050,7 +1049,6 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
     tx.refs_head            = NULL;
     tx.retry_count          = 0;
     tx.try_depth_at_start   = saved_try;
-    tx.retry_signal         = 0;
     tx.in_commit            = 0;
     tx.validator_thrown_ex  = NULL;
     tx.pending_sends        = NULL;

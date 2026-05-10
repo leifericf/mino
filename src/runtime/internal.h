@@ -216,7 +216,6 @@ typedef struct tx_state {
     tx_ref_state_t      *refs_head;        /* per-ref state chain */
     int                  retry_count;
     int                  try_depth_at_start; /* try-stack snapshot for retry */
-    int                  retry_signal;     /* set by retry-trigger; consumed by loop */
     /* Non-zero while tx_commit is walking the write set and invoking
      * user code (commute log replay, validators). Mutating ops
      * (alter / ref-set / commute) re-entered through that user code
