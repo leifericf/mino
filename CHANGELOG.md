@@ -28,6 +28,14 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **Build-time pre-parsed core.clj: not shipping.** Per the plan's
+  decision rule, this step was contingent on cold-start parse-only
+  time exceeding 30% of total install time after the earlier
+  steps landed. Cold start measures ~10 ms now (was ~12 ms);
+  parse cannot be the dominant fraction of that. The maintenance
+  tax of a generated pre-parsed AST blob isn't earned. Revisit if
+  install grows again.
+
 - **Reduce / range fast paths.** `prim_reduce` now has two fast
   lanes for numeric work:
   - **Range source pre-detection.** `lazy_is_int_range` recognises
