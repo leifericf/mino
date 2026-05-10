@@ -351,6 +351,25 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/state", "MST002",
             "Agent does not need a restart");
     }
+    /* JVM canon: restart-agent runs the validator on the new state
+     * before clearing the error. A failed agent must not be lifted
+     * back into circulation in a state the validator forbids --
+     * the next send would just refail. Throws here propagate to
+     * the caller; the agent stays in its failed state. */
+    if (agent->as.agent.validator != NULL) {
+        mino_val_t *vargs   = mino_cons(S, new_state, mino_nil(S));
+        mino_val_t *vresult = NULL;
+        mino_val_t *thrown  = NULL;
+        int         pc      = mino_pcall(S, agent->as.agent.validator,
+                                          vargs, env, &vresult, &thrown);
+        if (pc != 0) {
+            return mino_throw(S, thrown);
+        }
+        if (vresult == NULL || !mino_is_truthy(vresult)) {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                "Invalid reference state");
+        }
+    }
     gc_write_barrier(S, agent, agent->as.agent.err, NULL);
     agent->as.agent.err = NULL;
     gc_write_barrier(S, agent, agent->as.agent.val, new_state);

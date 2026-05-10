@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Run Validator on `restart-agent`
+
+`restart-agent` cleared the failed agent's error and published the
+new state without consulting the agent's validator, so a failed
+agent could be restarted to a state the validator forbids -- the
+next send would just refail. JVM canon validates first; mino now
+matches. The validator runs through `mino_pcall`; a throw or falsy
+return aborts the restart and leaves the agent in its failed
+state, so the caller can see and retry.
+
 ### Invoke Agent `error-handler` on Action and Validator Failure
 
 `set-error-handler!` stored a fn but `agent_apply_action` never

@@ -186,3 +186,21 @@
     (is (= 1 @seen))
     (is (nil? (agent-error a)))
     (is (= 1 @a))))
+
+(deftest restart-agent-runs-validator
+  ;; JVM canon: restart-agent validates the new state. mino used to
+  ;; bypass the validator, so a failed agent could be restarted into
+  ;; a state the validator forbids -- silent corruption that would
+  ;; only surface on the next send. Reject before clearing the error.
+  (let [a (agent 1)]
+    (set-validator! a pos?)
+    (send a (fn [_] (throw (ex-info "boom" {}))))
+    (is (some? (agent-error a)))
+    (is (thrown? (restart-agent a -99)))
+    ;; Agent stays in failed state with original value untouched.
+    (is (some? (agent-error a)))
+    (is (= 1 @a))
+    ;; A valid restart succeeds.
+    (restart-agent a 42)
+    (is (nil? (agent-error a)))
+    (is (= 42 @a))))
