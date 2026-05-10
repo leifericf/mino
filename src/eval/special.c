@@ -10,6 +10,7 @@
  */
 
 #include "eval/special_internal.h"
+#include "prim/internal.h"
 
 /* --- Evaluator helpers: one per value kind. --- */
 
@@ -661,6 +662,84 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
     /* Pin fn: eval_args allocates, and the conservative stack
      * scanner may miss fn if the compiler keeps it in a register. */
     gc_pin(fn);
+    /* Numeric int+int fast lane. Recognise the binary call shape
+     * (op a b) for the canonical arithmetic / comparison prims;
+     * evaluate both args straight into stack vars; if both are
+     * MINO_INT, compute the op directly with overflow-aware
+     * builtins. Any miss (mixed types, overflow) builds a 2-cell
+     * cons spine and falls through to apply_callable. */
+    if (fn->type == MINO_PRIM
+        && fn->as.prim.fn != NULL
+        && mino_is_cons(args)
+        && mino_is_cons(args->as.cons.cdr)
+        && !mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        mino_prim_fn p = fn->as.prim.fn;
+        if (p == prim_add || p == prim_sub || p == prim_mul
+            || p == prim_eq
+            || p == prim_lt || p == prim_lte
+            || p == prim_gt || p == prim_gte) {
+            mino_val_t *a = eval_value(S, args->as.cons.car, env);
+            mino_val_t *b;
+            mino_val_t *spine;
+            if (a == NULL) {
+                gc_unpin(1);
+                return NULL;
+            }
+            gc_pin(a);
+            b = eval_value(S, args->as.cons.cdr->as.cons.car, env);
+            gc_unpin(1);
+            if (b == NULL) {
+                gc_unpin(1);
+                return NULL;
+            }
+            if (a->type == MINO_INT && b->type == MINO_INT) {
+                long long ai = a->as.i;
+                long long bi = b->as.i;
+                long long r;
+                if (p == prim_add) {
+#if defined(__GNUC__) || defined(__clang__)
+                    if (!__builtin_add_overflow(ai, bi, &r)) {
+                        gc_unpin(1);
+                        return mino_int(S, r);
+                    }
+#endif
+                } else if (p == prim_sub) {
+#if defined(__GNUC__) || defined(__clang__)
+                    if (!__builtin_sub_overflow(ai, bi, &r)) {
+                        gc_unpin(1);
+                        return mino_int(S, r);
+                    }
+#endif
+                } else if (p == prim_mul) {
+#if defined(__GNUC__) || defined(__clang__)
+                    if (!__builtin_mul_overflow(ai, bi, &r)) {
+                        gc_unpin(1);
+                        return mino_int(S, r);
+                    }
+#endif
+                } else if (p == prim_eq) {
+                    gc_unpin(1);
+                    return (ai == bi) ? mino_true(S) : mino_false(S);
+                } else if (p == prim_lt) {
+                    gc_unpin(1);
+                    return (ai < bi) ? mino_true(S) : mino_false(S);
+                } else if (p == prim_lte) {
+                    gc_unpin(1);
+                    return (ai <= bi) ? mino_true(S) : mino_false(S);
+                } else if (p == prim_gt) {
+                    gc_unpin(1);
+                    return (ai > bi) ? mino_true(S) : mino_false(S);
+                } else if (p == prim_gte) {
+                    gc_unpin(1);
+                    return (ai >= bi) ? mino_true(S) : mino_false(S);
+                }
+            }
+            /* Slow path: rebuild the 2-element cons spine and call. */
+            spine = mino_cons(S, a, mino_cons(S, b, mino_nil(S)));
+            gc_unpin(1);
+            return apply_callable(S, fn, spine, env);
+        }
+    }
     /* argv-prim fast path: skip eval_args' cons spine entirely.
      * Each arg form evaluates straight into a stack-resident scratch
      * slot, GC-rooted by the conservative stack scan. Spillover

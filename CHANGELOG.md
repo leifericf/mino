@@ -28,6 +28,21 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **Numeric int+int fast lane.** `eval_apply_regular_call` now
+  recognises the binary call shape `(op a b)` for the canonical
+  `+ - * = < <= > >=` prims. When both args evaluate to `MINO_INT`
+  the op is computed directly via `__builtin_add_overflow` /
+  `__builtin_sub_overflow` / `__builtin_mul_overflow`; comparisons
+  use bare `<` / `==`. Any miss (mixed types, overflow,
+  non-canonical resolution) builds a 2-cell cons spine and falls
+  through to `apply_callable`. Combined with the IC and argv
+  paths, the binary numeric lane skips `tower_reduce` entirely on
+  the dominant tight-loop shape.
+
+  Microbenchmark: `(loop [i 0 acc 0] (if (< i 1M) (recur (+ i 1)
+  (+ acc i)) acc))` was ~941 ms at the start of the push and ~787
+  ms after step 5; this step takes it to ~375 ms (-60% overall).
+
 - **Monomorphic inline call cache.** Per-state hashed slot table
   keyed on the call form pointer, with a head-symbol-data tag and a
   `gen_at_fill` snapshot. `var_set_root` bumps `S->ic_gen` to
