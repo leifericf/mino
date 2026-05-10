@@ -28,6 +28,17 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **Closure-shape pre-compile for user fns.** New `MINO_FN.shape`
+  cache (lazy-tri-state: 0 = not yet inspected, 1 = simple, -1 =
+  complex). On first call apply_callable inspects the params: if
+  every slot is a plain interned MINO_SYMBOL with no `&`-rest /
+  `:as` / nested destructure, the cache flips to 1 and subsequent
+  calls dispatch through `bind_simple_params`, which walks
+  params/args in parallel and calls `env_bind_sym` directly,
+  skipping `bind_form`'s pattern-dispatch tower. Anything outside
+  the simple shape (destructure pattern, rest arg, multi-arity
+  per-clause params) flows through the existing `bind_params`.
+
 - **argv/argc calling convention for hot prims.** New
   `mino_prim_fn2` ABI receives evaluated args as a flat C array
   instead of a cons spine. `mino_prim_argv()` constructs argv-style

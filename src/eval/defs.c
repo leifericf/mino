@@ -609,6 +609,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     mac->as.fn.body        = body;
     mac->as.fn.env         = env;
     mac->as.fn.defining_ns = S->current_ns;
+    mac->as.fn.shape       = 0;
     n = name_form->as.s.len;
     if (n >= sizeof(buf)) {
         set_eval_diag(S, form, "syntax", "MSY001", "defmacro name too long");

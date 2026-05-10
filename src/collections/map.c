@@ -729,6 +729,7 @@ mino_val_t *make_fn(mino_state_t *S, mino_val_t *params, mino_val_t *body,
     v->as.fn.params      = params;
     v->as.fn.body        = body;
     v->as.fn.env         = env;
+    v->as.fn.shape       = 0;
     /* Inside a macro body, current_ns is still the caller's ns (only
      * fn_ambient_ns is the macro's defining ns). Closures created here
      * are artifacts of the macro expansion -- they should resolve free

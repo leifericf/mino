@@ -282,6 +282,13 @@ struct mino_val {
             mino_val_t *body;   /* body forms */
             mino_env_t *env;    /* captured lexical environment */
             const char *defining_ns; /* ns at creation time (interned), or NULL */
+            /* Lazily-cached shape tag for the parameter list. 0 means
+             * not yet inspected; 1 means params is a plain-symbol vector
+             * with no destructure, no &-rest, no :as -- the bind path
+             * can skip the destructure dispatch entirely; -1 means the
+             * params need the full bind_params walk. Set by
+             * apply_callable on first call, never invalidated. */
+            int         shape;
         } fn;
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
             void       *ptr;   /* host-owned pointer */

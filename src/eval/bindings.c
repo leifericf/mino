@@ -300,6 +300,58 @@ static int bind_form(mino_state_t *S, mino_env_t *env, mino_val_t *pattern,
     return 0;
 }
 
+/* Inspect a vector params list to decide whether the bind path can use
+ * the simple plain-symbol fast lane. Returns 1 if every slot is a plain
+ * MINO_SYMBOL (no &, no :as, no nested destructure), 0 otherwise.
+ * Symbols are passed by data-pointer comparison so the check is a few
+ * loads per slot. */
+int fn_params_simple_shape(mino_val_t *params)
+{
+    size_t i, n;
+    if (params == NULL || params->type != MINO_VECTOR) return 0;
+    n = params->as.vec.len;
+    for (i = 0; i < n; i++) {
+        mino_val_t *p = vec_nth(params, i);
+        if (p == NULL || p->type != MINO_SYMBOL) return 0;
+        if (p->as.s.len == 1 && p->as.s.data[0] == '&') return 0;
+        if (p->as.s.len == 2
+            && p->as.s.data[0] == ':' && p->as.s.data[1] == 'a') return 0;
+    }
+    return 1;
+}
+
+/* Fast lane for the simple plain-symbol shape: walk params/args in
+ * parallel and bind each slot directly. Caller must have already
+ * verified fn_params_simple_shape(params); this skips the dispatch
+ * tower entirely. Returns 1 on success, 0 on arity mismatch. */
+int bind_simple_params(mino_state_t *S, mino_env_t *env,
+                       mino_val_t *params, mino_val_t *args, const char *ctx)
+{
+    size_t n = params->as.vec.len;
+    size_t i;
+    for (i = 0; i < n; i++) {
+        mino_val_t *sym;
+        if (!mino_is_cons(args)) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "syntax", "MSY001", msg);
+            return 0;
+        }
+        sym = vec_nth(params, i);
+        env_bind_sym(S, env, sym, args->as.cons.car);
+        args = args->as.cons.cdr;
+    }
+    if (mino_is_cons(args)) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "syntax", "MSY001", msg);
+        return 0;
+    }
+    return 1;
+}
+
 /*
  * Bind a parameter list (cons list or vector) to a list of argument values.
  * Returns 1 on success, 0 on arity mismatch or error (with error set).

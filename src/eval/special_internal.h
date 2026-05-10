@@ -20,6 +20,13 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 int kw_eq(const mino_val_t *v, const char *s);
 int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
                 mino_val_t *args, const char *ctx);
+/* Closure-shape pre-compile helpers. fn_params_simple_shape returns 1
+ * iff `params` is a vector of plain interned symbols with no
+ * destructure / no &-rest / no :as. bind_simple_params binds such a
+ * vector to args without going through bind_form's dispatch tower. */
+int fn_params_simple_shape(mino_val_t *params);
+int bind_simple_params(mino_state_t *S, mino_env_t *env,
+                       mino_val_t *params, mino_val_t *args, const char *ctx);
 
 /*
  * Special-form handler signature. Every entry in the special-form

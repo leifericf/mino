@@ -360,7 +360,24 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             return NULL;
         }
         for (;;) {
-            if (!bind_params(S, local, cur_params, call_args, tag)) {
+            int simple_path = 0;
+            if (cur_params != NULL && cur_params == fn->as.fn.params) {
+                /* Lazy shape detection on the per-fn cache. dispatch_multi_arity
+                 * yields per-clause params that are not the cached one; those
+                 * walks fall through to the general bind_params. */
+                if (fn->as.fn.shape == 0) {
+                    fn->as.fn.shape =
+                        fn_params_simple_shape(cur_params) ? 1 : -1;
+                }
+                simple_path = (fn->as.fn.shape == 1);
+            }
+            if (simple_path) {
+                if (!bind_simple_params(S, local, cur_params, call_args, tag)) {
+                    S->current_ns    = saved_ns;
+                    S->fn_ambient_ns = saved_ambient;
+                    return NULL;
+                }
+            } else if (!bind_params(S, local, cur_params, call_args, tag)) {
                 S->current_ns    = saved_ns;
                 S->fn_ambient_ns = saved_ambient;
                 return NULL; /* leave frame for trace */
