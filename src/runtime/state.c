@@ -124,6 +124,7 @@ static void state_init(mino_state_t *S)
     }
     S->agent_mu_inited = 0;
     mino_state_lock_init(S);
+    mino_worker_list_lock_init(S);
     gc_evt_init(S);
 }
 
@@ -429,6 +430,7 @@ void mino_state_free(mino_state_t *S)
     state_free_async(S);
     state_free_heap(S);
     mino_state_lock_destroy(S);
+    mino_worker_list_lock_destroy(S);
     if (S->stm_lock_inited) {
 #if !(defined(_WIN32) && defined(_MSC_VER))
         pthread_mutex_destroy(&S->stm_commit_lock);
@@ -1038,6 +1040,31 @@ void mino_state_lock_release(mino_state_t *S)
 {
     LeaveCriticalSection((CRITICAL_SECTION *)S->state_lock);
 }
+void mino_worker_list_lock_init(mino_state_t *S)
+{
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)calloc(1, sizeof(*cs));
+    /* unrecoverable: init-time OOM allocating worker_list_lock */
+    if (cs == NULL) { abort(); }
+    InitializeCriticalSection(cs);
+    S->worker_list_lock = cs;
+}
+void mino_worker_list_lock_destroy(mino_state_t *S)
+{
+    CRITICAL_SECTION *cs = (CRITICAL_SECTION *)S->worker_list_lock;
+    if (cs != NULL) {
+        DeleteCriticalSection(cs);
+        free(cs);
+        S->worker_list_lock = NULL;
+    }
+}
+void mino_worker_list_lock_acquire(mino_state_t *S)
+{
+    EnterCriticalSection((CRITICAL_SECTION *)S->worker_list_lock);
+}
+void mino_worker_list_lock_release(mino_state_t *S)
+{
+    LeaveCriticalSection((CRITICAL_SECTION *)S->worker_list_lock);
+}
 #else
 void mino_state_lock_init(mino_state_t *S)
 {
@@ -1062,6 +1089,22 @@ void mino_state_lock_acquire(mino_state_t *S)
 void mino_state_lock_release(mino_state_t *S)
 {
     pthread_mutex_unlock(&S->state_lock);
+}
+void mino_worker_list_lock_init(mino_state_t *S)
+{
+    pthread_mutex_init(&S->worker_list_lock, NULL);
+}
+void mino_worker_list_lock_destroy(mino_state_t *S)
+{
+    pthread_mutex_destroy(&S->worker_list_lock);
+}
+void mino_worker_list_lock_acquire(mino_state_t *S)
+{
+    pthread_mutex_lock(&S->worker_list_lock);
+}
+void mino_worker_list_lock_release(mino_state_t *S)
+{
+    pthread_mutex_unlock(&S->worker_list_lock);
 }
 #endif
 

@@ -365,22 +365,36 @@ static void gc_mark_module_and_meta(mino_state_t *S)
 /* Pin per-thread-context state: dynamic-binding values, GC save-stack
  * payloads, and current-ctx diagnostic objects. Workers don't publish
  * diagnostics back through this path, so only the current ctx's diag
- * is walked. */
+ * is walked.
+ *
+ * worker_list_lock guards the linked-list walk: workers attach/detach
+ * themselves under this lock, and per-worker fields (dyn_stack /
+ * gc_save / tx) remain stable while the worker is parked at the
+ * state_lock waiting to enter mino_call. The GC reaches this from
+ * inside state_lock (gc_alloc_typed -> major collect), so the
+ * effective lock order is state_lock outer, worker_list_lock inner --
+ * matching the spawn path. */
 static void gc_mark_thread_state(mino_state_t *S)
 {
     mino_thread_ctx_t *w;
     gc_mark_ctx_dyn_stack(S, &S->main_ctx);
+    mino_worker_list_lock_acquire(S);
     for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_dyn_stack(S, w);
     }
+    mino_worker_list_lock_release(S);
     gc_mark_ctx_gc_save(S, &S->main_ctx);
+    mino_worker_list_lock_acquire(S);
     for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_gc_save(S, w);
     }
+    mino_worker_list_lock_release(S);
     gc_mark_ctx_tx(S, &S->main_ctx);
+    mino_worker_list_lock_acquire(S);
     for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
         gc_mark_ctx_tx(S, w);
     }
+    mino_worker_list_lock_release(S);
     if (mino_current_ctx(S)->last_diag != NULL) {
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->data);
         gc_mark_interior(S, mino_current_ctx(S)->last_diag->cached_map);

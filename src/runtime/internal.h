@@ -701,9 +701,12 @@ struct mino_state {
      * by default; embedders opt in per state.
      *
      * thread_count is the live worker count, incremented at spawn,
-     * decremented at join. multi_threaded flips to 1 the first time a
-     * spawn actually runs; single-threaded states pay none of the
-     * inter-thread coordination cost. The full implementation
+     * decremented at join. Mutated under worker_list_lock (NOT
+     * state_lock), so a tight embedder loop holding state_lock cannot
+     * stall a worker's exit-decrement. multi_threaded flips to 1 the
+     * first time a spawn actually runs; single-threaded states pay
+     * none of the inter-thread coordination cost. The full
+     * implementation
      * (per-thread context refactor, GC STW machinery, atom CAS upgrade)
      * lands across upcoming versions; v0.84.x is the API surface plus
      * thrown stubs that distinguish "host has not granted threads"
@@ -752,8 +755,28 @@ struct mino_state {
 
     /* Linked list of live worker ctxs. Walked during GC root
      * scanning so blocked workers' pinned values stay live.
-     * Mutated under state_lock. */
+     * Mutated under worker_list_lock (see below) -- NOT state_lock.
+     * The split keeps worker bookkeeping off the heavy eval lock so a
+     * tight embedder loop that holds state_lock can't starve workers
+     * at their entry-link / exit-detach steps.
+     *
+     * Lock order (when both are needed): state_lock outer,
+     * worker_list_lock inner. Workers at entry/exit acquire
+     * worker_list_lock alone. The spawn path and GC root scan reach
+     * worker_list_lock from inside state_lock. */
     mino_thread_ctx_t *worker_ctxs_head;
+
+    /* Brief mutex guarding worker_ctxs_head and thread_count.
+     * Non-recursive; held only across the linked-list mutation +
+     * counter step. See comment above worker_ctxs_head for the lock
+     * order. Initialized in state_init unconditionally; cheap to
+     * carry in single-threaded mode (one mutex_init at state-create
+     * time, never contended). */
+#if defined(_WIN32) && defined(_MSC_VER)
+    void           *worker_list_lock;  /* CRITICAL_SECTION; see state.c */
+#else
+    pthread_mutex_t worker_list_lock;
+#endif
 
     /* Stop-the-world request for major GC.
      *
@@ -978,6 +1001,14 @@ void mino_state_lock_init(mino_state_t *S);
 void mino_state_lock_destroy(mino_state_t *S);
 void mino_state_lock_acquire(mino_state_t *S);
 void mino_state_lock_release(mino_state_t *S);
+
+/* worker_list_lock: brief lock for worker_ctxs_head + thread_count.
+ * Inner to state_lock; never wraps an eval. Workers at entry/exit
+ * acquire alone; spawn + GC root scan acquire from inside state_lock. */
+void mino_worker_list_lock_init(mino_state_t *S);
+void mino_worker_list_lock_destroy(mino_state_t *S);
+void mino_worker_list_lock_acquire(mino_state_t *S);
+void mino_worker_list_lock_release(mino_state_t *S);
 
 /* mino_lock / mino_unlock take the recursive state_lock unconditionally.
  * This ensures correctness when multi_threaded flips mid-eval (a

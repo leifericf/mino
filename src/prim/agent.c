@@ -443,11 +443,13 @@ static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
     mino_tls_ctx = ctx;
 
     /* Link onto S->worker_ctxs_head so gc_mark_roots reaches the
-     * worker's pinned values while it's blocked. */
-    mino_state_lock_acquire(S);
+     * worker's pinned values while it's blocked. The brief
+     * worker_list_lock keeps this off the heavy state_lock so a
+     * tight embedder loop can't stall agent worker entry. */
+    mino_worker_list_lock_acquire(S);
     ctx->next_worker = S->worker_ctxs_head;
     S->worker_ctxs_head = ctx;
-    mino_state_lock_release(S);
+    mino_worker_list_lock_release(S);
 
     for (;;) {
         agent_action_node_t *n;
@@ -482,20 +484,20 @@ static void agent_worker_run(mino_state_t *S, agent_pool_kind_t kind,
     }
 
     /* Detach worker ctx from S->worker_ctxs_head and decrement the
-     * thread count. The pthread_t is left intact for a follow-up
-     * pthread_join from agent_worker_ensure or
-     * mino_agent_quiesce_workers (signaled by
-     * worker_pending_join, which the spawn path set when it
-     * created us). Joining an already-exited joinable pthread
-     * returns immediately. */
-    mino_state_lock_acquire(S);
+     * thread count under the brief worker_list_lock. The pthread_t
+     * is left intact for a follow-up pthread_join from
+     * agent_worker_ensure or mino_agent_quiesce_workers (signaled by
+     * worker_pending_join, which the spawn path set when it created
+     * us). Joining an already-exited joinable pthread returns
+     * immediately. */
+    mino_worker_list_lock_acquire(S);
     {
         mino_thread_ctx_t **pp = &S->worker_ctxs_head;
         while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
         if (*pp == ctx) { *pp = ctx->next_worker; }
     }
     if (S->thread_count > 0) { S->thread_count--; }
-    mino_state_lock_release(S);
+    mino_worker_list_lock_release(S);
 
     mino_tls_ctx = NULL;
     free(ctx);
@@ -572,7 +574,12 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
      * for this pool. */
     agent_worker_reap_pending(S, kind);
 
+    /* Gate-and-increment thread_count under worker_list_lock so a
+     * concurrent spawn (e.g. another pool's agent_worker_ensure or
+     * mino_future_spawn) cannot both pass the limit check. */
+    mino_worker_list_lock_acquire(S);
     if (S->thread_count >= S->thread_limit) {
+        mino_worker_list_lock_release(S);
         prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
             "agent dispatch requires a host-granted worker thread; "
             "raise via mino_set_thread_limit (>= 1 for one agent "
@@ -581,8 +588,9 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
             "against the limit -- only spawned workers do.");
         return 1;
     }
-    S->multi_threaded = 1;
     S->thread_count++;
+    mino_worker_list_lock_release(S);
+    S->multi_threaded = 1;
     /* Mark alive BEFORE pthread_create returns so a concurrent send
      * on the embedder thread (impossible in single-thread mode but
      * defensive) doesn't race. */
@@ -600,7 +608,9 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
             agent_mu_lock(&S->agent_mu);
             S->agent_pool[kind].worker_alive = 0;
             agent_mu_unlock(&S->agent_mu);
-            S->thread_count--;
+            mino_worker_list_lock_acquire(S);
+            if (S->thread_count > 0) { S->thread_count--; }
+            mino_worker_list_lock_release(S);
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;
@@ -627,7 +637,9 @@ static int agent_worker_ensure(mino_state_t *S, agent_pool_kind_t kind)
             agent_mu_lock(&S->agent_mu);
             S->agent_pool[kind].worker_alive = 0;
             agent_mu_unlock(&S->agent_mu);
-            S->thread_count--;
+            mino_worker_list_lock_acquire(S);
+            if (S->thread_count > 0) { S->thread_count--; }
+            mino_worker_list_lock_release(S);
             prim_throw_classified(S, "mino/thread-limit-exceeded", "MTH001",
                 "host refused agent worker thread");
             return 1;

@@ -220,12 +220,18 @@ int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
 /* ------------------------------------------------------------------------- */
 
 /* Lock invariant: enters with no locks held — this thread did not pass
- * through mino_call. Acquires state_lock explicitly twice: once briefly
- * to attach ctx to S->worker_ctxs_head before running the body, and once
- * at exit to detach ctx and decrement S->thread_count atomically. The
- * mino_call inside the body acquires state_lock recursively for the
- * duration of the user thunk. impl->mu is taken only to publish the
- * result and broadcast the cv. */
+ * through mino_call. Acquires worker_list_lock explicitly twice: once
+ * briefly to attach ctx to S->worker_ctxs_head before running the
+ * body, and once at exit to detach ctx and decrement S->thread_count
+ * atomically. The mino_call inside the body acquires state_lock
+ * recursively for the duration of the user thunk. impl->mu is taken
+ * only to publish the result and broadcast the cv.
+ *
+ * Why worker_list_lock and not state_lock for the entry/exit step:
+ * a tight embedder loop holding state_lock would otherwise stall
+ * the worker at link/unlink, which (a) leaves the worker invisible
+ * to the GC root walker for the duration of the loop and (b) keeps
+ * thread_count inflated even after the worker's body has finished. */
 static void worker_run(mino_future_t *impl, char *stack_anchor)
 {
     mino_state_t       *S    = impl->state;
@@ -250,12 +256,11 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
 
     /* Link onto S->worker_ctxs_head so gc_mark_roots can walk the
      * worker's gc_save and dyn_stack while it's blocked. Take the
-     * state_lock briefly for the list mutation; we're outside the
-     * mino_call lock at this point so it's a fresh acquire. */
-    mino_state_lock_acquire(S);
+     * brief worker_list_lock for the list mutation. */
+    mino_worker_list_lock_acquire(S);
     ctx->next_worker = S->worker_ctxs_head;
     S->worker_ctxs_head = ctx;
-    mino_state_lock_release(S);
+    mino_worker_list_lock_release(S);
 
     /* Embed-distinctive lifecycle hook. Spawn-per-future path only.
      * Pool-managed workers run under the pool's own lifecycle hooks.
@@ -339,21 +344,23 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
      * concurrently-live workers. For the spawn-per-future path the
      * pthread itself remains joinable until mino_host_threads_quiesce;
      * pthread_join on an already exited joinable thread is a no-op
-     * that returns immediately. */
-    /* Worker exit takes the lock explicitly: this thread did not enter
-     * through mino_call, so no caller is holding state_lock for us. The
-     * detach of worker_ctxs_head and the thread_count decrement must
-     * happen as one atomic update so a concurrent mino_thread_count
-     * never sees a ctx removed from the GC-root list while the counter
+     * that returns immediately.
+     *
+     * Worker exit takes the brief worker_list_lock: this thread did
+     * not enter through mino_call, so no caller is holding any lock
+     * for us. The detach of worker_ctxs_head and the thread_count
+     * decrement happen as one atomic update under the worker-list
+     * lock so a concurrent mino_thread_count or spawn-time gate never
+     * sees a ctx removed from the GC-root list while the counter
      * still claims a live worker. */
-    mino_state_lock_acquire(S);
+    mino_worker_list_lock_acquire(S);
     {
         mino_thread_ctx_t **pp = &S->worker_ctxs_head;
         while (*pp != NULL && *pp != ctx) { pp = &(*pp)->next_worker; }
         if (*pp == ctx) { *pp = ctx->next_worker; }
     }
     if (S->thread_count > 0) { S->thread_count--; }
-    mino_state_lock_release(S);
+    mino_worker_list_lock_release(S);
 
     mino_tls_ctx = NULL;
     free(ctx);
@@ -389,26 +396,44 @@ static void worker_pool_entry(void *arg)
 /* ------------------------------------------------------------------------- */
 
 /* Lock invariant: caller is the apply path from mino_call, which holds
- * state_lock recursively for the entire call. The multi_threaded and
- * thread_count writes here therefore execute under the caller-held
- * lock. The lock is not released before this function returns; the
- * worker thread takes its own lock acquisitions later. */
+ * state_lock recursively for the entire call. multi_threaded is
+ * written under the caller-held state_lock; the thread_count gate
+ * and increment use the worker_list_lock (state_lock outer ->
+ * worker_list_lock inner). The lock is not released before this
+ * function returns; the worker thread takes its own lock acquisitions
+ * later. */
 mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
                               mino_env_t *env)
 {
     mino_val_t *fut;
     mino_future_t *impl;
 
-    /* Enforce the host-thread grant. */
+    /* Enforce the host-thread grant. The gate-and-increment is one
+     * critical section under worker_list_lock so a parallel spawn
+     * can't both read thread_count < limit and then both increment. */
+    mino_worker_list_lock_acquire(S);
     if (S->thread_count >= S->thread_limit) {
+        mino_worker_list_lock_release(S);
         return prim_throw_classified(S,
             "mino/thread-limit-exceeded", "MTH001",
             "thread limit exceeded; raise via mino_set_thread_limit");
     }
+    S->thread_count++;
+    mino_worker_list_lock_release(S);
     (void)env; /* env borrowing reserved for richer body forms */
 
+    /* First spawn flips multi_threaded; from this point gc/atom paths
+     * take their multi-threaded branches. Reached only via the apply
+     * path from mino_call, which holds state_lock for the entire call. */
+    S->multi_threaded = 1;
+
     fut = future_alloc(S);
-    if (fut == NULL) { return NULL; }
+    if (fut == NULL) {
+        mino_worker_list_lock_acquire(S);
+        if (S->thread_count > 0) { S->thread_count--; }
+        mino_worker_list_lock_release(S);
+        return NULL;
+    }
     impl = fut->as.future.impl;
     impl->thunk    = thunk;
     impl->body_env = (mino_val_t *)env; /* env is gc-rooted via thunk closure */
@@ -419,17 +444,6 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
      * `bound-fn`, `binding`, and `*ns*` rely on across threads. */
     impl->dyn_snapshot = mino_snapshot_thread_bindings(S);
 
-    /* First spawn flips multi_threaded; from this point gc/atom paths
-     * take their multi-threaded branches. Lock invariant: this is
-     * reached only via apply_callable from mino_call, which holds
-     * state_lock for the entire call (state.c mino_call). The
-     * multi_threaded and thread_count writes therefore execute under
-     * the caller-held lock; workers later read these fields through
-     * paths that re-acquire the lock or use the documented relaxed
-     * accessor (mino_thread_count). */
-    S->multi_threaded = 1;
-    S->thread_count++;
-
     /* Pool path: the embedder hands us a host pool and we just submit
      * the work item. impl->thread_started stays 0 so the sweep + quiesce
      * paths skip pthread_join (mino doesn't own the pthread). */
@@ -437,7 +451,9 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
         int rc = S->thread_pool->submit_fn(S->thread_pool,
                                            worker_pool_entry, impl);
         if (rc != 0) {
-            S->thread_count--;
+            mino_worker_list_lock_acquire(S);
+            if (S->thread_count > 0) { S->thread_count--; }
+            mino_worker_list_lock_release(S);
             return prim_throw_classified(S,
                 "mino/thread-limit-exceeded", "MTH001",
                 "host thread pool refused submission");
@@ -451,7 +467,9 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
         uintptr_t h = _beginthreadex(NULL, stack, worker_entry, impl,
                                      0, NULL);
         if (h == 0) {
-            S->thread_count--;
+            mino_worker_list_lock_acquire(S);
+            if (S->thread_count > 0) { S->thread_count--; }
+            mino_worker_list_lock_release(S);
             return NULL;
         }
         impl->thread = (HANDLE)h;
@@ -471,7 +489,9 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
         rc = pthread_create(&impl->thread, attrp, worker_entry, impl);
         if (attrp != NULL) { pthread_attr_destroy(attrp); }
         if (rc != 0) {
-            S->thread_count--;
+            mino_worker_list_lock_acquire(S);
+            if (S->thread_count > 0) { S->thread_count--; }
+            mino_worker_list_lock_release(S);
             return NULL;
         }
         impl->thread_started = 1;
