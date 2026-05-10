@@ -267,19 +267,30 @@ static void tx_c_closure_finalize(void *ptr, const char *tag)
  *   - a MINO_HANDLE with TX_C_CLOSURE_TAG for a C-side commute_c.
  * Replay reverses the list onto a fresh stack and walks forward,
  * dispatching per entry shape against the running accumulator.
+ *
+ * Clojure-side entries are invoked via mino_pcall so a throw cannot
+ * longjmp past the caller. Commit-phase callers hold the global STM
+ * lock; an unprotected longjmp there would leak it. When out_ex is
+ * non-NULL and a Clojure entry throws, *out_ex receives the user's
+ * raw exception value and the function returns NULL. C-side closures
+ * (TX_C_CLOSURE_TAG) are invoked directly: per the public C API
+ * contract, host transformers must surface failure via NULL, not
+ * longjmp.
  */
 static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
-                                      mino_val_t *base, mino_env_t *env)
+                                      mino_val_t *base, mino_env_t *env,
+                                      mino_val_t **out_ex)
 {
     mino_val_t *reversed = mino_empty_list(S);
     mino_val_t *p = log;
     mino_val_t *cur = base;
+    if (out_ex != NULL) *out_ex = NULL;
     while (mino_is_cons(p)) {
         reversed = mino_cons(S, p->as.cons.car, reversed);
         p = p->as.cons.cdr;
     }
     for (p = reversed; mino_is_cons(p); p = p->as.cons.cdr) {
-        mino_val_t *entry = p->as.cons.car;
+        mino_val_t *entry  = p->as.cons.car;
         mino_val_t *result = NULL;
         if (entry != NULL && entry->type == MINO_HANDLE
             && entry->as.handle.tag == TX_C_CLOSURE_TAG) {
@@ -290,7 +301,13 @@ static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
             mino_val_t *fn        = entry->as.cons.car;
             mino_val_t *extra     = entry->as.cons.cdr;
             mino_val_t *call_args = alter_build_args(S, cur, extra);
-            result = mino_call(S, fn, call_args, env);
+            mino_val_t *thrown    = NULL;
+            int         pc        = mino_pcall(S, fn, call_args, env,
+                                                &result, &thrown);
+            if (pc != 0) {
+                if (out_ex != NULL) *out_ex = thrown;
+                return NULL;
+            }
         } else {
             continue;
         }
@@ -311,7 +328,7 @@ static mino_val_t *tx_effective_value(mino_state_t *S, tx_ref_state_t *rs,
     }
     if (rs->kind == TX_STATE_COMMUTE_LOG && rs->commute_log != NULL) {
         return commute_log_replay(S, rs->commute_log,
-                                   rs->ref->as.tx_ref.val, env);
+                                   rs->ref->as.tx_ref.val, env, NULL);
     }
     return rs->ref->as.tx_ref.val;
 }
@@ -797,10 +814,21 @@ static int tx_commit(mino_state_t *S, tx_state_t *tx, mino_env_t *env,
             new_val = rs->tentative;
         } else if (rs->kind == TX_STATE_COMMUTE_LOG
                    && rs->commute_log != NULL) {
+            mino_val_t *replay_ex = NULL;
             new_val = commute_log_replay(S, rs->commute_log,
-                                          rs->ref->as.tx_ref.val, env);
+                                          rs->ref->as.tx_ref.val, env,
+                                          &replay_ex);
             if (new_val == NULL) {
                 stm_unlock(S);
+                /* A commute fn throw during replay is a hard failure,
+                 * not a retry-able read-set conflict. Funnel through
+                 * the same path as a validator throw so dosync_run
+                 * surfaces the user's original exception payload
+                 * instead of looping until MST004. */
+                if (replay_ex != NULL && out_validator_rejected != NULL) {
+                    *out_validator_rejected = 1;
+                    tx->validator_thrown_ex = replay_ex;
+                }
                 return 0;
             }
         }

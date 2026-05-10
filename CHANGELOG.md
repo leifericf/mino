@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Fix STM Commit-Lock Leak on Commute Throw During Replay
+
+A `commute` fn that succeeded during the transaction body but threw
+during `commute_log_replay` longjmped past `stm_unlock`, leaving the
+global STM commit lock held. Subsequent dosync calls on another
+thread would deadlock; on the same thread, re-acquiring the
+non-recursive mutex is undefined. Route Clojure-side commute log
+entries through `mino_pcall` so a throw is captured and surfaced as
+a hard failure with the user's original exception payload, after
+the lock is released. C-side closures (`TX_C_CLOSURE_TAG`) remain
+direct calls per the public API contract that host transformers
+must surface failure via NULL rather than longjmp.
+
 ## v0.101.0
 
 ### Add software transactional memory (refs + `dosync`)

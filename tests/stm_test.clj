@@ -191,3 +191,30 @@
                       (catch e (:mino/code e)))]
       (is (= "MCT001" caught)))
     (is (= 1 @r))))
+
+(deftest commute-throw-during-replay-does-not-leak-commit-lock
+  ;; A commute fn that succeeds during the body but throws during
+  ;; commute_log_replay (under the commit lock) used to longjmp past
+  ;; stm_unlock, leaving the lock held. Subsequent dosync calls on
+  ;; another thread would deadlock; on the same thread, attempting
+  ;; to re-acquire the non-recursive mutex is undefined. The fix
+  ;; routes commute fns through pcall so the throw is captured and
+  ;; the lock is released cleanly before the user's exception is
+  ;; surfaced.
+  (let [r (ref 0)
+        trip (atom false)
+        caught (atom nil)]
+    (try
+      (dosync
+        (commute r (fn [v]
+                     (if @trip
+                       (throw (ex-info "replay-boom" {:value v}))
+                       (do (reset! trip true) (inc v))))))
+      (catch e (reset! caught (ex-data e))))
+    ;; Replay sees the committed base value (0), not the body-time
+    ;; tentative -- commute_log_replay walks log entries against the
+    ;; latest committed value at commit time.
+    (is (= {:value 0} @caught))
+    ;; Lock must be released: subsequent transaction completes.
+    (dosync (alter r inc))
+    (is (= 1 @r))))
