@@ -48,6 +48,22 @@ typedef enum {
     OP_PUSHDYN,        /* A=var_k, B=val                                   */
     OP_POPDYN,         /* A=count                                          */
     OP_MAKE_LAZY,      /* A=dst, Bx=thunk const index                      */
+    /* Phase 4 specialization opcodes. The VM dispatch loop rewrites
+     * generic OP_GETGLOBAL / OP_CALL / OP_BINOP_INT sites to these
+     * after observing stable runtime shapes; each specialized handler
+     * version-checks its assumption and deopts on mismatch. */
+    OP_GETGLOBAL_CACHED, /* A=dst, Bx=ic slot index                        */
+    OP_CALL_CACHED,      /* A=fn, B=argc, C=ret_base; cached callable      */
+    OP_ADD_II,           /* A=dst, B=lhs, C=rhs; int+int add              */
+    OP_SUB_II,           /* "                                              */
+    OP_MUL_II,           /* "                                              */
+    OP_LT_II,            /* int < int                                      */
+    OP_LE_II,            /* int <= int                                     */
+    OP_GT_II,            /* int > int                                      */
+    OP_GE_II,            /* int >= int                                     */
+    OP_EQ_II,            /* int == int                                     */
+    OP_GET_KW_MAP,       /* A=dst, B=map, C=kw                             */
+    OP_NTH_VEC,          /* A=dst, B=vec, C=index                          */
     OP__COUNT
 } mino_bc_op_t;
 

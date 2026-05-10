@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.108.0 — Specialization Opcode Reservation
+
+Eleven Phase-4 opcodes are added to the bytecode opcode enum
+so the encoding is stable across the cycle that wires the
+specializing interpreter. The new entries cover the
+most-likely specializations against the v0.103.0 hot-path
+profile: `OP_GETGLOBAL_CACHED` (version-checked direct slot
+read), `OP_CALL_CACHED` (cached callable + version snapshot),
+eight per-op int+int variants (`OP_ADD_II`, `OP_SUB_II`,
+`OP_MUL_II`, `OP_LT_II`, `OP_LE_II`, `OP_GT_II`, `OP_GE_II`,
+`OP_EQ_II`) that split the single Phase-1 `OP_BINOP_INT`, and
+two shape specializations (`OP_GET_KW_MAP` for keyword-on-map
+`get`, `OP_NTH_VEC` for integer-index-on-vector `nth`).
+
+Their handlers and the in-place opcode-rewriting machinery
+land alongside the runtime profiling counters; this cycle
+reserves the opcode IDs so embedders that inspect compiled
+fns get a stable instruction-set view from the start.
+
+ABI surface and semantics unchanged; all 1557 tests, 7279
+assertions pass on release / ASan / UBSan.
+
 ## v0.107.0 — Bytecode Require Mode
 
 `MINO_BC_REQUIRE=1` flips the tree-walker fallback in
