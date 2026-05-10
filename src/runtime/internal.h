@@ -149,6 +149,15 @@ typedef struct {
     mino_val_t *var;     /* the MINO_VAR value */
 } var_entry_t;
 
+/* Open-addressing hash slot for the var registry. Keyed on the
+ * (ns*, name*) pointer pair: both are interned so equality is pointer
+ * equality. ns == NULL marks an empty slot. */
+typedef struct {
+    const char *ns;
+    const char *name;
+    mino_val_t *var;
+} var_hash_slot_t;
+
 /* Record-type registry entry. Pinned for the life of the state so
  * MINO_TYPE values keep stable pointer identity across re-evaluation
  * of the same defrecord form. The fields vector is GC-owned and
@@ -605,6 +614,13 @@ struct mino_state {
     const char    **interned_var_strs;
     size_t          interned_var_strs_len;
     size_t          interned_var_strs_cap;
+    /* Open-addressing hash mirror over interned_var_strs, keyed on the
+     * string contents. Each slot stores the canonical pointer; NULL
+     * marks an empty slot. cap is always a power of two; resize when
+     * load factor exceeds 0.7. Linear scans dominated cold-start
+     * install before this index existed (~640 vars => 400k strcmps). */
+    const char    **interned_var_strs_hash;
+    size_t          interned_var_strs_hash_cap;
 
     /* Source cache for diagnostic rendering. */
     #define MINO_SOURCE_CACHE_SIZE 4
@@ -640,6 +656,14 @@ struct mino_state {
     var_entry_t    *var_registry;
     size_t          var_registry_len;
     size_t          var_registry_cap;
+    /* Open-addressing hash mirror keyed on the (interned-ns*, interned-name*)
+     * pointer pair. var_intern / var_find / var_unintern hit this first;
+     * the linear var_registry remains the source of truth (and the GC
+     * root-walk target). cap is always a power of two; len counts
+     * occupied slots. ns == NULL marks an empty slot. */
+    var_hash_slot_t *var_hash;
+    size_t          var_hash_cap;
+    size_t          var_hash_len;
 
     /* Host interop */
     int             interop_enabled;

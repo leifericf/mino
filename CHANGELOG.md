@@ -18,6 +18,16 @@ allocation shape come down.
   release build identical; profile builds carry one extra hash and
   two field updates per allocation.
 
+- **Var registry / interned-string hash indices.** Two
+  open-addressing hash mirrors back the var registry and the
+  per-state interned-string table. `var_intern` / `var_find` /
+  `var_unintern` now hit the hash instead of a linear scan; both
+  keys are interned, so the hot lookup is pointer-pair equality
+  with no strcmp on a hit. Cold-start install drops from
+  ~640^2 strcmps in the old scan to a constant per-name hit.
+  `clojure.core/+` vs bare `+` over 100k calls is now
+  indistinguishable (was a 110 ns/call gap).
+
 ## v0.103.0 — Worker-List Lock Split
 
 Closes the only open NEEDS-DESIGN finding from the v0.102.0

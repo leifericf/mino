@@ -288,6 +288,7 @@ static void state_free_string_interns(mino_state_t *S)
         free((void *)S->interned_var_strs[i]);
     }
     free(S->interned_var_strs);
+    free(S->interned_var_strs_hash);
 }
 
 /* Free GC bookkeeping arrays + freelists. The actual heap (gc_all_young
@@ -385,6 +386,7 @@ void mino_state_free(mino_state_t *S)
     state_free_ns_aliases(S);
     state_free_ns_env_table(S);
     free(S->var_registry);
+    free(S->var_hash);
     /* Drain any leftover agent run-queue nodes. shutdown-agents
      * (or a successful host_threads quiesce above) normally empties
      * this; if the embedder tore down without calling shutdown-agents,
