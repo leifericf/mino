@@ -28,6 +28,18 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **Run-over-run drift on `(reduce + (range 1M))` is GC settling,
+  not a leak.** Across 10 in-process trials wall-clock drifts
+  ~785 ms -> ~1185 ms, then plateaus. Across separate processes
+  the same workload measures 794-883 ms with no drift. Cause is
+  the major collector's mark walk over ~89 MB of live old-gen
+  state that the bootstrap promotes during install; per-major
+  cost grows 16 ms -> 39 ms as the heap shape settles. No
+  monotonic growth past trial ~5. Recommendation for benchmarks:
+  median of 5 after a 3-run warmup; the perf gate already does
+  median-of-3. Reducing per-major mark cost is downstream work
+  outside this push.
+
 ## v0.103.0 — Worker-List Lock Split
 
 Closes the only open NEEDS-DESIGN finding from the v0.102.0
