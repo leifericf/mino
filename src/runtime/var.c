@@ -276,6 +276,8 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
         gc_write_barrier(S, var, var->as.var.root, val);
         var->as.var.root  = val;
         var->as.var.bound = 1;
+        var->as.var.version++;
+        S->ic_gen++;
         return;
     }
 
@@ -301,6 +303,7 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
     gc_write_barrier(S, var, var->as.var.root, val);
     var->as.var.root  = val;
     var->as.var.bound = 1;
+    var->as.var.version++;
     /* Watches: dispatch after the publish. JVM Clojure's Var watches
      * fire on (alter-var-root v f) and on def with rebind. The
      * callback signature is (fn key var old new). A watch that throws

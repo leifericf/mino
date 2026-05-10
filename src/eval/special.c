@@ -585,12 +585,76 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
  * sorted-set) flow through apply_non_fn_callable so the two
  * dispatch entries cannot drift.
  */
+/* Best-effort check: is `name` bound somewhere in the local env chain
+ * (i.e. lexical, not in the ns env)? Walks until env hits a known ns
+ * root. Used by the inline call cache to skip filling on calls whose
+ * head is locally shadowed. */
+static int local_lexical_shadow(mino_state_t *S, mino_env_t *env,
+                                const char *name, size_t nlen)
+{
+    mino_env_t *cur = env;
+    size_t      i;
+    while (cur != NULL) {
+        for (i = 0; i < S->ns_env_len; i++) {
+            if (S->ns_env_table[i].env == cur) return 0;
+        }
+        if (env_find_here_n(cur, name, nlen) != NULL) return 1;
+        cur = cur->parent;
+    }
+    return 0;
+}
+
 static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
                                            mino_val_t *head, mino_val_t *args,
                                            mino_env_t *env, int tail)
 {
-    mino_val_t *fn = eval_value(S, head, env);
+    mino_val_t *fn = NULL;
     mino_val_t *evaled;
+    /* IC lookup. Conservative: only consult the cache when head is an
+     * unqualified symbol and no dynamic binding context is active.
+     * Slots are GC-pinned in gc_mark_runtime_globals so a freed form
+     * cannot alias a fresh allocation. */
+    if (head != NULL && head->type == MINO_SYMBOL
+        && S->ic_table != NULL
+        && mino_current_ctx(S)->dyn_stack == NULL) {
+        size_t bucket = ((uintptr_t)form >> 4) & (S->ic_cap - 1);
+        struct ic_slot *slot = &S->ic_table[bucket];
+        if (slot->form == form
+            && slot->head_data == head->as.s.data
+            && slot->gen_at_fill == S->ic_gen) {
+            fn = slot->callable;
+        }
+    }
+    if (fn == NULL) {
+        fn = eval_value(S, head, env);
+        if (fn == NULL) return NULL;
+        /* Fill conditions: head is unqualified symbol, no dyn rebind in
+         * scope, no lexical shadow up to the ns env, resolved value is
+         * not a var (unbound or in-flight). MINO_MACRO is excluded too
+         * because macros expand differently per call site. */
+        if (head->type == MINO_SYMBOL
+            && mino_current_ctx(S)->dyn_stack == NULL
+            && fn->type != MINO_VAR
+            && fn->type != MINO_MACRO
+            && !local_lexical_shadow(S, env, head->as.s.data, head->as.s.len)) {
+            size_t bucket;
+            struct ic_slot *slot;
+            if (S->ic_table == NULL) {
+                S->ic_cap   = 1024;
+                S->ic_table = (struct ic_slot *)calloc(
+                    S->ic_cap, sizeof(*S->ic_table));
+                if (S->ic_table == NULL) S->ic_cap = 0;
+            }
+            if (S->ic_table != NULL) {
+                bucket = ((uintptr_t)form >> 4) & (S->ic_cap - 1);
+                slot   = &S->ic_table[bucket];
+                slot->form        = form;
+                slot->head_data   = head->as.s.data;
+                slot->callable    = fn;
+                slot->gen_at_fill = S->ic_gen;
+            }
+        }
+    }
     if (fn == NULL) {
         return NULL;
     }

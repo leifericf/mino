@@ -387,6 +387,7 @@ void mino_state_free(mino_state_t *S)
     state_free_ns_env_table(S);
     free(S->var_registry);
     free(S->var_hash);
+    free(S->ic_table);
     /* Drain any leftover agent run-queue nodes. shutdown-agents
      * (or a successful host_threads quiesce above) normally empties
      * this; if the embedder tore down without calling shutdown-agents,

@@ -342,6 +342,10 @@ struct mino_val {
             int         is_private; /* 1 if ^:private */
             mino_val_t *watches;   /* MINO_MAP key->callback, or NULL */
             mino_val_t *validator; /* validator fn, or NULL */
+            /* Monotonic version counter. Bumped on every var_set_root and
+             * dynamic rebind so the eval-side inline call cache can
+             * detect a stale entry without re-resolving. */
+            unsigned    version;
         } var;
         struct {          /* MINO_TRANSIENT: batch-mutation wrapper */
             mino_val_t *current; /* current persistent value (vec/map/set) */

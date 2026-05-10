@@ -416,6 +416,19 @@ static void gc_mark_runtime_globals(mino_state_t *S)
             gc_mark_interior(S, S->core_forms[ci]);
         }
     }
+    /* Inline call cache: pin the form pointer (keys the slot) and the
+     * cached callable. Without this, a freed form could be GC-recycled
+     * for an unrelated allocation and the slot would alias to the new
+     * object, producing wrong dispatch. */
+    if (S->ic_table != NULL) {
+        size_t ic_i;
+        for (ic_i = 0; ic_i < S->ic_cap; ic_i++) {
+            if (S->ic_table[ic_i].form != NULL) {
+                gc_mark_interior(S, S->ic_table[ic_i].form);
+                gc_mark_interior(S, S->ic_table[ic_i].callable);
+            }
+        }
+    }
 }
 
 /* Pin async-subsystem live values: scheduler run-queue callbacks/values

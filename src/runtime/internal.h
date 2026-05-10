@@ -656,6 +656,21 @@ struct mino_state {
     var_entry_t    *var_registry;
     size_t          var_registry_len;
     size_t          var_registry_cap;
+    /* Monomorphic inline call cache. Keyed on the call form pointer
+     * plus the head symbol's interned data pointer. The form and the
+     * callable in each filled slot are walked by gc_mark_runtime_globals,
+     * so the GC keeps both alive for the cache lifetime; this prevents
+     * the freed-and-recycled-form aliasing problem. Var redefinition
+     * bumps `ic_gen`, invalidating every slot in one shot. Allocated
+     * lazily on first hit-prone call. */
+    struct ic_slot {
+        mino_val_t *form;          /* call form pointer, NULL = empty */
+        const char *head_data;     /* sym->as.s.data, interned */
+        mino_val_t *callable;
+        unsigned    gen_at_fill;
+    } *ic_table;
+    size_t          ic_cap;
+    unsigned        ic_gen;
     /* Open-addressing hash mirror keyed on the (interned-ns*, interned-name*)
      * pointer pair. var_intern / var_find / var_unintern hit this first;
      * the linear var_registry remains the source of truth (and the GC

@@ -28,6 +28,22 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **Monomorphic inline call cache.** Per-state hashed slot table
+  keyed on the call form pointer, with a head-symbol-data tag and a
+  `gen_at_fill` snapshot. `var_set_root` bumps `S->ic_gen` to
+  invalidate every slot in one shot. Filled only when the head is
+  an unqualified symbol that resolves past every local lexical
+  frame (no `let`/fn-param shadow), no dynamic binding context is
+  active, and the resolved value is neither an unbound var nor a
+  macro. The GC root walk pins both the form and the cached
+  callable in every filled slot, so a freed-and-reused form
+  address cannot alias to a stale entry.
+
+- **Per-var version counter.** `MINO_VAR.version` is bumped by
+  `var_set_root`; the inline call cache uses it as part of the
+  invalidation generation. Cheap: one `unsigned`, one increment per
+  redef.
+
 - **Closure-shape pre-compile for user fns.** New `MINO_FN.shape`
   cache (lazy-tri-state: 0 = not yet inspected, 1 = simple, -1 =
   complex). On first call apply_callable inspects the params: if
