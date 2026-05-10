@@ -28,6 +28,15 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **Symbol-aware env lookup.** `mino_env_get_sym(env, sym)` walks
+  the parent chain with the symbol's cached length in hand, so the
+  inner hash-indexed probes skip `strlen(name)` per frame.
+  `eval_symbol`'s lexical / current-ns / fn-ambient walks now use
+  this path. Reader-emitted symbols were already interned via
+  `mino_symbol_n` (intern table on `S->sym_intern`), so the
+  `env_find_here` pointer-equality fast path was already firing
+  on every binding hit; no further interning work was required.
+
 - **Run-over-run drift on `(reduce + (range 1M))` is GC settling,
   not a leak.** Across 10 in-process trials wall-clock drifts
   ~785 ms -> ~1185 ms, then plateaus. Across separate processes

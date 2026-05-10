@@ -97,14 +97,16 @@ static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
     env->ht_cap = new_cap;
 }
 
-env_binding_t *env_find_here(mino_env_t *env, const char *name)
+/* Length-aware variant. The caller already paid for strlen(name)
+ * (typically reading sym->as.s.len from an interned symbol), so we
+ * skip recomputing it on every probe. */
+env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen)
 {
     /* Hash-indexed lookup for large frames. */
     if (env->ht_buckets != NULL) {
-        size_t nlen = strlen(name);
-        uint32_t h = env_hash_name(name, nlen);
-        size_t mask = env->ht_cap - 1;
-        size_t idx = h & mask;
+        uint32_t h    = env_hash_name(name, nlen);
+        size_t   mask = env->ht_cap - 1;
+        size_t   idx  = h & mask;
         while (env->ht_buckets[idx] != SIZE_MAX) {
             env_binding_t *b = &env->bindings[env->ht_buckets[idx]];
             /* Pointer-eq fast path: names are stored by their interned
@@ -126,6 +128,15 @@ env_binding_t *env_find_here(mino_env_t *env, const char *name)
         }
     }
     return NULL;
+}
+
+env_binding_t *env_find_here(mino_env_t *env, const char *name)
+{
+    /* Most callers already paid for strlen via sym->as.s.len. Compute
+     * once here only if the lookup actually needs it (hash-indexed
+     * frame); the linear-scan path ignores nlen entirely. */
+    size_t nlen = (env->ht_buckets != NULL) ? strlen(name) : 0;
+    return env_find_here_n(env, name, nlen);
 }
 
 /* Shared implementation: interned_name is a stable pointer (e.g. from
@@ -269,11 +280,35 @@ void mino_env_set(mino_state_t *S, mino_env_t *env, const char *name, mino_val_t
 
 mino_val_t *mino_env_get(mino_env_t *env, const char *name)
 {
+    /* Cache strlen(name) across the parent walk: every hash-indexed
+     * frame in the chain would otherwise pay for it again. The cost
+     * is a single conditional plus the strlen on the first frame that
+     * actually needs it. */
+    size_t nlen      = 0;
+    int    nlen_done = 0;
     while (env != NULL) {
-        env_binding_t *b = env_find_here(env, name);
-        if (b != NULL) {
-            return b->val;
+        env_binding_t *b;
+        if (env->ht_buckets != NULL && !nlen_done) {
+            nlen      = strlen(name);
+            nlen_done = 1;
         }
+        b = env_find_here_n(env, name, nlen);
+        if (b != NULL) return b->val;
+        env = env->parent;
+    }
+    return NULL;
+}
+
+/* Symbol-aware variant: caller has the symbol's interned len in hand
+ * (sym->as.s.len), so we skip strlen entirely. Used by eval_symbol on
+ * the hot lookup path. */
+mino_val_t *mino_env_get_sym(mino_env_t *env, const mino_val_t *sym)
+{
+    const char *name = sym->as.s.data;
+    size_t      nlen = sym->as.s.len;
+    while (env != NULL) {
+        env_binding_t *b = env_find_here_n(env, name, nlen);
+        if (b != NULL) return b->val;
         env = env->parent;
     }
     return NULL;

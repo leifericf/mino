@@ -1097,6 +1097,10 @@ void meta_set_capability(mino_state_t *S, const char *name,
 
 mino_env_t    *env_alloc(mino_state_t *S, mino_env_t *parent); /* GC-owned */
 env_binding_t *env_find_here(mino_env_t *env, const char *name); /* borrowed */
+env_binding_t *env_find_here_n(mino_env_t *env, const char *name, size_t nlen);
+/* Symbol-aware lookup. Caller already has sym->as.s.{data,len}; we
+ * skip strlen and walk the parent chain with the cached length. */
+mino_val_t    *mino_env_get_sym(mino_env_t *env, const mino_val_t *sym);
 void           env_bind(mino_state_t *S, mino_env_t *env,
                         const char *name,                      /* borrowed (copied) */
                         mino_val_t *val);                      /* GC-owned, retained */
