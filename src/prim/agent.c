@@ -592,9 +592,24 @@ mino_val_t *prim_shutdown_agents(mino_state_t *S, mino_val_t *args,
 mino_val_t *prim_release_pending_sends(mino_state_t *S, mino_val_t *args,
                                         mino_env_t *env)
 {
+    mino_thread_ctx_t *ctx;
+    long long          count = 0;
+    mino_val_t        *p;
     (void)args;
     (void)env;
-    return mino_int(S, 0);
+    /* JVM canon: returns the number of sends that were queued by the
+     * current transaction and clears them so they will NOT fire on
+     * commit. Outside a transaction it's a no-op returning 0. mino's
+     * pending_sends lives on tx_state_t; walk + null it out. */
+    ctx = mino_current_ctx(S);
+    if (ctx->current_tx == NULL) return mino_int(S, 0);
+    for (p = ctx->current_tx->pending_sends;
+         mino_is_cons(p);
+         p = p->as.cons.cdr) {
+        count++;
+    }
+    ctx->current_tx->pending_sends = NULL;
+    return mino_int(S, count);
 }
 
 /* --- primitive table + install hook -------------------------------------- */
@@ -634,7 +649,9 @@ const mino_prim_def k_prims_agent[] = {
     {"shutdown-agents", prim_shutdown_agents,
      "Stub. Returns nil."},
     {"release-pending-sends", prim_release_pending_sends,
-     "Stub. Returns 0; mino runs actions eagerly."},
+     "Returns the count of sends queued by the current transaction "
+     "and clears them so they will NOT fire on commit. Outside a "
+     "transaction returns 0."},
 };
 
 const size_t k_prims_agent_count = sizeof(k_prims_agent)

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Wire `release-pending-sends` And Drain Agents Before Watches
+
+Two follow-ups to the in-tx send deferral.
+
+`release-pending-sends` was a stub returning 0. Now that
+`tx_state_t.pending_sends` exists, walk it, return the count, and
+clear it -- so a body that wants to abort just its agent
+dispatches before commit can do so. Outside a transaction the
+prim still returns 0 without side effects.
+
+`tx_outer_run` used to dispatch ref watches BEFORE draining
+pending sends. A ref watch that threw longjmped to the outer
+setjmp and silently swallowed every queued agent send. Swap the
+order: drain agents first so a successful body always reaches its
+agents, then fire watches.
+
 ### Defer Agent `send` From Inside `dosync` Until Successful Commit
 
 `send` and `send-off` from inside a transaction body used to fire

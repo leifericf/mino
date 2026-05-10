@@ -180,6 +180,39 @@
     (await a)
     (is (= [:a :b :c] @a))))
 
+(deftest watch-throw-does-not-drop-pending-sends
+  ;; A ref watch that throws used to longjmp past the pending-sends
+  ;; drain, silently swallowing every queued agent dispatch. Drain
+  ;; now runs BEFORE watch dispatch so a misbehaving watch can't
+  ;; lose the agent sends a successful body queued.
+  (let [a (agent 0)
+        r (ref 0)]
+    (add-watch r :crash (fn [_ _ _ _] (throw (ex-info "watch-crash" {}))))
+    (try (dosync (alter r inc) (send a inc)) (catch e nil))
+    (await a)
+    (is (= 1 @a))))
+
+(deftest release-pending-sends-counts-and-clears
+  ;; Inside a tx, release-pending-sends returns the count of queued
+  ;; sends and removes them so they will NOT fire on commit. Outside
+  ;; a tx it's a no-op returning 0.
+  (let [a (agent 0)
+        r (ref 0)]
+    (dosync
+      (alter r inc)
+      (send a inc)
+      (send a inc)
+      (send a inc)
+      (is (= 3 (release-pending-sends)))
+      ;; Subsequent sends in the same tx still queue.
+      (send a inc)
+      (is (= 1 (release-pending-sends))))
+    (await a)
+    ;; All sends were released; agent state is unchanged.
+    (is (= 0 @a)))
+  ;; Outside a tx, returns 0 without throwing.
+  (is (= 0 (release-pending-sends))))
+
 (deftest io-bang-allowed-in-action-from-dosync
   ;; Because the action runs post-commit (current_tx cleared), io! does
   ;; NOT trip even when the send was queued from inside dosync.

@@ -1104,16 +1104,18 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
         if (result_v != NULL) {
             mino_val_t *pending = tx.pending_sends;
             tx.pending_sends = NULL;
-            (void)dispatch_watches(S, &tx, env);
-            /* Drain agent pending sends queued during the body. JVM
-             * canon: send/send-off from inside dosync queue actions
-             * that fire only on successful commit; mino's MVP runs
-             * each synchronously here, AFTER current_tx is cleared
-             * so an action body can itself open a fresh dosync. */
+            /* Drain agent pending sends BEFORE watch dispatch. A
+             * thrown ref watch longjmps past everything that
+             * follows, and we don't want a misbehaving watch fn to
+             * silently swallow queued agent dispatches. JVM canon
+             * doesn't strictly order the two notifications, but
+             * agent dispatches FIRST means a body that completed
+             * cleanly always reaches its agents. */
             mino_agent_drain_pending(S, pending, env);
-            /* If a watch or pending-send action threw, the longjmp
-             * landed at our setjmp and cleanup ran there; this
-             * branch only sees clean returns. */
+            (void)dispatch_watches(S, &tx, env);
+            /* If a watch threw, the longjmp landed at our setjmp
+             * and cleanup ran there; this branch only sees clean
+             * returns. */
         }
         tx_clear_ref_states(&tx);
         c->try_depth  = saved_try;
