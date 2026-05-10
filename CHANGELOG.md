@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## v0.103.0 — Worker-List Lock Split
+
+Closes the only open NEEDS-DESIGN finding from the v0.102.0
+adversarial pass: future / agent worker bookkeeping no longer
+contends with the heavy state_lock. A tight embedder loop in
+`(dosync ...)` or any other state_lock-held form can no longer
+starve workers at their entry-link or exit-detach steps.
+
+- New per-state `worker_list_lock` (non-recursive), inner to the
+  recursive `state_lock`. Guards exactly two fields: the linked
+  list `worker_ctxs_head` (walked by GC root scanning) and the
+  live worker counter `thread_count` (gates `thread_limit`).
+- `host_threads.c` worker entry-link, exit-detach, the spawn-time
+  limit gate, and every `thread_count` mutation moved off
+  state_lock onto worker_list_lock.
+- `prim/agent.c` agent worker entry-link / exit-detach and
+  `agent_worker_ensure`'s gate-and-increment moved similarly.
+- `gc/roots.c` `gc_mark_thread_state` takes worker_list_lock
+  briefly across each of its three `worker_ctxs_head` walks
+  (dyn_stack, gc_save, tx) -- workers no longer mutate the list
+  under state_lock, so GC must hold the new lock to walk safely.
+- Lock order: state_lock outer, worker_list_lock inner. Workers
+  at entry/exit acquire alone (no state_lock held). The spawn
+  path and GC root scan reach worker_list_lock from inside
+  state_lock.
+- Regression test
+  `future-thread-count-not-stuck-under-tight-loop` in
+  `tests/host_threads_test.clj`: spawn N futures, run 200
+  dotimes-wrapped dosyncs in one form, then assert
+  `thread_count` returns to 0. Pre-fix this scenario could
+  leave the count inflated for the duration of any
+  state_lock-held form.
+
+`mino.h` is unchanged at the API surface; embedders that take a
+fresh source build pick up the fix transparently.
+
 ## v0.102.1 — Adversarial-test pass: doc accuracy + qa-arch hygiene
 
 Adversarial whitebox test of the v0.102.0 STM + Agent surfaces
