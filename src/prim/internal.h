@@ -70,9 +70,14 @@ void         print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v);
  * into k_core_domains[] and iterates via prim_install_table to bind
  * each entry into the env and attach its docstring. */
 typedef struct {
-    const char  *name;     /* binding name visible to mino code */
-    mino_prim_fn fn;       /* C implementation; signature in mino.h */
-    const char  *doc;      /* docstring for (doc name); never NULL */
+    const char   *name;     /* binding name visible to mino code */
+    mino_prim_fn  fn;       /* C implementation; signature in mino.h */
+    const char   *doc;      /* docstring for (doc name); never NULL */
+    /* Extension fields. Default-initialised to NULL when omitted from
+     * brace-list initialisers, so existing static tables compile
+     * unchanged. fn2 takes precedence over fn when both are set. */
+    mino_prim_fn2 fn2;      /* argv ABI; non-NULL switches the install
+                             * path to register an argv-style prim */
 } mino_prim_def;
 
 typedef struct {
@@ -335,6 +340,40 @@ mino_val_t *prim_ex_data(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+
+/* argv-ABI variants for hot fixed-arity prims. */
+mino_val_t *prim_inc_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_incp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_dec_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_decp_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_count_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_first_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_rest_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_cons_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+
+/* argv-ABI variants emitted by DEFINE_TYPE_PRED. fn_name##_argv. */
+mino_val_t *prim_nil_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_cons_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_list_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_vector_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_int_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_float_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_string_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_keyword_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_symbol_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_fn_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_char_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_number_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_map_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_set_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_seq_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_boolean_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_true_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_false_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_record_type_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_record_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_uuid_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_regex_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
 
 /* regex.c */
 mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env);

@@ -622,6 +622,16 @@ mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn)
     mino_val_t *v = alloc_val(S, MINO_PRIM);
     v->as.prim.name = name;
     v->as.prim.fn   = fn;
+    v->as.prim.fn2  = NULL;
+    return v;
+}
+
+mino_val_t *mino_prim_argv(mino_state_t *S, const char *name, mino_prim_fn2 fn)
+{
+    mino_val_t *v = alloc_val(S, MINO_PRIM);
+    v->as.prim.name = name;
+    v->as.prim.fn   = NULL;
+    v->as.prim.fn2  = fn;
     return v;
 }
 

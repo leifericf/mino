@@ -208,6 +208,13 @@ typedef struct mino_rb_node   mino_rb_node_t;    /* opaque to embedders */
 
 typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);
+/* argv ABI: receives evaluated args as a flat C array instead of a
+ * cons spine. Skips eval_args' per-call cons allocation for prims
+ * registered with mino_prim_argv. argv slots are GC-rooted by the
+ * conservative stack scan for the duration of the call. */
+typedef mino_val_t *(*mino_prim_fn2)(mino_state_t *S,
+                                     mino_val_t **argv, int argc,
+                                     mino_env_t *env);
 typedef void (*mino_finalizer_fn)(void *ptr, const char *tag);
 
 /* Host interop callback. target is the handle (NULL for ctor/static),
@@ -267,7 +274,8 @@ struct mino_val {
         } sorted;
         struct {          /* MINO_PRIM */
             const char *name;  /* primitive name */
-            mino_prim_fn fn;   /* C function pointer */
+            mino_prim_fn  fn;  /* legacy cons-list ABI (NULL iff fn2 set) */
+            mino_prim_fn2 fn2; /* argv ABI; non-NULL takes precedence */
         } prim;
         struct {          /* MINO_FN: user-defined closure */
             mino_val_t *params; /* parameter list or vector */
@@ -518,6 +526,8 @@ mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len);
 
 /* Create a primitive function value from a C function pointer. */
 mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn);
+/* Create a primitive value backed by an argv-style C function. */
+mino_val_t *mino_prim_argv(mino_state_t *S, const char *name, mino_prim_fn2 fn);
 
 /* Wrap a host pointer as an opaque handle with a type tag. */
 mino_val_t *mino_handle(mino_state_t *S, void *ptr, const char *tag);

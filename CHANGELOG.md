@@ -28,6 +28,24 @@ allocation shape come down.
   `clojure.core/+` vs bare `+` over 100k calls is now
   indistinguishable (was a 110 ns/call gap).
 
+- **argv/argc calling convention for hot prims.** New
+  `mino_prim_fn2` ABI receives evaluated args as a flat C array
+  instead of a cons spine. `mino_prim_argv()` constructs argv-style
+  prim values; the install-table extension auto-routes when an
+  entry's `fn2` field is non-NULL. `eval_apply_regular_call` has a
+  dedicated argv fast path that evaluates each argument straight
+  into a stack-resident scratch slot (16 inline, larger args fall
+  back to cons), so the fixed-arity hot prims now skip the
+  per-call cons spine entirely. `apply_callable` walks the cons
+  spine into the same scratch when called externally with cons.
+  Migrated this round: `inc inc' dec dec' count first rest cons`
+  plus all 22 type predicates emitted by `DEFINE_TYPE_PRED`. The
+  variadic arithmetic / comparison ops stay on the cons ABI; their
+  binary fast path is the subject of a later step.
+
+  Microbenchmark: `(loop [i 0 acc 0] (if (< i 1M) (recur (inc i)
+  (+ acc i)) acc))` was ~941 ms before this push, now ~787 ms.
+
 - **Symbol-aware env lookup.** `mino_env_get_sym(env, sym)` walks
   the parent chain with the symbol's cached length in hand, so the
   inner hash-indexed probes skip `strlen(name)` per frame.

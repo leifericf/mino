@@ -28,7 +28,9 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
     size_t i;
     int has_cap = capability != NULL && capability[0] != '\0';
     for (i = 0; i < count; i++) {
-        mino_val_t *pv = mino_prim(S, defs[i].name, defs[i].fn);
+        mino_val_t *pv = (defs[i].fn2 != NULL)
+                         ? mino_prim_argv(S, defs[i].name, defs[i].fn2)
+                         : mino_prim(S, defs[i].name, defs[i].fn);
         mino_env_set(S, env, defs[i].name, pv);
         if (ns_name != NULL) {
             mino_val_t *var = var_intern(S, ns_name, defs[i].name);

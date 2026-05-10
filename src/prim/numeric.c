@@ -570,15 +570,9 @@ mino_val_t *prim_subp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
  * inc, matches JVM Clojure) or auto-promote to bigint (inc'). Non-int
  * operands defer to the generic + primitive so tier semantics stay
  * identical. */
-static mino_val_t *prim_inc_impl(mino_state_t *S, mino_val_t *args,
+static mino_val_t *prim_inc_step(mino_state_t *S, mino_val_t *x,
                                  mino_env_t *env, int strict)
 {
-    mino_val_t *x;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "inc requires exactly 1 argument");
-    }
-    x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
         if (x->as.i == LLONG_MAX) {
             if (strict) {
@@ -614,6 +608,36 @@ static mino_val_t *prim_inc_impl(mino_state_t *S, mino_val_t *args,
         "inc expects a number");
 }
 
+static mino_val_t *prim_inc_impl(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env, int strict)
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "inc requires exactly 1 argument");
+    }
+    return prim_inc_step(S, args->as.cons.car, env, strict);
+}
+
+mino_val_t *prim_inc_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    if (argc != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "inc requires exactly 1 argument");
+    }
+    return prim_inc_step(S, argv[0], env, 1);
+}
+
+mino_val_t *prim_incp_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                           mino_env_t *env)
+{
+    if (argc != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "inc' requires exactly 1 argument");
+    }
+    return prim_inc_step(S, argv[0], env, 0);
+}
+
 mino_val_t *prim_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     return prim_inc_impl(S, args, env, 1);
@@ -624,15 +648,9 @@ mino_val_t *prim_incp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return prim_inc_impl(S, args, env, 0);
 }
 
-static mino_val_t *prim_dec_impl(mino_state_t *S, mino_val_t *args,
+static mino_val_t *prim_dec_step(mino_state_t *S, mino_val_t *x,
                                  mino_env_t *env, int strict)
 {
-    mino_val_t *x;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "dec requires exactly 1 argument");
-    }
-    x = args->as.cons.car;
     if (x != NULL && x->type == MINO_INT) {
         if (x->as.i == LLONG_MIN) {
             if (strict) {
@@ -660,6 +678,36 @@ static mino_val_t *prim_dec_impl(mino_state_t *S, mino_val_t *args,
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
         "dec expects a number");
+}
+
+static mino_val_t *prim_dec_impl(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env, int strict)
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "dec requires exactly 1 argument");
+    }
+    return prim_dec_step(S, args->as.cons.car, env, strict);
+}
+
+mino_val_t *prim_dec_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                          mino_env_t *env)
+{
+    if (argc != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "dec requires exactly 1 argument");
+    }
+    return prim_dec_step(S, argv[0], env, 1);
+}
+
+mino_val_t *prim_decp_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                           mino_env_t *env)
+{
+    if (argc != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "dec' requires exactly 1 argument");
+    }
+    return prim_dec_step(S, argv[0], env, 0);
 }
 
 mino_val_t *prim_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -2183,14 +2231,16 @@ const mino_prim_def k_prims_numeric[] = {
      "long overflow; use + to throw on overflow."},
     {"inc", prim_inc,
      "Returns x plus 1. Throws on long overflow; use inc' to "
-     "auto-promote."},
+     "auto-promote.", prim_inc_argv},
     {"inc'", prim_incp,
-     "Returns x plus 1. Auto-promotes to bigint on long overflow."},
+     "Returns x plus 1. Auto-promotes to bigint on long overflow.",
+     prim_incp_argv},
     {"dec", prim_dec,
      "Returns x minus 1. Throws on long overflow; use dec' to "
-     "auto-promote."},
+     "auto-promote.", prim_dec_argv},
     {"dec'", prim_decp,
-     "Returns x minus 1. Auto-promotes to bigint on long overflow."},
+     "Returns x minus 1. Auto-promotes to bigint on long overflow.",
+     prim_decp_argv},
     {"-",   prim_sub,
      "Returns the difference of the arguments. With one arg, returns "
      "the negation. Throws on long overflow; use -' to auto-promote."},

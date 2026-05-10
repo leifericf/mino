@@ -597,6 +597,58 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
     /* Pin fn: eval_args allocates, and the conservative stack
      * scanner may miss fn if the compiler keeps it in a register. */
     gc_pin(fn);
+    /* argv-prim fast path: skip eval_args' cons spine entirely.
+     * Each arg form evaluates straight into a stack-resident scratch
+     * slot, GC-rooted by the conservative stack scan. Spillover
+     * beyond 16 args falls through to the cons path below. */
+    if (fn->type == MINO_PRIM && fn->as.prim.fn2 != NULL) {
+        mino_val_t  *scratch[16];
+        int          scratch_cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
+        int          argc        = 0;
+        int          spilled     = 0;
+        mino_val_t  *cur         = args;
+        mino_val_t  *result;
+        const char  *file        = NULL;
+        int          line        = 0;
+        int          col         = 0;
+        while (mino_is_cons(cur)) {
+            if (argc == scratch_cap) {
+                spilled = 1;
+                break;
+            }
+            {
+                mino_val_t *v = eval_value(S, cur->as.cons.car, env);
+                if (v == NULL) {
+                    gc_unpin(1);
+                    return NULL;
+                }
+                scratch[argc++] = v;
+                cur             = cur->as.cons.cdr;
+            }
+        }
+        if (spilled) {
+            /* Too many args for the stack scratch -- fall back to cons
+             * eval + apply_callable's argv-aware dispatch path. */
+            evaled = eval_args(S, args, env);
+            gc_unpin(1);
+            if (evaled == NULL && mino_last_error(S) != NULL) {
+                return NULL;
+            }
+            return apply_callable(S, fn, evaled, env);
+        }
+        if (mino_current_ctx(S)->eval_current_form != NULL
+            && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+            file = mino_current_ctx(S)->eval_current_form->as.cons.file;
+            line = mino_current_ctx(S)->eval_current_form->as.cons.line;
+            col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
+        }
+        push_frame(S, fn->as.prim.name, file, line, col);
+        result = fn->as.prim.fn2(S, scratch, argc, env);
+        gc_unpin(1);
+        if (result == NULL) return NULL; /* leave frame for trace */
+        pop_frame(S);
+        return result;
+    }
     /* Fast path for the dominant PRIM/FN case, checked first so
      * non-function callables (keyword/map/vector/etc.) don't delay
      * typical calls. */

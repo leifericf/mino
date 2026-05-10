@@ -376,6 +376,18 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         } \
         v = args->as.cons.car; \
         return (pred_expr) ? mino_true(S) : mino_false(S); \
+    } \
+    mino_val_t *fn_name##_argv(mino_state_t *S, mino_val_t **argv, int argc, \
+                               mino_env_t *env) \
+    { \
+        mino_val_t *v; \
+        (void)env; \
+        if (argc != 1) { \
+            return prim_throw_classified(S, "eval/arity", "MAR001", \
+                label " requires one argument"); \
+        } \
+        v = argv[0]; \
+        return (pred_expr) ? mino_true(S) : mino_false(S); \
     }
 
 DEFINE_TYPE_PRED(prim_nil_p,     (v == NULL || v->type == MINO_NIL),           "nil?")
@@ -1177,43 +1189,43 @@ const mino_prim_def k_prims_reflection[] = {
     {"type",      prim_type,
      "Returns a keyword indicating the type of the value."},
     {"nil?",      prim_nil_p,
-     "Returns true if x is nil."},
+     "Returns true if x is nil.", prim_nil_p_argv},
     {"cons?",     prim_cons_p,
-     "Returns true if x is a list (cons cell)."},
+     "Returns true if x is a list (cons cell).", prim_cons_p_argv},
     {"list?",     prim_list_p,
      "Returns true if x is a list (cons chain or the empty-list singleton). "
      "Excludes lazy-seq and chunked-cons; for the broader 'is a sequence' "
-     "predicate, use seq?."},
+     "predicate, use seq?.", prim_list_p_argv},
     {"vector?",   prim_vector_p,
-     "Returns true if x is a vector."},
+     "Returns true if x is a vector.", prim_vector_p_argv},
     {"int?",      prim_int_p,
-     "Returns true if x is an integer."},
+     "Returns true if x is an integer.", prim_int_p_argv},
     {"float?",    prim_float_p,
-     "Returns true if x is a float."},
+     "Returns true if x is a float.", prim_float_p_argv},
     {"string?",   prim_string_p,
-     "Returns true if x is a string."},
+     "Returns true if x is a string.", prim_string_p_argv},
     {"keyword?",  prim_keyword_p,
-     "Returns true if x is a keyword."},
+     "Returns true if x is a keyword.", prim_keyword_p_argv},
     {"symbol?",   prim_symbol_p,
-     "Returns true if x is a symbol."},
+     "Returns true if x is a symbol.", prim_symbol_p_argv},
     {"fn?",       prim_fn_p,
-     "Returns true if x is callable as a function (fn or prim)."},
+     "Returns true if x is callable as a function (fn or prim).", prim_fn_p_argv},
     {"char?",     prim_char_p,
-     "Returns true if x is a one-character string."},
+     "Returns true if x is a one-character string.", prim_char_p_argv},
     {"number?",   prim_number_p,
-     "Returns true if x is a number (int or float)."},
+     "Returns true if x is a number (int or float).", prim_number_p_argv},
     {"map?",      prim_map_p,
-     "Returns true if x is a map (including sorted-map)."},
+     "Returns true if x is a map (including sorted-map).", prim_map_p_argv},
     {"set?",      prim_set_p,
-     "Returns true if x is a set (including sorted-set)."},
+     "Returns true if x is a set (including sorted-set).", prim_set_p_argv},
     {"seq?",      prim_seq_p,
-     "Returns true if x is a cons cell or lazy-seq."},
+     "Returns true if x is a cons cell or lazy-seq.", prim_seq_p_argv},
     {"boolean?",  prim_boolean_p,
-     "Returns true if x is true or false."},
+     "Returns true if x is true or false.", prim_boolean_p_argv},
     {"true?",     prim_true_p,
-     "Returns true if x is the value true."},
+     "Returns true if x is the value true.", prim_true_p_argv},
     {"false?",    prim_false_p,
-     "Returns true if x is the value false."},
+     "Returns true if x is the value false.", prim_false_p_argv},
     {"not",       prim_not,
      "Returns true if x is logical false, false otherwise."},
     {"some?",     prim_some_p,

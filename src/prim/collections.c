@@ -269,17 +269,15 @@ mino_val_t *prim_map_entry(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                           args->as.cons.cdr->as.cons.car);
 }
 
-mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_cons_step(mino_state_t *S, mino_val_t *car,
+                                   mino_val_t *cdr_arg, mino_env_t *env)
 {
     mino_val_t *cdr;
     mino_val_t *result;
     (void)env;
-    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "cons requires two arguments");
-    }
-    cdr = val_to_seq(S, args->as.cons.cdr->as.cons.car);
+    cdr = val_to_seq(S, cdr_arg);
     if (cdr == NULL) return NULL;
-    result = mino_cons(S, args->as.cons.car, cdr);
+    result = mino_cons(S, car, cdr);
     if (result == NULL) return NULL;
     /* `(cons x y)` returns a Cons-shaped seq that is distinct from a
      * list literal: `(list? ...)` is false, `peek`/`pop` throw. The
@@ -289,6 +287,26 @@ mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * cleared. */
     result->as.cons.not_list = 1;
     return result;
+}
+
+mino_val_t *prim_cons(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "cons requires two arguments");
+    }
+    return prim_cons_step(S, args->as.cons.car,
+                           args->as.cons.cdr->as.cons.car, env);
+}
+
+mino_val_t *prim_cons_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                            mino_env_t *env)
+{
+    if (argc != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "cons requires two arguments");
+    }
+    return prim_cons_step(S, argv[0], argv[1], env);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -323,14 +341,9 @@ int arg_count(mino_state_t *S, mino_val_t *args, size_t *out)
     return 1;
 }
 
-mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
+                                    mino_env_t *env)
 {
-    mino_val_t *coll;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "count requires one argument");
-    }
-    coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_int(S, 0);
     }
@@ -365,8 +378,7 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (forced == NULL) return NULL;
         if (forced->type == MINO_NIL) return mino_int(S, 0);
         if (forced->type == MINO_CHUNKED_CONS) {
-            mino_val_t *recur_args = mino_cons(S, forced, mino_nil(S));
-            return prim_count(S, recur_args, env);
+            return prim_count_step(S, forced, env);
         }
         return mino_int(S, (long long)list_length(S, forced));
     }
@@ -401,6 +413,25 @@ mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
     }
+}
+
+mino_val_t *prim_count(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "count requires one argument");
+    }
+    return prim_count_step(S, args->as.cons.car, env);
+}
+
+mino_val_t *prim_count_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                            mino_env_t *env)
+{
+    if (argc != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "count requires one argument");
+    }
+    return prim_count_step(S, argv[0], env);
 }
 
 mino_val_t *prim_vector(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -612,14 +643,10 @@ mino_val_t *prim_nth(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_first_step(mino_state_t *S, mino_val_t *coll,
+                                    mino_env_t *env)
 {
-    mino_val_t *coll;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "first requires one argument");
-    }
-    coll = args->as.cons.car;
     if (coll == NULL || coll->type == MINO_NIL) {
         return mino_nil(S);
     }
@@ -693,6 +720,25 @@ mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                  type_tag_str(coll));
         return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
+}
+
+mino_val_t *prim_first(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "first requires one argument");
+    }
+    return prim_first_step(S, args->as.cons.car, env);
+}
+
+mino_val_t *prim_first_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                            mino_env_t *env)
+{
+    if (argc != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "first requires one argument");
+    }
+    return prim_first_step(S, argv[0], env);
 }
 
 /* Lazy rest thunks: each takes a cons(collection, int-index) as context. */
@@ -781,14 +827,9 @@ static mino_val_t *set_rest_thunk(mino_state_t *S, mino_val_t *ctx)
                     set_rest_thunk));
 }
 
-mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+static mino_val_t *prim_rest_step(mino_state_t *S, mino_val_t *coll,
+                                   mino_env_t *env)
 {
-    mino_val_t *coll;
-    (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "rest requires one argument");
-    }
-    coll = args->as.cons.car;
     /* User-visible empty rest is the empty-list singleton, not nil:
      * (rest '()) -> (), (rest nil) -> (), (rest '(1)) -> (). */
     if (coll == NULL || coll->type == MINO_NIL) {
@@ -900,6 +941,25 @@ mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                  type_tag_str(coll));
         return prim_throw_classified(S, "eval/type", "MTY001", msg);
     }
+}
+
+mino_val_t *prim_rest(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "rest requires one argument");
+    }
+    return prim_rest_step(S, args->as.cons.car, env);
+}
+
+mino_val_t *prim_rest_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                            mino_env_t *env)
+{
+    if (argc != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "rest requires one argument");
+    }
+    return prim_rest_step(S, argv[0], env);
 }
 
 /* Layer n k/v pairs onto an existing map, returning a new map value that
@@ -2061,15 +2121,16 @@ const mino_prim_def k_prims_collections[] = {
     {"cdr",      prim_cdr,
      "Returns the rest of a cons cell."},
     {"cons",     prim_cons,
-     "Returns a new list with x prepended to coll."},
+     "Returns a new list with x prepended to coll.", prim_cons_argv},
     {"count",    prim_count,
-     "Returns the number of items in a collection."},
+     "Returns the number of items in a collection.", prim_count_argv},
     {"nth",      prim_nth,
      "Returns the item at index n in a collection."},
     {"first",    prim_first,
-     "Returns the first item in a collection, or nil if empty."},
+     "Returns the first item in a collection, or nil if empty.",
+     prim_first_argv},
     {"rest",     prim_rest,
-     "Returns all but the first item in a collection."},
+     "Returns all but the first item in a collection.", prim_rest_argv},
     {"list",     prim_list,
      "Returns a list of the supplied arguments; () with no args."},
     {"vector",   prim_vector,
