@@ -2,19 +2,22 @@
 
 ## Unreleased
 
-## v0.102.0 — Agents finish MVP: async dispatch + blocking await
+## v0.102.0 — Agents finish MVP: async dispatch + pool split + C-API
 
 Agent execution model removes the synchronous-on-the-calling-thread
-fallback. Per-state agent worker thread + run queue land in this
-cycle.
+fallback. Per-state agent workers + run queues land in this cycle,
+with a separate POOLED / SOLO split for `send` / `send-off`, and a
+public C-API perimeter for embedders.
 
 - Internal: `agent_action_node_t` data structure for the run-queue
   of `(agent fn extra)` tuples; per-agent `in_flight` counter;
-  state-level `agent_run_head`/`agent_run_tail`, mutex, condvar,
-  worker thread fields. Lifecycle hooks in `state_init` /
-  `mino_state_free`. GC root-marking walks the runq so queued
-  actions keep their fn / args / dyn snapshot live until the
-  worker pops them.
+  per-state `agent_pool[2]` array (POOLED for `send`, SOLO for
+  `send-off`) with each pool carrying its own run head/tail and
+  worker thread; shared `agent_mu` and `agent_cv` so an `await`
+  waiter sleeps once and wakes for either pool's progress.
+  Lifecycle hooks in `state_init` / `mino_state_free`. GC
+  root-marking walks both pools' runqs so queued actions keep
+  their fn / args / dyn snapshot live until the worker pops them.
 - `send` and `send-off` now enqueue the action onto the per-state
   run-queue and return the agent immediately. A worker thread is
   lazy-spawned on the first send (gated on `thread_limit`; throws
@@ -49,13 +52,30 @@ cycle.
   rebroadcasts `agent_cv` so any await waiter wakes. The dropped
   actions are released without running.
 - `dosync`'s post-commit drain enqueues pending sends onto the
-  worker's runq instead of running them synchronously on the
-  embedder thread. Same path as a top-level send, so the action
-  body sees post-commit ref state via `*agent*` bindings and
-  doesn't tie up the embedder. STM dosync sends now require the
-  same thread budget as direct sends; spawn refusals (host hasn't
-  granted threads) silently drop the queued sends rather than
-  surfacing the post-commit drain as a failed dosync.
+  POOLED worker's runq instead of running them synchronously on
+  the embedder thread. Same path as a top-level send, so the
+  action body sees post-commit ref state via `*agent*` bindings
+  and doesn't tie up the embedder. STM dosync sends now require
+  the same thread budget as direct sends; spawn refusals (host
+  hasn't granted threads) silently drop the queued sends rather
+  than surfacing the post-commit drain as a failed dosync.
+- `send` and `send-off` now route onto separate POOLED and SOLO
+  pools. mino's per-state eval lock means actions across the two
+  pools still serialize, so the user-visible effect is the same
+  as before, but the queues are independent: a long-running
+  send-off action does not stall pending sends, and vice versa.
+  Each pool's worker counts against `thread_limit`, so embedders
+  that want both shapes alive concurrently must raise the limit
+  to at least 3 (embedder + POOLED + SOLO worker). The split is
+  also a clean seam for a future SOLO-yields-eval-lock-during-
+  blocking-IO design without further user-facing churn.
+- Public C-API entries: `mino_send`, `mino_send_off`, `mino_await`,
+  `mino_await_for`, `mino_agent_error`, `mino_restart_agent`. Each
+  takes the same `mino_lock` perimeter `mino_call` already uses
+  and routes through the shared `agent_send_core` helper, so the
+  guarantees are identical to the Clojure-level prims. Cross-
+  state misuse fires at the C boundary: passing an agent from
+  another `mino_state_t` throws MST007 and returns NULL.
 
 ## v0.101.1 — STM and agent hardening pass
 
