@@ -384,11 +384,12 @@ static int compile_def(compiler_t *c, mino_val_t *form, int dst)
 
 static int compile_call(compiler_t *c, mino_val_t *form, int dst)
 {
-    /* Phase 1 keeps fn calls on the tree-walker path. OP_CALL is wired
-     * in the VM but the compiler does not emit it yet: without
-     * cross-frame tail-call elimination, deeply-recursive Clojure
-     * patterns would blow the C stack. Phase 2 adds OP_TAILCALL
-     * emission and OP_CALL becomes viable. */
+    /* Phase 1/2: function application stays on the tree-walker.
+     * OP_CALL/OP_TAILCALL are wired into the VM and the trampoline,
+     * but the emitter needs more discrimination -- specifically a
+     * compile-time MACRO check that consults the ns env, not just
+     * the captured lexical env -- before it can safely emit. That
+     * work lands in a subsequent cycle. */
     (void)form; (void)dst;
     c->ok = 0;
     return -1;
@@ -511,6 +512,37 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
     return compile_call(c, form, dst);
 }
 
+/* Used by Phase-3 compile_body to identify tail-position calls.
+ * Currently unused; kept as scaffolding. */
+__attribute__((unused))
+static int form_is_simple_call(compiler_t *c, mino_val_t *form)
+{
+    if (!mino_is_cons(form)) return 0;
+    mino_val_t *head = form->as.cons.car;
+    if (head == NULL || head->type != MINO_SYMBOL) return 0;
+    if (find_local(c, head->as.s.data) >= 0) return 1;
+    /* Check special forms. */
+    if (sym_is(head, "if") || sym_is(head, "do")
+        || sym_is(head, "let") || sym_is(head, "let*")
+        || sym_is(head, "quote") || sym_is(head, "def")) return 0;
+    if (sym_is(head, "fn") || sym_is(head, "fn*")
+        || sym_is(head, "loop") || sym_is(head, "loop*")
+        || sym_is(head, "recur") || sym_is(head, "try")
+        || sym_is(head, "catch") || sym_is(head, "finally")
+        || sym_is(head, "throw") || sym_is(head, "lazy-seq")
+        || sym_is(head, "binding") || sym_is(head, "set!")
+        || sym_is(head, "quote*") || sym_is(head, "var")
+        || sym_is(head, "defmacro") || sym_is(head, "defrecord")
+        || sym_is(head, "deftype") || sym_is(head, "defprotocol")
+        || sym_is(head, "reify") || sym_is(head, "case")
+        || sym_is(head, "cond") || sym_is(head, "new")
+        || sym_is(head, ".")) return 0;
+    /* Check macro. */
+    mino_val_t *hv = mino_env_get_sym(c->env, head);
+    if (hv != NULL && hv->type == MINO_MACRO) return 0;
+    return 1;
+}
+
 static int compile_body(compiler_t *c, mino_val_t *body, int dst)
 {
     if (!mino_is_cons(body)) {
@@ -531,11 +563,6 @@ static int compile_body(compiler_t *c, mino_val_t *body, int dst)
             int t = alloc_reg(c);
             if (t < 0) return -1;
             if (compile_expr(c, expr, t) < 0) return -1;
-            c->next_reg = saved_next + 0;  /* discard intermediate temp */
-            /* Actually keep growing next_reg to avoid stomping on
-             * "live across forms" register slots; the simple
-             * compiler doesn't reason about liveness, so each
-             * non-last form just gets its own slot. */
             c->next_reg = saved_next;
         }
         body = next;

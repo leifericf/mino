@@ -38,6 +38,16 @@ typedef enum {
     OP_RETURN,         /* A=src                                           */
     OP_CLOSURE,        /* A=dst, Bx=child fn const index                  */
     OP_BINOP_INT,      /* A=dst, B=lhs, C=rhs; op nibble in instr top byte */
+    /* Phase 2 scaffolding: full handlers land alongside compile-time
+     * emission once macro detection and tail-call discipline are
+     * tightened up. The opcode IDs are reserved now so the encoding
+     * is stable for the cycle. */
+    OP_PUSHCATCH,      /* A=handler_pc_offset (sBx packed in Bx), B=reg_top_save */
+    OP_POPCATCH,       /*                                                  */
+    OP_THROW,          /* A=err                                            */
+    OP_PUSHDYN,        /* A=var_k, B=val                                   */
+    OP_POPDYN,         /* A=count                                          */
+    OP_MAKE_LAZY,      /* A=dst, Bx=thunk const index                      */
     OP__COUNT
 } mino_bc_op_t;
 
@@ -128,9 +138,11 @@ void mino_bc_fn_mark(struct mino_state *S, const mino_bc_fn_t *bc);
  * (code == NULL, code_len == 0, consts == NULL, ...). */
 extern const mino_bc_fn_t mino_bc_declined;
 
-/* True iff the fn's bc slot was populated with a real compiled program
- * (as opposed to NULL = not yet tried, or &mino_bc_declined = declined). */
-#define MINO_BC_RUNNABLE(fn) \
-    ((fn)->as.fn.bc != NULL && (fn)->as.fn.bc != &mino_bc_declined)
+/* True iff the val's bc slot was populated with a real compiled program
+ * (as opposed to NULL = not yet tried, or &mino_bc_declined = declined).
+ * The macro parameter is named `v` so it does not collide with the
+ * `.fn.bc` field access in callers that have a local named `fn`. */
+#define MINO_BC_RUNNABLE(v) \
+    ((v)->as.fn.bc != NULL && (v)->as.fn.bc != &mino_bc_declined)
 
 #endif /* MINO_EVAL_BC_INTERNAL_H */

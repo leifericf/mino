@@ -242,9 +242,12 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             mino_val_t *callee = regs[a];
             mino_val_t *args   = args_from_regs(S, regs + a + 1, argn);
             if (args == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = apply_callable(S, callee, args, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            retval = r;
+            /* Hand off via the MINO_TAIL_CALL sentinel; the outer
+             * apply_callable trampoline picks up the new (fn, args)
+             * without growing the C stack. */
+            S->tail_call_sentinel.as.tail_call.fn   = callee;
+            S->tail_call_sentinel.as.tail_call.args = args;
+            retval = &S->tail_call_sentinel;
             goto bc_done;
         }
 

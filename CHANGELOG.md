@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.106.0 — Bytecode Tail-Call Trampoline
+
+A flat trampoline at the bc dispatch boundary. The VM's
+`OP_TAILCALL` returns the existing `MINO_TAIL_CALL` sentinel
+instead of recursing through `apply_callable`; `apply_callable`'s
+bc path consumes the sentinel in a loop, switching the active
+function and rebuilding argv without growing the C stack. When
+the tail target is bc-compatible the trampoline stays in the VM;
+when it isn't (a non-fn callable, a multi-arity / &-rest fn, a
+declined-bc fn) the loop pops its frame and hands off to the
+regular `apply_callable` path. Tail-recursive shapes that the
+tree-walker has been trampolining since v0.71.x now flatten the
+same way under the bc dispatch.
+
+The compiler holds off on emitting `OP_TAILCALL` for this cycle:
+the emit check needs to consult the namespace-env macro table in
+addition to the captured lexical env, otherwise a tail call whose
+head resolves to a macro (`(future :done)` inside `for`, for
+example) hands off pre-evaluated args and produces wrong results.
+The trampoline machinery is in place and verified through hand
+written programs; the discriminator fix and the form-coverage
+expansion ship together in the next cycle.
+
+The Phase-2 opcodes (`OP_PUSHCATCH`, `OP_POPCATCH`, `OP_THROW`,
+`OP_PUSHDYN`, `OP_POPDYN`, `OP_MAKE_LAZY`) are reserved in the
+opcode enum so the encoding stays stable; their handlers and
+emitters land alongside the corresponding form coverage.
+
+ABI surface and semantics unchanged. All 1557 tests, 7279
+assertions pass on release / ASan / UBSan.
+
 ## v0.105.0 — Bytecode VM Foundation
 
 A register-based bytecode interpreter sits behind the existing

@@ -362,21 +362,65 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
             }
             push_frame(S, tag, file, line, col);
-            /* The bc body resolves globals through eval_impl with the
-             * closure's captured env, not the caller's. Params live in
-             * registers (not the env), so we don't need an env_child
-             * for fresh bindings -- the captured env is exactly the
-             * lexical scope free vars should resolve against. */
-            result = mino_bc_run(S, fn, argv, argc, fn->as.fn.env);
-            if (result == NULL) {
-                /* bc returned NULL: either an opcode bailed (which it
-                 * does on any unsupported runtime shape) or a real
-                 * error. Restore ns and propagate; the diagnostic, if
-                 * any, was set by a primitive on the way out. The frame
-                 * stays for the trace. */
+            /* Trampoline loop: re-enter mino_bc_run as long as the body
+             * returns a MINO_TAIL_CALL sentinel. When the tail-call
+             * target is itself a bc-compatible MINO_FN, we stay in
+             * the bc world. When it isn't, we hand off to
+             * apply_callable so a non-bc callee runs through the
+             * regular dispatch. This keeps tail recursion flat across
+             * compiled fns without growing the C stack. */
+            for (;;) {
+                result = mino_bc_run(S, fn, argv, argc, fn->as.fn.env);
+                if (result == NULL) {
+                    S->current_ns    = saved_ns;
+                    S->fn_ambient_ns = saved_ambient;
+                    return NULL;
+                }
+                if (result->type != MINO_TAIL_CALL) break;
+                mino_val_t *next_fn   = result->as.tail_call.fn;
+                mino_val_t *next_args = result->as.tail_call.args;
+                /* Lazy compile the new target if it's a fresh MINO_FN. */
+                if (next_fn != NULL && next_fn->type == MINO_FN
+                    && next_fn->as.fn.bc == NULL) {
+                    (void)mino_bc_compile_fn(S, next_fn);
+                }
+                if (next_fn != NULL && next_fn->type == MINO_FN
+                    && MINO_BC_RUNNABLE(next_fn)
+                    && next_fn->as.fn.params != NULL) {
+                    /* Rebuild argv from the new args list. */
+                    argc = 0;
+                    cur  = next_args;
+                    while (mino_is_cons(cur)) {
+                        if (argc == cap) {
+                            int new_cap = cap * 2;
+                            mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                                S, GC_T_VALARR,
+                                (size_t)new_cap * sizeof(*grown));
+                            if (grown == NULL) {
+                                S->current_ns    = saved_ns;
+                                S->fn_ambient_ns = saved_ambient;
+                                return NULL;
+                            }
+                            memcpy(grown, argv,
+                                   (size_t)argc * sizeof(*argv));
+                            argv = grown;
+                            cap  = new_cap;
+                        }
+                        argv[argc++] = cur->as.cons.car;
+                        cur = cur->as.cons.cdr;
+                    }
+                    fn = next_fn;
+                    if (fn->as.fn.defining_ns != NULL) {
+                        S->current_ns    = fn->as.fn.defining_ns;
+                        S->fn_ambient_ns = fn->as.fn.defining_ns;
+                    }
+                    continue;
+                }
+                /* Non-bc target: pop our frame and hand off. */
+                pop_frame(S);
                 S->current_ns    = saved_ns;
                 S->fn_ambient_ns = saved_ambient;
-                return NULL;
+                return apply_callable(S, next_fn, next_args, env);
             }
             pop_frame(S);
             S->current_ns    = saved_ns;
