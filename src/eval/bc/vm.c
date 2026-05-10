@@ -150,6 +150,14 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     int ok = 1;
 
     while (pc < bc->code_len) {
+        /* Refresh the window pointer every cycle. Any op that can
+         * trigger user code (OP_CALL/TAILCALL via apply_callable,
+         * OP_GETGLOBAL via eval_impl, OP_CLOSURE via make_fn that
+         * may collect, OP_SETGLOBAL via var_intern) can cascade into
+         * a recursive mino_bc_run that grows S->bc_regs and frees
+         * the prior buffer. Recomputing from base on each iteration
+         * keeps the window pointer correct without per-op clutter. */
+        regs = S->bc_regs + base;
         mino_bc_insn_t ins = code[pc++];
         unsigned op = OP_OF(ins);
         switch (op) {
@@ -224,7 +232,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             if (args == NULL) { ok = 0; goto bc_done; }
             mino_val_t *r = apply_callable(S, callee, args, env);
             if (r == NULL) { ok = 0; goto bc_done; }
-            regs[ret] = r;
+            S->bc_regs[base + ret] = r;
             break;
         }
 

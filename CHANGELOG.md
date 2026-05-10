@@ -1,8 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Bytecode VM Foundation
+## v0.105.0 — Bytecode VM Foundation
 
 A register-based bytecode interpreter sits behind the existing
 tree-walker. Compilation is lazy and per-fn: on first call a fn
@@ -14,10 +12,16 @@ every global reference resolves through the var cell, not a baked
 direct value.
 
 This cycle ships the foundation: opcode encoding, dispatch loop,
-register stack, GC integration, and per-fn compile entry. The
-compiler returns `MINO_BC_UNSUPPORTED` for every shape so far;
-subsequent commits add coverage form-by-form. ABI surface and
-semantics are unchanged.
+register stack, GC integration, per-fn compile entry, and the
+apply_callable wiring that makes the bc path live. The Phase-1
+compiler covers literals, local and global variable refs, `(if)`,
+`(do)`, plain-symbol `(let [b v ...] body)`, `(quote)`, and
+top-level `(def name expr)`. Function application, multi-arity,
+destructuring, `(fn ...)` literals, `(loop / recur)`, `(try /
+catch / finally)`, `(binding)`, `(lazy-seq)`, and macro-using
+forms decline to the tree-walker; the next cycle adds them with
+proper tail-call elimination. ABI surface and semantics are
+unchanged; every existing test passes through either path.
 
 - **Opcode header (`src/eval/bc/internal.h`).** 32-bit fixed-width
   instruction encoding (`OP A B C` for the common form, `OP A Bx`

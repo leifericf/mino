@@ -432,18 +432,17 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             gc_mark_child_push(S, v->as.fn.params);
             gc_mark_child_push(S, v->as.fn.body);
             gc_mark_child_push(S, v->as.fn.env);
-            /* Compiled bytecode: walk the const pool so symbols,
-             * literal child fns, and any nested constant values stay
-             * reachable. The bc record itself and its code/consts
-             * buffers are GC_T_RAW / GC_T_PTRARR allocations carried
-             * along by the GC's tag-walk; only the mino_val_t
-             * pointers inside consts need an explicit push. */
-            if (v->as.fn.bc != NULL) {
+            /* Compiled bytecode: the bc record and its code/consts
+             * buffers are separate GC allocations reachable only
+             * through this field, so each one needs an explicit
+             * push. The const pool is GC_T_VALARR so the GC's
+             * tag-walk scans its slots automatically once the buffer
+             * itself is marked. */
+            if (v->as.fn.bc != NULL && v->as.fn.bc != &mino_bc_declined) {
                 const struct mino_bc_fn *bc = v->as.fn.bc;
-                size_t bi;
-                for (bi = 0; bi < bc->consts_len; bi++) {
-                    gc_mark_child_push(S, bc->consts[bi]);
-                }
+                gc_mark_child_push(S, bc);
+                gc_mark_child_push(S, bc->code);
+                gc_mark_child_push(S, bc->consts);
             }
             break;
         case MINO_ATOM:

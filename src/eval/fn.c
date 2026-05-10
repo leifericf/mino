@@ -362,7 +362,12 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
             }
             push_frame(S, tag, file, line, col);
-            result = mino_bc_run(S, fn, argv, argc, env);
+            /* The bc body resolves globals through eval_impl with the
+             * closure's captured env, not the caller's. Params live in
+             * registers (not the env), so we don't need an env_child
+             * for fresh bindings -- the captured env is exactly the
+             * lexical scope free vars should resolve against. */
+            result = mino_bc_run(S, fn, argv, argc, fn->as.fn.env);
             if (result == NULL) {
                 /* bc returned NULL: either an opcode bailed (which it
                  * does on any unsupported runtime shape) or a real

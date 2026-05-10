@@ -436,11 +436,22 @@ static void gc_mark_runtime_globals(mino_state_t *S)
      * GC_T_VALARR, so it's already kept alive through the state's
      * indirect-pointer scan; the explicit per-slot mark is what
      * keeps the values they point at alive. */
+    /* Mark the bc register-stack buffer itself so its allocation is
+     * not freed mid-VM-execution. The MINOR collector does not trace
+     * inside OLD allocations -- it relies on the remembered set for
+     * OLD-to-YOUNG references. Since the bc_regs buffer can be OLD
+     * while every register write inside the VM is hot-path code that
+     * skips the write barrier for speed, we walk the live slot range
+     * explicitly here so a minor cycle finds every YOUNG value held
+     * in a register. */
     if (S->bc_regs != NULL) {
-        size_t bi;
-        for (bi = 0; bi < S->bc_top; bi++) {
-            if (S->bc_regs[bi] != NULL) {
-                gc_mark_interior(S, S->bc_regs[bi]);
+        gc_mark_interior(S, S->bc_regs);
+        if (S->bc_top <= S->bc_regs_cap) {
+            size_t bi;
+            for (bi = 0; bi < S->bc_top; bi++) {
+                if (S->bc_regs[bi] != NULL) {
+                    gc_mark_interior(S, S->bc_regs[bi]);
+                }
             }
         }
     }
