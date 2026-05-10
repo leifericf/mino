@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Bytecode VM Foundation
+
+A register-based bytecode interpreter sits behind the existing
+tree-walker. Compilation is lazy and per-fn: on first call a fn
+attempts to compile its body to a 32-bit fixed-width instruction
+stream; on success the program is cached on the fn and dispatched
+through the VM, on any unsupported shape the call falls back to
+the tree-walker. Var redefinition discipline is preserved because
+every global reference resolves through the var cell, not a baked
+direct value.
+
+This cycle ships the foundation: opcode encoding, dispatch loop,
+register stack, GC integration, and per-fn compile entry. The
+compiler returns `MINO_BC_UNSUPPORTED` for every shape so far;
+subsequent commits add coverage form-by-form. ABI surface and
+semantics are unchanged.
+
+- **Opcode header (`src/eval/bc/internal.h`).** 32-bit fixed-width
+  instruction encoding (`OP A B C` for the common form, `OP A Bx`
+  with a 16-bit operand for jumps and constant references).
+  Phase 1 enum covers the eleven opcodes that handle the
+  high-frequency form set: `OP_MOVE`, `OP_LOAD_K`, `OP_GETGLOBAL`,
+  `OP_SETGLOBAL`, `OP_JMP`, `OP_JMPIFNOT`, `OP_CALL`,
+  `OP_TAILCALL`, `OP_RETURN`, `OP_CLOSURE`, and a single
+  `OP_BINOP_INT` covering the eight binary integer
+  arith/comparison fast lanes through a sub-op nibble. Encoder
+  helpers (`MK_ABC`, `MK_ABx`, `MK_AsBx`, `MK_BINOP_INT`) and
+  decoder accessors (`OP_OF`, `A_OF`, `B_OF`, `C_OF`, `Bx_OF`,
+  `sBx_OF`, `BINOP_OF`) live next to the enum so the encoding
+  contract is single-sourced.
+
+- **VM dispatch skeleton (`src/eval/bc/vm.c`).** Switch-based
+  interpreter entry point `mino_bc_run`. The Phase 1 skeleton
+  returns NULL for every program; opcode handlers and the
+  register-stack window plumb in across subsequent commits.
+
 ## v0.104.0 — Eval-Floor Performance Cycle
 
 A non-JIT performance cycle. Each entry below is a self-contained

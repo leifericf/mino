@@ -33,10 +33,10 @@ endif
 
 BIN = mino$(EXE)
 
-SRCS = $(wildcard src/eval/*.c src/diag/*.c src/runtime/*.c \
-                  src/gc/*.c src/public/*.c src/collections/*.c \
-                  src/prim/*.c src/interop/*.c src/regex/*.c \
-                  src/async/*.c src/vendor/imath/*.c) main.c
+SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/diag/*.c \
+                  src/runtime/*.c src/gc/*.c src/public/*.c \
+                  src/collections/*.c src/prim/*.c src/interop/*.c \
+                  src/regex/*.c src/async/*.c src/vendor/imath/*.c) main.c
 
 # Bundled-source header set: <c-symbol>:<source-path> pairs. Each entry
 # becomes src/<symbol>.h with a single static const char *<symbol>_src
