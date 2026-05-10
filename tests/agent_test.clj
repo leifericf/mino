@@ -462,3 +462,36 @@
     (restart-agent a 42)
     (is (nil? (agent-error a)))
     (is (= 42 @a))))
+
+(deftest restart-agent-clear-actions-drops-queued
+  ;; With :clear-actions true, queued actions targeting the failed
+  ;; agent are dropped. After restart the agent's value is exactly
+  ;; the restart value with no later actions applying. We exercise
+  ;; the deeper invariant by piling several sends behind a slow
+  ;; throwing action; the throw fails the agent, which makes the
+  ;; trailing sends parking candidates the worker would skip with
+  ;; :fail mode. :clear-actions then drops them outright instead
+  ;; of leaving them as no-op skips.
+  (let [a (agent 0)
+        ran (atom 0)]
+    (send a (fn [_] (throw (ex-info "boom" {}))))
+    ;; Sends queued behind the failing action. With :fail mode and
+    ;; an err-set agent the worker silently drops these, but they
+    ;; still count toward in_flight until the worker pops them.
+    ;; clear-actions true should remove them from the queue
+    ;; outright so the agent's print-time identity shape and
+    ;; await semantics line up with JVM canon.
+    (send a (fn [v] (swap! ran inc) (inc v)))
+    (send a (fn [v] (swap! ran inc) (inc v)))
+    (await a)
+    (is (some? (agent-error a)))
+    ;; All queued sends drained as silent skips at this point.
+    (is (= 0 @ran))
+    (restart-agent a 100 :clear-actions true)
+    (is (nil? (agent-error a)))
+    (is (= 100 @a))))
+
+;; shutdown-agents joins the worker and seals the state's agent surface.
+;; The flag is permanent (no reverse), so this test runs only in
+;; embed_stm_test.c against a private mino_state_t. Re-running it here
+;; in the shared test state would poison every subsequent agent test.

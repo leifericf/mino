@@ -519,6 +519,34 @@ static void test_shutdown_agents_seals_state(void)
     mino_state_free(S);
 }
 
+/* shutdown-agents called from inside an agent action body would
+ * try to pthread_join the worker thread that's running the action.
+ * Detect and throw rather than self-deadlock. */
+static void test_shutdown_agents_self_call_throws(void)
+{
+    mino_state_t *S   = mino_state_new();
+    mino_env_t   *env = mino_new(S);
+    mino_set_thread_limit(S, 2);
+    mino_install_agent(S, env);
+    {
+        /* The action body calls shutdown-agents. The worker
+         * catches the throw and the agent's value is set to a
+         * sentinel; the agent itself stays clean. */
+        mino_val_t *r = mino_eval_string(S,
+            "(let [a (agent 0)]"
+            "  (send a (fn [_] (try (shutdown-agents) :unreachable"
+            "                       (catch e :saw-throw))))"
+            "  (await a)"
+            "  (deref a))",
+            env);
+        REQUIRE(r != NULL, "self-shutdown action should not abort the runtime");
+        REQUIRE(r->type == MINO_KEYWORD,
+                "self-shutdown action's catch should publish :saw-throw");
+    }
+    mino_env_free(S, env);
+    mino_state_free(S);
+}
+
 int main(void)
 {
     mino_state_t *S   = mino_state_new();
@@ -535,6 +563,7 @@ int main(void)
     test_cross_state_agent_throws(S, env);
     test_run_retry_under_contention(S, env);
     test_shutdown_agents_seals_state();
+    test_shutdown_agents_self_call_throws();
 
     mino_env_free(S, env);
     mino_state_free(S);

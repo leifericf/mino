@@ -1010,6 +1010,8 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
                                 mino_env_t *env)
 {
     mino_val_t *agent, *new_state;
+    mino_val_t *opts;
+    int         clear_actions = 0;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1017,7 +1019,27 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
     }
     agent     = args->as.cons.car;
     new_state = args->as.cons.cdr->as.cons.car;
-    /* Trailing :clear-actions option ignored in this MVP. */
+    /* Parse trailing keyword options. JVM accepts :clear-actions. */
+    for (opts = args->as.cons.cdr->as.cons.cdr; mino_is_cons(opts); ) {
+        mino_val_t *key = opts->as.cons.car;
+        mino_val_t *val;
+        if (!mino_is_cons(opts->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "restart-agent: option key without value");
+        }
+        val  = opts->as.cons.cdr->as.cons.car;
+        opts = opts->as.cons.cdr->as.cons.cdr;
+        if (key == NULL || key->type != MINO_KEYWORD) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "restart-agent: option key must be a keyword");
+        }
+        if (strcmp(key->as.s.data, "clear-actions") == 0) {
+            clear_actions = mino_is_truthy(val) ? 1 : 0;
+        } else {
+            return prim_throw_classified(S, "eval/state", "MST002",
+                "restart-agent: unknown option key");
+        }
+    }
     if (!mino_is_agent(agent)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "restart-agent: first argument must be an agent");
@@ -1045,6 +1067,39 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
             return prim_throw_classified(S, "eval/contract", "MCT001",
                 "Invalid reference state");
         }
+    }
+    /* JVM canon: with :clear-actions true, drop any actions the
+     * agent has queued (they would have been blocked behind the
+     * failure latch anyway). Walk the runq under agent_mu, splice
+     * out entries targeting this agent, decrement in_flight per
+     * removal, broadcast in case an await waiter is sleeping. */
+    if (clear_actions && S->agent_mu_inited) {
+        agent_action_node_t **pp;
+        agent_mu_lock(&S->agent_mu);
+        pp = &S->agent_run_head;
+        while (*pp != NULL) {
+            agent_action_node_t *cur = *pp;
+            if (cur->agent == agent) {
+                *pp = cur->next;
+                if (S->agent_run_tail == cur) S->agent_run_tail = NULL;
+                if (agent->as.agent.in_flight > 0) {
+                    agent->as.agent.in_flight--;
+                }
+                free(cur);
+            } else {
+                pp = &cur->next;
+            }
+        }
+        /* Re-establish run_tail by walking once. */
+        if (S->agent_run_head == NULL) {
+            S->agent_run_tail = NULL;
+        } else {
+            agent_action_node_t *t = S->agent_run_head;
+            while (t->next != NULL) t = t->next;
+            S->agent_run_tail = t;
+        }
+        agent_cv_broadcast(&S->agent_cv);
+        agent_mu_unlock(&S->agent_mu);
     }
     gc_write_barrier(S, agent, agent->as.agent.err, NULL);
     agent->as.agent.err = NULL;
@@ -1165,11 +1220,18 @@ mino_val_t *prim_shutdown_agents(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "shutdown-agents takes no arguments");
     }
-    /* mino's sync MVP has no thread pool to terminate, but the
-     * state flag still gives embedders a clean teardown signal:
-     * subsequent send / send-off throw MST008. Idempotent --
-     * calling twice is fine. */
-    S->agents_shutdown = 1;
+    /* Self-detect: an action body running on the worker thread
+     * cannot join itself. mino_tls_ctx is set only on host worker
+     * threads, so a non-NULL tls_ctx during eval implies the agent
+     * worker is the caller. */
+    if (mino_tls_ctx != NULL) {
+        return prim_throw_classified(S, "eval/state", "MST002",
+            "shutdown-agents cannot be called from inside an agent action");
+    }
+    /* Flip the shutdown flag, signal the worker to drain + exit,
+     * then reap the pthread handle. Idempotent: a no-op if no
+     * worker has been spawned, or if quiesce has already run. */
+    mino_agent_quiesce_workers(S);
     return mino_nil(S);
 }
 

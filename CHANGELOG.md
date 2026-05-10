@@ -37,6 +37,15 @@ cycle.
   the cv so any drain-pending worker exits, then reaps the
   pthread handle. Called by `mino_state_free` before heap teardown
   so a worker can't run after free.
+- `shutdown-agents` now joins the worker thread instead of just
+  flipping a flag. Self-call detection (calling shutdown-agents
+  from inside an agent action body, which would deadlock the
+  worker on its own pthread_join) throws MST002.
+- `restart-agent` accepts `:clear-actions true`. Walks the
+  per-state run-queue under `agent_mu`, splices out every entry
+  targeting the failed agent, decrements its `in_flight`, and
+  rebroadcasts `agent_cv` so any await waiter wakes. The dropped
+  actions are released without running.
 
 ## v0.101.1 — STM and agent hardening pass
 
