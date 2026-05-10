@@ -261,8 +261,18 @@ mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             agent->as.agent.err_mode =
                 (strcmp(val->as.s.data, "continue") == 0) ? 1 : 0;
         } else if (strcmp(key->as.s.data, "meta") == 0) {
-            return prim_throw_classified(S, "eval/state", "MST002",
-                "agent: :meta option not yet supported");
+            if (val != NULL && val->type != MINO_NIL
+                && val->type != MINO_MAP) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "agent: :meta must be a map or nil");
+            }
+            if (val != NULL && val->type == MINO_NIL) val = NULL;
+            /* Cell-level meta. with-meta is intentionally NOT
+             * routed through supports_meta for agents (shallow
+             * copy would diverge on first send); (meta a) reads
+             * this slot directly. */
+            gc_write_barrier(S, agent, agent->meta, val);
+            agent->meta = val;
         } else {
             return prim_throw_classified(S, "eval/state", "MST002",
                 "agent: unknown option key");

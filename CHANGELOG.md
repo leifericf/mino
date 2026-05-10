@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Wire `:meta` Constructor Option for Agents
+
+`(agent state :meta m)` previously threw "not yet supported".
+Store the map (or nil) on the agent's cell-level `meta` field and
+let `(meta a)` read it back. `with-meta` on agents is
+intentionally still rejected: `with-meta`'s shallow copy of the
+agent struct would create a sibling cell with its own `val` /
+`err` slots that diverges on the next send. `(meta a)` reads
+through a special-case in `prim_meta` rather than extending
+`supports_meta`, so the broken-copy path stays closed.
+
 ### Cross-State Defense for Agents and Tighter Defense for Refs
 
 Refs already carried `owning_state` and threw MST007 if a public C

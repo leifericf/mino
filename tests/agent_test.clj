@@ -139,9 +139,18 @@
 
 (deftest agent-constructor-options-unknown-throws
   ;; Unknown option keys must throw rather than be silently ignored.
-  (is (thrown? (agent 0 :no-such-option 1)))
-  ;; :meta is not yet supported on agents; throws explicitly.
-  (is (thrown? (agent 0 :meta {:doc "x"}))))
+  (is (thrown? (agent 0 :no-such-option 1))))
+
+(deftest agent-constructor-options-meta
+  ;; :meta is wired through to the cell's meta field. (meta a) reads
+  ;; it; with-meta is intentionally not supported for agents (shallow
+  ;; copy of the cell would diverge on first send).
+  (let [m {:doc "counter"}
+        a (agent 0 :meta m)]
+    (is (= m (meta a))))
+  (let [a (agent 0)]
+    (is (nil? (meta a))))
+  (is (thrown? (agent 0 :meta 5))))
 
 (deftest agent-constructor-options-bad-mode-throws
   (is (thrown? (agent 0 :error-mode :silent)))

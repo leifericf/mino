@@ -53,7 +53,15 @@ mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/arity", "MAR001", "meta requires one argument");
     }
     obj = args->as.cons.car;
-    if (obj == NULL || !supports_meta(obj->type)) {
+    if (obj == NULL) return mino_nil(S);
+    /* Agents carry meta on the cell but are NOT in supports_meta:
+     * with-meta would shallow-copy the agent struct (val / err /
+     * watches pointers), producing a sibling that diverges on the
+     * next send. Read here directly; with-meta still throws. */
+    if (obj->type == MINO_AGENT) {
+        return obj->meta != NULL ? obj->meta : mino_nil(S);
+    }
+    if (!supports_meta(obj->type)) {
         return mino_nil(S);
     }
     if (obj->type == MINO_VAR) {
