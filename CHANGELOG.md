@@ -48,6 +48,21 @@ semantics are unchanged.
   running, the GC keeps register values and constants reachable
   without explicit pinning at every allocation site.
 
+- **VM dispatch: all 11 Phase-1 opcodes.** `src/eval/bc/vm.c`
+  expands from skeleton to full switch dispatch for `OP_MOVE`,
+  `OP_LOAD_K`, `OP_GETGLOBAL`, `OP_SETGLOBAL`, `OP_JMP`,
+  `OP_JMPIFNOT`, `OP_CALL`, `OP_TAILCALL`, `OP_RETURN`,
+  `OP_CLOSURE`, and `OP_BINOP_INT`. The register window grows on
+  demand; `args_from_regs` packs an argv slice into the cons
+  spine ABI for `apply_callable`. `OP_GETGLOBAL` resolves
+  through `eval_impl` against the live var registry; `OP_CLOSURE`
+  clones a child template's bc pointer into a fresh
+  closure-capturing fn; `OP_BINOP_INT` runs the v0.103.0
+  integer fast lane with `__builtin_*_overflow` checks. Nothing
+  compiles to these opcodes yet — they're exercised by the
+  next commit's compiler coverage — so the test suite continues
+  to run through the tree-walker.
+
 - **Compiler entry stub + apply_callable wiring.**
   `src/eval/bc/compile.c` defines the lazy `mino_bc_compile_fn`
   entry and the `mino_bc_declined` sentinel; the entry currently
