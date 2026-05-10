@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.102.0 — Agents finish MVP: async dispatch + blocking await
+
 Agent execution model removes the synchronous-on-the-calling-thread
 fallback. Per-state agent worker thread + run queue land in this
 cycle.
