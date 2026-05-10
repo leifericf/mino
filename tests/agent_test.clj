@@ -113,3 +113,39 @@
   (let [a (agent 0)]
     (is (= a (send a inc)))
     (is (= a (send-off a inc)))))
+
+(deftest agent-constructor-options-validator
+  ;; (agent state :validator pred) installs the validator at
+  ;; construction time. JVM canon: the initial state is NOT
+  ;; checked against the validator at install (matches set-validator!
+  ;; behavior). Subsequent send actions are.
+  (let [a (agent 5 :validator pos?)]
+    (is (= pos? (get-validator a)))
+    (send a (fn [_] -1))
+    (is (some? (agent-error a)))
+    (is (= 5 @a))))
+
+(deftest agent-constructor-options-error-mode
+  (let [a (agent 0 :error-mode :continue)]
+    (is (= :continue (error-mode a))))
+  (let [a (agent 0 :error-mode :fail)]
+    (is (= :fail (error-mode a)))))
+
+(deftest agent-constructor-options-error-handler
+  (let [calls (atom [])
+        h (fn [a e] (swap! calls conj :h))
+        a (agent 0 :error-handler h)]
+    (is (= h (error-handler a)))))
+
+(deftest agent-constructor-options-unknown-throws
+  ;; Unknown option keys must throw rather than be silently ignored.
+  (is (thrown? (agent 0 :no-such-option 1)))
+  ;; :meta is not yet supported on agents; throws explicitly.
+  (is (thrown? (agent 0 :meta {:doc "x"}))))
+
+(deftest agent-constructor-options-bad-mode-throws
+  (is (thrown? (agent 0 :error-mode :silent)))
+  (is (thrown? (agent 0 :error-mode "fail"))))
+
+(deftest agent-constructor-options-odd-args-throws
+  (is (thrown? (agent 0 :validator))))

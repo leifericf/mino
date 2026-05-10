@@ -158,16 +158,58 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
 mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *initial;
+    mino_val_t *opts;
+    mino_val_t *agent;
     (void)env;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "agent requires at least one argument");
     }
-    /* JVM accepts trailing keyword options (:validator / :error-handler
-     * / :error-mode / :meta). MVP: accept and ignore options for now;
-     * a follow-up commit can wire them through. */
     initial = args->as.cons.car;
-    return mino_agent(S, initial);
+    agent   = mino_agent(S, initial);
+    /* Parse trailing keyword options. JVM accepts :validator,
+     * :error-handler, :error-mode, :meta. mino supports the first
+     * three; :meta is rejected (cell meta on agents is not yet
+     * surfaced through supports_meta, so silently storing it would
+     * be invisible to (meta a)). Unknown keys throw -- silent
+     * acceptance would mask user typos. */
+    for (opts = args->as.cons.cdr; mino_is_cons(opts); ) {
+        mino_val_t *key = opts->as.cons.car;
+        mino_val_t *val;
+        if (!mino_is_cons(opts->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "agent: option key without value");
+        }
+        val  = opts->as.cons.cdr->as.cons.car;
+        opts = opts->as.cons.cdr->as.cons.cdr;
+        if (key == NULL || key->type != MINO_KEYWORD) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "agent: option key must be a keyword");
+        }
+        if (strcmp(key->as.s.data, "validator") == 0) {
+            gc_write_barrier(S, agent, agent->as.agent.validator, val);
+            agent->as.agent.validator = val;
+        } else if (strcmp(key->as.s.data, "error-handler") == 0) {
+            gc_write_barrier(S, agent, agent->as.agent.err_handler, val);
+            agent->as.agent.err_handler = val;
+        } else if (strcmp(key->as.s.data, "error-mode") == 0) {
+            if (val == NULL || val->type != MINO_KEYWORD
+                || (strcmp(val->as.s.data, "fail") != 0
+                    && strcmp(val->as.s.data, "continue") != 0)) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "agent: :error-mode must be :fail or :continue");
+            }
+            agent->as.agent.err_mode =
+                (strcmp(val->as.s.data, "continue") == 0) ? 1 : 0;
+        } else if (strcmp(key->as.s.data, "meta") == 0) {
+            return prim_throw_classified(S, "eval/state", "MST002",
+                "agent: :meta option not yet supported");
+        } else {
+            return prim_throw_classified(S, "eval/state", "MST002",
+                "agent: unknown option key");
+        }
+    }
+    return agent;
 }
 
 mino_val_t *prim_agent_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)

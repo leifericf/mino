@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Wire Up Agent Constructor Options
+
+`(agent state :validator pred :error-handler h :error-mode m)`
+previously accepted but silently ignored every option, so an agent
+declared with `:validator pos?` would still publish negative
+values. Parse trailing keyword pairs and apply them to the agent's
+slots. Unknown keys, odd numbers of trailing args, and invalid
+`:error-mode` values now throw with a classified error. `:meta`
+also throws with "not yet supported" rather than being silently
+dropped (cell metadata on agents is not yet surfaced through
+`(meta a)`).
+
 ### Fix STM Commit-Lock Leak on Commute Throw During Replay
 
 A `commute` fn that succeeded during the transaction body but threw
