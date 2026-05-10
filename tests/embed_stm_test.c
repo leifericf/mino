@@ -410,6 +410,69 @@ static void test_cross_state_ref_throws(mino_state_t *S, mino_env_t *env)
     mino_state_free(S2);
 }
 
+/* Inject an agent allocated in S2 into S's env and drive every public
+ * agent prim from Clojure code. Each must throw eval/state MST007
+ * instead of silently mutating across states. Mirrors the cross-
+ * state ref test above; agents lacked the defense before.
+ *
+ * Agents are an opt-in install so the test installs them on S
+ * itself; the foreign agent comes from a fresh S2. */
+static void test_cross_state_agent_throws(mino_state_t *S, mino_env_t *env)
+{
+    mino_state_t *S2     = mino_state_new();
+    mino_env_t   *env2   = mino_new(S2);
+    mino_val_t   *foreign_a;
+    const char   *err;
+    static const char *const probes[] = {
+        "(send *foreign-agent* inc)",
+        "(send-off *foreign-agent* inc)",
+        "(await *foreign-agent*)",
+        "(await-for 100 *foreign-agent*)",
+        "(agent-error *foreign-agent*)",
+        "(restart-agent *foreign-agent* 1)",
+        "(set-error-handler! *foreign-agent* (fn [_ _] nil))",
+        "(error-handler *foreign-agent*)",
+        "(set-error-mode! *foreign-agent* :continue)",
+        "(error-mode *foreign-agent*)",
+        "(add-watch *foreign-agent* :w (fn [_ _ _ _] nil))",
+        "(remove-watch *foreign-agent* :w)",
+        "(set-validator! *foreign-agent* number?)",
+        "(get-validator *foreign-agent*)",
+    };
+    size_t i;
+
+    /* Install the agent prims on S so (send / await / ...) resolve.
+     * S2 needs the same install so its own agent ops still work below. */
+    mino_install_agent(S, env);
+    mino_install_agent(S2, env2);
+    foreign_a = mino_agent(S2, mino_int(S2, 0));
+
+    REQUIRE(mino_is_agent(foreign_a), "foreign agent constructor failed");
+    mino_env_set(S, env, "*foreign-agent*", foreign_a);
+
+    for (i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+        mino_val_t *r = mino_eval_string(S, probes[i], env);
+        REQUIRE(r == NULL, "cross-state agent op should error (returned non-NULL)");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL && strstr(err, "foreign state") != NULL,
+                "cross-state agent op should mention 'foreign state'");
+    }
+
+    /* Foreign state's own agent ops still work normally. */
+    {
+        long long n;
+        mino_env_set(S2, env2, "*own-agent*", foreign_a);
+        mino_eval_string(S2, "(send *own-agent* inc)", env2);
+        REQUIRE(foreign_a->as.agent.val != NULL
+                && mino_to_int(foreign_a->as.agent.val, &n)
+                && n == 1,
+                "foreign state's own agent should still accept its own send");
+    }
+
+    mino_env_free(S2, env2);
+    mino_state_free(S2);
+}
+
 int main(void)
 {
     mino_state_t *S   = mino_state_new();
@@ -423,6 +486,7 @@ int main(void)
     test_type_check_throws(S, env);
     test_watch_fires_from_c_tx(S, env);
     test_cross_state_ref_throws(S, env);
+    test_cross_state_agent_throws(S, env);
     test_run_retry_under_contention(S, env);
 
     mino_env_free(S, env);

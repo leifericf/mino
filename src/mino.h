@@ -395,6 +395,15 @@ struct mino_val {
             int         err_mode;     /* 0=:fail, 1=:continue */
             void       *queue;        /* opaque agent_queue_t * (heap-
                                        * allocated; freed via finalizer) */
+            mino_state_t *owning_state; /* the state that allocated this
+                                          * agent. Mirrors tx_ref's
+                                          * cross-state defense: every
+                                          * agent prim throws MST007 if
+                                          * it sees a value passed in
+                                          * from another state. Not
+                                          * traced -- the state outlives
+                                          * its agents and isn't a GC
+                                          * value. */
         } agent;
     } as;
 };

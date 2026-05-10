@@ -380,13 +380,16 @@ int mino_is_tx_ref(const mino_val_t *v)
  * allocated in a different state than S. mino_tx_ref records its
  * allocating state in tx_ref.owning_state at construction time, so
  * the check is one pointer comparison. Catches a host that passes a
- * ref between states without going through serialization. Returns 0
- * on success, 1 if a throw was raised (caller should propagate NULL).
+ * ref between states (typically by smuggling one through
+ * mino_env_set or mino_call) without going through serialization.
+ * Returns 0 on success, 1 if a throw was raised (caller should
+ * propagate NULL).
  *
- * Called from the public C entries only. The Clojure-side primitives
- * receive refs that the eval loop has already located in S's env, so
- * a foreign-state ref would already be unreachable from a Clojure
- * program. */
+ * Called from the shared cores below so both the public C API and
+ * the Clojure-side prims are covered -- a foreign ref injected
+ * into S's env via mino_env_set was always reachable from a
+ * Clojure program; the earlier "C entries only" gate left that
+ * gap. */
 static int tx_check_ref_owned(mino_state_t *S, mino_val_t *ref)
 {
     if (ref->as.tx_ref.owning_state != S) {
@@ -407,6 +410,7 @@ static mino_val_t *tx_ref_set_core(mino_state_t *S, mino_val_t *ref,
 {
     tx_ref_state_t    *rs;
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    if (tx_check_ref_owned(S, ref)) return NULL;
     if (ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
@@ -460,7 +464,6 @@ mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *ref, mino_val_t *val)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ref_set: argument must be a ref");
     }
-    if (tx_check_ref_owned(S, ref)) return NULL;
     return tx_ref_set_core(S, ref, val);
 }
 
@@ -524,6 +527,7 @@ static mino_val_t *tx_alter_core(mino_state_t *S, mino_val_t *ref,
     tx_ref_state_t    *rs;
     mino_val_t        *cur, *result;
     mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
+    if (tx_check_ref_owned(S, ref)) return NULL;
     if (t_ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
@@ -581,7 +585,6 @@ mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_alter_c: argument must be a ref");
     }
-    if (tx_check_ref_owned(S, ref)) return NULL;
     if (fn == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_alter_c: transformer fn must not be NULL");
@@ -633,6 +636,7 @@ static mino_val_t *tx_commute_core(mino_state_t *S, mino_val_t *ref,
     tx_ref_state_t    *rs;
     mino_val_t        *cur, *result, *entry;
     mino_thread_ctx_t *t_ctx = mino_current_ctx(S);
+    if (tx_check_ref_owned(S, ref)) return NULL;
     if (t_ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
@@ -698,7 +702,6 @@ mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_commute_c: argument must be a ref");
     }
-    if (tx_check_ref_owned(S, ref)) return NULL;
     if (fn == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_commute_c: transformer fn must not be NULL");
@@ -718,6 +721,7 @@ static mino_val_t *tx_ensure_core(mino_state_t *S, mino_val_t *ref,
     tx_ref_state_t    *rs;
     mino_val_t        *val;
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    if (tx_check_ref_owned(S, ref)) return NULL;
     if (ctx->current_tx == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "No transaction running");
@@ -760,7 +764,6 @@ mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *ref,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ensure: argument must be a ref");
     }
-    if (tx_check_ref_owned(S, ref)) return NULL;
     return tx_ensure_core(S, ref, env);
 }
 

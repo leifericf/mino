@@ -43,19 +43,35 @@
 mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
 {
     mino_val_t *v = alloc_val(S, MINO_AGENT);
-    v->as.agent.val         = initial;
-    v->as.agent.watches     = NULL;
-    v->as.agent.validator   = NULL;
-    v->as.agent.err         = NULL;
-    v->as.agent.err_handler = NULL;
-    v->as.agent.err_mode    = 0;  /* :fail */
-    v->as.agent.queue       = NULL;  /* unused in sync MVP */
+    v->as.agent.val          = initial;
+    v->as.agent.watches      = NULL;
+    v->as.agent.validator    = NULL;
+    v->as.agent.err          = NULL;
+    v->as.agent.err_handler  = NULL;
+    v->as.agent.err_mode     = 0;  /* :fail */
+    v->as.agent.queue        = NULL;  /* unused in sync MVP */
+    v->as.agent.owning_state = S;
     return v;
 }
 
 int mino_is_agent(const mino_val_t *v)
 {
     return v != NULL && v->type == MINO_AGENT;
+}
+
+/* Cross-state defense, mirroring tx_check_ref_owned. Throws MST007
+ * if the agent was allocated in a different state than S, so a host
+ * that injects a foreign agent through mino_env_set / mino_call
+ * cannot tunnel mutations into another state's heap. Returns 0 on
+ * match, 1 on mismatch (caller should propagate NULL). */
+static int agent_check_state(mino_state_t *S, mino_val_t *agent)
+{
+    if (agent->as.agent.owning_state != S) {
+        prim_throw_classified(S, "eval/state", "MST007",
+            "agent from foreign state");
+        return 1;
+    }
+    return 0;
 }
 
 /* --- action dispatch ------------------------------------------------------ */
@@ -279,6 +295,7 @@ mino_val_t *prim_send(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "send: first argument must be an agent");
     }
+    if (agent_check_state(S, agent)) return NULL;
     /* JVM-canon: dispatching to an agent in the failed state throws
      * unless error-mode is :continue. mino's MVP captures the failure
      * but allows further dispatch (matches :continue). */
@@ -299,12 +316,14 @@ mino_val_t *prim_await(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)env;
     /* No-op: the sync MVP drains the queue on every send return. We
-     * still type-check so a misuse is loud. */
+     * still type-check and cross-state-check so a misuse is loud. */
     while (mino_is_cons(args)) {
-        if (!mino_is_agent(args->as.cons.car)) {
+        mino_val_t *a = args->as.cons.car;
+        if (!mino_is_agent(a)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "await: argument must be an agent");
         }
+        if (agent_check_state(S, a)) return NULL;
         args = args->as.cons.cdr;
     }
     return mino_nil(S);
@@ -321,10 +340,12 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
     /* MVP: same as await; timeout is irrelevant when send is sync. */
     args = args->as.cons.cdr;
     while (mino_is_cons(args)) {
-        if (!mino_is_agent(args->as.cons.car)) {
+        mino_val_t *a = args->as.cons.car;
+        if (!mino_is_agent(a)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "await-for: argument must be an agent");
         }
+        if (agent_check_state(S, a)) return NULL;
         args = args->as.cons.cdr;
     }
     return mino_true(S);
@@ -344,6 +365,7 @@ mino_val_t *prim_agent_error(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "agent-error: argument must be an agent");
     }
+    if (agent_check_state(S, agent)) return NULL;
     return agent->as.agent.err != NULL ? agent->as.agent.err : mino_nil(S);
 }
 
@@ -363,6 +385,7 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "restart-agent: first argument must be an agent");
     }
+    if (agent_check_state(S, agent)) return NULL;
     if (agent->as.agent.err == NULL) {
         return prim_throw_classified(S, "eval/state", "MST002",
             "Agent does not need a restart");
@@ -409,6 +432,7 @@ mino_val_t *prim_set_error_handler_bang(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-error-handler!: first argument must be an agent");
     }
+    if (agent_check_state(S, agent)) return NULL;
     /* nil clears. Anything else must be callable so a future action
      * failure can dispatch through it. Earlier mino stored any value
      * (e.g. an int) which then failed at dispatch time, far from the
@@ -439,6 +463,7 @@ mino_val_t *prim_error_handler(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "error-handler: argument must be an agent");
     }
+    if (agent_check_state(S, agent)) return NULL;
     return agent->as.agent.err_handler != NULL
          ? agent->as.agent.err_handler : mino_nil(S);
 }
@@ -459,6 +484,7 @@ mino_val_t *prim_set_error_mode_bang(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-error-mode!: first argument must be an agent");
     }
+    if (agent_check_state(S, agent)) return NULL;
     /* Only :fail and :continue are accepted. Earlier mino silently
      * routed any unrecognised keyword to :fail (so :silent on a
      * previously :continue agent quietly flipped it) and silently
@@ -489,6 +515,7 @@ mino_val_t *prim_error_mode(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "error-mode: argument must be an agent");
     }
+    if (agent_check_state(S, agent)) return NULL;
     return mino_keyword(S,
         agent->as.agent.err_mode == 1 ? "continue" : "fail");
 }

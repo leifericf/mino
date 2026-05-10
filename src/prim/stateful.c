@@ -373,6 +373,26 @@ static int watchable_get(mino_val_t *v, mino_val_t ***out_watches,
     return 0;
 }
 
+/* For watchable types whose state-of-allocation is tracked
+ * (refs and agents), throw MST007 if v belongs to a different state.
+ * Atoms and vars don't carry an owning_state slot today; for those
+ * types this returns 0 without checking. Returns 0 on success
+ * (host owns the value, or no check applies), 1 on mismatch
+ * (caller must propagate NULL after the throw). */
+static int watchable_check_state(mino_state_t *S, mino_val_t *v)
+{
+    mino_state_t *owner = NULL;
+    if (v == NULL) return 0;
+    if (v->type == MINO_TX_REF) owner = v->as.tx_ref.owning_state;
+    else if (v->type == MINO_AGENT) owner = v->as.agent.owning_state;
+    if (owner != NULL && owner != S) {
+        prim_throw_classified(S, "eval/state", "MST007",
+            "reference from foreign state");
+        return 1;
+    }
+    return 0;
+}
+
 mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t       *a, *key, *fn, *watches, *new_map;
@@ -396,6 +416,7 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!watchable_get(a, &watches_slot, &validator_slot)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "add-watch: first argument must be an atom or ref");
     }
+    if (watchable_check_state(S, a)) return NULL;
     /* The watch fn is invoked as (fn key ref old-value new-value) on
      * every committed state change. Storing a non-callable here just
      * defers the failure to the dispatch site, which is far from the
@@ -450,6 +471,7 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
     if (!watchable_get(a, &watches_slot, &validator_slot)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "remove-watch: first argument must be an atom or ref");
     }
+    if (watchable_check_state(S, a)) return NULL;
     watches = *watches_slot;
     if (watches == NULL || watches->type != MINO_MAP) return a;
     h = hash_val(key);
@@ -497,6 +519,7 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
     if (!watchable_get(a, &watches_slot, &validator_slot)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "set-validator!: first argument must be an atom or ref");
     }
+    if (watchable_check_state(S, a)) return NULL;
     /* nil removes the validator. */
     if (fn == NULL || fn->type == MINO_NIL) {
         gc_write_barrier(S, a, *validator_slot, NULL);
@@ -536,6 +559,7 @@ mino_val_t *prim_get_validator(mino_state_t *S, mino_val_t *args,
     if (!watchable_get(a, &watches_slot, &validator_slot)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "get-validator: argument must be an atom or ref");
     }
+    if (watchable_check_state(S, a)) return NULL;
     return *validator_slot != NULL ? *validator_slot : mino_nil(S);
 }
 

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Cross-State Defense for Agents and Tighter Defense for Refs
+
+Refs already carried `owning_state` and threw MST007 if a public C
+API entry saw a foreign value, but the Clojure-side prims
+(`alter` / `commute` / `ref-set` / `ensure`) had no check -- a
+host that smuggled a foreign ref in via `mino_env_set` could mutate
+across states. Move `tx_check_ref_owned` into the shared cores
+(`tx_alter_core`, etc.) so both the C API and Clojure prims hit
+the check; drop the now-redundant calls in C-API entries.
+
+Agents had no defense at all. Add `owning_state` to the agent
+struct, set it in `mino_agent`, and check it in every agent prim
+(`send`, `send-off`, `await`, `await-for`, `agent-error`,
+`restart-agent`, `set-error-handler!`, `error-handler`,
+`set-error-mode!`, `error-mode`) plus the shared watch /
+validator paths in `add-watch`, `remove-watch`, `set-validator!`,
+`get-validator` (which also pick up the equivalent ref defense).
+
+Mirror the existing cross-state ref test in `embed_stm_test.c`
+with a parallel run that drives all 14 agent-touching probes
+through `mino_eval_string` from a foreign-allocated agent.
+
 ### Validate Callability of Watch / Validator Arguments
 
 `add-watch` and `set-validator!` accepted any value as the watch
