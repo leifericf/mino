@@ -13,6 +13,8 @@ bin/
 /mino_asan
 /mino_tsan
 /mino_ubsan
+/mino_prof
+/data/
 src/core_mino.h
 src/lib_clojure_*.h
 src/lib_mino_*.h

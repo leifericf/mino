@@ -146,10 +146,35 @@ typedef struct {
 /* ------------------------------------------------------------------------- */
 
 /* driver.c: allocation and collection driver.
- * All gc_alloc/alloc_val returns are GC-owned. */
-void  *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size);
-mino_val_t *alloc_val(mino_state_t *S, mino_type_t type);     /* GC-owned */
-char  *dup_n(mino_state_t *S, const char *s, size_t len);     /* GC-owned copy */
+ * All gc_alloc/alloc_val returns are GC-owned. The three _inner names
+ * are the real functions; the public macros below add per-callsite
+ * profiler recording when the binary is built with -DMINO_ALLOC_PROFILE=1. */
+void  *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size);
+mino_val_t *alloc_val_inner(mino_state_t *S, mino_type_t type);
+char  *dup_n_inner(mino_state_t *S, const char *s, size_t len);
+
+#ifdef MINO_ALLOC_PROFILE
+void mino_alloc_profile_record(const char *file, int line,
+                               unsigned char tag, size_t size);
+#define gc_alloc_typed(S, T, SZ)                                          \
+    (mino_alloc_profile_record(__FILE__, __LINE__,                        \
+                               (unsigned char)(T), (size_t)(SZ)),         \
+     gc_alloc_typed_inner((S), (T), (SZ)))
+#define alloc_val(S, T)                                                   \
+    (mino_alloc_profile_record(__FILE__, __LINE__,                        \
+                               (unsigned char)2 /* GC_T_VAL */,           \
+                               sizeof(mino_val_t)),                       \
+     alloc_val_inner((S), (T)))
+#define dup_n(S, P, N)                                                    \
+    (mino_alloc_profile_record(__FILE__, __LINE__,                        \
+                               (unsigned char)1 /* GC_T_RAW */,           \
+                               (size_t)(N) + 1u),                         \
+     dup_n_inner((S), (P), (N)))
+#else
+#define gc_alloc_typed(S, T, SZ) gc_alloc_typed_inner((S), (T), (SZ))
+#define alloc_val(S, T)          alloc_val_inner((S), (T))
+#define dup_n(S, P, N)           dup_n_inner((S), (P), (N))
+#endif
 void   gc_major_collect(mino_state_t *S);
 void   gc_minor_collect(mino_state_t *S);
 /* Incremental major state machine. gc_major_begin seeds the mark stack

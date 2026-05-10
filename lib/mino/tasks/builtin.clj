@@ -31,7 +31,7 @@
    "src/runtime/host_threads.c"
    "src/gc/driver.c" "src/gc/roots.c" "src/gc/major.c"
    "src/gc/barrier.c" "src/gc/minor.c"
-   "src/gc/trace.c" "src/runtime/module.c"
+   "src/gc/trace.c" "src/gc/profile.c" "src/runtime/module.c"
    "src/public/gc.c" "src/public/embed.c"
    "src/collections/val.c" "src/collections/vec.c" "src/collections/map.c"
    "src/collections/chunk.c"
@@ -280,6 +280,23 @@
   []
   (build-sanitized "tsan" "mino_tsan"
                    ["-fsanitize=thread"]))
+
+(defn build-alloc-profile
+  "Build mino_prof with -DMINO_ALLOC_PROFILE=1. Wraps every gc_alloc_typed
+   call with a per-callsite recorder; expose the data with the
+   alloc-profile-dump! / alloc-profile-reset! primitives."
+  []
+  (gen-core-header)
+  (let [args (into [cc]
+                   (concat cflags
+                           ["-DMINO_ALLOC_PROFILE=1"]
+                           ldflags
+                           ["-o" "mino_prof"]
+                           all-srcs
+                           libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println (str "  alloc-profile build -> mino_prof"))))
 
 (defn test-suite
   "Run the test suite."

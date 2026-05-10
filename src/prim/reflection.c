@@ -1125,6 +1125,54 @@ mino_val_t *prim_gc_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_nil(S);
 }
 
+/* (alloc-profile-enabled?) -- compile-time flag. */
+mino_val_t *prim_alloc_profile_enabled_p(mino_state_t *S,
+                                         mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "alloc-profile-enabled? takes no arguments");
+    }
+    return mino_alloc_profile_enabled() ? mino_true(S) : mino_false(S);
+}
+
+/* (alloc-profile-reset!) -- zero the per-callsite counters. */
+mino_val_t *prim_alloc_profile_reset_bang(mino_state_t *S,
+                                          mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "alloc-profile-reset! takes no arguments");
+    }
+    mino_alloc_profile_reset(S);
+    return mino_nil(S);
+}
+
+/* (alloc-profile-dump! n) -- dump top n callsites to stderr. n=0 means
+ * all sites. Returns nil. */
+mino_val_t *prim_alloc_profile_dump_bang(mino_state_t *S,
+                                         mino_val_t *args, mino_env_t *env)
+{
+    long long n = 30;
+    (void)env;
+    if (mino_is_cons(args)) {
+        mino_val_t *first = args->as.cons.car;
+        if (first == NULL || first->type != MINO_INT) {
+            return prim_throw_classified(S, "eval/arg", "MAR002",
+                                         "alloc-profile-dump! takes an integer count");
+        }
+        n = first->as.i;
+        if (mino_is_cons(args->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                                         "alloc-profile-dump! takes at most one argument");
+        }
+    }
+    mino_alloc_profile_dump_top(S, stderr, (int)n);
+    return mino_nil(S);
+}
+
 const mino_prim_def k_prims_reflection[] = {
     {"type",      prim_type,
      "Returns a keyword indicating the type of the value."},
@@ -1236,6 +1284,12 @@ const mino_prim_def k_prims_reflection[] = {
      "Returns true if x is a UUID value."},
     {"regex?",     prim_regex_p,
      "Returns true if x is a regex value."},
+    {"alloc-profile-enabled?", prim_alloc_profile_enabled_p,
+     "Returns true if this binary was built with -DMINO_ALLOC_PROFILE=1."},
+    {"alloc-profile-reset!",   prim_alloc_profile_reset_bang,
+     "Zero the per-callsite allocation counters. No-op in non-profile builds."},
+    {"alloc-profile-dump!",    prim_alloc_profile_dump_bang,
+     "Dump the top-N allocation call sites to stderr. Defaults to 30; pass 0 for all."},
 };
 
 const size_t k_prims_reflection_count =

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Performance Push
+
+A non-JIT performance cycle. Each step is a self-contained commit;
+the user-visible surface stays put while the eval floor and
+allocation shape come down.
+
+- **Allocation profiler.** New compile-time-gated profiler
+  (`-DMINO_ALLOC_PROFILE=1`, exposed as `./mino task
+  build-alloc-profile` -> `./mino_prof`) wraps every
+  `gc_alloc_typed` call with a per-callsite recorder keyed on
+  `(__FILE__, __LINE__, tag)`. Three new primitives drive it from
+  mino: `alloc-profile-enabled?`, `alloc-profile-reset!`,
+  `alloc-profile-dump!`. Macro-based wrapper keeps the default
+  release build identical; profile builds carry one extra hash and
+  two field updates per allocation.
+
 ## v0.103.0 — Worker-List Lock Split
 
 Closes the only open NEEDS-DESIGN finding from the v0.102.0

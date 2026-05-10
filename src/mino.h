@@ -1561,6 +1561,29 @@ typedef struct {
 void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out);
 
 /* ------------------------------------------------------------------------- */
+/* Allocation profiler (opt-in, compile-time gated)                          */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Reports 1 when the binary was built with -DMINO_ALLOC_PROFILE=1, else 0.
+ * The recording paths and dump output are only meaningful in profile builds.
+ */
+int  mino_alloc_profile_enabled(void);
+
+/*
+ * Reset the profile counters to zero. No-op in non-profile builds.
+ */
+void mino_alloc_profile_reset(mino_state_t *S);
+
+/*
+ * Dump the top `top_n` call sites by allocation count to `out` (stderr
+ * if NULL). Pass top_n <= 0 to dump every recorded site. Format is a
+ * fixed-width table: rank, count, bytes, tag, file:line. In non-profile
+ * builds emits a single "rebuild with MINO_ALLOC_PROFILE=1" line.
+ */
+void mino_alloc_profile_dump_top(mino_state_t *S, FILE *out, int top_n);
+
+/* ------------------------------------------------------------------------- */
 /* In-process REPL handle                                                    */
 /* ------------------------------------------------------------------------- */
 

@@ -232,7 +232,7 @@ static void gc_oom_throw(mino_state_t *S, const char *msg)
     abort(); /* Class I: no error frame to recover through */
 }
 
-void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
+void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
 {
     gc_hdr_t *h;
     if (S->gc_stress == -1) {
@@ -274,17 +274,17 @@ void *gc_alloc_typed(mino_state_t *S, unsigned char tag, size_t size)
     return (void *)(h + 1);
 }
 
-mino_val_t *alloc_val(mino_state_t *S, mino_type_t type)
+mino_val_t *alloc_val_inner(mino_state_t *S, mino_type_t type)
 {
-    mino_val_t *v = (mino_val_t *)gc_alloc_typed(S, GC_T_VAL, sizeof(*v));
+    mino_val_t *v = (mino_val_t *)gc_alloc_typed_inner(S, GC_T_VAL, sizeof(*v));
     v->type = type;
     v->meta = NULL;
     return v;
 }
 
-char *dup_n(mino_state_t *S, const char *s, size_t len)
+char *dup_n_inner(mino_state_t *S, const char *s, size_t len)
 {
-    char *out = (char *)gc_alloc_typed(S, GC_T_RAW, len + 1);
+    char *out = (char *)gc_alloc_typed_inner(S, GC_T_RAW, len + 1);
     if (len > 0) {
         memcpy(out, s, len);
     }
