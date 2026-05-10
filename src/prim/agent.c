@@ -393,7 +393,17 @@ mino_val_t *prim_set_error_handler_bang(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-error-handler!: first argument must be an agent");
     }
+    /* nil clears. Anything else must be callable so a future action
+     * failure can dispatch through it. Earlier mino stored any value
+     * (e.g. an int) which then failed at dispatch time, far from the
+     * install site. Reject at install. */
     if (fn != NULL && fn->type == MINO_NIL) fn = NULL;
+    if (fn != NULL && fn->type != MINO_FN
+        && fn->type != MINO_PRIM
+        && fn->type != MINO_MACRO) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "set-error-handler!: handler must be a fn or nil");
+    }
     gc_write_barrier(S, agent, agent->as.agent.err_handler, fn);
     agent->as.agent.err_handler = fn;
     return mino_nil(S);

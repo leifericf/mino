@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Validate `set-error-handler!` Handler Argument
+
+`set-error-handler!` previously stored any value -- so
+`(set-error-handler! a 5)` quietly put `5` in the slot, only to
+fail far away when an action threw and the dispatcher tried to
+call it. Reject anything that isn't a fn/prim/macro (or nil to
+clear) at install time so the typo surfaces immediately.
+
 ### Validate `set-error-mode!` Argument
 
 `set-error-mode!` accepted any value silently: a non-keyword like

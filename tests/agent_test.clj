@@ -187,6 +187,19 @@
     (is (nil? (agent-error a)))
     (is (= 1 @a))))
 
+(deftest set-error-handler-validates-fn
+  ;; set-error-handler! used to silently store any value -- (set-error-handler! a 5)
+  ;; would put 5 in the slot, which then crashed on the call site
+  ;; when an action failed. Throw at install time. nil clears.
+  (let [a (agent 0)]
+    (is (thrown? (set-error-handler! a 5)))
+    (is (thrown? (set-error-handler! a "not-a-fn")))
+    (is (thrown? (set-error-handler! a :keyword)))
+    (set-error-handler! a (fn [_ _] :ok))
+    (is (some? (error-handler a)))
+    (set-error-handler! a nil)
+    (is (nil? (error-handler a)))))
+
 (deftest set-error-mode-validates-arg
   ;; Only :fail and :continue are accepted. mino used to either
   ;; silently re-route an invalid keyword to :fail (e.g. :silent
