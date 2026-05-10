@@ -393,8 +393,10 @@ struct mino_val {
             mino_val_t *err_handler;  /* on-error callback (fn agent ex)
                                        * or NULL */
             int         err_mode;     /* 0=:fail, 1=:continue */
-            void       *queue;        /* opaque agent_queue_t * (heap-
-                                       * allocated; freed via finalizer) */
+            int         in_flight;    /* count of actions queued + running
+                                       * for this agent. Read/write under
+                                       * S->agent_mu. await waiters block
+                                       * on S->agent_cv until this hits 0. */
             uint64_t    agent_id;     /* monotonic identity at construction
                                        * (mirrors tx_ref.ref_id) so the
                                        * print form distinguishes two

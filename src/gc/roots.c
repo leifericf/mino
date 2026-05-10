@@ -427,6 +427,25 @@ static void gc_mark_record_types(mino_state_t *S)
     }
 }
 
+/* Pin queued agent action nodes. The nodes themselves are malloc'd
+ * (not GC values), but they hold mino_val_t pointers (agent, fn,
+ * extra args, dyn snapshot, env) that must stay live until the
+ * worker thread pops and applies the action. The worker holds
+ * state_lock while running each action, so concurrent mutation of
+ * the queue is impossible during a major GC (which suspends all
+ * workers via the safepoint mechanism). */
+static void gc_mark_agent_runq(mino_state_t *S)
+{
+    agent_action_node_t *n;
+    for (n = S->agent_run_head; n != NULL; n = n->next) {
+        gc_mark_interior(S, n->agent);
+        gc_mark_interior(S, n->fn);
+        gc_mark_interior(S, n->extra);
+        gc_mark_interior(S, n->dyn_snap);
+        gc_mark_interior(S, (mino_val_t *)n->env);
+    }
+}
+
 void gc_mark_roots(mino_state_t *S)
 {
     gc_mark_envs_and_interns(S);
@@ -435,6 +454,7 @@ void gc_mark_roots(mino_state_t *S)
     gc_mark_runtime_globals(S);
     gc_mark_async_roots(S);
     gc_mark_record_types(S);
+    gc_mark_agent_runq(S);
 }
 
 /*

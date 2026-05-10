@@ -112,6 +112,11 @@ static void state_init(mino_state_t *S)
     S->stm_next_ref_id     = 0;
     S->agent_next_id       = 0;
     S->agents_shutdown     = 0;
+    S->agent_run_head      = NULL;
+    S->agent_run_tail      = NULL;
+    S->agent_worker_started = 0;
+    S->agent_worker_joined = 0;
+    S->agent_mu_inited     = 0;
     mino_state_lock_init(S);
     gc_evt_init(S);
 }
@@ -372,6 +377,35 @@ void mino_state_free(mino_state_t *S)
     state_free_ns_aliases(S);
     state_free_ns_env_table(S);
     free(S->var_registry);
+    /* Drain any leftover agent run-queue nodes. shutdown-agents
+     * (or a successful host_threads quiesce above) normally empties
+     * this; if the embedder tore down without calling shutdown-agents,
+     * the worker has been joined and the remaining nodes are stale.
+     * They reference GC-owned mino_val_t pointers, but we're past
+     * heap teardown ordering -- the heap is freed last, so we just
+     * release the malloc-owned shells. */
+    {
+        agent_action_node_t *n = S->agent_run_head;
+        while (n != NULL) {
+            agent_action_node_t *next = n->next;
+            free(n);
+            n = next;
+        }
+        S->agent_run_head = NULL;
+        S->agent_run_tail = NULL;
+    }
+#if defined(_WIN32) && defined(_MSC_VER)
+    if (S->agent_mu_inited) {
+        DeleteCriticalSection(&S->agent_mu);
+        S->agent_mu_inited = 0;
+    }
+#else
+    if (S->agent_mu_inited) {
+        pthread_cond_destroy(&S->agent_cv);
+        pthread_mutex_destroy(&S->agent_mu);
+        S->agent_mu_inited = 0;
+    }
+#endif
     state_free_host_types(S);
     state_free_module_cache(S);
     state_free_bundled_libs(S);

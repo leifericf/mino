@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+Agent execution model removes the synchronous-on-the-calling-thread
+fallback. Per-state agent worker thread + run queue land in this
+cycle.
+
+- Internal: `agent_action_node_t` data structure for the run-queue
+  of `(agent fn extra)` tuples; per-agent `in_flight` counter;
+  state-level `agent_run_head`/`agent_run_tail`, mutex, condvar,
+  worker thread fields. Lifecycle hooks in `state_init` /
+  `mino_state_free`. GC root-marking walks the runq so queued
+  actions keep their fn / args / dyn snapshot live until the
+  worker pops them. No behavior change yet -- the queue is
+  inert until the worker is wired up.
+
 ## v0.101.1 — STM and agent hardening pass
 
 Concentrated correctness, consistency, and safety pass over the

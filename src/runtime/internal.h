@@ -335,6 +335,22 @@ mino_thread_ctx_t *mino_tls_ctx;
 struct mino_thread_pool;
 
 /* ------------------------------------------------------------------------- */
+/* Agent run-queue node                                                      */
+/* ------------------------------------------------------------------------- */
+
+/* One queued action targeting a specific agent. Lives in the malloc
+ * heap (not GC). The mino_val_t pointers below are GC roots reached
+ * via gc_mark_agent_runq during root marking. */
+typedef struct agent_action_node {
+    mino_val_t                *agent;     /* MINO_AGENT target */
+    mino_val_t                *fn;        /* action fn */
+    mino_val_t                *extra;     /* extra arg list (nil/cons) */
+    mino_val_t                *dyn_snap;  /* dyn-binding snapshot at send */
+    mino_env_t                *env;       /* env captured at send time */
+    struct agent_action_node  *next;
+} agent_action_node_t;
+
+/* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */
 
@@ -769,12 +785,54 @@ struct mino_state {
     uint64_t        agent_next_id;
 
     /* Flipped to 1 by (shutdown-agents). After shutdown, every send
-     * / send-off throws MST008 instead of running its action --
-     * matches JVM canon's "after shutdown agents stop accepting
-     * actions." mino's sync MVP has no thread pool to actually
-     * stop, but the state flag still gives embedders a clean way
-     * to seal the agent surface during teardown. */
+     * / send-off throws MST008 instead of running its action; the
+     * worker drains the remaining queued actions and then exits.
+     * Idempotent: calling twice is a no-op. */
     int             agents_shutdown;
+
+    /* Per-state agent worker thread + run queue.
+     *
+     * One worker thread serves all agents in this state. The worker
+     * counts against thread_limit, so a host that never grants threads
+     * (default thread_limit == 1) cannot use agents -- send/send-off
+     * throw MTH001 in that case, the same shape future/promise/thread
+     * already use. Standalone `./mino` raises thread_limit to cpu_count
+     * after install_all so the standalone REPL works out of the box.
+     *
+     * The worker holds state_lock for the duration of each action's
+     * eval. Per-state eval-lock serialization means parallelism across
+     * agents within one state isn't a goal here; the worker exists to
+     * decouple send (returns immediately) from action execution and to
+     * give await meaningful blocking semantics. mino's eval lock means
+     * single-action-per-state regardless of pool size; Phase 2 may add
+     * a send vs send-off split for IO-bound actions that release the
+     * lock during blocking calls.
+     *
+     * agent_run_head / agent_run_tail form a singly-linked FIFO of
+     * (agent, fn, extra, dyn_snap) tuples. agent_mu serializes access
+     * to the queue and to per-agent in_flight counters. agent_cv is
+     * shared by the worker (waiting for work) and by await callers
+     * (waiting for an agent's in_flight to reach zero); broadcasts
+     * happen on enqueue and after each action completes.
+     *
+     * The worker is lazy-spawned on first send/send-off, and joined
+     * by shutdown-agents. The queue lives entirely outside the GC
+     * heap (malloc-owned nodes); GC tracing reaches the held
+     * mino_val_t pointers via a per-state walk in gc_mark_roots. */
+    agent_action_node_t *agent_run_head;
+    agent_action_node_t *agent_run_tail;
+#if defined(_WIN32) && defined(_MSC_VER)
+    CRITICAL_SECTION     agent_mu;
+    CONDITION_VARIABLE   agent_cv;
+    HANDLE               agent_worker;
+#else
+    pthread_mutex_t      agent_mu;
+    pthread_cond_t       agent_cv;
+    pthread_t            agent_worker;
+#endif
+    int                  agent_worker_started;
+    int                  agent_worker_joined;
+    int                  agent_mu_inited;
 
     /* === Async scheduler and timers ==================================== */
 

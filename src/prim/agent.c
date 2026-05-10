@@ -49,7 +49,7 @@ mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
     v->as.agent.err          = NULL;
     v->as.agent.err_handler  = NULL;
     v->as.agent.err_mode     = 0;  /* :fail */
-    v->as.agent.queue        = NULL;  /* unused in sync MVP */
+    v->as.agent.in_flight    = 0;
     v->as.agent.agent_id     = ++S->agent_next_id;
     v->as.agent.owning_state = S;
     return v;
