@@ -375,14 +375,38 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
              * filled on first miss with (cached, gen=S->ic_gen) and
              * re-read while the gen still matches. Bumps to ic_gen
              * (def / ns-unmap / var_set_root / var_unintern) invalidate
-             * naturally. The cache is bypassed when dynamic bindings
-             * are active so that `(binding [*x* ...] ...)` doesn't
-             * mask the dyn-shadowed value with a stale var root. */
+             * naturally. With dynamic bindings active the cache is
+             * skipped on miss so `(binding [*x* ...] ...)` doesn't
+             * mask the dyn-shadowed value with a stale var root.
+             *
+             * Closure free vars resolve through the env chain at
+             * runtime, but the bc record (and thus the IC slot array)
+             * is shared across all closures built from one template.
+             * Two closures of `(fn [i] (fn [] i))` therefore share the
+             * IC slot for `i`, even though each carries its own captured
+             * env where `i` is bound to a different value. Probe dyn
+             * and then env (matching eval_symbol's order) and use the
+             * found value directly without caching; the cache only
+             * fires for symbols that neither dyn nor env shadow. */
             unsigned a  = A_OF(ins);
             unsigned bx = Bx_OF(ins);
             if ((int)bx >= bc->ic_slots_len) { ok = 0; goto bc_done; }
             mino_bc_ic_slot_t *slot = &bc->ic_slots[bx];
             int dyn_active = (ctx->dyn_stack != NULL);
+            if (dyn_active) {
+                mino_val_t *dyn_v = dyn_lookup(S, slot->sym->as.s.data);
+                if (dyn_v != NULL) {
+                    regs[a] = dyn_v;
+                    break;
+                }
+            }
+            if (env != NULL) {
+                mino_val_t *env_v = mino_env_get_sym(env, slot->sym);
+                if (env_v != NULL) {
+                    regs[a] = env_v;
+                    break;
+                }
+            }
             if (!dyn_active
                 && slot->cached != NULL
                 && slot->gen == S->ic_gen) {
