@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.119.0 — Pointer-Tagged Value Representation: Infrastructure
+
+Lands the infrastructure that subsequent tags need to flip the
+boxed-int representation to inline-tagged. Still no behavioural
+change: every value continues to flow through the boxed `mino_val_t`
+cell path; `mino_int(S, n)` keeps returning a small-int cache cell
+or a freshly-allocated boxed cell. What this tag installs is the
+machinery so the constructor flip at the next tag can land without
+crashing the GC and without requiring a 200-callsite rewrite in the
+same commit.
+
+Three additions in `src/runtime/internal.h`:
+
+- Unified inline accessors `mino_val_int_p(v)` and
+  `mino_val_int_get(v)`. Both handle the inline-tagged form and the
+  boxed `MINO_INT` cell. Read sites that migrate to these helpers
+  stay correct under either representation, so the migration can
+  proceed one file at a time.
+- Two counter fields on `mino_state_t`: `bc_int_make_count` and
+  `bc_int_alloc_avoided`. The first bumps on every call to
+  `mino_int(S, n)`. The second stays at zero this tag and starts
+  incrementing at v0.120.0 when the constructor flips to return
+  tagged values for the 61-bit range.
+
+In `src/gc/driver.c`:
+
+- `gc_mark_child_push` and `gc_mark_interior_push` now skip any
+  pointer with non-zero low three bits. A heap pointer is always
+  8-byte aligned, so a non-zero tag means an inline-tagged value
+  that has no header to mark. Both guards are no-ops today; they
+  exist so the constructor flip at v0.120.0 does not bring the GC
+  down on the first minor collection.
+- `gc_alloc_typed_inner` and `alloc_val_inner` assert
+  `MINO_ASSERT_ALIGNED(p)` at return. Active under assertions,
+  no-op under `-DNDEBUG`. This is the alignment audit gate called
+  for in the cycle plan: a single misaligned alloc would silently
+  corrupt the tag scheme.
+
+Scope note: the cycle plan originally estimated v0.119.0 as a single
+tag that flipped the constructor and rewrote the ~50–80 affected
+call sites. A re-grep of the codebase found ~129 reads of `v->as.i`
+and ~70 `*->type == MINO_INT` predicates, plus scattered
+`switch (v->type)` patterns that also need gating on
+`MINO_IS_PTR(v)` before deref. Splitting infrastructure (this tag)
+from migration (v0.120.0) keeps each commit reviewable and ASan-
+verifiable, and matches the per-tag ASan/UBSan gates the plan
+requires.
+
+Release / ASan / UBSan continue to pass; 1557 tests / 7279
+assertions green on all three.
+
 ## v0.118.0 — Pointer-Tagged Value Representation: Layout Contract
 
 Header-only change that lands the layout contract for the

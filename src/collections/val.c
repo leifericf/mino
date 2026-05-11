@@ -35,6 +35,7 @@ mino_val_t *mino_empty_list(mino_state_t *S)
 mino_val_t *mino_int(mino_state_t *S, long long n)
 {
     mino_val_t *v;
+    S->bc_int_make_count++;
     if (n >= MINO_SMALL_INT_LO && n <= MINO_SMALL_INT_HI) {
         return &S->small_ints[n - MINO_SMALL_INT_LO];
     }

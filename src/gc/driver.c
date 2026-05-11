@@ -272,12 +272,21 @@ void *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size)
     if (h == NULL) {
         gc_oom_throw(S, "out of memory");
     }
-    return (void *)(h + 1);
+    {
+        void *payload = (void *)(h + 1);
+        /* Every heap payload must be 8-byte aligned: the pointer-tag
+         * scheme relies on tag-bit-zero in the low 3 bits of every
+         * legitimate pointer. A misaligned alloc silently corrupts the
+         * tag and is fatal in production. */
+        MINO_ASSERT_ALIGNED(payload);
+        return payload;
+    }
 }
 
 mino_val_t *alloc_val_inner(mino_state_t *S, mino_type_t type)
 {
     mino_val_t *v = (mino_val_t *)gc_alloc_typed_inner(S, GC_T_VAL, sizeof(*v));
+    MINO_ASSERT_ALIGNED(v);
     v->type = type;
     v->meta = NULL;
     return v;
@@ -361,6 +370,11 @@ static void gc_mark_interior_push(mino_state_t *S, const void *p)
 {
     gc_hdr_t *h;
     if (p == NULL) return;
+    /* Inline-tagged values (low 3 bits non-zero) are not heap pointers;
+     * the conservative scan can encounter them on the C stack when a
+     * tagged val happens to land in a register/stack slot during a
+     * scan. Skipping them avoids a bogus header lookup. */
+    if (((uintptr_t)p & MINO_TAG_MASK) != 0) return;
     h = gc_find_header_for_ptr(S, p);
     if (h != NULL) gc_mark_push(S, h);
 }
@@ -382,6 +396,11 @@ static void gc_mark_child_push(mino_state_t *S, const void *p)
     gc_hdr_t *h;
     uintptr_t u, lo, hi;
     if (p == NULL) return;
+    /* Inline-tagged values (low 3 bits non-zero) hold their payload
+     * directly in the pointer-sized slot; there's no heap cell to
+     * trace. The check has to come before the singleton-range test
+     * because the singleton range straddles aligned addresses. */
+    if (((uintptr_t)p & MINO_TAG_MASK) != 0) return;
     u  = (uintptr_t)p;
     lo = (uintptr_t)S;
     hi = lo + sizeof(*S);

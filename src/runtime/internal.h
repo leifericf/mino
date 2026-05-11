@@ -77,6 +77,23 @@
 #define MINO_ASSERT_ALIGNED(p) \
     assert(((uintptr_t)(p) & MINO_TAG_MASK) == 0)
 
+/* Unified accessors that handle both inline-tagged ints and boxed
+ * MINO_INT cells. mino_int(S, n) returns tagged for values that fit
+ * in MINO_INT_MAX/MIN and boxed otherwise; readers go through these
+ * to stay form-agnostic. The boxed form is only reachable for the
+ * narrow band between MINO_INT_MAX and LLONG_MAX, but readers must
+ * still handle it. */
+static inline int mino_val_int_p(const mino_val_t *v)
+{
+    if (MINO_IS_INT(v)) return 1;
+    return MINO_IS_PTR(v) && v->type == MINO_INT;
+}
+
+static inline long long mino_val_int_get(const mino_val_t *v)
+{
+    return MINO_IS_INT(v) ? MINO_INT_VAL(v) : v->as.i;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Runtime support types                                                     */
 /* ------------------------------------------------------------------------- */
@@ -711,6 +728,15 @@ struct mino_state {
     mino_val_t    **bc_regs;
     size_t          bc_regs_cap;
     size_t          bc_top;
+
+    /* Pointer-tagged int counters: bc_int_make_count counts every call
+     * to mino_int(S, n); bc_int_alloc_avoided counts those that
+     * returned a tagged value instead of allocating a boxed MINO_INT
+     * cell. The ratio quantifies the alloc-avoidance win from the
+     * tagged representation; the absolute numbers fall out for free
+     * in alloc-profile dumps. */
+    size_t          bc_int_make_count;
+    size_t          bc_int_alloc_avoided;
 
     /* Host interop */
     int             interop_enabled;
