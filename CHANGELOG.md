@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.144.6 — Correctness Fixes: BC Closure Capture, Catch Unwind, And Loud Limit Errors
+
+Adversarial whitebox testing of the bytecode VM surfaced four bugs.
+All four ship together because they are independent point fixes
+under the same banner (compile-time invariants the bc dispatcher
+glossed over) and each adds its own regression test.
+
+**1. IC cache poisoned closure free vars.** `OP_GETGLOBAL_CACHED`
+stores its result on a slot that lives on the shared bc record, but
+every closure built from one fn template shares that bc. Caching an
+env-resolved free var (e.g. `i` inside `(fn [i] (fn [] i))`) committed
+closure A's captured value into a slot closure B then read back,
+so `((mk 100))` followed by `((mk 200))` returned `100, 100` instead
+of `100, 200`. The handler now probes dyn then env (matching
+`eval_symbol`'s order) and uses the found value directly without
+writing the slot; the cache only fires for symbols that neither dyn
+nor env shadow.
+
+**2. Dyn frames leaked across catch landings.** A
+`(binding [...] (throw ...))` body inside a `try` had its dyn frame
+still on the stack when the longjmp landed at the catch handler.
+The handler observed the binding's value instead of the surrounding
+root, and the dyn frame stayed live until the enclosing fn returned.
+The bc catch entry now records `dyn_stack` at push and unwinds to
+that anchor on the longjmp branch, mirroring `eval_try`'s
+`saved_dyn` discipline.
+
+**3. Silent NULL on arity mismatch.** A multi-arity bc fn called
+with no matching clause returned NULL with no diagnostic, surfacing
+as "unhandled exception" with no message. Set the same MAR002
+"no matching arity for N args" the tree-walker raises so the cause
+is visible.
+
+**4. Silent NULL when `OP_PUSHCATCH` hit MAX_TRY_DEPTH.** A
+deeply-recursive `(try ... (catch ...))` body would unwind through
+`bc_done` returning NULL when the 64-frame cap was reached. Surface
+MLM002 "try nesting too deep" via `set_eval_diag` so the nearest
+live catch gets a real exception instead of bailing on NULL.
+
 ## v0.144.5 — Correctness Fix: BC Re-Throw Through Nested Try / Finally
 
 Nested `try` blocks where an inner `catch` handler re-throws an
