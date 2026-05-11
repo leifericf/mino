@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.124.0 — GC IC-Marking Audit and Stress Gate
+
+A verification milestone. The IC-marking path in `src/gc/roots.c`
+and every GC-internal `(gc_hdr_t *)` deref site was audited for
+tagged-value safety. The result: every site already routes through
+`gc_mark_interior` (which fast-rejects tagged values at the top via
+`MINO_TAG_MASK`), `gc_mark_child_push` (same guard), or operates on
+a pointer that is heap-only by construction (intern table entries,
+which are always interned symbol/keyword cells; never tagged).
+
+What changed:
+
+- A clarifying tag-safety comment near the IC table walk in
+  `gc_mark_runtime_globals` makes the guarantee explicit at the
+  call site rather than implicit in the helper's body.
+- No other code changes. The audit verified clean.
+
+Gate run at this tag:
+
+- All 11 `~/Code/mino-bench/stress/run_gc_shard*.clj` shards green
+  (≈690 tests / 2 870 assertions in aggregate). These exercise
+  the major-cycle + minor-cycle interleaving under heavy mutation
+  and remset traffic — exactly the surface where a stray
+  tagged-as-pointer deref would corrupt memory silently.
+- ASan + UBSan + the full unit test suite (1 557 / 7 279) all
+  green.
+
+The single-tag work for the next milestone (v0.125.0) is the arith
+fast-lane payload: `OP_ADD_II`, `OP_INC_I`, `OP_DEC_I`,
+`OP_ZERO_INT_P` rewritten to extract tagged ints inline without
+going through `mino_val_int_get`, plus overflow boundary tests at
+`MINO_INT_MAX` / `MINO_INT_MIN` and ±1 around `INT64_MAX` /
+`INT64_MIN`.
+
 ## v0.123.0 — Inline Tags for BOOL, NIL, CHAR
 
 Extends the tag scheme that v0.118.0–v0.122.0 set up for inline-tagged

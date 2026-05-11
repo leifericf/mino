@@ -419,7 +419,12 @@ static void gc_mark_runtime_globals(mino_state_t *S)
     /* Inline call cache: pin the form pointer (keys the slot) and the
      * cached callable. Without this, a freed form could be GC-recycled
      * for an unrelated allocation and the slot would alias to the new
-     * object, producing wrong dispatch. */
+     * object, producing wrong dispatch.
+     *
+     * Tag-safety: gc_mark_interior fast-rejects inline-tagged values
+     * (low three bits non-zero) at the top, so a tagged scalar that
+     * landed in the cache slot is harmless even though forms and
+     * callables in practice are always heap pointers. */
     if (S->ic_table != NULL) {
         size_t ic_i;
         for (ic_i = 0; ic_i < S->ic_cap; ic_i++) {
