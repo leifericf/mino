@@ -216,6 +216,20 @@ typedef struct mino_bc_fn {
                                    * forces env_child + OP_ENV_BIND of params
                                    * at entry, and let scopes bracket their
                                    * bindings with OP_PUSH_ENV / OP_POP_ENV */
+    int              has_folds;   /* 1 iff the compile resolved a
+                                   * literal-arg call against a core
+                                   * pure prim and emitted OP_LOAD_K
+                                   * with the folded result. Soundness
+                                   * tracker: the fold is valid only
+                                   * while the dependent var bindings
+                                   * stay the way they were at fold
+                                   * time, observed via compile_ic_gen
+                                   * below. */
+    unsigned         compile_ic_gen; /* S->ic_gen at end of compile.
+                                      * apply_callable invalidates the
+                                      * bc and reruns the compile if a
+                                      * mismatch is observed at call
+                                      * time AND has_folds is set. */
 } mino_bc_fn_t;
 
 /* Compile / run status. Returned from mino_bc_compile_fn and consulted

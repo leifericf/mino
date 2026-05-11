@@ -321,6 +321,23 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         if (mino_type_of(fn) == MINO_FN && fn->as.fn.bc == NULL) {
             (void)mino_bc_compile_fn(S, fn);
         }
+        /* Stale-fold check. Literal-arg pure-fn fold caches a folded
+         * result in the const pool; if the compiled fn observed any
+         * such fold (has_folds) AND the global IC generation has
+         * bumped since the compile (a `def` / `ns-unmap` / `set!` of
+         * SOME var has fired in between), one of the deps may now
+         * resolve differently. Drop the bc back to NULL so the next
+         * compile observes the current bindings. The recompile fires
+         * lazily on the very next call, so we don't pay the cost on
+         * fns that aren't reached again. */
+        if (mino_type_of(fn) == MINO_FN
+            && fn->as.fn.bc != NULL
+            && fn->as.fn.bc != &mino_bc_declined
+            && fn->as.fn.bc->has_folds
+            && fn->as.fn.bc->compile_ic_gen != S->ic_gen) {
+            fn->as.fn.bc = NULL;
+            (void)mino_bc_compile_fn(S, fn);
+        }
         mino_bc_check_require(S, fn);
         if (mino_type_of(fn) == MINO_FN && MINO_BC_RUNNABLE(fn)) {
             /* argv ABI: walk the cons spine into a stack scratch array.

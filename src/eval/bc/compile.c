@@ -120,6 +120,11 @@ typedef struct compiler {
     int                next_reg;     /* next register to allocate */
     int                n_params;
     int                ok;            /* 0 means decline */
+    int                has_folds;     /* 1 iff any literal pure-fn fold
+                                       * fired during this compile.
+                                       * propagates to bc->has_folds so
+                                       * apply_callable knows to check
+                                       * compile_ic_gen at dispatch. */
     loop_target_t     *loop;          /* innermost loop or NULL */
 } compiler_t;
 
@@ -1337,6 +1342,155 @@ static int compile_operand_inplace(compiler_t *c, mino_val_t *form)
     return r;
 }
 
+/* Pure core prims eligible for literal-arg compile-time fold.
+ *
+ * Soundness contract: the listed prims must be referentially
+ * transparent on the value tier we can prove at compile time --
+ * the args we feed in are self-evaluating literals (int / bool /
+ * float / float32 / string / keyword / char / nil), so the prim
+ * sees exactly the same input here as it would at runtime. Side
+ * effects (I/O, atom mutation, var alter) are out -- listed prims
+ * may allocate values but not observe or change state.
+ *
+ * What this leverages from Clojure: pure core arithmetic / compare
+ * / bitwise / divmod / numeric-predicate prims have a contract
+ * that's both stable across versions and statically known to the
+ * compiler. The homoiconic source form gives us the literal args
+ * before evaluation begins, and immutability guarantees the
+ * folded value's identity stays valid for the bc's lifetime. */
+typedef struct {
+    const char *name;
+    mino_val_t *(*prim)(mino_state_t *, mino_val_t *, mino_env_t *);
+    int min_arity;   /* lower bound; -1 for unrestricted */
+    int max_arity;   /* upper bound; -1 for unrestricted */
+} pure_prim_t;
+
+static const pure_prim_t PURE_PRIMS[] = {
+    {"+",       prim_add,    0, -1},
+    {"-",       prim_sub,    1, -1},
+    {"*",       prim_mul,    0, -1},
+    {"<",       prim_lt,     1, -1},
+    {"<=",      prim_lte,    1, -1},
+    {">",       prim_gt,     1, -1},
+    {">=",      prim_gte,    1, -1},
+    {"=",       prim_eq,     1, -1},
+    {"inc",     prim_inc,    1,  1},
+    {"dec",     prim_dec,    1,  1},
+    {"zero?",   prim_zero_p, 1,  1},
+    {"pos?",    prim_pos_p,  1,  1},
+    {"neg?",    prim_neg_p,  1,  1},
+    {"even?",   prim_even_p, 1,  1},
+    {"odd?",    prim_odd_p,  1,  1},
+    {"mod",     prim_mod,    2,  2},
+    {"quot",    prim_quot,   2,  2},
+    {"rem",     prim_rem,    2,  2},
+    {"bit-and", prim_bit_and, 2, 2},
+    {"bit-or",  prim_bit_or,  2, 2},
+    {"bit-xor", prim_bit_xor, 2, 2},
+    {"bit-not", prim_bit_not, 1, 1},
+    {"bit-shift-left",  prim_bit_shift_left,  2, 2},
+    {"bit-shift-right", prim_bit_shift_right, 2, 2},
+    {"unsigned-bit-shift-right", prim_unsigned_bit_shift_right, 2, 2},
+    {NULL, NULL, 0, 0},
+};
+
+static const pure_prim_t *find_pure_prim(const char *name)
+{
+    for (const pure_prim_t *p = PURE_PRIMS; p->name != NULL; p++) {
+        if (strcmp(p->name, name) == 0) return p;
+    }
+    return NULL;
+}
+
+/* Result of a fold must be representable as a const-pool literal --
+ * a value that can be the target of OP_LOAD_K without re-evaluation.
+ * Numeric values, bools, strings, keywords, chars, and the empty
+ * collections all qualify. Compound runtime values (cons lists,
+ * closures, transients) do not. */
+static int fold_result_constable(mino_val_t *v)
+{
+    if (v == NULL) return 1;
+    switch (mino_type_of(v)) {
+    case MINO_NIL: case MINO_BOOL:
+    case MINO_INT: case MINO_FLOAT: case MINO_FLOAT32:
+    case MINO_STRING: case MINO_KEYWORD: case MINO_CHAR:
+    case MINO_RATIO: case MINO_BIGINT: case MINO_BIGDEC:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* True iff the head call should be folded at compile time. Returns the
+ * matching pure_prim_t entry on a successful resolution; NULL when the
+ * head isn't a recognized pure prim OR the symbol resolves to something
+ * other than the canonical C prim (e.g., the user shadowed `+`). */
+static const pure_prim_t *should_fold_call(compiler_t *c, mino_val_t *head)
+{
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return NULL;
+    if (find_local(c, head->as.s.data) >= 0) return NULL;
+    const pure_prim_t *pp = find_pure_prim(head->as.s.data);
+    if (pp == NULL) return NULL;
+    mino_val_t *hv = probe_head_value(c, head);
+    if (hv == NULL || mino_type_of(hv) != MINO_PRIM) return NULL;
+    if (hv->as.prim.fn != pp->prim) return NULL;
+    return pp;
+}
+
+/* Attempt to fold a (head literal-args...) call. Returns 0 on a
+ * successful fold (LOAD_K already emitted), 1 to decline (no LOAD_K
+ * emitted; caller should fall through to the normal emit path), or
+ * -1 on a hard error (sets c->ok = 0). */
+static int try_fold_call(compiler_t *c, mino_val_t *form, int dst,
+                         const pure_prim_t *pp)
+{
+    int    argc      = 0;
+    mino_val_t *p    = form->as.cons.cdr;
+    while (mino_is_cons(p)) {
+        if (!is_self_evaluating(p->as.cons.car)) return 1;
+        argc++;
+        p = p->as.cons.cdr;
+    }
+    if (pp->min_arity >= 0 && argc < pp->min_arity) return 1;
+    if (pp->max_arity >= 0 && argc > pp->max_arity) return 1;
+
+    /* Rebuild the args list as a fresh cons-spine the prim can walk.
+     * The original cdr is a syntactic cons-list with file/line meta;
+     * the prim only reads the car/cdr chain, so re-consing is the
+     * cleanest way to feed it without disturbing the source. */
+    mino_val_t *args = mino_nil(c->S);
+    mino_val_t *src  = form->as.cons.cdr;
+    /* Walk to count, then build in reverse so mino_cons orders right. */
+    mino_val_t *stack[64];
+    int n = 0;
+    while (mino_is_cons(src) && n < (int)(sizeof(stack)/sizeof(stack[0]))) {
+        stack[n++] = src->as.cons.car;
+        src = src->as.cons.cdr;
+    }
+    if (n != argc) return 1;
+    for (int i = n - 1; i >= 0; i--) {
+        args = mino_cons(c->S, stack[i], args);
+        if (args == NULL) return 1;
+    }
+
+    mino_val_t *folded = pp->prim(c->S, args, c->env);
+    if (folded == NULL) {
+        /* The prim raised at fold time (e.g., division by zero).
+         * Clear the diagnostic and decline -- the runtime path will
+         * re-encounter the error in the right execution context with
+         * the right stack trace. */
+        clear_error(c->S);
+        return 1;
+    }
+    if (!fold_result_constable(folded)) return 1;
+
+    int k = add_const(c, folded);
+    if (k < 0) return -1;
+    emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+    c->has_folds = 1;
+    return 0;
+}
+
 /* Map a binary arith / compare / bitwise / div-class prim name to its
  * BINOP_* subop. Returns -1 when the name isn't one of the speculative
  * fast lanes. */
@@ -1381,6 +1535,26 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     mino_val_t *head = form->as.cons.car;
     if (head_resolves_to_macro(c, head)) { c->ok = 0; return -1; }
+
+    /* Literal-arg pure-fn fold (Clojure semantics: pure prims with
+     * self-evaluating literal args have an answer the compiler can
+     * compute at compile time). If the head resolves to the canonical
+     * C prim for a name in the pure-prims allow list AND every arg is
+     * a self-evaluating literal, run the prim now and emit OP_LOAD_K
+     * with the result. The fold records its dependency on the var-
+     * resolution state via bc->compile_ic_gen (set at end of compile);
+     * any subsequent def / ns-unmap bumps S->ic_gen and forces a
+     * recompile at the next call so a redefined `+` doesn't keep
+     * yielding the stale constant. */
+    {
+        const pure_prim_t *pp = should_fold_call(c, head);
+        if (pp != NULL) {
+            int r = try_fold_call(c, form, dst, pp);
+            if (r == 0)  return 0;
+            if (r < 0)   return -1;
+            /* r == 1: decline -- fall through to normal emit path. */
+        }
+    }
 
     /* Speculative fast lane for the unary and binary arith / compare
      * calls. The head must be the named prim (non-local, non-macro);
@@ -2032,6 +2206,15 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     bc->n_params = clauses[0].n_params;
     bc->has_rest = clauses[0].has_rest;
     bc->n_regs   = c.n_regs;
+    /* Soundness tracker for any literal-arg fold that fired during this
+     * compile (see find_pure_prim / compile_call_impl). apply_callable
+     * compares compile_ic_gen against S->ic_gen on each call entry; a
+     * mismatch means a var was redefined since the fold was computed,
+     * so the cached fold-result might no longer be Clojure-correct. The
+     * mismatch path drops fn->bc back to NULL and the next call
+     * recompiles from source. */
+    bc->has_folds      = c.has_folds;
+    bc->compile_ic_gen = S->ic_gen;
     return MINO_BC_OK;
 
 decline:

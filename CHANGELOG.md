@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.132.0 — Literal-Arg Pure-Fn Fold
+
+When a call's head is a core arithmetic / comparison /
+bitwise / numeric-predicate prim AND every argument is a
+self-evaluating literal, the bytecode compiler now runs the
+prim at compile time and emits the result as an `OP_LOAD_K`
+constant. `(+ 1 2 3)` becomes a one-opcode literal load
+instead of three loads plus a call; `(* 60 60 24)` becomes
+`86400` in the const pool; nested `(some-fn (* 60 60 24))`
+folds the inner call and leaves the outer call to do its
+normal work against the folded literal.
+
+What this leverages from Clojure: the core arithmetic /
+predicate / bitwise prims are **pure** (no side effects,
+deterministic on their inputs) and **stable** (their C
+implementations don't change at runtime). The homoiconic
+source form gives the compiler the literal arguments
+before evaluation starts, and immutability means the
+folded value's identity stays valid for the bc's
+lifetime. Lua / Janet can't do this with the same
+generality -- mutable globals mean an "innocuous" plus
+might have been replaced; mino's var indirection makes
+the dependency observable through `S->ic_gen`.
+
+Soundness: each compiled bc records `compile_ic_gen` at
+the end of compile and `has_folds = 1` if any fold fired.
+`apply_callable` compares `bc->compile_ic_gen` against
+`S->ic_gen` on entry; a mismatch (a `def` / `ns-unmap`
+ran since the compile) drops `fn->as.fn.bc` back to NULL
+so the next call recompiles against the current
+bindings. A user redefining `+` is observed; the folded
+constants get replaced with whatever the new `+` returns.
+
+Folds attempt at the level of `compile_call_impl` -- one
+pass per call form, declining (and clearing the prim's
+error state, if any) on any divergence. The
+existing speculative OP_*_II / OP_*_IK fast lanes still
+fire after a successful fold attempt declines.
+
+Verification: 1 571 tests / 7 353 assertions green on
+release.
+
 ## v0.131.0 — Immediate-Operand Fast Lanes
 
 Five new immediate-operand opcodes -- `OP_ADD_IK`, `OP_SUB_IK`,
