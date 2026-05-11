@@ -26,6 +26,20 @@ promote the bc record between compile and execution. ASan
 reported `heap-use-after-free` at `mino_bc_run`'s `code[pc++]`
 read. Test suite, ASan, UBSan all green after the fix.
 
+This release also adds 25 regression tests covering the K1,
+M3, and L2 work shipped earlier in the cycle:
+`tests/collection_test.clj` gains 10 small-persistent-map
+cases (flatmap basics, cross-threshold growth, shrink to
+flatmap size, meta preservation in both modes, insertion
+order); `tests/destructuring_test.clj` gains 6 tree-walker
+cases for `:strs` / `:syms` map destructure; and
+`tests/hash_compare_test.clj` gains 2 forcing-eq cases for
+lazy-cdr values inside maps plus 7 hash-cache cases (equal-
+implies-equal-hash across vec / map / set, deterministic
+hashing, pointer-eq fast path, populated-hash mismatch does
+NOT falsely short-circuit). Suite is now 1 596 tests / 7 427
+assertions.
+
 ## v0.144.0 — Cached Hash On Immutable Collection Headers
 
 Vectors, maps, and sets gain a `cached_hash` field on their value
