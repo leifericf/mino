@@ -1074,50 +1074,126 @@ static int params_simple_plain(mino_val_t *params, int *out_n, int *out_rest)
     return 1;
 }
 
+/* Compile a single arity clause (params, body) into the current
+ * compile context's code stream, starting at the current code_len.
+ * On success, populates *clause and returns 0; the caller is
+ * responsible for adding the clause to the bc record's clauses
+ * array. Plain-symbol params plus an optional trailing `& rest`. */
+static int compile_clause(compiler_t *c, mino_val_t *params, mino_val_t *body,
+                          mino_bc_clause_t *clause)
+{
+    int n_params = 0;
+    int has_rest = 0;
+    if (!params_simple_plain(params, &n_params, &has_rest)) return -1;
+
+    /* Reset locals/register allocator: each clause has its own bind
+     * map and may reuse register slots from the previous clause. */
+    c->n_locals = 0;
+    int total_param_regs = n_params + (has_rest ? 1 : 0);
+    c->next_reg = total_param_regs;
+    if (total_param_regs > c->n_regs) c->n_regs = total_param_regs;
+
+    for (int i = 0; i < n_params; i++) {
+        mino_val_t *p = vec_nth(params, (size_t)i);
+        if (!bind_local(c, p->as.s.data, i)) return -1;
+    }
+    if (has_rest) {
+        mino_val_t *rest_sym = vec_nth(params,
+            (size_t)(params->as.vec.len - 1));
+        if (!bind_local(c, rest_sym->as.s.data, n_params)) return -1;
+    }
+
+    clause->n_params   = n_params;
+    clause->has_rest   = has_rest;
+    clause->entry_pc   = (int)c->bc->code_len;
+    clause->params_vec = params;
+
+    int ret_reg = alloc_reg(c);
+    if (ret_reg < 0) return -1;
+    if (compile_body(c, body, ret_reg) < 0) return -1;
+    if (!c->ok) return -1;
+    emit_abc(c, OP_RETURN, (unsigned)ret_reg, 0, 0);
+    if (!c->ok) return -1;
+    return 0;
+}
+
 int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
 {
     if (fn == NULL || fn->type != MINO_FN) return MINO_BC_ERROR;
     if (fn->as.fn.bc != NULL) return MINO_BC_OK;  /* already compiled */
 
-    /* Multi-arity fns: params == NULL, body is a clause list. Decline
-     * for Phase 1. */
-    if (fn->as.fn.params == NULL) {
-        fn->as.fn.bc = &mino_bc_declined;
-        return MINO_BC_UNSUPPORTED;
-    }
-    int n_params = 0;
-    int has_rest = 0;
-    if (!params_simple_plain(fn->as.fn.params, &n_params, &has_rest)) {
-        fn->as.fn.bc = &mino_bc_declined;
-        return MINO_BC_UNSUPPORTED;
+    /* Count clauses and walk them out into stack arrays so the rest
+     * of the compile can index by clause without re-walking the cdr
+     * spine. Single-arity (params is the params vector, body is the
+     * body forms) becomes one clause; multi-arity (params == NULL,
+     * body is a (clause clause ...) cons list of (params body...))
+     * becomes N clauses. */
+    int n_clauses;
+    mino_val_t *clause_params_arr[32];
+    mino_val_t *clause_body_arr[32];
+    if (fn->as.fn.params != NULL) {
+        n_clauses = 1;
+        clause_params_arr[0] = fn->as.fn.params;
+        clause_body_arr[0]   = fn->as.fn.body;
+    } else {
+        n_clauses = 0;
+        mino_val_t *cur = fn->as.fn.body;
+        while (mino_is_cons(cur)) {
+            if (n_clauses >= 32) {
+                fn->as.fn.bc = &mino_bc_declined;
+                return MINO_BC_UNSUPPORTED;
+            }
+            mino_val_t *cl = cur->as.cons.car;
+            if (!mino_is_cons(cl)) {
+                fn->as.fn.bc = &mino_bc_declined;
+                return MINO_BC_UNSUPPORTED;
+            }
+            clause_params_arr[n_clauses] = cl->as.cons.car;
+            clause_body_arr[n_clauses]   = cl->as.cons.cdr;
+            n_clauses++;
+            cur = cur->as.cons.cdr;
+        }
+        if (n_clauses == 0) {
+            fn->as.fn.bc = &mino_bc_declined;
+            return MINO_BC_UNSUPPORTED;
+        }
     }
 
     /* Materialize the bc record FIRST and attach to fn so the GC has a
-     * root for the in-progress code/consts buffers throughout the
-     * compile. If compilation declines later, we overwrite
+     * root for the in-progress code/consts/clauses buffers throughout
+     * the compile. If compilation declines later, we overwrite
      * fn->as.fn.bc with the sentinel and the partial buffers fall out
      * of reachability. */
     mino_bc_fn_t *bc = (mino_bc_fn_t *)gc_alloc_typed(
         S, GC_T_RAW, sizeof(*bc));
     if (bc == NULL) { fn->as.fn.bc = &mino_bc_declined; return MINO_BC_UNSUPPORTED; }
-    bc->code       = NULL;
-    bc->code_len   = 0;
-    bc->consts     = NULL;
-    bc->consts_len = 0;
-    /* When there's a rest binding, the runtime stores the collected
-     * overflow list in the slot right after the fixed params, so the
-     * body needs one extra register at entry. */
-    int total_param_regs = n_params + (has_rest ? 1 : 0);
-    bc->n_regs     = total_param_regs;
-    bc->n_params   = n_params;
-    bc->has_rest   = has_rest;
-    bc->captures   = contains_env_capture(fn->as.fn.body);
+    memset(bc, 0, sizeof(*bc));
+    bc->n_clauses = n_clauses;
+    /* clauses array stored as GC_T_RAW since it contains POD data plus
+     * a single pointer field (param_syms) into an already-rooted
+     * vector. The GC trace pushes only the bc record and the params
+     * vectors are reachable through fn->as.fn.params (single arity)
+     * or fn->as.fn.body's clause spine (multi-arity). */
+    mino_bc_clause_t *clauses = (mino_bc_clause_t *)gc_alloc_typed(
+        S, GC_T_RAW, sizeof(*clauses) * (size_t)n_clauses);
+    if (clauses == NULL) { fn->as.fn.bc = &mino_bc_declined; return MINO_BC_UNSUPPORTED; }
+    memset(clauses, 0, sizeof(*clauses) * (size_t)n_clauses);
+    gc_write_barrier(S, bc, NULL, clauses);
+    bc->clauses = clauses;
+    /* captures reflects any clause's body needing env capture. */
+    {
+        int caps = 0;
+        for (int i = 0; i < n_clauses; i++) {
+            if (contains_env_capture(clause_body_arr[i])) { caps = 1; break; }
+        }
+        bc->captures = caps;
+    }
     /* Write barrier: fn may already be OLD (top-level defns survive
      * many minor cycles before the first call triggers compile). The
      * just-allocated bc is YOUNG. Without the barrier, the next minor
      * misses bc and frees it from under the field. */
     gc_write_barrier(S, fn, NULL, bc);
-    fn->as.fn.bc   = bc;
+    fn->as.fn.bc = bc;
 
     compiler_t c;
     memset(&c, 0, sizeof(c));
@@ -1125,39 +1201,23 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     c.env         = fn->as.fn.env;
     c.defining_ns = fn->as.fn.defining_ns;
     c.bc          = bc;
-    c.n_params    = n_params;
-    c.next_reg    = total_param_regs;
-    c.n_regs      = total_param_regs;
     c.ok          = 1;
+    c.n_regs      = 0;
 
-    /* Bind fixed params to registers 0..n_params-1. */
-    for (int i = 0; i < n_params; i++) {
-        mino_val_t *p = vec_nth(fn->as.fn.params, (size_t)i);
-        if (!bind_local(&c, p->as.s.data, i)) goto decline;
-    }
-    /* If rest, the binding name is in the params-vector slot right after
-     * the `&` marker (so at index n_params + 1 in the source vector).
-     * The runtime collects overflow args into a list and writes it to
-     * register n_params, which is where this local points. */
-    if (has_rest) {
-        mino_val_t *rest_sym = vec_nth(fn->as.fn.params,
-            (size_t)(fn->as.fn.params->as.vec.len - 1));
-        if (!bind_local(&c, rest_sym->as.s.data, n_params)) goto decline;
+    for (int i = 0; i < n_clauses; i++) {
+        if (compile_clause(&c, clause_params_arr[i], clause_body_arr[i],
+                           &clauses[i]) < 0) {
+            goto decline;
+        }
     }
 
-    /* Compile body. Result goes into a fresh "ret" register that's
-     * separate from param regs so OP_RETURN's source slot can be
-     * predicted ahead of body emission. */
-    int ret_reg = alloc_reg(&c);
-    if (ret_reg < 0) goto decline;
-    if (compile_body(&c, fn->as.fn.body, ret_reg) < 0) goto decline;
-    if (!c.ok) goto decline;
-
-    /* Final OP_RETURN. */
-    emit_abc(&c, OP_RETURN, (unsigned)ret_reg, 0, 0);
-    if (!c.ok) goto decline;
-
-    bc->n_regs = c.n_regs;
+    /* Mirror the first clause into the top-level n_params/has_rest
+     * fields. Old call sites that look at these directly (the single-
+     * arity fast path in mino_bc_run before clause selection) keep
+     * working unchanged. */
+    bc->n_params = clauses[0].n_params;
+    bc->has_rest = clauses[0].has_rest;
+    bc->n_regs   = c.n_regs;
     return MINO_BC_OK;
 
 decline:

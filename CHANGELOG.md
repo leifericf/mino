@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.113.0 — Bytecode Multi-Arity Dispatch
+
+Multi-arity fns now bc-compile. Each `([params] body...)` clause
+becomes a `mino_bc_clause_t` entry on the compiled record (its
+own `n_params`, `has_rest`, `entry_pc`, and `params_vec`); the
+shared code stream holds every clause's bytecode back-to-back.
+
+At fn entry, the runtime scans the clauses array twice: first
+looking for a fixed-arity match against `argc`, then for a
+variadic clause whose `n_params <= argc`. The matched clause's
+entry pc starts the interpreter loop; the matched params publish
+into the env when the fn captures, alongside any collected rest
+list.
+
+The compile path keeps the single-arity fast path as a degenerate
+one-clause case so nothing about the existing benchmarks regresses.
+Full tree-walker retirement still waits on try/catch, binding,
+and full destructuring; those land alongside the specialization
+work.
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.112.0 — Bytecode Loop/Recur and Lazy-Seq
 
 `(loop [...] body)` compiles into a binding scope with a recur

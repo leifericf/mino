@@ -128,6 +128,22 @@ typedef enum {
  * matches the fn: the GC walks consts as a root via the parent fn's
  * mark pass. code is a GC_T_RAW buffer of uint32_t; consts is a
  * GC_T_PTRARR of mino_val_t pointers. */
+/* One arity clause. Multi-arity fns carry an array of these, one per
+ * (params body...) clause; single-arity fns degenerate to a one-entry
+ * array with entry_pc = 0. The compiler emits each clause's body
+ * sequentially into the shared code stream; the runtime picks the
+ * matching clause at fn entry and copies argv into the first
+ * `n_params` registers (plus a collected rest list when has_rest). */
+typedef struct mino_bc_clause {
+    int          n_params;        /* fixed args this clause accepts */
+    int          has_rest;        /* 1 iff trailing `& rest` binding */
+    int          entry_pc;        /* code offset to start running from */
+    mino_val_t  *params_vec;      /* MINO_VECTOR of param syms (incl. & and
+                                   * the rest sym when has_rest); used by
+                                   * the runtime to env_bind names when the
+                                   * clause's fn captures */
+} mino_bc_clause_t;
+
 typedef struct mino_bc_fn {
     mino_bc_insn_t  *code;        /* instruction stream */
     size_t           code_len;
@@ -139,6 +155,10 @@ typedef struct mino_bc_fn {
                                    * overflow past n_params is collected into
                                    * a list and placed in regs[n_params] at
                                    * entry */
+    int              n_clauses;   /* >= 1; 1 for single-arity, N for multi */
+    mino_bc_clause_t *clauses;    /* n_clauses entries; clauses[0] mirrors
+                                   * n_params / has_rest for the single-
+                                   * arity fast path */
     int              captures;    /* 1 iff body contains inner fn literal --
                                    * forces env_child + OP_ENV_BIND of params
                                    * at entry, and let scopes bracket their

@@ -134,63 +134,71 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
 {
     const mino_bc_fn_t *bc = fn_val->as.fn.bc;
     if (bc == NULL || bc->code == NULL) return NULL;
-    /* Arity guard. With a rest binding the caller may pass any number
-     * of args >= n_params (the overflow becomes the rest list). */
-    if (bc->has_rest) {
-        if (argc < bc->n_params) return NULL;
-    } else {
-        if (argc != bc->n_params) return NULL;
+    if (bc->n_clauses <= 0 || bc->clauses == NULL) return NULL;
+
+    /* Select a clause whose arity matches argc. Prefer fixed-arity
+     * matches over variadic ones (Clojure semantics: the most-specific
+     * clause wins). If two clauses share the same min arity we pick
+     * the first in source order. */
+    const mino_bc_clause_t *match = NULL;
+    for (int i = 0; i < bc->n_clauses; i++) {
+        const mino_bc_clause_t *cl = &bc->clauses[i];
+        if (!cl->has_rest && cl->n_params == argc) { match = cl; break; }
     }
+    if (match == NULL) {
+        for (int i = 0; i < bc->n_clauses; i++) {
+            const mino_bc_clause_t *cl = &bc->clauses[i];
+            if (cl->has_rest && argc >= cl->n_params) { match = cl; break; }
+        }
+    }
+    if (match == NULL) return NULL;
 
     size_t base = bc_push_window(S, bc->n_regs);
     if (base == (size_t)-1) return NULL;
 
-    for (int i = 0; i < bc->n_params; i++) {
+    for (int i = 0; i < match->n_params; i++) {
         S->bc_regs[base + (size_t)i] = argv[i];
     }
     /* Collect overflow args into a list and place it in the slot
      * right after the fixed params. mino_cons walks back-to-front so
      * we get the values in their original order. When argc ==
      * n_params the rest binding is the empty list. */
-    if (bc->has_rest) {
+    if (match->has_rest) {
         mino_val_t *rest = mino_nil(S);
-        for (int i = argc - 1; i >= bc->n_params; i--) {
+        for (int i = argc - 1; i >= match->n_params; i--) {
             rest = mino_cons(S, argv[i], rest);
             if (rest == NULL) { bc_pop_window(S, base); return NULL; }
         }
-        S->bc_regs[base + (size_t)bc->n_params] = rest;
+        S->bc_regs[base + (size_t)match->n_params] = rest;
     }
 
-    /* When the body contains an inner fn literal, extend the lexical
-     * env with a fresh child and publish the params into it. Any
-     * OP_CLOSURE emitted by the body then captures an env that
-     * already has the outer's params (and, via OP_PUSH_ENV, any
-     * let-bindings) visible to the inner fn. Fns without inner fns
-     * skip the env_alloc + n_params hash inserts entirely. */
+    /* When the body contains an inner fn literal or a (lazy-seq ...),
+     * extend the lexical env with a fresh child and publish the
+     * matched clause's params into it. */
     if (bc->captures) {
         env = env_child(S, env);
         if (env == NULL) { bc_pop_window(S, base); return NULL; }
-        for (int i = 0; i < bc->n_params; i++) {
-            mino_val_t *p = vec_nth(fn_val->as.fn.params, (size_t)i);
+        for (int i = 0; i < match->n_params; i++) {
+            mino_val_t *p = vec_nth(match->params_vec, (size_t)i);
             if (p == NULL || p->type != MINO_SYMBOL) {
                 bc_pop_window(S, base);
                 return NULL;
             }
             env_bind_sym(S, env, p, argv[i]);
         }
-        if (bc->has_rest) {
-            mino_val_t *rest_sym = vec_nth(fn_val->as.fn.params,
-                fn_val->as.fn.params->as.vec.len - 1);
+        if (match->has_rest) {
+            mino_val_t *rest_sym = vec_nth(match->params_vec,
+                match->params_vec->as.vec.len - 1);
             if (rest_sym != NULL && rest_sym->type == MINO_SYMBOL) {
                 env_bind_sym(S, env, rest_sym,
-                    S->bc_regs[base + (size_t)bc->n_params]);
+                    S->bc_regs[base + (size_t)match->n_params]);
             }
         }
     }
 
     mino_val_t **regs = S->bc_regs + base;
     const mino_bc_insn_t *code = bc->code;
-    size_t pc = 0;
+    size_t pc = (size_t)match->entry_pc;
     mino_val_t *retval = NULL;
     int ok = 1;
 
