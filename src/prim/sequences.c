@@ -572,6 +572,22 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     handled = 1;
                 }
 #endif
+            } else if (p == prim_sub) {
+#if defined(__GNUC__) || defined(__clang__)
+                if (!__builtin_sub_overflow(ai, bi, &r)) {
+                    acc = mino_int(S, r);
+                    handled = 1;
+                }
+#endif
+            } else if (p == prim_bit_and) {
+                acc = mino_int(S, ai & bi);
+                handled = 1;
+            } else if (p == prim_bit_or) {
+                acc = mino_int(S, ai | bi);
+                handled = 1;
+            } else if (p == prim_bit_xor) {
+                acc = mino_int(S, ai ^ bi);
+                handled = 1;
             }
             if (handled) {
                 seq_iter_next(S, &it);

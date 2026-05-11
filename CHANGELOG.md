@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.138.0 — Broader Int Fast Lane Inside Reduce
+
+`prim_reduce`'s inner loop already shortcuts (`+`, `*`) on
+int+int pairs without allocating the per-step 2-element cons
+spine. This extends the same shortcut to `-`, `bit-and`,
+`bit-or`, and `bit-xor`. Subtraction goes through
+`__builtin_sub_overflow` so the throw-on-overflow semantics stay
+intact; the bitwise ops are total on int+int and need no
+overflow check.
+
+What this leverages from Clojure: `reduce` is the canonical
+folder over any seqable. Once the accumulator and the next
+element are both ints and the function is identified as a known
+pure core prim, we know exactly what the step computes and can
+skip both the cons allocation and the apply_callable dispatch
+for it. The PRIM identity check ensures a user shadow of `+`
+falls through to the slow path automatically.
+
+Verification: 1 571 tests / 7 353 assertions green on release
+and ASan. reduce-with-range stays at the existing reduce_int_range
+fast path (~0 ms for 1M ints).
+
 ## v0.137.0 — Fused Counted-Loop Opcodes
 
 The compiler recognises two common (loop ...) shapes:
