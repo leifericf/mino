@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.144.3 — Build Fix: Drop Local In `mino_current_ctx`
+
+gcc's `-Werror=clobbered` flagged the local `t` in
+`mino_current_ctx`'s inlined body when the inline expansion
+landed in a function with a `setjmp`. The local was a single
+unused-after-assignment cache (`mino_thread_ctx_t *t =
+mino_tls_ctx;` followed by a ternary), so the warning was a
+false positive — but `-Werror` made it fatal anyway. Removed
+the local; the body is now a direct ternary on `mino_tls_ctx`.
+The compiler is free to load the TLS slot once; there is no
+observable change in generated code on either Apple clang or
+gcc 12.
+
 ## v0.144.2 — Build Fix: Mark setjmp-Adjacent Locals `volatile`
 
 GCC's `-Werror=clobbered` flagged three locals in `mino_bc_run`

@@ -1063,8 +1063,7 @@ struct mino_state {
  * is a TLS load + predictable branch. */
 static inline mino_thread_ctx_t *mino_current_ctx(mino_state_t *S)
 {
-    mino_thread_ctx_t *t = mino_tls_ctx;
-    return t != NULL ? t : &S->main_ctx;
+    return mino_tls_ctx != NULL ? mino_tls_ctx : &S->main_ctx;
 }
 
 /* ------------------------------------------------------------------------- */
