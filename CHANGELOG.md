@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.137.0 — Fused Counted-Loop Opcodes
+
+The compiler recognises two common (loop ...) shapes:
+
+    (loop [i 0]     (if (zero? i) <exit> (recur (dec i))))
+    (loop [i 0 j N] (if (zero? j) <exit> (recur (inc i) (dec j))))
+
+and emits a single fused opcode (`OP_LOOP_INT_DEC` /
+`OP_LOOP_INT_DEC_INC`) at the recur target. Each iteration is
+now one decode + one tag-bit check + one (or two) tagged-int
+updates + one back-jump-to-self -- the per-iter ZERO_INT_P,
+JMPIFNOT, DEC_I, INC_I, MOVE, MOVE, JMP cascade collapses to a
+single fetch.
+
+What this leverages from Clojure: `loop` / `recur` is the
+canonical iteration form and its bytecode shape is stable and
+homoiconic. Persistent bindings mean each step depends only on
+the same binding's prior value -- no aliasing between iterations
+-- so the fused step can update the registers in place without
+the temp-register staging the generic recur emission needs to
+avoid clobbering. Integer-overflow semantics are preserved:
+`dec MIN_INT` and `inc MAX_INT` decline the fused step and fall
+back to the boxed-int slow lane so the throw still fires.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. tight-loop-10M: 155 ms -> ~15-18 ms (~9x), well
+under Lua's 72 ms. Other benches steady.
+
 ## v0.136.0 — Drop Redundant Register Zeroing on Push
 
 `bc_push_window` no longer zeroes the new window's slots up

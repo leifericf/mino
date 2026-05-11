@@ -688,6 +688,149 @@ out:
     return -1;
 }
 
+/* Match a single-form body whose head is the named special form. The
+ * (loop [...]) body is a cons-list of expressions; the fused pattern
+ * detector only fires when there's exactly one such expression and
+ * its head is `if`. Returns the (if cond then else?) tail or NULL. */
+static mino_val_t *match_single_form(mino_val_t *body, const char *head)
+{
+    if (!mino_is_cons(body)) return NULL;
+    if (body->as.cons.cdr != NULL && mino_type_of(body->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(body->as.cons.cdr)) return NULL;
+    }
+    mino_val_t *first = body->as.cons.car;
+    if (!mino_is_cons(first)) return NULL;
+    mino_val_t *h = first->as.cons.car;
+    if (h == NULL || mino_type_of(h) != MINO_SYMBOL) return NULL;
+    if (strcmp(h->as.s.data, head) != 0) return NULL;
+    return first;
+}
+
+/* True when `form` is (sym arg) where sym names the given prim head and
+ * arg is a symbol matching `expected_name`. Used to recognise the
+ * (zero? bind), (inc bind), (dec bind) shapes inside a counted-loop
+ * recur form. */
+static int is_unary_call_of_local(mino_val_t *form, const char *head,
+                                  const char *expected_name)
+{
+    if (!mino_is_cons(form)) return 0;
+    mino_val_t *h = form->as.cons.car;
+    if (h == NULL || mino_type_of(h) != MINO_SYMBOL) return 0;
+    if (strcmp(h->as.s.data, head) != 0) return 0;
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) return 0;
+    if (args->as.cons.cdr != NULL && mino_type_of(args->as.cons.cdr) != MINO_NIL) {
+        return 0;
+    }
+    mino_val_t *a = args->as.cons.car;
+    if (a == NULL || mino_type_of(a) != MINO_SYMBOL) return 0;
+    return strcmp(a->as.s.data, expected_name) == 0 ? 1 : 0;
+}
+
+/* Detect (loop [...] (if (zero? bX) <exit> (recur step0 step1 ...)))
+ * where each step is (inc bi) or (dec bi) self-referencing its own
+ * binding and the tested binding is the decremented one. On match,
+ * emit OP_LOOP_INT_DEC[_INC] and compile the exit branch in place of
+ * the normal body. Returns 1 when the fused op was emitted, 0 to
+ * fall through to the generic body compile. -1 propagates an error.
+ *
+ * What this leverages from Clojure: (loop ... (recur ...)) is a
+ * stable, homoiconic recur form -- the compiler sees the exact shape
+ * of the iteration step at compile time. Persistent bindings let the
+ * step's value depend only on the same binding's prior value, never
+ * on an aliased state from a parallel iteration. */
+static int try_compile_counted_loop(compiler_t *c,
+                                    mino_val_t *body,
+                                    mino_val_t *bindings,
+                                    int n_bindings,
+                                    loop_target_t *this_loop,
+                                    int dst, int tail)
+{
+    if (n_bindings < 1 || n_bindings > 2) return 0;
+
+    mino_val_t *if_form = match_single_form(body, "if");
+    if (if_form == NULL) return 0;
+
+    /* (if cond then else?) -- need both branches. */
+    mino_val_t *iargs = if_form->as.cons.cdr;
+    if (!mino_is_cons(iargs)) return 0;
+    mino_val_t *cond_form = iargs->as.cons.car;
+    mino_val_t *r1 = iargs->as.cons.cdr;
+    if (!mino_is_cons(r1)) return 0;
+    mino_val_t *then_form = r1->as.cons.car;
+    mino_val_t *r2 = r1->as.cons.cdr;
+    if (!mino_is_cons(r2)) return 0;
+    mino_val_t *else_form = r2->as.cons.car;
+    if (r2->as.cons.cdr != NULL && mino_type_of(r2->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(r2->as.cons.cdr)) return 0;
+    }
+
+    /* cond must be (zero? bX). */
+    if (!mino_is_cons(cond_form)) return 0;
+    mino_val_t *ch = cond_form->as.cons.car;
+    if (ch == NULL || mino_type_of(ch) != MINO_SYMBOL) return 0;
+    if (strcmp(ch->as.s.data, "zero?") != 0) return 0;
+    mino_val_t *cargs = cond_form->as.cons.cdr;
+    if (!mino_is_cons(cargs)) return 0;
+    mino_val_t *test_sym = cargs->as.cons.car;
+    if (test_sym == NULL || mino_type_of(test_sym) != MINO_SYMBOL) return 0;
+    if (cargs->as.cons.cdr != NULL && mino_type_of(cargs->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(cargs->as.cons.cdr)) return 0;
+    }
+    /* Find which binding the test symbol names. */
+    int test_idx = -1;
+    for (int i = 0; i < n_bindings; i++) {
+        mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
+        if (bn != NULL && mino_type_of(bn) == MINO_SYMBOL
+            && strcmp(bn->as.s.data, test_sym->as.s.data) == 0) {
+            test_idx = i;
+            break;
+        }
+    }
+    if (test_idx < 0) return 0;
+
+    /* else must be (recur step0 step1 ...) with one step per binding. */
+    if (!mino_is_cons(else_form)) return 0;
+    mino_val_t *eh = else_form->as.cons.car;
+    if (eh == NULL || mino_type_of(eh) != MINO_SYMBOL) return 0;
+    if (strcmp(eh->as.s.data, "recur") != 0) return 0;
+    mino_val_t *steps = else_form->as.cons.cdr;
+    for (int i = 0; i < n_bindings; i++) {
+        if (!mino_is_cons(steps)) return 0;
+        mino_val_t *step = steps->as.cons.car;
+        mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
+        if (bn == NULL || mino_type_of(bn) != MINO_SYMBOL) return 0;
+        const char *bname = bn->as.s.data;
+        int is_dec = is_unary_call_of_local(step, "dec", bname);
+        int is_inc = is_unary_call_of_local(step, "inc", bname);
+        if (!is_dec && !is_inc) return 0;
+        if (i == test_idx && !is_dec) return 0;
+        if (i != test_idx && !is_inc) return 0;
+        steps = steps->as.cons.cdr;
+    }
+    if (steps != NULL && mino_type_of(steps) != MINO_NIL) {
+        if (mino_is_cons(steps)) return 0;
+    }
+
+    /* All matched. Emit the fused step op at the recur target, then
+     * compile the exit branch in place. */
+    this_loop->entry_pc = (int)c->bc->code_len;
+    int test_reg = this_loop->bind_regs[test_idx];
+    if (n_bindings == 1) {
+        emit_abc(c, OP_LOOP_INT_DEC, (unsigned)test_reg, 0, 0);
+    } else {
+        int inc_idx = 1 - test_idx;
+        int inc_reg = this_loop->bind_regs[inc_idx];
+        emit_abc(c, OP_LOOP_INT_DEC_INC,
+                 (unsigned)test_reg, (unsigned)inc_reg, 0);
+    }
+    if (!c->ok) return -1;
+    /* When test_reg falls through to 0, control reaches the exit
+     * branch. Compile it in the same dst/tail context as the body. */
+    if (compile_expr(c, then_form, dst, tail) < 0) return -1;
+    return 1;
+}
+
 static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     /* (loop [b1 v1 ...] body) -- like let, but installs a recur target
@@ -752,7 +895,20 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
     this_loop.entry_pc = (int)c->bc->code_len;
     c->loop = &this_loop;
 
-    if (compile_body(c, body, dst, tail) < 0) goto out;
+    /* Fused counted-loop fast path: detects the common
+     *   (loop [i 0]       (if (zero? i) <exit> (recur (dec i))))
+     *   (loop [i 0 j N]   (if (zero? j) <exit> (recur (inc i) (dec j))))
+     * shape and emits a single OP_LOOP_INT_DEC[_INC] at the recur
+     * target. compile_body's generic emission is skipped on match.
+     * On miss, fall through unchanged. */
+    {
+        int fused = try_compile_counted_loop(c, body, bindings, n_bindings,
+                                             &this_loop, dst, tail);
+        if (fused < 0) goto out;
+        if (fused == 0) {
+            if (compile_body(c, body, dst, tail) < 0) goto out;
+        }
+    }
 
     if (pushed_env) emit_abc(c, OP_POP_ENV, 0, 0, 0);
     c->loop     = saved_loop;

@@ -646,6 +646,58 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_LOOP_INT_DEC: {
+            /* Fused counted-loop step (single binding):
+             *   if regs[A] == 0: fall through (exit branch follows).
+             *   else: regs[A]-- and re-fetch (pc-=1).
+             * The compiler emits this only when the loop binding is
+             * known to start as an int and is updated by a (dec ...)
+             * recur; runtime checks are a single tag-bit test plus the
+             * MIN-overflow guard. */
+            unsigned a = A_OF(ins);
+            mino_val_t *v = regs[a];
+            if (v != NULL && MINO_IS_INT(v)) {
+                long long t = MINO_INT_VAL(v);
+                if (t == 0) break;
+                /* dec(MIN_INT) overflows; bail to the unfused exit
+                 * path so the boxed-int slow lane can raise. */
+                if (t == MINO_INT_MIN) { ok = 0; goto bc_done; }
+                regs[a] = MINO_MAKE_INT(t - 1);
+                pc -= 1;
+                break;
+            }
+            /* Non-tagged-int test register: abort with a diagnostic.
+             * The compiler's pattern check made this branch
+             * cold-by-construction. */
+            ok = 0; goto bc_done;
+        }
+
+        case OP_LOOP_INT_DEC_INC: {
+            /* Fused counted-loop step (two bindings):
+             *   if regs[A] == 0: fall through (exit branch follows).
+             *   else: regs[A]-- and regs[B]++ and re-fetch (pc-=1).
+             * Mirrors OP_LOOP_INT_DEC plus an increment on B with a
+             * MAX-overflow guard. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *vt = regs[a];
+            mino_val_t *vi = regs[b];
+            if (vt != NULL && vi != NULL
+                && MINO_IS_INT(vt) && MINO_IS_INT(vi)) {
+                long long t = MINO_INT_VAL(vt);
+                if (t == 0) break;
+                long long i = MINO_INT_VAL(vi);
+                if (t == MINO_INT_MIN || i == MINO_INT_MAX) {
+                    ok = 0; goto bc_done;
+                }
+                regs[a] = MINO_MAKE_INT(t - 1);
+                regs[b] = MINO_MAKE_INT(i + 1);
+                pc -= 1;
+                break;
+            }
+            ok = 0; goto bc_done;
+        }
+
         case OP_ADD_IK:
         case OP_SUB_IK:
         case OP_LT_IK:

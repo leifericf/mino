@@ -97,6 +97,22 @@ typedef enum {
     OP_EQ_IK,            /* "                                              */
     OP_GET_KW_MAP,       /* A=dst, B=map, C=kw                             */
     OP_NTH_VEC,          /* A=dst, B=vec, C=index                          */
+    /* Fused counted-loop opcodes. Emitted at the (loop ...) entry pc
+     * when the body matches a shape the compiler can specialize:
+     *   (loop [i 0] (if (zero? i) <exit> (recur (dec i))))
+     *   (loop [i 0 j N]
+     *     (if (zero? j) <exit> (recur (inc i) (dec j))))
+     * The op IS the loop entry; on each iteration it tests the
+     * decrementing register, decrements (and optionally increments
+     * the other register), and back-jumps to itself with offset -1.
+     * On zero, it falls through to the compiled exit branch. All ops
+     * preserve Clojure-correct semantics: tagged int discipline plus
+     * overflow check on the increment side. The compiler declines to
+     * emit these opcodes if the inputs aren't statically guaranteed to
+     * stay int-typed, so the runtime cost stays one decode + two
+     * tagged-int checks per iteration. */
+    OP_LOOP_INT_DEC,     /* A=test_reg (decremented). One-binding form.  */
+    OP_LOOP_INT_DEC_INC, /* A=test_reg (decremented), B=inc_reg (incremented). */
     /* Lexical-env management for compiled closures. OP_PUSH_ENV and
      * OP_POP_ENV bracket let scopes when the enclosing fn captures
      * (its body contains an inner fn literal); OP_ENV_BIND publishes
