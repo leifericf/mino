@@ -78,6 +78,7 @@ typedef struct local {
 typedef struct compiler {
     mino_state_t      *S;
     mino_env_t        *env;          /* fn's captured env, for macroexpand1 */
+    const char        *defining_ns;  /* fn->as.fn.defining_ns, for ns-env probes */
     mino_bc_fn_t      *bc;           /* attached to fn from the start so the
                                       * GC can find the in-progress code and
                                       * consts buffers through it */
@@ -255,6 +256,55 @@ static int sym_is(const mino_val_t *v, const char *name)
     return strcmp(v->as.s.data, name) == 0;
 }
 
+/* Names of every special form mino's eval recognizes, plus the syntactic
+ * sub-forms that only appear as heads inside their parent (catch,
+ * finally) but would otherwise look like regular calls. Kept in sync
+ * with k_special_forms in src/eval/special_registry.c. */
+static int is_special_form_name(const char *name)
+{
+    /* Recognized by the registry (eval_try_special_form). */
+    if (strcmp(name, "quote") == 0) return 1;
+    if (strcmp(name, "quote*") == 0) return 1;
+    if (strcmp(name, "quasiquote") == 0) return 1;
+    if (strcmp(name, "unquote") == 0) return 1;
+    if (strcmp(name, "unquote-splicing") == 0) return 1;
+    if (strcmp(name, "defmacro") == 0) return 1;
+    if (strcmp(name, "declare") == 0) return 1;
+    if (strcmp(name, "ns") == 0) return 1;
+    if (strcmp(name, "var") == 0) return 1;
+    if (strcmp(name, "def") == 0) return 1;
+    if (strcmp(name, "if") == 0) return 1;
+    if (strcmp(name, "do") == 0) return 1;
+    if (strcmp(name, "let") == 0 || strcmp(name, "let*") == 0) return 1;
+    if (strcmp(name, "fn") == 0 || strcmp(name, "fn*") == 0) return 1;
+    if (strcmp(name, "recur") == 0) return 1;
+    if (strcmp(name, "loop") == 0 || strcmp(name, "loop*") == 0) return 1;
+    if (strcmp(name, "try") == 0) return 1;
+    if (strcmp(name, "binding") == 0) return 1;
+    if (strcmp(name, "lazy-seq") == 0) return 1;
+    if (strcmp(name, "when") == 0) return 1;
+    if (strcmp(name, "and") == 0) return 1;
+    if (strcmp(name, "or") == 0) return 1;
+    /* Sub-forms (only valid inside try) but still not regular calls. */
+    if (strcmp(name, "catch") == 0) return 1;
+    if (strcmp(name, "finally") == 0) return 1;
+    if (strcmp(name, "throw") == 0) return 1;
+    if (strcmp(name, "set!") == 0) return 1;
+    /* Other forms mino dispatches at eval time. defrecord/deftype/
+     * defprotocol/reify/case/cond/new/. are macros expanded before
+     * reaching here, but match the eye -- exclude defensively in case
+     * a future reader inserts them as raw forms. */
+    if (strcmp(name, "defrecord") == 0) return 1;
+    if (strcmp(name, "deftype") == 0) return 1;
+    if (strcmp(name, "defprotocol") == 0) return 1;
+    if (strcmp(name, "reify") == 0) return 1;
+    if (strcmp(name, "case") == 0) return 1;
+    if (strcmp(name, "cond") == 0) return 1;
+    if (strcmp(name, "new") == 0) return 1;
+    if (strcmp(name, ".") == 0) return 1;
+    return 0;
+}
+
 /* Forward declarations. */
 static int compile_expr(compiler_t *c, mino_val_t *form, int dst);
 static int compile_body(compiler_t *c, mino_val_t *body, int dst);
@@ -404,17 +454,144 @@ static int compile_def(compiler_t *c, mino_val_t *form, int dst)
     return 0;
 }
 
+/* Walk the runtime's resolution cascade in probe mode: lexical env, then
+ * the fn's defining-ns env, returning the bound value or NULL. Mirrors
+ * eval_symbol's unqualified path but uses the fn's defining_ns rather
+ * than S->current_ns -- compile happens lazily and S->current_ns at
+ * that time is the caller's, not the fn's.
+ *
+ * For qualified ns/name symbols, walks alias_resolve -> var_find ->
+ * ns_env_lookup the same way eval_qualified_symbol does, scoping the
+ * alias lookup to the fn's defining_ns. */
+static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head)
+{
+    if (head == NULL || head->type != MINO_SYMBOL) return NULL;
+    const char *data = head->as.s.data;
+    size_t      n    = head->as.s.len;
+    const char *slash = (n > 1) ? memchr(data, '/', n) : NULL;
+    mino_state_t *S = c->S;
+    const char *owning = c->defining_ns != NULL ? c->defining_ns : "user";
+
+    if (slash != NULL) {
+        /* Qualified: ns/name. Try literal env binding first (rare:
+         * something like (host/new ...) in lexical scope). */
+        mino_val_t *v = mino_env_get_sym(c->env, head);
+        if (v != NULL) return v;
+
+        char  ns_buf[256];
+        size_t ns_len = (size_t)(slash - data);
+        if (ns_len >= sizeof(ns_buf)) return NULL;
+        memcpy(ns_buf, data, ns_len);
+        ns_buf[ns_len] = '\0';
+        const char *sym_name = slash + 1;
+
+        /* Resolve alias against the fn's defining_ns (the runtime does
+         * the equivalent against S->current_ns, which during dispatch
+         * is the defining_ns). */
+        const char *resolved_ns = ns_buf;
+        for (size_t i = 0; i < S->ns_alias_len; i++) {
+            if (S->ns_aliases[i].owning_ns != NULL
+                && strcmp(S->ns_aliases[i].owning_ns, owning) == 0
+                && strcmp(S->ns_aliases[i].alias, ns_buf) == 0) {
+                resolved_ns = S->ns_aliases[i].full_name;
+                break;
+            }
+        }
+
+        mino_val_t *var = var_find(S, resolved_ns, sym_name);
+        if (var != NULL && var->type == MINO_VAR) {
+            return var->as.var.root;
+        }
+        mino_env_t *target_env = ns_env_lookup(S, resolved_ns);
+        if (target_env != NULL) {
+            env_binding_t *b = env_find_here(target_env, sym_name);
+            if (b != NULL) return b->val;
+        }
+        return NULL;
+    }
+
+    /* Unqualified: lexical -> defining_ns env. */
+    mino_val_t *v = mino_env_get_sym(c->env, head);
+    if (v != NULL) return v;
+    if (c->defining_ns != NULL) {
+        mino_env_t *ns_env = ns_env_lookup(S, c->defining_ns);
+        if (ns_env != NULL) {
+            v = mino_env_get_sym(ns_env, head);
+            if (v != NULL) return v;
+        }
+    }
+    return NULL;
+}
+
+/* Macro-detection probe: does `head` resolve to a MINO_MACRO under the
+ * same cascade the runtime would use at dispatch time? Used to gate
+ * OP_CALL / OP_TAILCALL emission so macros stay on the tree-walker
+ * path (their args are forms, not evaluated values). */
+static int head_resolves_to_macro(compiler_t *c, mino_val_t *head)
+{
+    if (head == NULL || head->type != MINO_SYMBOL) return 0;
+    if (find_local(c, head->as.s.data) >= 0) return 0;
+    mino_val_t *v = probe_head_value(c, head);
+    return v != NULL && v->type == MINO_MACRO;
+}
+
+static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
+{
+    mino_val_t *head = form->as.cons.car;
+    if (head_resolves_to_macro(c, head)) { c->ok = 0; return -1; }
+
+    /* Walk the cdr, counting args while validating each is a cons. */
+    mino_val_t *cur = form->as.cons.cdr;
+    int argc = 0;
+    while (mino_is_cons(cur)) {
+        argc++;
+        cur = cur->as.cons.cdr;
+    }
+    if (cur != NULL && cur->type != MINO_NIL && cur->type != MINO_EMPTY_LIST) {
+        /* Improper list form -- not a regular call. */
+        c->ok = 0; return -1;
+    }
+    if (argc > 0xFF) { c->ok = 0; return -1; }   /* B operand is 8 bits */
+
+    /* Allocate consecutive regs: fn slot then argc arg slots. The OP_CALL
+     * ABI requires args at A+1..A+argc. */
+    int saved_next = c->next_reg;
+    int fn_reg = alloc_reg(c);
+    if (fn_reg < 0) return -1;
+    int arg_base = c->next_reg;
+    for (int i = 0; i < argc; i++) {
+        if (alloc_reg(c) < 0) return -1;
+    }
+
+    /* Compile the head into fn_reg. */
+    if (compile_expr(c, head, fn_reg) < 0) return -1;
+
+    /* Compile each argument into its slot. */
+    cur = form->as.cons.cdr;
+    for (int i = 0; i < argc; i++) {
+        if (compile_expr(c, cur->as.cons.car, arg_base + i) < 0) return -1;
+        cur = cur->as.cons.cdr;
+    }
+
+    if (tail) {
+        /* OP_TAILCALL: A=fn, B=argc. Returns MINO_TAIL_CALL sentinel;
+         * the apply_callable trampoline picks up (fn, args) without
+         * growing the C stack. dst is ignored -- the body's OP_RETURN
+         * is dead code after a tail call. */
+        emit_abc(c, OP_TAILCALL, (unsigned)fn_reg, (unsigned)argc, 0);
+    } else {
+        /* OP_CALL: A=fn, B=argc, C=ret. Result lands at register `dst`. */
+        if (dst > 0xFF) { c->ok = 0; return -1; }
+        emit_abc(c, OP_CALL, (unsigned)fn_reg, (unsigned)argc, (unsigned)dst);
+    }
+
+    c->next_reg = saved_next;
+    return 0;
+}
+
 static int compile_call(compiler_t *c, mino_val_t *form, int dst)
 {
-    /* Phase 1/2: function application stays on the tree-walker.
-     * OP_CALL/OP_TAILCALL are wired into the VM and the trampoline,
-     * but the emitter needs more discrimination -- specifically a
-     * compile-time MACRO check that consults the ns env, not just
-     * the captured lexical env -- before it can safely emit. That
-     * work lands in a subsequent cycle. */
-    (void)form; (void)dst;
-    c->ok = 0;
-    return -1;
+    return compile_call_impl(c, form, dst, 0);
 }
 
 /* ------------------------------------------------------------------- */
@@ -477,24 +654,18 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
     }
 
     /* If the call head resolves to a macro at compile time, decline.
-     * Phase 1 keeps macro-using fns on the tree-walker path; the
-     * compile-time-then-tree-eval boundary is delicate enough that
-     * macros are deferred to a later cycle. */
-    {
-        mino_val_t *head = form->as.cons.car;
-        if (head != NULL && head->type == MINO_SYMBOL
-            && find_local(c, head->as.s.data) < 0) {
-            mino_val_t *hv = mino_env_get_sym(c->env, head);
-            if (hv != NULL && hv->type == MINO_MACRO) {
-                c->ok = 0;
-                return -1;
-            }
-        }
+     * The full resolution cascade (lexical -> defining-ns env, aliases
+     * for qualified heads) is required; a lexical-only check misses
+     * macros that live in the ns env, which is where most macros sit. */
+    if (head_resolves_to_macro(c, form->as.cons.car)) {
+        c->ok = 0;
+        return -1;
     }
 
     mino_val_t *head = form->as.cons.car;
 
-    if (head != NULL && head->type == MINO_SYMBOL) {
+    if (head != NULL && head->type == MINO_SYMBOL
+        && find_local(c, head->as.s.data) < 0) {
         const char *name = head->as.s.data;
         if (strcmp(name, "if") == 0)   return compile_if(c, form, dst);
         if (strcmp(name, "do") == 0)   return compile_do(c, form, dst);
@@ -503,30 +674,10 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
         if (strcmp(name, "quote") == 0) return compile_quote(c, form, dst);
         if (strcmp(name, "def") == 0)   return compile_def(c, form, dst);
 
-        /* Forms we explicitly decline so a missing handler doesn't
-         * silently compile to a regular call (which would fail at
-         * runtime because the special form has no callable binding). */
-        if (sym_is(head, "fn")        || sym_is(head, "fn*")
-            || sym_is(head, "loop")    || sym_is(head, "loop*")
-            || sym_is(head, "recur")
-            || sym_is(head, "try")     || sym_is(head, "catch")
-            || sym_is(head, "finally")
-            || sym_is(head, "throw")
-            || sym_is(head, "lazy-seq")
-            || sym_is(head, "binding")
-            || sym_is(head, "set!")
-            || sym_is(head, "quote*")
-            || sym_is(head, "var")
-            || sym_is(head, "defmacro")
-            || sym_is(head, "defrecord")
-            || sym_is(head, "deftype")
-            || sym_is(head, "defprotocol")
-            || sym_is(head, "reify")
-            || sym_is(head, "case")
-            || sym_is(head, "cond")
-            || sym_is(head, "new")
-            || sym_is(head, "."))
-        {
+        /* Other special forms have no compile-time handler yet; decline
+         * so the tree-walker picks them up rather than emitting a
+         * regular call that would fail at runtime. */
+        if (is_special_form_name(name)) {
             c->ok = 0;
             return -1;
         }
@@ -534,34 +685,19 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
     return compile_call(c, form, dst);
 }
 
-/* Used by Phase-3 compile_body to identify tail-position calls.
- * Currently unused; kept as scaffolding. */
-__attribute__((unused))
+/* True iff `form` is a regular call -- not a special form, not a macro
+ * invocation. Used by compile_body to decide whether the last expr in
+ * a body can be emitted as OP_TAILCALL. */
 static int form_is_simple_call(compiler_t *c, mino_val_t *form)
 {
     if (!mino_is_cons(form)) return 0;
     mino_val_t *head = form->as.cons.car;
     if (head == NULL || head->type != MINO_SYMBOL) return 0;
+    /* A local-bound head means the call is dispatched dynamically;
+     * it cannot be a special form or a macro. */
     if (find_local(c, head->as.s.data) >= 0) return 1;
-    /* Check special forms. */
-    if (sym_is(head, "if") || sym_is(head, "do")
-        || sym_is(head, "let") || sym_is(head, "let*")
-        || sym_is(head, "quote") || sym_is(head, "def")) return 0;
-    if (sym_is(head, "fn") || sym_is(head, "fn*")
-        || sym_is(head, "loop") || sym_is(head, "loop*")
-        || sym_is(head, "recur") || sym_is(head, "try")
-        || sym_is(head, "catch") || sym_is(head, "finally")
-        || sym_is(head, "throw") || sym_is(head, "lazy-seq")
-        || sym_is(head, "binding") || sym_is(head, "set!")
-        || sym_is(head, "quote*") || sym_is(head, "var")
-        || sym_is(head, "defmacro") || sym_is(head, "defrecord")
-        || sym_is(head, "deftype") || sym_is(head, "defprotocol")
-        || sym_is(head, "reify") || sym_is(head, "case")
-        || sym_is(head, "cond") || sym_is(head, "new")
-        || sym_is(head, ".")) return 0;
-    /* Check macro. */
-    mino_val_t *hv = mino_env_get_sym(c->env, head);
-    if (hv != NULL && hv->type == MINO_MACRO) return 0;
+    if (is_special_form_name(head->as.s.data)) return 0;
+    if (head_resolves_to_macro(c, head)) return 0;
     return 1;
 }
 
@@ -580,7 +716,16 @@ static int compile_body(compiler_t *c, mino_val_t *body, int dst)
         mino_val_t *next = body->as.cons.cdr;
         int is_last = !mino_is_cons(next);
         if (is_last) {
-            if (compile_expr(c, expr, dst) < 0) return -1;
+            /* Tail-position simple call -> OP_TAILCALL. The fn-emitted
+             * OP_RETURN after the body is dead code for this path; the
+             * trampoline returns via the MINO_TAIL_CALL sentinel. Non-
+             * simple-call expressions (special forms, locals, literals,
+             * macros that decline) use the normal compile_expr path. */
+            if (form_is_simple_call(c, expr)) {
+                if (compile_call_impl(c, expr, dst, 1) < 0) return -1;
+            } else {
+                if (compile_expr(c, expr, dst) < 0) return -1;
+            }
         } else {
             int t = alloc_reg(c);
             if (t < 0) return -1;
@@ -654,13 +799,14 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
 
     compiler_t c;
     memset(&c, 0, sizeof(c));
-    c.S        = S;
-    c.env      = fn->as.fn.env;
-    c.bc       = bc;
-    c.n_params = n_params;
-    c.next_reg = n_params;
-    c.n_regs   = n_params;
-    c.ok       = 1;
+    c.S           = S;
+    c.env         = fn->as.fn.env;
+    c.defining_ns = fn->as.fn.defining_ns;
+    c.bc          = bc;
+    c.n_params    = n_params;
+    c.next_reg    = n_params;
+    c.n_regs      = n_params;
+    c.ok          = 1;
 
     /* Bind params to registers 0..n_params-1. */
     for (int i = 0; i < n_params; i++) {

@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.109.0 — Bytecode Macro-Aware Emit
+
+The bc compiler emits `OP_CALL` for non-tail regular calls and
+`OP_TAILCALL` for tail-position simple calls. Both emissions are
+gated on a compile-time macro probe that walks the same cascade
+the runtime uses at dispatch: lexical environment first, then
+the fn's defining-namespace env, with full alias resolution for
+qualified `ns/name` heads. The lexical-only check that previously
+gated the emitter missed macros that live in the ns env -- which
+is where most macros sit -- so the emitter declined every call
+shape rather than risk handing evaluated args to a macro. The
+ns-aware probe closes that gap and unblocks bc dispatch for
+ordinary calls.
+
+The probe scopes alias lookup to the fn's defining ns rather
+than `S->current_ns` at compile time, since lazy compile-on-
+first-call runs with the caller's ns active but the runtime
+dispatch then switches to the fn's defining ns. Without that
+scoping, alias resolution would consult the wrong table.
+
+The OP_CALL ABI loads consecutive register slots and hands them
+to `apply_callable` via the same cons-spine argv that the rest
+of the runtime consumes. OP_TAILCALL is emitted only when the
+final expression of a body is a direct call (special forms in
+tail position keep tree-walked behaviour for this cycle).
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.108.0 — Specialization Opcode Reservation
 
 Eleven Phase-4 opcodes are added to the bytecode opcode enum
