@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.141.2 — Fast-Lane Emission Honours User Shadows
+
+The speculative `OP_*_II` / `OP_*_IK` / unary `OP_*_I` opcodes
+and the fused counted-loop pattern detector now gate on a
+canonical-prim identity probe: the head symbol must resolve at
+compile time to the C-level PRIM associated with its name. A
+user shadow -- `(defn + [a b] (* a b))`, `(defn dec [x] ...)`,
+etc. -- now correctly falls through to the regular `OP_CALL`
+path so the shadow's body runs at the call site.
+
+What this leverages from Clojure: vars carry stable identity
+under read/eval. The compile-time probe looks at the var's
+current root; if it isn't the canonical PRIM, the fast-lane
+emission declines and the regular dispatch handles whatever
+the user wrote. `OP_NTH_VEC` and `OP_GET_KW_MAP` are covered
+by the same gate (and `nth` / `get` are now listed in
+`PURE_PRIMS` so the probe recognises them).
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. Direct tests:
+
+    (defn + [a b] (* a b))
+    (+ 2 3)            ;=> 6 (user shadow, not 5)
+
+    (defn dec [x] (str "shadowed: " x))
+    (loop [i 5] (if (zero? i) :done (recur (dec i))))
+    ;=> throws "zero? requires a number" (unfused path runs)
+
+Bench unchanged: the identity probe is a compile-time
+operation, the hot path remains a single decode + step.
+
 ## v0.141.1 — Fused Counted-Loop: Proper Diagnostics on Miss
 
 `OP_LOOP_INT_DEC` and `OP_LOOP_INT_DEC_INC` previously bailed

@@ -799,6 +799,9 @@ out:
     return -1;
 }
 
+/* Forward decl: defined alongside the PURE_PRIMS table further down. */
+static int head_is_canonical_pure_prim(compiler_t *c, mino_val_t *head);
+
 /* Match a single-form body whose head is the named special form. The
  * (loop [...]) body is a cons-list of expressions; the fused pattern
  * detector only fires when there's exactly one such expression and
@@ -817,17 +820,20 @@ static mino_val_t *match_single_form(mino_val_t *body, const char *head)
     return first;
 }
 
-/* True when `form` is (sym arg) where sym names the given prim head and
- * arg is a symbol matching `expected_name`. Used to recognise the
- * (zero? bind), (inc bind), (dec bind) shapes inside a counted-loop
- * recur form. */
-static int is_unary_call_of_local(mino_val_t *form, const char *head,
+/* True when `form` is (sym arg) where sym names the given prim head AND
+ * resolves to the canonical PRIM (no user shadow), and arg is a symbol
+ * matching `expected_name`. Used to recognise the (zero? bind),
+ * (inc bind), (dec bind) shapes inside a counted-loop recur form. The
+ * canonical-prim check is what makes the fused-loop emission sound
+ * against a user `(defn dec [x] ...)` shadow. */
+static int is_unary_call_of_local(compiler_t *c, mino_val_t *form,
+                                  const char *head_name,
                                   const char *expected_name)
 {
     if (!mino_is_cons(form)) return 0;
     mino_val_t *h = form->as.cons.car;
     if (h == NULL || mino_type_of(h) != MINO_SYMBOL) return 0;
-    if (strcmp(h->as.s.data, head) != 0) return 0;
+    if (strcmp(h->as.s.data, head_name) != 0) return 0;
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) return 0;
     if (args->as.cons.cdr != NULL && mino_type_of(args->as.cons.cdr) != MINO_NIL) {
@@ -835,7 +841,8 @@ static int is_unary_call_of_local(mino_val_t *form, const char *head,
     }
     mino_val_t *a = args->as.cons.car;
     if (a == NULL || mino_type_of(a) != MINO_SYMBOL) return 0;
-    return strcmp(a->as.s.data, expected_name) == 0 ? 1 : 0;
+    if (strcmp(a->as.s.data, expected_name) != 0) return 0;
+    return head_is_canonical_pure_prim(c, h);
 }
 
 /* Detect (loop [...] (if (zero? bX) <exit> (recur step0 step1 ...)))
@@ -876,11 +883,13 @@ static int try_compile_counted_loop(compiler_t *c,
         if (mino_is_cons(r2->as.cons.cdr)) return 0;
     }
 
-    /* cond must be (zero? bX). */
+    /* cond must be (zero? bX) where zero? still resolves to the
+     * canonical prim (no user shadow). */
     if (!mino_is_cons(cond_form)) return 0;
     mino_val_t *ch = cond_form->as.cons.car;
     if (ch == NULL || mino_type_of(ch) != MINO_SYMBOL) return 0;
     if (strcmp(ch->as.s.data, "zero?") != 0) return 0;
+    if (!head_is_canonical_pure_prim(c, ch)) return 0;
     mino_val_t *cargs = cond_form->as.cons.cdr;
     if (!mino_is_cons(cargs)) return 0;
     mino_val_t *test_sym = cargs->as.cons.car;
@@ -912,8 +921,8 @@ static int try_compile_counted_loop(compiler_t *c,
         mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
         if (bn == NULL || mino_type_of(bn) != MINO_SYMBOL) return 0;
         const char *bname = bn->as.s.data;
-        int is_dec = is_unary_call_of_local(step, "dec", bname);
-        int is_inc = is_unary_call_of_local(step, "inc", bname);
+        int is_dec = is_unary_call_of_local(c, step, "dec", bname);
+        int is_inc = is_unary_call_of_local(c, step, "inc", bname);
         if (!is_dec && !is_inc) return 0;
         if (i == test_idx && !is_dec) return 0;
         if (i != test_idx && !is_inc) return 0;
@@ -1692,6 +1701,11 @@ static const pure_prim_t PURE_PRIMS[] = {
     {"bit-shift-left",  prim_bit_shift_left,  2, 2},
     {"bit-shift-right", prim_bit_shift_right, 2, 2},
     {"unsigned-bit-shift-right", prim_unsigned_bit_shift_right, 2, 2},
+    /* Collection accessors are pure over immutable collections:
+     * listed so the canonical-prim identity check at the
+     * OP_NTH_VEC / OP_GET_KW_MAP emission sites recognises them. */
+    {"nth",     prim_nth,    2,  3},
+    {"get",     prim_get,    2,  3},
     {NULL, NULL, 0, 0},
 };
 
@@ -1736,6 +1750,24 @@ static const pure_prim_t *should_fold_call(compiler_t *c, mino_val_t *head)
     if (hv == NULL || mino_type_of(hv) != MINO_PRIM) return NULL;
     if (hv->as.prim.fn != pp->prim) return NULL;
     return pp;
+}
+
+/* True iff `head` resolves at compile time to the canonical PRIM for
+ * a name in PURE_PRIMS. Used to gate emission of the speculative
+ * OP_*_II / OP_*_IK / unop fast-lane opcodes: a user-defined shadow
+ * (e.g., (defn + [a b] ...)) must NOT pick up the C-prim semantics
+ * at the fast-lane sites. Returns 0 for unknown names (caller already
+ * filtered) AND for known names whose head resolves to a non-PRIM or
+ * to a different PRIM. */
+static int head_is_canonical_pure_prim(compiler_t *c, mino_val_t *head)
+{
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return 0;
+    if (find_local(c, head->as.s.data) >= 0) return 0;
+    const pure_prim_t *pp = find_pure_prim(head->as.s.data);
+    if (pp == NULL) return 0;
+    mino_val_t *hv = probe_head_value(c, head);
+    if (hv == NULL || mino_type_of(hv) != MINO_PRIM) return 0;
+    return hv->as.prim.fn == pp->prim;
 }
 
 /* Attempt to fold a (head literal-args...) call. Returns 0 on a
@@ -1858,14 +1890,14 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
     }
 
     /* Speculative fast lane for the unary and binary arith / compare
-     * calls. The head must be the named prim (non-local, non-macro);
-     * we emit the per-op specialised opcode directly. Speculation
-     * fires in tail position too: the result is a value, not a tail
-     * call, so writing to dst and falling through to OP_RETURN gives
-     * the same observable behaviour as OP_TAILCALL through the
-     * trampoline -- minus the dispatch overhead. */
+     * calls. The head must be the named prim (non-local, non-macro,
+     * and the var must still point at the canonical C prim -- a user
+     * shadow like `(defn + [a b] ...)` makes head_is_canonical_pure_prim
+     * return false so we fall through to the regular OP_CALL emission
+     * and the shadow runs at runtime). */
     if (head != NULL && mino_type_of(head) == MINO_SYMBOL
-        && find_local(c, head->as.s.data) < 0) {
+        && find_local(c, head->as.s.data) < 0
+        && head_is_canonical_pure_prim(c, head)) {
         int usubop = unop_subop_for_name(head->as.s.data);
         if (usubop >= 0) {
             int argc_check = 0;
