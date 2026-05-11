@@ -66,7 +66,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputs("()", out);
         return;
     case MINO_BOOL:
-        fputs(v->as.b ? "true" : "false", out);
+        fputs(mino_val_bool_get(v) ? "true" : "false", out);
         return;
     case MINO_INT:
         fprintf(out, "%lld", mino_val_int_get(v));
@@ -109,7 +109,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         return;
     }
     case MINO_CHAR: {
-        int cp = v->as.ch;
+        int cp = mino_val_char_get(v);
         switch (cp) {
         case ' ':  fputs("\\space",     out); return;
         case '\n': fputs("\\newline",   out); return;

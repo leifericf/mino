@@ -154,12 +154,12 @@ int mino_args_parse(mino_state_t *S, const char *name, mino_val_t *args,
         }
         case 'b': {
             int *out = va_arg(ap, int *);
-            *out = v->as.b;
+            *out = mino_val_bool_get(v);
             break;
         }
         case 'c': {
             int *out = va_arg(ap, int *);
-            *out = v->as.ch;
+            *out = mino_val_char_get(v);
             break;
         }
         case 'v': case 'V': case 'M': case 'L':

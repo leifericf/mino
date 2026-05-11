@@ -323,8 +323,8 @@ int lazy_is_int_range(const mino_val_t *coll, long long *start_out,
     *step_out     = mino_val_int_get(ctx->as.cons.cdr->as.cons.cdr->as.cons.car);
     *infinite_out = (mino_type_of(ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr
                                   ->as.cons.car) == MINO_BOOL
-                     && ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr
-                       ->as.cons.car->as.b == 1);
+                     && mino_val_bool_get(ctx->as.cons.cdr->as.cons.cdr
+                                          ->as.cons.cdr->as.cons.car) == 1);
     return 1;
 }
 

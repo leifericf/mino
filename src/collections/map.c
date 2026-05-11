@@ -143,7 +143,7 @@ uint32_t hash_val(const mino_val_t *v)
         return fnv_mix(h, 0x15);
     case MINO_BOOL:
         h = fnv_mix(h, 0x02);
-        return fnv_mix(h, (unsigned char)(v->as.b ? 1 : 0));
+        return fnv_mix(h, (unsigned char)(mino_val_bool_get(v) ? 1 : 0));
     case MINO_INT:
         h = fnv_mix(h, 0x03);
         return hash_long_long_bytes(h, mino_val_int_get(v));
@@ -165,7 +165,7 @@ uint32_t hash_val(const mino_val_t *v)
     }
     case MINO_CHAR:
         h = fnv_mix(h, 0x0f);
-        return hash_uint32_bytes(h, (uint32_t)v->as.ch);
+        return hash_uint32_bytes(h, (uint32_t)mino_val_char_get(v));
     case MINO_STRING:
         h = fnv_mix(h, 0x05);
         return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);

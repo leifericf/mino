@@ -10,17 +10,20 @@
 
 mino_val_t *mino_nil(mino_state_t *S)
 {
-    return &S->nil_singleton;
+    (void)S;
+    return MINO_MAKE_NIL;
 }
 
 mino_val_t *mino_true(mino_state_t *S)
 {
-    return &S->true_singleton;
+    (void)S;
+    return MINO_MAKE_BOOL(1);
 }
 
 mino_val_t *mino_false(mino_state_t *S)
 {
-    return &S->false_singleton;
+    (void)S;
+    return MINO_MAKE_BOOL(0);
 }
 
 mino_val_t *mino_empty_list(mino_state_t *S)
@@ -68,9 +71,8 @@ mino_val_t *mino_float32(mino_state_t *S, double f)
 
 mino_val_t *mino_char(mino_state_t *S, int codepoint)
 {
-    mino_val_t *v = alloc_val(S, MINO_CHAR);
-    v->as.ch = codepoint;
-    return v;
+    (void)S;
+    return MINO_MAKE_CHAR(codepoint);
 }
 
 mino_val_t *mino_string_n(mino_state_t *S, const char *s, size_t len)
@@ -565,7 +567,7 @@ int mino_is_truthy(const mino_val_t *v)
         return 0;
     }
     if (mino_type_of(v) == MINO_BOOL) {
-        return v->as.b != 0;
+        return mino_val_bool_get(v) != 0;
     }
     return 1;
 }
@@ -914,14 +916,14 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_EMPTY_LIST:
         return 1;
     case MINO_BOOL:
-        return a->as.b == b->as.b;
+        return mino_val_bool_get(a) == mino_val_bool_get(b);
     case MINO_INT:
         return mino_val_int_get(a) == mino_val_int_get(b);
     case MINO_FLOAT:
     case MINO_FLOAT32:
         return a->as.f == b->as.f;
     case MINO_CHAR:
-        return a->as.ch == b->as.ch;
+        return mino_val_char_get(a) == mino_val_char_get(b);
     case MINO_STRING:
     case MINO_SYMBOL:
     case MINO_KEYWORD:

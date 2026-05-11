@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.123.0 — Inline Tags for BOOL, NIL, CHAR
+
+Extends the tag scheme that v0.118.0–v0.122.0 set up for inline-tagged
+integers to the remaining three reserved tags. After this commit
+`mino_true`, `mino_false`, `mino_nil`, and `mino_char` all return
+inline-encoded values; the `nil_singleton`, `true_singleton`, and
+`false_singleton` fields on `mino_state_t` become dead storage (kept
+in the struct only to avoid a separate ABI break — embedders never
+touched them directly).
+
+New macros in `src/mino.h`:
+
+- `MINO_IS_BOOL(v)`, `MINO_IS_NIL(v)`, `MINO_IS_CHAR(v)` — tag
+  predicates analogous to `MINO_IS_INT(v)`. `MINO_IS_NIL` also
+  matches C `NULL`, mirroring the runtime's "no value" sentinel.
+- `MINO_MAKE_BOOL(b)`, `MINO_MAKE_NIL`, `MINO_MAKE_CHAR(cp)` —
+  inline encoders. Bool stores the truth bit at offset 3; char
+  stores the Unicode codepoint in the upper 61 bits.
+- `MINO_BOOL_VAL(v)`, `MINO_CHAR_VAL(v)` — payload decoders.
+
+`src/runtime/internal.h`:
+
+- `mino_type_of(v)` now dispatches on all 5 tag values, returning
+  the matching `MINO_*` for inline-tagged scalars and falling
+  through to `v->type` for heap pointers. Order: NULL → PTR →
+  INT → BOOL → NIL → CHAR.
+- Adds `mino_val_bool_p` / `mino_val_bool_get` and
+  `mino_val_char_p` / `mino_val_char_get` helpers analogous to the
+  v0.119.0 int helpers; readers go through these to stay
+  form-agnostic.
+
+Migration (≈12 sites for bool, ≈12 for char):
+
+- `src/prim/{async,lazy,numeric,reflection,string}.c`,
+  `src/eval/print.c`, `src/public/embed.c`,
+  `src/collections/{val,map,clone,rbtree}.c` — every `v->as.b`
+  and `v->as.ch` read rewritten to use the unified accessor.
+- `src/runtime/internal.h::mino_is_truthy_inline` — the eval/if
+  hot-path truthiness check is updated; without this every `if`
+  form crashes on tagged BOOL.
+- `src/eval/special_registry.c::eval_and` — its initial
+  `result = &S->true_singleton` becomes `result = mino_true(S)`.
+- `src/collections/val.c` — `mino_nil`, `mino_true`, `mino_false`,
+  `mino_char` are now one-line inline-encode returns; the
+  per-state singletons stay on `mino_state_t` (dead storage) so
+  nothing in the public ABI moves.
+
+Verification: full test suite, ASan, UBSan all green (1557 / 7279).
+Perf impact: small — tagged BOOL/NIL save no allocations
+(singletons already shared one cell per kind); CHAR saves an alloc
+per char construction, visible on char-heavy workloads. The
+allocation-heavy hot lanes for INT continue to dominate the
+measurement signal; the bigger BOOL/NIL/CHAR win is structural
+(cleaner abstraction, no per-state singleton bookkeeping for
+constants).
+
 ## v0.122.0 — Constructor Flip: Inline-Tagged Integers
 
 `mino_int(S, n)` now returns an inline-tagged pointer for every `n`

@@ -138,7 +138,7 @@ static int append_print_chunk(mino_state_t *S, mino_val_t *v,
     } else if (!readably && v != NULL && mino_type_of(v) == MINO_CHAR) {
         /* Non-readable print emits the character itself, not the
          * \name escape form. Encode the codepoint as UTF-8. */
-        int cp = v->as.ch;
+        int cp = mino_val_char_get(v);
         if (cp < 0x80) {
             char_buf[0] = (char)cp;
             slen = 1;

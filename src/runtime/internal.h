@@ -77,23 +77,28 @@
 #define MINO_ASSERT_ALIGNED(p) \
     assert(((uintptr_t)(p) & MINO_TAG_MASK) == 0)
 
-/* Effective type discriminator: returns MINO_INT for inline-tagged
- * ints, MINO_NIL for NULL, otherwise the boxed header type. Use this
- * in switch / type comparisons so the dispatch is form-agnostic and
- * NULL-safe. */
+/* Effective type discriminator: returns the inline-tagged type for
+ * tagged scalars, MINO_NIL for NULL, otherwise the boxed header type.
+ * Use this in switch / type comparisons so the dispatch is
+ * form-agnostic and NULL-safe. */
 static inline mino_type_t mino_type_of(const mino_val_t *v)
 {
+    uintptr_t tag;
     if (v == NULL) return MINO_NIL;
-    if (MINO_IS_INT(v)) return MINO_INT;
-    return v->type;
+    tag = (uintptr_t)v & MINO_TAG_MASK;
+    if (tag == MINO_TAG_PTR) return v->type;
+    if (tag == MINO_TAG_INT) return MINO_INT;
+    if (tag == MINO_TAG_BOOL) return MINO_BOOL;
+    if (tag == MINO_TAG_NIL) return MINO_NIL;
+    if (tag == MINO_TAG_CHAR) return MINO_CHAR;
+    return v->type; /* unreachable: reserved tags */
 }
 
-/* Unified accessors that handle both inline-tagged ints and boxed
- * MINO_INT cells. mino_int(S, n) returns tagged for values that fit
- * in MINO_INT_MAX/MIN and boxed otherwise; readers go through these
- * to stay form-agnostic. The boxed form is only reachable for the
- * narrow band between MINO_INT_MAX and LLONG_MAX, but readers must
- * still handle it. */
+/* Unified accessors that handle both inline-tagged scalars and boxed
+ * cells. The constructors return tagged for in-range / supported
+ * cases; readers go through these helpers to stay form-agnostic. The
+ * boxed form is still reachable for out-of-tagged-range ints, so each
+ * helper handles both forms. */
 static inline int mino_val_int_p(const mino_val_t *v)
 {
     return mino_type_of(v) == MINO_INT;
@@ -102,6 +107,26 @@ static inline int mino_val_int_p(const mino_val_t *v)
 static inline long long mino_val_int_get(const mino_val_t *v)
 {
     return MINO_IS_INT(v) ? MINO_INT_VAL(v) : v->as.i;
+}
+
+static inline int mino_val_bool_p(const mino_val_t *v)
+{
+    return mino_type_of(v) == MINO_BOOL;
+}
+
+static inline int mino_val_bool_get(const mino_val_t *v)
+{
+    return MINO_IS_BOOL(v) ? MINO_BOOL_VAL(v) : v->as.b;
+}
+
+static inline int mino_val_char_p(const mino_val_t *v)
+{
+    return mino_type_of(v) == MINO_CHAR;
+}
+
+static inline int mino_val_char_get(const mino_val_t *v)
+{
+    return MINO_IS_CHAR(v) ? MINO_CHAR_VAL(v) : v->as.ch;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1272,7 +1297,7 @@ static inline int mino_is_truthy_inline(const mino_val_t *v)
 {
     if (v == NULL) return 0;
     if (mino_type_of(v) == MINO_NIL) return 0;
-    if (mino_type_of(v) == MINO_BOOL) return v->as.b != 0;
+    if (mino_type_of(v) == MINO_BOOL) return mino_val_bool_get(v) != 0;
     return 1;
 }
 

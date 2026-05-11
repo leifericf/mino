@@ -99,7 +99,7 @@ static mino_val_t *prim_drain_loop(mino_state_t *S, mino_val_t *args,
 
         result = mino_call(S, done_thunk, NULL, env);
         if (result != NULL && mino_type_of(result) != MINO_NIL &&
-            !(mino_type_of(result) == MINO_BOOL && !result->as.b)) {
+            !(mino_type_of(result) == MINO_BOOL && !mino_val_bool_get(result))) {
             gc_unpin(1);
             return mino_true(S);
         }

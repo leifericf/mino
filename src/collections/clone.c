@@ -36,11 +36,11 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
     switch (mino_type_of(v)) {
     case MINO_NIL:        return mino_nil(dst);
     case MINO_EMPTY_LIST: return mino_empty_list(dst);
-    case MINO_BOOL:       return v->as.b ? mino_true(dst) : mino_false(dst);
+    case MINO_BOOL:       return mino_val_bool_get(v) ? mino_true(dst) : mino_false(dst);
     case MINO_INT:    return mino_int(dst, mino_val_int_get(v));
     case MINO_FLOAT:   return mino_float(dst, v->as.f);
     case MINO_FLOAT32: return mino_float32(dst, v->as.f);
-    case MINO_CHAR:   return mino_char(dst, v->as.ch);
+    case MINO_CHAR:   return mino_char(dst, mino_val_char_get(v));
     case MINO_TRANSIENT:
         /* Transients are identity-based and mutable; cross-state
          * cloning would break aliasing invariants. Fail loudly. */

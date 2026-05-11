@@ -1815,7 +1815,7 @@ static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
     char        buf[160];
     /* (cast \a) -> codepoint: chars don't take the float-bound path. */
     if (v != NULL && mino_type_of(v) == MINO_CHAR) {
-        long long cp = (long long)v->as.ch;
+        long long cp = (long long)mino_val_char_get(v);
         if (cp < lo || cp > hi) {
             snprintf(buf, sizeof(buf), "%s: value out of range", opname);
             return prim_throw_classified(S, "eval/type", "MTY001", buf);
@@ -1878,7 +1878,7 @@ mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     /* (long \a) -> 97: char value yields its Unicode codepoint. */
     if (v != NULL && mino_type_of(v) == MINO_CHAR) {
-        return mino_int(S, (long long)v->as.ch);
+        return mino_int(S, (long long)mino_val_char_get(v));
     }
     if (!extract_integer_for_cast(S, v, &ll, &err)) {
         char buf[160];
@@ -2054,8 +2054,11 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (a_nil)          return mino_int(S, -1);
     if (b_nil)          return mino_int(S,  1);
     if (mino_type_of(a) == MINO_BOOL && mino_type_of(b) == MINO_BOOL) {
-        return mino_int(S, a->as.b < b->as.b ? -1 :
-                           a->as.b > b->as.b ? 1 : 0);
+        {
+            int ab = mino_val_bool_get(a);
+            int bb = mino_val_bool_get(b);
+            return mino_int(S, ab < bb ? -1 : ab > bb ? 1 : 0);
+        }
     }
     if (is_compare_number(a) && is_compare_number(b)) {
         /* Use the full numeric tower coercion so bigints, ratios, and
@@ -2080,7 +2083,7 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
     if (mino_type_of(a) == MINO_CHAR && mino_type_of(b) == MINO_CHAR) {
-        int cmp = a->as.ch - b->as.ch;
+        int cmp = mino_val_char_get(a) - mino_val_char_get(b);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
     {

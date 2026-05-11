@@ -222,7 +222,7 @@ static mino_val_t *eval_when(mino_state_t *S, mino_val_t *form,
 static mino_val_t *eval_and(mino_state_t *S, mino_val_t *form,
                             mino_val_t *args, mino_env_t *env, int tail)
 {
-    mino_val_t *result = &S->true_singleton;
+    mino_val_t *result = mino_true(S);
     (void)form;
     while (mino_is_cons(args)) {
         mino_val_t *rest = args->as.cons.cdr;

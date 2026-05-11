@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 122
+#define MINO_VERSION_MINOR 123
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -273,6 +273,33 @@ struct mino_bc_fn;                               /* compiled-fn record, opaque *
 /* Decode the 61-bit signed payload. Sign-extends via arithmetic right
  * shift (see portability note above). */
 #define MINO_INT_VAL(v) (((long long)(intptr_t)(v)) >> MINO_TAG_BITS)
+
+/* Tag predicates for the remaining singletons / inline scalars. */
+#define MINO_IS_BOOL(v) (MINO_TAG(v) == MINO_TAG_BOOL)
+#define MINO_IS_NIL(v)  ((v) == NULL || MINO_TAG(v) == MINO_TAG_NIL)
+#define MINO_IS_CHAR(v) (MINO_TAG(v) == MINO_TAG_CHAR)
+
+/* Inline-BOOL encoding: one bit at offset 3 carries the truth value.
+ * Two well-known constants exist (true / false); use the predicates
+ * above for tests and MINO_BOOL_VAL to decode. */
+#define MINO_TRUE_PAYLOAD  ((uintptr_t)0x1)
+#define MINO_FALSE_PAYLOAD ((uintptr_t)0x0)
+#define MINO_MAKE_BOOL(b) \
+    ((mino_val_t *)(((b) ? MINO_TRUE_PAYLOAD : MINO_FALSE_PAYLOAD) << MINO_TAG_BITS \
+                    | MINO_TAG_BOOL))
+#define MINO_BOOL_VAL(v) \
+    ((int)(((uintptr_t)(v) >> MINO_TAG_BITS) & 0x1))
+
+/* Inline-NIL encoding: a single constant pointer. Distinct from
+ * C NULL (which is also treated as nil throughout the runtime). */
+#define MINO_MAKE_NIL ((mino_val_t *)MINO_TAG_NIL)
+
+/* Inline-CHAR encoding: payload is the Unicode codepoint (21 bits used,
+ * 61 reserved -- plenty of headroom). */
+#define MINO_MAKE_CHAR(cp) \
+    ((mino_val_t *)(((uintptr_t)(uint32_t)(cp) << MINO_TAG_BITS) | MINO_TAG_CHAR))
+#define MINO_CHAR_VAL(v) \
+    ((int)((uintptr_t)(v) >> MINO_TAG_BITS))
 
 typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);

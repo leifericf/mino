@@ -854,7 +854,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             int  n;
             switch (mino_type_of(a)) {
             case MINO_BOOL:
-                n = snprintf(tmp, sizeof(tmp), "%s", a->as.b ? "true" : "false");
+                n = snprintf(tmp, sizeof(tmp), "%s", mino_val_bool_get(a) ? "true" : "false");
                 break;
             case MINO_INT:
                 n = snprintf(tmp, sizeof(tmp), "%lld", mino_val_int_get(a));
@@ -951,7 +951,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             }
             case MINO_CHAR: {
                 /* str of a char emits the codepoint's UTF-8 encoding. */
-                unsigned cp = (unsigned)a->as.ch;
+                unsigned cp = (unsigned)mino_val_char_get(a);
                 if (cp <= 0x7F) {
                     tmp[0] = (char)cp; n = 1;
                 } else if (cp <= 0x7FF) {

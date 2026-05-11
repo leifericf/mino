@@ -31,7 +31,8 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
         return a->as.f < db ? -1 : a->as.f > db ? 1 : 0;
     }
     if (mino_type_of(a) == MINO_CHAR && mino_type_of(b) == MINO_CHAR) {
-        return a->as.ch < b->as.ch ? -1 : a->as.ch > b->as.ch ? 1 : 0;
+        return mino_val_char_get(a) < mino_val_char_get(b) ? -1
+             : mino_val_char_get(a) > mino_val_char_get(b) ? 1 : 0;
     }
     if (mino_type_of(a) == MINO_STRING && mino_type_of(b) == MINO_STRING) {
         size_t min_len = a->as.s.len < b->as.s.len ? a->as.s.len : b->as.s.len;
