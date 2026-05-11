@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.122.0 — Constructor Flip: Inline-Tagged Integers
+
+`mino_int(S, n)` now returns an inline-tagged pointer for every `n`
+in the 61-bit signed range `[MINO_INT_MIN, MINO_INT_MAX]`. The boxed
+heap allocation that previously happened for every out-of-cache int
+is gone — the value rides in the pointer's spare bits.
+
+The constructor change is six lines:
+
+```c
+mino_val_t *mino_int(mino_state_t *S, long long n)
+{
+    mino_val_t *v;
+    S->bc_int_make_count++;
+    if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
+        S->bc_int_alloc_avoided++;
+        return MINO_MAKE_INT(n);
+    }
+    v = alloc_val(S, MINO_INT);
+    v->as.i = n;
+    return v;
+}
+```
+
+The boxed fallback stays in place for the narrow band between
+`MINO_INT_MAX` (≈1.15e18) and `LLONG_MAX` (≈9.22e18) where the tag
+would lose precision; in that band the value still allocates a cell.
+The small-int cache that v0.121.0 and earlier used is now dead code
+for the in-range case (the tagged form is faster and allocation-
+free) and dropped from the constructor.
+
+v0.118.0 set up the tag scheme, v0.119.0 added the infrastructure
+helpers + GC alignment audit, v0.120.0 migrated every `->type ==` /
+`switch (X->type)` / `X->as.i` site to the `mino_type_of` /
+`mino_val_int_get` helpers, and v0.121.0 closed the remaining
+generic-deref gaps (`X->type` as a function argument, cross-type
+comparisons, the defensive `a->type < 0` check). With all four
+landed, this commit is the six-line payload — and the test suite,
+ASan, and UBSan all stay green with no further changes needed.
+
 ## v0.121.0 — Generic-Deref Audit for Tagged-Int Safety
 
 Closes the remaining audit gaps that v0.120.0's `->type ==` / `->as.i`

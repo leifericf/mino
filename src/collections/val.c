@@ -36,8 +36,12 @@ mino_val_t *mino_int(mino_state_t *S, long long n)
 {
     mino_val_t *v;
     S->bc_int_make_count++;
-    if (n >= MINO_SMALL_INT_LO && n <= MINO_SMALL_INT_HI) {
-        return &S->small_ints[n - MINO_SMALL_INT_LO];
+    /* Inline-tag every int that fits in the 61-bit signed range. The
+     * boxed fallback below stays in place for the narrow band between
+     * MINO_INT_MAX and LLONG_MAX where the tag would lose precision. */
+    if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
+        S->bc_int_alloc_avoided++;
+        return MINO_MAKE_INT(n);
     }
     v = alloc_val(S, MINO_INT);
     v->as.i = n;
