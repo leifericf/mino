@@ -47,7 +47,16 @@ static size_t bc_push_window(mino_state_t *S, int n)
         S->bc_regs_cap = new_cap;
     }
     size_t base = S->bc_top;
-    for (int i = 0; i < n; i++) S->bc_regs[base + (size_t)i] = NULL;
+    /* The window is left uninitialized: bc_pop_window zeroes every
+     * slot before the next push lands on it, and fresh bc_regs growth
+     * paths zero the new tail explicitly above. Skipping the per-slot
+     * NULL loop here trims a hot per-call cost. The GC root walk
+     * (gc_mark_roots) only scans [0, bc_top), and the body's compiler
+     * emits a write to every register it later reads -- there is no
+     * GC point in mino_bc_run between fn entry and the body's writes
+     * to its own registers, because all dispatch ops that may collect
+     * (OP_CALL, OP_GETGLOBAL_CACHED, OP_CLOSURE, ...) come after the
+     * regs[a] := producer step. */
     S->bc_top = need;
     return base;
 }

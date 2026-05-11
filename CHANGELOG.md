@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.136.0 — Drop Redundant Register Zeroing on Push
+
+`bc_push_window` no longer zeroes the new window's slots up
+front. The slots are already NULL: `bc_pop_window` clears every
+slot before the next push lands on it, and the bc_regs growth
+path zeroes the freshly-allocated tail. The per-call zero loop
+was duplicating that work for every fn entry.
+
+The body's compiler emits a write to every register before any
+op that may collect (OP_CALL, OP_GETGLOBAL_CACHED, OP_CLOSURE,
+mino_cons / env_child during has_rest / captures setup). The GC
+root walk sees those filled slots, not the uninitialized state.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. fib-30: ~92 ms -> ~86 ms (~7%). Other benches
+within noise.
+
 ## v0.135.0 — Inline Cache for Global Symbol Resolution
 
 `OP_GETGLOBAL` is replaced by `OP_GETGLOBAL_CACHED` at every
