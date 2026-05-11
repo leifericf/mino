@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.133.0 — N-Arity Arithmetic Expansion
+
+`(+ a b c d)` is no longer a four-arg cons-spine call into
+the `+` prim. The compiler now expands variadic core `+`,
+`-`, and `*` into a left-associative chain of binary
+operations: `(+ a (+ b (+ c d)))` -- no wait, the order
+matters. Left-associative: `((a + b) + c) + d`. Each binary
+step goes through the existing `OP_*_II` fast lane with
+its overflow check, so `(+ INT_MAX 1 -1)` still throws at
+the first step (Clojure-correct), whereas a
+right-associative expansion would mask the overflow by
+computing `(+ 1 -1)` first.
+
+What this leverages from Clojure: variadic core
+arithmetic primitives have a well-defined left-fold
+semantics on the JVM, and that's exactly the contract
+mino's prims implement. The homoiconic source form lets
+the compiler see all N args before lowering, and
+immutability means the running accumulator can ride a
+single register through the whole chain.
+
+Comparators (`<`, `<=`, ...) and bitwise ops are NOT
+expanded: their variadic forms have AND-of-pairs
+semantics, not chained fold, so they stay on the prim
+fallback for now.
+
+Verification: 1 571 tests / 7 353 assertions green on
+release. arith-chain-1M drops from 639 ms baseline to
+~37 ms (~17x), and that's measured AFTER F1/F2/F3 -- the
+shape of `+/-/*` in inner loops is the bigger win.
+
 ## v0.132.0 — Literal-Arg Pure-Fn Fold
 
 When a call's head is a core arithmetic / comparison /

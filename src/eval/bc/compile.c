@@ -1594,6 +1594,67 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
             int argc_check = 0;
             mino_val_t *p = form->as.cons.cdr;
             while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            /* N-arity expansion. Clojure's variadic arithmetic
+             * primitives (+, -, *) are left-associative, so
+             * `(+ a b c d)` evaluates as `(+ (+ (+ a b) c) d)`. The
+             * compiler emits this chain directly: two-operand
+             * fast-lane opcode for the leftmost pair into an
+             * accumulator register, then a fold of each subsequent
+             * operand. Each step still goes through OP_*_II / OP_*_IK
+             * with its overflow check, so a literal sum that wraps
+             * still throws (vs. silent wrap that a right-associative
+             * folder might mask). Comparators and bitwise ops aren't
+             * expanded -- their variadic semantics differ ((< a b c)
+             * is `(and (< a b) (< b c))`) and stay on the prim. */
+            int n_ary_expand = (subop == BINOP_ADD
+                                || subop == BINOP_SUB
+                                || subop == BINOP_MUL)
+                && argc_check >= 3;
+            if (n_ary_expand) {
+                int saved_next = c->next_reg;
+                /* Walk into an array so we can index. */
+                mino_val_t *args[64];
+                int n = 0;
+                mino_val_t *q = form->as.cons.cdr;
+                while (mino_is_cons(q) && n < (int)(sizeof(args)/sizeof(args[0]))) {
+                    args[n++] = q->as.cons.car;
+                    q = q->as.cons.cdr;
+                }
+                if (n != argc_check) {
+                    /* Overflow: too many args; fall back to prim. */
+                    n_ary_expand = 0;
+                }
+                if (n_ary_expand) {
+                    /* Accumulator reg holds the running result. */
+                    int acc = alloc_reg(c);
+                    if (acc < 0) return -1;
+                    int a1 = compile_operand_inplace(c, args[0]);
+                    if (a1 < 0) return -1;
+                    int a2 = compile_operand_inplace(c, args[1]);
+                    if (a2 < 0) return -1;
+                    if (acc > 0xFF || a1 > 0xFF || a2 > 0xFF) {
+                        c->ok = 0; return -1;
+                    }
+                    static const mino_bc_op_t binop_op_nary[] = {
+                        OP_ADD_II, OP_SUB_II, OP_MUL_II,
+                    };
+                    emit_abc(c, binop_op_nary[subop],
+                             (unsigned)acc, (unsigned)a1, (unsigned)a2);
+                    for (int i = 2; i < n; i++) {
+                        int ai = compile_operand_inplace(c, args[i]);
+                        if (ai < 0) return -1;
+                        if (ai > 0xFF) { c->ok = 0; return -1; }
+                        emit_abc(c, binop_op_nary[subop],
+                                 (unsigned)acc, (unsigned)acc, (unsigned)ai);
+                    }
+                    if (dst > 0xFF) { c->ok = 0; return -1; }
+                    if (dst != acc) {
+                        emit_abc(c, OP_MOVE, (unsigned)dst, (unsigned)acc, 0);
+                    }
+                    c->next_reg = saved_next;
+                    return 0;
+                }
+            }
             if (argc_check == 2) {
                 int saved_next = c->next_reg;
                 mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
