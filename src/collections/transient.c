@@ -47,7 +47,7 @@ static mino_val_t *cons1(mino_state_t *S, mino_val_t *car, mino_val_t *cdr)
 
 int mino_is_transient(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_TRANSIENT;
+    return v != NULL && mino_type_of(v) == MINO_TRANSIENT;
 }
 
 size_t mino_transient_count(const mino_val_t *t)
@@ -58,7 +58,7 @@ size_t mino_transient_count(const mino_val_t *t)
     {
         const mino_val_t *c = t->as.transient.current;
         if (c == NULL) return 0;
-        switch (c->type) {
+        switch (mino_type_of(c)) {
         case MINO_VECTOR: return c->as.vec.len;
         case MINO_MAP:    return c->as.map.len;
         case MINO_SET:    return c->as.set.len;
@@ -75,9 +75,9 @@ mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll)
 {
     mino_val_t *t;
     if (coll == NULL
-        || (coll->type != MINO_VECTOR
-            && coll->type != MINO_MAP
-            && coll->type != MINO_SET)) {
+        || (mino_type_of(coll) != MINO_VECTOR
+            && mino_type_of(coll) != MINO_MAP
+            && mino_type_of(coll) != MINO_SET)) {
         return transient_error(S,
             "transient!: expected a persistent vector, map, or set");
     }
@@ -151,7 +151,7 @@ mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
     if (!require_valid_transient(S, t, "assoc!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL
-        || (inner->type != MINO_VECTOR && inner->type != MINO_MAP)) {
+        || (mino_type_of(inner) != MINO_VECTOR && mino_type_of(inner) != MINO_MAP)) {
         return transient_error(S,
             "assoc!: transient must wrap a vector or map");
     }
@@ -173,9 +173,9 @@ mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
     if (!require_valid_transient(S, t, "conj!")) return NULL;
     inner = t->as.transient.current;
     if (inner == NULL
-        || (inner->type != MINO_VECTOR
-            && inner->type != MINO_MAP
-            && inner->type != MINO_SET)) {
+        || (mino_type_of(inner) != MINO_VECTOR
+            && mino_type_of(inner) != MINO_MAP
+            && mino_type_of(inner) != MINO_SET)) {
         return transient_error(S,
             "conj!: transient must wrap a vector, map, or set");
     }
@@ -194,7 +194,7 @@ mino_val_t *mino_dissoc_bang(mino_state_t *S, mino_val_t *t,
     mino_val_t *args;
     if (!require_valid_transient(S, t, "dissoc!")) return NULL;
     inner = t->as.transient.current;
-    if (inner == NULL || inner->type != MINO_MAP) {
+    if (inner == NULL || mino_type_of(inner) != MINO_MAP) {
         return transient_error(S, "dissoc!: transient must wrap a map");
     }
     args = cons1(S, inner, cons1(S, key, mino_nil(S)));
@@ -212,7 +212,7 @@ mino_val_t *mino_disj_bang(mino_state_t *S, mino_val_t *t,
     mino_val_t *args;
     if (!require_valid_transient(S, t, "disj!")) return NULL;
     inner = t->as.transient.current;
-    if (inner == NULL || inner->type != MINO_SET) {
+    if (inner == NULL || mino_type_of(inner) != MINO_SET) {
         return transient_error(S, "disj!: transient must wrap a set");
     }
     args = cons1(S, inner, cons1(S, key, mino_nil(S)));
@@ -229,7 +229,7 @@ mino_val_t *mino_pop_bang(mino_state_t *S, mino_val_t *t)
     mino_val_t *args;
     if (!require_valid_transient(S, t, "pop!")) return NULL;
     inner = t->as.transient.current;
-    if (inner == NULL || inner->type != MINO_VECTOR) {
+    if (inner == NULL || mino_type_of(inner) != MINO_VECTOR) {
         return transient_error(S, "pop!: transient must wrap a vector");
     }
     args = cons1(S, inner, mino_nil(S));

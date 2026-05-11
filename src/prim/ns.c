@@ -32,7 +32,7 @@ static int ns_to_name(mino_state_t *S, mino_val_t *v, char *buf, size_t cap,
 {
     size_t n;
     if (v == NULL
-        || (v->type != MINO_SYMBOL && v->type != MINO_STRING)) {
+        || (mino_type_of(v) != MINO_SYMBOL && mino_type_of(v) != MINO_STRING)) {
         char msg[128];
         snprintf(msg, sizeof(msg),
                  "%s: expected a namespace symbol or string", fn);
@@ -87,7 +87,7 @@ mino_val_t *prim_find_ns(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!ns_one_arg(S, args, "find-ns", &arg)) return NULL;
     /* nil propagates: (find-ns nil) is nil, not a type error. */
-    if (arg == NULL || arg->type == MINO_NIL) return mino_nil(S);
+    if (arg == NULL || mino_type_of(arg) == MINO_NIL) return mino_nil(S);
     if (!ns_to_name(S, arg, buf, sizeof(buf), "find-ns")) return NULL;
     if (ns_env_lookup(S, buf) == NULL) return mino_nil(S);
     return ns_symbol_with_meta(S, buf);
@@ -243,7 +243,7 @@ mino_val_t *prim_ns_publics(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     for (i = 0; i < e->len; i++) {
         mino_val_t *var = var_find(S, buf, e->bindings[i].name);
         if (var == NULL) continue;
-        if (var->type == MINO_VAR && var->as.var.is_private) continue;
+        if (mino_type_of(var) == MINO_VAR && var->as.var.is_private) continue;
         if (!append_kv(S, &ks, &vs, &len, &cap,
                        mino_symbol(S, e->bindings[i].name), var)) return NULL;
     }
@@ -411,7 +411,7 @@ mino_val_t *prim_ns_aliases(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * :rename remaps the surviving names. */
 static int kw_eq(const mino_val_t *v, const char *s)
 {
-    return v != NULL && v->type == MINO_KEYWORD
+    return v != NULL && mino_type_of(v) == MINO_KEYWORD
         && v->as.s.len == strlen(s)
         && memcmp(v->as.s.data, s, v->as.s.len) == 0;
 }
@@ -422,10 +422,10 @@ static int sym_in_vec(mino_val_t *sel, const char *name, size_t namelen)
 {
     size_t i;
     if (sel == NULL) return 0;
-    if (sel->type == MINO_VECTOR) {
+    if (mino_type_of(sel) == MINO_VECTOR) {
         for (i = 0; i < sel->as.vec.len; i++) {
             mino_val_t *e = vec_nth(sel, i);
-            if (e != NULL && e->type == MINO_SYMBOL
+            if (e != NULL && mino_type_of(e) == MINO_SYMBOL
                 && e->as.s.len == namelen
                 && memcmp(e->as.s.data, name, namelen) == 0) return 1;
         }
@@ -435,7 +435,7 @@ static int sym_in_vec(mino_val_t *sel, const char *name, size_t namelen)
         mino_val_t *cur = sel;
         while (mino_is_cons(cur)) {
             mino_val_t *e = cur->as.cons.car;
-            if (e != NULL && e->type == MINO_SYMBOL
+            if (e != NULL && mino_type_of(e) == MINO_SYMBOL
                 && e->as.s.len == namelen
                 && memcmp(e->as.s.data, name, namelen) == 0) return 1;
             cur = cur->as.cons.cdr;
@@ -454,12 +454,12 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
     mino_val_t *cur;
     size_t      i;
     if (sel == NULL) return 0;
-    if (sel->type == MINO_VECTOR) {
+    if (mino_type_of(sel) == MINO_VECTOR) {
         for (i = 0; i < sel->as.vec.len; i++) {
             mino_val_t *e = vec_nth(sel, i);
             char        nm[256];
             mino_val_t *var;
-            if (e == NULL || e->type != MINO_SYMBOL
+            if (e == NULL || mino_type_of(e) != MINO_SYMBOL
                 || e->as.s.len >= sizeof(nm)) continue;
             memcpy(nm, e->as.s.data, e->as.s.len);
             nm[e->as.s.len] = '\0';
@@ -471,7 +471,7 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
                 return -1;
             }
             var = var_find(S, src_ns, nm);
-            if (var != NULL && var->type == MINO_VAR
+            if (var != NULL && mino_type_of(var) == MINO_VAR
                 && var->as.var.is_private) {
                 char msg[600];
                 snprintf(msg, sizeof(msg),
@@ -487,7 +487,7 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
         mino_val_t *e = cur->as.cons.car;
         char        nm[256];
         mino_val_t *var;
-        if (e != NULL && e->type == MINO_SYMBOL
+        if (e != NULL && mino_type_of(e) == MINO_SYMBOL
             && e->as.s.len < sizeof(nm)) {
             memcpy(nm, e->as.s.data, e->as.s.len);
             nm[e->as.s.len] = '\0';
@@ -499,7 +499,7 @@ static int validate_only_names(mino_state_t *S, mino_val_t *sel,
                 return -1;
             }
             var = var_find(S, src_ns, nm);
-            if (var != NULL && var->type == MINO_VAR
+            if (var != NULL && mino_type_of(var) == MINO_VAR
                 && var->as.var.is_private) {
                 char msg[600];
                 snprintf(msg, sizeof(msg),
@@ -518,17 +518,17 @@ static const char *rename_lookup(mino_val_t *map, const char *name,
 {
     size_t i;
     mino_val_t *order;
-    if (map == NULL || map->type != MINO_MAP) return NULL;
+    if (map == NULL || mino_type_of(map) != MINO_MAP) return NULL;
     order = map->as.map.key_order;
     if (order == NULL) return NULL;
     for (i = 0; i < map->as.map.len; i++) {
         mino_val_t *k = vec_nth(order, i);
         mino_val_t *v;
-        if (k == NULL || k->type != MINO_SYMBOL) continue;
+        if (k == NULL || mino_type_of(k) != MINO_SYMBOL) continue;
         if (k->as.s.len != namelen
             || memcmp(k->as.s.data, name, namelen) != 0) continue;
         v = map_get_val(map, k);
-        if (v == NULL || v->type != MINO_SYMBOL) continue;
+        if (v == NULL || mino_type_of(v) != MINO_SYMBOL) continue;
         if (v->as.s.len < bufsz) {
             memcpy(buf, v->as.s.data, v->as.s.len);
             buf[v->as.s.len] = '\0';
@@ -597,7 +597,7 @@ mino_val_t *prim_refer(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * the test re-asserts privacy. */
         if (only_v == NULL) {
             var = var_find(S, ns_buf, name);
-            if (var != NULL && var->type == MINO_VAR
+            if (var != NULL && mino_type_of(var) == MINO_VAR
                 && var->as.var.is_private) continue;
         }
         bind_name = rename_lookup(rename_v, name, nlen, rbuf, sizeof(rbuf));
@@ -787,7 +787,7 @@ mino_val_t *prim_find_var(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *var;
     (void)env;
     if (!ns_one_arg(S, args, "find-var", &arg)) return NULL;
-    if (arg == NULL || arg->type != MINO_SYMBOL) {
+    if (arg == NULL || mino_type_of(arg) != MINO_SYMBOL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "find-var: expected a qualified symbol");
     }
@@ -848,7 +848,7 @@ mino_val_t *prim_ns_resolve(mino_state_t *S, mino_val_t *args,
     }
     if (!ns_to_name(S, ns_arg, ns_buf, sizeof(ns_buf), "ns-resolve"))
         return NULL;
-    if (sym_arg == NULL || sym_arg->type != MINO_SYMBOL
+    if (sym_arg == NULL || mino_type_of(sym_arg) != MINO_SYMBOL
         || sym_arg->as.s.len >= sizeof(sym_buf)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "ns-resolve: second arg must be a symbol");
@@ -875,7 +875,7 @@ mino_val_t *prim_ns_resolve(mino_state_t *S, mino_val_t *args,
     }
     /* If a locals map was passed and the unqualified symbol is in it,
      * Clojure returns nil (the local shadows the global). */
-    if (locals != NULL && locals->type == MINO_MAP) {
+    if (locals != NULL && mino_type_of(locals) == MINO_MAP) {
         mino_val_t *probe = map_get_val(locals, sym_arg);
         if (probe != NULL) return mino_nil(S);
     }
@@ -896,7 +896,7 @@ mino_val_t *prim_requiring_resolve(mino_state_t *S, mino_val_t *args,
     char        ns_buf[256];
     char        sym_buf[256];
     if (!ns_one_arg(S, args, "requiring-resolve", &arg)) return NULL;
-    if (arg == NULL || arg->type != MINO_SYMBOL) {
+    if (arg == NULL || mino_type_of(arg) != MINO_SYMBOL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "requiring-resolve: expected a qualified symbol");
     }
@@ -956,7 +956,7 @@ mino_val_t *prim_intern(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     sym_arg = args->as.cons.cdr->as.cons.car;
     if (argc == 3) val_arg = args->as.cons.cdr->as.cons.cdr->as.cons.car;
     if (!ns_to_name(S, ns_arg, ns_buf, sizeof(ns_buf), "intern")) return NULL;
-    if (sym_arg == NULL || sym_arg->type != MINO_SYMBOL
+    if (sym_arg == NULL || mino_type_of(sym_arg) != MINO_SYMBOL
         || sym_arg->as.s.len >= sizeof(s_buf)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "intern: second arg must be a symbol");
@@ -989,7 +989,7 @@ mino_val_t *prim_var_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *arg;
     (void)env;
     if (!ns_one_arg(S, args, "var-get", &arg)) return NULL;
-    if (arg == NULL || arg->type != MINO_VAR) {
+    if (arg == NULL || mino_type_of(arg) != MINO_VAR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "var-get: expected a var");
     }
@@ -1005,7 +1005,7 @@ mino_val_t *prim_bound_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *arg;
     (void)env;
     if (!ns_one_arg(S, args, "bound?", &arg)) return NULL;
-    if (arg == NULL || arg->type != MINO_VAR) {
+    if (arg == NULL || mino_type_of(arg) != MINO_VAR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "bound?: expected a var");
     }
@@ -1018,7 +1018,7 @@ mino_val_t *prim_bound_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 static void var_sync_env(mino_state_t *S, mino_val_t *var, mino_val_t *val)
 {
     mino_env_t *e;
-    if (var == NULL || var->type != MINO_VAR) return;
+    if (var == NULL || mino_type_of(var) != MINO_VAR) return;
     e = ns_env_lookup(S, var->as.var.ns);
     if (e != NULL && var->as.var.sym != NULL) {
         env_bind(S, e, var->as.var.sym, val);
@@ -1037,7 +1037,7 @@ mino_val_t *prim_var_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     var_arg = args->as.cons.car;
     val_arg = args->as.cons.cdr->as.cons.car;
-    if (var_arg == NULL || var_arg->type != MINO_VAR) {
+    if (var_arg == NULL || mino_type_of(var_arg) != MINO_VAR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "var-set: expected a var");
     }
@@ -1061,7 +1061,7 @@ mino_val_t *prim_alter_var_root(mino_state_t *S, mino_val_t *args,
     var_arg   = args->as.cons.car;
     fn_arg    = args->as.cons.cdr->as.cons.car;
     rest_args = args->as.cons.cdr->as.cons.cdr;
-    if (var_arg == NULL || var_arg->type != MINO_VAR) {
+    if (var_arg == NULL || mino_type_of(var_arg) != MINO_VAR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "alter-var-root: first arg must be a var");
     }

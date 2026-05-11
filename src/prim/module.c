@@ -9,7 +9,7 @@ static const char *bundled_lib_lookup(mino_state_t *S, const char *name);
 static int kw_match(const mino_val_t *v, const char *s)
 {
     size_t n;
-    if (v == NULL || v->type != MINO_KEYWORD) return 0;
+    if (v == NULL || mino_type_of(v) != MINO_KEYWORD) return 0;
     n = strlen(s);
     return v->as.s.len == n && memcmp(v->as.s.data, s, n) == 0;
 }
@@ -34,7 +34,7 @@ static mino_val_t *require_load_path(mino_state_t *S, mino_val_t *name_val,
     mino_val_t *result;
     size_t      i;
 
-    if (name_val == NULL || name_val->type != MINO_STRING) {
+    if (name_val == NULL || mino_type_of(name_val) != MINO_STRING) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "require: argument must be a string, symbol, or vector");
         return NULL;
     }
@@ -315,18 +315,18 @@ static int parse_libspec_opts(mino_state_t *S, mino_val_t *spec_vec,
     for (vi = 1; vi + 1 < spec_vec->as.vec.len; vi += 2) {
         mino_val_t *k = vec_nth(spec_vec, vi);
         mino_val_t *v = vec_nth(spec_vec, vi + 1);
-        if (kw_match(k, "as") && v->type == MINO_SYMBOL) {
+        if (kw_match(k, "as") && mino_type_of(v) == MINO_SYMBOL) {
             out->alias_name = v->as.s.data;
             out->alias_len  = v->as.s.len;
             out->needs_load = 1;
-        } else if (kw_match(k, "as-alias") && v->type == MINO_SYMBOL) {
+        } else if (kw_match(k, "as-alias") && mino_type_of(v) == MINO_SYMBOL) {
             out->as_alias_name = v->as.s.data;
             out->as_alias_len  = v->as.s.len;
         } else if (kw_match(k, "refer")) {
             out->needs_load = 1;
-            if (v != NULL && v->type == MINO_VECTOR) {
+            if (v != NULL && mino_type_of(v) == MINO_VECTOR) {
                 out->refer_vec = v;
-            } else if (v != NULL && v->type == MINO_KEYWORD
+            } else if (v != NULL && mino_type_of(v) == MINO_KEYWORD
                        && kw_match(v, "all")) {
                 out->refer_all = 1;
             } else {
@@ -336,12 +336,12 @@ static int parse_libspec_opts(mino_state_t *S, mino_val_t *spec_vec,
                 return -1;
             }
         } else if (kw_match(k, "exclude")
-                   && v != NULL && v->type == MINO_VECTOR) {
+                   && v != NULL && mino_type_of(v) == MINO_VECTOR) {
             /* :exclude is meaningful only alongside :refer :all (which
              * use injects); does not by itself trigger a load. */
             out->exclude_vec = v;
         } else if (kw_match(k, "rename")
-                   && v != NULL && v->type == MINO_MAP) {
+                   && v != NULL && mino_type_of(v) == MINO_MAP) {
             out->rename_map = v;
         }
     }
@@ -375,7 +375,7 @@ static int apply_refer_options(mino_state_t *S, mino_val_t *mod_sym,
         size_t ri;
         for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
             mino_val_t *rsym = vec_nth(refer_vec, ri);
-            if (rsym != NULL && rsym->type == MINO_SYMBOL
+            if (rsym != NULL && mino_type_of(rsym) == MINO_SYMBOL
                 && rsym->as.s.len < 256) {
                 char rbuf[256];
                 size_t rn = rsym->as.s.len;
@@ -401,15 +401,15 @@ static int apply_refer_options(mino_state_t *S, mino_val_t *mod_sym,
                         "name", "MNS001", msg);
                     return -1;
                 }
-                if (rename_map != NULL && rename_map->type == MINO_MAP) {
+                if (rename_map != NULL && mino_type_of(rename_map) == MINO_MAP) {
                     size_t mi;
                     for (mi = 0; mi < rename_map->as.map.len; mi++) {
                         mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
-                        if (k != NULL && k->type == MINO_SYMBOL
+                        if (k != NULL && mino_type_of(k) == MINO_SYMBOL
                             && k->as.s.len == rn
                             && memcmp(k->as.s.data, rbuf, rn) == 0) {
                             mino_val_t *renamed = map_get_val(rename_map, k);
-                            if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                            if (renamed != NULL && mino_type_of(renamed) == MINO_SYMBOL) {
                                 bind_name = renamed->as.s.data;
                                 bind_len  = renamed->as.s.len;
                             }
@@ -439,7 +439,7 @@ static int apply_refer_options(mino_state_t *S, mino_val_t *mod_sym,
                 int     skip = 0;
                 for (ei = 0; ei < exclude_vec->as.vec.len; ei++) {
                     mino_val_t *e = vec_nth(exclude_vec, ei);
-                    if (e != NULL && e->type == MINO_SYMBOL
+                    if (e != NULL && mino_type_of(e) == MINO_SYMBOL
                         && e->as.s.len == blen
                         && memcmp(e->as.s.data, bname, blen) == 0) {
                         skip = 1;
@@ -448,15 +448,15 @@ static int apply_refer_options(mino_state_t *S, mino_val_t *mod_sym,
                 }
                 if (skip) continue;
             }
-            if (rename_map != NULL && rename_map->type == MINO_MAP) {
+            if (rename_map != NULL && mino_type_of(rename_map) == MINO_MAP) {
                 size_t mi;
                 for (mi = 0; mi < rename_map->as.map.len; mi++) {
                     mino_val_t *k = vec_nth(rename_map->as.map.key_order, mi);
-                    if (k != NULL && k->type == MINO_SYMBOL
+                    if (k != NULL && mino_type_of(k) == MINO_SYMBOL
                         && k->as.s.len == blen
                         && memcmp(k->as.s.data, bname, blen) == 0) {
                         mino_val_t *renamed = map_get_val(rename_map, k);
-                        if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                        if (renamed != NULL && mino_type_of(renamed) == MINO_SYMBOL) {
                             bind_name = renamed->as.s.data;
                             bind_len  = renamed->as.s.len;
                         }
@@ -506,12 +506,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * bare symbol or a vector libspec. Expands to multiple individual
      * (require '[prefix.sub ...]) calls. The disambiguator: if the
      * second element isn't a keyword, the form is a prefix list. */
-    if (name_val != NULL && name_val->type == MINO_VECTOR
+    if (name_val != NULL && mino_type_of(name_val) == MINO_VECTOR
         && name_val->as.vec.len >= 2) {
         mino_val_t *first  = vec_nth(name_val, 0);
         mino_val_t *second = vec_nth(name_val, 1);
-        if (first != NULL && first->type == MINO_SYMBOL
-            && second != NULL && second->type != MINO_KEYWORD) {
+        if (first != NULL && mino_type_of(first) == MINO_SYMBOL
+            && second != NULL && mino_type_of(second) != MINO_KEYWORD) {
             size_t      i;
             mino_val_t *last_result = mino_nil(S);
             for (i = 1; i < name_val->as.vec.len; i++) {
@@ -521,12 +521,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 char        joined[512];
                 size_t      sn;
                 if (sub == NULL) continue;
-                if (sub->type == MINO_SYMBOL) {
+                if (mino_type_of(sub) == MINO_SYMBOL) {
                     sub_name = sub;
-                } else if (sub->type == MINO_VECTOR
+                } else if (mino_type_of(sub) == MINO_VECTOR
                            && sub->as.vec.len >= 1) {
                     sub_name = vec_nth(sub, 0);
-                    if (sub_name == NULL || sub_name->type != MINO_SYMBOL) {
+                    if (sub_name == NULL || mino_type_of(sub_name) != MINO_SYMBOL) {
                         return prim_throw_classified(S,
                             "eval/type", "MTY001",
                             "require prefix list: subspec head must be a symbol");
@@ -556,7 +556,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 /* Build [joined-symbol opt1 v1 opt2 v2 ...] vector. */
                 {
                     mino_val_t *joined_sym = mino_symbol_n(S, joined, sn);
-                    size_t      tail_len   = (sub->type == MINO_VECTOR)
+                    size_t      tail_len   = (mino_type_of(sub) == MINO_VECTOR)
                         ? sub->as.vec.len - 1 : 0;
                     size_t      total      = 1 + tail_len;
                     mino_val_t **tmp       = (mino_val_t **)gc_alloc_typed(
@@ -583,7 +583,7 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 
     /* Symbol form: '(require 'foo.bar) — Clojure's everyday form. */
-    if (name_val != NULL && name_val->type == MINO_SYMBOL) {
+    if (name_val != NULL && mino_type_of(name_val) == MINO_SYMBOL) {
         char pathbuf[256];
         /* Runtime-ns shortcut: skip the file load when either the
          * file's already in module_cache (loaded earlier) or no file
@@ -628,12 +628,12 @@ mino_val_t *prim_require(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 
     /* Vector form: '[mod.name :as alias :refer [syms]] */
-    if (name_val != NULL && name_val->type == MINO_VECTOR
+    if (name_val != NULL && mino_type_of(name_val) == MINO_VECTOR
         && name_val->as.vec.len >= 1) {
         mino_val_t     *mod_sym = vec_nth(name_val, 0);
         char            pathbuf[256];
         libspec_opts_t  opts;
-        if (mod_sym == NULL || mod_sym->type != MINO_SYMBOL) {
+        if (mod_sym == NULL || mino_type_of(mod_sym) != MINO_SYMBOL) {
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "require: vector first element must be a symbol");
             return NULL;
         }
@@ -794,7 +794,7 @@ mino_val_t *prim_use(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         int         has_only  = 0;
         mino_val_t *only_v    = NULL;
         arg = args->as.cons.car;
-        if (arg != NULL && arg->type == MINO_SYMBOL) {
+        if (arg != NULL && mino_type_of(arg) == MINO_SYMBOL) {
             /* Symbol form: (use 'foo) -> (require '[foo :refer :all]) */
             mino_val_t **buf = (mino_val_t **)gc_alloc_typed(
                 S, GC_T_VALARR, 3 * sizeof(*buf));
@@ -802,7 +802,7 @@ mino_val_t *prim_use(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             gc_valarr_set(S, buf, 1, mino_keyword(S, "refer"));
             gc_valarr_set(S, buf, 2, mino_keyword(S, "all"));
             libspec = mino_vector(S, buf, 3);
-        } else if (arg != NULL && arg->type == MINO_VECTOR
+        } else if (arg != NULL && mino_type_of(arg) == MINO_VECTOR
                    && arg->as.vec.len >= 1) {
             /* Inspect existing options. */
             for (vi = 1; vi + 1 < arg->as.vec.len; vi += 2) {
@@ -918,7 +918,7 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     name_val = args->as.cons.car;
-    if (name_val == NULL || name_val->type != MINO_SYMBOL) {
+    if (name_val == NULL || mino_type_of(name_val) != MINO_SYMBOL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "doc: argument must be a symbol");
         return NULL;
     }
@@ -949,10 +949,10 @@ mino_val_t *prim_doc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * named-binding docstring is registered. */
     if (ns_env_lookup(S, buf) != NULL) {
         mino_val_t *meta = ns_env_get_meta(S, buf);
-        if (meta != NULL && meta->type == MINO_MAP) {
+        if (meta != NULL && mino_type_of(meta) == MINO_MAP) {
             mino_val_t *doc_kw = mino_keyword(S, "doc");
             mino_val_t *doc    = map_get_val(meta, doc_kw);
-            if (doc != NULL && doc->type == MINO_STRING) {
+            if (doc != NULL && mino_type_of(doc) == MINO_STRING) {
                 return doc;
             }
         }
@@ -973,7 +973,7 @@ mino_val_t *prim_source(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     name_val = args->as.cons.car;
-    if (name_val == NULL || name_val->type != MINO_SYMBOL) {
+    if (name_val == NULL || mino_type_of(name_val) != MINO_SYMBOL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "source: argument must be a symbol");
         return NULL;
     }
@@ -1004,7 +1004,7 @@ mino_val_t *prim_apropos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return NULL;
     }
     pat_val = args->as.cons.car;
-    if (pat_val == NULL || pat_val->type != MINO_STRING) {
+    if (pat_val == NULL || mino_type_of(pat_val) != MINO_STRING) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY001", "apropos: argument must be a string");
         return NULL;
     }
@@ -1125,7 +1125,7 @@ mino_val_t *prim_add_load_path(mino_state_t *S, mino_val_t *args,
             "add-load-path! requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "add-load-path!: argument must be a string");
     }
@@ -1174,7 +1174,7 @@ mino_val_t *prim_mino_capability(mino_state_t *S, mino_val_t *args,
             "mino-capability requires one argument");
     }
     name_val = args->as.cons.car;
-    if (name_val == NULL || name_val->type != MINO_SYMBOL) {
+    if (name_val == NULL || mino_type_of(name_val) != MINO_SYMBOL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino-capability: argument must be a symbol");
     }

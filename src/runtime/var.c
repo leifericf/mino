@@ -271,7 +271,7 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
      * install paths (state init, runtime/install_stdlib bootstrap)
      * stay zero-cost. */
     if (validator == NULL
-        && (watches == NULL || watches->type != MINO_MAP
+        && (watches == NULL || mino_type_of(watches) != MINO_MAP
             || watches->as.map.len == 0)) {
         gc_write_barrier(S, var, var->as.var.root, val);
         var->as.var.root  = val;
@@ -308,7 +308,7 @@ void var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val)
      * fire on (alter-var-root v f) and on def with rebind. The
      * callback signature is (fn key var old new). A watch that throws
      * propagates via mino_call returning NULL, matching atoms/refs. */
-    if (watches != NULL && watches->type == MINO_MAP
+    if (watches != NULL && mino_type_of(watches) == MINO_MAP
         && watches->as.map.len > 0) {
         size_t n = watches->as.map.len;
         size_t i;

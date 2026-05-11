@@ -15,8 +15,8 @@
 static mino_val_t *ns_meta_merge(mino_state_t *S,
                                  mino_val_t *a, mino_val_t *b)
 {
-    if (a == NULL || a->type != MINO_MAP) return b;
-    if (b == NULL || b->type != MINO_MAP) return a;
+    if (a == NULL || mino_type_of(a) != MINO_MAP) return b;
+    if (b == NULL || mino_type_of(b) != MINO_MAP) return a;
     {
         size_t       len = a->as.map.len + b->as.map.len;
         mino_val_t **ks  = (mino_val_t **)gc_alloc_typed(
@@ -99,10 +99,10 @@ static int refer_collision_check(mino_state_t *S, mino_val_t *form,
 static int sym_vec_contains(mino_val_t *vec, const char *name, size_t namelen)
 {
     size_t i;
-    if (vec == NULL || vec->type != MINO_VECTOR) return 0;
+    if (vec == NULL || mino_type_of(vec) != MINO_VECTOR) return 0;
     for (i = 0; i < vec->as.vec.len; i++) {
         mino_val_t *e = vec_nth(vec, i);
-        if (e != NULL && e->type == MINO_SYMBOL
+        if (e != NULL && mino_type_of(e) == MINO_SYMBOL
             && e->as.s.len == namelen
             && memcmp(e->as.s.data, name, namelen) == 0) {
             return 1;
@@ -115,12 +115,12 @@ static int sym_vec_contains(mino_val_t *vec, const char *name, size_t namelen)
 static mino_val_t *rename_map_lookup(mino_val_t *m, const char *name,
                                      size_t namelen)
 {
-    if (m == NULL || m->type != MINO_MAP) return NULL;
+    if (m == NULL || mino_type_of(m) != MINO_MAP) return NULL;
     {
         size_t i;
         for (i = 0; i < m->as.map.len; i++) {
             mino_val_t *k = vec_nth(m->as.map.key_order, i);
-            if (k != NULL && k->type == MINO_SYMBOL
+            if (k != NULL && mino_type_of(k) == MINO_SYMBOL
                 && k->as.s.len == namelen
                 && memcmp(k->as.s.data, name, namelen) == 0) {
                 return map_get_val(m, k);
@@ -144,38 +144,38 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
     int          refer_all   = use_mode; /* :use defaults to refer-all */
     int          as_alias_only = 0;
 
-    if (spec->type == MINO_SYMBOL) {
+    if (mino_type_of(spec) == MINO_SYMBOL) {
         modname = spec->as.s.data;
         modlen  = spec->as.s.len;
-    } else if (spec->type == MINO_VECTOR && spec->as.vec.len >= 1) {
+    } else if (mino_type_of(spec) == MINO_VECTOR && spec->as.vec.len >= 1) {
         mino_val_t *first = vec_nth(spec, 0);
         size_t i;
-        if (first == NULL || first->type != MINO_SYMBOL) return 0;
+        if (first == NULL || mino_type_of(first) != MINO_SYMBOL) return 0;
         modname = first->as.s.data;
         modlen  = first->as.s.len;
         /* Parse keyword args: :as, :refer, :only, :exclude, :rename */
         for (i = 1; i + 1 < spec->as.vec.len; i += 2) {
             mino_val_t *k = vec_nth(spec, i);
             mino_val_t *v = vec_nth(spec, i + 1);
-            if (kw_eq(k, "as") && v->type == MINO_SYMBOL) {
+            if (kw_eq(k, "as") && mino_type_of(v) == MINO_SYMBOL) {
                 alias_name = v->as.s.data;
                 alias_len  = v->as.s.len;
             }
-            if (kw_eq(k, "as-alias") && v->type == MINO_SYMBOL) {
+            if (kw_eq(k, "as-alias") && mino_type_of(v) == MINO_SYMBOL) {
                 alias_name    = v->as.s.data;
                 alias_len     = v->as.s.len;
                 as_alias_only = 1;
             }
-            if (kw_eq(k, "refer") && v->type == MINO_VECTOR) {
+            if (kw_eq(k, "refer") && mino_type_of(v) == MINO_VECTOR) {
                 refer_vec = v;
                 refer_all = 0;
             }
-            if (kw_eq(k, "refer") && v->type == MINO_KEYWORD
+            if (kw_eq(k, "refer") && mino_type_of(v) == MINO_KEYWORD
                 && kw_eq(v, "all")) {
                 refer_all = 1;
             }
             /* :only is the :use equivalent of :refer */
-            if (kw_eq(k, "only") && v->type == MINO_VECTOR) {
+            if (kw_eq(k, "only") && mino_type_of(v) == MINO_VECTOR) {
                 refer_vec = v;
                 refer_all = 0;
             }
@@ -187,12 +187,12 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                     refer_vec = vec_conj1(S, refer_vec, tmp->as.cons.car);
                 refer_all = 0;
             }
-            if (kw_eq(k, "exclude") && v->type == MINO_VECTOR) {
+            if (kw_eq(k, "exclude") && mino_type_of(v) == MINO_VECTOR) {
                 exclude_vec = v;
                 /* :exclude implies :refer :all unless :refer is set */
                 if (refer_vec == NULL) refer_all = 1;
             }
-            if (kw_eq(k, "rename") && v->type == MINO_MAP) {
+            if (kw_eq(k, "rename") && mino_type_of(v) == MINO_MAP) {
                 rename_map = v;
             }
         }
@@ -261,7 +261,7 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
             size_t ri;
             for (ri = 0; ri < refer_vec->as.vec.len; ri++) {
                 mino_val_t *rsym = vec_nth(refer_vec, ri);
-                if (rsym != NULL && rsym->type == MINO_SYMBOL) {
+                if (rsym != NULL && mino_type_of(rsym) == MINO_SYMBOL) {
                     char rbuf[256];
                     size_t rn = rsym->as.s.len;
                     mino_val_t *val = NULL;
@@ -290,7 +290,7 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                     }
                     if (val == NULL) continue;
                     renamed = rename_map_lookup(rename_map, rbuf, rn);
-                    if (renamed != NULL && renamed->type == MINO_SYMBOL) {
+                    if (renamed != NULL && mino_type_of(renamed) == MINO_SYMBOL) {
                         bind_name = renamed->as.s.data;
                         bind_len  = renamed->as.s.len;
                     } else {
@@ -327,10 +327,10 @@ static int ns_process_require_spec_ex(mino_state_t *S, mino_val_t *spec,
                  * consumer's own clojure.core refers. */
                 mino_val_t *var = var_find(S, modbuf, nm);
                 if (var == NULL) continue;
-                if (var->type == MINO_VAR && var->as.var.is_private) continue;
+                if (mino_type_of(var) == MINO_VAR && var->as.var.is_private) continue;
                 if (sym_vec_contains(exclude_vec, nm, nl)) continue;
                 renamed = rename_map_lookup(rename_map, nm, nl);
-                if (renamed != NULL && renamed->type == MINO_SYMBOL
+                if (renamed != NULL && mino_type_of(renamed) == MINO_SYMBOL
                     && renamed->as.s.len < 256) {
                     char nbuf[256];
                     memcpy(nbuf, renamed->as.s.data, renamed->as.s.len);
@@ -372,7 +372,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
         mino_val_t *name_form = args->as.cons.car;
         char buf[256];
         size_t n;
-        if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+        if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
             set_eval_diag(S, form, "syntax", "MSY001",
                           "ns: first arg must be a symbol");
             return NULL;
@@ -394,7 +394,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
             mino_val_t *meta = name_form->meta;
             mino_val_t *cur  = args->as.cons.cdr;
             mino_val_t *next = (mino_is_cons(cur)) ? cur->as.cons.car : NULL;
-            if (next != NULL && next->type == MINO_STRING) {
+            if (next != NULL && mino_type_of(next) == MINO_STRING) {
                 /* Docstring -> {:doc "..."}. Merge with existing meta. */
                 mino_val_t *kk = mino_keyword(S, "doc");
                 mino_val_t **ks = (mino_val_t **)gc_alloc_typed(
@@ -410,7 +410,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                 cur  = cur->as.cons.cdr;
                 next = (mino_is_cons(cur)) ? cur->as.cons.car : NULL;
             }
-            if (next != NULL && next->type == MINO_MAP) {
+            if (next != NULL && mino_type_of(next) == MINO_MAP) {
                 meta = ns_meta_merge(S, meta, next);
                 cur = cur->as.cons.cdr;
             }
@@ -463,13 +463,13 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                     if (!mino_is_cons(opts->as.cons.cdr)) break;
                     v = opts->as.cons.cdr->as.cons.car;
                     if (kw_eq(k, "only") && v != NULL
-                        && v->type == MINO_VECTOR) {
+                        && mino_type_of(v) == MINO_VECTOR) {
                         only_vec = v;
                     } else if (kw_eq(k, "exclude") && v != NULL
-                               && v->type == MINO_VECTOR) {
+                               && mino_type_of(v) == MINO_VECTOR) {
                         exclude_vec = v;
                     } else if (kw_eq(k, "rename") && v != NULL
-                               && v->type == MINO_MAP) {
+                               && mino_type_of(v) == MINO_MAP) {
                         rename_map = v;
                     }
                     opts = opts->as.cons.cdr->as.cons.cdr;
@@ -507,7 +507,7 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
                             continue;
                         }
                         renamed = rename_map_lookup(rename_map, nm, nl);
-                        if (renamed != NULL && renamed->type == MINO_SYMBOL
+                        if (renamed != NULL && mino_type_of(renamed) == MINO_SYMBOL
                             && renamed->as.s.len < 256) {
                             char nbuf[256];
                             memcpy(nbuf, renamed->as.s.data,
@@ -559,7 +559,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
     name_form = args->as.cons.car;
-    if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+    if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
         set_eval_diag(S, form, "syntax", "MSY001", "defmacro name must be a symbol");
         return NULL;
     }
@@ -574,7 +574,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
         mino_val_t *rest = args->as.cons.cdr;
         mino_val_t *cur  = rest->as.cons.car;
         /* Optional docstring. */
-        if (cur != NULL && cur->type == MINO_STRING
+        if (cur != NULL && mino_type_of(cur) == MINO_STRING
             && mino_is_cons(rest->as.cons.cdr)) {
             doc     = cur->as.s.data;
             doc_len = cur->as.s.len;
@@ -582,7 +582,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
             cur     = rest->as.cons.car;
         }
         /* Optional attr-map (skip it). */
-        if (cur != NULL && cur->type == MINO_MAP
+        if (cur != NULL && mino_type_of(cur) == MINO_MAP
             && mino_is_cons(rest->as.cons.cdr)) {
             rest = rest->as.cons.cdr;
         }
@@ -591,14 +591,14 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
 
         /* Detect multi-arity: params is a list whose car is a vector. */
         if (mino_is_cons(params) && params->as.cons.car != NULL
-            && params->as.cons.car->type == MINO_VECTOR) {
+            && mino_type_of(params->as.cons.car) == MINO_VECTOR) {
             mino_val_t *clauses = build_multi_arity_clauses(
                 S, form, rest, "MSY001", "defmacro");
             if (clauses == NULL) { return NULL; }
             params = NULL; /* sentinel for multi-arity */
             body   = clauses;
         } else if (!mino_is_cons(params) && !mino_is_nil(params)
-                   && params->type != MINO_VECTOR) {
+                   && mino_type_of(params) != MINO_VECTOR) {
             set_eval_diag(S, form, "syntax", "MSY001",
                           "defmacro parameter list must be a list or vector");
             return NULL;
@@ -621,7 +621,7 @@ mino_val_t *eval_defmacro(mino_state_t *S, mino_val_t *form,
     {
         int is_priv = 0;
         mino_val_t *m = name_form->meta;
-        if (m != NULL && m->type == MINO_MAP) {
+        if (m != NULL && mino_type_of(m) == MINO_MAP) {
             mino_val_t *pk = mino_keyword(S, "private");
             mino_val_t *pv = map_get_val(m, pk);
             if (pv != NULL && mino_is_truthy(pv)) is_priv = 1;
@@ -651,7 +651,7 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
         mino_val_t *sym = rest->as.cons.car;
         char buf[256];
         size_t n;
-        if (sym == NULL || sym->type != MINO_SYMBOL) {
+        if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
             set_eval_diag(S, form, "syntax", "MSY001", "declare: arguments must be symbols");
             return NULL;
         }
@@ -688,7 +688,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
     name_form  = args->as.cons.car;
-    if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+    if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
         set_eval_diag(S, form, "syntax", "MSY001", "def name must be a symbol");
         return NULL;
     }
@@ -705,7 +705,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
         int is_dynamic = 0;
         int is_priv    = 0;
         mino_val_t *m = name_form->meta;
-        if (m != NULL && m->type == MINO_MAP) {
+        if (m != NULL && mino_type_of(m) == MINO_MAP) {
             mino_val_t *dk = mino_keyword(S, "dynamic");
             mino_val_t *dv = map_get_val(m, dk);
             mino_val_t *pk = mino_keyword(S, "private");
@@ -727,7 +727,7 @@ mino_val_t *eval_def(mino_state_t *S, mino_val_t *form,
         /* Optional docstring: (def name "doc" value) */
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
             mino_val_t *maybe_doc = args->as.cons.cdr->as.cons.car;
-            if (maybe_doc != NULL && maybe_doc->type == MINO_STRING) {
+            if (maybe_doc != NULL && mino_type_of(maybe_doc) == MINO_STRING) {
                 doc       = maybe_doc->as.s.data;
                 doc_len   = maybe_doc->as.s.len;
                 value_form = args->as.cons.cdr->as.cons.cdr->as.cons.car;

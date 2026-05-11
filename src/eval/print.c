@@ -50,7 +50,7 @@ static void print_rb_inorder(mino_state_t *S, FILE *out,
 
 void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
-    if (v == NULL || v->type == MINO_NIL) {
+    if (v == NULL || (MINO_IS_PTR(v) && mino_type_of(v) == MINO_NIL)) {
         fputs("nil", out);
         return;
     }
@@ -58,7 +58,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputs("#<...>", out);
         return;
     }
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_NIL:
         fputs("nil", out);
         return;
@@ -69,7 +69,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputs(v->as.b ? "true" : "false", out);
         return;
     case MINO_INT:
-        fprintf(out, "%lld", v->as.i);
+        fprintf(out, "%lld", mino_val_int_get(v));
         return;
     case MINO_BIGINT:
         mino_bigint_print(S, v, out);
@@ -144,17 +144,17 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         const mino_val_t *p = v;
         fputc('(', out);
         S->print_depth++;
-        while (p != NULL && p->type == MINO_CONS) {
+        while (p != NULL && mino_type_of(p) == MINO_CONS) {
             mino_print_to(S, out, p->as.cons.car);
             p = p->as.cons.cdr;
             /* Force lazy tails so (cons x (lazy-seq ...)) prints as a list. */
-            if (p != NULL && p->type == MINO_LAZY) {
+            if (p != NULL && mino_type_of(p) == MINO_LAZY) {
                 p = lazy_force(S,(mino_val_t *)p);
             }
-            if (p != NULL && p->type == MINO_CONS) {
+            if (p != NULL && mino_type_of(p) == MINO_CONS) {
                 fputc(' ', out);
-            } else if (p != NULL && p->type != MINO_NIL
-                       && p->type != MINO_EMPTY_LIST) {
+            } else if (p != NULL && mino_type_of(p) != MINO_NIL
+                       && mino_type_of(p) != MINO_EMPTY_LIST) {
                 fputs(" . ", out);
                 mino_print_to(S, out, p);
                 break;
@@ -267,8 +267,8 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
          * that resolves to nil is the canonical empty seq — print as
          * () so cross-type seq equality and printer agree. */
         mino_val_t *forced = lazy_force(S,(mino_val_t *)v);
-        if (forced == NULL || forced->type == MINO_NIL
-            || forced->type == MINO_EMPTY_LIST) {
+        if (forced == NULL || mino_type_of(forced) == MINO_NIL
+            || mino_type_of(forced) == MINO_EMPTY_LIST) {
             fputs("()", out);
             return;
         }
@@ -296,7 +296,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         const mino_val_t *cur = v;
         fputc('(', out);
         S->print_depth++;
-        while (cur != NULL && cur->type == MINO_CHUNKED_CONS) {
+        while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
             const mino_val_t *ch = cur->as.chunked_cons.chunk;
             unsigned k;
             for (k = cur->as.chunked_cons.off; k < ch->as.chunk.len; k++) {
@@ -305,20 +305,20 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
                 mino_print_to(S, out, ch->as.chunk.vals[k]);
             }
             cur = cur->as.chunked_cons.more;
-            if (cur != NULL && cur->type == MINO_LAZY) {
+            if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
                 cur = lazy_force(S, (mino_val_t *)cur);
             }
         }
-        if (cur != NULL && cur->type == MINO_CONS) {
+        if (cur != NULL && mino_type_of(cur) == MINO_CONS) {
             fputc(' ', out);
             /* Reuse the cons walker by printing the tail inline. */
-            while (cur != NULL && cur->type == MINO_CONS) {
+            while (cur != NULL && mino_type_of(cur) == MINO_CONS) {
                 mino_print_to(S, out, cur->as.cons.car);
                 cur = cur->as.cons.cdr;
-                if (cur != NULL && cur->type == MINO_LAZY) {
+                if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
                     cur = lazy_force(S, (mino_val_t *)cur);
                 }
-                if (cur != NULL && cur->type == MINO_CONS) fputc(' ', out);
+                if (cur != NULL && mino_type_of(cur) == MINO_CONS) fputc(' ', out);
             }
         }
         S->print_depth--;
@@ -349,7 +349,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
         fputs("#<transient", out);
         if (v->as.transient.current != NULL) {
             fputc(':', out);
-            switch (v->as.transient.current->type) {
+            switch (mino_type_of(v->as.transient.current)) {
             case MINO_VECTOR: fputs("vector", out); break;
             case MINO_MAP:    fputs("map",    out); break;
             case MINO_SET:    fputs("set",    out); break;
@@ -445,7 +445,7 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
          * reader's regex literal accepts the same form. */
         const mino_val_t *src = v->as.regex.source;
         fputs("#\"", out);
-        if (src != NULL && src->type == MINO_STRING) {
+        if (src != NULL && mino_type_of(src) == MINO_STRING) {
             fwrite(src->as.s.data, 1, src->as.s.len, out);
         }
         fputc('"', out);

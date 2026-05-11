@@ -75,7 +75,7 @@ mino_val_t *prim_meta(mino_state_t *S, mino_val_t *args,
     if (!meta_readable(obj->type)) {
         return mino_nil(S);
     }
-    if (obj->type == MINO_VAR) {
+    if (mino_type_of(obj) == MINO_VAR) {
         if (obj->meta != NULL) return obj->meta;
         return synth_var_meta(S, obj);
     }
@@ -96,7 +96,7 @@ mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "with-meta: type does not support metadata");
     }
-    if (obj->type == MINO_ATOM || obj->type == MINO_AGENT) {
+    if (mino_type_of(obj) == MINO_ATOM || mino_type_of(obj) == MINO_AGENT) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "with-meta: stateful types (atom/agent) cannot be copied "
             "to attach new meta; use alter-meta! for in-place mutation "
@@ -105,13 +105,13 @@ mino_val_t *prim_with_meta(mino_state_t *S, mino_val_t *args,
     if (!supports_meta(obj->type)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "with-meta: type does not support metadata");
     }
-    if (m != NULL && m->type != MINO_NIL && m->type != MINO_MAP) {
+    if (m != NULL && mino_type_of(m) != MINO_NIL && mino_type_of(m) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "with-meta: metadata must be a map or nil");
     }
     /* Shallow-copy the value and attach the new metadata. */
     copy = alloc_val(S, obj->type);
     copy->as = obj->as;
-    copy->meta = (m != NULL && m->type == MINO_NIL) ? NULL : m;
+    copy->meta = (m != NULL && mino_type_of(m) == MINO_NIL) ? NULL : m;
     return copy;
 }
 
@@ -129,7 +129,7 @@ mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
         return prim_throw_classified(S, "eval/type", "MTY001",
             "vary-meta: type does not support metadata");
     }
-    if (obj->type == MINO_ATOM || obj->type == MINO_AGENT) {
+    if (mino_type_of(obj) == MINO_ATOM || mino_type_of(obj) == MINO_AGENT) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "vary-meta: stateful types (atom/agent) cannot be copied "
             "to attach new meta; use alter-meta! for in-place mutation "
@@ -145,12 +145,12 @@ mino_val_t *prim_vary_meta(mino_state_t *S, mino_val_t *args,
     if (new_meta == NULL) {
         return NULL;
     }
-    if (new_meta->type != MINO_NIL && new_meta->type != MINO_MAP) {
+    if (mino_type_of(new_meta) != MINO_NIL && mino_type_of(new_meta) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "vary-meta: f must return a map or nil");
     }
     copy = alloc_val(S, obj->type);
     copy->as = obj->as;
-    copy->meta = (new_meta->type == MINO_NIL) ? NULL : new_meta;
+    copy->meta = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
     return copy;
 }
 
@@ -176,11 +176,11 @@ mino_val_t *prim_alter_meta(mino_state_t *S, mino_val_t *args,
     if (new_meta == NULL) {
         return NULL;
     }
-    if (new_meta->type != MINO_NIL && new_meta->type != MINO_MAP) {
+    if (mino_type_of(new_meta) != MINO_NIL && mino_type_of(new_meta) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "alter-meta!: f must return a map or nil");
     }
     {
-        mino_val_t *next = (new_meta->type == MINO_NIL) ? NULL : new_meta;
+        mino_val_t *next = (mino_type_of(new_meta) == MINO_NIL) ? NULL : new_meta;
         gc_write_barrier(S, obj, obj->meta, next);
         obj->meta = next;
     }

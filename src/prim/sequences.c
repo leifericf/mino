@@ -41,18 +41,18 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "seq requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
-    if (coll->type == MINO_EMPTY_LIST) return mino_nil(S);
-    if (coll->type == MINO_LAZY) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_EMPTY_LIST) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_LAZY) {
         mino_val_t *forced = lazy_force(S, coll);
         if (forced == NULL) return NULL;
-        if (forced->type == MINO_NIL) return mino_nil(S);
-        if (forced->type == MINO_EMPTY_LIST) return mino_nil(S);
+        if (mino_type_of(forced) == MINO_NIL) return mino_nil(S);
+        if (mino_type_of(forced) == MINO_EMPTY_LIST) return mino_nil(S);
         return forced;
     }
-    if (coll->type == MINO_CONS) return coll;
-    if (coll->type == MINO_CHUNKED_CONS) return coll;
-    if (coll->type == MINO_VECTOR) {
+    if (mino_type_of(coll) == MINO_CONS) return coll;
+    if (mino_type_of(coll) == MINO_CHUNKED_CONS) return coll;
+    if (mino_type_of(coll) == MINO_VECTOR) {
         /* Emit a chunked-cons spine of 32-element chunks. Vector
          * leaves are already 32-wide (MINO_VEC_WIDTH), so consumers
          * that propagate chunkedness (map/filter/take/keep/...) get
@@ -86,7 +86,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return more;
     }
-    if (coll->type == MINO_MAP_ENTRY) {
+    if (mino_type_of(coll) == MINO_MAP_ENTRY) {
         /* Two-element chunked-seq over (k, v). */
         mino_val_t *buf = mino_chunk_buffer(S, 2);
         if (buf == NULL) return NULL;
@@ -95,7 +95,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_chunk_seal(buf);
         return mino_chunked_cons(S, buf, mino_nil(S));
     }
-    if (coll->type == MINO_HOST_ARRAY) {
+    if (mino_type_of(coll) == MINO_HOST_ARRAY) {
         /* Emit a single-chunk MINO_CHUNKED_CONS so seq? is true and
          * first/rest/count walk the elements; predicates like
          * vector? / coll? / counted? remain false (no MINO_HOST_ARRAY
@@ -112,7 +112,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_chunk_seal(buf);
         return mino_chunked_cons(S, buf, mino_nil(S));
     }
-    if (coll->type == MINO_MAP) {
+    if (mino_type_of(coll) == MINO_MAP) {
         mino_val_t *head = mino_nil(S), *tail = NULL;
         size_t i;
         if (coll->as.map.len == 0) return mino_nil(S);
@@ -123,7 +123,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return head;
     }
-    if (coll->type == MINO_SET) {
+    if (mino_type_of(coll) == MINO_SET) {
         mino_val_t *head = mino_nil(S), *tail = NULL;
         size_t i;
         if (coll->as.set.len == 0) return mino_nil(S);
@@ -133,7 +133,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return head;
     }
-    if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
+    if (mino_type_of(coll) == MINO_SORTED_MAP || mino_type_of(coll) == MINO_SORTED_SET) {
         /* sorted_seq returns a MINO_CONS chain, but the JVM Clojure
          * (seq sorted-map) is a Seq, not a PersistentList -- (list?
          * (seq (sorted-map ...))) is false. Re-package the cons chain
@@ -158,7 +158,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         (void)i;
         return result;
     }
-    if (coll->type == MINO_STRING) {
+    if (mino_type_of(coll) == MINO_STRING) {
         /* Per Clojure, (seq "abc") yields a sequence of chars, not
          * substrings. Walk UTF-8 codepoint by codepoint and emit
          * MINO_CHAR values. Malformed bytes are emitted as their
@@ -195,7 +195,7 @@ mino_val_t *prim_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return head;
     }
-    if (coll->type == MINO_RECORD) {
+    if (mino_type_of(coll) == MINO_RECORD) {
         /* Declared field [k v] pairs first in declared order, then
          * ext entries in insertion order. Returns nil for an empty
          * record (no fields and no ext entries). */
@@ -242,10 +242,10 @@ mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "realized? requires one argument");
     }
     v = args->as.cons.car;
-    if (v != NULL && v->type == MINO_LAZY) {
+    if (v != NULL && mino_type_of(v) == MINO_LAZY) {
         return v->as.lazy.realized ? mino_true(S) : mino_false(S);
     }
-    if (v != NULL && v->type == MINO_FUTURE) {
+    if (v != NULL && mino_type_of(v) == MINO_FUTURE) {
         return mino_future_realized_p(v) ? mino_true(S) : mino_false(S);
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
@@ -259,18 +259,18 @@ mino_val_t *prim_realized_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
 {
     /* Force lazy seqs so they behave as cons lists. */
-    if (coll != NULL && coll->type == MINO_LAZY) {
+    if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
         coll = lazy_force(S, (mino_val_t *)coll);
     }
     /* Sorted collections: flatten to cons list for uniform iteration. */
     if (coll != NULL &&
-        (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET)) {
+        (mino_type_of(coll) == MINO_SORTED_MAP || mino_type_of(coll) == MINO_SORTED_SET)) {
         coll = sorted_seq(S, coll);
     }
     it->coll  = coll;
     it->idx   = 0;
-    it->cons_p = (coll != NULL && coll->type == MINO_CONS) ? coll : NULL;
-    if (coll != NULL && coll->type == MINO_CHUNKED_CONS) {
+    it->cons_p = (coll != NULL && mino_type_of(coll) == MINO_CONS) ? coll : NULL;
+    if (coll != NULL && mino_type_of(coll) == MINO_CHUNKED_CONS) {
         it->cons_p = coll;
         it->idx    = (size_t)coll->as.chunked_cons.off;
     }
@@ -279,11 +279,11 @@ void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
 int seq_iter_done(const seq_iter_t *it)
 {
     const mino_val_t *c = it->coll;
-    if (c == NULL || c->type == MINO_NIL) return 1;
-    switch (c->type) {
-    case MINO_CONS:   return it->cons_p == NULL || it->cons_p->type != MINO_CONS;
+    if (c == NULL || mino_type_of(c) == MINO_NIL) return 1;
+    switch (mino_type_of(c)) {
+    case MINO_CONS:   return it->cons_p == NULL || mino_type_of(it->cons_p) != MINO_CONS;
     case MINO_CHUNKED_CONS:
-        return it->cons_p == NULL || it->cons_p->type != MINO_CHUNKED_CONS;
+        return it->cons_p == NULL || mino_type_of(it->cons_p) != MINO_CHUNKED_CONS;
     case MINO_VECTOR:     return it->idx >= c->as.vec.len;
     case MINO_HOST_ARRAY: return it->idx >= c->as.host_array.len;
     case MINO_MAP_ENTRY:  return it->idx >= 2;
@@ -328,7 +328,7 @@ static void utf8_step(const unsigned char *data, size_t len, size_t pos,
 mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
 {
     const mino_val_t *c = it->coll;
-    switch (c->type) {
+    switch (mino_type_of(c)) {
     case MINO_CONS:   return it->cons_p->as.cons.car;
     case MINO_CHUNKED_CONS: {
         const mino_val_t *cell = it->cons_p;
@@ -364,17 +364,17 @@ mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
 
 void seq_iter_next(mino_state_t *S, seq_iter_t *it)
 {
-    if (it->coll != NULL && it->coll->type == MINO_CONS) {
-        if (it->cons_p != NULL && it->cons_p->type == MINO_CONS) {
+    if (it->coll != NULL && mino_type_of(it->coll) == MINO_CONS) {
+        if (it->cons_p != NULL && mino_type_of(it->cons_p) == MINO_CONS) {
             const mino_val_t *next = it->cons_p->as.cons.cdr;
             /* Force lazy tail if present. */
-            if (next != NULL && next->type == MINO_LAZY) {
+            if (next != NULL && mino_type_of(next) == MINO_LAZY) {
                 next = lazy_force(S, (mino_val_t *)next);
             }
             it->cons_p = next;
         }
-    } else if (it->coll != NULL && it->coll->type == MINO_CHUNKED_CONS) {
-        if (it->cons_p != NULL && it->cons_p->type == MINO_CHUNKED_CONS) {
+    } else if (it->coll != NULL && mino_type_of(it->coll) == MINO_CHUNKED_CONS) {
+        if (it->cons_p != NULL && mino_type_of(it->cons_p) == MINO_CHUNKED_CONS) {
             const mino_val_t *cell = it->cons_p;
             const mino_val_t *ch   = cell->as.chunked_cons.chunk;
             unsigned          next_idx = (unsigned)(it->idx + 1);
@@ -384,17 +384,17 @@ void seq_iter_next(mino_state_t *S, seq_iter_t *it)
             }
             {
                 const mino_val_t *more = cell->as.chunked_cons.more;
-                if (more != NULL && more->type == MINO_LAZY) {
+                if (more != NULL && mino_type_of(more) == MINO_LAZY) {
                     more = lazy_force(S, (mino_val_t *)more);
                 }
-                if (more != NULL && more->type == MINO_CONS) {
+                if (more != NULL && mino_type_of(more) == MINO_CONS) {
                     /* Switch dispatch to cons-mode for the rest of the
                      * walk. */
                     it->coll   = more;
                     it->cons_p = more;
                     it->idx    = 0;
                 } else if (more != NULL
-                           && more->type == MINO_CHUNKED_CONS) {
+                           && mino_type_of(more) == MINO_CHUNKED_CONS) {
                     it->cons_p = more;
                     it->idx    = (size_t)more->as.chunked_cons.off;
                 } else {
@@ -402,7 +402,7 @@ void seq_iter_next(mino_state_t *S, seq_iter_t *it)
                 }
             }
         }
-    } else if (it->coll != NULL && it->coll->type == MINO_STRING) {
+    } else if (it->coll != NULL && mino_type_of(it->coll) == MINO_STRING) {
         /* Step by the current codepoint's byte length so multi-byte
          * UTF-8 characters advance correctly. */
         unsigned int cp;
@@ -440,7 +440,7 @@ mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reduced? requires exactly 1 argument");
     }
-    return (args->as.cons.car != NULL && args->as.cons.car->type == MINO_REDUCED)
+    return (args->as.cons.car != NULL && mino_type_of(args->as.cons.car) == MINO_REDUCED)
         ? mino_true(S) : mino_false(S);
 }
 
@@ -456,13 +456,13 @@ static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
 {
     long long acc = 0;
     long long i;
-    if (fn == NULL || fn->type != MINO_PRIM) return NULL;
+    if (fn == NULL || mino_type_of(fn) != MINO_PRIM) return NULL;
     if (fn->as.prim.fn != prim_add) return NULL;  /* extend later */
     /* Compute element count; range is finite (caller already checked). */
     if (step == 0) return NULL;
     if (has_init) {
-        if (init == NULL || init->type != MINO_INT) return NULL;
-        acc = init->as.i;
+        if (init == NULL || !mino_val_int_p(init)) return NULL;
+        acc = mino_val_int_get(init);
     } else {
         if (step > 0 ? start >= end : start <= end) {
             return apply_callable(S, fn, mino_nil(S), NULL);
@@ -508,7 +508,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* (reduce f coll) — first element is the initial accumulator. */
         fn   = args->as.cons.car;
         coll = args->as.cons.cdr->as.cons.car;
-        if (coll == NULL || coll->type == MINO_NIL) {
+        if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
             /* (reduce f nil) → (f) */
             return apply_callable(S, fn, mino_nil(S), env);
         }
@@ -529,7 +529,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         fn   = args->as.cons.car;
         acc  = args->as.cons.cdr->as.cons.car;
         coll = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-        if (coll == NULL || coll->type == MINO_NIL) {
+        if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
             return acc;
         }
         if (lazy_is_int_range(coll, &r_start, &r_end, &r_step, &r_inf)
@@ -549,13 +549,13 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * iterator. Saves the per-step 2-element cons spine. */
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
-        if (fn != NULL && fn->type == MINO_PRIM
+        if (fn != NULL && mino_type_of(fn) == MINO_PRIM
             && fn->as.prim.fn != NULL
-            && acc != NULL && acc->type == MINO_INT
-            && elem != NULL && elem->type == MINO_INT) {
+            && acc != NULL && mino_val_int_p(acc)
+            && elem != NULL && mino_val_int_p(elem)) {
             mino_prim_fn p  = fn->as.prim.fn;
-            long long    ai = acc->as.i;
-            long long    bi = elem->as.i;
+            long long    ai = mino_val_int_get(acc);
+            long long    bi = mino_val_int_get(elem);
             long long    r;
             int          handled = 0;
             if (p == prim_add) {
@@ -584,7 +584,7 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             acc = apply_callable(S, fn, call_a, env);
         }
         if (acc == NULL) return NULL;
-        if (acc->type == MINO_REDUCED) return acc->as.reduced.val;
+        if (mino_type_of(acc) == MINO_REDUCED) return acc->as.reduced.val;
         seq_iter_next(S, &it);
     }
     return acc;
@@ -601,7 +601,7 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "set requires exactly 1 argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_set(S, NULL, 0);
     }
     /* Validate seqability eagerly. */
@@ -609,7 +609,7 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
         mino_val_t *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
-        if (seqd->type == MINO_NIL) return mino_set(S, NULL, 0);
+        if (mino_type_of(seqd) == MINO_NIL) return mino_set(S, NULL, 0);
         coll = seqd;
     }
     result = mino_set(S, NULL, 0);
@@ -631,13 +631,13 @@ mino_val_t *prim_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 static mino_val_t *realize_seq(mino_state_t *S, mino_val_t *coll)
 {
     while (coll != NULL) {
-        if (coll->type == MINO_LAZY) {
+        if (mino_type_of(coll) == MINO_LAZY) {
             coll = lazy_force(S, coll);
             if (coll == NULL) return NULL;
             continue;
         }
-        if (coll->type == MINO_NIL) return coll;
-        if (coll->type == MINO_CONS) {
+        if (mino_type_of(coll) == MINO_NIL) return coll;
+        if (mino_type_of(coll) == MINO_CONS) {
             coll = coll->as.cons.cdr;
             continue;
         }
@@ -852,12 +852,12 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     to   = args->as.cons.car;
     from = args->as.cons.cdr->as.cons.car;
-    if (from == NULL || from->type == MINO_NIL) {
+    if (from == NULL || mino_type_of(from) == MINO_NIL) {
         return to;
     }
     /* Conj each element of `from` into `to`. The type of `to` determines
      * the conj semantics (vector appends, list prepends, map/set merges). */
-    if (to == NULL || to->type == MINO_NIL || to->type == MINO_EMPTY_LIST) {
+    if (to == NULL || mino_type_of(to) == MINO_NIL || mino_type_of(to) == MINO_EMPTY_LIST) {
         /* Into nil or empty-list: build a list (prepend each element). */
         mino_val_t *out = mino_nil(S);
         seq_iter_init(S, &it, from);
@@ -865,10 +865,10 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             out = mino_cons(S, seq_iter_val(S, &it), out);
             seq_iter_next(S, &it);
         }
-        if (out == NULL || out->type == MINO_NIL) return mino_empty_list(S);
+        if (out == NULL || mino_type_of(out) == MINO_NIL) return mino_empty_list(S);
         return out;
     }
-    if (to->type == MINO_VECTOR) {
+    if (mino_type_of(to) == MINO_VECTOR) {
         mino_val_t *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
@@ -877,18 +877,18 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
-    if (to->type == MINO_MAP) {
+    if (mino_type_of(to) == MINO_MAP) {
         mino_val_t *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             mino_val_t *item = seq_iter_val(S, &it);
             mino_val_t *pair_args;
             mino_val_t *ek, *ev;
-            if (item != NULL && item->type == MINO_VECTOR
+            if (item != NULL && mino_type_of(item) == MINO_VECTOR
                 && item->as.vec.len == 2) {
                 ek = vec_nth(item, 0);
                 ev = vec_nth(item, 1);
-            } else if (item != NULL && item->type == MINO_MAP_ENTRY) {
+            } else if (item != NULL && mino_type_of(item) == MINO_MAP_ENTRY) {
                 ek = item->as.map_entry.k;
                 ev = item->as.map_entry.v;
             } else {
@@ -901,7 +901,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
-    if (to->type == MINO_SET) {
+    if (mino_type_of(to) == MINO_SET) {
         mino_val_t *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
@@ -910,17 +910,17 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
-    if (to->type == MINO_SORTED_MAP) {
+    if (mino_type_of(to) == MINO_SORTED_MAP) {
         mino_val_t *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             mino_val_t *item = seq_iter_val(S, &it);
             mino_val_t *ek, *ev;
-            if (item != NULL && item->type == MINO_VECTOR
+            if (item != NULL && mino_type_of(item) == MINO_VECTOR
                 && item->as.vec.len == 2) {
                 ek = vec_nth(item, 0);
                 ev = vec_nth(item, 1);
-            } else if (item != NULL && item->type == MINO_MAP_ENTRY) {
+            } else if (item != NULL && mino_type_of(item) == MINO_MAP_ENTRY) {
                 ek = item->as.map_entry.k;
                 ev = item->as.map_entry.v;
             } else {
@@ -932,7 +932,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
-    if (to->type == MINO_SORTED_SET) {
+    if (mino_type_of(to) == MINO_SORTED_SET) {
         mino_val_t *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
@@ -941,7 +941,7 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return acc;
     }
-    if (to->type == MINO_CONS) {
+    if (mino_type_of(to) == MINO_CONS) {
         mino_val_t *out = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
@@ -988,7 +988,7 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         last = p->as.cons.car; /* the final collection argument */
         /* Append elements from `last` collection. */
-        if (last != NULL && last->type != MINO_NIL) {
+        if (last != NULL && mino_type_of(last) != MINO_NIL) {
             seq_iter_t it;
             seq_iter_init(S, &it, last);
             while (!seq_iter_done(&it)) {
@@ -1001,11 +1001,11 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return apply_callable(S, fn, head, env);
     }
     /* (apply f coll) — convert coll to a cons arg list. */
-    if (last == NULL || last->type == MINO_NIL
-        || last->type == MINO_EMPTY_LIST) {
+    if (last == NULL || mino_type_of(last) == MINO_NIL
+        || mino_type_of(last) == MINO_EMPTY_LIST) {
         return apply_callable(S, fn, mino_nil(S), env);
     }
-    if (last->type == MINO_CONS) {
+    if (mino_type_of(last) == MINO_CONS) {
         return apply_callable(S, fn, last, env);
     }
     /* Convert non-list collection to cons list. */
@@ -1044,13 +1044,13 @@ mino_val_t *prim_reverse(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "reverse requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_empty_list(S);
     }
     seq_args = mino_cons(S, coll, mino_nil(S));
     seqd = prim_seq(S, seq_args, env);
     if (seqd == NULL) return NULL;
-    if (seqd->type == MINO_NIL) return mino_empty_list(S);
+    if (mino_type_of(seqd) == MINO_NIL) return mino_empty_list(S);
     seq_iter_init(S, &it, seqd);
     while (!seq_iter_done(&it)) {
         out = mino_cons(S, seq_iter_val(S, &it), out);
@@ -1071,10 +1071,10 @@ static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *
         mino_val_t *result = mino_call(S, S->sort_comp_fn, call_args, S->sort_comp_env);
         if (result == NULL) return 0;
         /* Numeric result: use sign directly (compare-style) */
-        if (result->type == MINO_INT) {
-            return result->as.i < 0 ? -1 : result->as.i > 0 ? 1 : 0;
+        if (mino_val_int_p(result)) {
+            return mino_val_int_get(result) < 0 ? -1 : mino_val_int_get(result) > 0 ? 1 : 0;
         }
-        if (result->type == MINO_FLOAT) {
+        if (mino_type_of(result) == MINO_FLOAT) {
             return result->as.f < 0 ? -1 : result->as.f > 0 ? 1 : 0;
         }
         /* Boolean result: true means a < b, false means a >= b */
@@ -1088,10 +1088,10 @@ static int sort_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *
                               mino_cons(S, (mino_val_t *)b, mino_nil(S)));
         mino_val_t *r = prim_compare(S, args, NULL);
         if (r == NULL) return 0;
-        if (r->type == MINO_INT) {
-            return r->as.i < 0 ? -1 : r->as.i > 0 ? 1 : 0;
+        if (mino_val_int_p(r)) {
+            return mino_val_int_get(r) < 0 ? -1 : mino_val_int_get(r) > 0 ? 1 : 0;
         }
-        if (r->type == MINO_FLOAT) {
+        if (mino_type_of(r) == MINO_FLOAT) {
             return r->as.f < 0 ? -1 : r->as.f > 0 ? 1 : 0;
         }
         return 0;
@@ -1143,7 +1143,7 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001", "sort requires one or two arguments");
     }
-    if (coll == NULL || coll->type == MINO_NIL) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_empty_list(S);
     }
     /* Validate seqability eagerly: non-coll inputs throw rather than
@@ -1153,7 +1153,7 @@ mino_val_t *prim_sort(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
         mino_val_t *seqd = prim_seq(S, seq_args, env);
         if (seqd == NULL) return NULL;
-        if (seqd->type == MINO_NIL) return mino_empty_list(S);
+        if (mino_type_of(seqd) == MINO_NIL) return mino_empty_list(S);
         coll = seqd;
     }
     /* Collect elements into an array. */
@@ -1187,16 +1187,16 @@ mino_val_t *prim_peek(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "peek requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL
-        || coll->type == MINO_EMPTY_LIST) return mino_nil(S);
-    if (coll->type == MINO_VECTOR) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_VECTOR) {
         if (coll->as.vec.len == 0) return mino_nil(S);
         return vec_nth(coll, coll->as.vec.len - 1);
     }
     /* Only list-shaped MINO_CONS cells are stack-eligible. The result
      * of a (cons x y) call has not_list=1 and falls through to throw,
      * matching JVM Clojure where Cons is not a stack. */
-    if (coll->type == MINO_CONS && !coll->as.cons.not_list)
+    if (mino_type_of(coll) == MINO_CONS && !coll->as.cons.not_list)
         return coll->as.cons.car;
     {
         char msg[96];
@@ -1214,16 +1214,16 @@ mino_val_t *prim_pop(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "pop requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_nil(S);
     }
-    if (coll->type == MINO_VECTOR) {
+    if (mino_type_of(coll) == MINO_VECTOR) {
         if (coll->as.vec.len == 0) {
             return prim_throw_classified(S, "eval/bounds", "MBD001", "pop: cannot pop an empty vector");
         }
         return vec_pop(S, coll);
     }
-    if (coll->type == MINO_CONS && !coll->as.cons.not_list)
+    if (mino_type_of(coll) == MINO_CONS && !coll->as.cons.not_list)
         return coll->as.cons.cdr;
     {
         char msg[96];
@@ -1245,30 +1245,30 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     m = args->as.cons.car;
     k = args->as.cons.cdr->as.cons.car;
-    if (m == NULL || m->type == MINO_NIL) return mino_nil(S);
+    if (m == NULL || mino_type_of(m) == MINO_NIL) return mino_nil(S);
     /* Transient associatives delegate to their underlying persistent
      * collection, matching Clojure's semantics. */
-    if (m->type == MINO_TRANSIENT) {
+    if (mino_type_of(m) == MINO_TRANSIENT) {
         if (!m->as.transient.valid)
             return prim_throw_classified(S, "eval/state", "MST001",
                 "find: transient is no longer valid");
         m = m->as.transient.current;
-        if (m == NULL || m->type == MINO_NIL) return mino_nil(S);
+        if (m == NULL || mino_type_of(m) == MINO_NIL) return mino_nil(S);
     }
-    if (m->type == MINO_SORTED_MAP) {
+    if (mino_type_of(m) == MINO_SORTED_MAP) {
         if (!rb_contains(S, m->as.sorted.root, k, m->as.sorted.comparator))
             return mino_nil(S);
         v = rb_get(S, m->as.sorted.root, k, m->as.sorted.comparator);
         return mino_map_entry(S, k, v);
     }
-    if (m->type == MINO_VECTOR) {
+    if (mino_type_of(m) == MINO_VECTOR) {
         long long idx;
-        if (k->type != MINO_INT) return mino_nil(S);
-        idx = k->as.i;
+        if (!mino_val_int_p(k)) return mino_nil(S);
+        idx = mino_val_int_get(k);
         if (idx < 0 || (size_t)idx >= m->as.vec.len) return mino_nil(S);
         return mino_map_entry(S, k, vec_nth(m, (size_t)idx));
     }
-    if (m->type == MINO_RECORD) {
+    if (mino_type_of(m) == MINO_RECORD) {
         int idx = record_field_index(m, k);
         if (idx >= 0) {
             mino_val_t *fields = m->as.record.type->as.record_type.fields;
@@ -1281,7 +1281,7 @@ mino_val_t *prim_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return mino_nil(S);
     }
-    if (m->type != MINO_MAP) {
+    if (mino_type_of(m) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001", "find: first argument must be an associative collection");
     }
     v = map_get_val(m, k);
@@ -1297,10 +1297,10 @@ mino_val_t *prim_empty(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "empty requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) return mino_nil(S);
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_nil(S);
     {
         mino_val_t *r;
-        switch (coll->type) {
+        switch (mino_type_of(coll)) {
         case MINO_VECTOR:
             r = mino_vector(S, NULL, 0);
             r->meta = coll->meta;
@@ -1343,17 +1343,17 @@ mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "rseq requires one argument");
     }
     coll = args->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return prim_throw_classified(S, "eval/type", "MTY001", "rseq: argument must not be nil");
     }
-    if (coll->type == MINO_SORTED_MAP || coll->type == MINO_SORTED_SET) {
+    if (mino_type_of(coll) == MINO_SORTED_MAP || mino_type_of(coll) == MINO_SORTED_SET) {
         /* Reverse of sorted collection — build reverse cons list from
          * the in-order key list. */
         mino_val_t *keys = mino_nil(S);
         mino_val_t *kt   = NULL;
         rb_to_list(S, coll->as.sorted.root, &keys, &kt);
         out = mino_nil(S);
-        if (coll->type == MINO_SORTED_MAP) {
+        if (mino_type_of(coll) == MINO_SORTED_MAP) {
             while (mino_is_cons(keys)) {
                 mino_val_t *k = keys->as.cons.car;
                 mino_val_t *v = rb_get(S, coll->as.sorted.root, k,
@@ -1370,7 +1370,7 @@ mino_val_t *prim_rseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return out;
     }
-    if (coll->type != MINO_VECTOR) {
+    if (mino_type_of(coll) != MINO_VECTOR) {
         return prim_throw_classified(S, "eval/type", "MTY001", "rseq: argument must be a vector or sorted collection");
     }
     if (coll->as.vec.len == 0) return mino_nil(S);
@@ -1430,7 +1430,7 @@ mino_val_t *prim_sorted_map_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
     }
     comparator = args->as.cons.car;
     if (comparator == NULL
-        || (comparator->type != MINO_FN && comparator->type != MINO_PRIM)) {
+        || (mino_type_of(comparator) != MINO_FN && mino_type_of(comparator) != MINO_PRIM)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "sorted-map-by: comparator must be a function");
     }
@@ -1458,7 +1458,7 @@ mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
     }
     comparator = args->as.cons.car;
     if (comparator == NULL
-        || (comparator->type != MINO_FN && comparator->type != MINO_PRIM)) {
+        || (mino_type_of(comparator) != MINO_FN && mino_type_of(comparator) != MINO_PRIM)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "sorted-set-by: comparator must be a function");
     }
@@ -1479,7 +1479,7 @@ mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
  * if v is not one of the four accepted tests. */
 static int classify_subseq_test(const mino_val_t *v, int *is_gt, int *inclusive)
 {
-    if (v == NULL || v->type != MINO_PRIM) return 0;
+    if (v == NULL || mino_type_of(v) != MINO_PRIM) return 0;
     if (v->as.prim.fn == prim_lt)  { *is_gt = 0; *inclusive = 0; return 1; }
     if (v->as.prim.fn == prim_lte) { *is_gt = 0; *inclusive = 1; return 1; }
     if (v->as.prim.fn == prim_gt)  { *is_gt = 1; *inclusive = 0; return 1; }
@@ -1516,13 +1516,13 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
     }
     sc = args->as.cons.car;
     if (sc == NULL
-        || (sc->type != MINO_SORTED_MAP && sc->type != MINO_SORTED_SET)) {
+        || (mino_type_of(sc) != MINO_SORTED_MAP && mino_type_of(sc) != MINO_SORTED_SET)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             reverse
               ? "rsubseq: first argument must be a sorted map or sorted set"
               : "subseq: first argument must be a sorted map or sorted set");
     }
-    is_map = sc->type == MINO_SORTED_MAP;
+    is_map = mino_type_of(sc) == MINO_SORTED_MAP;
     (void)name;
     if (n == 3) {
         mino_val_t *test = args->as.cons.cdr->as.cons.car;

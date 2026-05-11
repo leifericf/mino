@@ -22,7 +22,7 @@ int args_have_float(mino_val_t *args)
 {
     while (mino_is_cons(args)) {
         mino_val_t *a = args->as.cons.car;
-        if (a != NULL && a->type == MINO_FLOAT) {
+        if (a != NULL && mino_type_of(a) == MINO_FLOAT) {
             return 1;
         }
         args = args->as.cons.cdr;
@@ -73,11 +73,11 @@ int as_double(const mino_val_t *v, double *out)
     if (v == NULL) {
         return 0;
     }
-    if (v->type == MINO_INT) {
-        *out = (double)v->as.i;
+    if (mino_val_int_p(v)) {
+        *out = (double)mino_val_int_get(v);
         return 1;
     }
-    if (v->type == MINO_FLOAT) {
+    if (mino_type_of(v) == MINO_FLOAT) {
         *out = v->as.f;
         return 1;
     }
@@ -86,10 +86,10 @@ int as_double(const mino_val_t *v, double *out)
 
 int as_long(const mino_val_t *v, long long *out)
 {
-    if (v == NULL || v->type != MINO_INT) {
+    if (v == NULL || !mino_val_int_p(v)) {
         return 0;
     }
-    *out = v->as.i;
+    *out = mino_val_int_get(v);
     return 1;
 }
 

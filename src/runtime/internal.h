@@ -77,6 +77,17 @@
 #define MINO_ASSERT_ALIGNED(p) \
     assert(((uintptr_t)(p) & MINO_TAG_MASK) == 0)
 
+/* Effective type discriminator: returns MINO_INT for inline-tagged
+ * ints, MINO_NIL for NULL, otherwise the boxed header type. Use this
+ * in switch / type comparisons so the dispatch is form-agnostic and
+ * NULL-safe. */
+static inline mino_type_t mino_type_of(const mino_val_t *v)
+{
+    if (v == NULL) return MINO_NIL;
+    if (MINO_IS_INT(v)) return MINO_INT;
+    return v->type;
+}
+
 /* Unified accessors that handle both inline-tagged ints and boxed
  * MINO_INT cells. mino_int(S, n) returns tagged for values that fit
  * in MINO_INT_MAX/MIN and boxed otherwise; readers go through these
@@ -85,8 +96,7 @@
  * still handle it. */
 static inline int mino_val_int_p(const mino_val_t *v)
 {
-    if (MINO_IS_INT(v)) return 1;
-    return MINO_IS_PTR(v) && v->type == MINO_INT;
+    return mino_type_of(v) == MINO_INT;
 }
 
 static inline long long mino_val_int_get(const mino_val_t *v)
@@ -1261,8 +1271,8 @@ mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source);
 static inline int mino_is_truthy_inline(const mino_val_t *v)
 {
     if (v == NULL) return 0;
-    if (v->type == MINO_NIL) return 0;
-    if (v->type == MINO_BOOL) return v->as.b != 0;
+    if (mino_type_of(v) == MINO_NIL) return 0;
+    if (mino_type_of(v) == MINO_BOOL) return v->as.b != 0;
     return 1;
 }
 

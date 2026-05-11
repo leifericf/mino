@@ -18,13 +18,13 @@
 static int seq_head_rest(mino_state_t *S, mino_val_t *coll,
                          mino_val_t **out_head, mino_val_t **out_rest)
 {
-    if (coll == NULL || coll->type == MINO_NIL) return 0;
-    if (coll->type == MINO_CONS) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) return 0;
+    if (mino_type_of(coll) == MINO_CONS) {
         *out_head = coll->as.cons.car;
         *out_rest = coll->as.cons.cdr;
         return 1;
     }
-    if (coll->type == MINO_CHUNKED_CONS) {
+    if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
         const mino_val_t *ch = coll->as.chunked_cons.chunk;
         *out_head = ch->as.chunk.vals[coll->as.chunked_cons.off];
         *out_rest = mino_chunked_cons_advance(S, coll);
@@ -38,22 +38,22 @@ static int seq_head_rest(mino_state_t *S, mino_val_t *coll,
  * or CHUNKED_CONS-shaped seq. Returns nil/NULL when the seq is empty. */
 static mino_val_t *normalize_seq(mino_state_t *S, mino_val_t *coll)
 {
-    if (coll != NULL && coll->type == MINO_LAZY) {
+    if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
         coll = lazy_force(S, coll);
         if (coll == NULL) return NULL;
     }
-    if (coll == NULL || coll->type == MINO_NIL
-        || coll->type == MINO_EMPTY_LIST) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
         return mino_nil(S);
     }
-    if (coll->type == MINO_CONS || coll->type == MINO_CHUNKED_CONS) {
+    if (mino_type_of(coll) == MINO_CONS || mino_type_of(coll) == MINO_CHUNKED_CONS) {
         return coll;
     }
     /* Fall back to prim_seq for vector/map/set/string/etc. */
     coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
     if (coll == NULL) return NULL;
-    if (coll->type == MINO_NIL) return mino_nil(S);
-    if (coll->type == MINO_CONS || coll->type == MINO_CHUNKED_CONS) {
+    if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_CONS || mino_type_of(coll) == MINO_CHUNKED_CONS) {
         return coll;
     }
     return mino_nil(S);
@@ -71,8 +71,8 @@ static mino_val_t *lazy_map1_thunk(mino_state_t *S, mino_val_t *ctx)
     mino_val_t *next_lz;
     coll = normalize_seq(S, coll);
     if (coll == NULL) return NULL;
-    if (coll->type == MINO_NIL) return mino_nil(S);
-    if (coll->type == MINO_CHUNKED_CONS) {
+    if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
         /* Chunked fast path: pull the whole head chunk in one go,
          * apply f to each slot into a fresh chunk, and emit a
          * chunk-cons whose tail wraps the next chunk-rest in a fresh
@@ -101,8 +101,8 @@ static mino_val_t *lazy_map1_thunk(mino_state_t *S, mino_val_t *ctx)
         }
         mino_chunk_seal(buf);
         more = coll->as.chunked_cons.more;
-        if (more != NULL && more->type != MINO_NIL
-            && more->type != MINO_EMPTY_LIST) {
+        if (more != NULL && mino_type_of(more) != MINO_NIL
+            && mino_type_of(more) != MINO_EMPTY_LIST) {
             next_ctx = mino_cons(S, fn, mino_cons(S, more, mino_nil(S)));
             next_lz = alloc_val(S, MINO_LAZY);
             next_lz->as.lazy.body    = next_ctx;
@@ -147,17 +147,17 @@ mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     fn   = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL
-        || coll->type == MINO_EMPTY_LIST) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
         return mino_empty_list(S);
     }
     /* Normalize initial coll to cons-or-lazy so the thunk only needs to
      * handle those cases going forward. */
-    if (coll->type != MINO_CONS && coll->type != MINO_LAZY
-        && coll->type != MINO_CHUNKED_CONS) {
+    if (mino_type_of(coll) != MINO_CONS && mino_type_of(coll) != MINO_LAZY
+        && mino_type_of(coll) != MINO_CHUNKED_CONS) {
         coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
         if (coll == NULL) return NULL;
-        if (coll->type == MINO_NIL) return mino_empty_list(S);
+        if (mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
     }
     ctx = mino_cons(S, fn, mino_cons(S, coll, mino_nil(S)));
     lz = alloc_val(S, MINO_LAZY);
@@ -180,8 +180,8 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
         mino_val_t *ok;
         coll = normalize_seq(S, coll);
         if (coll == NULL) return NULL;
-        if (coll->type == MINO_NIL) return mino_nil(S);
-        if (coll->type == MINO_CHUNKED_CONS) {
+        if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+        if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
             /* Chunked path: scan the head chunk into a fresh chunk
              * holding only the elements where pred is truthy, then
              * emit chunk-cons plus a lazy continuation over the
@@ -214,8 +214,8 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
             }
             mino_chunk_seal(buf);
             more = coll->as.chunked_cons.more;
-            if (more != NULL && more->type != MINO_NIL
-                && more->type != MINO_EMPTY_LIST) {
+            if (more != NULL && mino_type_of(more) != MINO_NIL
+                && mino_type_of(more) != MINO_EMPTY_LIST) {
                 next_ctx = mino_cons(S, pred,
                             mino_cons(S, more, mino_nil(S)));
                 next_lz = alloc_val(S, MINO_LAZY);
@@ -233,7 +233,7 @@ static mino_val_t *lazy_filter_thunk(mino_state_t *S, mino_val_t *ctx)
                  * test would see no chunk at the head). Instead,
                  * recur into the lazy continuation to find the next
                  * non-empty chunk. */
-                if (next_lz != NULL && next_lz->type == MINO_LAZY) {
+                if (next_lz != NULL && mino_type_of(next_lz) == MINO_LAZY) {
                     return lazy_force(S, next_lz);
                 }
                 return mino_nil(S);
@@ -279,15 +279,15 @@ mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     pred = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
-    if (coll == NULL || coll->type == MINO_NIL
-        || coll->type == MINO_EMPTY_LIST) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
         return mino_empty_list(S);
     }
-    if (coll->type != MINO_CONS && coll->type != MINO_LAZY
-        && coll->type != MINO_CHUNKED_CONS) {
+    if (mino_type_of(coll) != MINO_CONS && mino_type_of(coll) != MINO_LAZY
+        && mino_type_of(coll) != MINO_CHUNKED_CONS) {
         coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
         if (coll == NULL) return NULL;
-        if (coll->type == MINO_NIL) return mino_empty_list(S);
+        if (mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
     }
     ctx = mino_cons(S, pred, mino_cons(S, coll, mino_nil(S)));
     lz = alloc_val(S, MINO_LAZY);
@@ -313,16 +313,16 @@ int lazy_is_int_range(const mino_val_t *coll, long long *start_out,
                       int *infinite_out)
 {
     const mino_val_t *ctx;
-    if (coll == NULL || coll->type != MINO_LAZY) return 0;
+    if (coll == NULL || mino_type_of(coll) != MINO_LAZY) return 0;
     if (coll->as.lazy.c_thunk != range_thunk) return 0;
     if (coll->as.lazy.realized) return 0;  /* would be a chunked cons by now */
     ctx = coll->as.lazy.body;
     if (ctx == NULL || !mino_is_cons(ctx)) return 0;
-    *start_out    = ctx->as.cons.car->as.i;
-    *end_out      = ctx->as.cons.cdr->as.cons.car->as.i;
-    *step_out     = ctx->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
-    *infinite_out = (ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr
-                       ->as.cons.car->type == MINO_BOOL
+    *start_out    = mino_val_int_get(ctx->as.cons.car);
+    *end_out      = mino_val_int_get(ctx->as.cons.cdr->as.cons.car);
+    *step_out     = mino_val_int_get(ctx->as.cons.cdr->as.cons.cdr->as.cons.car);
+    *infinite_out = (mino_type_of(ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr
+                                  ->as.cons.car) == MINO_BOOL
                      && ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr
                        ->as.cons.car->as.b == 1);
     return 1;
@@ -352,9 +352,9 @@ static mino_val_t *range_make_lazy(mino_state_t *S, long long start,
 
 static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
 {
-    long long start = ctx->as.cons.car->as.i;
-    long long end   = ctx->as.cons.cdr->as.cons.car->as.i;
-    long long step  = ctx->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
+    long long start = mino_val_int_get(ctx->as.cons.car);
+    long long end   = mino_val_int_get(ctx->as.cons.cdr->as.cons.car);
+    long long step  = mino_val_int_get(ctx->as.cons.cdr->as.cons.cdr->as.cons.car);
     int infinite    = ctx->as.cons.cdr->as.cons.cdr->as.cons.cdr->as.cons.car
                           == mino_true(S);
     /* Emit a 32-element chunk (or whatever remains) on each force.
@@ -390,7 +390,7 @@ static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
  * yields (first coll) until n reaches zero or coll is exhausted. */
 static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
 {
-    long long n   = ctx->as.cons.car->as.i;
+    long long n   = mino_val_int_get(ctx->as.cons.car);
     mino_val_t *coll = ctx->as.cons.cdr->as.cons.car;
     mino_val_t *head;
     mino_val_t *rest;
@@ -399,7 +399,7 @@ static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
     if (n <= 0) return mino_nil(S);
     coll = normalize_seq(S, coll);
     if (coll == NULL) return NULL;
-    if (coll->type == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
     if (!seq_head_rest(S, coll, &head, &rest)) return mino_nil(S);
     if (n == 1) {
         return mino_cons(S, head, mino_nil(S));
@@ -431,15 +431,15 @@ mino_val_t *prim_lazy_take(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "lazy-take: n must be an integer");
     }
     coll = args->as.cons.cdr->as.cons.car;
-    if (n <= 0 || coll == NULL || coll->type == MINO_NIL
-        || coll->type == MINO_EMPTY_LIST) {
+    if (n <= 0 || coll == NULL || mino_type_of(coll) == MINO_NIL
+        || mino_type_of(coll) == MINO_EMPTY_LIST) {
         return mino_empty_list(S);
     }
-    if (coll->type != MINO_CONS && coll->type != MINO_LAZY
-        && coll->type != MINO_CHUNKED_CONS) {
+    if (mino_type_of(coll) != MINO_CONS && mino_type_of(coll) != MINO_LAZY
+        && mino_type_of(coll) != MINO_CHUNKED_CONS) {
         coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
         if (coll == NULL) return NULL;
-        if (coll->type == MINO_NIL) return mino_empty_list(S);
+        if (mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
     }
     ctx = mino_cons(S, mino_int(S, n), mino_cons(S, coll, mino_nil(S)));
     lz = alloc_val(S, MINO_LAZY);
@@ -468,35 +468,35 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.cdr->as.cons.car;
     if (n <= 0) {
-        if (coll == NULL || coll->type == MINO_NIL) return mino_empty_list(S);
+        if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
         return coll;
     }
     while (n > 0) {
-        if (coll != NULL && coll->type == MINO_LAZY) {
+        if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
             coll = lazy_force(S, coll);
             if (coll == NULL) return NULL;
         }
-        if (coll == NULL || coll->type == MINO_NIL
-            || coll->type == MINO_EMPTY_LIST) {
+        if (coll == NULL || mino_type_of(coll) == MINO_NIL
+            || mino_type_of(coll) == MINO_EMPTY_LIST) {
             return mino_empty_list(S);
         }
-        if (coll->type == MINO_CHUNKED_CONS) {
+        if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
             coll = mino_chunked_cons_advance(S, coll);
             if (coll == NULL) return mino_empty_list(S);
             n--;
             continue;
         }
-        if (coll->type != MINO_CONS) {
+        if (mino_type_of(coll) != MINO_CONS) {
             coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);
             if (coll == NULL) return NULL;
-            if (coll->type == MINO_NIL) return mino_empty_list(S);
-            if (coll->type == MINO_CHUNKED_CONS) continue;
-            if (coll->type != MINO_CONS) return mino_empty_list(S);
+            if (mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
+            if (mino_type_of(coll) == MINO_CHUNKED_CONS) continue;
+            if (mino_type_of(coll) != MINO_CONS) return mino_empty_list(S);
         }
         coll = coll->as.cons.cdr;
         n--;
     }
-    if (coll == NULL || coll->type == MINO_NIL) return mino_empty_list(S);
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
     return coll;
 }
 
@@ -539,7 +539,7 @@ mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     {
         mino_val_t *r = range_make_lazy(S, start, end, step, infinite);
         if (r == NULL) return NULL;
-        if (r->type == MINO_NIL) return mino_empty_list(S);
+        if (mino_type_of(r) == MINO_NIL) return mino_empty_list(S);
         return r;
     }
 }
@@ -589,7 +589,7 @@ mino_val_t *prim_chunk_append(mino_state_t *S, mino_val_t *args,
     }
     buf  = args->as.cons.car;
     elem = args->as.cons.cdr->as.cons.car;
-    if (buf == NULL || buf->type != MINO_CHUNK) {
+    if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "chunk-append: first argument must be a chunk-buffer");
     }
@@ -621,7 +621,7 @@ mino_val_t *prim_chunk(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "chunk requires 1 argument");
     }
     buf = args->as.cons.car;
-    if (buf == NULL || buf->type != MINO_CHUNK) {
+    if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "chunk: argument must be a chunk-buffer");
     }
@@ -641,12 +641,12 @@ mino_val_t *prim_chunk_cons(mino_state_t *S, mino_val_t *args,
     }
     chunk = args->as.cons.car;
     more  = args->as.cons.cdr->as.cons.car;
-    if (chunk == NULL || chunk->type != MINO_CHUNK) {
+    if (chunk == NULL || mino_type_of(chunk) != MINO_CHUNK) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "chunk-cons: first argument must be a chunk");
     }
     if (chunk->as.chunk.len == 0) {
-        if (more == NULL || more->type == MINO_NIL) return mino_empty_list(S);
+        if (more == NULL || mino_type_of(more) == MINO_NIL) return mino_empty_list(S);
         return more;
     }
     return mino_chunked_cons(S, chunk, more);
@@ -664,7 +664,7 @@ mino_val_t *prim_chunk_first(mino_state_t *S, mino_val_t *args,
             "chunk-first requires 1 argument");
     }
     cs = args->as.cons.car;
-    if (cs == NULL || cs->type != MINO_CHUNKED_CONS) {
+    if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "chunk-first: argument must be a chunked-seq");
     }
@@ -687,12 +687,12 @@ mino_val_t *prim_chunk_rest(mino_state_t *S, mino_val_t *args,
             "chunk-rest requires 1 argument");
     }
     cs = args->as.cons.car;
-    if (cs == NULL || cs->type != MINO_CHUNKED_CONS) {
+    if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "chunk-rest: argument must be a chunked-seq");
     }
     more = cs->as.chunked_cons.more;
-    if (more == NULL || more->type == MINO_NIL) return mino_empty_list(S);
+    if (more == NULL || mino_type_of(more) == MINO_NIL) return mino_empty_list(S);
     return more;
 }
 
@@ -709,17 +709,17 @@ mino_val_t *prim_chunk_next(mino_state_t *S, mino_val_t *args,
             "chunk-next requires 1 argument");
     }
     cs = args->as.cons.car;
-    if (cs == NULL || cs->type != MINO_CHUNKED_CONS) {
+    if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "chunk-next: argument must be a chunked-seq");
     }
     more = cs->as.chunked_cons.more;
-    if (more != NULL && more->type == MINO_LAZY) {
+    if (more != NULL && mino_type_of(more) == MINO_LAZY) {
         more = lazy_force(S, more);
         if (more == NULL) return NULL;
     }
-    if (more == NULL || more->type == MINO_NIL
-        || more->type == MINO_EMPTY_LIST) {
+    if (more == NULL || mino_type_of(more) == MINO_NIL
+        || mino_type_of(more) == MINO_EMPTY_LIST) {
         return mino_nil(S);
     }
     return more;
@@ -736,7 +736,7 @@ mino_val_t *prim_chunked_seq_p(mino_state_t *S, mino_val_t *args,
             "chunked-seq? requires 1 argument");
     }
     return (args->as.cons.car != NULL
-            && args->as.cons.car->type == MINO_CHUNKED_CONS)
+            && mino_type_of(args->as.cons.car) == MINO_CHUNKED_CONS)
         ? mino_true(S) : mino_false(S);
 }
 

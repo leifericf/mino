@@ -89,21 +89,21 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
         /* Dead YOUNG: call any finalizer, unlink, recycle. */
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
-            if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr,
                                        v->as.handle.tag);
-            } else if (v->type == MINO_BIGINT) {
+            } else if (mino_type_of(v) == MINO_BIGINT) {
                 mino_bigint_free(v);
-            } else if (v->type == MINO_RECORD) {
+            } else if (mino_type_of(v) == MINO_RECORD) {
                 free(v->as.record.vals);
                 v->as.record.vals = NULL;
-            } else if (v->type == MINO_CHUNK) {
+            } else if (mino_type_of(v) == MINO_CHUNK) {
                 free(v->as.chunk.vals);
                 v->as.chunk.vals = NULL;
-            } else if (v->type == MINO_HOST_ARRAY) {
+            } else if (mino_type_of(v) == MINO_HOST_ARRAY) {
                 free(v->as.host_array.vals);
                 v->as.host_array.vals = NULL;
-            } else if (v->type == MINO_FUTURE) {
+            } else if (mino_type_of(v) == MINO_FUTURE) {
                 extern void mino_future_gc_sweep(mino_val_t *fut);
                 mino_future_gc_sweep(v);
             }
@@ -234,7 +234,7 @@ static void gc_verify_remset_complete(mino_state_t *S)
         case GC_T_VAL: {
             mino_val_t *v = (mino_val_t *)(h + 1);
             gc_verify_check(S, h, v->meta);
-            switch (v->type) {
+            switch (mino_type_of(v)) {
             case MINO_STRING: case MINO_SYMBOL: case MINO_KEYWORD:
                 gc_verify_check(S, h, v->as.s.data); break;
             case MINO_CONS:

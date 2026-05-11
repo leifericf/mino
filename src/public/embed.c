@@ -27,7 +27,7 @@ mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex)
     if (mino_current_ctx(S)->try_depth <= 0) {
         /* No enclosing try: surface as a classified error. */
         char msg[512];
-        if (ex != NULL && ex->type == MINO_STRING) {
+        if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
         } else {
@@ -69,19 +69,19 @@ static int args_type_match(char spec, const mino_val_t *v)
 {
     if (v == NULL) return spec == 'v' || spec == 'L';
     switch (spec) {
-    case 'i': return v->type == MINO_INT;
-    case 'f': return v->type == MINO_FLOAT || v->type == MINO_INT;
-    case 's': case 'S': return v->type == MINO_STRING;
-    case 'k': return v->type == MINO_KEYWORD;
-    case 'y': return v->type == MINO_SYMBOL;
-    case 'b': return v->type == MINO_BOOL;
-    case 'c': return v->type == MINO_CHAR;
+    case 'i': return mino_val_int_p(v);
+    case 'f': return mino_type_of(v) == MINO_FLOAT || mino_val_int_p(v);
+    case 's': case 'S': return mino_type_of(v) == MINO_STRING;
+    case 'k': return mino_type_of(v) == MINO_KEYWORD;
+    case 'y': return mino_type_of(v) == MINO_SYMBOL;
+    case 'b': return mino_type_of(v) == MINO_BOOL;
+    case 'c': return mino_type_of(v) == MINO_CHAR;
     case 'v': return 1;
-    case 'V': return v->type == MINO_VECTOR;
-    case 'M': return v->type == MINO_MAP;
-    case 'L': return v->type == MINO_CONS || v->type == MINO_NIL;
-    case 'H': return v->type == MINO_HANDLE;
-    case 'A': return v->type == MINO_ATOM;
+    case 'V': return mino_type_of(v) == MINO_VECTOR;
+    case 'M': return mino_type_of(v) == MINO_MAP;
+    case 'L': return mino_type_of(v) == MINO_CONS || mino_type_of(v) == MINO_NIL;
+    case 'H': return mino_type_of(v) == MINO_HANDLE;
+    case 'A': return mino_type_of(v) == MINO_ATOM;
     default:  return 0;
     }
 }
@@ -127,12 +127,12 @@ int mino_args_parse(mino_state_t *S, const char *name, mino_val_t *args,
         switch (*f) {
         case 'i': {
             long long *out = va_arg(ap, long long *);
-            *out = v->as.i;
+            *out = mino_val_int_get(v);
             break;
         }
         case 'f': {
             double *out = va_arg(ap, double *);
-            *out = (v->type == MINO_INT) ? (double)v->as.i : v->as.f;
+            *out = (mino_val_int_p(v)) ? (double)mino_val_int_get(v) : v->as.f;
             break;
         }
         case 's': {

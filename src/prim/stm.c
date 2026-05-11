@@ -227,7 +227,7 @@ mino_val_t *prim_ref_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "ref? requires one argument");
     }
     v = args->as.cons.car;
-    return (v != NULL && v->type == MINO_TX_REF) ? mino_true(S)
+    return (v != NULL && mino_type_of(v) == MINO_TX_REF) ? mino_true(S)
                                                   : mino_false(S);
 }
 
@@ -292,7 +292,7 @@ static mino_val_t *commute_log_replay(mino_state_t *S, mino_val_t *log,
     for (p = reversed; mino_is_cons(p); p = p->as.cons.cdr) {
         mino_val_t *entry  = p->as.cons.car;
         mino_val_t *result = NULL;
-        if (entry != NULL && entry->type == MINO_HANDLE
+        if (entry != NULL && mino_type_of(entry) == MINO_HANDLE
             && entry->as.handle.tag == TX_C_CLOSURE_TAG) {
             struct tx_c_closure *c = (struct tx_c_closure *)
                                       entry->as.handle.ptr;
@@ -353,7 +353,7 @@ mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *ref)
     tx_state_t        *tx;
     tx_ref_state_t    *rs;
     mino_val_t        *val;
-    if (ref == NULL || ref->type != MINO_TX_REF) return NULL;
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) return NULL;
     if (tx_check_ref_owned(S, ref)) return NULL;
     ctx = mino_current_ctx(S);
     tx  = ctx->current_tx;
@@ -373,7 +373,7 @@ mino_val_t *mino_tx_ref_deref(mino_state_t *S, mino_val_t *ref)
 
 int mino_is_tx_ref(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_TX_REF;
+    return v != NULL && mino_type_of(v) == MINO_TX_REF;
 }
 
 /* Cross-state defense: throw eval/state MST007 if the ref was
@@ -451,7 +451,7 @@ mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     ref = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "ref-set: first argument must be a ref");
     }
@@ -460,7 +460,7 @@ mino_val_t *prim_ref_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 
 mino_val_t *mino_tx_ref_set(mino_state_t *S, mino_val_t *ref, mino_val_t *val)
 {
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ref_set: argument must be a ref");
     }
@@ -569,7 +569,7 @@ mino_val_t *prim_alter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     ref           = args->as.cons.car;
     clj_ctx.fn    = args->as.cons.cdr->as.cons.car;
     clj_ctx.extra = args->as.cons.cdr->as.cons.cdr;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "alter: first argument must be a ref");
     }
@@ -581,7 +581,7 @@ mino_val_t *mino_tx_alter_c(mino_state_t *S, mino_val_t *ref,
                             mino_env_t *env)
 {
     struct compute_c_ctx c_ctx;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_alter_c: argument must be a ref");
     }
@@ -685,7 +685,7 @@ mino_val_t *prim_commute(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     ref           = args->as.cons.car;
     clj_ctx.fn    = args->as.cons.cdr->as.cons.car;
     clj_ctx.extra = args->as.cons.cdr->as.cons.cdr;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "commute: first argument must be a ref");
     }
@@ -698,7 +698,7 @@ mino_val_t *mino_tx_commute_c(mino_state_t *S, mino_val_t *ref,
                               mino_env_t *env)
 {
     struct compute_c_ctx c_ctx;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_commute_c: argument must be a ref");
     }
@@ -750,7 +750,7 @@ mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "ensure requires one argument");
     }
     ref = args->as.cons.car;
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "ensure: argument must be a ref");
     }
@@ -760,7 +760,7 @@ mino_val_t *prim_ensure(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 mino_val_t *mino_tx_ensure(mino_state_t *S, mino_val_t *ref,
                            mino_env_t *env)
 {
-    if (ref == NULL || ref->type != MINO_TX_REF) {
+    if (ref == NULL || mino_type_of(ref) != MINO_TX_REF) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "mino_tx_ensure: argument must be a ref");
     }
@@ -922,7 +922,7 @@ static int dispatch_watches(mino_state_t *S, tx_state_t *tx,
         size_t      i, n;
         if (rs->committed_new == NULL) continue;
         watches = rs->ref->as.tx_ref.watches;
-        if (watches == NULL || watches->type != MINO_MAP
+        if (watches == NULL || mino_type_of(watches) != MINO_MAP
             || watches->as.map.len == 0) {
             continue;
         }
@@ -1096,7 +1096,7 @@ static mino_val_t *tx_outer_run(mino_state_t *S,
             c->try_stack[c->try_depth - 1].exception = ex;
             longjmp(c->try_stack[c->try_depth - 1].buf, 1);
         }
-        if (ex != NULL && ex->type == MINO_STRING) {
+        if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
             set_eval_diag(S, c->eval_current_form,
                           "user", "MUS001", ex->as.s.data);
         } else {
@@ -1152,9 +1152,9 @@ mino_val_t *prim_dosync_star(mino_state_t *S, mino_val_t *args,
             "dosync* requires one argument (a thunk)");
     }
     thunk = args->as.cons.car;
-    if (thunk == NULL || (thunk->type != MINO_FN
-                          && thunk->type != MINO_PRIM
-                          && thunk->type != MINO_MACRO)) {
+    if (thunk == NULL || (mino_type_of(thunk) != MINO_FN
+                          && mino_type_of(thunk) != MINO_PRIM
+                          && mino_type_of(thunk) != MINO_MACRO)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "dosync*: expected a thunk");
     }

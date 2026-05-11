@@ -314,7 +314,7 @@ mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
     mino_val_t **vals = NULL;
     size_t       len = 0, i;
     /* Vector fast path. */
-    if (coll != NULL && coll->type == MINO_VECTOR) {
+    if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
         len = coll->as.vec.len;
         if (len > 0) {
             vals = (mino_val_t **)malloc(len * sizeof(*vals));
@@ -332,8 +332,8 @@ mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
     {
         size_t cap = 0;
         mino_val_t *s = coll;
-        while (s != NULL && s->type == MINO_LAZY) s = lazy_force(S, s);
-        while (mino_is_cons(s) || (s != NULL && s->type == MINO_CHUNKED_CONS)) {
+        while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
+        while (mino_is_cons(s) || (s != NULL && mino_type_of(s) == MINO_CHUNKED_CONS)) {
             mino_val_t *head;
             if (mino_is_cons(s)) {
                 head = s->as.cons.car;
@@ -343,7 +343,7 @@ mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
                           ->as.chunk.vals[s->as.chunked_cons.off];
                 s    = mino_chunked_cons_advance(S, s);
             }
-            while (s != NULL && s->type == MINO_LAZY) s = lazy_force(S, s);
+            while (s != NULL && mino_type_of(s) == MINO_LAZY) s = lazy_force(S, s);
             if (len >= cap) {
                 size_t ncap = cap == 0 ? 8 : cap * 2;
                 mino_val_t **nvals = (mino_val_t **)realloc(vals,
@@ -453,7 +453,7 @@ mino_val_t *mino_defrecord(mino_state_t *S,
 
 int mino_is_record_type(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_TYPE;
+    return v != NULL && mino_type_of(v) == MINO_TYPE;
 }
 
 mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
@@ -464,7 +464,7 @@ mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
     size_t       expected;
     size_t       i;
 
-    if (S == NULL || type == NULL || type->type != MINO_TYPE) {
+    if (S == NULL || type == NULL || mino_type_of(type) != MINO_TYPE) {
         return NULL;
     }
     expected = (type->as.record_type.fields != NULL)
@@ -498,8 +498,8 @@ int record_field_index(const mino_val_t *r, const mino_val_t *key)
 {
     mino_val_t *fields;
     size_t      i, n;
-    if (r == NULL || r->type != MINO_RECORD) return -1;
-    if (key == NULL || key->type != MINO_KEYWORD) return -1;
+    if (r == NULL || mino_type_of(r) != MINO_RECORD) return -1;
+    if (key == NULL || mino_type_of(key) != MINO_KEYWORD) return -1;
     fields = r->as.record.type->as.record_type.fields;
     if (fields == NULL) return -1;
     n = fields->as.vec.len;
@@ -519,7 +519,7 @@ mino_val_t *mino_record_field(const mino_val_t *record, const char *name)
 {
     mino_val_t *fields;
     size_t      i, n, name_len;
-    if (record == NULL || record->type != MINO_RECORD || name == NULL) {
+    if (record == NULL || mino_type_of(record) != MINO_RECORD || name == NULL) {
         return NULL;
     }
     fields = record->as.record.type->as.record_type.fields;
@@ -539,7 +539,7 @@ mino_val_t *mino_record_field(const mino_val_t *record, const char *name)
 
 int mino_is_record(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_RECORD;
+    return v != NULL && mino_type_of(v) == MINO_RECORD;
 }
 
 
@@ -549,7 +549,7 @@ int mino_is_record(const mino_val_t *v)
 
 int mino_is_nil(const mino_val_t *v)
 {
-    return v == NULL || v->type == MINO_NIL;
+    return v == NULL || mino_type_of(v) == MINO_NIL;
 }
 
 int mino_is_truthy(const mino_val_t *v)
@@ -557,10 +557,10 @@ int mino_is_truthy(const mino_val_t *v)
     if (v == NULL) {
         return 0;
     }
-    if (v->type == MINO_NIL) {
+    if (mino_type_of(v) == MINO_NIL) {
         return 0;
     }
-    if (v->type == MINO_BOOL) {
+    if (mino_type_of(v) == MINO_BOOL) {
         return v->as.b != 0;
     }
     return 1;
@@ -568,12 +568,12 @@ int mino_is_truthy(const mino_val_t *v)
 
 int mino_is_cons(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_CONS;
+    return v != NULL && mino_type_of(v) == MINO_CONS;
 }
 
 int mino_is_empty_list(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_EMPTY_LIST;
+    return v != NULL && mino_type_of(v) == MINO_EMPTY_LIST;
 }
 
 mino_val_t *mino_car(const mino_val_t *v)
@@ -604,18 +604,18 @@ size_t mino_length(const mino_val_t *list)
 
 int mino_to_int(const mino_val_t *v, long long *out)
 {
-    if (v == NULL || v->type != MINO_INT) {
+    if (v == NULL || !mino_val_int_p(v)) {
         return 0;
     }
     if (out != NULL) {
-        *out = v->as.i;
+        *out = mino_val_int_get(v);
     }
     return 1;
 }
 
 int mino_to_float(const mino_val_t *v, double *out)
 {
-    if (v == NULL || v->type != MINO_FLOAT) {
+    if (v == NULL || mino_type_of(v) != MINO_FLOAT) {
         return 0;
     }
     if (out != NULL) {
@@ -626,7 +626,7 @@ int mino_to_float(const mino_val_t *v, double *out)
 
 int mino_to_string(const mino_val_t *v, const char **out, size_t *len)
 {
-    if (v == NULL || v->type != MINO_STRING) {
+    if (v == NULL || mino_type_of(v) != MINO_STRING) {
         return 0;
     }
     if (out != NULL) {
@@ -674,7 +674,7 @@ static int is_sequential(mino_type_t t)
  */
 static const mino_val_t *resolve_lazy(const mino_val_t *v)
 {
-    while (v != NULL && v->type == MINO_LAZY && v->as.lazy.realized) {
+    while (v != NULL && mino_type_of(v) == MINO_LAZY && v->as.lazy.realized) {
         v = v->as.lazy.cached;
     }
     return v;
@@ -693,8 +693,8 @@ static void eq_seq_step(const mino_val_t **cur, size_t *idx)
 {
     const mino_val_t *c = *cur;
     if (c == NULL) return;
-    if (c->type == MINO_CONS) { *cur = c->as.cons.cdr; return; }
-    if (c->type == MINO_CHUNKED_CONS) {
+    if (mino_type_of(c) == MINO_CONS) { *cur = c->as.cons.cdr; return; }
+    if (mino_type_of(c) == MINO_CHUNKED_CONS) {
         const mino_val_t *ch = c->as.chunked_cons.chunk;
         size_t next = (*idx) + 1;
         if (next < ch->as.chunk.len) { *idx = next; return; }
@@ -713,9 +713,9 @@ static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
 {
     const mino_val_t *ca = resolve_lazy(a);
     const mino_val_t *cb = resolve_lazy(b);
-    size_t ia = (ca != NULL && ca->type == MINO_CHUNKED_CONS)
+    size_t ia = (ca != NULL && mino_type_of(ca) == MINO_CHUNKED_CONS)
                     ? ca->as.chunked_cons.off : 0;
-    size_t ib = (cb != NULL && cb->type == MINO_CHUNKED_CONS)
+    size_t ib = (cb != NULL && mino_type_of(cb) == MINO_CHUNKED_CONS)
                     ? cb->as.chunked_cons.off : 0;
 
     for (;;) {
@@ -727,31 +727,31 @@ static int eq_seq_like(const mino_val_t *a, const mino_val_t *b)
         ca = resolve_lazy(ca);
         cb = resolve_lazy(cb);
 
-        a_end = (ca == NULL || ca->type == MINO_NIL
-                 || ca->type == MINO_EMPTY_LIST
-                 || (ca->type == MINO_VECTOR && ia >= ca->as.vec.len)
-                 || (ca->type == MINO_MAP_ENTRY && ia >= 2)
-                 || ca->type == MINO_LAZY /* unrealized */);
-        b_end = (cb == NULL || cb->type == MINO_NIL
-                 || cb->type == MINO_EMPTY_LIST
-                 || (cb->type == MINO_VECTOR && ib >= cb->as.vec.len)
-                 || (cb->type == MINO_MAP_ENTRY && ib >= 2)
-                 || cb->type == MINO_LAZY /* unrealized */);
+        a_end = (ca == NULL || mino_type_of(ca) == MINO_NIL
+                 || mino_type_of(ca) == MINO_EMPTY_LIST
+                 || (mino_type_of(ca) == MINO_VECTOR && ia >= ca->as.vec.len)
+                 || (mino_type_of(ca) == MINO_MAP_ENTRY && ia >= 2)
+                 || mino_type_of(ca) == MINO_LAZY /* unrealized */);
+        b_end = (cb == NULL || mino_type_of(cb) == MINO_NIL
+                 || mino_type_of(cb) == MINO_EMPTY_LIST
+                 || (mino_type_of(cb) == MINO_VECTOR && ib >= cb->as.vec.len)
+                 || (mino_type_of(cb) == MINO_MAP_ENTRY && ib >= 2)
+                 || mino_type_of(cb) == MINO_LAZY /* unrealized */);
 
         if (a_end && b_end) return 1;
         if (a_end || b_end) return 0;
 
-        if (ca->type == MINO_CONS) ea = ca->as.cons.car;
-        else if (ca->type == MINO_CHUNKED_CONS)
+        if (mino_type_of(ca) == MINO_CONS) ea = ca->as.cons.car;
+        else if (mino_type_of(ca) == MINO_CHUNKED_CONS)
             ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
-        else if (ca->type == MINO_MAP_ENTRY)
+        else if (mino_type_of(ca) == MINO_MAP_ENTRY)
             ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
         else ea = vec_nth(ca, ia);
 
-        if (cb->type == MINO_CONS) eb = cb->as.cons.car;
-        else if (cb->type == MINO_CHUNKED_CONS)
+        if (mino_type_of(cb) == MINO_CONS) eb = cb->as.cons.car;
+        else if (mino_type_of(cb) == MINO_CHUNKED_CONS)
             eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
-        else if (cb->type == MINO_MAP_ENTRY)
+        else if (mino_type_of(cb) == MINO_MAP_ENTRY)
             eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
         else eb = vec_nth(cb, ib);
 
@@ -772,7 +772,7 @@ static int eq_map_like_cross(const mino_val_t *a, const mino_val_t *b)
     size_t i;
 
     /* Normalize: hmap is the HAMT map, smap is the sorted map. */
-    if (a->type == MINO_MAP) { hmap = a; smap = b; }
+    if (mino_type_of(a) == MINO_MAP) { hmap = a; smap = b; }
     else                     { hmap = b; smap = a; }
 
     if (hmap->as.map.len != smap->as.sorted.len) return 0;
@@ -798,7 +798,7 @@ static int eq_set_like_cross(const mino_val_t *a, const mino_val_t *b)
     const mino_val_t *hset, *sset;
     size_t i;
 
-    if (a->type == MINO_SET) { hset = a; sset = b; }
+    if (mino_type_of(a) == MINO_SET) { hset = a; sset = b; }
     else                     { hset = b; sset = a; }
 
     if (hset->as.set.len != sset->as.sorted.len) return 0;
@@ -839,17 +839,17 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
      * A realized lazy whose cache is nil/empty-list is still semantically
      * an empty seq; preserve the LAZY tag so cross-type seq equality
      * routes through eq_seq_like instead of degenerating to nil. */
-    if (a->type == MINO_LAZY && a->as.lazy.realized) {
+    if (mino_type_of(a) == MINO_LAZY && a->as.lazy.realized) {
         mino_val_t *cached = a->as.lazy.cached;
-        if (cached != NULL && cached->type != MINO_NIL
-            && cached->type != MINO_EMPTY_LIST) {
+        if (cached != NULL && mino_type_of(cached) != MINO_NIL
+            && mino_type_of(cached) != MINO_EMPTY_LIST) {
             a = cached;
         }
     }
-    if (b->type == MINO_LAZY && b->as.lazy.realized) {
+    if (mino_type_of(b) == MINO_LAZY && b->as.lazy.realized) {
         mino_val_t *cached = b->as.lazy.cached;
-        if (cached != NULL && cached->type != MINO_NIL
-            && cached->type != MINO_EMPTY_LIST) {
+        if (cached != NULL && mino_type_of(cached) != MINO_NIL
+            && mino_type_of(cached) != MINO_EMPTY_LIST) {
             b = cached;
         }
     }
@@ -866,11 +866,11 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
          * bigdec/anything-else — are NOT equal under `=`; use `==`
          * for cross-tier numeric equality.
          */
-        if (a->type == MINO_INT && b->type == MINO_BIGINT) {
-            return mino_bigint_equals_ll(b, a->as.i);
+        if (mino_val_int_p(a) && mino_type_of(b) == MINO_BIGINT) {
+            return mino_bigint_equals_ll(b, mino_val_int_get(a));
         }
-        if (a->type == MINO_BIGINT && b->type == MINO_INT) {
-            return mino_bigint_equals_ll(a, b->as.i);
+        if (mino_type_of(a) == MINO_BIGINT && mino_val_int_p(b)) {
+            return mino_bigint_equals_ll(a, mino_val_int_get(b));
         }
         /*
          * Cross-type sequential equality: cons, vector, and nil compare
@@ -887,8 +887,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
          * Cross-type map equality: sorted-map and map compare by entries.
          */
         {
-            int a_map = (a->type == MINO_MAP || a->type == MINO_SORTED_MAP);
-            int b_map = (b->type == MINO_MAP || b->type == MINO_SORTED_MAP);
+            int a_map = (mino_type_of(a) == MINO_MAP || mino_type_of(a) == MINO_SORTED_MAP);
+            int b_map = (mino_type_of(b) == MINO_MAP || mino_type_of(b) == MINO_SORTED_MAP);
             if (a_map && b_map) {
                 return eq_map_like_cross(a, b);
             }
@@ -897,22 +897,22 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
          * Cross-type set equality: sorted-set and set compare by elements.
          */
         {
-            int a_set = (a->type == MINO_SET || a->type == MINO_SORTED_SET);
-            int b_set = (b->type == MINO_SET || b->type == MINO_SORTED_SET);
+            int a_set = (mino_type_of(a) == MINO_SET || mino_type_of(a) == MINO_SORTED_SET);
+            int b_set = (mino_type_of(b) == MINO_SET || mino_type_of(b) == MINO_SORTED_SET);
             if (a_set && b_set) {
                 return eq_set_like_cross(a, b);
             }
         }
         return 0;
     }
-    switch (a->type) {
+    switch (mino_type_of(a)) {
     case MINO_NIL:
     case MINO_EMPTY_LIST:
         return 1;
     case MINO_BOOL:
         return a->as.b == b->as.b;
     case MINO_INT:
-        return a->as.i == b->as.i;
+        return mino_val_int_get(a) == mino_val_int_get(b);
     case MINO_FLOAT:
     case MINO_FLOAT32:
         return a->as.f == b->as.f;
@@ -1014,11 +1014,11 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         if (a->as.sorted.len != b->as.sorted.len) return 0;
         if (a->as.sorted.comparator == b->as.sorted.comparator) {
             return rb_trees_equal(a->as.sorted.root, b->as.sorted.root,
-                                  a->type == MINO_SORTED_MAP);
+                                  mino_type_of(a) == MINO_SORTED_MAP);
         }
         return rb_trees_content_equal(a->as.sorted.root,
                                       b->as.sorted.root,
-                                      a->type == MINO_SORTED_MAP);
+                                      mino_type_of(a) == MINO_SORTED_MAP);
     case MINO_RECUR:
         return a == b;
     case MINO_TAIL_CALL:
@@ -1095,9 +1095,9 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
     const mino_val_t *cb = b;
     size_t ia = 0, ib = 0;
 
-    if (ca != NULL && ca->type == MINO_CHUNKED_CONS)
+    if (ca != NULL && mino_type_of(ca) == MINO_CHUNKED_CONS)
         ia = ca->as.chunked_cons.off;
-    if (cb != NULL && cb->type == MINO_CHUNKED_CONS)
+    if (cb != NULL && mino_type_of(cb) == MINO_CHUNKED_CONS)
         ib = cb->as.chunked_cons.off;
 
     for (;;) {
@@ -1107,34 +1107,34 @@ static int eq_seq_like_force(mino_state_t *S, const mino_val_t *a,
         int b_end;
 
         /* Force lazy seqs */
-        if (ca != NULL && ca->type == MINO_LAZY)
+        if (ca != NULL && mino_type_of(ca) == MINO_LAZY)
             ca = lazy_force(S, (mino_val_t *)ca);
-        if (cb != NULL && cb->type == MINO_LAZY)
+        if (cb != NULL && mino_type_of(cb) == MINO_LAZY)
             cb = lazy_force(S, (mino_val_t *)cb);
 
-        a_end = (ca == NULL || ca->type == MINO_NIL
-                 || ca->type == MINO_EMPTY_LIST
-                 || (ca->type == MINO_VECTOR && ia >= ca->as.vec.len)
-                 || (ca->type == MINO_MAP_ENTRY && ia >= 2));
-        b_end = (cb == NULL || cb->type == MINO_NIL
-                 || cb->type == MINO_EMPTY_LIST
-                 || (cb->type == MINO_VECTOR && ib >= cb->as.vec.len)
-                 || (cb->type == MINO_MAP_ENTRY && ib >= 2));
+        a_end = (ca == NULL || mino_type_of(ca) == MINO_NIL
+                 || mino_type_of(ca) == MINO_EMPTY_LIST
+                 || (mino_type_of(ca) == MINO_VECTOR && ia >= ca->as.vec.len)
+                 || (mino_type_of(ca) == MINO_MAP_ENTRY && ia >= 2));
+        b_end = (cb == NULL || mino_type_of(cb) == MINO_NIL
+                 || mino_type_of(cb) == MINO_EMPTY_LIST
+                 || (mino_type_of(cb) == MINO_VECTOR && ib >= cb->as.vec.len)
+                 || (mino_type_of(cb) == MINO_MAP_ENTRY && ib >= 2));
 
         if (a_end && b_end) return 1;
         if (a_end || b_end) return 0;
 
-        if (ca->type == MINO_CONS) ea = ca->as.cons.car;
-        else if (ca->type == MINO_CHUNKED_CONS)
+        if (mino_type_of(ca) == MINO_CONS) ea = ca->as.cons.car;
+        else if (mino_type_of(ca) == MINO_CHUNKED_CONS)
             ea = ca->as.chunked_cons.chunk->as.chunk.vals[ia];
-        else if (ca->type == MINO_MAP_ENTRY)
+        else if (mino_type_of(ca) == MINO_MAP_ENTRY)
             ea = ia == 0 ? ca->as.map_entry.k : ca->as.map_entry.v;
         else ea = vec_nth(ca, ia);
 
-        if (cb->type == MINO_CONS) eb = cb->as.cons.car;
-        else if (cb->type == MINO_CHUNKED_CONS)
+        if (mino_type_of(cb) == MINO_CONS) eb = cb->as.cons.car;
+        else if (mino_type_of(cb) == MINO_CHUNKED_CONS)
             eb = cb->as.chunked_cons.chunk->as.chunk.vals[ib];
-        else if (cb->type == MINO_MAP_ENTRY)
+        else if (mino_type_of(cb) == MINO_MAP_ENTRY)
             eb = ib == 0 ? cb->as.map_entry.k : cb->as.map_entry.v;
         else eb = vec_nth(cb, ib);
 
@@ -1151,17 +1151,17 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
      * result is nil/empty-list. A lazy seq that resolves to nothing is
      * still semantically an empty seq; collapsing it to nil here would
      * make `(= [] (lazy-seq nil))` false, contradicting canon. */
-    if (a != NULL && a->type == MINO_LAZY) {
+    if (a != NULL && mino_type_of(a) == MINO_LAZY) {
         mino_val_t *forced = lazy_force(S, (mino_val_t *)a);
-        if (forced != NULL && forced->type != MINO_NIL
-            && forced->type != MINO_EMPTY_LIST) {
+        if (forced != NULL && mino_type_of(forced) != MINO_NIL
+            && mino_type_of(forced) != MINO_EMPTY_LIST) {
             a = forced;
         }
     }
-    if (b != NULL && b->type == MINO_LAZY) {
+    if (b != NULL && mino_type_of(b) == MINO_LAZY) {
         mino_val_t *forced = lazy_force(S, (mino_val_t *)b);
-        if (forced != NULL && forced->type != MINO_NIL
-            && forced->type != MINO_EMPTY_LIST) {
+        if (forced != NULL && mino_type_of(forced) != MINO_NIL
+            && mino_type_of(forced) != MINO_EMPTY_LIST) {
             b = forced;
         }
     }
@@ -1174,7 +1174,7 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
      * via cdr would expose the cross-type asymmetry: nil and a
      * lazy-realized-to-nil are equivalent at end-of-seq but
      * is_sequential(NIL) is false at top level. */
-    if (a->type == MINO_CONS && b->type == MINO_CONS) {
+    if (mino_type_of(a) == MINO_CONS && mino_type_of(b) == MINO_CONS) {
         return eq_seq_like_force(S, a, b);
     }
     /* Same-tag chunked sequential: a chunked-cons spine can have a
@@ -1182,7 +1182,7 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
      * produce). The non-forcing eq_seq_like would see that unrealized
      * lazy as end-of-seq and short-circuit incorrectly. Force on both
      * sides instead. */
-    if (a->type == MINO_CHUNKED_CONS && b->type == MINO_CHUNKED_CONS) {
+    if (mino_type_of(a) == MINO_CHUNKED_CONS && mino_type_of(b) == MINO_CHUNKED_CONS) {
         return eq_seq_like_force(S, a, b);
     }
     /* Cross-type sequential: cons vs vector, nil vs vector, etc. */
@@ -1191,7 +1191,7 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
         return eq_seq_like_force(S, a, b);
     }
     /* Vectors: compare elements with forcing. */
-    if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
+    if (mino_type_of(a) == MINO_VECTOR && mino_type_of(b) == MINO_VECTOR) {
         size_t i;
         if (a->as.vec.len != b->as.vec.len) return 0;
         for (i = 0; i < a->as.vec.len; i++) {

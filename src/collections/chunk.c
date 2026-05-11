@@ -33,7 +33,7 @@ mino_val_t *mino_chunk_buffer(mino_state_t *S, unsigned cap)
 
 int mino_chunk_append(mino_val_t *buf, mino_val_t *elem)
 {
-    if (buf == NULL || buf->type != MINO_CHUNK) return 0;
+    if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) return 0;
     if (buf->as.chunk.sealed) return 0;
     if (buf->as.chunk.len >= buf->as.chunk.cap) return 0;
     buf->as.chunk.vals[buf->as.chunk.len++] = elem;
@@ -42,7 +42,7 @@ int mino_chunk_append(mino_val_t *buf, mino_val_t *elem)
 
 mino_val_t *mino_chunk_seal(mino_val_t *buf)
 {
-    if (buf == NULL || buf->type != MINO_CHUNK) return NULL;
+    if (buf == NULL || mino_type_of(buf) != MINO_CHUNK) return NULL;
     buf->as.chunk.sealed = 1;
     return buf;
 }
@@ -51,7 +51,7 @@ mino_val_t *mino_chunked_cons(mino_state_t *S, mino_val_t *chunk,
                               mino_val_t *more)
 {
     mino_val_t *cell;
-    if (chunk == NULL || chunk->type != MINO_CHUNK) return NULL;
+    if (chunk == NULL || mino_type_of(chunk) != MINO_CHUNK) return NULL;
     if (chunk->as.chunk.len == 0) {
         /* Empty chunk degenerates to its tail. */
         return more;
@@ -72,7 +72,7 @@ mino_val_t *mino_chunked_cons_advance(mino_state_t *S, const mino_val_t *cs)
     const mino_val_t *ch;
     mino_val_t       *cell;
     unsigned          next;
-    if (cs == NULL || cs->type != MINO_CHUNKED_CONS) return NULL;
+    if (cs == NULL || mino_type_of(cs) != MINO_CHUNKED_CONS) return NULL;
     ch   = cs->as.chunked_cons.chunk;
     next = cs->as.chunked_cons.off + 1;
     if (next >= ch->as.chunk.len) return cs->as.chunked_cons.more;

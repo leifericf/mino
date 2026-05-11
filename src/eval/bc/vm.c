@@ -84,8 +84,8 @@ static mino_val_t *args_from_regs(mino_state_t *S, mino_val_t **regs,
 static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
                                  unsigned subop)
 {
-    if (v == NULL || v->type != MINO_INT) return NULL;
-    long long a = v->as.i;
+    if (v == NULL || !mino_val_int_p(v)) return NULL;
+    long long a = mino_val_int_get(v);
     long long r;
     switch (subop) {
     case UNOP_INC:
@@ -116,9 +116,9 @@ static mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
                                   mino_val_t *rhs, unsigned subop)
 {
     if (lhs == NULL || rhs == NULL) return NULL;
-    if (lhs->type != MINO_INT || rhs->type != MINO_INT) return NULL;
-    long long a = lhs->as.i;
-    long long b = rhs->as.i;
+    if (!mino_val_int_p(lhs) || !mino_val_int_p(rhs)) return NULL;
+    long long a = mino_val_int_get(lhs);
+    long long b = mino_val_int_get(rhs);
     long long r;
     switch (subop) {
     case BINOP_ADD:
@@ -157,7 +157,7 @@ static mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
 static mino_val_t *resolve_global(mino_state_t *S, mino_val_t *sym,
                                   mino_env_t *env)
 {
-    if (sym == NULL || sym->type != MINO_SYMBOL) return NULL;
+    if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) return NULL;
     return eval_impl(S, sym, env, 0);
 }
 
@@ -212,7 +212,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         if (env == NULL) { bc_pop_window(S, base); return NULL; }
         for (int i = 0; i < match->n_params; i++) {
             mino_val_t *p = vec_nth(match->params_vec, (size_t)i);
-            if (p == NULL || p->type != MINO_SYMBOL) {
+            if (p == NULL || mino_type_of(p) != MINO_SYMBOL) {
                 bc_pop_window(S, base);
                 return NULL;
             }
@@ -221,7 +221,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         if (match->has_rest) {
             mino_val_t *rest_sym = vec_nth(match->params_vec,
                 match->params_vec->as.vec.len - 1);
-            if (rest_sym != NULL && rest_sym->type == MINO_SYMBOL) {
+            if (rest_sym != NULL && mino_type_of(rest_sym) == MINO_SYMBOL) {
                 env_bind_sym(S, env, rest_sym,
                     S->bc_regs[base + (size_t)match->n_params]);
             }
@@ -280,7 +280,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             unsigned bx = Bx_OF(ins);
             if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
             mino_val_t *sym = bc->consts[bx];
-            if (sym == NULL || sym->type != MINO_SYMBOL) {
+            if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
                 ok = 0;
                 goto bc_done;
             }
@@ -347,7 +347,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             unsigned bx = Bx_OF(ins);
             if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
             mino_val_t *child = bc->consts[bx];
-            if (child == NULL || child->type != MINO_FN) {
+            if (child == NULL || mino_type_of(child) != MINO_FN) {
                 ok = 0;
                 goto bc_done;
             }
@@ -405,7 +405,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             unsigned bx = Bx_OF(ins);
             if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
             mino_val_t *sym = bc->consts[bx];
-            if (sym == NULL || sym->type != MINO_SYMBOL) {
+            if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
                 ok = 0; goto bc_done;
             }
             env_bind_sym(S, env, sym, regs[a]);

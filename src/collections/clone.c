@@ -33,11 +33,11 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
 {
     if (v == NULL) return mino_nil(dst);
 
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_NIL:        return mino_nil(dst);
     case MINO_EMPTY_LIST: return mino_empty_list(dst);
     case MINO_BOOL:       return v->as.b ? mino_true(dst) : mino_false(dst);
-    case MINO_INT:    return mino_int(dst, v->as.i);
+    case MINO_INT:    return mino_int(dst, mino_val_int_get(v));
     case MINO_FLOAT:   return mino_float(dst, v->as.f);
     case MINO_FLOAT32: return mino_float32(dst, v->as.f);
     case MINO_CHAR:   return mino_char(dst, v->as.ch);
@@ -59,11 +59,11 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         mino_val_t *cdr;
         mino_ref_t *rcar;
         if (car == NULL && v->as.cons.car != NULL
-            && v->as.cons.car->type != MINO_NIL) return NULL;
+            && mino_type_of(v->as.cons.car) != MINO_NIL) return NULL;
         rcar = mino_ref(dst, car);
         cdr = clone_val(dst, v->as.cons.cdr);
         if (cdr == NULL && v->as.cons.cdr != NULL
-            && v->as.cons.cdr->type != MINO_NIL) {
+            && mino_type_of(v->as.cons.cdr) != MINO_NIL) {
             mino_unref(dst, rcar);
             return NULL;
         }

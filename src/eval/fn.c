@@ -31,7 +31,7 @@ mino_val_t *build_multi_arity_clauses(mino_state_t *S, mino_val_t *form,
         cparams = clause->as.cons.car;
         cbody   = clause->as.cons.cdr;
         if (cparams == NULL
-            || (cparams->type != MINO_VECTOR
+            || (mino_type_of(cparams) != MINO_VECTOR
                 && !mino_is_cons(cparams)
                 && !mino_is_nil(cparams))) {
             snprintf(msg, sizeof(msg),
@@ -68,12 +68,12 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
     }
     /* Optional name: (fn name (...) body) or (fn name ([x] ...) ([x y] ...)) */
     if (args->as.cons.car != NULL
-        && args->as.cons.car->type == MINO_SYMBOL
+        && mino_type_of(args->as.cons.car) == MINO_SYMBOL
         && mino_is_cons(args->as.cons.cdr)) {
         mino_val_t *after = args->as.cons.cdr->as.cons.car;
         if (after != NULL
             && (mino_is_cons(after) || mino_is_nil(after)
-                || after->type == MINO_VECTOR)) {
+                || mino_type_of(after) == MINO_VECTOR)) {
             fn_name = args->as.cons.car;
             args    = args->as.cons.cdr;
         }
@@ -83,7 +83,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
     /* Detect multi-arity: (fn ([x] ...) ([x y] ...))
      * The first arg is a list whose car is a vector or list. */
     if (mino_is_cons(params) && params->as.cons.car != NULL
-        && (params->as.cons.car->type == MINO_VECTOR
+        && (mino_type_of(params->as.cons.car) == MINO_VECTOR
             || (mino_is_cons(params->as.cons.car)
                 || mino_is_nil(params->as.cons.car)))) {
         /* Could be multi-arity OR single-arity with list params.
@@ -91,7 +91,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
          * Disambiguate: if car of first arg is a vector, it's
          * multi-arity. If car is a cons/nil, check if it looks
          * like a params list (all symbols) or an arity clause. */
-        if (params->as.cons.car->type == MINO_VECTOR) {
+        if (mino_type_of(params->as.cons.car) == MINO_VECTOR) {
             multi_arity = 1;
         }
     }
@@ -103,7 +103,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
         body   = clauses;
     } else {
         if (!mino_is_cons(params) && !mino_is_nil(params)
-            && params->type != MINO_VECTOR) {
+            && mino_type_of(params) != MINO_VECTOR) {
             set_eval_diag(S, form, "syntax", "MSY002", "fn parameter list must be a list or vector");
             return NULL;
         }
@@ -111,7 +111,7 @@ mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,
         if (mino_is_cons(params) || mino_is_nil(params)) {
             for (p = params; mino_is_cons(p); p = p->as.cons.cdr) {
                 mino_val_t *name = p->as.cons.car;
-                if (name == NULL || name->type != MINO_SYMBOL) {
+                if (name == NULL || mino_type_of(name) != MINO_SYMBOL) {
                     set_eval_diag(S, form, "syntax", "MSY002", "fn parameter must be a symbol");
                     return NULL;
                 }
@@ -157,7 +157,7 @@ static int param_arity(const mino_val_t *params, int *has_rest)
     int n = 0;
     *has_rest = 0;
     if (params == NULL) return 0;
-    if (params->type == MINO_VECTOR) {
+    if (mino_type_of(params) == MINO_VECTOR) {
         size_t i;
         for (i = 0; i < params->as.vec.len; i++) {
             mino_val_t *p = vec_nth(params, i);
@@ -245,7 +245,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/type", "MTY002", "cannot apply null");
         return NULL;
     }
-    if (fn->type == MINO_VAR) {
+    if (mino_type_of(fn) == MINO_VAR) {
         if (!fn->as.var.bound) {
             char msg[256];
             snprintf(msg, sizeof(msg), "var is unbound: %s/%s",
@@ -261,13 +261,13 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             return NULL;
         }
     }
-    if (fn->type == MINO_PRIM) {
+    if (mino_type_of(fn) == MINO_PRIM) {
         const char *file = NULL;
         int         line = 0;
         int         col  = 0;
         mino_val_t *result;
         if (mino_current_ctx(S)->eval_current_form != NULL
-            && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+            && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
             file = mino_current_ctx(S)->eval_current_form->as.cons.file;
             line = mino_current_ctx(S)->eval_current_form->as.cons.line;
             col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
@@ -310,19 +310,19 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         pop_frame(S);
         return result;
     }
-    if (fn->type == MINO_FN || fn->type == MINO_MACRO) {
-        const char *tag       = fn->type == MINO_MACRO ? "macro" : "fn";
+    if (mino_type_of(fn) == MINO_FN || mino_type_of(fn) == MINO_MACRO) {
+        const char *tag       = mino_type_of(fn) == MINO_MACRO ? "macro" : "fn";
         /* Lazy compile-on-first-call. Macros stay tree-walked; their
          * call frequency is low and the bc compiler's macro-body
          * handling lives in Phase 2. Plain fns get one compile attempt
          * the first time they're invoked; the attempt either populates
          * fn->as.fn.bc with a runnable program or leaves the
          * declined sentinel so the next call skips the retry. */
-        if (fn->type == MINO_FN && fn->as.fn.bc == NULL) {
+        if (mino_type_of(fn) == MINO_FN && fn->as.fn.bc == NULL) {
             (void)mino_bc_compile_fn(S, fn);
         }
         mino_bc_check_require(S, fn);
-        if (fn->type == MINO_FN && MINO_BC_RUNNABLE(fn)) {
+        if (mino_type_of(fn) == MINO_FN && MINO_BC_RUNNABLE(fn)) {
             /* argv ABI: walk the cons spine into a stack scratch array.
              * The slots are kept alive across any GC the body triggers
              * because the conservative stack scan covers this frame
@@ -357,7 +357,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 S->fn_ambient_ns = fn->as.fn.defining_ns;
             }
             if (mino_current_ctx(S)->eval_current_form != NULL
-                && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+                && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
                 file = mino_current_ctx(S)->eval_current_form->as.cons.file;
                 line = mino_current_ctx(S)->eval_current_form->as.cons.line;
                 col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
@@ -377,15 +377,15 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     S->fn_ambient_ns = saved_ambient;
                     return NULL;
                 }
-                if (result->type != MINO_TAIL_CALL) break;
+                if (mino_type_of(result) != MINO_TAIL_CALL) break;
                 mino_val_t *next_fn   = result->as.tail_call.fn;
                 mino_val_t *next_args = result->as.tail_call.args;
                 /* Lazy compile the new target if it's a fresh MINO_FN. */
-                if (next_fn != NULL && next_fn->type == MINO_FN
+                if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
                     && next_fn->as.fn.bc == NULL) {
                     (void)mino_bc_compile_fn(S, next_fn);
                 }
-                if (next_fn != NULL && next_fn->type == MINO_FN
+                if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
                     && MINO_BC_RUNNABLE(next_fn)
                     && next_fn->as.fn.params != NULL) {
                     /* Rebuild argv from the new args list. */
@@ -438,7 +438,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         const char *saved_ns      = S->current_ns;
         const char *saved_ambient = S->fn_ambient_ns;
         mino_val_t *result;
-        if (fn->type == MINO_MACRO) {
+        if (mino_type_of(fn) == MINO_MACRO) {
             env_bind(S, local, "&env", mino_nil(S));
         }
         /* Closures resolve free unqualified vars in the namespace they
@@ -454,7 +454,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
          * helper-symbol lookups fall back to the defining ns without
          * shifting current_ns. */
         if (fn->as.fn.defining_ns != NULL) {
-            if (fn->type == MINO_MACRO) {
+            if (mino_type_of(fn) == MINO_MACRO) {
                 S->fn_ambient_ns = fn->as.fn.defining_ns;
             } else {
                 S->current_ns    = fn->as.fn.defining_ns;
@@ -462,7 +462,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             }
         }
         if (mino_current_ctx(S)->eval_current_form != NULL
-            && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+            && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
             file = mino_current_ctx(S)->eval_current_form->as.cons.file;
             line = mino_current_ctx(S)->eval_current_form->as.cons.line;
             col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
@@ -505,7 +505,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 S->fn_ambient_ns = saved_ambient;
                 return NULL; /* leave frame for trace */
             }
-            if (result->type == MINO_RECUR) {
+            if (mino_type_of(result) == MINO_RECUR) {
                 /* Self-recursion: rebind params and loop.
                  * For multi-arity, re-dispatch on new arg count. */
                 call_args = result->as.recur.args;
@@ -533,7 +533,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 mino_safepoint_poll(S);
                 continue;
             }
-            if (result->type == MINO_TAIL_CALL) {
+            if (mino_type_of(result) == MINO_TAIL_CALL) {
                 /* Proper tail call: switch to the target function. */
                 mino_val_t *new_fn = result->as.tail_call.fn;
                 call_args = result->as.tail_call.args;
@@ -549,7 +549,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 local     = env_child(S, fn->as.fn.env);
                 /* Tail-call to a different fn: switch to its defining ns
                  * so its body's free vars resolve correctly. */
-                if (fn->type == MINO_FN && fn->as.fn.defining_ns != NULL) {
+                if (mino_type_of(fn) == MINO_FN && fn->as.fn.defining_ns != NULL) {
                     S->current_ns    = fn->as.fn.defining_ns;
                     S->fn_ambient_ns = fn->as.fn.defining_ns;
                 }
@@ -582,21 +582,21 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
      * (t-vec idx), (t-map :k), (t-set v) all behave identically to the
      * persistent original until persistent! is called -- matching
      * Clojure's read-only-on-transient contract. */
-    if (fn->type == MINO_TRANSIENT) {
+    if (mino_type_of(fn) == MINO_TRANSIENT) {
         if (!fn->as.transient.valid) {
             set_eval_diag(S, form, "eval/state", "MST001",
                 "transient is no longer valid");
             return NULL;
         }
         fn = fn->as.transient.current;
-        if (fn == NULL || fn->type == MINO_NIL) {
+        if (fn == NULL || mino_type_of(fn) == MINO_NIL) {
             set_eval_diag(S, form, "eval/type", "MTY002",
                 "transient has no underlying collection");
             return NULL;
         }
     }
 
-    if (fn->type == MINO_KEYWORD) {
+    if (mino_type_of(fn) == MINO_KEYWORD) {
         /* (:k m) => (get m :k); (:k m default) => (get m :k default). */
         if (nargs < 1 || nargs > 2) {
             set_eval_diag(S, form, "eval/arity", "MAR001",
@@ -608,25 +608,25 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             mino_val_t *def_val = nargs == 2
                 ? args->as.cons.cdr->as.cons.car
                 : mino_nil(S);
-            if (coll != NULL && coll->type == MINO_TRANSIENT) {
+            if (coll != NULL && mino_type_of(coll) == MINO_TRANSIENT) {
                 if (!coll->as.transient.valid) {
                     set_eval_diag(S, form, "eval/state", "MST001",
                         "transient is no longer valid");
                     return NULL;
                 }
                 coll = coll->as.transient.current;
-                if (coll == NULL || coll->type == MINO_NIL) return def_val;
+                if (coll == NULL || mino_type_of(coll) == MINO_NIL) return def_val;
             }
-            if (coll != NULL && coll->type == MINO_MAP) {
+            if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
                 mino_val_t *v = map_get_val(coll, fn);
                 return v == NULL ? def_val : v;
             }
-            if (coll != NULL && coll->type == MINO_SORTED_MAP) {
+            if (coll != NULL && mino_type_of(coll) == MINO_SORTED_MAP) {
                 mino_val_t *v = rb_get(S, coll->as.sorted.root, fn,
                                         coll->as.sorted.comparator);
                 return v == NULL ? def_val : v;
             }
-            if (coll != NULL && coll->type == MINO_RECORD) {
+            if (coll != NULL && mino_type_of(coll) == MINO_RECORD) {
                 int idx = record_field_index(coll, fn);
                 if (idx >= 0) return coll->as.record.vals[idx];
                 if (coll->as.record.ext != NULL) {
@@ -635,7 +635,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                 }
                 return def_val;
             }
-            if (coll != NULL && coll->type == MINO_SET) {
+            if (coll != NULL && mino_type_of(coll) == MINO_SET) {
                 /* (:k #{:k :other}) returns :k if present, else default.
                  * Mirrors Clojure's keyword-as-fn behaviour against a
                  * set: the set acts as a "is this key present?" check
@@ -645,7 +645,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                     return fn;
                 return def_val;
             }
-            if (coll != NULL && coll->type == MINO_SORTED_SET) {
+            if (coll != NULL && mino_type_of(coll) == MINO_SORTED_SET) {
                 if (rb_contains(S, coll->as.sorted.root, fn,
                                 coll->as.sorted.comparator))
                     return fn;
@@ -654,7 +654,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return def_val;
         }
     }
-    if (fn->type == MINO_MAP) {
+    if (mino_type_of(fn) == MINO_MAP) {
         /* ({:a 1} :k) => (get {:a 1} :k). */
         if (nargs < 1 || nargs > 2) {
             set_eval_diag(S, form, "eval/arity", "MAR001",
@@ -670,7 +670,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return v == NULL ? def_val : v;
         }
     }
-    if (fn->type == MINO_RECORD) {
+    if (mino_type_of(fn) == MINO_RECORD) {
         /* (record :key) and (record :key default) -- same lookup
          * surface as map. Goes through record_field_index (declared
          * fields) and falls back to ext lookup before returning the
@@ -694,7 +694,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return def_val;
         }
     }
-    if (fn->type == MINO_VECTOR) {
+    if (mino_type_of(fn) == MINO_VECTOR) {
         /* ([1 2 3] 0) => (nth [1 2 3] 0). */
         if (nargs != 1) {
             set_eval_diag(S, form, "eval/arity", "MAR001",
@@ -704,12 +704,12 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
         {
             mino_val_t *idx = args->as.cons.car;
             long long i;
-            if (idx == NULL || idx->type != MINO_INT) {
+            if (idx == NULL || !mino_val_int_p(idx)) {
                 set_eval_diag(S, form, "eval/type", "MTY001",
                     "vector index must be an integer");
                 return NULL;
             }
-            i = idx->as.i;
+            i = mino_val_int_get(idx);
             if (i < 0 || (size_t)i >= fn->as.vec.len) {
                 set_eval_diag(S, form, "eval/bounds", "MBD001",
                     "vector index out of bounds");
@@ -718,7 +718,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return vec_nth(fn, (size_t)i);
         }
     }
-    if (fn->type == MINO_SET) {
+    if (mino_type_of(fn) == MINO_SET) {
         /* (#{:a :b} :a) => :a or nil. */
         if (nargs != 1) {
             set_eval_diag(S, form, "eval/arity", "MAR001",
@@ -732,7 +732,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
                 ? key : mino_nil(S);
         }
     }
-    if (fn->type == MINO_SORTED_MAP) {
+    if (mino_type_of(fn) == MINO_SORTED_MAP) {
         if (nargs < 1 || nargs > 2) {
             set_eval_diag(S, form, "eval/arity", "MAR001",
                 "sorted-map as function takes 1 or 2 arguments");
@@ -748,7 +748,7 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return v == NULL ? def_val : v;
         }
     }
-    if (fn->type == MINO_SORTED_SET) {
+    if (mino_type_of(fn) == MINO_SORTED_SET) {
         if (nargs != 1) {
             set_eval_diag(S, form, "eval/arity", "MAR001",
                 "sorted-set as function takes 1 argument");

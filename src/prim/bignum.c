@@ -73,7 +73,7 @@ static mino_val_t *bigint_wrap(mino_state_t *S, mp_int z)
 void mino_bigint_free(mino_val_t *v)
 {
     mp_int z;
-    if (v == NULL || v->type != MINO_BIGINT) return;
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT) return;
     z = (mp_int)v->as.bigint.mpz;
     if (z == NULL) return;
     mp_int_clear(z);
@@ -157,14 +157,14 @@ mino_val_t *mino_bigint_from_string(mino_state_t *S, const char *s)
 int mino_bigint_equals(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == NULL || b == NULL) return 0;
-    if (a->type != MINO_BIGINT || b->type != MINO_BIGINT) return 0;
+    if (mino_type_of(a) != MINO_BIGINT || mino_type_of(b) != MINO_BIGINT) return 0;
     return mp_int_compare((mp_int)a->as.bigint.mpz,
                           (mp_int)b->as.bigint.mpz) == 0;
 }
 
 int mino_bigint_equals_ll(const mino_val_t *a, long long n)
 {
-    if (a == NULL || a->type != MINO_BIGINT) return 0;
+    if (a == NULL || mino_type_of(a) != MINO_BIGINT) return 0;
     if (n >= LONG_MIN && n <= LONG_MAX) {
         return mp_int_compare_value((mp_int)a->as.bigint.mpz,
                                     (mp_small)n) == 0;
@@ -189,7 +189,7 @@ int mino_bigint_equals_ll(const mino_val_t *a, long long n)
 int mino_bigint_cmp(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == NULL || b == NULL) return 0;
-    if (a->type != MINO_BIGINT || b->type != MINO_BIGINT) return 0;
+    if (mino_type_of(a) != MINO_BIGINT || mino_type_of(b) != MINO_BIGINT) return 0;
     return mp_int_compare((mp_int)a->as.bigint.mpz,
                           (mp_int)b->as.bigint.mpz);
 }
@@ -203,7 +203,7 @@ uint32_t mino_bigint_hash(const mino_val_t *v)
 {
     mp_small r = 0;
     uint32_t h;
-    if (v == NULL || v->type != MINO_BIGINT) return 0;
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT) return 0;
     /* Use a prime that fits mp_small comfortably. */
     mp_int_div_value((mp_int)v->as.bigint.mpz, (mp_small)2147483647L, NULL, &r);
     h = (uint32_t)(r < 0 ? -r : r);
@@ -222,11 +222,11 @@ uint32_t mino_bigint_hash(const mino_val_t *v)
 int mino_as_ll(const mino_val_t *v, long long *out)
 {
     if (v == NULL || out == NULL) return 0;
-    if (v->type == MINO_INT) {
-        *out = v->as.i;
+    if (mino_val_int_p(v)) {
+        *out = mino_val_int_get(v);
         return 1;
     }
-    if (v->type == MINO_BIGINT && v->as.bigint.mpz != NULL) {
+    if (mino_type_of(v) == MINO_BIGINT && v->as.bigint.mpz != NULL) {
         mp_int    z = (mp_int)v->as.bigint.mpz;
         mp_small  s;
         if (mp_int_to_int(z, &s) != MP_OK) return 0;
@@ -247,7 +247,7 @@ char *mino_bigint_to_cstr(const mino_val_t *v)
     mp_result lenr;
     int  len;
     char *buf;
-    if (v == NULL || v->type != MINO_BIGINT || v->as.bigint.mpz == NULL) {
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT || v->as.bigint.mpz == NULL) {
         return NULL;
     }
     lenr = mp_int_string_len((mp_int)v->as.bigint.mpz, 10);
@@ -269,7 +269,7 @@ void mino_bigint_print(mino_state_t *S, const mino_val_t *v, FILE *out)
     int  len;
     char *buf;
     (void)S;
-    if (v == NULL || v->type != MINO_BIGINT || v->as.bigint.mpz == NULL) {
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT || v->as.bigint.mpz == NULL) {
         fputs("0N", out);
         return;
     }
@@ -307,9 +307,9 @@ mino_val_t *prim_bigint(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigint argument is nil");
     }
-    switch (x->type) {
+    switch (mino_type_of(x)) {
     case MINO_INT:
-        return mino_bigint_from_ll(S, x->as.i);
+        return mino_bigint_from_ll(S, mino_val_int_get(x));
     case MINO_BIGINT: {
         /* Copy into a fresh bigint. */
         mp_int z = bigint_alloc_zeroed();
@@ -408,7 +408,7 @@ mino_val_t *prim_bigint_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     {
         mino_val_t *x = args->as.cons.car;
-        return (x != NULL && x->type == MINO_BIGINT)
+        return (x != NULL && mino_type_of(x) == MINO_BIGINT)
             ? mino_true(S) : mino_false(S);
     }
 }
@@ -434,21 +434,21 @@ static int bigint_view(const mino_val_t *v, mpz_t *scratch, mp_int *out,
                        int *owns_scratch)
 {
     if (v == NULL) return 0;
-    if (v->type == MINO_BIGINT && v->as.bigint.mpz != NULL) {
+    if (mino_type_of(v) == MINO_BIGINT && v->as.bigint.mpz != NULL) {
         *out = (mp_int)v->as.bigint.mpz;
         *owns_scratch = 0;
         return 1;
     }
-    if (v->type == MINO_INT) {
+    if (mino_val_int_p(v)) {
         if (mp_int_init(scratch) != MP_OK) return 0;
-        if (v->as.i >= LONG_MIN && v->as.i <= LONG_MAX) {
-            if (mp_int_set_value(scratch, (mp_small)v->as.i) != MP_OK) {
+        if (mino_val_int_get(v) >= LONG_MIN && mino_val_int_get(v) <= LONG_MAX) {
+            if (mp_int_set_value(scratch, (mp_small)mino_val_int_get(v)) != MP_OK) {
                 mp_int_clear(scratch);
                 return 0;
             }
         } else {
             char buf[32];
-            snprintf(buf, sizeof(buf), "%lld", v->as.i);
+            snprintf(buf, sizeof(buf), "%lld", mino_val_int_get(v));
             if (mp_int_read_string(scratch, 10, buf) != MP_OK) {
                 mp_int_clear(scratch);
                 return 0;
@@ -598,8 +598,8 @@ mino_val_t *mino_bigint_mod(mino_state_t *S, const mino_val_t *a,
     int sr, sb;
     if (mino_bigint_quotrem(S, a, b, NULL, &r) != 0) return NULL;
     sr = mp_int_compare_zero((mp_int)r->as.bigint.mpz);
-    if (b->type == MINO_INT) {
-        sb = (b->as.i > 0) - (b->as.i < 0);
+    if (mino_val_int_p(b)) {
+        sb = (mino_val_int_get(b) > 0) - (mino_val_int_get(b) < 0);
     } else {
         sb = mp_int_compare_zero((mp_int)b->as.bigint.mpz);
     }
@@ -645,7 +645,7 @@ double mino_bigint_to_double(const mino_val_t *v)
     int  len;
     char *buf;
     double d;
-    if (v == NULL || v->type != MINO_BIGINT || v->as.bigint.mpz == NULL) {
+    if (v == NULL || mino_type_of(v) != MINO_BIGINT || v->as.bigint.mpz == NULL) {
         return 0.0;
     }
     lenr = mp_int_string_len((mp_int)v->as.bigint.mpz, 10);
@@ -677,7 +677,7 @@ double mino_bigint_to_double(const mino_val_t *v)
 static mino_val_t *to_bigint(mino_state_t *S, const mino_val_t *v)
 {
     if (v == NULL) return NULL;
-    if (v->type == MINO_BIGINT) {
+    if (mino_type_of(v) == MINO_BIGINT) {
         mp_int z = bigint_alloc_zeroed();
         if (z == NULL) {
             return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
@@ -690,8 +690,8 @@ static mino_val_t *to_bigint(mino_state_t *S, const mino_val_t *v)
         }
         return bigint_wrap(S, z);
     }
-    if (v->type == MINO_INT) {
-        return mino_bigint_from_ll(S, v->as.i);
+    if (mino_val_int_p(v)) {
+        return mino_bigint_from_ll(S, mino_val_int_get(v));
     }
     return NULL;
 }
@@ -708,7 +708,7 @@ mino_val_t *mino_ratio_make_unchecked(mino_state_t *S, mino_val_t *num,
 {
     mino_val_t *v;
     if (num == NULL || denom == NULL ||
-        num->type != MINO_BIGINT || denom->type != MINO_BIGINT) {
+        mino_type_of(num) != MINO_BIGINT || mino_type_of(denom) != MINO_BIGINT) {
         return prim_throw_classified(S, "internal", "MIN001",
                                      "ratio components must be bigints");
     }
@@ -795,7 +795,7 @@ mino_val_t *mino_ratio_from_ll(mino_state_t *S, long long num, long long denom)
 
 void mino_ratio_print(mino_state_t *S, const mino_val_t *v, FILE *out)
 {
-    if (v == NULL || v->type != MINO_RATIO) {
+    if (v == NULL || mino_type_of(v) != MINO_RATIO) {
         fputs("0/1", out);
         return;
     }
@@ -820,7 +820,7 @@ void mino_ratio_print(mino_state_t *S, const mino_val_t *v, FILE *out)
 int mino_ratio_equals(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == NULL || b == NULL) return 0;
-    if (a->type != MINO_RATIO || b->type != MINO_RATIO) return 0;
+    if (mino_type_of(a) != MINO_RATIO || mino_type_of(b) != MINO_RATIO) return 0;
     return mino_bigint_equals(a->as.ratio.num,   b->as.ratio.num)
         && mino_bigint_equals(a->as.ratio.denom, b->as.ratio.denom);
 }
@@ -832,7 +832,7 @@ int mino_ratio_cmp(const mino_val_t *a, const mino_val_t *b)
     mpz_t lhs, rhs;
     int   r;
     if (a == NULL || b == NULL) return 0;
-    if (a->type != MINO_RATIO || b->type != MINO_RATIO) return 0;
+    if (mino_type_of(a) != MINO_RATIO || mino_type_of(b) != MINO_RATIO) return 0;
     if (mp_int_init(&lhs) != MP_OK) return 0;
     if (mp_int_init(&rhs) != MP_OK) { mp_int_clear(&lhs); return 0; }
     mp_int_mul((mp_int)a->as.ratio.num->as.bigint.mpz,
@@ -848,7 +848,7 @@ int mino_ratio_cmp(const mino_val_t *a, const mino_val_t *b)
 uint32_t mino_ratio_hash(const mino_val_t *v)
 {
     uint32_t h;
-    if (v == NULL || v->type != MINO_RATIO) return 0;
+    if (v == NULL || mino_type_of(v) != MINO_RATIO) return 0;
     h = mino_bigint_hash(v->as.ratio.num);
     h ^= mino_bigint_hash(v->as.ratio.denom) * 0x85ebca77u;
     /* Tag with a ratio-specific salt so a ratio doesn't collide with a
@@ -859,7 +859,7 @@ uint32_t mino_ratio_hash(const mino_val_t *v)
 double mino_ratio_to_double(const mino_val_t *v)
 {
     double n, d;
-    if (v == NULL || v->type != MINO_RATIO) return 0.0;
+    if (v == NULL || mino_type_of(v) != MINO_RATIO) return 0.0;
     n = mino_bigint_to_double(v->as.ratio.num);
     d = mino_bigint_to_double(v->as.ratio.denom);
     if (d == 0.0) return 0.0;
@@ -880,7 +880,7 @@ mino_val_t *prim_numerator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "numerator: nil");
-    if (x->type == MINO_RATIO) {
+    if (mino_type_of(x) == MINO_RATIO) {
         long long ll;
         if (mino_as_ll(x->as.ratio.num, &ll)) return mino_int(S, ll);
         return x->as.ratio.num;
@@ -903,7 +903,7 @@ mino_val_t *prim_denominator(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "denominator: nil");
-    if (x->type == MINO_RATIO) {
+    if (mino_type_of(x) == MINO_RATIO) {
         long long ll;
         if (mino_as_ll(x->as.ratio.denom, &ll)) return mino_int(S, ll);
         return x->as.ratio.denom;
@@ -922,7 +922,7 @@ mino_val_t *prim_ratio_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     {
         mino_val_t *x = args->as.cons.car;
-        return (x != NULL && x->type == MINO_RATIO)
+        return (x != NULL && mino_type_of(x) == MINO_RATIO)
             ? mino_true(S) : mino_false(S);
     }
 }
@@ -940,10 +940,10 @@ mino_val_t *prim_rational_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     {
         mino_val_t *x = args->as.cons.car;
         if (x == NULL) return mino_false(S);
-        return (x->type == MINO_INT
-             || x->type == MINO_BIGINT
-             || x->type == MINO_RATIO
-             || x->type == MINO_BIGDEC) ? mino_true(S) : mino_false(S);
+        return (mino_val_int_p(x)
+             || mino_type_of(x) == MINO_BIGINT
+             || mino_type_of(x) == MINO_RATIO
+             || mino_type_of(x) == MINO_BIGDEC) ? mino_true(S) : mino_false(S);
     }
 }
 
@@ -963,11 +963,11 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "rationalize: nil");
-    if (x->type == MINO_INT || x->type == MINO_BIGINT
-        || x->type == MINO_RATIO) {
+    if (mino_val_int_p(x) || mino_type_of(x) == MINO_BIGINT
+        || mino_type_of(x) == MINO_RATIO) {
         return x;
     }
-    if (x->type == MINO_BIGDEC) {
+    if (mino_type_of(x) == MINO_BIGDEC) {
         /* unscaled / 10^scale, reduced. Negative scale means
          * unscaled * 10^|scale| / 1 (an integer multiple). */
         mino_val_t *unscaled = x->as.bigdec.unscaled;
@@ -1013,7 +1013,7 @@ mino_val_t *prim_rationalize(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return mino_ratio_make(S, unscaled, bd);
         }
     }
-    if (x->type == MINO_FLOAT) {
+    if (mino_type_of(x) == MINO_FLOAT) {
         /* JVM Clojure's (rationalize d) for a double goes through
          * BigDecimal.valueOf(d), i.e. the shortest decimal that
          * round-trips. So (rationalize 1.1) is 11/10 (matching the
@@ -1071,12 +1071,12 @@ static mino_val_t *as_ratio_pair(mino_state_t *S, const mino_val_t *v,
                                  mino_val_t **out_num, mino_val_t **out_denom)
 {
     if (v == NULL) return NULL;
-    if (v->type == MINO_RATIO) {
+    if (mino_type_of(v) == MINO_RATIO) {
         *out_num   = v->as.ratio.num;
         *out_denom = v->as.ratio.denom;
         return (mino_val_t *)v;
     }
-    if (v->type == MINO_INT || v->type == MINO_BIGINT) {
+    if (mino_val_int_p(v) || mino_type_of(v) == MINO_BIGINT) {
         mino_val_t *bn = to_bigint(S, v);
         if (bn == NULL) return NULL;
         *out_num   = bn;
@@ -1159,7 +1159,7 @@ mino_val_t *mino_ratio_div(mino_state_t *S, const mino_val_t *a,
 mino_val_t *mino_bigdec_make(mino_state_t *S, mino_val_t *unscaled, int scale)
 {
     mino_val_t *v;
-    if (unscaled == NULL || unscaled->type != MINO_BIGINT) {
+    if (unscaled == NULL || mino_type_of(unscaled) != MINO_BIGINT) {
         return prim_throw_classified(S, "internal", "MIN001",
                                      "bigdec: unscaled must be a bigint");
     }
@@ -1253,7 +1253,7 @@ void mino_bigdec_print(mino_state_t *S, const mino_val_t *v, FILE *out)
     int   scale;
     int   neg;
     int   len;
-    if (v == NULL || v->type != MINO_BIGDEC) {
+    if (v == NULL || mino_type_of(v) != MINO_BIGDEC) {
         fputs("0M", out); return;
     }
     digits = mino_bigint_to_cstr(v->as.bigdec.unscaled);
@@ -1300,7 +1300,7 @@ int mino_bigdec_equals(const mino_val_t *a, const mino_val_t *b)
     mpz_t au, bu, pw;
     int   eq;
     if (a == NULL || b == NULL) return 0;
-    if (a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) return 0;
+    if (mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) return 0;
     sa = a->as.bigdec.scale;
     sb = b->as.bigdec.scale;
     if (sa == sb) {
@@ -1342,7 +1342,7 @@ uint32_t mino_bigdec_hash(const mino_val_t *v)
     mpz_t       r;
     int         scale;
     uint32_t    h;
-    if (v == NULL || v->type != MINO_BIGDEC) return 0;
+    if (v == NULL || mino_type_of(v) != MINO_BIGDEC) return 0;
     scale = v->as.bigdec.scale;
     if (mp_int_init(&acc) != MP_OK) return 0;
     if (mp_int_copy((mp_int)v->as.bigdec.unscaled->as.bigint.mpz, &acc)
@@ -1382,7 +1382,7 @@ double mino_bigdec_to_double(const mino_val_t *v)
 {
     double d;
     int    scale;
-    if (v == NULL || v->type != MINO_BIGDEC) return 0.0;
+    if (v == NULL || mino_type_of(v) != MINO_BIGDEC) return 0.0;
     d = mino_bigint_to_double(v->as.bigdec.unscaled);
     scale = v->as.bigdec.scale;
     while (scale > 0)  { d /= 10.0; scale--; }
@@ -1403,30 +1403,30 @@ mino_val_t *prim_bigdec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (x == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec: nil");
-    if (x->type == MINO_BIGDEC) return x;
-    if (x->type == MINO_INT) {
-        mino_val_t *u = mino_bigint_from_ll(S, x->as.i);
+    if (mino_type_of(x) == MINO_BIGDEC) return x;
+    if (mino_val_int_p(x)) {
+        mino_val_t *u = mino_bigint_from_ll(S, mino_val_int_get(x));
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
     }
-    if (x->type == MINO_BIGINT) {
+    if (mino_type_of(x) == MINO_BIGINT) {
         mino_val_t *u = to_bigint(S, x);
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
     }
-    if (x->type == MINO_FLOAT) {
+    if (mino_type_of(x) == MINO_FLOAT) {
         char buf[64];
         snprintf(buf, sizeof(buf), "%.17g", x->as.f);
         return mino_bigdec_from_string(S, buf);
     }
-    if (x->type == MINO_STRING) {
+    if (mino_type_of(x) == MINO_STRING) {
         mino_val_t *r = mino_bigdec_from_string(S, x->as.s.data);
         if (r == NULL)
             return prim_throw_classified(S, "eval/type", "MTY001",
                                          "bigdec: invalid numeric string");
         return r;
     }
-    if (x->type == MINO_RATIO) {
+    if (mino_type_of(x) == MINO_RATIO) {
         /* Convert via float then string. Lossy; the user can pre-call
          * with-precision once it's wired. */
         char buf[64];
@@ -1447,7 +1447,7 @@ mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     {
         mino_val_t *x = args->as.cons.car;
-        return (x != NULL && x->type == MINO_BIGDEC)
+        return (x != NULL && mino_type_of(x) == MINO_BIGDEC)
             ? mino_true(S) : mino_false(S);
     }
 }
@@ -1460,13 +1460,13 @@ mino_val_t *prim_decimal_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 mino_val_t *mino_to_bigdec(mino_state_t *S, const mino_val_t *v)
 {
     if (v == NULL) return NULL;
-    if (v->type == MINO_BIGDEC) return (mino_val_t *)v;
-    if (v->type == MINO_INT) {
-        mino_val_t *u = mino_bigint_from_ll(S, v->as.i);
+    if (mino_type_of(v) == MINO_BIGDEC) return (mino_val_t *)v;
+    if (mino_val_int_p(v)) {
+        mino_val_t *u = mino_bigint_from_ll(S, mino_val_int_get(v));
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
     }
-    if (v->type == MINO_BIGINT) {
+    if (mino_type_of(v) == MINO_BIGINT) {
         mino_val_t *u = to_bigint(S, v);
         if (u == NULL) return NULL;
         return mino_bigdec_make(S, u, 0);
@@ -1501,7 +1501,7 @@ mino_val_t *mino_bigdec_add(mino_state_t *S, const mino_val_t *a,
 {
     int        sa, sb, smax;
     mino_val_t *au, *bu, *result;
-    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+    if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec add: bigdec operands required");
     }
@@ -1526,7 +1526,7 @@ mino_val_t *mino_bigdec_sub(mino_state_t *S, const mino_val_t *a,
 {
     int        sa, sb, smax;
     mino_val_t *au, *bu, *result;
-    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+    if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec sub: bigdec operands required");
     }
@@ -1550,7 +1550,7 @@ mino_val_t *mino_bigdec_mul(mino_state_t *S, const mino_val_t *a,
                             const mino_val_t *b)
 {
     mino_val_t *result;
-    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+    if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec mul: bigdec operands required");
     }
@@ -1562,7 +1562,7 @@ mino_val_t *mino_bigdec_mul(mino_state_t *S, const mino_val_t *a,
 mino_val_t *mino_bigdec_neg(mino_state_t *S, const mino_val_t *a)
 {
     mino_val_t *u;
-    if (a == NULL || a->type != MINO_BIGDEC) {
+    if (a == NULL || mino_type_of(a) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec neg: bigdec operand required");
     }
@@ -1604,7 +1604,7 @@ mino_val_t *mino_bigdec_quot(mino_state_t *S, const mino_val_t *a,
 {
     mino_val_t *au, *bu, *q;
     int smax;
-    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+    if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec quot: bigdec operands required");
     }
@@ -1624,7 +1624,7 @@ mino_val_t *mino_bigdec_rem(mino_state_t *S, const mino_val_t *a,
 {
     mino_val_t *au, *bu, *r;
     int smax;
-    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+    if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec rem: bigdec operands required");
     }
@@ -1651,8 +1651,8 @@ mino_val_t *mino_bigdec_div(mino_state_t *S, const mino_val_t *a,
     int   max_extra = 1024; /* same upper bound as Java's MAX_VALUE-bounded
                              * non-terminating detector in practice */
     mino_val_t *result = NULL;
-    if (a == NULL || b == NULL || a->type != MINO_BIGDEC
-        || b->type != MINO_BIGDEC) {
+    if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC
+        || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec div: bigdec operands required");
     }
@@ -1714,7 +1714,7 @@ mino_val_t *mino_bigdec_mod(mino_state_t *S, const mino_val_t *a,
 {
     mino_val_t *au, *bu, *m;
     int smax;
-    if (a == NULL || b == NULL || a->type != MINO_BIGDEC || b->type != MINO_BIGDEC) {
+    if (a == NULL || b == NULL || mino_type_of(a) != MINO_BIGDEC || mino_type_of(b) != MINO_BIGDEC) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "bigdec mod: bigdec operands required");
     }

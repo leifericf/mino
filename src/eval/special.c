@@ -184,7 +184,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
 static int is_eval_constant(mino_val_t *v)
 {
     if (v == NULL) return 1;
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_NIL: case MINO_BOOL: case MINO_INT: case MINO_FLOAT:
     case MINO_STRING: case MINO_KEYWORD:
         return 1;
@@ -352,7 +352,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
 {
     const char *hname;
     size_t      hlen;
-    if (head == NULL || head->type != MINO_SYMBOL || head->as.s.len == 0) {
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL || head->as.s.len == 0) {
         return 0;
     }
     hname = head->as.s.data;
@@ -440,7 +440,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
     /* (new TypeName args...) -> (host/new :TypeName args...) */
     if (hlen == 3 && memcmp(hname, "new", 3) == 0 && mino_is_cons(args)) {
         mino_val_t *type_sym = args->as.cons.car;
-        if (type_sym != NULL && type_sym->type == MINO_SYMBOL) {
+        if (type_sym != NULL && mino_type_of(type_sym) == MINO_SYMBOL) {
             mino_val_t *kw   = mino_keyword(S, type_sym->as.s.data);
             mino_val_t *rest = args->as.cons.cdr;
             mino_val_t *evaled_rest;
@@ -494,7 +494,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
                 if (amb != NULL) type_val = mino_env_get(amb, stem_buf);
             }
-            if (type_val != NULL && type_val->type == MINO_TYPE) {
+            if (type_val != NULL && mino_type_of(type_val) == MINO_TYPE) {
                 char        ctor_buf[256 + 2];
                 mino_val_t *ctor = NULL;
                 size_t      cn = stem_len + 2;
@@ -615,7 +615,7 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
      * unqualified symbol and no dynamic binding context is active.
      * Slots are GC-pinned in gc_mark_runtime_globals so a freed form
      * cannot alias a fresh allocation. */
-    if (head != NULL && head->type == MINO_SYMBOL
+    if (head != NULL && mino_type_of(head) == MINO_SYMBOL
         && S->ic_table != NULL
         && mino_current_ctx(S)->dyn_stack == NULL) {
         size_t bucket = ((uintptr_t)form >> 4) & (S->ic_cap - 1);
@@ -633,10 +633,10 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
          * scope, no lexical shadow up to the ns env, resolved value is
          * not a var (unbound or in-flight). MINO_MACRO is excluded too
          * because macros expand differently per call site. */
-        if (head->type == MINO_SYMBOL
+        if (mino_type_of(head) == MINO_SYMBOL
             && mino_current_ctx(S)->dyn_stack == NULL
-            && fn->type != MINO_VAR
-            && fn->type != MINO_MACRO
+            && mino_type_of(fn) != MINO_VAR
+            && mino_type_of(fn) != MINO_MACRO
             && !local_lexical_shadow(S, env, head->as.s.data, head->as.s.len)) {
             size_t bucket;
             struct ic_slot *slot;
@@ -668,7 +668,7 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
      * MINO_INT, compute the op directly with overflow-aware
      * builtins. Any miss (mixed types, overflow) builds a 2-cell
      * cons spine and falls through to apply_callable. */
-    if (fn->type == MINO_PRIM
+    if (mino_type_of(fn) == MINO_PRIM
         && fn->as.prim.fn != NULL
         && mino_is_cons(args)
         && mino_is_cons(args->as.cons.cdr)
@@ -692,9 +692,9 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
                 gc_unpin(1);
                 return NULL;
             }
-            if (a->type == MINO_INT && b->type == MINO_INT) {
-                long long ai = a->as.i;
-                long long bi = b->as.i;
+            if (mino_val_int_p(a) && mino_val_int_p(b)) {
+                long long ai = mino_val_int_get(a);
+                long long bi = mino_val_int_get(b);
                 long long r;
                 if (p == prim_add) {
 #if defined(__GNUC__) || defined(__clang__)
@@ -744,7 +744,7 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
      * Each arg form evaluates straight into a stack-resident scratch
      * slot, GC-rooted by the conservative stack scan. Spillover
      * beyond 16 args falls through to the cons path below. */
-    if (fn->type == MINO_PRIM && fn->as.prim.fn2 != NULL) {
+    if (mino_type_of(fn) == MINO_PRIM && fn->as.prim.fn2 != NULL) {
         mino_val_t  *scratch[16];
         int          scratch_cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
         int          argc        = 0;
@@ -780,7 +780,7 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
             return apply_callable(S, fn, evaled, env);
         }
         if (mino_current_ctx(S)->eval_current_form != NULL
-            && mino_current_ctx(S)->eval_current_form->type == MINO_CONS) {
+            && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
             file = mino_current_ctx(S)->eval_current_form->as.cons.file;
             line = mino_current_ctx(S)->eval_current_form->as.cons.line;
             col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
@@ -795,20 +795,20 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
     /* Fast path for the dominant PRIM/FN case, checked first so
      * non-function callables (keyword/map/vector/etc.) don't delay
      * typical calls. */
-    if (fn->type == MINO_PRIM || fn->type == MINO_FN) {
+    if (mino_type_of(fn) == MINO_PRIM || mino_type_of(fn) == MINO_FN) {
         evaled = eval_args(S, args, env);
         gc_unpin(1);
         if (evaled == NULL && mino_last_error(S) != NULL) {
             return NULL;
         }
-        if (tail && fn->type == MINO_FN) {
+        if (tail && mino_type_of(fn) == MINO_FN) {
             S->tail_call_sentinel.as.tail_call.fn   = fn;
             S->tail_call_sentinel.as.tail_call.args = evaled;
             return &S->tail_call_sentinel;
         }
         return apply_callable(S, fn, evaled, env);
     }
-    if (fn->type == MINO_MACRO) {
+    if (mino_type_of(fn) == MINO_MACRO) {
         /* Expand with unevaluated args; re-eval the resulting form in
          * the caller's environment. */
         mino_val_t *expanded = apply_callable(S, fn, args, env);
@@ -880,7 +880,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     if (form == NULL) {
         return mino_nil(S);
     }
-    switch (form->type) {
+    switch (mino_type_of(form)) {
     case MINO_NIL:
     case MINO_EMPTY_LIST:
     case MINO_BOOL:

@@ -419,7 +419,7 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
     case GC_T_VAL: {
         mino_val_t *v = (mino_val_t *)(h + 1);
         gc_mark_child_push(S, v->meta);
-        switch (v->type) {
+        switch (mino_type_of(v)) {
         case MINO_STRING:
         case MINO_SYMBOL:
         case MINO_KEYWORD:

@@ -67,7 +67,7 @@ void clear_error(mino_state_t *S)
 /* Location-aware error: prepend file:line when the form has source info. */
 void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
 {
-    if (form != NULL && form->type == MINO_CONS
+    if (form != NULL && mino_type_of(form) == MINO_CONS
         && form->as.cons.file != NULL && form->as.cons.line > 0) {
         char buf[2048];
         mino_span_t span;
@@ -100,7 +100,7 @@ void set_eval_diag(mino_state_t *S, const mino_val_t *form,
     }
     {
         mino_diag_t *d = diag_new(kind, code, "eval", msg);
-        if (d != NULL && form != NULL && form->type == MINO_CONS
+        if (d != NULL && form != NULL && mino_type_of(form) == MINO_CONS
             && form->as.cons.file != NULL && form->as.cons.line > 0) {
             mino_span_t span;
             memset(&span, 0, sizeof(span));
@@ -117,7 +117,7 @@ void set_eval_diag(mino_state_t *S, const mino_val_t *form,
 const char *type_tag_str(const mino_val_t *v)
 {
     if (v == NULL) return "nil";
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_NIL:     return "nil";
     case MINO_BOOL:    return "bool";
     case MINO_INT:     return "int";

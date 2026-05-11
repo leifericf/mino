@@ -41,7 +41,7 @@ static int atom_notify_watches(mino_state_t *S, mino_val_t *atom,
 {
     mino_val_t *watches = atom->as.atom.watches;
     size_t i, len;
-    if (watches == NULL || watches->type != MINO_MAP || watches->as.map.len == 0)
+    if (watches == NULL || mino_type_of(watches) != MINO_MAP || watches->as.map.len == 0)
         return 0;
     len = watches->as.map.len;
     for (i = 0; i < len; i++) {
@@ -110,14 +110,14 @@ static mino_val_t *swap_build_args(mino_state_t *S, mino_val_t *cur,
                                    mino_val_t *extra)
 {
     mino_val_t *call_args = mino_nil(S);
-    if (extra != NULL && extra->type == MINO_CONS) {
+    if (extra != NULL && mino_type_of(extra) == MINO_CONS) {
         mino_val_t *tail = mino_nil(S);
-        while (extra != NULL && extra->type == MINO_CONS) {
+        while (extra != NULL && mino_type_of(extra) == MINO_CONS) {
             tail = mino_cons(S, extra->as.cons.car, tail);
             extra = extra->as.cons.cdr;
         }
         call_args = mino_nil(S);
-        while (tail != NULL && tail->type == MINO_CONS) {
+        while (tail != NULL && mino_type_of(tail) == MINO_CONS) {
             call_args = mino_cons(S, tail->as.cons.car, call_args);
             tail = tail->as.cons.cdr;
         }
@@ -155,19 +155,19 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         v    = rest->as.cons.cdr->as.cons.car;
         rest = rest->as.cons.cdr->as.cons.cdr;
-        if (k != NULL && k->type == MINO_KEYWORD) {
+        if (k != NULL && mino_type_of(k) == MINO_KEYWORD) {
             if (strcmp(k->as.s.data, "meta") == 0) {
-                if (v != NULL && v->type != MINO_NIL
-                    && v->type != MINO_MAP
-                    && v->type != MINO_SORTED_MAP) {
+                if (v != NULL && mino_type_of(v) != MINO_NIL
+                    && mino_type_of(v) != MINO_MAP
+                    && mino_type_of(v) != MINO_SORTED_MAP) {
                     return prim_throw_classified(S, "eval/type", "MTY001",
                         "atom: :meta value must be a map or nil");
                 }
                 meta = (v != NULL
-                        && (v->type == MINO_MAP || v->type == MINO_SORTED_MAP))
+                        && (mino_type_of(v) == MINO_MAP || mino_type_of(v) == MINO_SORTED_MAP))
                        ? v : NULL;
             } else if (strcmp(k->as.s.data, "validator") == 0) {
-                if (v != NULL && v->type != MINO_NIL) {
+                if (v != NULL && mino_type_of(v) != MINO_NIL) {
                     validator = v;
                 }
             }
@@ -204,29 +204,29 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one argument");
     }
     a = args->as.cons.car;
-    if (a != NULL && a->type == MINO_ATOM) {
+    if (a != NULL && mino_type_of(a) == MINO_ATOM) {
         return a->as.atom.val;
     }
-    if (a != NULL && a->type == MINO_VOLATILE) {
+    if (a != NULL && mino_type_of(a) == MINO_VOLATILE) {
         return a->as.volatile_.val;
     }
-    if (a != NULL && a->type == MINO_REDUCED) {
+    if (a != NULL && mino_type_of(a) == MINO_REDUCED) {
         return a->as.reduced.val;
     }
-    if (a != NULL && a->type == MINO_VAR) {
+    if (a != NULL && mino_type_of(a) == MINO_VAR) {
         if (!a->as.var.bound) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "deref: var is unbound");
         }
         return a->as.var.root != NULL ? a->as.var.root : mino_nil(S);
     }
-    if (a != NULL && a->type == MINO_FUTURE) {
+    if (a != NULL && mino_type_of(a) == MINO_FUTURE) {
         return mino_future_deref(S, a);
     }
-    if (a != NULL && a->type == MINO_TX_REF) {
+    if (a != NULL && mino_type_of(a) == MINO_TX_REF) {
         return mino_tx_ref_deref(S, a);
     }
-    if (a != NULL && a->type == MINO_AGENT) {
+    if (a != NULL && mino_type_of(a) == MINO_AGENT) {
         return a->as.agent.val;
     }
     return prim_throw_classified(S, "eval/type", "MTY001", "deref: expected an atom, volatile, var, future, ref, or reduced");
@@ -241,7 +241,7 @@ mino_val_t *prim_reset_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     a   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
+    if (a == NULL || mino_type_of(a) != MINO_ATOM) {
         return prim_throw_classified(S, "eval/type", "MTY001", "reset!: first argument must be an atom");
     }
     old = a->as.atom.val;
@@ -263,7 +263,7 @@ mino_val_t *prim_swap_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
+    if (a == NULL || mino_type_of(a) != MINO_ATOM) {
         return prim_throw_classified(S, "eval/type", "MTY001", "swap!: first argument must be an atom");
     }
     extra = args->as.cons.cdr->as.cons.cdr;
@@ -320,7 +320,7 @@ mino_val_t *prim_compare_and_set_bang(mino_state_t *S, mino_val_t *args, mino_en
     a        = args->as.cons.car;
     expected = args->as.cons.cdr->as.cons.car;
     new_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
+    if (a == NULL || mino_type_of(a) != MINO_ATOM) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "compare-and-set!: first argument must be an atom");
     }
@@ -350,22 +350,22 @@ static int watchable_get(mino_val_t *v, mino_val_t ***out_watches,
                           mino_val_t ***out_validator)
 {
     if (v == NULL) return 0;
-    if (v->type == MINO_ATOM) {
+    if (mino_type_of(v) == MINO_ATOM) {
         *out_watches   = &v->as.atom.watches;
         *out_validator = &v->as.atom.validator;
         return 1;
     }
-    if (v->type == MINO_TX_REF) {
+    if (mino_type_of(v) == MINO_TX_REF) {
         *out_watches   = &v->as.tx_ref.watches;
         *out_validator = &v->as.tx_ref.validator;
         return 1;
     }
-    if (v->type == MINO_VAR) {
+    if (mino_type_of(v) == MINO_VAR) {
         *out_watches   = &v->as.var.watches;
         *out_validator = &v->as.var.validator;
         return 1;
     }
-    if (v->type == MINO_AGENT) {
+    if (mino_type_of(v) == MINO_AGENT) {
         *out_watches   = &v->as.agent.watches;
         *out_validator = &v->as.agent.validator;
         return 1;
@@ -383,8 +383,8 @@ static int watchable_check_state(mino_state_t *S, mino_val_t *v)
 {
     mino_state_t *owner = NULL;
     if (v == NULL) return 0;
-    if (v->type == MINO_TX_REF) owner = v->as.tx_ref.owning_state;
-    else if (v->type == MINO_AGENT) owner = v->as.agent.owning_state;
+    if (mino_type_of(v) == MINO_TX_REF) owner = v->as.tx_ref.owning_state;
+    else if (mino_type_of(v) == MINO_AGENT) owner = v->as.agent.owning_state;
     if (owner != NULL && owner != S) {
         prim_throw_classified(S, "eval/state", "MST007",
             "reference from foreign state");
@@ -421,14 +421,14 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
      * every committed state change. Storing a non-callable here just
      * defers the failure to the dispatch site, which is far from the
      * install. Reject at install. */
-    if (fn == NULL || (fn->type != MINO_FN
-                        && fn->type != MINO_PRIM
-                        && fn->type != MINO_MACRO)) {
+    if (fn == NULL || (mino_type_of(fn) != MINO_FN
+                        && mino_type_of(fn) != MINO_PRIM
+                        && mino_type_of(fn) != MINO_MACRO)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "add-watch: watch fn must be a fn");
     }
     watches = *watches_slot;
-    if (watches == NULL || watches->type != MINO_MAP) {
+    if (watches == NULL || mino_type_of(watches) != MINO_MAP) {
         root  = NULL;
         order = mino_vector(S, NULL, 0);
         len   = 0;
@@ -473,7 +473,7 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
     }
     if (watchable_check_state(S, a)) return NULL;
     watches = *watches_slot;
-    if (watches == NULL || watches->type != MINO_MAP) return a;
+    if (watches == NULL || mino_type_of(watches) != MINO_MAP) return a;
     h = hash_val(key);
     if (hamt_get(watches->as.map.root, key, h, 0u) != NULL) {
         mino_val_t       *new_map = alloc_val(S, MINO_MAP);
@@ -521,7 +521,7 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
     }
     if (watchable_check_state(S, a)) return NULL;
     /* nil removes the validator. */
-    if (fn == NULL || fn->type == MINO_NIL) {
+    if (fn == NULL || mino_type_of(fn) == MINO_NIL) {
         gc_write_barrier(S, a, *validator_slot, NULL);
         *validator_slot = NULL;
         return mino_nil(S);
@@ -530,9 +530,9 @@ mino_val_t *prim_set_validator(mino_state_t *S, mino_val_t *args,
      * transition. Storing a non-callable just defers the failure to
      * the next mutation, far from this install site -- reject loudly
      * here so user typos surface immediately. */
-    if (fn->type != MINO_FN
-        && fn->type != MINO_PRIM
-        && fn->type != MINO_MACRO) {
+    if (mino_type_of(fn) != MINO_FN
+        && mino_type_of(fn) != MINO_PRIM
+        && mino_type_of(fn) != MINO_MACRO) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-validator!: validator must be a fn or nil");
     }
@@ -574,7 +574,7 @@ mino_val_t *prim_reset_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     a   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
+    if (a == NULL || mino_type_of(a) != MINO_ATOM) {
         return prim_throw_classified(S, "eval/type", "MTY001", "reset-vals!: first argument must be an atom");
     }
     old = a->as.atom.val;
@@ -594,7 +594,7 @@ mino_val_t *prim_swap_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     a  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
-    if (a == NULL || a->type != MINO_ATOM) {
+    if (a == NULL || mino_type_of(a) != MINO_ATOM) {
         return prim_throw_classified(S, "eval/type", "MTY001", "swap-vals!: first argument must be an atom");
     }
     cur = a->as.atom.val;
@@ -696,10 +696,10 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
     fn      = args->as.cons.cdr->as.cons.car;
 
     /* nil bindings: just call fn with no extra frame. */
-    if (map_arg == NULL || map_arg->type == MINO_NIL) {
+    if (map_arg == NULL || mino_type_of(map_arg) == MINO_NIL) {
         return mino_call(S, fn, mino_nil(S), env);
     }
-    if (map_arg->type != MINO_MAP) {
+    if (mino_type_of(map_arg) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "with-bindings*: bindings argument must be a map or nil");
     }
@@ -709,7 +709,7 @@ mino_val_t *prim_with_bindings_star(mino_state_t *S, mino_val_t *args,
         mino_val_t *val = map_get_val(map_arg, key);
         const char *name_str;
         if (key == NULL
-            || (key->type != MINO_SYMBOL && key->type != MINO_STRING)) {
+            || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
             dyn_binding_list_free(bhead);
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "with-bindings*: keys must be symbols or strings");
@@ -757,11 +757,11 @@ mino_val_t *prim_set_fail_alloc_at(mino_state_t *S, mino_val_t *args,
             "set-fail-alloc-at! requires 1 argument");
     }
     n = args->as.cons.car;
-    if (n == NULL || n->type != MINO_INT) {
+    if (n == NULL || !mino_val_int_p(n)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-fail-alloc-at!: argument must be an integer");
     }
-    mino_set_fail_alloc_at(S, (long)n->as.i);
+    mino_set_fail_alloc_at(S, (long)mino_val_int_get(n));
     return mino_nil(S);
 }
 
@@ -809,9 +809,9 @@ static mino_val_t *prim_future_call(mino_state_t *S, mino_val_t *args,
             "future-call expects exactly one argument");
     }
     thunk = args->as.cons.car;
-    if (thunk == NULL || (thunk->type != MINO_FN
-                          && thunk->type != MINO_PRIM
-                          && thunk->type != MINO_MACRO)) {
+    if (thunk == NULL || (mino_type_of(thunk) != MINO_FN
+                          && mino_type_of(thunk) != MINO_PRIM
+                          && mino_type_of(thunk) != MINO_MACRO)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "future-call expects a function");
     }
@@ -844,7 +844,7 @@ static mino_val_t *prim_deliver(mino_state_t *S, mino_val_t *args,
     }
     promise = args->as.cons.car;
     value   = args->as.cons.cdr->as.cons.car;
-    if (promise == NULL || promise->type != MINO_FUTURE) {
+    if (promise == NULL || mino_type_of(promise) != MINO_FUTURE) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "deliver expects a promise");
     }
@@ -904,7 +904,7 @@ static mino_val_t *prim_future_q(mino_state_t *S, mino_val_t *args,
             "future? expects one argument");
     }
     x = args->as.cons.car;
-    return (x != NULL && x->type == MINO_FUTURE) ? mino_true(S) : mino_false(S);
+    return (x != NULL && mino_type_of(x) == MINO_FUTURE) ? mino_true(S) : mino_false(S);
 }
 
 /* (future-deref f) — block until the future is realized; return result
@@ -920,7 +920,7 @@ static mino_val_t *prim_future_deref(mino_state_t *S, mino_val_t *args,
             "future-deref expects one argument");
     }
     fut = args->as.cons.car;
-    if (fut == NULL || fut->type != MINO_FUTURE) {
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "future-deref expects a future");
     }
@@ -963,7 +963,7 @@ mino_val_t *prim_vreset_bang(mino_state_t *S, mino_val_t *args,
     }
     v   = args->as.cons.car;
     val = args->as.cons.cdr->as.cons.car;
-    if (v == NULL || v->type != MINO_VOLATILE) {
+    if (v == NULL || mino_type_of(v) != MINO_VOLATILE) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "vreset!: first argument must be a volatile");
     }
@@ -982,7 +982,7 @@ mino_val_t *prim_vswap_bang(mino_state_t *S, mino_val_t *args,
     }
     v  = args->as.cons.car;
     fn = args->as.cons.cdr->as.cons.car;
-    if (v == NULL || v->type != MINO_VOLATILE) {
+    if (v == NULL || mino_type_of(v) != MINO_VOLATILE) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "vswap!: first argument must be a volatile");
     }

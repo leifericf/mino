@@ -68,7 +68,7 @@ static mino_val_t *eval_var(mino_state_t *S, mino_val_t *form,
         return NULL;
     }
     sym_arg = args->as.cons.car;
-    if (sym_arg->type != MINO_SYMBOL) {
+    if (mino_type_of(sym_arg) != MINO_SYMBOL) {
         set_eval_diag(S, form, "syntax", "MSY001",
                       "var requires a symbol argument");
         return NULL;
@@ -318,7 +318,7 @@ int eval_try_special_form(mino_state_t *S, mino_val_t *form,
                           mino_val_t **out)
 {
     size_t i;
-    if (head == NULL || head->type != MINO_SYMBOL) {
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) {
         return 0;
     }
     for (i = 0; i < k_special_forms_count; i++) {

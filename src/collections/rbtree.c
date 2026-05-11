@@ -14,33 +14,33 @@
 int val_compare(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == b) return 0;
-    if (a == NULL || a->type == MINO_NIL) return -1;
-    if (b == NULL || b->type == MINO_NIL) return 1;
-    if (a->type == MINO_INT && b->type == MINO_INT) {
-        return a->as.i < b->as.i ? -1 : a->as.i > b->as.i ? 1 : 0;
+    if (a == NULL || mino_type_of(a) == MINO_NIL) return -1;
+    if (b == NULL || mino_type_of(b) == MINO_NIL) return 1;
+    if (mino_val_int_p(a) && mino_val_int_p(b)) {
+        return mino_val_int_get(a) < mino_val_int_get(b) ? -1 : mino_val_int_get(a) > mino_val_int_get(b) ? 1 : 0;
     }
-    if (a->type == MINO_FLOAT && b->type == MINO_FLOAT) {
+    if (mino_type_of(a) == MINO_FLOAT && mino_type_of(b) == MINO_FLOAT) {
         return a->as.f < b->as.f ? -1 : a->as.f > b->as.f ? 1 : 0;
     }
-    if (a->type == MINO_INT && b->type == MINO_FLOAT) {
-        double da = (double)a->as.i;
+    if (mino_val_int_p(a) && mino_type_of(b) == MINO_FLOAT) {
+        double da = (double)mino_val_int_get(a);
         return da < b->as.f ? -1 : da > b->as.f ? 1 : 0;
     }
-    if (a->type == MINO_FLOAT && b->type == MINO_INT) {
-        double db = (double)b->as.i;
+    if (mino_type_of(a) == MINO_FLOAT && mino_val_int_p(b)) {
+        double db = (double)mino_val_int_get(b);
         return a->as.f < db ? -1 : a->as.f > db ? 1 : 0;
     }
-    if (a->type == MINO_CHAR && b->type == MINO_CHAR) {
+    if (mino_type_of(a) == MINO_CHAR && mino_type_of(b) == MINO_CHAR) {
         return a->as.ch < b->as.ch ? -1 : a->as.ch > b->as.ch ? 1 : 0;
     }
-    if (a->type == MINO_STRING && b->type == MINO_STRING) {
+    if (mino_type_of(a) == MINO_STRING && mino_type_of(b) == MINO_STRING) {
         size_t min_len = a->as.s.len < b->as.s.len ? a->as.s.len : b->as.s.len;
         int c = memcmp(a->as.s.data, b->as.s.data, min_len);
         if (c != 0) return c;
         return a->as.s.len < b->as.s.len ? -1
              : a->as.s.len > b->as.s.len ? 1 : 0;
     }
-    if ((a->type == MINO_SYMBOL || a->type == MINO_KEYWORD)
+    if ((mino_type_of(a) == MINO_SYMBOL || mino_type_of(a) == MINO_KEYWORD)
          && a->type == b->type) {
         /* Symbols and keywords compare like Clojure's Symbol.compareTo:
          * unqualified (nil ns) sorts before any qualified one; within
@@ -76,7 +76,7 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
                  : a_name_len > b_name_len ? 1 : 0;
         }
     }
-    if (a->type == MINO_VECTOR && b->type == MINO_VECTOR) {
+    if (mino_type_of(a) == MINO_VECTOR && mino_type_of(b) == MINO_VECTOR) {
         size_t i;
         size_t min_len = a->as.vec.len < b->as.vec.len
                        ? a->as.vec.len : b->as.vec.len;
@@ -111,9 +111,9 @@ int rb_compare(mino_state_t *S, const mino_val_t *a, const mino_val_t *b,
         mino_val_t *args2;
         mino_val_t *result2;
         if (result == NULL) return 0;
-        if (result->type == MINO_INT)
-            return result->as.i < 0 ? -1 : result->as.i > 0 ? 1 : 0;
-        if (result->type == MINO_FLOAT)
+        if (mino_val_int_p(result))
+            return mino_val_int_get(result) < 0 ? -1 : mino_val_int_get(result) > 0 ? 1 : 0;
+        if (mino_type_of(result) == MINO_FLOAT)
             return result->as.f < 0 ? -1 : result->as.f > 0 ? 1 : 0;
         if (mino_is_truthy(result)) return -1;
         args2 = mino_cons(S, (mino_val_t *)b,
@@ -529,7 +529,7 @@ mino_val_t *sorted_seq(mino_state_t *S, const mino_val_t *coll)
 {
     mino_val_t *head = mino_nil(S), *tail = NULL;
     if (coll->as.sorted.len == 0) return mino_nil(S);
-    if (coll->type == MINO_SORTED_MAP) {
+    if (mino_type_of(coll) == MINO_SORTED_MAP) {
         mino_val_t *keys = mino_nil(S), *kt = NULL;
         rb_to_list(S, coll->as.sorted.root, &keys, &kt);
         while (mino_is_cons(keys)) {

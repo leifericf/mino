@@ -8,7 +8,7 @@
 int sym_eq(const mino_val_t *v, const char *s)
 {
     size_t n;
-    if (v == NULL || v->type != MINO_SYMBOL) {
+    if (v == NULL || mino_type_of(v) != MINO_SYMBOL) {
         return 0;
     }
     n = strlen(s);
@@ -33,7 +33,7 @@ mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
         return form;
     }
     head = form->as.cons.car;
-    if (head == NULL || head->type != MINO_SYMBOL) {
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) {
         return form;
     }
     n = head->as.s.len;
@@ -54,7 +54,7 @@ mino_val_t *macroexpand1(mino_state_t *S, mino_val_t *form, mino_env_t *env,
         mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
         if (amb != NULL) mac = mino_env_get(amb, buf);
     }
-    if (mac == NULL || mac->type != MINO_MACRO) {
+    if (mac == NULL || mino_type_of(mac) != MINO_MACRO) {
         return form;
     }
     *expanded = 1;
@@ -181,7 +181,7 @@ static mino_val_t *qq_qualify_symbol(mino_state_t *S, mino_val_t *sym,
              * and original name -- use those so refer'd entries are
              * qualified back to where they live, matching the Clojure
              * syntax-quote contract. */
-            if (b->val != NULL && b->val->type == MINO_VAR) {
+            if (b->val != NULL && mino_type_of(b->val) == MINO_VAR) {
                 nsn   = b->val->as.var.ns;
                 bname = b->val->as.var.sym;
                 bnlen = bname != NULL ? strlen(bname) : 0;
@@ -256,7 +256,7 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                 }
                 spliced = eval_value(S, arg->as.cons.car, env);
                 if (spliced == NULL) { return NULL; }
-                if (spliced->type == MINO_VECTOR) {
+                if (mino_type_of(spliced) == MINO_VECTOR) {
                     size_t j;
                     for (j = 0; j < spliced->as.vec.len; j++) {
                         mino_val_t *cell = mino_cons(S,
@@ -268,13 +268,13 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                     }
                 } else {
                     mino_val_t *sp = spliced;
-                    while (sp != NULL && sp->type == MINO_LAZY) {
+                    while (sp != NULL && mino_type_of(sp) == MINO_LAZY) {
                         sp = lazy_force(S, sp);
                         if (sp == NULL) return NULL;
                     }
-                    while (sp != NULL && sp->type != MINO_NIL
-                           && sp->type != MINO_EMPTY_LIST) {
-                        if (sp->type == MINO_CONS) {
+                    while (sp != NULL && mino_type_of(sp) != MINO_NIL
+                           && mino_type_of(sp) != MINO_EMPTY_LIST) {
+                        if (mino_type_of(sp) == MINO_CONS) {
                             mino_val_t *cell = mino_cons(S,
                                 sp->as.cons.car, mino_nil(S));
                             if (tail == NULL) { out = cell; }
@@ -282,7 +282,7 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                             tail = cell;
                             count++;
                             sp = sp->as.cons.cdr;
-                        } else if (sp->type == MINO_CHUNKED_CONS) {
+                        } else if (mino_type_of(sp) == MINO_CHUNKED_CONS) {
                             const mino_val_t *ch = sp->as.chunked_cons.chunk;
                             unsigned k;
                             for (k = sp->as.chunked_cons.off;
@@ -298,7 +298,7 @@ static mino_val_t *qq_expand_vector(mino_state_t *S, mino_val_t *form,
                         } else {
                             break;
                         }
-                        while (sp != NULL && sp->type == MINO_LAZY) {
+                        while (sp != NULL && mino_type_of(sp) == MINO_LAZY) {
                             sp = lazy_force(S, sp);
                             if (sp == NULL) return NULL;
                         }
@@ -392,7 +392,7 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
                 spliced = eval_value(S, arg->as.cons.car, env);
                 if (spliced == NULL) { return NULL; }
                 sp = spliced;
-                if (sp != NULL && sp->type == MINO_VECTOR) {
+                if (sp != NULL && mino_type_of(sp) == MINO_VECTOR) {
                     size_t j;
                     for (j = 0; j < sp->as.vec.len; j++) {
                         mino_val_t *cell = mino_cons(S,
@@ -402,20 +402,20 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
                         tail = cell;
                     }
                 } else {
-                    while (sp != NULL && sp->type == MINO_LAZY) {
+                    while (sp != NULL && mino_type_of(sp) == MINO_LAZY) {
                         sp = lazy_force(S, sp);
                         if (sp == NULL) return NULL;
                     }
-                    while (sp != NULL && sp->type != MINO_NIL
-                           && sp->type != MINO_EMPTY_LIST) {
-                        if (sp->type == MINO_CONS) {
+                    while (sp != NULL && mino_type_of(sp) != MINO_NIL
+                           && mino_type_of(sp) != MINO_EMPTY_LIST) {
+                        if (mino_type_of(sp) == MINO_CONS) {
                             mino_val_t *cell = mino_cons(S,
                                 sp->as.cons.car, mino_nil(S));
                             if (tail == NULL) { out = cell; }
                             else { mino_cons_cdr_set(S, tail, cell); }
                             tail = cell;
                             sp = sp->as.cons.cdr;
-                        } else if (sp->type == MINO_CHUNKED_CONS) {
+                        } else if (mino_type_of(sp) == MINO_CHUNKED_CONS) {
                             const mino_val_t *ch = sp->as.chunked_cons.chunk;
                             unsigned k;
                             for (k = sp->as.chunked_cons.off;
@@ -430,7 +430,7 @@ static mino_val_t *qq_expand_cons(mino_state_t *S, mino_val_t *form,
                         } else {
                             break;
                         }
-                        while (sp != NULL && sp->type == MINO_LAZY) {
+                        while (sp != NULL && mino_type_of(sp) == MINO_LAZY) {
                             sp = lazy_force(S, sp);
                             if (sp == NULL) return NULL;
                         }
@@ -462,9 +462,9 @@ mino_val_t *quasiquote_expand(mino_state_t *S, mino_val_t *form,
                               mino_env_t *env)
 {
     if (form == NULL) { return form; }
-    if (form->type == MINO_SYMBOL) return qq_qualify_symbol(S, form, env);
-    if (form->type == MINO_VECTOR) return qq_expand_vector(S, form, env);
-    if (form->type == MINO_MAP)    return qq_expand_map(S, form, env);
+    if (mino_type_of(form) == MINO_SYMBOL) return qq_qualify_symbol(S, form, env);
+    if (mino_type_of(form) == MINO_VECTOR) return qq_expand_vector(S, form, env);
+    if (mino_type_of(form) == MINO_MAP)    return qq_expand_map(S, form, env);
     if (!mino_is_cons(form))       return form;
     return qq_expand_cons(S, form, env);
 }
@@ -481,11 +481,11 @@ mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env)
     if (v == NULL) {
         return NULL;
     }
-    if (v->type == MINO_RECUR) {
+    if (mino_type_of(v) == MINO_RECUR) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "recur must be in tail position");
         return NULL;
     }
-    if (v->type == MINO_TAIL_CALL) {
+    if (mino_type_of(v) == MINO_TAIL_CALL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "tail call in non-tail position");
         return NULL;
     }
@@ -532,7 +532,7 @@ mino_val_t *lazy_force(mino_state_t *S, mino_val_t *v)
             : eval_implicit_do(S, v->as.lazy.body, v->as.lazy.env);
         if (result == NULL) return NULL;
         /* Iteratively unwrap nested lazy seqs. */
-        while (result != NULL && result->type == MINO_LAZY) {
+        while (result != NULL && mino_type_of(result) == MINO_LAZY) {
             if (result->as.lazy.realized) {
                 result = result->as.lazy.cached;
             } else {

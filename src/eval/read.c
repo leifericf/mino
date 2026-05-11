@@ -341,7 +341,7 @@ static mino_val_t *read_cond_body(mino_state_t *S, const char **p,
             }
             return NULL;
         }
-        if (key->type != MINO_KEYWORD) {
+        if (mino_type_of(key) != MINO_KEYWORD) {
             set_reader_diag(S, MRE006,
                             "reader conditional key must be a keyword",
                             S->reader_line, S->reader_col);
@@ -454,7 +454,7 @@ static mino_val_t *read_list_form(mino_state_t *S, const char **p)
             if (mino_last_error(S) != NULL) return NULL;
             if (found != NULL) {
                 /* Splice: iterate found and append elements */
-                if (found->type == MINO_VECTOR) {
+                if (mino_type_of(found) == MINO_VECTOR) {
                     size_t i;
                     for (i = 0; i < found->as.vec.len; i++) {
                         list_append_cell(S, &head, &tail,
@@ -599,7 +599,7 @@ static mino_val_t *read_vector_form(mino_state_t *S, const char **p)
             if (mino_last_error(S) != NULL) return NULL;
             if (found != NULL) {
                 /* Splice elements from matched vector/list into buf */
-                if (found->type == MINO_VECTOR) {
+                if (mino_type_of(found) == MINO_VECTOR) {
                     size_t i;
                     size_t flen = found->as.vec.len;
                     for (i = 0; i < flen; i++) {
@@ -687,7 +687,7 @@ static mino_val_t *read_map_form(mino_state_t *S, const char **p)
             if (mino_last_error(S) != NULL) return NULL;
             if (found != NULL) {
                 /* Splice alternating key-value pairs. */
-                if (found->type == MINO_VECTOR) {
+                if (mino_type_of(found) == MINO_VECTOR) {
                     size_t i;
                     if (found->as.vec.len % 2 != 0) {
                         set_reader_diag(S, MRE008,
@@ -1128,7 +1128,7 @@ static void scan_percent_args(mino_val_t *form, int used[9],
                               int *max_arg, int *has_rest)
 {
     if (form == NULL) return;
-    if (form->type == MINO_SYMBOL) {
+    if (mino_type_of(form) == MINO_SYMBOL) {
         const char *s = form->as.s.data;
         size_t      n = form->as.s.len;
         if (n == 1 && s[0] == '%') {
@@ -1148,13 +1148,13 @@ static void scan_percent_args(mino_val_t *form, int used[9],
         scan_percent_args(form->as.cons.cdr, used, max_arg, has_rest);
         return;
     }
-    if (form->type == MINO_VECTOR) {
+    if (mino_type_of(form) == MINO_VECTOR) {
         size_t i;
         for (i = 0; i < form->as.vec.len; i++)
             scan_percent_args(vec_nth(form, i), used, max_arg, has_rest);
         return;
     }
-    if (form->type == MINO_MAP) {
+    if (mino_type_of(form) == MINO_MAP) {
         size_t i;
         for (i = 0; i < form->as.map.len; i++) {
             scan_percent_args(vec_nth(form->as.map.key_order, i),
@@ -1165,7 +1165,7 @@ static void scan_percent_args(mino_val_t *form, int used[9],
         }
         return;
     }
-    if (form->type == MINO_SET) {
+    if (mino_type_of(form) == MINO_SET) {
         size_t i;
         for (i = 0; i < form->as.set.len; i++)
             scan_percent_args(vec_nth(form->as.set.key_order, i),
@@ -1181,7 +1181,7 @@ static void scan_percent_args(mino_val_t *form, int used[9],
 static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
 {
     if (form == NULL) return form;
-    if (form->type == MINO_SYMBOL && form->as.s.len == 1
+    if (mino_type_of(form) == MINO_SYMBOL && form->as.s.len == 1
         && form->as.s.data[0] == '%') {
         return mino_symbol(S, "%1");
     }
@@ -1198,7 +1198,7 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
             return c;
         }
     }
-    if (form->type == MINO_VECTOR) {
+    if (mino_type_of(form) == MINO_VECTOR) {
         size_t      i;
         int         changed = 0;
         mino_val_t *stack_items[64];
@@ -1289,27 +1289,27 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
         return NULL;
     }
     /* ^:key shorthand: expand to {:key true}. */
-    if (meta_val->type == MINO_KEYWORD) {
+    if (mino_type_of(meta_val) == MINO_KEYWORD) {
         mino_val_t *kv[1], *vv[1];
         kv[0] = meta_val;
         vv[0] = mino_true(S);
         meta_val = mino_map(S, kv, vv, 1);
     }
     /* ^Symbol shorthand: expand to {:tag Symbol}. */
-    if (meta_val->type == MINO_SYMBOL) {
+    if (mino_type_of(meta_val) == MINO_SYMBOL) {
         mino_val_t *kv[1], *vv[1];
         kv[0] = mino_keyword(S, "tag");
         vv[0] = meta_val;
         meta_val = mino_map(S, kv, vv, 1);
     }
     /* ^"String" shorthand: expand to {:tag "String"}. */
-    if (meta_val->type == MINO_STRING) {
+    if (mino_type_of(meta_val) == MINO_STRING) {
         mino_val_t *kv[1], *vv[1];
         kv[0] = mino_keyword(S, "tag");
         vv[0] = meta_val;
         meta_val = mino_map(S, kv, vv, 1);
     }
-    if (meta_val->type != MINO_MAP) {
+    if (mino_type_of(meta_val) != MINO_MAP) {
         set_reader_diag(S, MRE010,
                         "metadata must be a map, keyword, symbol, or string",
                         S->reader_line, S->reader_col);
@@ -1324,19 +1324,19 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
         return NULL;
     }
     /* Attach metadata directly to the value instead of desugaring. */
-    if (target->type == MINO_SYMBOL || target->type == MINO_VECTOR
-        || target->type == MINO_MAP || target->type == MINO_CONS
-        || target->type == MINO_SET) {
+    if (mino_type_of(target) == MINO_SYMBOL || mino_type_of(target) == MINO_VECTOR
+        || mino_type_of(target) == MINO_MAP || mino_type_of(target) == MINO_CONS
+        || mino_type_of(target) == MINO_SET) {
         /* Symbols are interned (shared). Make a fresh copy so we
          * do not mutate the interned instance. */
-        if (target->type == MINO_SYMBOL) {
+        if (mino_type_of(target) == MINO_SYMBOL) {
             mino_val_t *fresh = alloc_val(S, MINO_SYMBOL);
             fresh->as.s.data = target->as.s.data;
             fresh->as.s.len  = target->as.s.len;
             target = fresh;
         }
         /* Merge with any existing metadata from chained ^ syntax. */
-        if (target->meta != NULL && target->meta->type == MINO_MAP) {
+        if (target->meta != NULL && mino_type_of(target->meta) == MINO_MAP) {
             size_t i;
             size_t ko_len;
             mino_val_t *ko = meta_val->as.map.key_order;
@@ -1550,8 +1550,8 @@ static mino_val_t *namespaced_map_qualify_key(mino_state_t *S, mino_val_t *k,
     char        full[512];
     size_t      flen;
     if (k == NULL) return k;
-    if (k->type != MINO_KEYWORD && k->type != MINO_SYMBOL) return k;
-    is_kw   = (k->type == MINO_KEYWORD);
+    if (mino_type_of(k) != MINO_KEYWORD && mino_type_of(k) != MINO_SYMBOL) return k;
+    is_kw   = (mino_type_of(k) == MINO_KEYWORD);
     name    = k->as.s.data;
     namelen = k->as.s.len;
     slash   = memchr(name, '/', namelen);
@@ -1912,7 +1912,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
          * Mirrors Clojure's reader where #uuid "..." constructs a
          * java.util.UUID at read time. */
         if (tag_len == 4 && memcmp(tag_start, "uuid", 4) == 0
-            && body != NULL && body->type == MINO_STRING) {
+            && body != NULL && mino_type_of(body) == MINO_STRING) {
             unsigned char bytes[16];
             if (!mino_uuid_parse(body->as.s.data, body->as.s.len, bytes)) {
                 set_reader_diag(S, MRE008,
@@ -1930,7 +1930,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
             mino_val_t *var = var_find(S, "clojure.core", "*data-readers*");
             if (var != NULL && var->as.var.bound) readers = var->as.var.root;
         }
-        if (readers != NULL && readers->type == MINO_MAP) {
+        if (readers != NULL && mino_type_of(readers) == MINO_MAP) {
             fn = map_get_val(readers, tag_sym);
             if (fn != NULL && call_env != NULL) {
                 mino_val_t *args = mino_cons(S, body, mino_nil(S));
@@ -1946,7 +1946,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
                                        "*default-data-reader-fn*");
             if (var != NULL && var->as.var.bound) fn = var->as.var.root;
         }
-        if (fn != NULL && fn->type != MINO_NIL && call_env != NULL) {
+        if (fn != NULL && mino_type_of(fn) != MINO_NIL && call_env != NULL) {
             mino_val_t *args = mino_cons(S, tag_sym,
                                          mino_cons(S, body, mino_nil(S)));
             return mino_call(S, fn, args, call_env);

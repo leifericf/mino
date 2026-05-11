@@ -11,7 +11,7 @@
 mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source)
 {
     mino_val_t *v;
-    if (source == NULL || source->type != MINO_STRING) return NULL;
+    if (source == NULL || mino_type_of(source) != MINO_STRING) return NULL;
     v = alloc_val(S, MINO_REGEX);
     if (v == NULL) return NULL;
     v->as.regex.source = source;
@@ -24,13 +24,13 @@ mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source)
 static int regex_source_view(const mino_val_t *v, const char **data, size_t *len)
 {
     if (v == NULL) return 0;
-    if (v->type == MINO_STRING) {
+    if (mino_type_of(v) == MINO_STRING) {
         *data = v->as.s.data;
         *len  = v->as.s.len;
         return 1;
     }
-    if (v->type == MINO_REGEX && v->as.regex.source != NULL
-        && v->as.regex.source->type == MINO_STRING) {
+    if (mino_type_of(v) == MINO_REGEX && v->as.regex.source != NULL
+        && mino_type_of(v->as.regex.source) == MINO_STRING) {
         *data = v->as.regex.source->as.s.data;
         *len  = v->as.regex.source->as.s.len;
         return 1;
@@ -50,8 +50,8 @@ mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "re-pattern requires one argument");
     }
     x = args->as.cons.car;
-    if (x != NULL && x->type == MINO_REGEX) return x;
-    if (x != NULL && x->type == MINO_STRING) {
+    if (x != NULL && mino_type_of(x) == MINO_REGEX) return x;
+    if (x != NULL && mino_type_of(x) == MINO_STRING) {
         return mino_regex_from_source(S, x);
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
@@ -109,8 +109,8 @@ mino_val_t *prim_re_find(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "re-find: first argument must be a pattern (regex or string)");
     }
     /* Real Clojure (re-find re nil) returns nil rather than throwing. */
-    if (text_val == NULL || text_val->type == MINO_NIL) return mino_nil(S);
-    if (text_val->type != MINO_STRING) {
+    if (text_val == NULL || mino_type_of(text_val) == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(text_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-find: second argument must be a string");
     }
     compiled = re_compile(pat_data);
@@ -154,8 +154,8 @@ mino_val_t *prim_re_matches(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "re-matches: first argument must be a pattern (regex or string)");
     }
-    if (text_val == NULL || text_val->type == MINO_NIL) return mino_nil(S);
-    if (text_val->type != MINO_STRING) {
+    if (text_val == NULL || mino_type_of(text_val) == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(text_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "re-matches: second argument must be a string");
     }
     compiled = re_compile(pat_data);

@@ -47,7 +47,7 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
                 return -1;
             }
             cv = clause->as.cons.cdr->as.cons.car;
-            if (cv == NULL || cv->type != MINO_SYMBOL) {
+            if (cv == NULL || mino_type_of(cv) != MINO_SYMBOL) {
                 set_eval_diag(S, form, "syntax", "MSY001",
                     "catch binding must be a symbol");
                 return -1;
@@ -93,7 +93,7 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
 static mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
 {
     mino_val_t *keys[5], *vals[5];
-    if (ex_val->type == MINO_MAP
+    if (mino_type_of(ex_val) == MINO_MAP
         && map_get_val(ex_val, mino_keyword(S, "mino/kind")) != NULL) {
         return ex_val;
     }
@@ -104,12 +104,12 @@ static mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
     keys[2] = mino_keyword(S, "mino/phase");
     vals[2] = mino_keyword(S, "eval");
     keys[3] = mino_keyword(S, "mino/message");
-    if (ex_val->type == MINO_STRING) {
+    if (mino_type_of(ex_val) == MINO_STRING) {
         vals[3] = ex_val;
-    } else if (ex_val->type == MINO_MAP) {
+    } else if (mino_type_of(ex_val) == MINO_MAP) {
         mino_val_t *msg_val = map_get_val(ex_val,
             mino_keyword(S, "message"));
-        vals[3] = (msg_val != NULL && msg_val->type == MINO_STRING)
+        vals[3] = (msg_val != NULL && mino_type_of(msg_val) == MINO_STRING)
             ? msg_val : mino_string(S, "uncaught exception");
     } else {
         vals[3] = mino_string(S, "uncaught exception");
@@ -254,7 +254,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = e;
             longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
         }
-        if (e != NULL && e->type == MINO_STRING) {
+        if (e != NULL && mino_type_of(e) == MINO_STRING) {
             char msg[512];
             snprintf(msg, sizeof(msg),
                      "unhandled exception: %.*s",

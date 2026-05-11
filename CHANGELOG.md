@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.120.0 — Tag-Safe Type Discrimination at Call Sites
+
+Migrates every type-discrimination site to the `mino_type_of(v)`
+helper introduced in v0.119.0. No representation change at this tag —
+`mino_int(S, n)` still returns a boxed cell from the small-int cache
+or a fresh alloc — but the codebase is now uniformly safe for the
+constructor flip, with one important caveat (see below).
+
+Three blanket call-site rewrites land here:
+
+- `X->type == MINO_Y` and `X->type != MINO_Y` become
+  `mino_type_of(X) == MINO_Y` and `mino_type_of(X) != MINO_Y`.
+  `mino_type_of` returns `MINO_INT` for an inline-tagged int,
+  `MINO_NIL` for `NULL`, and `v->type` otherwise — so today, with
+  every value still boxed, behavior is preserved exactly; with
+  tagged values, the dispatch stays correct without a deref.
+- `switch (X->type)` becomes `switch (mino_type_of(X))` for the same
+  reason: the switch is now NULL-safe and tag-safe.
+- `X->as.i` reads become `mino_val_int_get(X)`. The single legitimate
+  write at the boxed-MINO_INT construction site in `val.c` is left
+  alone.
+
+The rewrites touch 48 files. All 1557 tests / 7279 assertions stay
+green on release, ASan, and UBSan.
+
+Scope caveat — second sweep needed before constructor flip. While
+attempting the flip in this tag, the test suite crashed in `atom_set`
+and `prim_type`. Root cause: the migration pass covered `->type` and
+`->as.i` access, but the GC write barrier (`gc_write_barrier` in
+`src/gc/barrier.c`) still dereferences `new_value` and `old_value` as
+`gc_hdr_t *` without tag-checking, and a wide population of sites
+read `v->meta`, `v->as.cons.car`, `v->as.atom.val`, etc. directly off
+a value that the next tag could see as inline-tagged. The plan's
+"22 files, 200 callsites" estimate was correct for the int-typed
+sites; the broader generic-deref audit (~60 `->meta` reads alone, and
+the GC barrier's three internal derefs) needs its own tag.
+
+GC barrier guards added preemptively at this tag (no behavior change
+today, prep for v0.121.0): the two SATB pushes and the remset path
+in `gc_write_barrier` now early-return on any pointer with non-zero
+low three bits.
+
+Helper layout in `internal.h` was reordered so `mino_type_of` is
+defined before `mino_val_int_p`/`mino_val_int_get`; the latter two
+delegate to it, eliminating two near-duplicate tag-check sites.
+
 ## v0.119.0 — Pointer-Tagged Value Representation: Infrastructure
 
 Lands the infrastructure that subsequent tags need to flip the

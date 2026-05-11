@@ -139,7 +139,7 @@ int mino_promise_deliver(mino_state_t *S, mino_val_t *promise,
     int delivered = 0;
 
     (void)S;
-    if (promise == NULL || promise->type != MINO_FUTURE) { return 0; }
+    if (promise == NULL || mino_type_of(promise) != MINO_FUTURE) { return 0; }
     impl = promise->as.future.impl;
     if (impl == NULL) { return 0; }
 
@@ -162,7 +162,7 @@ int mino_future_realized_p(mino_val_t *fut)
 {
     mino_future_t *impl;
     int realized;
-    if (fut == NULL || fut->type != MINO_FUTURE) { return 0; }
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return 0; }
     impl = fut->as.future.impl;
     if (impl == NULL) { return 0; }
     mu_lock(&impl->mu);
@@ -180,7 +180,7 @@ int mino_future_cancelled_p(mino_val_t *fut)
 {
     mino_future_t *impl;
     int cancelled;
-    if (fut == NULL || fut->type != MINO_FUTURE) { return 0; }
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return 0; }
     impl = fut->as.future.impl;
     if (impl == NULL) { return 0; }
     mu_lock(&impl->mu);
@@ -200,7 +200,7 @@ int mino_future_cancel(mino_state_t *S, mino_val_t *fut)
     int newly_set = 0;
 
     (void)S;
-    if (fut == NULL || fut->type != MINO_FUTURE) { return 0; }
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return 0; }
     impl = fut->as.future.impl;
     if (impl == NULL) { return 0; }
 
@@ -277,7 +277,7 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
     {
         mino_val_t  *snap = impl->dyn_snapshot;
         dyn_frame_t *conveyed = NULL;
-        if (snap != NULL && snap->type == MINO_MAP && snap->as.map.len > 0) {
+        if (snap != NULL && mino_type_of(snap) == MINO_MAP && snap->as.map.len > 0) {
             dyn_binding_t *bhead = NULL;
             size_t i;
             int    oom = 0;
@@ -286,7 +286,7 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
                 mino_val_t    *val = map_get_val(snap, key);
                 dyn_binding_t *b;
                 if (key == NULL
-                    || (key->type != MINO_SYMBOL && key->type != MINO_STRING)) {
+                    || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
                     continue;
                 }
                 b = (dyn_binding_t *)malloc(sizeof(*b));
@@ -510,7 +510,7 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
     mino_future_t *impl;
     mino_val_t    *out;
 
-    if (fut == NULL || fut->type != MINO_FUTURE) {
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) {
         return mino_nil(S);
     }
     impl = fut->as.future.impl;
@@ -626,7 +626,7 @@ void mino_future_gc_sweep(mino_val_t *fut)
 {
     mino_future_t *impl;
     mino_state_t *S;
-    if (fut == NULL || fut->type != MINO_FUTURE) { return; }
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) { return; }
     impl = fut->as.future.impl;
     if (impl == NULL) { return; }
 

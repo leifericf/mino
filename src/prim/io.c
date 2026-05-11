@@ -18,7 +18,7 @@
 
 void print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v)
 {
-    if (v != NULL && v->type == MINO_STRING) {
+    if (v != NULL && mino_type_of(v) == MINO_STRING) {
         fwrite(v->as.s.data, 1, v->as.s.len, out);
     } else {
         mino_print_to(S, out, v);
@@ -49,7 +49,7 @@ static mino_val_t *resolve_io_sink(mino_state_t *S, const char *name)
         }
     }
     var = var_find(S, "clojure.core", name);
-    if (var != NULL && var->type == MINO_VAR && var->as.var.bound) {
+    if (var != NULL && mino_type_of(var) == MINO_VAR && var->as.var.bound) {
         return var->as.var.root;
     }
     return NULL;
@@ -66,9 +66,9 @@ static int try_capture_to_atom(mino_state_t *S, mino_val_t *sink,
     mino_val_t *new_str;
     char       *combined;
     size_t      cur_len;
-    if (sink == NULL || sink->type != MINO_ATOM) return 0;
+    if (sink == NULL || mino_type_of(sink) != MINO_ATOM) return 0;
     cur = sink->as.atom.val;
-    if (cur == NULL || cur->type != MINO_STRING) return 0;
+    if (cur == NULL || mino_type_of(cur) != MINO_STRING) return 0;
     cur_len = cur->as.s.len;
     combined = (char *)malloc(cur_len + len);
     if (combined == NULL) {
@@ -106,7 +106,7 @@ static int io_emit(mino_state_t *S, const char *out_var_name,
     if (captured < 0) return -1;
     if (captured == 1) return 0;
     fallback = (strcmp(out_var_name, "*err*") == 0) ? stderr : stdout;
-    if (sink != NULL && sink->type == MINO_KEYWORD) {
+    if (sink != NULL && mino_type_of(sink) == MINO_KEYWORD) {
         if (sink->as.s.len == 11
             && memcmp(sink->as.s.data, "mino/stdout", 11) == 0) {
             fallback = stdout;
@@ -132,10 +132,10 @@ static int append_print_chunk(mino_state_t *S, mino_val_t *v,
     size_t      slen;
     mino_val_t *formatted = NULL;
     char        char_buf[4];
-    if (!readably && v != NULL && v->type == MINO_STRING) {
+    if (!readably && v != NULL && mino_type_of(v) == MINO_STRING) {
         src  = v->as.s.data;
         slen = v->as.s.len;
-    } else if (!readably && v != NULL && v->type == MINO_CHAR) {
+    } else if (!readably && v != NULL && mino_type_of(v) == MINO_CHAR) {
         /* Non-readable print emits the character itself, not the
          * \name escape form. Encode the codepoint as UTF-8. */
         int cp = v->as.ch;
@@ -371,11 +371,11 @@ mino_val_t *prim_set_print_method_bang(mino_state_t *S, mino_val_t *args,
             "set-print-method! requires one argument");
     }
     fn = args->as.cons.car;
-    if (fn == NULL || fn->type == MINO_NIL) {
+    if (fn == NULL || mino_type_of(fn) == MINO_NIL) {
         S->print_method_fn = NULL;
         return mino_nil(S);
     }
-    if (fn->type != MINO_FN && fn->type != MINO_PRIM) {
+    if (mino_type_of(fn) != MINO_FN && mino_type_of(fn) != MINO_PRIM) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-print-method! argument must be a fn");
     }
@@ -411,14 +411,14 @@ mino_val_t *prim_read_line(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "read-line takes no arguments");
     }
     src = resolve_io_sink(S, "*in*");
-    if (src != NULL && src->type == MINO_ATOM) {
+    if (src != NULL && mino_type_of(src) == MINO_ATOM) {
         mino_val_t *cur = src->as.atom.val;
         size_t      i;
         size_t      llen;
         size_t      rstart;
         mino_val_t *line;
         mino_val_t *rem;
-        if (cur == NULL || cur->type != MINO_STRING
+        if (cur == NULL || mino_type_of(cur) != MINO_STRING
             || cur->as.s.len == 0) {
             return mino_nil(S);
         }
@@ -487,13 +487,13 @@ mino_val_t *prim_read(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "read takes no arguments in this build");
     }
     src = resolve_io_sink(S, "*in*");
-    if (src != NULL && src->type == MINO_ATOM) {
+    if (src != NULL && mino_type_of(src) == MINO_ATOM) {
         mino_val_t *cur = src->as.atom.val;
         const char *end = NULL;
         mino_val_t *form;
         mino_val_t *rem;
         size_t      consumed;
-        if (cur == NULL || cur->type != MINO_STRING
+        if (cur == NULL || mino_type_of(cur) != MINO_STRING
             || cur->as.s.len == 0) {
             return mino_nil(S);
         }
@@ -530,7 +530,7 @@ mino_val_t *prim_printf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     formatted = prim_format(S, args, env);
     if (formatted == NULL) return NULL;
-    if (formatted->type != MINO_STRING) {
+    if (mino_type_of(formatted) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "printf: format did not produce a string");
     }
@@ -572,7 +572,7 @@ mino_val_t *prim_slurp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "slurp requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "slurp: argument must be a string");
     }
     path = path_val->as.s.data;
@@ -615,7 +615,7 @@ mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     path_val = args->as.cons.car;
     content  = args->as.cons.cdr->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "spit: first argument must be a string path");
     }
     path = path_val->as.s.data;
@@ -625,7 +625,7 @@ mino_val_t *prim_spit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         snprintf(msg, sizeof(msg), "spit: cannot open file: %s", path);
         return prim_throw_classified(S, "host", "MHO001", msg);
     }
-    if (content != NULL && content->type == MINO_STRING) {
+    if (content != NULL && mino_type_of(content) == MINO_STRING) {
         fwrite(content->as.s.data, 1, content->as.s.len, f);
     } else {
         mino_print_to(S, f, content);
@@ -642,9 +642,9 @@ mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (mino_is_cons(args)) {
         mino_val_t *v = args->as.cons.car;
-        if (v != NULL && v->type == MINO_INT) {
-            code = (int)v->as.i;
-        } else if (v != NULL && v->type == MINO_FLOAT) {
+        if (v != NULL && mino_val_int_p(v)) {
+            code = (int)mino_val_int_get(v);
+        } else if (v != NULL && mino_type_of(v) == MINO_FLOAT) {
             code = (int)v->as.f;
         }
     }
@@ -706,7 +706,7 @@ mino_val_t *prim_chdir(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "chdir requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "chdir: argument must be a string");
     }
@@ -728,7 +728,7 @@ mino_val_t *prim_getenv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "getenv requires one argument");
     }
     name_val = args->as.cons.car;
-    if (name_val == NULL || name_val->type != MINO_STRING) {
+    if (name_val == NULL || mino_type_of(name_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "getenv: argument must be a string");
     }
@@ -782,7 +782,7 @@ mino_val_t *prim_file_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "file-seq requires one argument");
     }
     dir_val = args->as.cons.car;
-    if (dir_val == NULL || dir_val->type != MINO_STRING) {
+    if (dir_val == NULL || mino_type_of(dir_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "file-seq: argument must be a string");
     }

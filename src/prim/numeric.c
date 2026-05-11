@@ -116,8 +116,8 @@ static int is_compare_number(const mino_val_t *v);
 double tower_to_double(const mino_val_t *v)
 {
     if (v == NULL) return 0.0;
-    switch (v->type) {
-    case MINO_INT:     return (double)v->as.i;
+    switch (mino_type_of(v)) {
+    case MINO_INT:     return (double)mino_val_int_get(v);
     case MINO_FLOAT:   return v->as.f;
     case MINO_FLOAT32: return v->as.f;
     case MINO_BIGINT:  return mino_bigint_to_double(v);
@@ -141,7 +141,7 @@ static int classify_or_throw(mino_state_t *S, const mino_val_t *v,
                              const char *opname, int *out_tier)
 {
     if (v == NULL) goto err;
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_INT:     *out_tier = TT_INT;    return 1;
     case MINO_BIGINT:  *out_tier = TT_BIGINT; return 1;
     case MINO_RATIO:   *out_tier = TT_RATIO;  return 1;
@@ -302,20 +302,20 @@ static mino_val_t *coerce_at_tier(mino_state_t *S, mino_val_t *v, int tier,
     if (!classify_or_throw(S, v, opname, &vt)) return NULL;
     switch (tier) {
     case TT_BIGINT:
-        if (v->type == MINO_INT)    return mino_bigint_from_ll(S, v->as.i);
-        if (v->type == MINO_BIGINT) return v;
+        if (mino_val_int_p(v))    return mino_bigint_from_ll(S, mino_val_int_get(v));
+        if (mino_type_of(v) == MINO_BIGINT) return v;
         break;
     case TT_RATIO: {
         mino_val_t *bn, *bd;
-        if (v->type == MINO_RATIO)  return v;
-        if (v->type == MINO_INT) {
-            bn = mino_bigint_from_ll(S, v->as.i);
+        if (mino_type_of(v) == MINO_RATIO)  return v;
+        if (mino_val_int_p(v)) {
+            bn = mino_bigint_from_ll(S, mino_val_int_get(v));
             if (bn == NULL) return NULL;
             bd = mino_bigint_from_ll(S, 1);
             if (bd == NULL) return NULL;
             return mino_ratio_make_unchecked(S, bn, bd);
         }
-        if (v->type == MINO_BIGINT) {
+        if (mino_type_of(v) == MINO_BIGINT) {
             bd = mino_bigint_from_ll(S, 1);
             if (bd == NULL) return NULL;
             return mino_ratio_make_unchecked(S, (mino_val_t *)v, bd);
@@ -323,16 +323,16 @@ static mino_val_t *coerce_at_tier(mino_state_t *S, mino_val_t *v, int tier,
         break;
     }
     case TT_BIGDEC: {
-        if (v->type == MINO_BIGDEC) return v;
-        if (v->type == MINO_INT) {
-            mino_val_t *u = mino_bigint_from_ll(S, v->as.i);
+        if (mino_type_of(v) == MINO_BIGDEC) return v;
+        if (mino_val_int_p(v)) {
+            mino_val_t *u = mino_bigint_from_ll(S, mino_val_int_get(v));
             if (u == NULL) return NULL;
             return mino_bigdec_make(S, u, 0);
         }
-        if (v->type == MINO_BIGINT) {
+        if (mino_type_of(v) == MINO_BIGINT) {
             return mino_bigdec_make(S, (mino_val_t *)v, 0);
         }
-        if (v->type == MINO_RATIO) {
+        if (mino_type_of(v) == MINO_RATIO) {
             /* Widen the ratio to bigdec via exact division. */
             mino_val_t *num_bd, *den_bd;
             num_bd = mino_bigdec_make(S, v->as.ratio.num, 0);
@@ -354,7 +354,7 @@ static mino_val_t *coerce_at_tier(mino_state_t *S, mino_val_t *v, int tier,
 static void tower_seed_div(tower_acc_t *acc, const mino_val_t *a, int at)
 {
     switch (at) {
-    case TT_INT:    acc->iacc = a->as.i; break;
+    case TT_INT:    acc->iacc = mino_val_int_get(a); break;
     case TT_FLOAT:  acc->dacc = a->as.f; acc->tier = TT_FLOAT; break;
     case TT_BIGINT: acc->vacc = (mino_val_t *)a; acc->tier = TT_BIGINT; break;
     case TT_RATIO:  acc->vacc = (mino_val_t *)a; acc->tier = TT_RATIO; break;
@@ -372,7 +372,7 @@ static int tower_apply_int(mino_state_t *S, tower_acc_t *acc,
                            const mino_val_t *a, tower_op_t op,
                            const char *opname, int strict)
 {
-    long long x = a->as.i;
+    long long x = mino_val_int_get(a);
     int (*overflow_op)(long long, long long, long long *) =
         (op == OP_ADD) ? iadd_overflow
         : (op == OP_SUB) ? isub_overflow
@@ -433,11 +433,11 @@ static int tower_apply_bigint(mino_state_t *S, tower_acc_t *acc,
     if (op == OP_DIV) {
         acc->vacc = mino_ratio_div(S, acc->vacc, operand);
         if (acc->vacc == NULL) return -1;
-        if (acc->vacc->type == MINO_INT) {
-            acc->iacc = acc->vacc->as.i;
+        if (mino_val_int_p(acc->vacc)) {
+            acc->iacc = mino_val_int_get(acc->vacc);
             acc->vacc = NULL;
             acc->tier = TT_INT;
-        } else if (acc->vacc->type == MINO_BIGINT) {
+        } else if (mino_type_of(acc->vacc) == MINO_BIGINT) {
             acc->tier = TT_BIGINT;
         } else {
             acc->tier = TT_RATIO;
@@ -458,9 +458,9 @@ static int tower_apply_ratio(mino_state_t *S, tower_acc_t *acc,
     if (operand == NULL) return -1;
     acc->vacc = tower_op_at_tier(S, op, TT_RATIO, acc->vacc, operand, opname);
     if (acc->vacc == NULL) return -1;
-    if (acc->vacc->type == MINO_INT) {
-        acc->iacc = acc->vacc->as.i; acc->vacc = NULL; acc->tier = TT_INT;
-    } else if (acc->vacc->type == MINO_BIGINT) {
+    if (mino_val_int_p(acc->vacc)) {
+        acc->iacc = mino_val_int_get(acc->vacc); acc->vacc = NULL; acc->tier = TT_INT;
+    } else if (mino_type_of(acc->vacc) == MINO_BIGINT) {
         acc->tier = TT_BIGINT;
     }
     return 0;
@@ -614,29 +614,29 @@ mino_val_t *prim_subp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 static mino_val_t *prim_inc_step(mino_state_t *S, mino_val_t *x,
                                  mino_env_t *env, int strict)
 {
-    if (x != NULL && x->type == MINO_INT) {
-        if (x->as.i == LLONG_MAX) {
+    if (x != NULL && mino_val_int_p(x)) {
+        if (mino_val_int_get(x) == LLONG_MAX) {
             if (strict) {
                 return prim_throw_classified(S, "eval/contract", "MCT001",
                                              "integer overflow");
             }
             {
-                mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+                mino_val_t *lhs = mino_bigint_from_ll(S, mino_val_int_get(x));
                 mino_val_t *one;
                 if (lhs == NULL) return NULL;
                 one = mino_int(S, 1);
                 return mino_bigint_add(S, lhs, one);
             }
         }
-        return mino_int(S, x->as.i + 1);
+        return mino_int(S, mino_val_int_get(x) + 1);
     }
-    if (x != NULL && (x->type == MINO_FLOAT || x->type == MINO_FLOAT32)) {
+    if (x != NULL && (mino_type_of(x) == MINO_FLOAT || mino_type_of(x) == MINO_FLOAT32)) {
         /* JVM Clojure's `(inc (float 1))` returns a Double; arithmetic
          * with floats always promotes to double. Match that. */
         return mino_float(S, x->as.f + 1.0);
     }
-    if (x != NULL && (x->type == MINO_BIGINT || x->type == MINO_RATIO
-                      || x->type == MINO_BIGDEC)) {
+    if (x != NULL && (mino_type_of(x) == MINO_BIGINT || mino_type_of(x) == MINO_RATIO
+                      || mino_type_of(x) == MINO_BIGDEC)) {
         /* Defer to the tower-aware (+) by passing (x 1). The bigint /
          * ratio / bigdec tiers don't overflow long, so the strict flag
          * doesn't change behavior here -- both inc and inc' route to
@@ -692,27 +692,27 @@ mino_val_t *prim_incp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 static mino_val_t *prim_dec_step(mino_state_t *S, mino_val_t *x,
                                  mino_env_t *env, int strict)
 {
-    if (x != NULL && x->type == MINO_INT) {
-        if (x->as.i == LLONG_MIN) {
+    if (x != NULL && mino_val_int_p(x)) {
+        if (mino_val_int_get(x) == LLONG_MIN) {
             if (strict) {
                 return prim_throw_classified(S, "eval/contract", "MCT001",
                                              "integer overflow");
             }
             {
-                mino_val_t *lhs = mino_bigint_from_ll(S, x->as.i);
+                mino_val_t *lhs = mino_bigint_from_ll(S, mino_val_int_get(x));
                 mino_val_t *one;
                 if (lhs == NULL) return NULL;
                 one = mino_int(S, 1);
                 return mino_bigint_sub(S, lhs, one);
             }
         }
-        return mino_int(S, x->as.i - 1);
+        return mino_int(S, mino_val_int_get(x) - 1);
     }
-    if (x != NULL && (x->type == MINO_FLOAT || x->type == MINO_FLOAT32)) {
+    if (x != NULL && (mino_type_of(x) == MINO_FLOAT || mino_type_of(x) == MINO_FLOAT32)) {
         return mino_float(S, x->as.f - 1.0);
     }
-    if (x != NULL && (x->type == MINO_BIGINT || x->type == MINO_RATIO
-                      || x->type == MINO_BIGDEC)) {
+    if (x != NULL && (mino_type_of(x) == MINO_BIGINT || mino_type_of(x) == MINO_RATIO
+                      || mino_type_of(x) == MINO_BIGDEC)) {
         mino_val_t *one = mino_int(S, 1);
         mino_val_t *pair = mino_cons(S, x, mino_cons(S, one, mino_nil(S)));
         return strict ? prim_sub(S, pair, env) : prim_subp(S, pair, env);
@@ -769,7 +769,7 @@ static int tower_seed(mino_state_t *S, tower_acc_t *a, mino_val_t *seed,
     if (!classify_or_throw(S, seed, opname, &seed_tier)) return -1;
     a->iacc = 0; a->dacc = 0; a->vacc = NULL;
     switch (seed_tier) {
-    case TT_INT:    a->iacc = seed->as.i; a->tier = TT_INT;    break;
+    case TT_INT:    a->iacc = mino_val_int_get(seed); a->tier = TT_INT;    break;
     case TT_FLOAT:  a->dacc = seed->as.f; a->tier = TT_FLOAT;  break;
     case TT_BIGINT: a->vacc = seed;       a->tier = TT_BIGINT; break;
     case TT_RATIO:  a->vacc = seed;       a->tier = TT_RATIO;  break;
@@ -798,7 +798,7 @@ static int tower_seeded_step(mino_state_t *S, tower_acc_t *a, mino_val_t *x,
         case TT_INT: {
             long long out;
             if (op == OP_SUB) {
-                if (isub_overflow(a->iacc, x->as.i, &out)) {
+                if (isub_overflow(a->iacc, mino_val_int_get(x), &out)) {
                     if (strict) {
                         prim_throw_classified(S, "eval/contract", "MCT001",
                                               "integer overflow");
@@ -806,7 +806,7 @@ static int tower_seeded_step(mino_state_t *S, tower_acc_t *a, mino_val_t *x,
                     }
                     {
                         mino_val_t *la = mino_bigint_from_ll(S, a->iacc);
-                        mino_val_t *lb = mino_bigint_from_ll(S, x->as.i);
+                        mino_val_t *lb = mino_bigint_from_ll(S, mino_val_int_get(x));
                         if (la == NULL || lb == NULL) return -1;
                         a->vacc = mino_bigint_sub(S, la, lb);
                         if (a->vacc == NULL) return -1;
@@ -816,22 +816,22 @@ static int tower_seeded_step(mino_state_t *S, tower_acc_t *a, mino_val_t *x,
                 }
                 a->iacc = out;
             } else { /* OP_DIV */
-                if (x->as.i == 0) {
+                if (mino_val_int_get(x) == 0) {
                     prim_throw_classified(S, "eval/type", "MTY001",
                                           "division by zero");
                     return -1;
                 }
-                if (a->iacc % x->as.i == 0) {
-                    a->iacc /= x->as.i;
+                if (a->iacc % mino_val_int_get(x) == 0) {
+                    a->iacc /= mino_val_int_get(x);
                 } else {
                     mino_val_t *bn = mino_bigint_from_ll(S, a->iacc);
-                    mino_val_t *bd = mino_bigint_from_ll(S, x->as.i);
+                    mino_val_t *bd = mino_bigint_from_ll(S, mino_val_int_get(x));
                     if (bn == NULL || bd == NULL) return -1;
                     a->vacc = mino_ratio_make(S, bn, bd);
                     if (a->vacc == NULL) return -1;
-                    if (a->vacc->type == MINO_INT) {
-                        a->iacc = a->vacc->as.i; a->vacc = NULL; a->tier = TT_INT;
-                    } else if (a->vacc->type == MINO_BIGINT) {
+                    if (mino_val_int_p(a->vacc)) {
+                        a->iacc = mino_val_int_get(a->vacc); a->vacc = NULL; a->tier = TT_INT;
+                    } else if (mino_type_of(a->vacc) == MINO_BIGINT) {
                         a->tier = TT_BIGINT;
                     } else {
                         a->tier = TT_RATIO;
@@ -848,9 +848,9 @@ static int tower_seeded_step(mino_state_t *S, tower_acc_t *a, mino_val_t *x,
             } else {
                 a->vacc = mino_ratio_div(S, a->vacc, opd);
                 if (a->vacc != NULL) {
-                    if (a->vacc->type == MINO_INT) {
-                        a->iacc = a->vacc->as.i; a->vacc = NULL; a->tier = TT_INT;
-                    } else if (a->vacc->type == MINO_BIGINT) {
+                    if (mino_val_int_p(a->vacc)) {
+                        a->iacc = mino_val_int_get(a->vacc); a->vacc = NULL; a->tier = TT_INT;
+                    } else if (mino_type_of(a->vacc) == MINO_BIGINT) {
                         a->tier = TT_BIGINT;
                     } else {
                         a->tier = TT_RATIO;
@@ -867,9 +867,9 @@ static int tower_seeded_step(mino_state_t *S, tower_acc_t *a, mino_val_t *x,
                 ? mino_ratio_sub(S, a->vacc, opd)
                 : mino_ratio_div(S, a->vacc, opd);
             if (a->vacc == NULL) return -1;
-            if (a->vacc->type == MINO_INT) {
-                a->iacc = a->vacc->as.i; a->vacc = NULL; a->tier = TT_INT;
-            } else if (a->vacc->type == MINO_BIGINT) {
+            if (mino_val_int_p(a->vacc)) {
+                a->iacc = mino_val_int_get(a->vacc); a->vacc = NULL; a->tier = TT_INT;
+            } else if (mino_type_of(a->vacc) == MINO_BIGINT) {
                 a->tier = TT_BIGINT;
             }
             break;
@@ -943,26 +943,26 @@ static mino_val_t *prim_sub_negate(mino_state_t *S, mino_val_t *first,
         snprintf(buf, sizeof(buf), "%s expects numbers", opname);
         return prim_throw_classified(S, "eval/type", "MTY001", buf);
     }
-    if (first->type == MINO_INT) {
+    if (mino_val_int_p(first)) {
         long long neg;
-        if (ineg_overflow(first->as.i, &neg)) {
+        if (ineg_overflow(mino_val_int_get(first), &neg)) {
             if (strict) {
                 return prim_throw_classified(S, "eval/contract", "MCT001",
                                              "integer overflow");
             }
             /* Negating LLONG_MIN doesn't fit in long; promote. */
             {
-                mino_val_t *bi = mino_bigint_from_ll(S, first->as.i);
+                mino_val_t *bi = mino_bigint_from_ll(S, mino_val_int_get(first));
                 if (bi == NULL) return NULL;
                 return mino_bigint_neg(S, bi);
             }
         }
         return mino_int(S, neg);
     }
-    if (first->type == MINO_FLOAT || first->type == MINO_FLOAT32)
+    if (mino_type_of(first) == MINO_FLOAT || mino_type_of(first) == MINO_FLOAT32)
         return mino_float(S, -first->as.f);
-    if (first->type == MINO_BIGINT) return mino_bigint_neg(S, first);
-    if (first->type == MINO_RATIO) {
+    if (mino_type_of(first) == MINO_BIGINT) return mino_bigint_neg(S, first);
+    if (mino_type_of(first) == MINO_RATIO) {
         mino_val_t *zero_n = mino_bigint_from_ll(S, 0);
         mino_val_t *zero_d = mino_bigint_from_ll(S, 1);
         mino_val_t *zero;
@@ -971,7 +971,7 @@ static mino_val_t *prim_sub_negate(mino_state_t *S, mino_val_t *first,
         if (zero == NULL) return NULL;
         return mino_ratio_sub(S, zero, first);
     }
-    if (first->type == MINO_BIGDEC) return mino_bigdec_neg(S, first);
+    if (mino_type_of(first) == MINO_BIGDEC) return mino_bigdec_neg(S, first);
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "%s expects numbers", opname);
@@ -1085,8 +1085,8 @@ mino_val_t *prim_subp_argv(mino_state_t *S, mino_val_t **argv, int argc,
 
 static int unchecked_grab_long(mino_val_t *v, long long *out)
 {
-    if (v == NULL || v->type != MINO_INT) return 0;
-    *out = v->as.i;
+    if (v == NULL || !mino_val_int_p(v)) return 0;
+    *out = mino_val_int_get(v);
     return 1;
 }
 
@@ -1281,18 +1281,18 @@ static mino_val_t *mqr_float(mino_state_t *S, double a, double b, mqr_op_t op,
 static int as_ratio_pair_bigints(mino_state_t *S, const mino_val_t *v,
                                  mino_val_t **num_out, mino_val_t **denom_out)
 {
-    if (v->type == MINO_RATIO) {
+    if (mino_type_of(v) == MINO_RATIO) {
         *num_out   = v->as.ratio.num;
         *denom_out = v->as.ratio.denom;
         return 1;
     }
-    if (v->type == MINO_INT) {
-        *num_out = mino_bigint_from_ll(S, v->as.i);
+    if (mino_val_int_p(v)) {
+        *num_out = mino_bigint_from_ll(S, mino_val_int_get(v));
         if (*num_out == NULL) return 0;
         *denom_out = mino_bigint_from_ll(S, 1);
         return *denom_out != NULL;
     }
-    if (v->type == MINO_BIGINT) {
+    if (mino_type_of(v) == MINO_BIGINT) {
         *num_out = (mino_val_t *)v;
         *denom_out = mino_bigint_from_ll(S, 1);
         return *denom_out != NULL;
@@ -1309,7 +1309,7 @@ static int as_ratio_pair_bigints(mino_state_t *S, const mino_val_t *v,
 static mino_val_t *bigint_or_self(mino_state_t *S, mino_val_t *v)
 {
     if (v == NULL) return NULL;
-    if (v->type == MINO_INT) return mino_bigint_from_ll(S, v->as.i);
+    if (mino_val_int_p(v)) return mino_bigint_from_ll(S, mino_val_int_get(v));
     return v;
 }
 
@@ -1352,39 +1352,39 @@ static mino_val_t *mqr_ratio_inner(mino_state_t *S, const mino_val_t *a,
         if (qb_num == NULL) return NULL;
         qb = mino_ratio_make(S, qb_num, db);
         if (qb == NULL) return NULL;
-        if (a->type == MINO_RATIO) {
+        if (mino_type_of(a) == MINO_RATIO) {
             mino_val_t *qb_at_ratio = qb;
-            if (qb->type != MINO_RATIO) {
+            if (mino_type_of(qb) != MINO_RATIO) {
                 /* qb collapsed to int / bigint; promote for ratio_sub. */
                 mino_val_t *qb_num2;
                 mino_val_t *one = mino_bigint_from_ll(S, 1);
                 if (one == NULL) return NULL;
-                qb_num2 = (qb->type == MINO_INT)
-                    ? mino_bigint_from_ll(S, qb->as.i)
+                qb_num2 = (mino_val_int_p(qb))
+                    ? mino_bigint_from_ll(S, mino_val_int_get(qb))
                     : qb;
                 if (qb_num2 == NULL) return NULL;
                 qb_at_ratio = mino_ratio_make_unchecked(S, qb_num2, one);
                 if (qb_at_ratio == NULL) return NULL;
             }
             rem = mino_ratio_sub(S, a, qb_at_ratio);
-        } else if (qb->type == MINO_RATIO) {
+        } else if (mino_type_of(qb) == MINO_RATIO) {
             /* a is int / bigint, qb is ratio. Sub via ratio. */
             mino_val_t *one = mino_bigint_from_ll(S, 1);
             mino_val_t *a_num;
             mino_val_t *a_at_ratio;
             if (one == NULL) return NULL;
-            a_num = (a->type == MINO_INT)
-                ? mino_bigint_from_ll(S, a->as.i) : (mino_val_t *)a;
+            a_num = (mino_val_int_p(a))
+                ? mino_bigint_from_ll(S, mino_val_int_get(a)) : (mino_val_t *)a;
             if (a_num == NULL) return NULL;
             a_at_ratio = mino_ratio_make_unchecked(S, a_num, one);
             if (a_at_ratio == NULL) return NULL;
             rem = mino_ratio_sub(S, a_at_ratio, qb);
         } else {
             /* Both bigint-tier. */
-            mino_val_t *a_bn = (a->type == MINO_INT)
-                ? mino_bigint_from_ll(S, a->as.i) : (mino_val_t *)a;
-            mino_val_t *qb_bn = (qb->type == MINO_INT)
-                ? mino_bigint_from_ll(S, qb->as.i) : qb;
+            mino_val_t *a_bn = (mino_val_int_p(a))
+                ? mino_bigint_from_ll(S, mino_val_int_get(a)) : (mino_val_t *)a;
+            mino_val_t *qb_bn = (mino_val_int_p(qb))
+                ? mino_bigint_from_ll(S, mino_val_int_get(qb)) : qb;
             if (a_bn == NULL || qb_bn == NULL) return NULL;
             rem = mino_bigint_sub(S, a_bn, qb_bn);
         }
@@ -1394,24 +1394,24 @@ static mino_val_t *mqr_ratio_inner(mino_state_t *S, const mino_val_t *a,
         {
             int sr;
             int sb;
-            if (rem->type == MINO_INT) {
-                sr = (rem->as.i > 0) - (rem->as.i < 0);
-            } else if (rem->type == MINO_BIGINT) {
+            if (mino_val_int_p(rem)) {
+                sr = (mino_val_int_get(rem) > 0) - (mino_val_int_get(rem) < 0);
+            } else if (mino_type_of(rem) == MINO_BIGINT) {
                 sr = mp_int_compare_zero((mp_int)rem->as.bigint.mpz);
             } else { /* MINO_RATIO: sign matches numerator (denom positive) */
                 sr = mp_int_compare_zero((mp_int)rem->as.ratio.num->as.bigint.mpz);
             }
             /* Sign of b: ratio b sign matches numerator. */
-            if (b->type == MINO_RATIO) {
+            if (mino_type_of(b) == MINO_RATIO) {
                 sb = mp_int_compare_zero((mp_int)b->as.ratio.num->as.bigint.mpz);
-            } else if (b->type == MINO_INT) {
-                sb = (b->as.i > 0) - (b->as.i < 0);
+            } else if (mino_val_int_p(b)) {
+                sb = (mino_val_int_get(b) > 0) - (mino_val_int_get(b) < 0);
             } else {
                 sb = mp_int_compare_zero((mp_int)b->as.bigint.mpz);
             }
             if (sr == 0 || ((sr < 0) == (sb < 0))) return rem;
             /* rem + b. Promote both to ratio if either is ratio. */
-            if (rem->type == MINO_RATIO || b->type == MINO_RATIO) {
+            if (mino_type_of(rem) == MINO_RATIO || mino_type_of(b) == MINO_RATIO) {
                 mino_val_t *one = mino_bigint_from_ll(S, 1);
                 /* Init to NULL so older GCC's -Wmaybe-uninitialized
                  * flow analysis sees a definite assignment. The
@@ -1420,19 +1420,19 @@ static mino_val_t *mqr_ratio_inner(mino_state_t *S, const mino_val_t *a,
                  * any allocator failure. */
                 mino_val_t *r_at = NULL, *b_at = NULL;
                 if (one == NULL) return NULL;
-                if (rem->type == MINO_RATIO) {
+                if (mino_type_of(rem) == MINO_RATIO) {
                     r_at = rem;
                 } else {
-                    mino_val_t *rn = (rem->type == MINO_INT)
-                        ? mino_bigint_from_ll(S, rem->as.i) : rem;
+                    mino_val_t *rn = (mino_val_int_p(rem))
+                        ? mino_bigint_from_ll(S, mino_val_int_get(rem)) : rem;
                     if (rn == NULL) return NULL;
                     r_at = mino_ratio_make_unchecked(S, rn, one);
                 }
-                if (b->type == MINO_RATIO) {
+                if (mino_type_of(b) == MINO_RATIO) {
                     b_at = (mino_val_t *)b;
                 } else {
-                    mino_val_t *bn = (b->type == MINO_INT)
-                        ? mino_bigint_from_ll(S, b->as.i) : (mino_val_t *)b;
+                    mino_val_t *bn = (mino_val_int_p(b))
+                        ? mino_bigint_from_ll(S, mino_val_int_get(b)) : (mino_val_t *)b;
                     mino_val_t *one2 = mino_bigint_from_ll(S, 1);
                     if (bn == NULL || one2 == NULL) return NULL;
                     b_at = mino_ratio_make_unchecked(S, bn, one2);
@@ -1442,10 +1442,10 @@ static mino_val_t *mqr_ratio_inner(mino_state_t *S, const mino_val_t *a,
             }
             /* Both bigint-tier. */
             {
-                mino_val_t *r_bn = (rem->type == MINO_INT)
-                    ? mino_bigint_from_ll(S, rem->as.i) : rem;
-                mino_val_t *b_bn = (b->type == MINO_INT)
-                    ? mino_bigint_from_ll(S, b->as.i) : (mino_val_t *)b;
+                mino_val_t *r_bn = (mino_val_int_p(rem))
+                    ? mino_bigint_from_ll(S, mino_val_int_get(rem)) : rem;
+                mino_val_t *b_bn = (mino_val_int_p(b))
+                    ? mino_bigint_from_ll(S, mino_val_int_get(b)) : (mino_val_t *)b;
                 if (r_bn == NULL || b_bn == NULL) return NULL;
                 return mino_bigint_add(S, r_bn, b_bn);
             }
@@ -1499,7 +1499,7 @@ static mino_val_t *prim_mqr(mino_state_t *S, mino_val_t *args, mqr_op_t op)
     }
     /* Both INT. */
     {
-        long long a = xv->as.i, b = yv->as.i;
+        long long a = mino_val_int_get(xv), b = mino_val_int_get(yv);
         if (b == 0) {
             char buf[64];
             snprintf(buf, sizeof(buf), "%s: division by zero", opname);
@@ -1765,8 +1765,8 @@ static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
 {
     (void)S;
     if (v == NULL) { *err = "expected a number"; return 0; }
-    if (v->type == MINO_INT) { *out = v->as.i; return 1; }
-    if (v->type == MINO_FLOAT || v->type == MINO_FLOAT32) {
+    if (mino_val_int_p(v)) { *out = mino_val_int_get(v); return 1; }
+    if (mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32) {
         double d = v->as.f;
         if (d != d) { *err = "NaN cannot be coerced to integer"; return 0; }
         if (d > 9.2233720368547748e18 || d < -9.2233720368547758e18) {
@@ -1775,11 +1775,11 @@ static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
         *out = (long long)d;
         return 1;
     }
-    if (v->type == MINO_BIGINT) {
+    if (mino_type_of(v) == MINO_BIGINT) {
         if (mino_as_ll(v, out)) return 1;
         *err = "bigint value out of long range"; return 0;
     }
-    if (v->type == MINO_RATIO) {
+    if (mino_type_of(v) == MINO_RATIO) {
         double d = mino_ratio_to_double(v);
         if (d > 9.2233720368547748e18 || d < -9.2233720368547758e18) {
             *err = "ratio value out of long range"; return 0;
@@ -1787,7 +1787,7 @@ static int extract_integer_for_cast(mino_state_t *S, mino_val_t *v,
         *out = (long long)d;
         return 1;
     }
-    if (v->type == MINO_BIGDEC) {
+    if (mino_type_of(v) == MINO_BIGDEC) {
         double d = mino_bigdec_to_double(v);
         if (d != d) { *err = "NaN cannot be coerced to integer"; return 0; }
         if (d > 9.2233720368547748e18 || d < -9.2233720368547758e18) {
@@ -1814,7 +1814,7 @@ static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
     const char *err = NULL;
     char        buf[160];
     /* (cast \a) -> codepoint: chars don't take the float-bound path. */
-    if (v != NULL && v->type == MINO_CHAR) {
+    if (v != NULL && mino_type_of(v) == MINO_CHAR) {
         long long cp = (long long)v->as.ch;
         if (cp < lo || cp > hi) {
             snprintf(buf, sizeof(buf), "%s: value out of range", opname);
@@ -1822,7 +1822,7 @@ static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
         }
         return mino_int(S, cp);
     }
-    if (v != NULL && (v->type == MINO_FLOAT || v->type == MINO_FLOAT32)) {
+    if (v != NULL && (mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32)) {
         double d = v->as.f;
         if (d != d) {
             snprintf(buf, sizeof(buf), "%s: NaN cannot be coerced to integer", opname);
@@ -1834,7 +1834,7 @@ static mino_val_t *narrow_cast(mino_state_t *S, mino_val_t *v,
         }
         return mino_int(S, (long long)d);
     }
-    if (v != NULL && v->type == MINO_BIGDEC) {
+    if (v != NULL && mino_type_of(v) == MINO_BIGDEC) {
         double d = mino_bigdec_to_double(v);
         if (d != d) {
             snprintf(buf, sizeof(buf), "%s: NaN cannot be coerced to integer", opname);
@@ -1877,7 +1877,7 @@ mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     v = args->as.cons.car;
     /* (long \a) -> 97: char value yields its Unicode codepoint. */
-    if (v != NULL && v->type == MINO_CHAR) {
+    if (v != NULL && mino_type_of(v) == MINO_CHAR) {
         return mino_int(S, (long long)v->as.ch);
     }
     if (!extract_integer_for_cast(S, v, &ll, &err)) {
@@ -1922,12 +1922,12 @@ mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001", "float: expected a number");
     }
-    if      (v->type == MINO_FLOAT)   d = v->as.f;
-    else if (v->type == MINO_FLOAT32) d = v->as.f;
-    else if (v->type == MINO_INT)     d = (double)v->as.i;
-    else if (v->type == MINO_BIGINT)  d = mino_bigint_to_double(v);
-    else if (v->type == MINO_RATIO)   d = mino_ratio_to_double(v);
-    else if (v->type == MINO_BIGDEC)  d = mino_bigdec_to_double(v);
+    if      (mino_type_of(v) == MINO_FLOAT)   d = v->as.f;
+    else if (mino_type_of(v) == MINO_FLOAT32) d = v->as.f;
+    else if (mino_val_int_p(v))     d = (double)mino_val_int_get(v);
+    else if (mino_type_of(v) == MINO_BIGINT)  d = mino_bigint_to_double(v);
+    else if (mino_type_of(v) == MINO_RATIO)   d = mino_ratio_to_double(v);
+    else if (mino_type_of(v) == MINO_BIGDEC)  d = mino_bigdec_to_double(v);
     else
         return prim_throw_classified(S, "eval/type", "MTY001", "float: expected a number");
     /* Narrow the contract to the 32-bit float range: values outside
@@ -1954,12 +1954,12 @@ mino_val_t *prim_double(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (v == NULL)
         return prim_throw_classified(S, "eval/type", "MTY001", "double: expected a number");
-    if (v->type == MINO_FLOAT)   return v;
-    if (v->type == MINO_FLOAT32) return mino_float(S, v->as.f);
-    if (v->type == MINO_INT)     return mino_float(S, (double)v->as.i);
-    if (v->type == MINO_BIGINT)  return mino_float(S, mino_bigint_to_double(v));
-    if (v->type == MINO_RATIO)   return mino_float(S, mino_ratio_to_double(v));
-    if (v->type == MINO_BIGDEC)  return mino_float(S, mino_bigdec_to_double(v));
+    if (mino_type_of(v) == MINO_FLOAT)   return v;
+    if (mino_type_of(v) == MINO_FLOAT32) return mino_float(S, v->as.f);
+    if (mino_val_int_p(v))     return mino_float(S, (double)mino_val_int_get(v));
+    if (mino_type_of(v) == MINO_BIGINT)  return mino_float(S, mino_bigint_to_double(v));
+    if (mino_type_of(v) == MINO_RATIO)   return mino_float(S, mino_ratio_to_double(v));
+    if (mino_type_of(v) == MINO_BIGDEC)  return mino_float(S, mino_bigdec_to_double(v));
     return prim_throw_classified(S, "eval/type", "MTY001", "double: expected a number");
 }
 
@@ -1974,7 +1974,7 @@ mino_val_t *prim_parse_long(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "parse-long requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_STRING)
+    if (v == NULL || mino_type_of(v) != MINO_STRING)
         return prim_throw_classified(S, "eval/type", "MTY001", "parse-long: argument must be a string");
     s = v->as.s.data;
     if (v->as.s.len == 0 || isspace((unsigned char)s[0]))
@@ -1997,7 +1997,7 @@ mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env
         return prim_throw_classified(S, "eval/arity", "MAR001", "parse-double requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_STRING)
+    if (v == NULL || mino_type_of(v) != MINO_STRING)
         return prim_throw_classified(S, "eval/type", "MTY001", "parse-double: argument must be a string");
     s = v->as.s.data;
     if (v->as.s.len == 0 || isspace((unsigned char)s[0]))
@@ -2019,10 +2019,10 @@ mino_val_t *prim_parse_double(mino_state_t *S, mino_val_t *args, mino_env_t *env
 static int is_compare_number(const mino_val_t *v)
 {
     if (v == NULL) return 0;
-    return v->type == MINO_INT || v->type == MINO_FLOAT
-        || v->type == MINO_FLOAT32
-        || v->type == MINO_BIGINT || v->type == MINO_RATIO
-        || v->type == MINO_BIGDEC;
+    return mino_val_int_p(v) || mino_type_of(v) == MINO_FLOAT
+        || mino_type_of(v) == MINO_FLOAT32
+        || mino_type_of(v) == MINO_BIGINT || mino_type_of(v) == MINO_RATIO
+        || mino_type_of(v) == MINO_BIGDEC;
 }
 
 /* (compare a b) -- general comparison returning -1, 0, or 1.
@@ -2048,12 +2048,12 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     a = args->as.cons.car;
     b = args->as.cons.cdr->as.cons.car;
-    a_nil = (a == NULL || a->type == MINO_NIL);
-    b_nil = (b == NULL || b->type == MINO_NIL);
+    a_nil = (a == NULL || mino_type_of(a) == MINO_NIL);
+    b_nil = (b == NULL || mino_type_of(b) == MINO_NIL);
     if (a_nil && b_nil) return mino_int(S, 0);
     if (a_nil)          return mino_int(S, -1);
     if (b_nil)          return mino_int(S,  1);
-    if (a->type == MINO_BOOL && b->type == MINO_BOOL) {
+    if (mino_type_of(a) == MINO_BOOL && mino_type_of(b) == MINO_BOOL) {
         return mino_int(S, a->as.b < b->as.b ? -1 :
                            a->as.b > b->as.b ? 1 : 0);
     }
@@ -2066,12 +2066,12 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         double db = tower_to_double(b);
         return mino_int(S, da < db ? -1 : da > db ? 1 : 0);
     }
-    if (a->type == b->type && a->type == MINO_STRING) {
+    if (a->type == b->type && mino_type_of(a) == MINO_STRING) {
         int cmp = strcmp(a->as.s.data, b->as.s.data);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
     if (a->type == b->type
-        && (a->type == MINO_KEYWORD || a->type == MINO_SYMBOL)) {
+        && (mino_type_of(a) == MINO_KEYWORD || mino_type_of(a) == MINO_SYMBOL)) {
         /* Defer to val_compare so namespaced symbols/keywords compare
          * as Clojure does: unqualified before any qualified, and
          * within the same ns, by name. Plain strcmp would put `:cat`
@@ -2079,7 +2079,7 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         int cmp = val_compare(a, b);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
-    if (a->type == MINO_CHAR && b->type == MINO_CHAR) {
+    if (mino_type_of(a) == MINO_CHAR && mino_type_of(b) == MINO_CHAR) {
         int cmp = a->as.ch - b->as.ch;
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
@@ -2088,25 +2088,25 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * sequences. A MAP_ENTRY behaves like a 2-element vector for
          * compare purposes (matches JVM Clojure where MapEntry's
          * compareTo delegates to AbstractVector). */
-        int a_vec = (a->type == MINO_VECTOR || a->type == MINO_MAP_ENTRY);
-        int b_vec = (b->type == MINO_VECTOR || b->type == MINO_MAP_ENTRY);
+        int a_vec = (mino_type_of(a) == MINO_VECTOR || mino_type_of(a) == MINO_MAP_ENTRY);
+        int b_vec = (mino_type_of(b) == MINO_VECTOR || mino_type_of(b) == MINO_MAP_ENTRY);
         if (a_vec && b_vec) {
-            size_t la = a->type == MINO_VECTOR ? a->as.vec.len : 2;
-            size_t lb = b->type == MINO_VECTOR ? b->as.vec.len : 2;
+            size_t la = mino_type_of(a) == MINO_VECTOR ? a->as.vec.len : 2;
+            size_t lb = mino_type_of(b) == MINO_VECTOR ? b->as.vec.len : 2;
             size_t n  = la < lb ? la : lb;
             size_t i;
             for (i = 0; i < n; i++) {
-                mino_val_t *ea = a->type == MINO_VECTOR
+                mino_val_t *ea = mino_type_of(a) == MINO_VECTOR
                     ? vec_nth(a, i)
                     : (i == 0 ? a->as.map_entry.k : a->as.map_entry.v);
-                mino_val_t *eb = b->type == MINO_VECTOR
+                mino_val_t *eb = mino_type_of(b) == MINO_VECTOR
                     ? vec_nth(b, i)
                     : (i == 0 ? b->as.map_entry.k : b->as.map_entry.v);
                 mino_val_t *recur_args =
                     mino_cons(S, ea, mino_cons(S, eb, mino_nil(S)));
                 mino_val_t *r = prim_compare(S, recur_args, env);
                 if (r == NULL) return NULL;
-                if (r->type == MINO_INT && r->as.i != 0) return r;
+                if (mino_val_int_p(r) && mino_val_int_get(r) != 0) return r;
             }
             if (la == lb) return mino_int(S, 0);
             return mino_int(S, la < lb ? -1 : 1);
@@ -2148,20 +2148,20 @@ static int num_pair_eq(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == NULL || b == NULL) return 0;
     /* Exact integer comparison. */
-    if ((a->type == MINO_INT || a->type == MINO_BIGINT) &&
-        (b->type == MINO_INT || b->type == MINO_BIGINT)) {
-        if (a->type == MINO_INT && b->type == MINO_INT) return a->as.i == b->as.i;
-        if (a->type == MINO_BIGINT && b->type == MINO_BIGINT)
+    if ((mino_val_int_p(a) || mino_type_of(a) == MINO_BIGINT) &&
+        (mino_val_int_p(b) || mino_type_of(b) == MINO_BIGINT)) {
+        if (mino_val_int_p(a) && mino_val_int_p(b)) return mino_val_int_get(a) == mino_val_int_get(b);
+        if (mino_type_of(a) == MINO_BIGINT && mino_type_of(b) == MINO_BIGINT)
             return mino_bigint_equals(a, b);
-        if (a->type == MINO_INT) return mino_bigint_equals_ll(b, a->as.i);
-        return mino_bigint_equals_ll(a, b->as.i);
+        if (mino_val_int_p(a)) return mino_bigint_equals_ll(b, mino_val_int_get(a));
+        return mino_bigint_equals_ll(a, mino_val_int_get(b));
     }
     /* Same-tier ratio. */
-    if (a->type == MINO_RATIO && b->type == MINO_RATIO)
+    if (mino_type_of(a) == MINO_RATIO && mino_type_of(b) == MINO_RATIO)
         return mino_ratio_equals(a, b);
     /* Same-tier bigdec: compare by value (not representation), since
      * == is numeric equality. */
-    if (a->type == MINO_BIGDEC && b->type == MINO_BIGDEC)
+    if (mino_type_of(a) == MINO_BIGDEC && mino_type_of(b) == MINO_BIGDEC)
         return mino_bigdec_cmp(a, b) == 0;
     /* Cross-tier with float involved: collapse to double and compare. */
     {
@@ -2217,9 +2217,9 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
     if (a == NULL || b == NULL) return -2;
     /* Same-type fast paths. */
     if (a->type == b->type) {
-        switch (a->type) {
+        switch (mino_type_of(a)) {
         case MINO_INT:
-            return a->as.i < b->as.i ? -1 : a->as.i > b->as.i ? 1 : 0;
+            return mino_val_int_get(a) < mino_val_int_get(b) ? -1 : mino_val_int_get(a) > mino_val_int_get(b) ? 1 : 0;
         case MINO_FLOAT:
         case MINO_FLOAT32:
             return a->as.f < b->as.f ? -1 : a->as.f > b->as.f ? 1 : 0;
@@ -2233,20 +2233,20 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
         }
     }
     /* Mixed int/bigint: compare via bigint_equals_ll + magnitude check. */
-    if ((a->type == MINO_INT && b->type == MINO_BIGINT) ||
-        (a->type == MINO_BIGINT && b->type == MINO_INT)) {
+    if ((mino_val_int_p(a) && mino_type_of(b) == MINO_BIGINT) ||
+        (mino_type_of(a) == MINO_BIGINT && mino_val_int_p(b))) {
         long long ll;
-        if (a->type == MINO_INT) {
-            if (mino_bigint_equals_ll(b, a->as.i)) return 0;
+        if (mino_val_int_p(a)) {
+            if (mino_bigint_equals_ll(b, mino_val_int_get(a))) return 0;
             /* Compare magnitudes via double; for long-fitting bigints
              * the comparison is exact, otherwise the bigint dominates. */
             if (mino_as_ll(b, &ll))
-                return a->as.i < ll ? -1 : a->as.i > ll ? 1 : 0;
+                return mino_val_int_get(a) < ll ? -1 : mino_val_int_get(a) > ll ? 1 : 0;
             return mino_bigint_to_double(b) > 0 ? -1 : 1;
         } else {
-            if (mino_bigint_equals_ll(a, b->as.i)) return 0;
+            if (mino_bigint_equals_ll(a, mino_val_int_get(b))) return 0;
             if (mino_as_ll(a, &ll))
-                return ll < b->as.i ? -1 : ll > b->as.i ? 1 : 0;
+                return ll < mino_val_int_get(b) ? -1 : ll > mino_val_int_get(b) ? 1 : 0;
             return mino_bigint_to_double(a) > 0 ? 1 : -1;
         }
     }
@@ -2270,7 +2270,7 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
  */
 static int has_nan(const mino_val_t *v)
 {
-    return v != NULL && (v->type == MINO_FLOAT || v->type == MINO_FLOAT32)
+    return v != NULL && (mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32)
         && isnan(v->as.f);
 }
 
@@ -2414,7 +2414,7 @@ mino_val_t *prim_nan_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     v = args->as.cons.car;
     if (!is_compare_number(v))
         return prim_throw_classified(S, "eval/type", "MTY001", "NaN? requires a number");
-    return ((v->type == MINO_FLOAT || v->type == MINO_FLOAT32)
+    return ((mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32)
             && isnan(v->as.f))
            ? mino_true(S) : mino_false(S);
 }
@@ -2427,9 +2427,9 @@ mino_val_t *prim_infinite_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "infinite? requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL)
+    if (v == NULL || mino_type_of(v) == MINO_NIL)
         return prim_throw_classified(S, "eval/type", "MTY001", "infinite? requires a number");
-    return ((v->type == MINO_FLOAT || v->type == MINO_FLOAT32)
+    return ((mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32)
             && isinf(v->as.f))
            ? mino_true(S) : mino_false(S);
 }

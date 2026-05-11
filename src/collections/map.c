@@ -128,10 +128,10 @@ static uint32_t hash_uint32_bytes(uint32_t h, uint32_t x)
 uint32_t hash_val(const mino_val_t *v)
 {
     uint32_t h = 2166136261u;   /* FNV-1a offset basis */
-    if (v == NULL || v->type == MINO_NIL) {
+    if (v == NULL || mino_type_of(v) == MINO_NIL) {
         return fnv_mix(h, 0x01);
     }
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_NIL:
         return fnv_mix(h, 0x01);
     case MINO_EMPTY_LIST:
@@ -146,7 +146,7 @@ uint32_t hash_val(const mino_val_t *v)
         return fnv_mix(h, (unsigned char)(v->as.b ? 1 : 0));
     case MINO_INT:
         h = fnv_mix(h, 0x03);
-        return hash_long_long_bytes(h, v->as.i);
+        return hash_long_long_bytes(h, mino_val_int_get(v));
     case MINO_FLOAT:
     case MINO_FLOAT32: {
         double    d  = v->as.f;
@@ -246,17 +246,17 @@ uint32_t hash_val(const mino_val_t *v)
         const mino_val_t *cur = v;
         size_t idx = v->as.chunked_cons.off;
         h = fnv_mix(h, 0x15);
-        while (cur != NULL && cur->type == MINO_CHUNKED_CONS) {
+        while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
             const mino_val_t *ch = cur->as.chunked_cons.chunk;
             for (; idx < ch->as.chunk.len; idx++) {
                 h = hash_uint32_bytes(h, hash_val(ch->as.chunk.vals[idx]));
             }
             cur = cur->as.chunked_cons.more;
-            idx = (cur != NULL && cur->type == MINO_CHUNKED_CONS)
+            idx = (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS)
                       ? cur->as.chunked_cons.off : 0;
         }
-        if (cur != NULL && cur->type != MINO_NIL
-            && cur->type != MINO_EMPTY_LIST) {
+        if (cur != NULL && mino_type_of(cur) != MINO_NIL
+            && mino_type_of(cur) != MINO_EMPTY_LIST) {
             h = hash_uint32_bytes(h, hash_val(cur));
         }
         return h;
@@ -658,12 +658,12 @@ mino_val_t *mino_handle_ex(mino_state_t *S, void *ptr, const char *tag,
 
 int mino_is_handle(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_HANDLE;
+    return v != NULL && mino_type_of(v) == MINO_HANDLE;
 }
 
 void *mino_handle_ptr(const mino_val_t *v)
 {
-    if (v == NULL || v->type != MINO_HANDLE) {
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE) {
         return NULL;
     }
     return v->as.handle.ptr;
@@ -671,7 +671,7 @@ void *mino_handle_ptr(const mino_val_t *v)
 
 const char *mino_handle_tag(const mino_val_t *v)
 {
-    if (v == NULL || v->type != MINO_HANDLE) {
+    if (v == NULL || mino_type_of(v) != MINO_HANDLE) {
         return NULL;
     }
     return v->as.handle.tag;
@@ -688,12 +688,12 @@ mino_val_t *mino_atom(mino_state_t *S, mino_val_t *val)
 
 int mino_is_atom(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_ATOM;
+    return v != NULL && mino_type_of(v) == MINO_ATOM;
 }
 
 mino_val_t *mino_atom_deref(const mino_val_t *a)
 {
-    if (a == NULL || a->type != MINO_ATOM) return NULL;
+    if (a == NULL || mino_type_of(a) != MINO_ATOM) return NULL;
     return a->as.atom.val;
 }
 
@@ -706,18 +706,18 @@ mino_val_t *mino_volatile(mino_state_t *S, mino_val_t *val)
 
 int mino_is_volatile(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_VOLATILE;
+    return v != NULL && mino_type_of(v) == MINO_VOLATILE;
 }
 
 mino_val_t *mino_volatile_deref(const mino_val_t *v)
 {
-    if (v == NULL || v->type != MINO_VOLATILE) return NULL;
+    if (v == NULL || mino_type_of(v) != MINO_VOLATILE) return NULL;
     return v->as.volatile_.val;
 }
 
 void mino_atom_reset(mino_val_t *a, mino_val_t *val)
 {
-    if (a != NULL && a->type == MINO_ATOM) {
+    if (a != NULL && mino_type_of(a) == MINO_ATOM) {
         a->as.atom.val = val;
     }
 }

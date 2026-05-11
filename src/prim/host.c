@@ -22,7 +22,7 @@ static int count_args(mino_val_t *args)
 /* Extract keyword name as C string. Returns NULL if not a keyword. */
 static const char *kw_name(const mino_val_t *v)
 {
-    if (v == NULL || v->type != MINO_KEYWORD) return NULL;
+    if (v == NULL || mino_type_of(v) != MINO_KEYWORD) return NULL;
     return v->as.s.data;
 }
 
@@ -102,7 +102,7 @@ static mino_val_t *prim_host_call(mino_state_t *S, mino_val_t *args,
         return NULL;
     }
     target = args->as.cons.car;
-    if (target == NULL || target->type != MINO_HANDLE)
+    if (target == NULL || mino_type_of(target) != MINO_HANDLE)
         return interop_error(S, "target is not a host handle");
 
     type_key = target->as.handle.tag;
@@ -209,7 +209,7 @@ static mino_val_t *prim_host_get(mino_state_t *S, mino_val_t *args,
         return NULL;
     }
     target = args->as.cons.car;
-    if (target == NULL || target->type != MINO_HANDLE)
+    if (target == NULL || mino_type_of(target) != MINO_HANDLE)
         return interop_error(S, "target is not a host handle");
 
     type_key = target->as.handle.tag;

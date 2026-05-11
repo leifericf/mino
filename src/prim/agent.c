@@ -135,7 +135,7 @@ mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial)
 
 int mino_is_agent(const mino_val_t *v)
 {
-    return v != NULL && v->type == MINO_AGENT;
+    return v != NULL && mino_type_of(v) == MINO_AGENT;
 }
 
 /* Convert a NULL-terminated array of agents to a cons list, matching
@@ -281,7 +281,7 @@ static void agent_apply_action(mino_state_t *S, mino_val_t *agent,
      * expects the watch's thrown payload to surface via
      * agent-error. */
     if (agent->as.agent.watches != NULL
-        && agent->as.agent.watches->type == MINO_MAP
+        && mino_type_of(agent->as.agent.watches) == MINO_MAP
         && agent->as.agent.watches->as.map.len > 0) {
         mino_val_t *watches = agent->as.agent.watches;
         size_t      n = watches->as.map.len;
@@ -363,7 +363,7 @@ static void agent_worker_run_one(mino_state_t *S, agent_action_node_t *n)
     dyn_binding_t     *bhead = NULL;
 
     /* Build conveyed dyn-binding chain from the caller's snapshot map. */
-    if (n->dyn_snap != NULL && n->dyn_snap->type == MINO_MAP
+    if (n->dyn_snap != NULL && mino_type_of(n->dyn_snap) == MINO_MAP
         && n->dyn_snap->as.map.len > 0) {
         size_t i;
         int    oom = 0;
@@ -372,7 +372,7 @@ static void agent_worker_run_one(mino_state_t *S, agent_action_node_t *n)
             mino_val_t    *val = map_get_val(n->dyn_snap, key);
             dyn_binding_t *b;
             if (key == NULL
-                || (key->type != MINO_SYMBOL && key->type != MINO_STRING)) {
+                || (mino_type_of(key) != MINO_SYMBOL && mino_type_of(key) != MINO_STRING)) {
                 continue;
             }
             b = (dyn_binding_t *)malloc(sizeof(*b));
@@ -971,34 +971,34 @@ mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         val  = opts->as.cons.cdr->as.cons.car;
         opts = opts->as.cons.cdr->as.cons.cdr;
-        if (key == NULL || key->type != MINO_KEYWORD) {
+        if (key == NULL || mino_type_of(key) != MINO_KEYWORD) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "agent: option key must be a keyword");
         }
         if (strcmp(key->as.s.data, "validator") == 0) {
-            if (val == NULL || (val->type != MINO_FN
-                                 && val->type != MINO_PRIM
-                                 && val->type != MINO_MACRO
-                                 && val->type != MINO_NIL)) {
+            if (val == NULL || (mino_type_of(val) != MINO_FN
+                                 && mino_type_of(val) != MINO_PRIM
+                                 && mino_type_of(val) != MINO_MACRO
+                                 && mino_type_of(val) != MINO_NIL)) {
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "agent: :validator must be a fn or nil");
             }
-            if (val->type == MINO_NIL) val = NULL;
+            if (mino_type_of(val) == MINO_NIL) val = NULL;
             gc_write_barrier(S, agent, agent->as.agent.validator, val);
             agent->as.agent.validator = val;
         } else if (strcmp(key->as.s.data, "error-handler") == 0) {
-            if (val == NULL || (val->type != MINO_FN
-                                 && val->type != MINO_PRIM
-                                 && val->type != MINO_MACRO
-                                 && val->type != MINO_NIL)) {
+            if (val == NULL || (mino_type_of(val) != MINO_FN
+                                 && mino_type_of(val) != MINO_PRIM
+                                 && mino_type_of(val) != MINO_MACRO
+                                 && mino_type_of(val) != MINO_NIL)) {
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "agent: :error-handler must be a fn or nil");
             }
-            if (val->type == MINO_NIL) val = NULL;
+            if (mino_type_of(val) == MINO_NIL) val = NULL;
             gc_write_barrier(S, agent, agent->as.agent.err_handler, val);
             agent->as.agent.err_handler = val;
         } else if (strcmp(key->as.s.data, "error-mode") == 0) {
-            if (val == NULL || val->type != MINO_KEYWORD
+            if (val == NULL || mino_type_of(val) != MINO_KEYWORD
                 || (strcmp(val->as.s.data, "fail") != 0
                     && strcmp(val->as.s.data, "continue") != 0)) {
                 return prim_throw_classified(S, "eval/type", "MTY001",
@@ -1007,12 +1007,12 @@ mino_val_t *prim_agent(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             agent->as.agent.err_mode =
                 (strcmp(val->as.s.data, "continue") == 0) ? 1 : 0;
         } else if (strcmp(key->as.s.data, "meta") == 0) {
-            if (val != NULL && val->type != MINO_NIL
-                && val->type != MINO_MAP) {
+            if (val != NULL && mino_type_of(val) != MINO_NIL
+                && mino_type_of(val) != MINO_MAP) {
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "agent: :meta must be a map or nil");
             }
-            if (val != NULL && val->type == MINO_NIL) val = NULL;
+            if (val != NULL && mino_type_of(val) == MINO_NIL) val = NULL;
             /* Cell-level meta. with-meta is intentionally NOT
              * routed through supports_meta for agents (shallow
              * copy would diverge on first send); (meta a) reads
@@ -1149,11 +1149,11 @@ mino_val_t *prim_await_for(mino_state_t *S, mino_val_t *args,
             "await-for requires a timeout and at least one agent");
     }
     first = args->as.cons.car;
-    if (first == NULL || first->type != MINO_INT) {
+    if (first == NULL || !mino_val_int_p(first)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "await-for: timeout must be an integer (milliseconds)");
     }
-    timeout_ms = first->as.i;
+    timeout_ms = mino_val_int_get(first);
     if (timeout_ms < 0) timeout_ms = 0;
     agents = args->as.cons.cdr;
     for (iter = agents; mino_is_cons(iter); iter = iter->as.cons.cdr) {
@@ -1266,7 +1266,7 @@ mino_val_t *prim_restart_agent(mino_state_t *S, mino_val_t *args,
         }
         val  = opts->as.cons.cdr->as.cons.car;
         opts = opts->as.cons.cdr->as.cons.cdr;
-        if (key == NULL || key->type != MINO_KEYWORD) {
+        if (key == NULL || mino_type_of(key) != MINO_KEYWORD) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "restart-agent: option key must be a keyword");
         }
@@ -1367,10 +1367,10 @@ mino_val_t *prim_set_error_handler_bang(mino_state_t *S, mino_val_t *args,
      * failure can dispatch through it. Earlier mino stored any value
      * (e.g. an int) which then failed at dispatch time, far from the
      * install site. Reject at install. */
-    if (fn != NULL && fn->type == MINO_NIL) fn = NULL;
-    if (fn != NULL && fn->type != MINO_FN
-        && fn->type != MINO_PRIM
-        && fn->type != MINO_MACRO) {
+    if (fn != NULL && mino_type_of(fn) == MINO_NIL) fn = NULL;
+    if (fn != NULL && mino_type_of(fn) != MINO_FN
+        && mino_type_of(fn) != MINO_PRIM
+        && mino_type_of(fn) != MINO_MACRO) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "set-error-handler!: handler must be a fn or nil");
     }
@@ -1420,7 +1420,7 @@ mino_val_t *prim_set_error_mode_bang(mino_state_t *S, mino_val_t *args,
      * previously :continue agent quietly flipped it) and silently
      * ignored non-keywords. Both behaviors are loud surprises; the
      * fix throws so the caller sees the typo. */
-    if (mode == NULL || mode->type != MINO_KEYWORD
+    if (mode == NULL || mino_type_of(mode) != MINO_KEYWORD
         || (strcmp(mode->as.s.data, "fail") != 0
             && strcmp(mode->as.s.data, "continue") != 0)) {
         return prim_throw_classified(S, "eval/type", "MTY001",

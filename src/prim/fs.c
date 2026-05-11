@@ -37,7 +37,7 @@ mino_val_t *prim_file_exists_p(mino_state_t *S, mino_val_t *args,
                                      "file-exists? requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "file-exists?: argument must be a string");
     }
@@ -58,7 +58,7 @@ mino_val_t *prim_directory_p(mino_state_t *S, mino_val_t *args,
                                      "directory? requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "directory?: argument must be a string");
     }
@@ -108,7 +108,7 @@ mino_val_t *prim_mkdir_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "mkdir-p requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "mkdir-p: argument must be a string");
     }
@@ -159,7 +159,7 @@ mino_val_t *prim_rm_rf(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "rm-rf requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "rm-rf: argument must be a string");
     }
@@ -184,7 +184,7 @@ mino_val_t *prim_file_mtime(mino_state_t *S, mino_val_t *args,
                                      "file-mtime requires one argument");
     }
     path_val = args->as.cons.car;
-    if (path_val == NULL || path_val->type != MINO_STRING) {
+    if (path_val == NULL || mino_type_of(path_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
                                      "file-mtime: argument must be a string");
     }

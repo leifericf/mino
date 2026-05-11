@@ -76,7 +76,7 @@ void mino_bc_check_require(mino_state_t *S, mino_val_t *fn)
 {
     (void)S;
     if (!mino_bc_require_flag) return;
-    if (fn == NULL || fn->type != MINO_FN) return;
+    if (fn == NULL || mino_type_of(fn) != MINO_FN) return;
     if (MINO_BC_RUNNABLE(fn)) return;
     /* Decline mode: report and abort. The fn's params/body are not
      * compilable yet; whoever flipped require_flag should run with
@@ -361,7 +361,7 @@ static void peephole_tail_move(compiler_t *c)
 static int is_self_evaluating(const mino_val_t *v)
 {
     if (v == NULL) return 1;
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_NIL: case MINO_BOOL: case MINO_INT: case MINO_FLOAT:
     case MINO_FLOAT32: case MINO_STRING: case MINO_KEYWORD: case MINO_CHAR:
         return 1;
@@ -372,7 +372,7 @@ static int is_self_evaluating(const mino_val_t *v)
 
 static int sym_is(const mino_val_t *v, const char *name)
 {
-    if (v == NULL || v->type != MINO_SYMBOL) return 0;
+    if (v == NULL || mino_type_of(v) != MINO_SYMBOL) return 0;
     return strcmp(v->as.s.data, name) == 0;
 }
 
@@ -442,18 +442,18 @@ static int compile_body(compiler_t *c, mino_val_t *body, int dst, int tail);
 static int contains_env_capture(mino_val_t *form)
 {
     if (form == NULL) return 0;
-    if (form->type == MINO_VECTOR) {
+    if (mino_type_of(form) == MINO_VECTOR) {
         for (size_t i = 0; i < form->as.vec.len; i++) {
             if (contains_env_capture(vec_nth(form, i))) return 1;
         }
         return 0;
     }
-    if (form->type == MINO_MAP || form->type == MINO_SET) {
+    if (mino_type_of(form) == MINO_MAP || mino_type_of(form) == MINO_SET) {
         return 0;
     }
     if (!mino_is_cons(form)) return 0;
     mino_val_t *head = form->as.cons.car;
-    if (head != NULL && head->type == MINO_SYMBOL) {
+    if (head != NULL && mino_type_of(head) == MINO_SYMBOL) {
         if (sym_is(head, "fn") || sym_is(head, "fn*")) return 1;
         if (sym_is(head, "lazy-seq")) return 1;
         if (sym_is(head, "quote") || sym_is(head, "quote*")) return 0;
@@ -552,7 +552,7 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst, int tail)
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
     mino_val_t *bindings = args->as.cons.car;
     mino_val_t *body     = args->as.cons.cdr;
-    if (bindings == NULL || bindings->type != MINO_VECTOR) {
+    if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) {
         c->ok = 0; return -1;
     }
     size_t blen = bindings->as.vec.len;
@@ -574,7 +574,7 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst, int tail)
     for (size_t i = 0; i < blen; i += 2) {
         mino_val_t *name_form = vec_nth(bindings, i);
         mino_val_t *val_form  = vec_nth(bindings, i + 1);
-        if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+        if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
             c->ok = 0; goto out;
         }
         int reg = alloc_reg(c);
@@ -612,7 +612,7 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
     mino_val_t *bindings = args->as.cons.car;
     mino_val_t *body     = args->as.cons.cdr;
-    if (bindings == NULL || bindings->type != MINO_VECTOR) {
+    if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) {
         c->ok = 0; return -1;
     }
     size_t blen = bindings->as.vec.len;
@@ -636,7 +636,7 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
     for (int i = 0; i < n_bindings; i++) {
         mino_val_t *name_form = vec_nth(bindings, (size_t)(i * 2));
         mino_val_t *val_form  = vec_nth(bindings, (size_t)(i * 2 + 1));
-        if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+        if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
             c->ok = 0; goto out;
         }
         int reg = alloc_reg(c);
@@ -756,12 +756,12 @@ static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst, int tail
     mino_val_t *fn_name = NULL;
     mino_val_t *first   = args->as.cons.car;
     mino_val_t *rest    = args->as.cons.cdr;
-    if (first != NULL && first->type == MINO_SYMBOL
+    if (first != NULL && mino_type_of(first) == MINO_SYMBOL
         && mino_is_cons(rest)) {
         mino_val_t *after = rest->as.cons.car;
         if (after != NULL
             && (mino_is_cons(after) || mino_is_nil(after)
-                || after->type == MINO_VECTOR)) {
+                || mino_type_of(after) == MINO_VECTOR)) {
             fn_name = first;
             args    = rest;
         }
@@ -778,10 +778,10 @@ static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst, int tail
      * shape so the tree-walker fallback at apply_callable time sees
      * what eval_fn would have produced. */
     if (mino_is_cons(params) && params->as.cons.car != NULL
-        && (params->as.cons.car->type == MINO_VECTOR
+        && (mino_type_of(params->as.cons.car) == MINO_VECTOR
             || mino_is_cons(params->as.cons.car)
             || mino_is_nil(params->as.cons.car))
-        && params->as.cons.car->type == MINO_VECTOR) {
+        && mino_type_of(params->as.cons.car) == MINO_VECTOR) {
         mino_val_t *clauses = build_multi_arity_clauses(
             c->S, form, args, "MSY002", "fn");
         if (clauses == NULL) { c->ok = 0; return -1; }
@@ -837,7 +837,7 @@ static int compile_def(compiler_t *c, mino_val_t *form, int dst, int tail)
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
     mino_val_t *name_form = args->as.cons.car;
     mino_val_t *rest = args->as.cons.cdr;
-    if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+    if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
         c->ok = 0; return -1;
     }
     /* Decline metadata-carrying defs: they need the eval_def codepath
@@ -877,7 +877,7 @@ static int compile_def(compiler_t *c, mino_val_t *form, int dst, int tail)
  * alias lookup to the fn's defining_ns. */
 static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head)
 {
-    if (head == NULL || head->type != MINO_SYMBOL) return NULL;
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return NULL;
     const char *data = head->as.s.data;
     size_t      n    = head->as.s.len;
     const char *slash = (n > 1) ? memchr(data, '/', n) : NULL;
@@ -911,7 +911,7 @@ static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head)
         }
 
         mino_val_t *var = var_find(S, resolved_ns, sym_name);
-        if (var != NULL && var->type == MINO_VAR) {
+        if (var != NULL && mino_type_of(var) == MINO_VAR) {
             return var->as.var.root;
         }
         mino_env_t *target_env = ns_env_lookup(S, resolved_ns);
@@ -941,10 +941,10 @@ static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head)
  * path (their args are forms, not evaluated values). */
 static int head_resolves_to_macro(compiler_t *c, mino_val_t *head)
 {
-    if (head == NULL || head->type != MINO_SYMBOL) return 0;
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return 0;
     if (find_local(c, head->as.s.data) >= 0) return 0;
     mino_val_t *v = probe_head_value(c, head);
-    return v != NULL && v->type == MINO_MACRO;
+    return v != NULL && mino_type_of(v) == MINO_MACRO;
 }
 
 /* Compile `form` so its value lands in some register, preferring to
@@ -962,7 +962,7 @@ static int head_resolves_to_macro(compiler_t *c, mino_val_t *head)
  * next_reg high-water restore. */
 static int compile_operand_inplace(compiler_t *c, mino_val_t *form)
 {
-    if (form != NULL && form->type == MINO_SYMBOL) {
+    if (form != NULL && mino_type_of(form) == MINO_SYMBOL) {
         int local = find_local(c, form->as.s.data);
         if (local >= 0) return local;
     }
@@ -1008,7 +1008,7 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
      * call, so writing to dst and falling through to OP_RETURN gives
      * the same observable behaviour as OP_TAILCALL through the
      * trampoline -- minus the dispatch overhead. */
-    if (head != NULL && head->type == MINO_SYMBOL
+    if (head != NULL && mino_type_of(head) == MINO_SYMBOL
         && find_local(c, head->as.s.data) < 0) {
         int usubop = unop_subop_for_name(head->as.s.data);
         if (usubop >= 0) {
@@ -1073,7 +1073,7 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
         argc++;
         cur = cur->as.cons.cdr;
     }
-    if (cur != NULL && cur->type != MINO_NIL && cur->type != MINO_EMPTY_LIST) {
+    if (cur != NULL && mino_type_of(cur) != MINO_NIL && mino_type_of(cur) != MINO_EMPTY_LIST) {
         /* Improper list form -- not a regular call. */
         c->ok = 0; return -1;
     }
@@ -1153,23 +1153,23 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail)
         emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
         return 0;
     }
-    if (form->type == MINO_SYMBOL) {
+    if (mino_type_of(form) == MINO_SYMBOL) {
         return compile_symbol_ref(c, form, dst);
     }
-    if (form->type == MINO_EMPTY_LIST) {
+    if (mino_type_of(form) == MINO_EMPTY_LIST) {
         int k = add_const(c, form);
         if (k < 0) return -1;
         emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
         return 0;
     }
-    if (form->type == MINO_VECTOR || form->type == MINO_MAP
-        || form->type == MINO_SET) {
+    if (mino_type_of(form) == MINO_VECTOR || mino_type_of(form) == MINO_MAP
+        || mino_type_of(form) == MINO_SET) {
         /* Vector literal with only self-evaluating elements is a
          * constant: stash the whole vector in the pool and emit a
          * single OP_LOAD_K. Vectors with non-const elements and
          * non-empty maps / sets still decline (their tree-walker
          * lowering handles element evaluation). */
-        if (form->type == MINO_VECTOR) {
+        if (mino_type_of(form) == MINO_VECTOR) {
             int all_const = 1;
             for (size_t i = 0; i < form->as.vec.len; i++) {
                 if (!is_self_evaluating(vec_nth(form, i))) {
@@ -1203,7 +1203,7 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail)
 
     mino_val_t *head = form->as.cons.car;
 
-    if (head != NULL && head->type == MINO_SYMBOL
+    if (head != NULL && mino_type_of(head) == MINO_SYMBOL
         && find_local(c, head->as.s.data) < 0) {
         const char *name = head->as.s.data;
         if (strcmp(name, "if") == 0)   return compile_if(c, form, dst, tail);
@@ -1274,12 +1274,12 @@ static int params_simple_plain(mino_val_t *params, int *out_n, int *out_rest)
 {
     *out_rest = 0;
     if (params == NULL) return 0;
-    if (params->type != MINO_VECTOR) return 0;
+    if (mino_type_of(params) != MINO_VECTOR) return 0;
     size_t n = params->as.vec.len;
     if (n > BC_MAX_REGS) return 0;
     for (size_t i = 0; i < n; i++) {
         mino_val_t *p = vec_nth(params, i);
-        if (p == NULL || p->type != MINO_SYMBOL) return 0;
+        if (p == NULL || mino_type_of(p) != MINO_SYMBOL) return 0;
         const char *d = p->as.s.data;
         /* A bare & marks the rest separator. The slot right after it
          * is the rest-binding name (must be a plain symbol; we don't
@@ -1288,7 +1288,7 @@ static int params_simple_plain(mino_val_t *params, int *out_n, int *out_rest)
         if (strcmp(d, "&") == 0) {
             if (i != n - 2) return 0;     /* must be second-to-last */
             mino_val_t *rest_sym = vec_nth(params, n - 1);
-            if (rest_sym == NULL || rest_sym->type != MINO_SYMBOL) return 0;
+            if (rest_sym == NULL || mino_type_of(rest_sym) != MINO_SYMBOL) return 0;
             const char *rd = rest_sym->as.s.data;
             if (rd[0] == '&') return 0;
             if (strchr(rd, '.') != NULL) return 0;
@@ -1352,7 +1352,7 @@ static int compile_clause(compiler_t *c, mino_val_t *params, mino_val_t *body,
 
 int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
 {
-    if (fn == NULL || fn->type != MINO_FN) return MINO_BC_ERROR;
+    if (fn == NULL || mino_type_of(fn) != MINO_FN) return MINO_BC_ERROR;
     if (fn->as.fn.bc != NULL) return MINO_BC_OK;  /* already compiled */
 
     /* Count clauses and walk them out into stack arrays so the rest

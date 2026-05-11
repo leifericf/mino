@@ -67,7 +67,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "format requires at least a format string");
     }
     fmt_val = args->as.cons.car;
-    if (fmt_val == NULL || fmt_val->type != MINO_STRING) {
+    if (fmt_val == NULL || mino_type_of(fmt_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "format: first argument must be a string");
     }
     fmt     = fmt_val->as.s.data;
@@ -125,7 +125,7 @@ mino_val_t *prim_format(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 }
                 a = arg_list->as.cons.car;
                 arg_list = arg_list->as.cons.cdr;
-                if (a != NULL && a->type == MINO_STRING) {
+                if (a != NULL && mino_type_of(a) == MINO_STRING) {
                     buf = fmt_ensure(S, buf, len, &cap, a->as.s.len);
                     if (buf == NULL) return NULL;
                     memcpy(buf + len, a->as.s.data, a->as.s.len);
@@ -229,18 +229,18 @@ mino_val_t *prim_read_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     } else {
         s = args->as.cons.car;
     }
-    if (s == NULL || s->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "read-string: argument must be a string");
     }
-    if (opts != NULL && opts->type != MINO_NIL) {
+    if (opts != NULL && mino_type_of(opts) != MINO_NIL) {
         mino_val_t *rc;
-        if (opts->type != MINO_MAP) {
+        if (mino_type_of(opts) != MINO_MAP) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "read-string: opts must be a map");
         }
         rc = map_get_val(opts, mino_keyword(S, "read-cond"));
         if (rc != NULL) {
-            if (rc->type != MINO_KEYWORD) {
+            if (mino_type_of(rc) != MINO_KEYWORD) {
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "read-string: :read-cond must be a keyword");
             }
@@ -319,11 +319,11 @@ mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     s       = args->as.cons.car;
     idx_val = args->as.cons.cdr->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING
-        || idx_val == NULL || idx_val->type != MINO_INT) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING
+        || idx_val == NULL || !mino_val_int_p(idx_val)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "char-at: requires a string and integer index");
     }
-    idx = idx_val->as.i;
+    idx = mino_val_int_get(idx_val);
     if (idx < 0 || (size_t)idx >= s->as.s.len) {
         return prim_throw_classified(S, "eval/bounds", "MBD001", "char-at: index out of range");
     }
@@ -386,14 +386,14 @@ mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "subs requires 2 or 3 arguments");
     }
     s_val = args->as.cons.car;
-    if (s_val == NULL || s_val->type != MINO_STRING) {
+    if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "subs: first argument must be a string");
     }
     if (args->as.cons.cdr->as.cons.car == NULL
-        || args->as.cons.cdr->as.cons.car->type != MINO_INT) {
+        || !mino_val_int_p(args->as.cons.cdr->as.cons.car)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "subs: start index must be an integer");
     }
-    start = args->as.cons.cdr->as.cons.car->as.i;
+    start = mino_val_int_get(args->as.cons.cdr->as.cons.car);
     /* Indices are codepoint-counted, matching Clojure where strings
      * are sequences of chars (UTF-16 code units there, codepoints
      * here -- mino has no surrogates). For ASCII content the byte
@@ -401,10 +401,10 @@ mino_val_t *prim_subs(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     total_cps = utf8_codepoint_count(s_val->as.s.data, s_val->as.s.len);
     if (n == 3) {
         if (args->as.cons.cdr->as.cons.cdr->as.cons.car == NULL
-            || args->as.cons.cdr->as.cons.cdr->as.cons.car->type != MINO_INT) {
+            || !mino_val_int_p(args->as.cons.cdr->as.cons.cdr->as.cons.car)) {
             return prim_throw_classified(S, "eval/type", "MTY001", "subs: end index must be an integer");
         }
-        end_idx = args->as.cons.cdr->as.cons.cdr->as.cons.car->as.i;
+        end_idx = mino_val_int_get(args->as.cons.cdr->as.cons.cdr->as.cons.car);
     } else {
         end_idx = total_cps;
     }
@@ -444,26 +444,26 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return prim_throw_classified(S, "eval/arity", "MAR001",
                 "split takes at most 3 arguments");
         }
-        if (limit_val == NULL || limit_val->type != MINO_INT) {
+        if (limit_val == NULL || !mino_val_int_p(limit_val)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "split: limit must be an integer");
         }
-        limit = limit_val->as.i;
+        limit = mino_val_int_get(limit_val);
     }
-    if (s_val == NULL || s_val->type != MINO_STRING) {
+    if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "split: first argument must be a string");
     }
     if (sep_val == NULL
-        || (sep_val->type != MINO_STRING && sep_val->type != MINO_REGEX)) {
+        || (mino_type_of(sep_val) != MINO_STRING && mino_type_of(sep_val) != MINO_REGEX)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "split: separator must be a string or regex");
     }
     s    = s_val->as.s.data;
     slen = s_val->as.s.len;
-    if (sep_val->type == MINO_REGEX
+    if (mino_type_of(sep_val) == MINO_REGEX
         && sep_val->as.regex.source != NULL
-        && sep_val->as.regex.source->type == MINO_STRING) {
+        && mino_type_of(sep_val->as.regex.source) == MINO_STRING) {
         /* Regex separators currently use the raw source as a literal
          * substring -- works for fixed-string patterns like #","
          * which is what every callsite in the test suites uses today.
@@ -549,16 +549,16 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* (join sep coll) */
         sep_val = args->as.cons.car;
         coll    = args->as.cons.cdr->as.cons.car;
-        if (sep_val != NULL && sep_val->type == MINO_STRING) {
+        if (sep_val != NULL && mino_type_of(sep_val) == MINO_STRING) {
             sep     = sep_val->as.s.data;
             sep_len = sep_val->as.s.len;
-        } else if (sep_val != NULL && sep_val->type != MINO_NIL) {
+        } else if (sep_val != NULL && mino_type_of(sep_val) != MINO_NIL) {
             return prim_throw_classified(S, "eval/type", "MTY001", "join: separator must be a string or nil");
         }
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001", "join requires 1 or 2 arguments");
     }
-    if (coll == NULL || coll->type == MINO_NIL) {
+    if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
         return mino_string(S, "");
     }
     seq_iter_init(S, &it, coll);
@@ -567,11 +567,11 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         const char *part;
         size_t      part_len;
         size_t      need;
-        if (elem == NULL || elem->type == MINO_NIL) {
+        if (elem == NULL || mino_type_of(elem) == MINO_NIL) {
             seq_iter_next(S, &it);
             continue;
         }
-        if (elem->type == MINO_STRING) {
+        if (mino_type_of(elem) == MINO_STRING) {
             part     = elem->as.s.data;
             part_len = elem->as.s.len;
         } else {
@@ -624,9 +624,9 @@ mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
     s_val     = args->as.cons.car;
     match_val = args->as.cons.cdr->as.cons.car;
     repl_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-    if (s_val == NULL || s_val->type != MINO_STRING
-        || match_val == NULL || match_val->type != MINO_STRING
-        || repl_val == NULL || repl_val->type != MINO_STRING) {
+    if (s_val == NULL || mino_type_of(s_val) != MINO_STRING
+        || match_val == NULL || mino_type_of(match_val) != MINO_STRING
+        || repl_val == NULL || mino_type_of(repl_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "str-replace: all arguments must be strings");
     }
@@ -696,8 +696,8 @@ mino_val_t *prim_starts_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *en
     }
     s      = args->as.cons.car;
     prefix = args->as.cons.cdr->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING
-        || prefix == NULL || prefix->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING
+        || prefix == NULL || mino_type_of(prefix) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "starts-with? requires two string arguments");
     }
     if (prefix->as.s.len > s->as.s.len) return mino_false(S);
@@ -714,8 +714,8 @@ mino_val_t *prim_ends_with_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     s      = args->as.cons.car;
     suffix = args->as.cons.cdr->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING
-        || suffix == NULL || suffix->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING
+        || suffix == NULL || mino_type_of(suffix) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "ends-with? requires two string arguments");
     }
     if (suffix->as.s.len > s->as.s.len) return mino_false(S);
@@ -734,8 +734,8 @@ mino_val_t *prim_includes_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     s   = args->as.cons.car;
     sub = args->as.cons.cdr->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING
-        || sub == NULL || sub->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING
+        || sub == NULL || mino_type_of(sub) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "includes? requires two string arguments");
     }
     if (sub->as.s.len == 0) return mino_true(S);
@@ -758,7 +758,7 @@ mino_val_t *prim_upper_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "upper-case requires one string argument");
     }
     s = args->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "upper-case requires one string argument");
     }
     buf = (char *)malloc(s->as.s.len);
@@ -785,7 +785,7 @@ mino_val_t *prim_lower_case(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "lower-case requires one string argument");
     }
     s = args->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "lower-case requires one string argument");
     }
     buf = (char *)malloc(s->as.s.len);
@@ -811,7 +811,7 @@ mino_val_t *prim_trim(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "trim requires one string argument");
     }
     s = args->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001", "trim requires one string argument");
     }
     start   = s->as.s.data;
@@ -833,7 +833,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     while (mino_is_cons(args)) {
         mino_val_t *a = args->as.cons.car;
-        if (a != NULL && a->type == MINO_STRING) {
+        if (a != NULL && mino_type_of(a) == MINO_STRING) {
             /* Append raw string content without quotes. */
             size_t need = len + a->as.s.len + 1;
             if (need > cap) {
@@ -844,7 +844,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             }
             memcpy(buf + len, a->as.s.data, a->as.s.len);
             len += a->as.s.len;
-        } else if (a != NULL && a->type == MINO_NIL) {
+        } else if (a != NULL && mino_type_of(a) == MINO_NIL) {
             /* nil contributes nothing. */
         } else if (a == NULL) {
             /* NULL treated as nil. */
@@ -852,12 +852,12 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             /* Print to a temp buffer using the standard printer. */
             char tmp[256];
             int  n;
-            switch (a->type) {
+            switch (mino_type_of(a)) {
             case MINO_BOOL:
                 n = snprintf(tmp, sizeof(tmp), "%s", a->as.b ? "true" : "false");
                 break;
             case MINO_INT:
-                n = snprintf(tmp, sizeof(tmp), "%lld", a->as.i);
+                n = snprintf(tmp, sizeof(tmp), "%lld", mino_val_int_get(a));
                 break;
             case MINO_BIGINT: {
                 /* `str` strips the readable-form N suffix. */
@@ -1000,7 +1000,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             case MINO_SYMBOL:
             case MINO_KEYWORD: {
                 size_t slen = a->as.s.len;
-                int    off  = a->type == MINO_KEYWORD ? 1 : 0;
+                int    off  = mino_type_of(a) == MINO_KEYWORD ? 1 : 0;
                 if (off + slen + 1 > sizeof(tmp)) slen = sizeof(tmp) - off - 1;
                 if (off) tmp[0] = ':';
                 memcpy(tmp + off, a->as.s.data, slen);
@@ -1013,7 +1013,7 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                  * opaque types: print via the standard printer so str
                  * produces readable output, not #<?>. */
                 mino_val_t *printed = print_to_string(S, a);
-                if (printed != NULL && printed->type == MINO_STRING) {
+                if (printed != NULL && mino_type_of(printed) == MINO_STRING) {
                     size_t plen = printed->as.s.len;
                     size_t need2 = len + plen + 1;
                     if (need2 > cap) {
@@ -1027,10 +1027,10 @@ mino_val_t *prim_str(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                     n = 0; /* already appended */
                 } else {
                     n = snprintf(tmp, sizeof(tmp), "#<%s>",
-                                 a->type == MINO_PRIM ? "prim" :
-                                 a->type == MINO_FN   ? "fn" :
-                                 a->type == MINO_MACRO ? "macro" :
-                                 a->type == MINO_HANDLE ? "handle" : "?");
+                                 mino_type_of(a) == MINO_PRIM ? "prim" :
+                                 mino_type_of(a) == MINO_FN   ? "fn" :
+                                 mino_type_of(a) == MINO_MACRO ? "macro" :
+                                 mino_type_of(a) == MINO_HANDLE ? "handle" : "?");
                 }
                 break;
             }
@@ -1141,7 +1141,7 @@ mino_val_t *prim_parse_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "parse-uuid requires one argument");
     }
     s = args->as.cons.car;
-    if (s == NULL || s->type != MINO_STRING) {
+    if (s == NULL || mino_type_of(s) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "parse-uuid: argument must be a string");
     }

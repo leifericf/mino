@@ -348,7 +348,7 @@ static void state_free_heap(mino_state_t *S)
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
-            if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
             }
         }
@@ -358,7 +358,7 @@ static void state_free_heap(mino_state_t *S)
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
-            if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
             }
         }
@@ -543,7 +543,7 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
             if (mino_last_error(S) == NULL) {
                 /* If the exception is a diagnostic map, extract its
                  * message for the error buffer. */
-                if (ex != NULL && ex->type == MINO_MAP) {
+                if (ex != NULL && mino_type_of(ex) == MINO_MAP) {
                     mino_val_t *msg = map_get_val(ex,
                         mino_keyword(S, "mino/message"));
                     mino_val_t *kind = map_get_val(ex,
@@ -551,13 +551,13 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
                     mino_val_t *code = map_get_val(ex,
                         mino_keyword(S, "mino/code"));
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                        (kind && kind->type == MINO_KEYWORD)
+                        (kind && mino_type_of(kind) == MINO_KEYWORD)
                             ? kind->as.s.data : "internal",
-                        (code && code->type == MINO_STRING)
+                        (code && mino_type_of(code) == MINO_STRING)
                             ? code->as.s.data : "MIN001",
-                        (msg && msg->type == MINO_STRING)
+                        (msg && mino_type_of(msg) == MINO_STRING)
                             ? msg->as.s.data : "unhandled exception");
-                } else if (ex != NULL && ex->type == MINO_STRING) {
+                } else if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
                     char msg[512];
                     snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                              (int)ex->as.s.len, ex->as.s.data);
@@ -582,12 +582,12 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
         mino_current_ctx(S)->call_depth = 0;
         return NULL;
     }
-    if (v->type == MINO_RECUR) {
+    if (mino_type_of(v) == MINO_RECUR) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "recur must be in tail position");
         mino_current_ctx(S)->call_depth = 0;
         return NULL;
     }
-    if (v->type == MINO_TAIL_CALL) {
+    if (mino_type_of(v) == MINO_TAIL_CALL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", "tail call escaped to top level");
         mino_current_ctx(S)->call_depth = 0;
         return NULL;
@@ -648,7 +648,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
                 /* Preserve the original exception message if available,
                  * and include the file being loaded for context. */
                 const char *file = S->reader_file;
-                if (ex != NULL && ex->type == MINO_STRING
+                if (ex != NULL && mino_type_of(ex) == MINO_STRING
                     && ex->as.s.len > 0) {
                     if (file != NULL && strcmp(file, "<string>") != 0
                         && strcmp(file, "<input>") != 0) {

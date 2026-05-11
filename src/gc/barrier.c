@@ -154,12 +154,14 @@ void gc_write_barrier(mino_state_t *S, void *container,
      * push is free when the value was already in the snapshot. */
     if (S->gc_phase == GC_PHASE_MAJOR_MARK
         && old_value != NULL
+        && ((uintptr_t)old_value & MINO_TAG_MASK) == 0
         && !gc_ptr_is_state_embedded(S, old_value)) {
         gc_hdr_t *h_old = ((gc_hdr_t *)old_value) - 1;
         gc_mark_push(S, h_old);
     }
     if (S->gc_phase == GC_PHASE_MAJOR_MARK
         && new_value != NULL
+        && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
         && !gc_ptr_is_state_embedded(S, new_value)) {
         gc_hdr_t *h_new_satb = ((gc_hdr_t *)new_value) - 1;
         gc_mark_push(S, h_new_satb);
@@ -178,6 +180,11 @@ void gc_write_barrier(mino_state_t *S, void *container,
     }
     /* Slot cleared: no new old->young edge. */
     if (new_value == NULL) {
+        return;
+    }
+    /* Tagged inline value (int/bool/nil/char): no heap object behind
+     * this pointer, so no edge to record. */
+    if (((uintptr_t)new_value & MINO_TAG_MASK) != 0) {
         return;
     }
     /* Singleton target: not GC-managed, so there is nothing the minor

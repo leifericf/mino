@@ -13,10 +13,10 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "name requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL)
+    if (v == NULL || mino_type_of(v) == MINO_NIL)
         return prim_throw_classified(S, "eval/type", "MTY001", "name: argument must not be nil");
-    if (v->type == MINO_STRING)  return v;
-    if (v->type == MINO_KEYWORD || v->type == MINO_SYMBOL) {
+    if (mino_type_of(v) == MINO_STRING)  return v;
+    if (mino_type_of(v) == MINO_KEYWORD || mino_type_of(v) == MINO_SYMBOL) {
         const char *data = v->as.s.data;
         size_t len = v->as.s.len;
         /* For qualified names (foo/bar), return only the part after /. */
@@ -66,12 +66,12 @@ mino_val_t *prim_random_seed_bang(mino_state_t *S, mino_val_t *args,
             "random-seed! requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_INT) {
+    if (v == NULL || !mino_val_int_p(v)) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "random-seed! seed must be an integer");
     }
     {
-        uint64_t seed = (uint64_t)v->as.i;
+        uint64_t seed = (uint64_t)mino_val_int_get(v);
         if (seed == 0) seed = 0x243F6A8885A308D3ULL;
         S->rand_state = seed;
     }
@@ -109,7 +109,7 @@ mino_val_t *prim_load_string(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "load-string requires one string argument");
     }
     src = args->as.cons.car;
-    if (src == NULL || src->type != MINO_STRING) {
+    if (src == NULL || mino_type_of(src) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "load-string: argument must be a string");
     }
@@ -134,7 +134,7 @@ mino_val_t *prim_load_file(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "load-file requires one string argument");
     }
     path = args->as.cons.car;
-    if (path == NULL || path->type != MINO_STRING) {
+    if (path == NULL || mino_type_of(path) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "load-file: argument must be a string");
     }
@@ -164,10 +164,10 @@ mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         mino_val_t *name_arg = args->as.cons.cdr->as.cons.car;
         char buf[512];
         size_t pos = 0;
-        if (name_arg == NULL || name_arg->type != MINO_STRING) {
+        if (name_arg == NULL || mino_type_of(name_arg) != MINO_STRING) {
             return prim_throw_classified(S, "eval/type", "MTY001", "symbol: name must be a string");
         }
-        if (ns_arg != NULL && ns_arg->type == MINO_STRING) {
+        if (ns_arg != NULL && mino_type_of(ns_arg) == MINO_STRING) {
             /* Preserve an explicit (even empty) ns by emitting the
              * `ns/name` form. Clojure differentiates `(symbol "" "x")`
              * (namespace returns `""`) from `(symbol nil "x")` (no ns,
@@ -178,7 +178,7 @@ mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             memcpy(buf, ns_arg->as.s.data, ns_arg->as.s.len);
             pos = ns_arg->as.s.len;
             buf[pos++] = '/';
-        } else if (ns_arg != NULL && ns_arg->type != MINO_NIL) {
+        } else if (ns_arg != NULL && mino_type_of(ns_arg) != MINO_NIL) {
             return prim_throw_classified(S, "eval/type", "MTY001", "symbol: namespace must be a string");
         }
         if (pos + name_arg->as.s.len >= sizeof(buf)) {
@@ -190,19 +190,19 @@ mino_val_t *prim_symbol(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     /* 1-arg */
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL) {
+    if (v == NULL || mino_type_of(v) == MINO_NIL) {
         return prim_throw_classified(S, "eval/type", "MTY001", "symbol: argument must not be nil");
     }
-    if (v->type == MINO_STRING) {
+    if (mino_type_of(v) == MINO_STRING) {
         return mino_symbol_n(S, v->as.s.data, v->as.s.len);
     }
-    if (v->type == MINO_SYMBOL) {
+    if (mino_type_of(v) == MINO_SYMBOL) {
         return v;
     }
-    if (v->type == MINO_KEYWORD) {
+    if (mino_type_of(v) == MINO_KEYWORD) {
         return mino_symbol_n(S, v->as.s.data, v->as.s.len);
     }
-    if (v->type == MINO_VAR) {
+    if (mino_type_of(v) == MINO_VAR) {
         /* (symbol #'foo) -> 'ns/foo. Vars are Named in Clojure, so a
          * fully-qualified symbol falls out of the var's stored ns +
          * name. Vars without an owning ns (rare; root user defs in
@@ -245,12 +245,12 @@ mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         char buf[256];
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr))
             return prim_throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
-        if (nm_val->type != MINO_STRING)
+        if (mino_type_of(nm_val) != MINO_STRING)
             return prim_throw_classified(S, "eval/type", "MTY001", "keyword: name must be a string");
-        if (ns_val == NULL || ns_val->type == MINO_NIL) {
+        if (ns_val == NULL || mino_type_of(ns_val) == MINO_NIL) {
             return mino_keyword_n(S, nm_val->as.s.data, nm_val->as.s.len);
         }
-        if (ns_val->type != MINO_STRING)
+        if (mino_type_of(ns_val) != MINO_STRING)
             return prim_throw_classified(S, "eval/type", "MTY001", "keyword: namespace must be a string or nil");
         snprintf(buf, sizeof(buf), "%.*s/%.*s",
                  (int)ns_val->as.s.len, ns_val->as.s.data,
@@ -258,13 +258,13 @@ mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return mino_keyword_n(S, buf, strlen(buf));
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL)
+    if (v == NULL || mino_type_of(v) == MINO_NIL)
         return mino_nil(S);
-    if (v->type == MINO_STRING)
+    if (mino_type_of(v) == MINO_STRING)
         return mino_keyword_n(S, v->as.s.data, v->as.s.len);
-    if (v->type == MINO_KEYWORD)
+    if (mino_type_of(v) == MINO_KEYWORD)
         return v;
-    if (v->type == MINO_SYMBOL)
+    if (mino_type_of(v) == MINO_SYMBOL)
         return mino_keyword_n(S, v->as.s.data, v->as.s.len);
     return prim_throw_classified(S, "eval/type", "MTY001", "keyword: argument must be a string, keyword, or symbol");
 }
@@ -286,22 +286,22 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "type requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL)  return mino_keyword(S, "nil");
+    if (v == NULL || mino_type_of(v) == MINO_NIL)  return mino_keyword(S, "nil");
     /* Records return their MINO_TYPE value directly so protocol
      * dispatch keys for built-ins (keywords) and user types (type
      * pointers) live in the same atom-keyed table. The :type
      * metadata path runs for non-records only, keeping the keyword
      * tagging mechanism (used by mino's multimethods and print
      * surface) unchanged. */
-    if (v->type == MINO_RECORD) return v->as.record.type;
+    if (mino_type_of(v) == MINO_RECORD) return v->as.record.type;
     /* Honor :type metadata (Clojure semantics). Enables print-method
      * dispatch for user types via (with-meta obj {:type :my-type}). */
-    if (v->meta != NULL && v->meta->type == MINO_MAP) {
+    if (MINO_IS_PTR(v) && v->meta != NULL && mino_type_of(v->meta) == MINO_MAP) {
         mino_val_t *tk = mino_keyword(S, "type");
         mino_val_t *tv = map_get_val(v->meta, tk);
         if (tv != NULL) return tv;
     }
-    switch (v->type) {
+    switch (mino_type_of(v)) {
     case MINO_NIL:     return mino_keyword(S, "nil");
     case MINO_BOOL:    return mino_keyword(S, "bool");
     case MINO_INT:     return mino_keyword(S, "int");
@@ -390,28 +390,28 @@ mino_val_t *prim_type(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return (pred_expr) ? mino_true(S) : mino_false(S); \
     }
 
-DEFINE_TYPE_PRED(prim_nil_p,     (v == NULL || v->type == MINO_NIL),           "nil?")
-DEFINE_TYPE_PRED(prim_cons_p,    (v != NULL && (v->type == MINO_CONS || v->type == MINO_CHUNKED_CONS)),          "cons?")
-DEFINE_TYPE_PRED(prim_list_p,    (v != NULL && ((v->type == MINO_CONS && !v->as.cons.not_list) || v->type == MINO_EMPTY_LIST)),             "list?")
-DEFINE_TYPE_PRED(prim_vector_p,  (v != NULL && (v->type == MINO_VECTOR || v->type == MINO_MAP_ENTRY)),        "vector?")
-DEFINE_TYPE_PRED(prim_int_p,     (v != NULL && v->type == MINO_INT),           "int?")
-DEFINE_TYPE_PRED(prim_float_p,   (v != NULL && (v->type == MINO_FLOAT || v->type == MINO_FLOAT32)),         "float?")
-DEFINE_TYPE_PRED(prim_string_p,  (v != NULL && v->type == MINO_STRING),        "string?")
-DEFINE_TYPE_PRED(prim_keyword_p, (v != NULL && v->type == MINO_KEYWORD),       "keyword?")
-DEFINE_TYPE_PRED(prim_symbol_p,  (v != NULL && v->type == MINO_SYMBOL),        "symbol?")
-DEFINE_TYPE_PRED(prim_fn_p,      (v != NULL && (v->type == MINO_FN || v->type == MINO_PRIM)), "fn?")
-DEFINE_TYPE_PRED(prim_char_p,    (v != NULL && v->type == MINO_CHAR),          "char?")
-DEFINE_TYPE_PRED(prim_number_p,  (v != NULL && (v->type == MINO_INT || v->type == MINO_FLOAT || v->type == MINO_FLOAT32 || v->type == MINO_BIGINT || v->type == MINO_RATIO || v->type == MINO_BIGDEC)), "number?")
-DEFINE_TYPE_PRED(prim_map_p,     (v != NULL && (v->type == MINO_MAP || v->type == MINO_SORTED_MAP)), "map?")
-DEFINE_TYPE_PRED(prim_set_p,     (v != NULL && (v->type == MINO_SET || v->type == MINO_SORTED_SET)), "set?")
-DEFINE_TYPE_PRED(prim_seq_p,     (v != NULL && (v->type == MINO_CONS || v->type == MINO_LAZY || v->type == MINO_EMPTY_LIST || v->type == MINO_CHUNKED_CONS)), "seq?")
-DEFINE_TYPE_PRED(prim_boolean_p, (v != NULL && v->type == MINO_BOOL),          "boolean?")
-DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && v->type == MINO_BOOL && v->as.b != 0),  "true?")
-DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && v->type == MINO_BOOL && v->as.b == 0),  "false?")
-DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && v->type == MINO_TYPE), "record-type?")
-DEFINE_TYPE_PRED(prim_record_p,      (v != NULL && v->type == MINO_RECORD), "record?")
-DEFINE_TYPE_PRED(prim_uuid_p,        (v != NULL && v->type == MINO_UUID),    "uuid?")
-DEFINE_TYPE_PRED(prim_regex_p,       (v != NULL && v->type == MINO_REGEX),   "regex?")
+DEFINE_TYPE_PRED(prim_nil_p,     (v == NULL || mino_type_of(v) == MINO_NIL),           "nil?")
+DEFINE_TYPE_PRED(prim_cons_p,    (v != NULL && (mino_type_of(v) == MINO_CONS || mino_type_of(v) == MINO_CHUNKED_CONS)),          "cons?")
+DEFINE_TYPE_PRED(prim_list_p,    (v != NULL && ((mino_type_of(v) == MINO_CONS && !v->as.cons.not_list) || mino_type_of(v) == MINO_EMPTY_LIST)),             "list?")
+DEFINE_TYPE_PRED(prim_vector_p,  (v != NULL && (mino_type_of(v) == MINO_VECTOR || mino_type_of(v) == MINO_MAP_ENTRY)),        "vector?")
+DEFINE_TYPE_PRED(prim_int_p,     (v != NULL && mino_val_int_p(v)),           "int?")
+DEFINE_TYPE_PRED(prim_float_p,   (v != NULL && (mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32)),         "float?")
+DEFINE_TYPE_PRED(prim_string_p,  (v != NULL && mino_type_of(v) == MINO_STRING),        "string?")
+DEFINE_TYPE_PRED(prim_keyword_p, (v != NULL && mino_type_of(v) == MINO_KEYWORD),       "keyword?")
+DEFINE_TYPE_PRED(prim_symbol_p,  (v != NULL && mino_type_of(v) == MINO_SYMBOL),        "symbol?")
+DEFINE_TYPE_PRED(prim_fn_p,      (v != NULL && (mino_type_of(v) == MINO_FN || mino_type_of(v) == MINO_PRIM)), "fn?")
+DEFINE_TYPE_PRED(prim_char_p,    (v != NULL && mino_type_of(v) == MINO_CHAR),          "char?")
+DEFINE_TYPE_PRED(prim_number_p,  (v != NULL && (mino_val_int_p(v) || mino_type_of(v) == MINO_FLOAT || mino_type_of(v) == MINO_FLOAT32 || mino_type_of(v) == MINO_BIGINT || mino_type_of(v) == MINO_RATIO || mino_type_of(v) == MINO_BIGDEC)), "number?")
+DEFINE_TYPE_PRED(prim_map_p,     (v != NULL && (mino_type_of(v) == MINO_MAP || mino_type_of(v) == MINO_SORTED_MAP)), "map?")
+DEFINE_TYPE_PRED(prim_set_p,     (v != NULL && (mino_type_of(v) == MINO_SET || mino_type_of(v) == MINO_SORTED_SET)), "set?")
+DEFINE_TYPE_PRED(prim_seq_p,     (v != NULL && (mino_type_of(v) == MINO_CONS || mino_type_of(v) == MINO_LAZY || mino_type_of(v) == MINO_EMPTY_LIST || mino_type_of(v) == MINO_CHUNKED_CONS)), "seq?")
+DEFINE_TYPE_PRED(prim_boolean_p, (v != NULL && mino_type_of(v) == MINO_BOOL),          "boolean?")
+DEFINE_TYPE_PRED(prim_true_p,    (v != NULL && mino_type_of(v) == MINO_BOOL && v->as.b != 0),  "true?")
+DEFINE_TYPE_PRED(prim_false_p,   (v != NULL && mino_type_of(v) == MINO_BOOL && v->as.b == 0),  "false?")
+DEFINE_TYPE_PRED(prim_record_type_p, (v != NULL && mino_type_of(v) == MINO_TYPE), "record-type?")
+DEFINE_TYPE_PRED(prim_record_p,      (v != NULL && mino_type_of(v) == MINO_RECORD), "record?")
+DEFINE_TYPE_PRED(prim_uuid_p,        (v != NULL && mino_type_of(v) == MINO_UUID),    "uuid?")
+DEFINE_TYPE_PRED(prim_regex_p,       (v != NULL && mino_type_of(v) == MINO_REGEX),   "regex?")
 
 #undef DEFINE_TYPE_PRED
 
@@ -434,7 +434,7 @@ mino_val_t *prim_some_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "some? requires one argument");
     }
     v = args->as.cons.car;
-    return (v != NULL && v->type != MINO_NIL) ? mino_true(S) : mino_false(S);
+    return (v != NULL && mino_type_of(v) != MINO_NIL) ? mino_true(S) : mino_false(S);
 }
 
 mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -446,8 +446,8 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             "empty? requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL) return mino_true(S);
-    switch (v->type) {
+    if (v == NULL || mino_type_of(v) == MINO_NIL) return mino_true(S);
+    switch (mino_type_of(v)) {
     case MINO_EMPTY_LIST: return mino_true(S);
     case MINO_CONS:       return mino_false(S);
     case MINO_VECTOR:     return v->as.vec.len == 0 ? mino_true(S) : mino_false(S);
@@ -459,8 +459,8 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     case MINO_LAZY: {
         mino_val_t *forced = lazy_force(S, v);
         if (forced == NULL) return NULL;
-        if (forced == NULL || forced->type == MINO_NIL) return mino_true(S);
-        if (forced->type == MINO_CHUNKED_CONS) return mino_false(S);
+        if (forced == NULL || mino_type_of(forced) == MINO_NIL) return mino_true(S);
+        if (mino_type_of(forced) == MINO_CHUNKED_CONS) return mino_false(S);
         return mino_false(S);
     }
     case MINO_CHUNKED_CONS: return mino_false(S);
@@ -492,10 +492,10 @@ static mino_val_t *num_pred(mino_state_t *S, mino_val_t *args,
     }
     v = args->as.cons.car;
     if (v == NULL) goto type_err;
-    if (v->type == MINO_INT)   return cmp_int(v->as.i) ? mino_true(S) : mino_false(S);
-    if (v->type == MINO_FLOAT) return cmp_float(v->as.f) ? mino_true(S) : mino_false(S);
-    if (v->type == MINO_BIGINT || v->type == MINO_RATIO
-        || v->type == MINO_BIGDEC) {
+    if (mino_val_int_p(v))   return cmp_int(mino_val_int_get(v)) ? mino_true(S) : mino_false(S);
+    if (mino_type_of(v) == MINO_FLOAT) return cmp_float(v->as.f) ? mino_true(S) : mino_false(S);
+    if (mino_type_of(v) == MINO_BIGINT || mino_type_of(v) == MINO_RATIO
+        || mino_type_of(v) == MINO_BIGDEC) {
         double d = tower_to_double(v);
         return cmp_float(d) ? mino_true(S) : mino_false(S);
     }
@@ -537,10 +537,10 @@ mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "odd? requires an integer");
     }
-    if (v->type == MINO_INT) {
-        return (v->as.i & 1LL) != 0 ? mino_true(S) : mino_false(S);
+    if (mino_val_int_p(v)) {
+        return (mino_val_int_get(v) & 1LL) != 0 ? mino_true(S) : mino_false(S);
     }
-    if (v->type == MINO_BIGINT) {
+    if (mino_type_of(v) == MINO_BIGINT) {
         return mp_int_is_odd((mp_int)v->as.bigint.mpz)
             ? mino_true(S) : mino_false(S);
     }
@@ -561,10 +561,10 @@ mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001",
             "even? requires an integer");
     }
-    if (v->type == MINO_INT) {
-        return (v->as.i & 1LL) == 0 ? mino_true(S) : mino_false(S);
+    if (mino_val_int_p(v)) {
+        return (mino_val_int_get(v) & 1LL) == 0 ? mino_true(S) : mino_false(S);
     }
-    if (v->type == MINO_BIGINT) {
+    if (mino_type_of(v) == MINO_BIGINT) {
         return mp_int_is_odd((mp_int)v->as.bigint.mpz)
             ? mino_false(S) : mino_true(S);
     }
@@ -602,7 +602,7 @@ mino_val_t *prim_gensym(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (nargs == 1) {
         mino_val_t *p = args->as.cons.car;
-        if (p == NULL || p->type != MINO_STRING) {
+        if (p == NULL || mino_type_of(p) != MINO_STRING) {
             return prim_throw_classified(S, "eval/type", "MTY001", "gensym prefix must be a string");
         }
         prefix_src = p->as.s.data;
@@ -668,15 +668,15 @@ mino_val_t *prim_defrecord_star(mino_state_t *S, mino_val_t *args,
     name_arg   = args->as.cons.cdr->as.cons.car;
     fields_arg = args->as.cons.cdr->as.cons.cdr->as.cons.car;
 
-    if (ns_arg == NULL || ns_arg->type != MINO_STRING) {
+    if (ns_arg == NULL || mino_type_of(ns_arg) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "defrecord*: ns must be a string");
     }
-    if (name_arg == NULL || name_arg->type != MINO_STRING) {
+    if (name_arg == NULL || mino_type_of(name_arg) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "defrecord*: name must be a string");
     }
-    if (fields_arg == NULL || fields_arg->type != MINO_VECTOR) {
+    if (fields_arg == NULL || mino_type_of(fields_arg) != MINO_VECTOR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "defrecord*: fields must be a vector");
     }
@@ -694,9 +694,9 @@ mino_val_t *prim_defrecord_star(mino_state_t *S, mino_val_t *args,
         }
         for (i = 0; i < n_fields; i++) {
             mino_val_t *f = vec_nth(fields_arg, i);
-            if (f == NULL || (f->type != MINO_KEYWORD
-                              && f->type != MINO_SYMBOL
-                              && f->type != MINO_STRING)) {
+            if (f == NULL || (mino_type_of(f) != MINO_KEYWORD
+                              && mino_type_of(f) != MINO_SYMBOL
+                              && mino_type_of(f) != MINO_STRING)) {
                 free(field_names);
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "defrecord*: field names must be keywords, symbols, or strings");
@@ -733,11 +733,11 @@ mino_val_t *prim_record_star(mino_state_t *S, mino_val_t *args,
     }
     type_arg = args->as.cons.car;
     vals_arg = args->as.cons.cdr->as.cons.car;
-    if (type_arg == NULL || type_arg->type != MINO_TYPE) {
+    if (type_arg == NULL || mino_type_of(type_arg) != MINO_TYPE) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "record*: first argument must be a record type");
     }
-    if (vals_arg == NULL || vals_arg->type != MINO_VECTOR) {
+    if (vals_arg == NULL || mino_type_of(vals_arg) != MINO_VECTOR) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "record*: second argument must be a vector of field values");
     }
@@ -786,11 +786,11 @@ mino_val_t *prim_record_from_map(mino_state_t *S, mino_val_t *args,
     }
     type_arg = args->as.cons.car;
     map_arg  = args->as.cons.cdr->as.cons.car;
-    if (type_arg == NULL || type_arg->type != MINO_TYPE) {
+    if (type_arg == NULL || mino_type_of(type_arg) != MINO_TYPE) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "record-from-map: first argument must be a record type");
     }
-    if (map_arg == NULL || map_arg->type != MINO_MAP) {
+    if (map_arg == NULL || mino_type_of(map_arg) != MINO_MAP) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "record-from-map: second argument must be a map");
     }
@@ -863,7 +863,7 @@ mino_val_t *prim_record_fields(mino_state_t *S, mino_val_t *args,
             "record-fields requires one argument");
     }
     t = args->as.cons.car;
-    if (t == NULL || t->type != MINO_TYPE) {
+    if (t == NULL || mino_type_of(t) != MINO_TYPE) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "record-fields: argument must be a record type");
     }
@@ -883,7 +883,7 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_current_ctx(S)->try_depth <= 0) {
         /* No enclosing try -- format as fatal error. */
         char msg[512];
-        if (ex != NULL && ex->type == MINO_STRING) {
+        if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
         } else {
@@ -904,7 +904,7 @@ mino_val_t *prim_var_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "var? requires one argument");
     }
     v = args->as.cons.car;
-    return (v != NULL && v->type == MINO_VAR) ? mino_true(S) : mino_false(S);
+    return (v != NULL && mino_type_of(v) == MINO_VAR) ? mino_true(S) : mino_false(S);
 }
 
 mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -918,7 +918,7 @@ mino_val_t *prim_resolve(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "resolve requires one argument");
     }
     sym = args->as.cons.car;
-    if (sym == NULL || sym->type != MINO_SYMBOL) {
+    if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
         return prim_throw_classified(S, "eval/type", "MTY001", "resolve: argument must be a symbol");
     }
     n = sym->as.s.len;
@@ -997,10 +997,10 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/arity", "MAR001", "namespace requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type == MINO_NIL) {
+    if (v == NULL || mino_type_of(v) == MINO_NIL) {
         return prim_throw_classified(S, "eval/type", "MTY001", "namespace: argument must not be nil");
     }
-    if (v->type != MINO_SYMBOL && v->type != MINO_KEYWORD) {
+    if (mino_type_of(v) != MINO_SYMBOL && mino_type_of(v) != MINO_KEYWORD) {
         return prim_throw_classified(S, "eval/type", "MTY001", "namespace: expected a symbol or keyword");
     }
     data = v->as.s.data;
@@ -1024,7 +1024,7 @@ mino_val_t *prim_error_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     (void)env;
     if (!mino_is_cons(args)) return mino_false(S);
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_MAP) return mino_false(S);
+    if (v == NULL || mino_type_of(v) != MINO_MAP) return mino_false(S);
     kind_key = mino_keyword(S, "mino/kind");
     return map_get_val(v, kind_key) != NULL ? mino_true(S) : mino_false(S);
 }
@@ -1039,7 +1039,7 @@ mino_val_t *prim_ex_data(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "ex-data requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_MAP) return mino_nil(S);
+    if (v == NULL || mino_type_of(v) != MINO_MAP) return mino_nil(S);
     data_key = mino_keyword(S, "mino/data");
     result = map_get_val(v, data_key);
     return result != NULL ? result : mino_nil(S);
@@ -1055,7 +1055,7 @@ mino_val_t *prim_ex_message(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                                      "ex-message requires one argument");
     }
     v = args->as.cons.car;
-    if (v == NULL || v->type != MINO_MAP) return mino_nil(S);
+    if (v == NULL || mino_type_of(v) != MINO_MAP) return mino_nil(S);
     msg_key = mino_keyword(S, "mino/message");
     result = map_get_val(v, msg_key);
     return result != NULL ? result : mino_nil(S);
@@ -1171,11 +1171,11 @@ mino_val_t *prim_alloc_profile_dump_bang(mino_state_t *S,
     (void)env;
     if (mino_is_cons(args)) {
         mino_val_t *first = args->as.cons.car;
-        if (first == NULL || first->type != MINO_INT) {
+        if (first == NULL || !mino_val_int_p(first)) {
             return prim_throw_classified(S, "eval/arg", "MAR002",
                                          "alloc-profile-dump! takes an integer count");
         }
-        n = first->as.i;
+        n = mino_val_int_get(first);
         if (mino_is_cons(args->as.cons.cdr)) {
             return prim_throw_classified(S, "eval/arity", "MAR001",
                                          "alloc-profile-dump! takes at most one argument");

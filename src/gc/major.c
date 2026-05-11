@@ -191,21 +191,21 @@ void gc_sweep(mino_state_t *S)
         /* Dead OLD: call finalizer, unlink, recycle. */
         if (h->type_tag == GC_T_VAL) {
             mino_val_t *v = (mino_val_t *)(h + 1);
-            if (v->type == MINO_HANDLE && v->as.handle.finalizer != NULL) {
+            if (mino_type_of(v) == MINO_HANDLE && v->as.handle.finalizer != NULL) {
                 v->as.handle.finalizer(v->as.handle.ptr,
                                        v->as.handle.tag);
-            } else if (v->type == MINO_BIGINT) {
+            } else if (mino_type_of(v) == MINO_BIGINT) {
                 mino_bigint_free(v);
-            } else if (v->type == MINO_RECORD) {
+            } else if (mino_type_of(v) == MINO_RECORD) {
                 free(v->as.record.vals);
                 v->as.record.vals = NULL;
-            } else if (v->type == MINO_CHUNK) {
+            } else if (mino_type_of(v) == MINO_CHUNK) {
                 free(v->as.chunk.vals);
                 v->as.chunk.vals = NULL;
-            } else if (v->type == MINO_HOST_ARRAY) {
+            } else if (mino_type_of(v) == MINO_HOST_ARRAY) {
                 free(v->as.host_array.vals);
                 v->as.host_array.vals = NULL;
-            } else if (v->type == MINO_FUTURE) {
+            } else if (mino_type_of(v) == MINO_FUTURE) {
                 /* Hosted-thread future: tear down mu/cv and free
                  * the impl struct. quiesce should have joined any
                  * outstanding worker before we get here; if not, the

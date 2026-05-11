@@ -40,7 +40,7 @@ int async_timer_schedule(mino_state_t *S, double ms, mino_val_t *callback)
 {
     timer_entry_t *entry;
 
-    if (callback == NULL || callback->type == MINO_NIL) {
+    if (callback == NULL || mino_type_of(callback) == MINO_NIL) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001",
                       "async-schedule-timer* requires a non-nil callback");
         return -1;

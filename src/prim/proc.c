@@ -95,7 +95,7 @@ static char *build_command(mino_state_t *S, mino_val_t *args)
     while (mino_is_cons(args)) {
         mino_val_t *arg = args->as.cons.car;
         size_t new_pos;
-        if (arg == NULL || arg->type != MINO_STRING) {
+        if (arg == NULL || mino_type_of(arg) != MINO_STRING) {
             free(buf);
             prim_throw_classified(S, "eval/type", "MTY001",
                                   "sh: all arguments must be strings");
@@ -241,14 +241,14 @@ mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     exit_key = mino_keyword(S, "exit");
     exit_val = map_get_val(result, exit_key);
 
-    if (exit_val != NULL && exit_val->type == MINO_INT
-        && exit_val->as.i != 0) {
+    if (exit_val != NULL && mino_val_int_p(exit_val)
+        && mino_val_int_get(exit_val) != 0) {
         out_val = map_get_val(result, mino_keyword(S, "out"));
         {
             char msg[512];
             snprintf(msg, sizeof(msg), "sh!: command exited with code %lld: %s",
-                     exit_val->as.i,
-                     (out_val && out_val->type == MINO_STRING)
+                     mino_val_int_get(exit_val),
+                     (out_val && mino_type_of(out_val) == MINO_STRING)
                          ? out_val->as.s.data : "");
             return prim_throw_classified(S, "io", "MIO001", msg);
         }
