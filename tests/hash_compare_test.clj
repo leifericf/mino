@@ -52,3 +52,58 @@
 (deftest nested-map-eq-forces-deep
   (is (= {:outer {:inner (rest [9 8 7])}}
          {:outer {:inner '(8 7)}})))
+
+;; --- Cached-hash invariants on immutable collections ---
+
+(deftest equal-implies-equal-hash-vec
+  (let [a [1 2 3 4 5]
+        b [1 2 3 4 5]]
+    (is (= a b))
+    (is (= (hash a) (hash b)))))
+
+(deftest equal-implies-equal-hash-map
+  (let [a {:k1 1 :k2 2 :k3 3}
+        b (-> {} (assoc :k3 3) (assoc :k1 1) (assoc :k2 2))]
+    (is (= a b))
+    (is (= (hash a) (hash b)))))
+
+(deftest equal-implies-equal-hash-set
+  (let [a #{:x :y :z}
+        b (-> #{} (conj :z) (conj :x) (conj :y))]
+    (is (= a b))
+    (is (= (hash a) (hash b)))))
+
+(deftest hash-is-deterministic
+  (let [v [10 20 30 40 50 60]
+        h1 (hash v)
+        h2 (hash v)
+        h3 (hash v)]
+    (is (= h1 h2))
+    (is (= h2 h3))))
+
+(deftest eq-pointer-fast-path
+  (let [a {:a 1 :b 2}]
+    (is (= a a)))
+  (let [v [1 2 3 4]]
+    (is (= v v)))
+  (let [s #{1 2 3}]
+    (is (= s s))))
+
+(deftest eq-differing-content-after-hash
+  ;; Build two maps that differ at one deep key. Force both to
+  ;; populate their cached hashes via (hash ...), then verify
+  ;; structural compare still returns false. Guards against a
+  ;; bogus short-circuit on populated mismatched hashes.
+  (let [a {:k1 1 :k2 {:inner 42}}
+        b {:k1 1 :k2 {:inner 43}}]
+    (hash a)
+    (hash b)
+    (is (not= a b))))
+
+(deftest eq-large-equal-vectors
+  (let [build (fn [] (loop [i 0 v []]
+                       (if (< i 100) (recur (+ i 1) (conj v i)) v)))
+        a (build)
+        b (build)]
+    (is (= a b))
+    (is (= (hash a) (hash b)))))
