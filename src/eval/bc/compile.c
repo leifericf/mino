@@ -175,6 +175,39 @@ static int ensure_code(compiler_t *c, size_t need)
     return 1;
 }
 
+/* Allocate a fresh IC slot for OP_GETGLOBAL_CACHED. Grows the slots
+ * buffer geometrically (8 -> 16 -> 32 ...); writes the symbol the
+ * slot stands for so the runtime miss path can re-resolve. Returns
+ * the slot index (fits in 16-bit Bx) or -1 on overflow / OOM. */
+static int alloc_ic_slot(compiler_t *c, mino_val_t *sym)
+{
+    if (c->bc->ic_slots_len >= 0xFFFF) { c->ok = 0; return -1; }
+    if ((int)c->bc->ic_slots_len + 1 > c->bc->ic_slots_cap) {
+        int cap = c->bc->ic_slots_cap == 0 ? 8 : c->bc->ic_slots_cap * 2;
+        mino_bc_ic_slot_t *grown = (mino_bc_ic_slot_t *)gc_alloc_typed(
+            c->S, GC_T_RAW, (size_t)cap * sizeof(*grown));
+        if (grown == NULL) { c->ok = 0; return -1; }
+        if (c->bc->ic_slots != NULL && c->bc->ic_slots_len > 0) {
+            memcpy(grown, c->bc->ic_slots,
+                   (size_t)c->bc->ic_slots_len * sizeof(*grown));
+        }
+        for (int i = c->bc->ic_slots_len; i < cap; i++) {
+            grown[i].sym = NULL;
+            grown[i].cached = NULL;
+            grown[i].gen = 0;
+        }
+        gc_write_barrier(c->S, c->bc, c->bc->ic_slots, grown);
+        c->bc->ic_slots = grown;
+        c->bc->ic_slots_cap = cap;
+    }
+    int idx = c->bc->ic_slots_len++;
+    gc_write_barrier(c->S, c->bc->ic_slots, NULL, sym);
+    c->bc->ic_slots[idx].sym    = sym;
+    c->bc->ic_slots[idx].cached = NULL;
+    c->bc->ic_slots[idx].gen    = 0;
+    return idx;
+}
+
 static int add_const(compiler_t *c, mino_val_t *v)
 {
     /* No dedup: the const pool is per-fn and typical bodies have small
@@ -294,6 +327,7 @@ static int producer_writes_to_A_dst(unsigned op)
     case OP_MOVE:
     case OP_LOAD_K:
     case OP_GETGLOBAL:
+    case OP_GETGLOBAL_CACHED:
     case OP_CLOSURE:
     case OP_MAKE_LAZY:
     case OP_ADD_II:  case OP_SUB_II:  case OP_MUL_II:
@@ -1803,9 +1837,9 @@ static int compile_symbol_ref(compiler_t *c, mino_val_t *sym, int dst)
         emit_abc(c, OP_MOVE, (unsigned)dst, (unsigned)local_reg, 0);
         return 0;
     }
-    int k = add_const(c, sym);
-    if (k < 0) return -1;
-    emit_abx(c, OP_GETGLOBAL, (unsigned)dst, (unsigned)k);
+    int slot = alloc_ic_slot(c, sym);
+    if (slot < 0) return -1;
+    emit_abx(c, OP_GETGLOBAL_CACHED, (unsigned)dst, (unsigned)slot);
     return 0;
 }
 

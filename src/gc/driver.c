@@ -463,6 +463,17 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
                 gc_mark_child_push(S, bc->code);
                 gc_mark_child_push(S, bc->consts);
                 gc_mark_child_push(S, bc->clauses);
+                /* IC slots: a GC_T_RAW POD buffer whose embedded sym/
+                 * cached pointers the GC can't see without an explicit
+                 * walk. Push the buffer itself so the slot storage
+                 * stays live, then push each slot's value fields. */
+                if (bc->ic_slots != NULL && bc->ic_slots_len > 0) {
+                    gc_mark_child_push(S, bc->ic_slots);
+                    for (int i = 0; i < bc->ic_slots_len; i++) {
+                        gc_mark_child_push(S, bc->ic_slots[i].sym);
+                        gc_mark_child_push(S, bc->ic_slots[i].cached);
+                    }
+                }
             }
             break;
         case MINO_ATOM:

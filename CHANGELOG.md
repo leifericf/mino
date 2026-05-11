@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.135.0 — Inline Cache for Global Symbol Resolution
+
+`OP_GETGLOBAL` is replaced by `OP_GETGLOBAL_CACHED` at every
+compiled call site. The first time a global symbol resolves, the
+result is stashed in a per-fn inline-cache slot together with the
+state's `ic_gen` snapshot. Subsequent reads in the same fn skip
+the full `eval_impl` cascade (dyn-stack -> lexical env ->
+current-ns env -> ambient ns -> diagnostic) and return the cached
+value directly.
+
+What this leverages from Clojure: vars carry stable identity
+under read/eval separation. Bindings only change via `def` /
+`ns-unmap` / `var-set-root` / `var-unintern`; the existing
+`ic_gen` counter that already gates the int+int fast lane and
+the literal-arg fold doubles as the IC's coherence epoch. In
+steady state the gen never moves, so every hit is a single
+load-compare-load.
+
+Soundness: the cache is bypassed when dynamic bindings are
+active (`mino_current_ctx(S)->dyn_stack != NULL`), so
+`(binding [*x* ...] ...)` can't be masked by a stale var root.
+The cache fills only when no dyn-bindings are active, so the
+stored value is always the var's published root, never a
+dyn-shadowed value. Each fn-value owns its own bc and its own
+IC slots, so the cache key doesn't need to include the closure
+env; the env is constant across calls to a given fn-value.
+
+Verification: 1 571 tests / 7 353 assertions green on release
+and ASan. fib-30: 188 ms -> ~92 ms (~2x). call-noop-1M:
+58 ms -> ~30 ms (~2x). Other benches steady within noise.
+
 ## v0.134.0 — argv ABI for BC Calls
 
 `OP_CALL` no longer builds a cons-spine arg list when

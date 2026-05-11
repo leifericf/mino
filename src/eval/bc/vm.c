@@ -361,6 +361,39 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_GETGLOBAL_CACHED: {
+            /* Inline cache for global symbol resolution. The slot is
+             * filled on first miss with (cached, gen=S->ic_gen) and
+             * re-read while the gen still matches. Bumps to ic_gen
+             * (def / ns-unmap / var_set_root / var_unintern) invalidate
+             * naturally. The cache is bypassed when dynamic bindings
+             * are active so that `(binding [*x* ...] ...)` doesn't
+             * mask the dyn-shadowed value with a stale var root. */
+            unsigned a  = A_OF(ins);
+            unsigned bx = Bx_OF(ins);
+            if ((int)bx >= bc->ic_slots_len) { ok = 0; goto bc_done; }
+            mino_bc_ic_slot_t *slot = &bc->ic_slots[bx];
+            int dyn_active = (mino_current_ctx(S)->dyn_stack != NULL);
+            if (!dyn_active
+                && slot->cached != NULL
+                && slot->gen == S->ic_gen) {
+                regs[a] = slot->cached;
+                break;
+            }
+            mino_val_t *v = resolve_global(S, slot->sym, env);
+            if (v == NULL) { ok = 0; goto bc_done; }
+            if (!dyn_active) {
+                /* slot array may be OLD after a minor cycle; v may be
+                 * a freshly resolved var-root in YOUNG. The barrier
+                 * keeps the next minor's remset honest. */
+                gc_write_barrier(S, bc->ic_slots, slot->cached, v);
+                slot->cached = v;
+                slot->gen    = S->ic_gen;
+            }
+            regs[a] = v;
+            break;
+        }
+
         case OP_SETGLOBAL: {
             unsigned a  = A_OF(ins);
             unsigned bx = Bx_OF(ins);

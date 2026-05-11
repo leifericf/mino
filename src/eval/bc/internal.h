@@ -178,6 +178,21 @@ typedef enum {
  * matches the fn: the GC walks consts as a root via the parent fn's
  * mark pass. code is a GC_T_RAW buffer of uint32_t; consts is a
  * GC_T_PTRARR of mino_val_t pointers. */
+/* Inline-cache slot for OP_GETGLOBAL_CACHED. Per-fn array indexed by
+ * the Bx field of the cached opcode. `sym` is the unqualified or
+ * qualified MINO_SYMBOL whose resolution this slot stands for. `cached`
+ * is the last resolved value (NULL = uninitialized / invalidated).
+ * `gen` is the S->ic_gen snapshot at fill: when ic_gen advances (def /
+ * ns-unmap / var_set_root / var_unintern) the cache misses on its
+ * next read. The fn-value owns the slots array (one bc per fn-value),
+ * so env stays constant across calls and does not need to be part of
+ * the cache key. */
+typedef struct mino_bc_ic_slot {
+    mino_val_t *sym;
+    mino_val_t *cached;
+    unsigned    gen;
+} mino_bc_ic_slot_t;
+
 /* One arity clause. Multi-arity fns carry an array of these, one per
  * (params body...) clause; single-arity fns degenerate to a one-entry
  * array with entry_pc = 0. The compiler emits each clause's body
@@ -230,6 +245,13 @@ typedef struct mino_bc_fn {
                                       * bc and reruns the compile if a
                                       * mismatch is observed at call
                                       * time AND has_folds is set. */
+    mino_bc_ic_slot_t *ic_slots;  /* OP_GETGLOBAL_CACHED slot array;
+                                   * Bx of each cached op indexes here.
+                                   * Allocated as GC_T_RAW (POD slots
+                                   * plus value pointers walked by the
+                                   * MINO_FN GC pass). */
+    int              ic_slots_len;
+    int              ic_slots_cap;
 } mino_bc_fn_t;
 
 /* Compile / run status. Returned from mino_bc_compile_fn and consulted
