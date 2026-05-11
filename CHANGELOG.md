@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.114.0 — Bytecode Speculative Int+Int Fast Lanes
+
+The bc compiler emits per-op specialised opcodes -- `OP_ADD_II`,
+`OP_SUB_II`, `OP_MUL_II`, `OP_LT_II`, `OP_LE_II`, `OP_GT_II`,
+`OP_GE_II`, `OP_EQ_II` -- for the eight binary arith / compare
+calls (`+ - * < <= > >= =`) when both the head is a non-local
+non-macro and the call site has exactly two args. Each handler
+runs the v0.103.0-era int+int fast lane and, on a type miss,
+falls through to the matching prim with the same cons-spine
+argv as a regular `OP_CALL`. The compiler skips the speculation
+when the call is in tail position so the OP_RETURN / OP_TAILCALL
+discipline isn't disturbed.
+
+A pre-existing encoding bug in `MK_BINOP_INT` (sub-op nibble
+overlapped the op byte for any non-zero sub-op) is sidestepped:
+the original `OP_BINOP_INT` opcode stays in the enum and runtime
+for any hand-written stream that uses sub-op zero, but the
+compiler now emits the per-op variants instead. Phase-4
+profile-driven runtime rewriting -- the original plan -- is
+overkill once the compile-time speculation covers the only set
+of opcodes the plan would have promoted to anyway.
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.113.0 — Bytecode Multi-Arity Dispatch
 
 Multi-arity fns now bc-compile. Each `([params] body...)` clause

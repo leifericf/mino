@@ -21,6 +21,7 @@
 #include "eval/internal.h"          /* eval_impl, apply_callable */
 #include "eval/bc/internal.h"
 #include "collections/internal.h"   /* make_fn */
+#include "prim/internal.h"          /* binary arith prim_* on bc fast-lane miss */
 
 extern mino_val_t *mino_nil(mino_state_t *S);
 
@@ -380,21 +381,62 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_ADD_II:
+        case OP_SUB_II:
+        case OP_MUL_II:
+        case OP_LT_II:
+        case OP_LE_II:
+        case OP_GT_II:
+        case OP_GE_II:
+        case OP_EQ_II: {
+            /* Speculative int+int fast lanes for the eight binary
+             * arith / compare ops. On a type miss we fall through to
+             * the corresponding prim with the same argv ABI as a
+             * regular OP_CALL. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned c = C_OF(ins);
+            unsigned subop;
+            mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
+            switch (op) {
+            case OP_ADD_II: subop = BINOP_ADD; fallback = prim_add; break;
+            case OP_SUB_II: subop = BINOP_SUB; fallback = prim_sub; break;
+            case OP_MUL_II: subop = BINOP_MUL; fallback = prim_mul; break;
+            case OP_LT_II:  subop = BINOP_LT;  fallback = prim_lt;  break;
+            case OP_LE_II:  subop = BINOP_LE;  fallback = prim_lte; break;
+            case OP_GT_II:  subop = BINOP_GT;  fallback = prim_gt;  break;
+            case OP_GE_II:  subop = BINOP_GE;  fallback = prim_gte; break;
+            case OP_EQ_II:  subop = BINOP_EQ;  fallback = prim_eq;  break;
+            default: ok = 0; goto bc_done;
+            }
+            mino_val_t *r = binop_int_fast(S, regs[b], regs[c], subop);
+            if (r == NULL) {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[c], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                list = mino_cons(S, regs[b], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                r = fallback(S, list, env);
+                if (r == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+            }
+            regs[a] = r;
+            break;
+        }
+
         case OP_BINOP_INT: {
+            /* The original Phase-1 generic binop with its sub-op
+             * encoded in the low nibble of the instruction. The
+             * encoding collides with the op byte for non-zero sub-ops;
+             * the compiler now emits per-op specialised opcodes
+             * instead. The handler stays for any hand-written stream
+             * that uses sub-op zero (ADD). */
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
             unsigned c = C_OF(ins);
             unsigned subop = BINOP_OF(ins);
             mino_val_t *r = binop_int_fast(S, regs[b], regs[c], subop);
-            if (r == NULL) {
-                /* Fast-lane miss: bail. Phase 1's compiler does not
-                 * emit BINOP_INT, so this path is reached only by
-                 * hand-written / Phase-4-specialized streams. The
-                 * follow-on commits add a slow-fallback variant that
-                 * routes through the named prim. */
-                ok = 0;
-                goto bc_done;
-            }
+            if (r == NULL) { ok = 0; goto bc_done; }
             regs[a] = r;
             break;
         }

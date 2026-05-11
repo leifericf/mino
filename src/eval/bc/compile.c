@@ -807,10 +807,72 @@ static int head_resolves_to_macro(compiler_t *c, mino_val_t *head)
     return v != NULL && v->type == MINO_MACRO;
 }
 
+/* Map a binary arith / compare prim name to its BINOP_* subop. Returns
+ * -1 when the name isn't one of the speculative fast lanes. */
+static int binop_subop_for_name(const char *name)
+{
+    if (strcmp(name, "+") == 0)  return BINOP_ADD;
+    if (strcmp(name, "-") == 0)  return BINOP_SUB;
+    if (strcmp(name, "*") == 0)  return BINOP_MUL;
+    if (strcmp(name, "<") == 0)  return BINOP_LT;
+    if (strcmp(name, "<=") == 0) return BINOP_LE;
+    if (strcmp(name, ">") == 0)  return BINOP_GT;
+    if (strcmp(name, ">=") == 0) return BINOP_GE;
+    if (strcmp(name, "=") == 0)  return BINOP_EQ;
+    return -1;
+}
+
 static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     mino_val_t *head = form->as.cons.car;
     if (head_resolves_to_macro(c, head)) { c->ok = 0; return -1; }
+
+    /* Speculative fast lane for the eight binary arith / compare calls.
+     * When the head is one of `+ - * < <= > >= =`, has exactly two
+     * args, and resolves to a non-local non-macro at compile time,
+     * emit OP_BINOP_INT directly. The runtime's int+int fast path
+     * handles INT/INT pairs; on type miss it falls back to the named
+     * prim via the same argv ABI as a regular call. Tail context is
+     * irrelevant here -- arithmetic returns a value, never tail-calls
+     * the fn that wraps it. */
+    if (!tail && head != NULL && head->type == MINO_SYMBOL
+        && find_local(c, head->as.s.data) < 0) {
+        int subop = binop_subop_for_name(head->as.s.data);
+        if (subop >= 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                int lhs_reg = alloc_reg(c);
+                if (lhs_reg < 0) return -1;
+                int rhs_reg = alloc_reg(c);
+                if (rhs_reg < 0) return -1;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                if (compile_expr(c, a1, lhs_reg) < 0) return -1;
+                if (compile_expr(c, a2, rhs_reg) < 0) return -1;
+                if (dst > 0xFF || lhs_reg > 0xFF || rhs_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                /* Per-op specialized opcode. ABC form: A=dst, B=lhs,
+                 * C=rhs. The original OP_BINOP_INT encoding tried to
+                 * pack the subop into the instruction's low nibble,
+                 * which collides with the op byte; the per-op variants
+                 * sidestep the encoding mess and are what Phase-4
+                 * specialization would have promoted to anyway. */
+                static const mino_bc_op_t binop_op[BINOP__COUNT] = {
+                    OP_ADD_II, OP_SUB_II, OP_MUL_II,
+                    OP_LT_II,  OP_LE_II,  OP_GT_II,
+                    OP_GE_II,  OP_EQ_II,
+                };
+                emit_abc(c, binop_op[subop], (unsigned)dst,
+                         (unsigned)lhs_reg, (unsigned)rhs_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+    }
 
     /* Walk the cdr, counting args while validating each is a cons. */
     mino_val_t *cur = form->as.cons.cdr;
