@@ -373,6 +373,13 @@ typedef struct mino_thread_ctx {
         int      try_depth_at_push;
         unsigned ex_reg;
         struct mino_env *env_at_push;
+        /* Anchor of the dyn stack at push. A throw across a
+         * `(binding [...] ...)` form inside the try body would
+         * otherwise leak the dyn frame -- the longjmp bypasses the
+         * matching OP_POPDYN, and the per-fn bc_done unwind loop only
+         * fires on fn exit, not on a catch landing inside the same fn.
+         * Mirrors `saved_dyn` in `eval_try`. */
+        dyn_frame_t *dyn_stack_at_push;
     } bc_catch_stack[MAX_TRY_DEPTH];
     int             bc_catch_depth;
 

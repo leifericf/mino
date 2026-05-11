@@ -935,6 +935,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             ctx->bc_catch_stack[ctx->bc_catch_depth].try_depth_at_push = td;
             ctx->bc_catch_stack[ctx->bc_catch_depth].ex_reg            = a;
             ctx->bc_catch_stack[ctx->bc_catch_depth].env_at_push       = env;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].dyn_stack_at_push = ctx->dyn_stack;
             ctx->bc_catch_depth++;
 
             ctx->try_stack[td].exception      = NULL;
@@ -961,6 +962,22 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 S->fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
                 load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
                 ctx->try_depth = my_td;
+                /* Pop any dyn frames that the body PUSHDYN'd but never
+                 * POPDYN'd because the throw bypassed the matching
+                 * cleanup. Matches eval_try's saved_dyn unwind so a
+                 * `(binding [...] (throw ...))` body doesn't leave its
+                 * binding visible to the catch handler. */
+                {
+                    dyn_frame_t *anchor =
+                        ctx->bc_catch_stack[d].dyn_stack_at_push;
+                    while (ctx->dyn_stack != anchor) {
+                        dyn_frame_t *f = ctx->dyn_stack;
+                        if (f == NULL) break;
+                        ctx->dyn_stack = f->prev;
+                        dyn_binding_list_free(f->bindings);
+                        free(f);
+                    }
+                }
                 pc      = ctx->bc_catch_stack[d].handler_pc;
                 env     = ctx->bc_catch_stack[d].env_at_push;
                 regs    = S->bc_regs + base;

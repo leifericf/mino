@@ -59,3 +59,31 @@
   (testing "empty binding vector is a no-op"
     (defn t [] (binding [] *bc-tx*))
     (is (= 0 (t)))))
+
+(deftest bc-binding-throw-unwinds-to-catch
+  ;; The bc catch landing pad needs to pop dyn frames that the body
+  ;; pushed but never popped because the longjmp bypassed the matching
+  ;; OP_POPDYN. Without the unwind, the catch handler observes the
+  ;; throw-site's binding instead of the surrounding root / outer
+  ;; binding -- matching `eval_try`'s `saved_dyn` discipline.
+  (testing "catch handler sees root after inner binding throws"
+    (defn t [] (try (binding [*bc-tx* 999]
+                      (throw "boom"))
+                    (catch e *bc-tx*)))
+    (is (= 0 (t))))
+  (testing "outer binding visible after inner throws across nested binding"
+    (defn t [] (binding [*bc-tx* :outer]
+                 (try (binding [*bc-tx* :inner]
+                        (throw "boom"))
+                      (catch e *bc-tx*))))
+    (is (= :outer (t)))
+    (is (= 0 *bc-tx*)))
+  (testing "catch rethrow from inner binding still reports outer state"
+    (defn t [] (try
+                 (binding [*bc-tx* :A]
+                   (try
+                     (binding [*bc-tx* :B]
+                       (throw "inner"))
+                     (catch e (throw "rethrown"))))
+                 (catch e *bc-tx*)))
+    (is (= 0 (t)))))
