@@ -78,15 +78,34 @@ static mino_val_t *args_from_regs(mino_state_t *S, mino_val_t **regs,
     return list;
 }
 
-/* Integer fast-lane for unary inc / dec / zero?. Returns NULL on a type
- * miss or overflow; the dispatcher then falls back to the cons-spine
- * prim with the same ABI as a regular OP_CALL miss. */
+/* Encode a 61-bit signed `r` as a tagged int. Falls back to the boxed
+ * constructor for the narrow band beyond MINO_INT_MAX where the tag
+ * would lose precision (in practice unreachable from the +/-/inc/dec
+ * fast lanes: their operands are both already in 61-bit range and the
+ * overflow check prior to encoding caught LLONG_MAX-class wraps). */
+static inline mino_val_t *tag_or_box_int(mino_state_t *S, long long r)
+{
+    S->bc_int_make_count++;
+    if (r >= MINO_INT_MIN && r <= MINO_INT_MAX) {
+        S->bc_int_alloc_avoided++;
+        return MINO_MAKE_INT(r);
+    }
+    return mino_int(S, r);
+}
+
+/* Integer fast-lane for unary inc / dec / zero?. The Phase D rewrite
+ * skips mino_val_int_p / mino_val_int_get -- both inputs are required
+ * to be inline-tagged ints, so the helper functions' NULL + tag + type
+ * three-step check is replaced with a single MINO_IS_INT tag-bit test
+ * and MINO_INT_VAL inline decode. The boxed-int slow path falls
+ * through to the prim via the same NULL-return-bails-to-fallback
+ * contract the binop lane uses. */
 static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
                                  unsigned subop)
 {
-    if (v == NULL || !mino_val_int_p(v)) return NULL;
-    long long a = mino_val_int_get(v);
-    long long r;
+    long long a, r;
+    if (!MINO_IS_INT(v)) return NULL;
+    a = MINO_INT_VAL(v);
     switch (subop) {
     case UNOP_INC:
 #if defined(__GNUC__) || defined(__clang__)
@@ -94,14 +113,14 @@ static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
 #else
         r = a + 1;
 #endif
-        return mino_int(S, r);
+        return tag_or_box_int(S, r);
     case UNOP_DEC:
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_ssubll_overflow(a, 1, &r)) return NULL;
 #else
         r = a - 1;
 #endif
-        return mino_int(S, r);
+        return tag_or_box_int(S, r);
     case UNOP_ZERO_P:
         return (a == 0) ? mino_true(S) : mino_false(S);
     default:
@@ -109,17 +128,20 @@ static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
     }
 }
 
-/* Integer fast-lane for OP_BINOP_INT. Identical dispatch shape to the
- * v0.103.0 eval-side fast path; returns NULL on type mismatch or
- * overflow so the VM can bail to the tree-walker fallback. */
+/* Integer fast-lane for OP_BINOP_INT. Same Phase D tag-extract shape
+ * as unop_int_fast: a single MINO_IS_INT check per operand replaces
+ * mino_val_int_p's NULL + tag + type chain, and MINO_INT_VAL decodes
+ * inline without the boxed-fallback branch. Overflow stays on the
+ * __builtin_*_overflow intrinsics; the encoded result rides through
+ * tag_or_box_int. Returns NULL on a tag miss or overflow so the
+ * dispatcher bails to the cons-spine prim. */
 static mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
                                   mino_val_t *rhs, unsigned subop)
 {
-    if (lhs == NULL || rhs == NULL) return NULL;
-    if (!mino_val_int_p(lhs) || !mino_val_int_p(rhs)) return NULL;
-    long long a = mino_val_int_get(lhs);
-    long long b = mino_val_int_get(rhs);
-    long long r;
+    long long a, b, r;
+    if (!MINO_IS_INT(lhs) || !MINO_IS_INT(rhs)) return NULL;
+    a = MINO_INT_VAL(lhs);
+    b = MINO_INT_VAL(rhs);
     switch (subop) {
     case BINOP_ADD:
 #if defined(__GNUC__) || defined(__clang__)
@@ -127,21 +149,21 @@ static mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
 #else
         r = a + b;
 #endif
-        return mino_int(S, r);
+        return tag_or_box_int(S, r);
     case BINOP_SUB:
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_ssubll_overflow(a, b, &r)) return NULL;
 #else
         r = a - b;
 #endif
-        return mino_int(S, r);
+        return tag_or_box_int(S, r);
     case BINOP_MUL:
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_smulll_overflow(a, b, &r)) return NULL;
 #else
         r = a * b;
 #endif
-        return mino_int(S, r);
+        return tag_or_box_int(S, r);
     case BINOP_LT: return (a <  b) ? mino_true(S) : mino_false(S);
     case BINOP_LE: return (a <= b) ? mino_true(S) : mino_false(S);
     case BINOP_GT: return (a >  b) ? mino_true(S) : mino_false(S);

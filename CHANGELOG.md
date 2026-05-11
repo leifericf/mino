@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.125.0 — Arith Fast-Lane Direct Tag Extraction
+
+The Phase D payload. `binop_int_fast` and `unop_int_fast` in
+`src/eval/bc/vm.c` now extract tagged ints inline via `MINO_IS_INT`
+tag-bit tests and `MINO_INT_VAL` decode, skipping the
+`mino_val_int_p` / `mino_val_int_get` helper chain. A single tag-bit
+test per operand replaces NULL + tag + boxed-type — 2–3 ALU ops
+saved per operand check, ~5 ops saved per call.
+
+Encoding: a new inline helper `tag_or_box_int` handles the
+post-overflow-check encode path. For results that fit in
+`[MINO_INT_MIN, MINO_INT_MAX]` (the 61-bit signed range, ~±1.15e18)
+it returns `MINO_MAKE_INT(r)` — no allocation, no cell init. For the
+narrow band beyond the tagged range, it falls back to `mino_int(S, r)`
+which allocates a boxed cell. Both code paths increment the
+`bc_int_make_count` / `bc_int_alloc_avoided` counter pair.
+
+Overflow boundary tests added in `tests/arithmetic_test.clj`:
+
+- Values at `MINO_INT_MAX` / `MINO_INT_MIN` stay `:int` and survive
+  the round-trip through the fast lane.
+- `inc` / `dec` crossing the tagged boundary box transparently.
+- `+`, `-`, `*` across the boundary in both directions.
+- `INT64_MAX` / `INT64_MIN` overflow still throws under strict arith
+  (matches the existing `integer-overflow-strict-and-primed` test).
+- Both top-level and in-fn execution paths exercised so the BC fast
+  lane and the tree-walker prim path both get the boundary cases.
+
+Verification: full test suite (1 558 / 7 306) green on release,
+ASan, UBSan. UBSan green is the load-bearing correctness signal —
+it catches every misaligned deref the tag scheme could
+silently corrupt around.
+
 ## v0.124.0 — GC IC-Marking Audit and Stress Gate
 
 A verification milestone. The IC-marking path in `src/gc/roots.c`

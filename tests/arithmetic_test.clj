@@ -162,6 +162,61 @@
     (is (= max-int (unchecked-dec min-int)))
     (is (= min-int (unchecked-multiply 2 4611686018427387904)))))
 
+(deftest tagged-int-boundary
+  ;; The internal int representation tags values that fit in 61 signed
+  ;; bits (about +-1.15e18) and boxes anything wider up to the long
+  ;; range. These tests cross the tagged boundary in every fast-lane
+  ;; arith op so the inline encode/decode and the boxed slow path both
+  ;; get exercised. Result *values* are what we observe -- the tag bit
+  ;; is internal -- but UBSan catches every mis-tagged deref.
+  (let [tag-max (- (bit-shift-left 1 60) 1)
+        tag-min (- (bit-shift-left 1 60))
+        tag-max-plus-1 (+' tag-max 1)
+        tag-min-minus-1 (-' tag-min 1)]
+    ;; Values right at the tagged boundary stay int.
+    (is (= :int (type tag-max)))
+    (is (= :int (type tag-min)))
+    ;; inc / dec at the boundary cross to boxed but stay :int -- the
+    ;; constructor's boxed fallback handles the LLONG band beyond the
+    ;; tagged range.
+    (is (= tag-max-plus-1 (inc tag-max)))
+    (is (= tag-min-minus-1 (dec tag-min)))
+    (is (= :int (type (inc tag-max))))
+    (is (= :int (type (dec tag-min))))
+    ;; + / - / * crossing the boundary in either direction.
+    (is (= tag-max-plus-1 (+ tag-max 1)))
+    (is (= tag-min-minus-1 (- tag-min 1)))
+    (is (= -1 (+ tag-max tag-min-minus-1 1)))
+    (is (= tag-max (- tag-max-plus-1 1)))
+    (is (= tag-min (+ tag-min-minus-1 1)))
+    ;; Multiplication inside the tagged range stays inline.
+    (is (= (- tag-max 1) (* 2 (quot (- tag-max 1) 2))))
+    ;; Comparison across the boundary is still correct.
+    (is (< tag-max tag-max-plus-1))
+    (is (> tag-min-minus-1 -1.5e19))
+    (is (= tag-max tag-max))
+    (is (not= tag-max tag-max-plus-1)))
+  ;; INT64_MAX / INT64_MIN boundaries: same overflow rules as JVM
+  ;; Clojure (strict + / inc throw on long overflow). The fast lane
+  ;; must return NULL on these so the prim slow path runs and throws.
+  (let [max-int 9223372036854775807
+        min-int -9223372036854775808]
+    (is (thrown? (inc max-int)))
+    (is (thrown? (dec min-int)))
+    (is (thrown? (+ max-int 1)))
+    (is (thrown? (- min-int 1)))
+    (is (thrown? (* max-int 2)))
+    ;; In-range arithmetic still returns the right value.
+    (is (= max-int (+ (dec max-int) 1)))
+    (is (= min-int (- (inc min-int) 1))))
+  ;; ±1 around tagged + int64 boundaries inside a fn so the BC fast
+  ;; lane runs (top-level uses the tree-walker).
+  (let [tag-max (- (bit-shift-left 1 60) 1)]
+    (is (= tag-max ((fn [n] (+ n 0)) tag-max)))
+    (is (= (+' tag-max 1) ((fn [n] (+ n 1)) tag-max)))
+    (is (= (- tag-max 1) ((fn [n] (dec n)) tag-max)))
+    (is (= tag-max ((fn [n] (inc n)) (- tag-max 1))))))
+
 (deftest scientific-notation-signed-exponents
   (is (float? 1e10))
   (is (float? 1e-10))
