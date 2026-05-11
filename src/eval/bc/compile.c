@@ -77,6 +77,17 @@ typedef struct local {
     int         reg;
 } bc_local_t;
 
+/* The innermost active loop, if any. `entry_pc` is the bytecode offset
+ * to jump back to on (recur ...); `bind_regs[i]` is the register slot
+ * that binding `i` of (loop [b1 v1 ... bN vN]) lives in. n_bindings is
+ * the arity recur must match. The compiler stacks these so a nested
+ * loop's recur targets only the innermost one. */
+typedef struct loop_target {
+    int  entry_pc;
+    int  bind_regs[BC_MAX_LOCALS];
+    int  n_bindings;
+} loop_target_t;
+
 typedef struct compiler {
     mino_state_t      *S;
     mino_env_t        *env;          /* fn's captured env, for macroexpand1 */
@@ -92,6 +103,7 @@ typedef struct compiler {
     int                next_reg;     /* next register to allocate */
     int                n_params;
     int                ok;            /* 0 means decline */
+    loop_target_t     *loop;          /* innermost loop or NULL */
 } compiler_t;
 
 /* ------------------------------------------------------------------- */
@@ -311,35 +323,34 @@ static int is_special_form_name(const char *name)
 static int compile_expr(compiler_t *c, mino_val_t *form, int dst);
 static int compile_body(compiler_t *c, mino_val_t *body, int dst);
 
-/* Pre-scan: does the form tree contain an inner (fn ...) or (fn* ...)
- * literal? When yes, the enclosing fn captures, which forces
- * env-binding of params and bracketing of let scopes with
- * OP_PUSH_ENV / OP_POP_ENV so the inner closures see the right
- * lexical chain. Quote-forms are data, not code -- their inner
- * fn-shaped lists are not closures. */
-static int contains_inner_fn(mino_val_t *form)
+/* Pre-scan: does the form tree contain a form that captures the
+ * current lexical env -- an inner (fn ...) literal or a (lazy-seq ...)
+ * that will realise its body in the env later? When yes, the enclosing
+ * fn sets bc->captures = 1, which forces env-binding of params and
+ * bracketing of let scopes with OP_PUSH_ENV / OP_POP_ENV so any
+ * captured shape sees the right lexical chain. Quote-forms are data,
+ * not code, and don't count. */
+static int contains_env_capture(mino_val_t *form)
 {
     if (form == NULL) return 0;
     if (form->type == MINO_VECTOR) {
         for (size_t i = 0; i < form->as.vec.len; i++) {
-            if (contains_inner_fn(vec_nth(form, i))) return 1;
+            if (contains_env_capture(vec_nth(form, i))) return 1;
         }
         return 0;
     }
     if (form->type == MINO_MAP || form->type == MINO_SET) {
-        /* Conservative: treat as not containing inner fn. Map / set
-         * literals with inner-fn values would be unusual and the
-         * compile-time pre-scan stops at the outermost fn anyway. */
         return 0;
     }
     if (!mino_is_cons(form)) return 0;
     mino_val_t *head = form->as.cons.car;
     if (head != NULL && head->type == MINO_SYMBOL) {
         if (sym_is(head, "fn") || sym_is(head, "fn*")) return 1;
+        if (sym_is(head, "lazy-seq")) return 1;
         if (sym_is(head, "quote") || sym_is(head, "quote*")) return 0;
     }
     while (mino_is_cons(form)) {
-        if (contains_inner_fn(form->as.cons.car)) return 1;
+        if (contains_env_capture(form->as.cons.car)) return 1;
         form = form->as.cons.cdr;
     }
     return 0;
@@ -455,6 +466,128 @@ out:
     c->n_locals = saved_n_locals;
     c->next_reg = saved_next_reg;
     return -1;
+}
+
+static int compile_loop(compiler_t *c, mino_val_t *form, int dst)
+{
+    /* (loop [b1 v1 ...] body) -- like let, but installs a recur target
+     * at the loop entry pc and tracks the binding registers so (recur
+     * v1' ...) can rebind and jump. Plain-symbol bindings only. */
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) { c->ok = 0; return -1; }
+    mino_val_t *bindings = args->as.cons.car;
+    mino_val_t *body     = args->as.cons.cdr;
+    if (bindings == NULL || bindings->type != MINO_VECTOR) {
+        c->ok = 0; return -1;
+    }
+    size_t blen = bindings->as.vec.len;
+    if ((blen & 1) != 0) { c->ok = 0; return -1; }
+    int n_bindings = (int)(blen / 2);
+    if (n_bindings >= BC_MAX_LOCALS) { c->ok = 0; return -1; }
+
+    int saved_n_locals = c->n_locals;
+    int saved_next_reg = c->next_reg;
+    loop_target_t *saved_loop = c->loop;
+    loop_target_t this_loop;
+    this_loop.n_bindings = n_bindings;
+    int pushed_env = 0;
+    if (c->bc->captures) {
+        emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
+        pushed_env = 1;
+    }
+
+    /* Compile initial binding values into successive registers and
+     * record those slots as the recur-rebind targets. */
+    for (int i = 0; i < n_bindings; i++) {
+        mino_val_t *name_form = vec_nth(bindings, (size_t)(i * 2));
+        mino_val_t *val_form  = vec_nth(bindings, (size_t)(i * 2 + 1));
+        if (name_form == NULL || name_form->type != MINO_SYMBOL) {
+            c->ok = 0; goto out;
+        }
+        int reg = alloc_reg(c);
+        if (reg < 0) goto out;
+        if (compile_expr(c, val_form, reg) < 0) goto out;
+        if (!bind_local(c, name_form->as.s.data, reg)) goto out;
+        this_loop.bind_regs[i] = reg;
+        if (pushed_env) {
+            int k = add_const(c, name_form);
+            if (k < 0) goto out;
+            emit_abx(c, OP_ENV_BIND, (unsigned)reg, (unsigned)k);
+        }
+    }
+
+    /* Install recur target only after the initial bindings are in
+     * place. A recur expression in tail position rebinds the loop
+     * slots and jumps to entry_pc. */
+    this_loop.entry_pc = (int)c->bc->code_len;
+    c->loop = &this_loop;
+
+    if (compile_body(c, body, dst) < 0) goto out;
+
+    if (pushed_env) emit_abc(c, OP_POP_ENV, 0, 0, 0);
+    c->loop     = saved_loop;
+    c->n_locals = saved_n_locals;
+    c->next_reg = saved_next_reg;
+    return 0;
+
+out:
+    c->loop     = saved_loop;
+    c->n_locals = saved_n_locals;
+    c->next_reg = saved_next_reg;
+    return -1;
+}
+
+static int compile_recur(compiler_t *c, mino_val_t *form, int dst)
+{
+    (void)dst;
+    if (c->loop == NULL) { c->ok = 0; return -1; }
+    /* Walk the recur args. They must match the loop's binding count.
+     * Evaluate each into a fresh temp register so a recur arg can
+     * reference a loop binding without being clobbered by an earlier
+     * MOVE; only after all temps are filled do we copy them onto the
+     * loop binding slots. */
+    int n = c->loop->n_bindings;
+    mino_val_t *cur = form->as.cons.cdr;
+    int saved_next = c->next_reg;
+    int temp_base  = c->next_reg;
+    for (int i = 0; i < n; i++) {
+        if (!mino_is_cons(cur)) { c->ok = 0; return -1; }
+        int t = alloc_reg(c);
+        if (t < 0) return -1;
+        if (compile_expr(c, cur->as.cons.car, t) < 0) return -1;
+        cur = cur->as.cons.cdr;
+    }
+    if (mino_is_cons(cur)) { c->ok = 0; return -1; }  /* too many */
+    for (int i = 0; i < n; i++) {
+        emit_abc(c, OP_MOVE, (unsigned)c->loop->bind_regs[i],
+                 (unsigned)(temp_base + i), 0);
+    }
+    /* OP_JMP's offset is added to pc after the instruction is fetched. */
+    int off = c->loop->entry_pc - ((int)c->bc->code_len + 1);
+    if (off < INT16_MIN + 0x8000 || off > INT16_MAX - 0x8000) {
+        c->ok = 0; return -1;
+    }
+    emit_abc(c, OP_JMP, 0, 0, 0);
+    /* Patch the offset into the instruction we just emitted. */
+    c->bc->code[c->bc->code_len - 1] = MK_AsBx(OP_JMP, 0, off);
+    c->next_reg = saved_next;
+    return 0;
+}
+
+static int compile_lazy_seq(compiler_t *c, mino_val_t *form, int dst)
+{
+    /* (lazy-seq body...) -- stash the body forms (a list of AST
+     * expressions) in the constant pool and have the runtime build a
+     * MINO_LAZY whose body is that list and whose env is the live
+     * lexical chain. Realisation runs the body via the tree-walker in
+     * the captured env, so the enclosing fn must already publish its
+     * locals into the env (bc->captures = 1, set automatically by the
+     * pre-scan since `lazy-seq` is one of the env-capturing shapes). */
+    mino_val_t *body = form->as.cons.cdr;
+    int k = add_const(c, body);
+    if (k < 0) return -1;
+    emit_abx(c, OP_MAKE_LAZY, (unsigned)dst, (unsigned)k);
+    return 0;
 }
 
 /* Compile an inner (fn ...) or (fn* ...) literal into a child template.
@@ -831,6 +964,10 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
         if (strcmp(name, "def") == 0)   return compile_def(c, form, dst);
         if (strcmp(name, "fn") == 0
             || strcmp(name, "fn*") == 0) return compile_fn_literal(c, form, dst);
+        if (strcmp(name, "loop") == 0
+            || strcmp(name, "loop*") == 0) return compile_loop(c, form, dst);
+        if (strcmp(name, "recur") == 0) return compile_recur(c, form, dst);
+        if (strcmp(name, "lazy-seq") == 0) return compile_lazy_seq(c, form, dst);
 
         /* Other special forms have no compile-time handler yet; decline
          * so the tree-walker picks them up rather than emitting a
@@ -974,7 +1111,7 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     bc->n_regs     = total_param_regs;
     bc->n_params   = n_params;
     bc->has_rest   = has_rest;
-    bc->captures   = contains_inner_fn(fn->as.fn.body);
+    bc->captures   = contains_env_capture(fn->as.fn.body);
     /* Write barrier: fn may already be OLD (top-level defns survive
      * many minor cycles before the first call triggers compile). The
      * just-allocated bc is YOUNG. Without the barrier, the next minor

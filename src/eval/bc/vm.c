@@ -328,6 +328,21 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_MAKE_LAZY: {
+            unsigned a  = A_OF(ins);
+            unsigned bx = Bx_OF(ins);
+            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
+            mino_val_t *body = bc->consts[bx];
+            mino_val_t *lz = alloc_val(S, MINO_LAZY);
+            if (lz == NULL) { ok = 0; goto bc_done; }
+            lz->as.lazy.body     = body;
+            lz->as.lazy.env      = env;
+            lz->as.lazy.cached   = NULL;
+            lz->as.lazy.realized = 0;
+            regs[a] = lz;
+            break;
+        }
+
         case OP_PUSH_ENV: {
             mino_env_t *child = env_child(S, env);
             if (child == NULL) { ok = 0; goto bc_done; }

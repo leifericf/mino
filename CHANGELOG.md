@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.112.0 — Bytecode Loop/Recur and Lazy-Seq
+
+`(loop [...] body)` compiles into a binding scope with a recur
+target installed at the loop entry pc. `(recur ...)` evaluates
+its args into temporaries, moves them onto the loop's binding
+registers, and jumps back to the entry. Nested loops stack the
+recur targets so each `recur` only sees its enclosing `loop`.
+
+`(lazy-seq body...)` stashes the body forms in the constant pool
+and emits `OP_MAKE_LAZY`, which builds a MINO_LAZY whose `.body`
+is the form list and whose `.env` is the live lexical chain at
+the OP_MAKE_LAZY site. Realisation reuses the existing tree-walker
+path; only the construction side is new on the bc dispatch. The
+env-capture pre-scan now recognises `(lazy-seq ...)` alongside
+inner `(fn ...)` literals, so the enclosing fn publishes its
+let-bindings into the env in time for the lazy body to see them.
+
+`(try ...)`, `(throw ...)`, `(binding [...] ...)` stay tree-walked
+for this cycle. Their PUSH/POP-DYN and PUSHCATCH/POPCATCH handlers
+land alongside the tree-walker retirement.
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.111.0 — Bytecode &-Rest and Constant Vectors
 
 Single-arity fns with a trailing `& rest` binding now bc-compile.
