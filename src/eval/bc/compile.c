@@ -57,6 +57,7 @@
 #include "eval/internal.h"
 #include "eval/special_internal.h"  /* build_multi_arity_clauses */
 #include "eval/bc/internal.h"
+#include "prim/internal.h"         /* prim_destructure for let-pattern flatten */
 #include "collections/internal.h"   /* make_fn */
 
 extern mino_val_t *mino_nil(mino_state_t *S);
@@ -544,16 +545,56 @@ static int compile_do(compiler_t *c, mino_val_t *form, int dst, int tail)
     return compile_body(c, body, dst, tail);
 }
 
+/* Walk a let / loop binding vector and return 1 iff every LHS is a
+ * plain MINO_SYMBOL. When this returns 0 the caller can run
+ * prim_destructure on the vector to expand the destructure patterns
+ * into a flat plain-symbol sequence. */
+static int bindings_are_plain(mino_val_t *bindings)
+{
+    if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) return 0;
+    size_t n = bindings->as.vec.len;
+    if ((n & 1) != 0) return 0;
+    for (size_t i = 0; i < n; i += 2) {
+        mino_val_t *lhs = vec_nth(bindings, i);
+        if (lhs == NULL || mino_type_of(lhs) != MINO_SYMBOL) return 0;
+    }
+    return 1;
+}
+
+/* Run prim_destructure on a binding vector to flatten any vector /
+ * map destructure patterns into plain-symbol bindings backed by
+ * synthesized `nth` / `get` calls + gensym intermediates. Returns
+ * NULL on a destructure error (with c->ok cleared so the caller
+ * declines into the tree-walker). */
+static mino_val_t *expand_destructure_bindings(compiler_t *c,
+                                                mino_val_t *bindings)
+{
+    mino_val_t *args = mino_cons(c->S, bindings, mino_nil(c->S));
+    if (args == NULL) { c->ok = 0; return NULL; }
+    mino_val_t *expanded = prim_destructure(c->S, args, c->env);
+    if (expanded == NULL || mino_type_of(expanded) != MINO_VECTOR) {
+        c->ok = 0;
+        return NULL;
+    }
+    return expanded;
+}
+
 static int compile_let(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
-    /* (let [b1 v1 b2 v2 ...] body...) -- plain-symbol bindings only.
-     * Tail position propagates to the body's last expression. */
+    /* (let [b1 v1 b2 v2 ...] body...) -- plain-symbol bindings, or
+     * vector / map destructure patterns which we flatten via
+     * prim_destructure at compile time. Tail position propagates to
+     * the body's last expression. */
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
     mino_val_t *bindings = args->as.cons.car;
     mino_val_t *body     = args->as.cons.cdr;
     if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) {
         c->ok = 0; return -1;
+    }
+    if (!bindings_are_plain(bindings)) {
+        bindings = expand_destructure_bindings(c, bindings);
+        if (bindings == NULL) return -1;
     }
     size_t blen = bindings->as.vec.len;
     if ((blen & 1) != 0) { c->ok = 0; return -1; }
@@ -615,6 +656,14 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
     if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) {
         c->ok = 0; return -1;
     }
+    /* Loop bindings don't strictly need plain symbols at the source
+     * level -- Clojure expands (loop [[a b] [1 2]] ...) too -- but
+     * recur targets must be plain registers, so any destructure
+     * pattern has to expand into `let`-style scaffolding rather than
+     * become a loop binding directly. Decline non-plain bindings;
+     * the rare loop-with-destructure cases fall back to the tree-
+     * walker. */
+    if (!bindings_are_plain(bindings)) { c->ok = 0; return -1; }
     size_t blen = bindings->as.vec.len;
     if ((blen & 1) != 0) { c->ok = 0; return -1; }
     int n_bindings = (int)(blen / 2);
@@ -1615,14 +1664,157 @@ static int params_simple_plain(mino_val_t *params, int *out_n, int *out_rest)
     return 1;
 }
 
+/* Walk the params vector and return 1 iff every fixed-arity slot is
+ * a plain MINO_SYMBOL (and any trailing rest slot is too). Used to
+ * decide whether compile_clause should rewrite the body with a
+ * wrapping let to destructure non-plain params. */
+static int params_all_plain(mino_val_t *params)
+{
+    if (params == NULL || mino_type_of(params) != MINO_VECTOR) return 0;
+    size_t n = params->as.vec.len;
+    for (size_t i = 0; i < n; i++) {
+        mino_val_t *p = vec_nth(params, i);
+        if (p == NULL) return 0;
+        if (mino_type_of(p) != MINO_SYMBOL) return 0;
+    }
+    return 1;
+}
+
+/* Rewrite a destructuring params vector into a pair of:
+ *   - a fresh plain-symbol params vector (gensyms in the non-plain
+ *     slots, originals in the plain slots),
+ *   - a wrapping let whose bindings extract each pattern from its
+ *     matching gensym.
+ *
+ * Used so compile_clause can stay in its plain-symbol-only happy
+ * path. Both & rest-as-destructure and pattern-on-rest decline so
+ * the tree-walker handles those rare shapes. Returns 1 with the
+ * rewritten params / body installed via the out params on success,
+ * 0 on decline. */
+static int rewrite_destructure_params(compiler_t *c, mino_val_t *params,
+                                       mino_val_t *body,
+                                       mino_val_t **out_params,
+                                       mino_val_t **out_body)
+{
+    size_t n = params->as.vec.len;
+    /* Find & to demarcate fixed args from the rest. & must be the
+     * second-to-last entry and its successor must be a plain symbol
+     * (matches the params_simple_plain contract). */
+    size_t amp_pos = SIZE_MAX;
+    for (size_t i = 0; i < n; i++) {
+        mino_val_t *p = vec_nth(params, i);
+        if (p != NULL && mino_type_of(p) == MINO_SYMBOL
+            && strcmp(p->as.s.data, "&") == 0) {
+            if (i != n - 2) return 0;
+            amp_pos = i;
+            break;
+        }
+    }
+    if (amp_pos != SIZE_MAX) {
+        /* Require the rest binding itself to be a plain symbol: we
+         * don't yet rewrite (& [a b]) into nested destructure. */
+        mino_val_t *rest_sym = vec_nth(params, n - 1);
+        if (rest_sym == NULL || mino_type_of(rest_sym) != MINO_SYMBOL) {
+            return 0;
+        }
+    }
+
+    /* Build the new params vector and the let-binding pairs in
+     * parallel. */
+    mino_val_t **new_params_buf = (mino_val_t **)gc_alloc_typed(
+        c->S, GC_T_VALARR, n * sizeof(mino_val_t *));
+    if (new_params_buf == NULL) return 0;
+    /* binding-pairs is built in reverse, then a final pass writes
+     * them in source order into the vector backing the let form. */
+    mino_val_t *acc = mino_nil(c->S);
+    size_t n_pairs = 0;
+    for (size_t i = 0; i < n; i++) {
+        mino_val_t *p = vec_nth(params, i);
+        if (p != NULL && mino_type_of(p) == MINO_SYMBOL) {
+            /* Plain slot -- pass through; & and the rest sym land here. */
+            new_params_buf[i] = p;
+            continue;
+        }
+        /* Destructure pattern -- mint a gensym, push (pattern gensym)
+         * onto the let binding pairs. Same shape as destr_gensym in
+         * src/eval/bindings.c so symbols collide with neither user
+         * code nor the destructure expander's own intermediates. */
+        char    gbuf[64];
+        int     gused;
+        gused = snprintf(gbuf, sizeof(gbuf), "p__%ld__auto__",
+                         ++c->S->gensym_counter);
+        if (gused < 0) return 0;
+        mino_val_t *gs = mino_symbol_n(c->S, gbuf, (size_t)gused);
+        if (gs == NULL) return 0;
+        new_params_buf[i] = gs;
+        acc = mino_cons(c->S, gs, acc);
+        acc = mino_cons(c->S, p, acc);
+        n_pairs += 2;
+    }
+    if (n_pairs == 0) {
+        /* Nothing to rewrite; caller's plain path already handles this. */
+        return 0;
+    }
+    /* Collect the binding-pair list into a vector for the let form. */
+    mino_val_t **bind_buf = (mino_val_t **)gc_alloc_typed(
+        c->S, GC_T_VALARR, n_pairs * sizeof(mino_val_t *));
+    if (bind_buf == NULL) return 0;
+    {
+        mino_val_t *cur = acc;
+        for (size_t i = 0; i < n_pairs; i++) {
+            if (!mino_is_cons(cur)) return 0;
+            bind_buf[i] = cur->as.cons.car;
+            cur = cur->as.cons.cdr;
+        }
+    }
+    mino_val_t *bind_vec = mino_vector(c->S, bind_buf, n_pairs);
+    if (bind_vec == NULL) return 0;
+    /* Wrap body in (let [pat1 g1 pat2 g2 ...] body...). The body is
+     * a cons list of forms; the let needs (let bind-vec body...) so
+     * we cons the bind-vec onto body and prepend `let`. */
+    mino_val_t *let_sym = mino_symbol(c->S, "let");
+    if (let_sym == NULL) return 0;
+    mino_val_t *wrapped = mino_cons(c->S, bind_vec, body);
+    if (wrapped == NULL) return 0;
+    wrapped = mino_cons(c->S, let_sym, wrapped);
+    if (wrapped == NULL) return 0;
+    /* The new body for compile_clause is a single-element list whose
+     * one form is the let. compile_body walks it as (let ...). */
+    mino_val_t *new_body = mino_cons(c->S, wrapped, mino_nil(c->S));
+    if (new_body == NULL) return 0;
+    mino_val_t *new_params = mino_vector(c->S, new_params_buf, n);
+    if (new_params == NULL) return 0;
+    *out_params = new_params;
+    *out_body   = new_body;
+    return 1;
+}
+
 /* Compile a single arity clause (params, body) into the current
  * compile context's code stream, starting at the current code_len.
  * On success, populates *clause and returns 0; the caller is
  * responsible for adding the clause to the bc record's clauses
- * array. Plain-symbol params plus an optional trailing `& rest`. */
+ * array. Plain-symbol params plus an optional trailing `& rest`;
+ * destructure params get rewritten into a wrapping let before we
+ * reach the simple-plain check below. */
 static int compile_clause(compiler_t *c, mino_val_t *params, mino_val_t *body,
                           mino_bc_clause_t *clause)
 {
+    /* Vector params with one or more destructure patterns get
+     * rewritten into plain gensym params + a wrapping let.
+     * Non-vector params (legacy list form, NULL, etc.) and pure
+     * plain-vector params skip the rewrite -- the latter is the hot
+     * path, the former lets params_simple_plain decline below. */
+    if (params != NULL && mino_type_of(params) == MINO_VECTOR
+        && !params_all_plain(params)) {
+        mino_val_t *new_params = NULL;
+        mino_val_t *new_body   = NULL;
+        if (!rewrite_destructure_params(c, params, body,
+                                          &new_params, &new_body)) {
+            return -1;
+        }
+        params = new_params;
+        body   = new_body;
+    }
     int n_params = 0;
     int has_rest = 0;
     if (!params_simple_plain(params, &n_params, &has_rest)) return -1;

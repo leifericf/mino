@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.128.0 — Destructure Bytecode Compilation
+
+Third Phase E tag. The bytecode compiler now accepts destructuring
+patterns in `let` / `loop` bindings and in fn-params; previously
+both shapes declined to the tree-walker.
+
+What changed:
+
+- `compile_let` in `src/eval/bc/compile.c` runs `prim_destructure`
+  on the binding vector when any LHS is non-symbol, flattening the
+  vector / map patterns into plain-symbol bindings backed by
+  synthesized `nth` / `get` calls + gensym intermediates. The
+  remainder of compile_let runs unchanged against the expanded
+  vector, so the entire let-destructure surface (positional,
+  rest, `:as`, nested, `:keys`, `:or` defaults, explicit pair)
+  compiles to bytecode without a separate per-pattern lowering.
+- `compile_clause` rewrites destructuring fn-params by minting a
+  gensym for each non-plain slot and wrapping the body in a `let`
+  whose bindings extract the pattern from its matching gensym.
+  The new params vector reaches `params_simple_plain` as
+  all-plain, so the existing register-stable argv-copy path
+  handles entry, and the wrapping let expands through
+  `compile_let`'s destructure flatten on the way down.
+- `compile_loop` keeps declining destructure patterns: recur
+  targets must be plain registers, so a vector / map pattern on
+  a loop binding has nowhere to land. The rare
+  `(loop [[a b] ...])` form falls back to the tree-walker.
+- Guard added in `compile_clause` so the rewrite path only runs
+  for vector params; legacy list-form fn params and NULL params
+  decline as before.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. New `tests/bc_destructure_test.clj` covers vector
+positional + rest + `:as` + nested, map `:keys` + explicit pair +
+`:or` + `:as`, fn-param destructure mixed with plain params, and
+destructure-around-try-with-throw on both let and fn-param
+surfaces.
+
 ## v0.127.0 — Binding (Dynamic Vars) Bytecode Compilation
 
 Second Phase E tag. The bytecode compiler now emits code for
