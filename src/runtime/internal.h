@@ -57,6 +57,27 @@
 #include <time.h>
 
 /* ------------------------------------------------------------------------- */
+/* Tagged-value debug invariants                                             */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Internal assertion helpers for the pointer-tagged representation
+ * (see mino.h "Pointer-tagged value representation"). Active in
+ * builds with assertions enabled; compile to no-ops under -DNDEBUG.
+ * Runtime-internal; embedders use the public MINO_IS_* / MINO_*_VAL
+ * macros directly.
+ */
+#define MINO_ASSERT_INT(v)            assert(MINO_IS_INT(v))
+#define MINO_ASSERT_PTR(v)            assert(MINO_IS_PTR(v))
+#define MINO_ASSERT_TAGGED_NONNULL(v) assert((v) != NULL)
+
+/* Alignment guard for newly-allocated heap objects: every alloc site
+ * must return a pointer with the low three bits clear, otherwise the
+ * tag scheme silently corrupts. */
+#define MINO_ASSERT_ALIGNED(p) \
+    assert(((uintptr_t)(p) & MINO_TAG_MASK) == 0)
+
+/* ------------------------------------------------------------------------- */
 /* Runtime support types                                                     */
 /* ------------------------------------------------------------------------- */
 

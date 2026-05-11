@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.118.0 — Pointer-Tagged Value Representation: Layout Contract
+
+Header-only change that lands the layout contract for the
+pointer-tagged value representation. No call site uses the new
+macros yet; this tag installs the vocabulary so subsequent tags
+can migrate alloc sites, GC paths, and arithmetic fast lanes one
+chunk at a time.
+
+`mino.h` gains the tag scheme:
+
+```
+tag 000  ->  heap pointer to struct mino_val
+tag 001  ->  inline 61-bit signed int (payload bits 63..3)
+tag 010  ->  reserved for inline BOOL
+tag 011  ->  reserved for inline NIL
+tag 100  ->  reserved for inline CHAR
+tag 101..111  ->  reserved
+```
+
+Public macros: `MINO_TAG_PTR`, `MINO_TAG_INT`, `MINO_TAG_BOOL`,
+`MINO_TAG_NIL`, `MINO_TAG_CHAR`, `MINO_TAG`, `MINO_IS_PTR`,
+`MINO_IS_INT`, `MINO_INT_VAL`, `MINO_MAKE_INT`, plus the 61-bit
+signed range constants `MINO_INT_MAX` and `MINO_INT_MIN`. The
+`MINO_INT_VAL` decode relies on arithmetic right shift of signed
+integers, which C99 6.5.7p5 leaves implementation-defined for
+negative operands; the layout note in the header records that
+every supported toolchain (clang, gcc, msvc on x86_64 and arm64)
+implements it as sign-preserving. 64-bit hosts only.
+
+The header also fixes the stable execution ABI carried across
+the representation rollout: frame layout, register window
+indexing, call/tailcall handoff, and the bailout-to-tree-walker
+contract do not change. Only the in-register and in-memory layout
+of values changes. Prims with the `mino_val_t *args` (cons spine)
+ABI keep that ABI; tagged values flow through every slot
+identically.
+
+`src/runtime/internal.h` gains the runtime-internal debug
+assertion helpers `MINO_ASSERT_INT`, `MINO_ASSERT_PTR`,
+`MINO_ASSERT_TAGGED_NONNULL`, and `MINO_ASSERT_ALIGNED`. They
+compile to no-ops under `-DNDEBUG` and are intended for the
+alloc-site audit and GC adjustments in upcoming tags. No
+production code references them yet.
+
+No tests changed. Release / ASan / UBSan continue to pass; 1557
+tests / 7279 assertions green on all three.
+
 ## v0.117.0 — Bytecode Constant-If Fold And Tail-MOVE Peephole
 
 Two small bytecode compiler optimisations.

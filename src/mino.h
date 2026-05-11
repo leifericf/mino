@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 117
+#define MINO_VERSION_MINOR 118
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -206,6 +206,73 @@ typedef struct mino_vec_node  mino_vec_node_t;   /* opaque to embedders */
 typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque to embedders */
 typedef struct mino_rb_node   mino_rb_node_t;    /* opaque to embedders */
 struct mino_bc_fn;                               /* compiled-fn record, opaque */
+
+/* ------------------------------------------------------------------------- */
+/* Pointer-tagged value representation                                       */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * A mino_val_t* is either a real heap pointer to struct mino_val or an
+ * inline tagged scalar. The three low bits encode which.
+ *
+ *   tag 000 -> heap pointer (alloc guarantees 8-byte alignment; every
+ *              alloc site asserts this in debug builds).
+ *   tag 001 -> inline 61-bit signed int; payload is bits 63..3.
+ *              Range MINO_INT_MIN .. MINO_INT_MAX
+ *              (-2^60 .. 2^60 - 1, ~= +/-1.15e18).
+ *   tag 010 -> reserved for inline BOOL.
+ *   tag 011 -> reserved for inline NIL.
+ *   tag 100 -> reserved for inline CHAR.
+ *   tag 101..111 -> reserved.
+ *
+ * Stable execution ABI: frame layout, register window indexing,
+ * call/tailcall handoff, and bailout-to-tree-walker contract are
+ * unchanged by the tagged representation. Only the in-register /
+ * in-memory layout of values changes. Prims with the
+ * `mino_val_t *args` (cons spine) ABI keep that ABI; tagged values
+ * flow through every slot identically.
+ *
+ * Portability:
+ *   - 64-bit hosts only. mino does not support 32-bit targets.
+ *   - MINO_INT_VAL decode relies on arithmetic right shift of signed
+ *     integers, which C99 6.5.7p5 leaves implementation-defined for
+ *     negative operands. Every supported toolchain (clang, gcc, msvc
+ *     on x86_64 and arm64) implements it as sign-preserving. A port
+ *     to a target with logical right shift will need a sign-extending
+ *     decode instead.
+ */
+
+#define MINO_TAG_BITS  3
+#define MINO_TAG_MASK  ((uintptr_t)0x7)
+
+#define MINO_TAG_PTR   ((uintptr_t)0x0)
+#define MINO_TAG_INT   ((uintptr_t)0x1)
+#define MINO_TAG_BOOL  ((uintptr_t)0x2)
+#define MINO_TAG_NIL   ((uintptr_t)0x3)
+#define MINO_TAG_CHAR  ((uintptr_t)0x4)
+
+#define MINO_TAG(v)    ((uintptr_t)(v) & MINO_TAG_MASK)
+
+/* Heap-pointer test: tag 000 *and* non-NULL. NULL is the runtime's
+ * "no value" sentinel and must not be confused with a heap object. */
+#define MINO_IS_PTR(v) ((v) != NULL && MINO_TAG(v) == MINO_TAG_PTR)
+#define MINO_IS_INT(v) (MINO_TAG(v) == MINO_TAG_INT)
+
+/* 61-bit signed inline-int range. */
+#define MINO_INT_MAX   ((long long)((1ULL << 60) - 1))
+#define MINO_INT_MIN   (-((long long)(1LL << 60)))
+
+/* Encode a 61-bit signed integer as a tagged mino_val_t*. The caller
+ * is responsible for range-checking; out-of-range values silently
+ * wrap. Fast-lane handlers added with the arithmetic migration check
+ * before encoding and fall back to boxed allocation on miss. */
+#define MINO_MAKE_INT(n) \
+    ((mino_val_t *)((uintptr_t)((uint64_t)(long long)(n) << MINO_TAG_BITS) \
+                    | MINO_TAG_INT))
+
+/* Decode the 61-bit signed payload. Sign-extends via arithmetic right
+ * shift (see portability note above). */
+#define MINO_INT_VAL(v) (((long long)(intptr_t)(v)) >> MINO_TAG_BITS)
 
 typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);
