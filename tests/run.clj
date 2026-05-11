@@ -60,6 +60,7 @@
 (require "tests/empty_list_test")
 (require "tests/error_path_test")
 (require "tests/bc_try_catch_test")
+(require "tests/bc_binding_test")
 (require "tests/regex_reentrant_test")
 (require "tests/ifn_test")
 (require "tests/stack_test")

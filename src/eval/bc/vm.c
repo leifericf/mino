@@ -268,6 +268,14 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
     int saved_try_depth        = ctx->try_depth;
     int saved_bc_catch_depth   = ctx->bc_catch_depth;
+    /* Anchor the dyn_stack at fn entry so bc_done can unwind any
+     * OP_PUSHDYN frames that survived an early exit (NULL return /
+     * tail-call sentinel / catch landing). The body either matches
+     * each PUSHDYN with a POPDYN -- the normal path -- or one of
+     * those error paths kicks in and the cleanup below frees the
+     * orphaned frames. Mirrors the longjmp-unwind loop in
+     * control.c's eval_try. */
+    dyn_frame_t       *saved_dyn_stack    = ctx->dyn_stack;
 
     while (pc < bc->code_len) {
         /* Refresh the window pointer every cycle. Any op that can
@@ -597,6 +605,80 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_PUSHDYN: {
+            /* A=base_reg, Bx=names_const_idx
+             *
+             * names_const is a MINO_VECTOR of plain symbols; the
+             * matching binding values live in regs[base..base+N).
+             * Allocates a dyn_frame_t and one dyn_binding_t per name
+             * via malloc -- same lifecycle as eval_binding so a
+             * throw-unwind walking dyn_stack frees them by the same
+             * path. */
+            unsigned a  = A_OF(ins);
+            unsigned bx = Bx_OF(ins);
+            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
+            mino_val_t *names = bc->consts[bx];
+            if (names == NULL || mino_type_of(names) != MINO_VECTOR) {
+                ok = 0; goto bc_done;
+            }
+            size_t n = names->as.vec.len;
+            dyn_binding_t *bhead = NULL;
+            for (size_t i = 0; i < n; i++) {
+                mino_val_t *sym = vec_nth(names, i);
+                if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+                    while (bhead != NULL) {
+                        dyn_binding_t *nxt = bhead->next;
+                        free(bhead); bhead = nxt;
+                    }
+                    ok = 0; goto bc_done;
+                }
+                dyn_binding_t *b = (dyn_binding_t *)malloc(sizeof(*b));
+                if (b == NULL) {
+                    while (bhead != NULL) {
+                        dyn_binding_t *nxt = bhead->next;
+                        free(bhead); bhead = nxt;
+                    }
+                    ok = 0; goto bc_done;
+                }
+                b->name = sym->as.s.data;
+                b->val  = regs[a + (unsigned)i];
+                b->next = bhead;
+                bhead   = b;
+            }
+            dyn_frame_t *frame = (dyn_frame_t *)malloc(sizeof(*frame));
+            if (frame == NULL) {
+                while (bhead != NULL) {
+                    dyn_binding_t *nxt = bhead->next;
+                    free(bhead); bhead = nxt;
+                }
+                ok = 0; goto bc_done;
+            }
+            frame->bindings = bhead;
+            frame->prev     = ctx->dyn_stack;
+            ctx->dyn_stack  = frame;
+            break;
+        }
+
+        case OP_POPDYN: {
+            /* A=count: pop `count` frames off the dyn stack. The body
+             * has finished and matched its PUSHDYN(s); free each
+             * frame's bindings + frame itself. count is encoded so
+             * the compiler can collapse multiple POPDYNs into one in
+             * patterns like (binding [...] (binding [...] body)). */
+            unsigned a = A_OF(ins);
+            if (a == 0) a = 1;
+            for (unsigned i = 0; i < a; i++) {
+                dyn_frame_t *f = ctx->dyn_stack;
+                if (f == NULL || f == saved_dyn_stack) {
+                    ok = 0; goto bc_done;
+                }
+                ctx->dyn_stack = f->prev;
+                dyn_binding_list_free(f->bindings);
+                free(f);
+            }
+            break;
+        }
+
         case OP_THROW: {
             unsigned a = A_OF(ins);
             mino_val_t *exc = regs[a];
@@ -628,6 +710,18 @@ bc_done:
     }
     if (ctx->try_depth > saved_try_depth) {
         ctx->try_depth = saved_try_depth;
+    }
+    /* Unwind any dyn frames that the body PUSHDYN'd but didn't POP --
+     * happens on NULL-return error paths, tail-call sentinel paths,
+     * and catch landing pads (which restore try state but leave the
+     * dyn frames pushed by the failing body). Mirrors the unwind loop
+     * in control.c's eval_try longjmp branch. */
+    while (ctx->dyn_stack != saved_dyn_stack) {
+        dyn_frame_t *f = ctx->dyn_stack;
+        if (f == NULL) break;
+        ctx->dyn_stack = f->prev;
+        dyn_binding_list_free(f->bindings);
+        free(f);
     }
     bc_pop_window(S, base);
     if (!ok) return NULL;

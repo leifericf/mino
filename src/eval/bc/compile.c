@@ -960,6 +960,82 @@ fail:
     return -1;
 }
 
+/* (binding [v1 e1 v2 e2 ...] body...) -- evaluate each binding value
+ * into a fresh register, push a dyn frame whose names match v_i and
+ * whose values are the just-computed registers, run the body, then
+ * pop the frame. The names vector becomes a single constant (a
+ * MINO_VECTOR of plain symbols) referenced by OP_PUSHDYN's Bx.
+ *
+ * Body is non-tail: OP_POPDYN must run after, so a tail-call inside
+ * the body would skip the pop just like inside a try. The wrapping
+ * fn's tail position is still reachable -- when (binding ...) is the
+ * fn's last expression and we POPDYN here, the fn's natural OP_RETURN
+ * follows. */
+static int compile_binding(compiler_t *c, mino_val_t *form, int dst, int tail)
+{
+    (void)tail;
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) { c->ok = 0; return -1; }
+    mino_val_t *binds = args->as.cons.car;
+    mino_val_t *body  = args->as.cons.cdr;
+    if (binds == NULL || mino_type_of(binds) != MINO_VECTOR) {
+        c->ok = 0; return -1;
+    }
+    size_t blen = binds->as.vec.len;
+    if ((blen & 1) != 0) { c->ok = 0; return -1; }
+    int n_pairs = (int)(blen / 2);
+    if (n_pairs == 0) {
+        /* Empty binding form -- semantically (do body). */
+        return compile_body(c, body, dst, tail);
+    }
+
+    int saved_next = c->next_reg;
+
+    /* Build the names vec from binding's even slots. Compile-time
+     * eager validation: each name must be a symbol; otherwise
+     * decline so the tree-walker can produce its richer diagnostic.
+     */
+    mino_val_t **names_buf = (mino_val_t **)gc_alloc_typed(
+        c->S, GC_T_VALARR, (size_t)n_pairs * sizeof(mino_val_t *));
+    if (names_buf == NULL) { c->ok = 0; return -1; }
+    for (int i = 0; i < n_pairs; i++) {
+        mino_val_t *sym = vec_nth(binds, (size_t)(i * 2));
+        if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+            c->ok = 0; goto fail;
+        }
+        names_buf[i] = sym;
+    }
+    mino_val_t *names_vec = mino_vector(c->S, names_buf, (size_t)n_pairs);
+    if (names_vec == NULL) { c->ok = 0; goto fail; }
+    int names_k = add_const(c, names_vec);
+    if (names_k < 0) goto fail;
+
+    /* Allocate a contiguous run of n_pairs registers for the values,
+     * then compile each value form into its slot. The OP_PUSHDYN
+     * reads them in-order so the run must stay packed. */
+    int base_reg = c->next_reg;
+    for (int i = 0; i < n_pairs; i++) {
+        int r = alloc_reg(c);
+        if (r < 0) goto fail;
+        mino_val_t *val_form = vec_nth(binds, (size_t)(i * 2 + 1));
+        if (compile_expr(c, val_form, r, 0) < 0) goto fail;
+    }
+
+    emit_abx(c, OP_PUSHDYN, (unsigned)base_reg, (unsigned)names_k);
+
+    /* Body runs non-tail: OP_POPDYN must follow. */
+    if (compile_body(c, body, dst, 0) < 0) goto fail;
+
+    emit_abc(c, OP_POPDYN, 1, 0, 0);
+
+    c->next_reg = saved_next;
+    return 0;
+
+fail:
+    c->next_reg = saved_next;
+    return -1;
+}
+
 /* Compile an inner (fn ...) or (fn* ...) literal into a child template.
  * The template is a MINO_FN with .params / .body / .bc populated; it
  * lives in the outer fn's constant pool. OP_CLOSURE at runtime copies
@@ -1453,6 +1529,7 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail)
         if (strcmp(name, "lazy-seq") == 0) return compile_lazy_seq(c, form, dst, tail);
         if (strcmp(name, "try") == 0)   return compile_try(c, form, dst, tail);
         if (strcmp(name, "throw") == 0) return compile_throw(c, form, dst, tail);
+        if (strcmp(name, "binding") == 0) return compile_binding(c, form, dst, tail);
 
         /* Other special forms have no compile-time handler yet; decline
          * so the tree-walker picks them up rather than emitting a

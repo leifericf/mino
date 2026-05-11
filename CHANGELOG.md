@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.127.0 — Binding (Dynamic Vars) Bytecode Compilation
+
+Second Phase E tag. The bytecode compiler now emits code for
+`binding`, so dynamic var rebinds inside compiled fn bodies run on
+the BC path instead of declining into the tree-walker.
+
+What changed:
+
+- `OP_PUSHDYN` / `OP_POPDYN` handlers in `src/eval/bc/vm.c`. PUSHDYN
+  takes a base register and a const-pool index that names a vector
+  of plain symbols; it allocates a fresh `dyn_frame_t` and one
+  `dyn_binding_t` per name (same malloc lifecycle as eval_binding
+  in `src/eval/bindings.c`), wires their values from
+  `regs[base..base+N)`, and pushes the frame on the per-thread
+  `dyn_stack`. POPDYN takes a count and pops that many frames.
+- `compile_binding` in `src/eval/bc/compile.c`. The binding values
+  compile into a contiguous register window so PUSHDYN can read
+  them in order; the names vector becomes a single
+  reused-as-needed pool constant. The body is non-tail because
+  POPDYN must follow.
+- `mino_bc_run` anchors the `dyn_stack` pointer at fn entry and
+  unwinds any frames the body PUSHDYN'd but didn't POP at
+  `bc_done`. Matches the longjmp-unwind loop in `eval_try`, so
+  early exits (NULL-return errors, tail-call sentinels, catch
+  landings whose try body wrapped a binding) don't leak frames.
+- `dyn_lookup` is unchanged; the value the BC path pushes is
+  indistinguishable from one the tree-walker pushed, so any
+  resolve path (BC or tree-walker, lexical or ambient) sees the
+  same dynamic value while the binding is in scope.
+
+Verification: 1 567 tests / 7 338 assertions green on release,
+ASan, UBSan. New `tests/bc_binding_test.clj` covers nested
+bindings, bindings around a try with both caught and uncaught
+throws, bindings across fn calls, and the empty-bindings no-op.
+Existing `error_path_test/binding-dynamic-scope` exercises the
+binding-restores-on-exception contract from a regular fn body,
+which now runs through BC.
+
 ## v0.126.0 — Try/Catch/Throw Bytecode Compilation
 
 First Phase E tag. The bytecode compiler now emits code for
