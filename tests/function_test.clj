@@ -60,3 +60,21 @@
   (is (= true ((complement nil?) 42)))
   (is (= false ((complement nil?) nil)))
   (is (= 42 ((constantly 42) :a :b))))
+
+(deftest bc-arity-mismatch-raises
+  ;; A bc-compiled fn called with no matching clause must raise the
+  ;; same diagnostic the tree-walker raises -- a silent NULL return
+  ;; surfaces as "unhandled exception" with no message, hiding the
+  ;; actual problem.
+  (defn m__am ([a] :one) ([a b c] :three))
+  (testing "call with arity 0 raises"
+    (is (thrown? (m__am))))
+  (testing "call with arity 2 raises with the arity message"
+    (is (= "no matching arity for 2 args"
+           (try (m__am 1 2) (catch e (ex-message e))))))
+  (testing "fixed-arity single clause raises on wrong count"
+    (defn s__am [a b] (+ a b))
+    (is (= "no matching arity for 0 args"
+           (try (s__am) (catch e (ex-message e)))))
+    (is (= "no matching arity for 3 args"
+           (try (s__am 1 2 3) (catch e (ex-message e)))))))

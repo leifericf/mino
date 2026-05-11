@@ -15,6 +15,7 @@
 #include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "mino.h"
@@ -259,7 +260,18 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             if (cl->has_rest && argc >= cl->n_params) { match = cl; break; }
         }
     }
-    if (match == NULL) return NULL;
+    if (match == NULL) {
+        /* No matching clause: surface the same MAR002 diagnostic the
+         * tree-walker's dispatch_multi_arity raises so callers see
+         * "no matching arity for N args" instead of a silent NULL
+         * that propagates up as an "unhandled exception" with no
+         * message. */
+        char msg[96];
+        snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "eval/arity", "MAR002", msg);
+        return NULL;
+    }
 
     size_t base = bc_push_window(S, bc->n_regs);
     if (base == (size_t)-1) return NULL;
