@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.144.4 — Build Fix: Suppress gcc's `-Wclobbered` Instead Of `volatile`
+
+The v0.144.2 attempt to silence gcc's `-Wclobbered` by marking
+`mino_bc_run`'s `env` parameter and `rest` local `volatile`
+turned out to miscompile the nested-try-rethrow path on Linux
+gcc (the outer catch handler saw the inner exception instead
+of the rethrown one). Apple clang's codegen for the same source
+was correct without `volatile`. The simpler fix: pass
+`-Wno-clobbered` to the compiler (gated through
+`-Wno-unknown-warning-option` so clang silently ignores it). The
+volatile annotations are reverted; the codegen on both compilers
+now matches the v0.144.0-era source. The `mino_current_ctx`
+inline simplification from v0.144.3 (drop the unused local `t`)
+stays — it is a clean style cleanup independent of the warning.
+
 ## v0.144.3 — Build Fix: Drop Local In `mino_current_ctx`
 
 gcc's `-Werror=clobbered` flagged the local `t` in

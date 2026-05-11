@@ -12,7 +12,14 @@
 # add it to the task runner instead.
 
 CC      ?= cc
-CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -O2
+# -Wno-clobbered silences a gcc-specific false positive in the bytecode VM
+# (mino_bc_run holds locals across setjmp/longjmp pairs; the warning is a
+# heuristic that doesn't reflect whether the value is actually re-read on
+# the longjmp branch). Apple clang doesn't emit this warning at all and
+# doesn't recognise the flag name, so the -Wno-unknown-warning-option
+# pair lets us pass -Wno-clobbered to both compilers without breaking
+# either.
+CFLAGS  ?= -std=c99 -Wall -Wpedantic -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-warning-option -Wno-clobbered -O2
 INCDIRS  = -Isrc -Isrc/public -Isrc/runtime -Isrc/gc -Isrc/eval \
            -Isrc/collections -Isrc/prim -Isrc/async -Isrc/interop \
            -Isrc/diag -Isrc/vendor/imath
