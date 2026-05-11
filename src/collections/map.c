@@ -182,10 +182,16 @@ uint32_t hash_val(const mino_val_t *v)
     case MINO_VECTOR: {
         size_t n = v->as.vec.len;
         size_t i;
+        if (v->as.vec.cached_hash != 0) return v->as.vec.cached_hash;
         h = fnv_mix(h, 0x09);
         for (i = 0; i < n; i++) {
             h = hash_uint32_bytes(h, hash_val(vec_nth(v, i)));
         }
+        /* Cast through const_cast pattern: the value is logically
+         * immutable but the cache field is a memo. Concurrent fills
+         * compute the same value and the write is uint32-atomic on
+         * the platforms mino targets. */
+        ((mino_val_t *)v)->as.vec.cached_hash = h;
         return h;
     }
     case MINO_MAP_ENTRY: {
@@ -204,6 +210,7 @@ uint32_t hash_val(const mino_val_t *v)
         uint32_t acc = 0;
         size_t   n   = v->as.map.len;
         size_t   i;
+        if (v->as.map.cached_hash != 0) return v->as.map.cached_hash;
         for (i = 0; i < n; i++) {
             mino_val_t *key = vec_nth(v->as.map.key_order, i);
             uint32_t    hk  = hash_val(key);
@@ -212,19 +219,24 @@ uint32_t hash_val(const mino_val_t *v)
             acc ^= hk;
         }
         h = fnv_mix(h, 0x0a);
-        return hash_uint32_bytes(h, acc);
+        h = hash_uint32_bytes(h, acc);
+        ((mino_val_t *)v)->as.map.cached_hash = h;
+        return h;
     }
     case MINO_SET: {
         /* XOR-fold of element hashes for order independence. */
         uint32_t acc = 0;
         size_t   n   = v->as.set.len;
         size_t   i;
+        if (v->as.set.cached_hash != 0) return v->as.set.cached_hash;
         for (i = 0; i < n; i++) {
             mino_val_t *elem = vec_nth(v->as.set.key_order, i);
             acc ^= hash_val(elem);
         }
         h = fnv_mix(h, 0x0d);
-        return hash_uint32_bytes(h, acc);
+        h = hash_uint32_bytes(h, acc);
+        ((mino_val_t *)v)->as.set.cached_hash = h;
+        return h;
     }
     case MINO_HANDLE:
         h = fnv_mix(h, 0x0c);

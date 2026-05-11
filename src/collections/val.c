@@ -867,6 +867,36 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return mino_is_nil(a) && mino_is_nil(b);
     }
     if (a == b) return 1;
+    /* Same-type hash-cache short-circuit on the immutable collection
+     * types. Both values are immutable, so once their hash field is
+     * populated it stays correct. A mismatch here means the values
+     * cannot be `=` (the equal-implies-equal-hash invariant) -- skip
+     * the structural compare. We only consult cached hashes that are
+     * ALREADY populated; computing the hash on-demand here would
+     * cost as much as the structural compare for first-time pairs. */
+    if (mino_type_of(a) == mino_type_of(b)) {
+        switch (mino_type_of(a)) {
+        case MINO_VECTOR: {
+            uint32_t ha = a->as.vec.cached_hash;
+            uint32_t hb = b->as.vec.cached_hash;
+            if (ha != 0 && hb != 0 && ha != hb) return 0;
+            break;
+        }
+        case MINO_MAP: {
+            uint32_t ha = a->as.map.cached_hash;
+            uint32_t hb = b->as.map.cached_hash;
+            if (ha != 0 && hb != 0 && ha != hb) return 0;
+            break;
+        }
+        case MINO_SET: {
+            uint32_t ha = a->as.set.cached_hash;
+            uint32_t hb = b->as.set.cached_hash;
+            if (ha != 0 && hb != 0 && ha != hb) return 0;
+            break;
+        }
+        default: break;
+        }
+    }
     if (mino_type_of(a) != mino_type_of(b)) {
         /*
          * Cross-tier integer equality: int and bigint represent the

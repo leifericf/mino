@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 143
+#define MINO_VERSION_MINOR 144
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -356,6 +356,10 @@ struct mino_val {
             size_t           len;      /* visible element count */
             size_t           offset;   /* first visible element (0 unless subvec) */
             size_t           blen;     /* backing total (len+offset when no nesting) */
+            uint32_t         cached_hash; /* hash_val of this vec; 0 = uncomputed.
+                                           * Sound under immutability: once filled,
+                                           * stays correct because the contents
+                                           * never change. */
         } vec;
         struct {          /* MINO_MAP: flatmap (small) or HAMT (large) */
             /* Two representations behind one shape:
@@ -370,11 +374,13 @@ struct mino_val {
             mino_val_t       *key_order; /* MINO_VECTOR of keys, insertion order */
             mino_val_t       *val_order; /* MINO_VECTOR of vals (flatmap), or NULL */
             size_t            len;       /* number of entries */
+            uint32_t          cached_hash; /* hash_val of this map; 0 = uncomputed. */
         } map;
         struct {          /* MINO_SET: HAMT with sentinel values */
             mino_hamt_node_t *root;      /* HAMT root (NULL when len == 0) */
             mino_val_t       *key_order; /* MINO_VECTOR of elements */
             size_t            len;       /* number of elements */
+            uint32_t          cached_hash; /* hash_val of this set; 0 = uncomputed. */
         } set;
         struct {          /* MINO_SORTED_MAP / MINO_SORTED_SET: red-black tree */
             mino_rb_node_t *root;       /* RB tree root (NULL when empty) */

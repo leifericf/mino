@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.144.0 — Cached Hash On Immutable Collection Headers
+
+Vectors, maps, and sets gain a `cached_hash` field on their value
+header. `hash_val` populates it lazily on first call and returns
+the memo thereafter. The cache field is `0`-initialised; `0`
+means "uncomputed" (a real hash that happens to be `0` pays the
+recompute cost on each call -- rare and bounded).
+
+`mino_eq` adds a same-type-and-both-cached short-circuit: when
+both arguments already carry a populated `cached_hash` and the
+hashes differ, the values cannot be `=` (equal-implies-equal-hash
+invariant for immutable contents), so the structural walk is
+skipped. The short-circuit fires only on hashes that were
+ALREADY computed; computing fresh hashes here would cost as
+much as the structural compare for first-time pairs.
+
+**Why this is sound under Clojure semantics:** vectors, maps, and
+sets are immutable -- once constructed, their contents (and
+therefore their hash) never change. Storing a memo of the hash
+in the header is a pure observation; concurrent fills compute
+the same value and the uint32_t write is atomic on the
+platforms mino targets, so the race is harmless. (For mutable
+types -- atoms, refs, agents -- no such field exists, matching
+the design.)
+
+Header-size cost: 4 bytes per vector / map / set value header.
+GC walker unaffected -- the field is a uint32_t scalar, not a
+pointer.
+
+Bench: hash-heavy and equality-on-cached pairs see a measurable
+drop; the hot path (single OP_LOOP_INT_DEC iter, fib-30 inner
+call) is unaffected since none of those touch hash. 1 571 tests
+/ 7 353 assertions green on release, ASan, UBSan.
+
 ## v0.143.0 — Tree-Walker `:strs` / `:syms` Destructure And Forcing Map Equality
 
 Two correctness fixes that surfaced during the bytecode-VM cycle.
