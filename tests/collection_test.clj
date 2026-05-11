@@ -189,3 +189,91 @@
   (is (= #{1 2 3} (into #{} [1 2 2 3])))
   (is (= {:a 1 :b 2} (into {} [[:a 1] [:b 2]])))
   (is (= '(3 2 1) (into (list) [1 2 3]))))
+
+;; --- Small persistent maps ---
+
+(deftest small-map-basic-ops
+  (let [m {:a 1 :b 2 :c 3 :d 4}]
+    (is (= 4 (count m)))
+    (is (= 1 (get m :a)))
+    (is (= 4 (get m :d)))
+    (is (= nil (get m :z)))
+    (is (= :miss (get m :z :miss)))
+    (is (contains? m :b))
+    (is (not (contains? m :z)))))
+
+(deftest small-map-assoc-then-dissoc
+  (let [m0 {:a 1 :b 2 :c 3}
+        m1 (assoc m0 :d 4)
+        m2 (dissoc m1 :b)]
+    (is (= 4 (count m1)))
+    (is (= 4 (get m1 :d)))
+    (is (= 3 (count m2)))
+    (is (= nil (get m2 :b)))
+    (is (= 1 (get m2 :a)))
+    (is (= 3 (count m0)))))
+
+(deftest small-map-mixed-key-types
+  (let [m (assoc {} :kw 1 "str" 2 'sym 3 42 4)]
+    (is (= 4 (count m)))
+    (is (= 1 (get m :kw)))
+    (is (= 2 (get m "str")))
+    (is (= 3 (get m 'sym)))
+    (is (= 4 (get m 42)))))
+
+(deftest map-cross-threshold-growth
+  (let [m (loop [i 0 m {}]
+            (if (< i 12) (recur (+ i 1) (assoc m i (* i 10))) m))]
+    (is (= 12 (count m)))
+    (is (= 0 (get m 0)))
+    (is (= 70 (get m 7)))
+    (is (= 110 (get m 11)))
+    (is (= nil (get m 99)))))
+
+(deftest map-shrink-from-large-keeps-equality
+  (let [big    (loop [i 0 m {}]
+                 (if (< i 12) (recur (+ i 1) (assoc m i i)) m))
+        shrunk (reduce dissoc big [5 6 7 8 9 10 11])
+        flat   (zipmap [0 1 2 3 4] [0 1 2 3 4])]
+    (is (= 5 (count shrunk)))
+    (is (= 0 (get shrunk 0)))
+    (is (= 4 (get shrunk 4)))
+    (is (= nil (get shrunk 5)))
+    (is (= shrunk flat))))
+
+(deftest map-equality-flat-vs-large
+  (let [flat  {:a 1 :b 2 :c 3}
+        large (loop [i 0 m flat]
+                (if (< i 12) (recur (+ i 1) (assoc m (str "k" i) i)) m))
+        large2 (reduce dissoc large (map (fn [i] (str "k" i)) (range 12)))]
+    (is (= flat large2))
+    (is (= (hash flat) (hash large2)))))
+
+(deftest empty-map-ops
+  (is (= 0 (count {})))
+  (is (= nil (get {} :anything)))
+  (is (= {:a 1} (assoc {} :a 1)))
+  (is (= {} (dissoc {} :nope)))
+  (is (= nil (keys {})))
+  (is (= nil (vals {}))))
+
+(deftest small-map-insertion-order
+  (let [m {:z 1 :a 2 :m 3 :b 4}]
+    (is (= '(:z :a :m :b) (keys m)))
+    (is (= '(1 2 3 4) (vals m)))
+    (is (= '([:z 1] [:a 2] [:m 3] [:b 4])
+           (map (fn [e] [(key e) (val e)]) (seq m))))))
+
+(deftest small-map-meta-preservation
+  (let [m (with-meta {:a 1 :b 2} {:tag :small})]
+    (is (= {:tag :small} (meta m)))
+    (is (= {:tag :small} (meta (assoc m :c 3))))
+    (is (= {:tag :small} (meta (dissoc m :a))))))
+
+(deftest large-map-meta-preservation
+  (let [big (loop [i 0 m {}]
+              (if (< i 12) (recur (+ i 1) (assoc m i i)) m))
+        tagged (with-meta big {:tag :large})]
+    (is (= {:tag :large} (meta tagged)))
+    (is (= {:tag :large} (meta (assoc tagged 100 100))))
+    (is (= {:tag :large} (meta (dissoc tagged 5))))))
