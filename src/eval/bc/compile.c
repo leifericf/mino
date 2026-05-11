@@ -727,6 +727,239 @@ static int compile_lazy_seq(compiler_t *c, mino_val_t *form, int dst, int tail)
     return 0;
 }
 
+/* (throw expr) -- evaluate expr into a temp, emit OP_THROW. The handler
+ * does not return; the caller's dst register is left untouched (callers
+ * that need a value here are unreachable past the throw at runtime). */
+static int compile_throw(compiler_t *c, mino_val_t *form, int dst, int tail)
+{
+    (void)dst; (void)tail;
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) { c->ok = 0; return -1; }
+    if (mino_is_cons(args->as.cons.cdr)) { c->ok = 0; return -1; }
+    mino_val_t *arg = args->as.cons.car;
+    int saved_next = c->next_reg;
+    int r = alloc_reg(c);
+    if (r < 0) return -1;
+    if (compile_expr(c, arg, r, 0) < 0) return -1;
+    emit_abc(c, OP_THROW, (unsigned)r, 0, 0);
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* Partition a try form's args into (body... [catch e ...] [finally ...]).
+ * Mirrors partition_try_clauses in src/eval/control.c but pulls only the
+ * shape the BC compiler currently emits: zero-or-one catch clause, an
+ * optional finally clause, both placed after the body forms. Returns 1
+ * on success, 0 to decline (let the tree-walker handle it). */
+typedef struct bc_try_clauses {
+    mino_val_t *body;          /* GC-rooted list of body forms (linear, NULL-terminated cons) */
+    mino_val_t *catch_body;    /* tail of args list after `e` -- not deep-copied */
+    mino_val_t *finally_body;  /* tail of args list after `finally` */
+    int         has_catch;
+    int         has_finally;
+    mino_val_t *catch_var;     /* MINO_SYMBOL: the catch binding name */
+} bc_try_clauses_t;
+
+static int parse_try_clauses(compiler_t *c, mino_val_t *args,
+                             bc_try_clauses_t *out)
+{
+    mino_val_t *body_tail = NULL;
+    mino_val_t *rest      = args;
+
+    out->body         = NULL;
+    out->catch_body   = NULL;
+    out->finally_body = NULL;
+    out->has_catch    = 0;
+    out->has_finally  = 0;
+    out->catch_var    = NULL;
+
+    while (mino_is_cons(rest)) {
+        mino_val_t *clause = rest->as.cons.car;
+        if (mino_is_cons(clause)
+            && sym_is(clause->as.cons.car, "catch")) {
+            if (!mino_is_cons(clause->as.cons.cdr)) { c->ok = 0; return 0; }
+            mino_val_t *cv = clause->as.cons.cdr->as.cons.car;
+            if (cv == NULL || mino_type_of(cv) != MINO_SYMBOL) {
+                c->ok = 0; return 0;
+            }
+            out->catch_var  = cv;
+            out->catch_body = clause->as.cons.cdr->as.cons.cdr;
+            out->has_catch  = 1;
+            rest = rest->as.cons.cdr;
+            continue;
+        }
+        if (mino_is_cons(clause)
+            && sym_is(clause->as.cons.car, "finally")) {
+            out->finally_body = clause->as.cons.cdr;
+            out->has_finally  = 1;
+            rest = rest->as.cons.cdr;
+            continue;
+        }
+        /* Body form. Append to the linked list. */
+        {
+            mino_val_t *cell = mino_cons(c->S, clause, mino_nil(c->S));
+            if (cell == NULL) { c->ok = 0; return 0; }
+            if (body_tail == NULL) {
+                out->body = cell;
+            } else {
+                mino_cons_cdr_set(c->S, body_tail, cell);
+            }
+            body_tail = cell;
+        }
+        rest = rest->as.cons.cdr;
+    }
+    return 1;
+}
+
+/* (try body... [(catch e handler...)] [(finally f...)])
+ *
+ * Three shapes:
+ *   try-no-handlers -- just (do body...).
+ *   try-catch (no finally) -- PUSHCATCH around body; handler binds the
+ *      exception and runs in the catch scope.
+ *   try with finally -- wrap in an outer PUSHCATCH so the finally block
+ *      runs on both normal completion and on an uncaught throw before
+ *      re-raising. When a catch is also present, the inner PUSHCATCH
+ *      handles the body's throw and the outer wraps everything so
+ *      finally runs even on a re-throw from the handler. */
+static int compile_try(compiler_t *c, mino_val_t *form, int dst, int tail)
+{
+    mino_val_t *args = form->as.cons.cdr;
+    bc_try_clauses_t cl;
+    if (!parse_try_clauses(c, args, &cl)) return -1;
+
+    if (!cl.has_catch && !cl.has_finally) {
+        /* Degenerate (try body) -- semantically (do body). Body
+         * inherits tail. */
+        return compile_body(c, cl.body, dst, tail);
+    }
+
+    /* The catch handler's tail position matches our caller's tail
+     * position when there is no finally clause: a value from the
+     * handler is the try's value. When a finally is present, the
+     * handler's result is the value but it has to run through the
+     * finally block before returning, so the handler body isn't in
+     * tail position. */
+    int handler_tail = (!cl.has_finally) ? tail : 0;
+    /* The body must NEVER run in tail position. An OP_TAILCALL inside
+     * the body would return the trampoline sentinel from this fn,
+     * bypassing POPCATCH and pulling the BC catch frame down with it
+     * (bc_done's rollback). Any throw inside the trampolined callee
+     * would then longjmp to an OUTER try, not ours -- semantic break.
+     * Building C stack for recursion in try bodies is the right
+     * trade-off; try bodies aren't typical hot recursion sites. */
+    int body_tail = 0;
+
+    int saved_next = c->next_reg;
+    int saved_locals = c->n_locals;
+
+    if (!cl.has_finally) {
+        /* try + catch (no finally). */
+        int ex_reg = alloc_reg(c);
+        if (ex_reg < 0) goto fail;
+        int push_pos = emit_jmp_placeholder(c, OP_PUSHCATCH, (unsigned)ex_reg);
+        if (push_pos < 0) goto fail;
+        if (compile_body(c, cl.body, dst, body_tail) < 0) goto fail;
+        emit_abc(c, OP_POPCATCH, 0, 0, 0);
+        int end_jmp = emit_jmp_placeholder(c, OP_JMP, 0);
+        if (end_jmp < 0) goto fail;
+        /* Handler entry: ex_reg holds the normalized exception. */
+        patch_jmp(c, push_pos);
+        if (c->bc->captures) {
+            emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
+        }
+        if (!bind_local(c, cl.catch_var->as.s.data, ex_reg)) goto fail;
+        if (c->bc->captures) {
+            int k = add_const(c, cl.catch_var);
+            if (k < 0) goto fail;
+            emit_abx(c, OP_ENV_BIND, (unsigned)ex_reg, (unsigned)k);
+        }
+        if (compile_body(c, cl.catch_body, dst, handler_tail) < 0) goto fail;
+        if (c->bc->captures) {
+            emit_abc(c, OP_POP_ENV, 0, 0, 0);
+        }
+        patch_jmp(c, end_jmp);
+        c->n_locals = saved_locals;
+        c->next_reg = saved_next;
+        return 0;
+    }
+
+    /* Finally is involved. Outer try frame catches re-throws (or
+     * uncaught body throws when there is no catch) so finally runs on
+     * every exit path. The thrown value lands in outer_ex_reg; the
+     * inner handler binding (when a catch is present) lives in
+     * inner_ex_reg. */
+    int outer_ex_reg = alloc_reg(c);
+    if (outer_ex_reg < 0) goto fail;
+    int outer_push = emit_jmp_placeholder(c, OP_PUSHCATCH,
+                                           (unsigned)outer_ex_reg);
+    if (outer_push < 0) goto fail;
+
+    if (cl.has_catch) {
+        int inner_ex_reg = alloc_reg(c);
+        if (inner_ex_reg < 0) goto fail;
+        int inner_push = emit_jmp_placeholder(c, OP_PUSHCATCH,
+                                               (unsigned)inner_ex_reg);
+        if (inner_push < 0) goto fail;
+        if (compile_body(c, cl.body, dst, body_tail) < 0) goto fail;
+        emit_abc(c, OP_POPCATCH, 0, 0, 0);
+        int after_inner = emit_jmp_placeholder(c, OP_JMP, 0);
+        if (after_inner < 0) goto fail;
+        patch_jmp(c, inner_push);
+        if (c->bc->captures) {
+            emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
+        }
+        int catch_locals = c->n_locals;
+        if (!bind_local(c, cl.catch_var->as.s.data, inner_ex_reg)) goto fail;
+        if (c->bc->captures) {
+            int k = add_const(c, cl.catch_var);
+            if (k < 0) goto fail;
+            emit_abx(c, OP_ENV_BIND, (unsigned)inner_ex_reg, (unsigned)k);
+        }
+        if (compile_body(c, cl.catch_body, dst, 0) < 0) goto fail;
+        if (c->bc->captures) {
+            emit_abc(c, OP_POP_ENV, 0, 0, 0);
+        }
+        c->n_locals = catch_locals;
+        patch_jmp(c, after_inner);
+    } else {
+        /* No catch, just finally. Body executes inside the outer try. */
+        if (compile_body(c, cl.body, dst, body_tail) < 0) goto fail;
+    }
+
+    emit_abc(c, OP_POPCATCH, 0, 0, 0);
+    /* Normal-completion finally. Result register is a throwaway -- the
+     * finally body's value is discarded. */
+    {
+        int throwaway = alloc_reg(c);
+        if (throwaway < 0) goto fail;
+        if (compile_body(c, cl.finally_body, throwaway, 0) < 0) goto fail;
+        c->next_reg = throwaway;  /* free the throwaway */
+    }
+    int end_jmp = emit_jmp_placeholder(c, OP_JMP, 0);
+    if (end_jmp < 0) goto fail;
+
+    /* Outer-handler entry: a throw reached here. Run finally, then
+     * re-raise the original exception. */
+    patch_jmp(c, outer_push);
+    {
+        int throwaway = alloc_reg(c);
+        if (throwaway < 0) goto fail;
+        if (compile_body(c, cl.finally_body, throwaway, 0) < 0) goto fail;
+    }
+    emit_abc(c, OP_THROW, (unsigned)outer_ex_reg, 0, 0);
+
+    patch_jmp(c, end_jmp);
+    c->n_locals = saved_locals;
+    c->next_reg = saved_next;
+    return 0;
+
+fail:
+    c->n_locals = saved_locals;
+    c->next_reg = saved_next;
+    return -1;
+}
+
 /* Compile an inner (fn ...) or (fn* ...) literal into a child template.
  * The template is a MINO_FN with .params / .body / .bc populated; it
  * lives in the outer fn's constant pool. OP_CLOSURE at runtime copies
@@ -1218,6 +1451,8 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail)
             || strcmp(name, "loop*") == 0) return compile_loop(c, form, dst, tail);
         if (strcmp(name, "recur") == 0) return compile_recur(c, form, dst, tail);
         if (strcmp(name, "lazy-seq") == 0) return compile_lazy_seq(c, form, dst, tail);
+        if (strcmp(name, "try") == 0)   return compile_try(c, form, dst, tail);
+        if (strcmp(name, "throw") == 0) return compile_throw(c, form, dst, tail);
 
         /* Other special forms have no compile-time handler yet; decline
          * so the tree-walker picks them up rather than emitting a

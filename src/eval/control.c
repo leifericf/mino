@@ -89,8 +89,11 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
 
 /* normalize_exception -- ensure the value passed to a catch handler is
  * a structured diagnostic map (has :mino/kind). Strings, plain values,
- * and partial maps are wrapped; already-diagnostic maps pass through. */
-static mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
+ * and partial maps are wrapped; already-diagnostic maps pass through.
+ * Shared with the bytecode VM's OP_PUSHCATCH landing pad so a caught
+ * exception arrives at the BC handler in the same shape as the tree-
+ * walker's catch binding. */
+mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
 {
     mino_val_t *keys[5], *vals[5];
     if (mino_type_of(ex_val) == MINO_MAP

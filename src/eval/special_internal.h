@@ -60,6 +60,7 @@ mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,
 /* control.c */
 mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
                      mino_val_t *args, mino_env_t *env, int tail);
+mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val);
 
 /* fn.c */
 mino_val_t *eval_fn(mino_state_t *S, mino_val_t *form,

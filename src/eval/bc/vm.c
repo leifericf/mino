@@ -12,6 +12,7 @@
  * compile time; redefinition stays visible.
  */
 
+#include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -19,6 +20,7 @@
 #include "mino.h"
 #include "runtime/internal.h"       /* mino_state_t, gc_alloc_typed, GC_T_VALARR */
 #include "eval/internal.h"          /* eval_impl, apply_callable */
+#include "eval/special_internal.h"  /* normalize_exception for OP_PUSHCATCH */
 #include "eval/bc/internal.h"
 #include "collections/internal.h"   /* make_fn */
 #include "prim/internal.h"          /* binary arith prim_* on bc fast-lane miss */
@@ -255,6 +257,17 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     size_t pc = (size_t)match->entry_pc;
     mino_val_t *retval = NULL;
     int ok = 1;
+
+    /* Save the try-state snapshot at fn entry so any abnormal exit
+     * (early goto bc_done while a PUSHCATCH is still live, or a fn
+     * that body-faults inside a try) rolls bc_catch_depth and
+     * try_depth back to where they were before this fn ran. A
+     * leaked frame would leave a stale setjmp landing pad pointing
+     * into this stack frame after we return, and the next longjmp
+     * up the chain would jump to garbage. */
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    int saved_try_depth        = ctx->try_depth;
+    int saved_bc_catch_depth   = ctx->bc_catch_depth;
 
     while (pc < bc->code_len) {
         /* Refresh the window pointer every cycle. Any op that can
@@ -520,6 +533,86 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_PUSHCATCH: {
+            unsigned a  = A_OF(ins);
+            int off     = sBx_OF(ins);
+            int td      = ctx->try_depth;
+            size_t hpc  = (size_t)((long)pc + off);
+            if (td >= MAX_TRY_DEPTH
+                || ctx->bc_catch_depth >= MAX_TRY_DEPTH) {
+                ok = 0; goto bc_done;
+            }
+            /* Record the BC-side resume state BEFORE the setjmp call.
+             * The longjmp-return branch only reads from S/ctx; no
+             * post-setjmp writes need to survive the longjmp. */
+            ctx->bc_catch_stack[ctx->bc_catch_depth].handler_pc        = hpc;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].reg_window_base   = base;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].try_depth_at_push = td;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].ex_reg            = a;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].env_at_push       = env;
+            ctx->bc_catch_depth++;
+
+            ctx->try_stack[td].exception      = NULL;
+            ctx->try_stack[td].saved_ns       = S->current_ns;
+            ctx->try_stack[td].saved_ambient  = S->fn_ambient_ns;
+            ctx->try_stack[td].saved_load_len = S->load_stack_len;
+
+            if (setjmp(ctx->try_stack[td].buf) == 0) {
+                /* Normal entry: arm the try frame and run the body. */
+                ctx->try_depth = td + 1;
+            } else {
+                /* longjmp landed here: a throw inside the body (BC or
+                 * tree-walker callee) targeted our setjmp. Recover the
+                 * VM state from the catch entry, drop the try frame,
+                 * stash the normalized exception in ex_reg, and resume
+                 * at the handler pc. Locals modified between setjmp
+                 * and longjmp (pc, env, regs, retval, ok) are
+                 * overwritten here; base / bc / code / match never
+                 * change after fn entry so they survive untouched. */
+                int d = --ctx->bc_catch_depth;
+                mino_val_t *ex = ctx->try_stack[td].exception;
+                S->current_ns    = ctx->try_stack[td].saved_ns;
+                S->fn_ambient_ns = ctx->try_stack[td].saved_ambient;
+                load_stack_truncate(S, ctx->try_stack[td].saved_load_len);
+                ctx->try_depth = ctx->bc_catch_stack[d].try_depth_at_push;
+                pc      = ctx->bc_catch_stack[d].handler_pc;
+                env     = ctx->bc_catch_stack[d].env_at_push;
+                regs    = S->bc_regs + base;
+                regs[ctx->bc_catch_stack[d].ex_reg] =
+                    normalize_exception(S, ex);
+                retval  = NULL;
+                ok      = 1;
+                clear_error(S);
+            }
+            break;
+        }
+
+        case OP_POPCATCH: {
+            if (ctx->bc_catch_depth <= saved_bc_catch_depth
+                || ctx->try_depth <= saved_try_depth) {
+                ok = 0; goto bc_done;
+            }
+            ctx->bc_catch_depth--;
+            ctx->try_depth--;
+            break;
+        }
+
+        case OP_THROW: {
+            unsigned a = A_OF(ins);
+            mino_val_t *exc = regs[a];
+            if (ctx->try_depth > 0) {
+                ctx->try_stack[ctx->try_depth - 1].exception = exc;
+                longjmp(ctx->try_stack[ctx->try_depth - 1].buf, 1);
+                /* unreachable */
+            }
+            /* No enclosing try -- format as fatal user error and bail
+             * through the standard error path. */
+            prim_throw_classified(S, "user", "MUS001",
+                "unhandled exception (no try)");
+            ok = 0;
+            goto bc_done;
+        }
+
         default:
             ok = 0;
             goto bc_done;
@@ -527,6 +620,15 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     }
 
 bc_done:
+    /* Roll any BC catch frames that survived back so the try_stack is
+     * exactly as it was at fn entry. Normal POPCATCH paths balance the
+     * count on their own; this only kicks in on error / unwind paths. */
+    if (ctx->bc_catch_depth > saved_bc_catch_depth) {
+        ctx->bc_catch_depth = saved_bc_catch_depth;
+    }
+    if (ctx->try_depth > saved_try_depth) {
+        ctx->try_depth = saved_try_depth;
+    }
     bc_pop_window(S, base);
     if (!ok) return NULL;
     return retval != NULL ? retval : mino_nil(S);

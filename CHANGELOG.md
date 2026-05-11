@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.126.0 — Try/Catch/Throw Bytecode Compilation
+
+First Phase E tag. The bytecode compiler now emits code for
+`try`/`catch`/`finally`/`throw` instead of declining; programs that
+use exception handling can run on the BC fast path without falling
+back to the tree-walker.
+
+What changed:
+
+- `OP_PUSHCATCH`, `OP_POPCATCH`, `OP_THROW` handlers in
+  `src/eval/bc/vm.c`. `OP_PUSHCATCH` does a `setjmp` into the
+  shared `try_stack` entry (the same buffer prim throws longjmp
+  into), and records the BC-side resume state — handler pc,
+  register window base, env at push, exception register — in a
+  parallel `bc_catch_stack` on `mino_thread_ctx_t`. A longjmp
+  landing at this setjmp pops the entry, restores env/regs, drops
+  the try frame, normalizes the exception into the handler's
+  binding register, and resumes at the handler pc.
+- `compile_try` / `compile_throw` in `src/eval/bc/compile.c`.
+  Three shapes covered: try-no-handler (degenerates to `do`),
+  try+catch (no finally), and try with finally (with or without
+  catch). The finally shape wraps in an outer `OP_PUSHCATCH` so
+  the cleanup runs on both normal completion and re-thrown paths;
+  on the rethrow path the original exception is preserved in its
+  reserved register and an `OP_THROW` re-raises it after the
+  finally body.
+- `mino_bc_run` saves `try_depth` / `bc_catch_depth` at fn entry
+  and rolls them back at `bc_done`, so any early-exit path
+  (recoverable error, tail-call sentinel) that leaves a `try`
+  partway through cannot leak a stale `setjmp` landing pad onto
+  the outer C-stack frame's slot.
+- Body of a `try` never compiles in tail position. An
+  `OP_TAILCALL` inside the body would return the trampoline
+  sentinel from this fn, bypassing `OP_POPCATCH` and pulling the
+  BC catch frame down with it (the bc_done rollback); a throw in
+  the trampolined callee would then longjmp to the wrong frame.
+  Handler bodies still tail-call freely — by the time a handler
+  runs the BC catch frame is already popped in the landing pad.
+- `normalize_exception` in `src/eval/control.c` exposed via
+  `eval/special_internal.h` so the BC landing pad shapes the
+  caught value the same way the tree-walker does (structured
+  diagnostic map with `:mino/kind` / `:mino/code` / `:mino/data`).
+
+Verification: full test suite (1 558 / 7 306) green on release,
+ASan, UBSan. Throw + catch through nested BC frames, throws from
+prim-called C code unwinding through a BC try, re-throws inside
+catch handlers, and finally-on-uncaught all exercised by the
+existing `error_path_test`, `dialect_test`, and `async_*_test`
+suites — they previously declined into the tree-walker; they now
+run on BC.
+
 ## v0.125.0 — Arith Fast-Lane Direct Tag Extraction
 
 The Phase D payload. `binop_int_fast` and `unop_int_fast` in

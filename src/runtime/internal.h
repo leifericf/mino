@@ -356,6 +356,26 @@ typedef struct mino_thread_ctx {
     try_frame_t     try_stack[MAX_TRY_DEPTH];
     int             try_depth;
 
+    /* Bytecode-VM catch frames. Parallel to try_stack, recording the
+     * BC-side state (handler pc, register window base, env at entry,
+     * exception register) that a longjmp landing at OP_PUSHCATCH's
+     * setjmp needs to resume execution at the matching handler.
+     * bc_catch_depth indexes the topmost active BC catch entry. When
+     * the longjmp originates from a tree-walker `try` that interleaves
+     * BC frames, the BC entry's try_depth_at_push is compared against
+     * the active try_depth so a stray longjmp doesn't pick up the wrong
+     * handler. Plain int + size_t members -- no GC-reachable refs (the
+     * thrown value lives in try_stack[..].exception, already a GC root
+     * via gc_mark_runtime_globals). */
+    struct {
+        size_t   handler_pc;
+        size_t   reg_window_base;
+        int      try_depth_at_push;
+        unsigned ex_reg;
+        struct mino_env *env_at_push;
+    } bc_catch_stack[MAX_TRY_DEPTH];
+    int             bc_catch_depth;
+
     /* Error reporting: text buffer + structured diagnostic + frame stack. */
     char            error_buf[2048];
     mino_diag_t    *last_diag;
