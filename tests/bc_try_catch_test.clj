@@ -84,3 +84,27 @@
                             (catch e (ex-data e)))]
                  r))
     (is (= {:k :v} (t)))))
+
+(deftest bc-try-depth-cap-reports
+  ;; A recursive (try ...) that hits MAX_TRY_DEPTH must surface a
+  ;; throwable diagnostic so the nearest live catch gets a message,
+  ;; instead of NULL propagating silently up the whole stack.
+  (testing "deep recursive try is caught by next live catch"
+    (defn rec__td [n]
+      (if (zero? n) :done
+          (try (rec__td (dec n)) (catch e :err))))
+    ;; well under the cap completes normally
+    (is (= :done (rec__td 60)))
+    ;; deep call hits the cap; the next live try's catch fires (with
+    ;; my fix, set_eval_diag throws into the surrounding try); before
+    ;; the fix this returned NULL silently
+    (is (= :err (rec__td 200))))
+  (testing "MLM002 message visible when no inner catch swallows it"
+    (defn rec__td2 [n]
+      (if (zero? n) :done
+          (try (rec__td2 (dec n))
+               (catch e
+                 ;; Re-throw so the message stays observable.
+                 (throw e)))))
+    (is (= "try nesting too deep"
+           (try (rec__td2 200) (catch e (ex-message e)))))))

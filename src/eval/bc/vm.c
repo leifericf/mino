@@ -932,6 +932,13 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             size_t hpc  = (size_t)((long)pc + off);
             if (td >= MAX_TRY_DEPTH
                 || ctx->bc_catch_depth >= MAX_TRY_DEPTH) {
+                /* Surface the same MLM002 diagnostic the tree-walker
+                 * raises at this cap. Without the explicit set, a
+                 * deeply recursive `(try ... (catch ...))` body just
+                 * unwinds with no message and the user sees a silent
+                 * NULL. */
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "limit", "MLM002", "try nesting too deep");
                 ok = 0; goto bc_done;
             }
             /* Record the BC-side resume state BEFORE the setjmp call.
