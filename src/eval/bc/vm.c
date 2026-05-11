@@ -78,6 +78,37 @@ static mino_val_t *args_from_regs(mino_state_t *S, mino_val_t **regs,
     return list;
 }
 
+/* Integer fast-lane for unary inc / dec / zero?. Returns NULL on a type
+ * miss or overflow; the dispatcher then falls back to the cons-spine
+ * prim with the same ABI as a regular OP_CALL miss. */
+static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
+                                 unsigned subop)
+{
+    if (v == NULL || v->type != MINO_INT) return NULL;
+    long long a = v->as.i;
+    long long r;
+    switch (subop) {
+    case UNOP_INC:
+#if defined(__GNUC__) || defined(__clang__)
+        if (__builtin_saddll_overflow(a, 1, &r)) return NULL;
+#else
+        r = a + 1;
+#endif
+        return mino_int(S, r);
+    case UNOP_DEC:
+#if defined(__GNUC__) || defined(__clang__)
+        if (__builtin_ssubll_overflow(a, 1, &r)) return NULL;
+#else
+        r = a - 1;
+#endif
+        return mino_int(S, r);
+    case UNOP_ZERO_P:
+        return (a == 0) ? mino_true(S) : mino_false(S);
+    default:
+        return NULL;
+    }
+}
+
 /* Integer fast-lane for OP_BINOP_INT. Identical dispatch shape to the
  * v0.103.0 eval-side fast path; returns NULL on type mismatch or
  * overflow so the VM can bail to the tree-walker fallback. */
@@ -414,6 +445,32 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 mino_val_t *list = mino_nil(S);
                 list = mino_cons(S, regs[c], list);
                 if (list == NULL) { ok = 0; goto bc_done; }
+                list = mino_cons(S, regs[b], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                r = fallback(S, list, env);
+                if (r == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+            }
+            regs[a] = r;
+            break;
+        }
+
+        case OP_INC_I:
+        case OP_DEC_I:
+        case OP_ZERO_INT_P: {
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned subop;
+            mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
+            switch (op) {
+            case OP_INC_I:      subop = UNOP_INC;    fallback = prim_inc;    break;
+            case OP_DEC_I:      subop = UNOP_DEC;    fallback = prim_dec;    break;
+            case OP_ZERO_INT_P: subop = UNOP_ZERO_P; fallback = prim_zero_p; break;
+            default: ok = 0; goto bc_done;
+            }
+            mino_val_t *r = unop_int_fast(S, regs[b], subop);
+            if (r == NULL) {
+                mino_val_t *list = mino_nil(S);
                 list = mino_cons(S, regs[b], list);
                 if (list == NULL) { ok = 0; goto bc_done; }
                 r = fallback(S, list, env);

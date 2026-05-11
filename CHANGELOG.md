@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.115.0 — Bytecode Tail-Position Propagation And Unary Int Fast Lanes
+
+The bc compiler now propagates tail position through `if`, `do`,
+`let`, and `loop`. Any call sitting in a control-form's tail
+slot -- including the recursive call inside `(if cond done
+(recur ...))` and the cross-fn tail call in
+`(defn f [n] (if (= n 0) :done (f (- n 1))))` -- emits
+`OP_TAILCALL` and reuses the apply_callable trampoline, keeping
+the C stack flat across arbitrary recursion depth.
+
+The same change exposed two latent encoder bugs that had been
+silently masking bytecode coverage. The bias-encoded jump-offset
+bounds in `patch_jmp` and the `recur` back-jump emitter both
+read `INT16_MIN + 0x8000` (= 0) and `INT16_MAX - 0x8000` (= -1),
+so every conditional branch declined bytecode compilation and
+landed back on the tree-walker. The correct bounds
+(`-0x8000..0x7FFF`) replace them; every `if`-bodied fn now runs
+through the VM as intended.
+
+Three unary int fast-lane opcodes -- `OP_INC_I`, `OP_DEC_I`,
+`OP_ZERO_INT_P` -- join the eight binary lanes from the prior
+release. The compiler emits them for `(inc x)`, `(dec x)`, and
+`(zero? x)` when the head resolves to the non-local non-macro
+prim; on a type miss the handler falls back to `prim_inc` /
+`prim_dec` / `prim_zero_p` via the same cons-spine ABI as a
+regular `OP_CALL`. The `!tail` gate on both unary and binary
+fast lanes is gone: speculation produces a value that the
+surrounding `OP_RETURN` carries out, with no trampoline
+indirection.
+
+The 10M `(inc i)(dec j)` tight-loop probe drops from ~4.7s to
+~1.2s. Self-tail recursion at depth 100000 (`(defn countdown
+[n] (if (= n 0) :done (countdown (- n 1))))`) now runs flat
+through the VM trampoline instead of overflowing the C stack.
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.114.0 — Bytecode Speculative Int+Int Fast Lanes
 
 The bc compiler emits per-op specialised opcodes -- `OP_ADD_II`,

@@ -198,9 +198,10 @@ static void patch_jmp(compiler_t *c, int pos)
 {
     if (pos < 0 || (size_t)pos >= c->bc->code_len) { c->ok = 0; return; }
     /* The jump offset is added to pc AFTER the instruction is fetched,
-     * so the natural "fall-through here" offset is code_len - (pos+1). */
+     * so the natural "fall-through here" offset is code_len - (pos+1).
+     * Bias-encoded as 16-bit unsigned (+0x8000): valid -0x8000..0x7FFF. */
     int off = (int)c->bc->code_len - (pos + 1);
-    if (off < INT16_MIN + 0x8000 || off > INT16_MAX - 0x8000) {
+    if (off < -0x8000 || off > 0x7FFF) {
         c->ok = 0;
         return;
     }
@@ -319,9 +320,12 @@ static int is_special_form_name(const char *name)
     return 0;
 }
 
-/* Forward declarations. */
-static int compile_expr(compiler_t *c, mino_val_t *form, int dst);
-static int compile_body(compiler_t *c, mino_val_t *body, int dst);
+/* Forward declarations. `tail` is 1 when the result of this expression
+ * is the fn's return value; control forms (if/do/let) propagate it to
+ * their inner tail position so a nested call there emits OP_TAILCALL
+ * and goes through the trampoline (constant C stack). */
+static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail);
+static int compile_body(compiler_t *c, mino_val_t *body, int dst, int tail);
 
 /* Pre-scan: does the form tree contain a form that captures the
  * current lexical env -- an inner (fn ...) literal or a (lazy-seq ...)
@@ -360,9 +364,11 @@ static int contains_env_capture(mino_val_t *form)
 /* Special-form compilers                                              */
 /* ------------------------------------------------------------------- */
 
-static int compile_if(compiler_t *c, mino_val_t *form, int dst)
+static int compile_if(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
-    /* (if cond then) or (if cond then else) */
+    /* (if cond then) or (if cond then else). When `tail` is set, the
+     * value of the chosen branch is the fn's result, so each branch
+     * inherits the tail position from us. */
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
     mino_val_t *cond_form = args->as.cons.car;
@@ -379,13 +385,13 @@ static int compile_if(compiler_t *c, mino_val_t *form, int dst)
     int saved_next = c->next_reg;
     int cond_reg = alloc_reg(c);
     if (cond_reg < 0) return -1;
-    if (compile_expr(c, cond_form, cond_reg) < 0) return -1;
+    if (compile_expr(c, cond_form, cond_reg, 0) < 0) return -1;
     c->next_reg = saved_next;
 
     int jmp_to_else = emit_jmp_placeholder(c, OP_JMPIFNOT, (unsigned)cond_reg);
     if (jmp_to_else < 0) return -1;
 
-    if (compile_expr(c, then_form, dst) < 0) return -1;
+    if (compile_expr(c, then_form, dst, tail) < 0) return -1;
 
     int jmp_to_end = emit_jmp_placeholder(c, OP_JMP, 0);
     if (jmp_to_end < 0) return -1;
@@ -393,7 +399,7 @@ static int compile_if(compiler_t *c, mino_val_t *form, int dst)
     patch_jmp(c, jmp_to_else);
 
     if (else_form != NULL) {
-        if (compile_expr(c, else_form, dst) < 0) return -1;
+        if (compile_expr(c, else_form, dst, tail) < 0) return -1;
     } else {
         /* (if cond then) without else: result is nil. */
         int k = add_const(c, mino_nil(c->S));
@@ -405,16 +411,18 @@ static int compile_if(compiler_t *c, mino_val_t *form, int dst)
     return 0;
 }
 
-static int compile_do(compiler_t *c, mino_val_t *form, int dst)
+static int compile_do(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
-    /* (do e1 e2 ... eN) -> eval each, result is eN. Empty (do) -> nil. */
+    /* (do e1 e2 ... eN) -> eval each, result is eN. Empty (do) -> nil.
+     * Tail position propagates to the last expression. */
     mino_val_t *body = form->as.cons.cdr;
-    return compile_body(c, body, dst);
+    return compile_body(c, body, dst, tail);
 }
 
-static int compile_let(compiler_t *c, mino_val_t *form, int dst)
+static int compile_let(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
-    /* (let [b1 v1 b2 v2 ...] body...) -- plain-symbol bindings only. */
+    /* (let [b1 v1 b2 v2 ...] body...) -- plain-symbol bindings only.
+     * Tail position propagates to the body's last expression. */
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
     mino_val_t *bindings = args->as.cons.car;
@@ -446,7 +454,7 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst)
         }
         int reg = alloc_reg(c);
         if (reg < 0) goto out;
-        if (compile_expr(c, val_form, reg) < 0) goto out;
+        if (compile_expr(c, val_form, reg, 0) < 0) goto out;
         if (!bind_local(c, name_form->as.s.data, reg)) goto out;
         if (pushed_env) {
             int k = add_const(c, name_form);
@@ -455,7 +463,7 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst)
         }
     }
 
-    if (compile_body(c, body, dst) < 0) goto out;
+    if (compile_body(c, body, dst, tail) < 0) goto out;
 
     if (pushed_env) emit_abc(c, OP_POP_ENV, 0, 0, 0);
     c->n_locals = saved_n_locals;
@@ -468,11 +476,13 @@ out:
     return -1;
 }
 
-static int compile_loop(compiler_t *c, mino_val_t *form, int dst)
+static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     /* (loop [b1 v1 ...] body) -- like let, but installs a recur target
      * at the loop entry pc and tracks the binding registers so (recur
-     * v1' ...) can rebind and jump. Plain-symbol bindings only. */
+     * v1' ...) can rebind and jump. Plain-symbol bindings only.
+     * When the loop is in tail position, the body's last expression
+     * (when it isn't a recur) is the fn's result; propagate tail. */
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
     mino_val_t *bindings = args->as.cons.car;
@@ -506,7 +516,7 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst)
         }
         int reg = alloc_reg(c);
         if (reg < 0) goto out;
-        if (compile_expr(c, val_form, reg) < 0) goto out;
+        if (compile_expr(c, val_form, reg, 0) < 0) goto out;
         if (!bind_local(c, name_form->as.s.data, reg)) goto out;
         this_loop.bind_regs[i] = reg;
         if (pushed_env) {
@@ -522,7 +532,7 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst)
     this_loop.entry_pc = (int)c->bc->code_len;
     c->loop = &this_loop;
 
-    if (compile_body(c, body, dst) < 0) goto out;
+    if (compile_body(c, body, dst, tail) < 0) goto out;
 
     if (pushed_env) emit_abc(c, OP_POP_ENV, 0, 0, 0);
     c->loop     = saved_loop;
@@ -537,9 +547,9 @@ out:
     return -1;
 }
 
-static int compile_recur(compiler_t *c, mino_val_t *form, int dst)
+static int compile_recur(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
-    (void)dst;
+    (void)dst; (void)tail;  /* recur never produces a value -- it jumps. */
     if (c->loop == NULL) { c->ok = 0; return -1; }
     /* Walk the recur args. They must match the loop's binding count.
      * Evaluate each into a fresh temp register so a recur arg can
@@ -554,7 +564,7 @@ static int compile_recur(compiler_t *c, mino_val_t *form, int dst)
         if (!mino_is_cons(cur)) { c->ok = 0; return -1; }
         int t = alloc_reg(c);
         if (t < 0) return -1;
-        if (compile_expr(c, cur->as.cons.car, t) < 0) return -1;
+        if (compile_expr(c, cur->as.cons.car, t, 0) < 0) return -1;
         cur = cur->as.cons.cdr;
     }
     if (mino_is_cons(cur)) { c->ok = 0; return -1; }  /* too many */
@@ -562,9 +572,10 @@ static int compile_recur(compiler_t *c, mino_val_t *form, int dst)
         emit_abc(c, OP_MOVE, (unsigned)c->loop->bind_regs[i],
                  (unsigned)(temp_base + i), 0);
     }
-    /* OP_JMP's offset is added to pc after the instruction is fetched. */
+    /* OP_JMP's offset is added to pc after the instruction is fetched.
+     * Bias-encoded as 16-bit unsigned (+0x8000): valid range -0x8000..0x7FFF. */
     int off = c->loop->entry_pc - ((int)c->bc->code_len + 1);
-    if (off < INT16_MIN + 0x8000 || off > INT16_MAX - 0x8000) {
+    if (off < -0x8000 || off > 0x7FFF) {
         c->ok = 0; return -1;
     }
     emit_abc(c, OP_JMP, 0, 0, 0);
@@ -574,8 +585,9 @@ static int compile_recur(compiler_t *c, mino_val_t *form, int dst)
     return 0;
 }
 
-static int compile_lazy_seq(compiler_t *c, mino_val_t *form, int dst)
+static int compile_lazy_seq(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
+    (void)tail;
     /* (lazy-seq body...) -- stash the body forms (a list of AST
      * expressions) in the constant pool and have the runtime build a
      * MINO_LAZY whose body is that list and whose env is the live
@@ -602,8 +614,9 @@ static int compile_lazy_seq(compiler_t *c, mino_val_t *form, int dst)
  * sentinel and the closure built from it falls back to the tree-walker
  * at apply_callable time. The outer fn can still compile -- decline of
  * an inner fn is local. */
-static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst)
+static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
+    (void)tail;
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
 
@@ -677,8 +690,9 @@ static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst)
     return 0;
 }
 
-static int compile_quote(compiler_t *c, mino_val_t *form, int dst)
+static int compile_quote(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
+    (void)tail;
     /* (quote x) -- x is itself the value. */
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
@@ -690,8 +704,9 @@ static int compile_quote(compiler_t *c, mino_val_t *form, int dst)
     return 0;
 }
 
-static int compile_def(compiler_t *c, mino_val_t *form, int dst)
+static int compile_def(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
+    (void)tail;
     /* (def name) or (def name expr) -- plain form only, no metadata. */
     mino_val_t *args = form->as.cons.cdr;
     if (!mino_is_cons(args)) { c->ok = 0; return -1; }
@@ -713,7 +728,7 @@ static int compile_def(compiler_t *c, mino_val_t *form, int dst)
     if (mino_is_cons(rest)) {
         mino_val_t *val_form = rest->as.cons.car;
         if (mino_is_cons(rest->as.cons.cdr)) { c->ok = 0; return -1; }
-        if (compile_expr(c, val_form, val_reg) < 0) return -1;
+        if (compile_expr(c, val_form, val_reg, 0) < 0) return -1;
     } else {
         /* (def name) -- value is nil. */
         int nk = add_const(c, mino_nil(c->S));
@@ -822,21 +837,52 @@ static int binop_subop_for_name(const char *name)
     return -1;
 }
 
+/* Map a unary numeric prim name to its UNOP_* subop. */
+static int unop_subop_for_name(const char *name)
+{
+    if (strcmp(name, "inc")   == 0) return UNOP_INC;
+    if (strcmp(name, "dec")   == 0) return UNOP_DEC;
+    if (strcmp(name, "zero?") == 0) return UNOP_ZERO_P;
+    return -1;
+}
+
 static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     mino_val_t *head = form->as.cons.car;
     if (head_resolves_to_macro(c, head)) { c->ok = 0; return -1; }
 
-    /* Speculative fast lane for the eight binary arith / compare calls.
-     * When the head is one of `+ - * < <= > >= =`, has exactly two
-     * args, and resolves to a non-local non-macro at compile time,
-     * emit OP_BINOP_INT directly. The runtime's int+int fast path
-     * handles INT/INT pairs; on type miss it falls back to the named
-     * prim via the same argv ABI as a regular call. Tail context is
-     * irrelevant here -- arithmetic returns a value, never tail-calls
-     * the fn that wraps it. */
-    if (!tail && head != NULL && head->type == MINO_SYMBOL
+    /* Speculative fast lane for the unary and binary arith / compare
+     * calls. The head must be the named prim (non-local, non-macro);
+     * we emit the per-op specialised opcode directly. Speculation
+     * fires in tail position too: the result is a value, not a tail
+     * call, so writing to dst and falling through to OP_RETURN gives
+     * the same observable behaviour as OP_TAILCALL through the
+     * trampoline -- minus the dispatch overhead. */
+    if (head != NULL && head->type == MINO_SYMBOL
         && find_local(c, head->as.s.data) < 0) {
+        int usubop = unop_subop_for_name(head->as.s.data);
+        if (usubop >= 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 1) {
+                int saved_next = c->next_reg;
+                int src_reg = alloc_reg(c);
+                if (src_reg < 0) return -1;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                if (compile_expr(c, a1, src_reg, 0) < 0) return -1;
+                if (dst > 0xFF || src_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                static const mino_bc_op_t unop_op[UNOP__COUNT] = {
+                    OP_INC_I, OP_DEC_I, OP_ZERO_INT_P,
+                };
+                emit_abc(c, unop_op[usubop], (unsigned)dst,
+                         (unsigned)src_reg, 0);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
         int subop = binop_subop_for_name(head->as.s.data);
         if (subop >= 0) {
             int argc_check = 0;
@@ -850,8 +896,8 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 if (rhs_reg < 0) return -1;
                 mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
                 mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                if (compile_expr(c, a1, lhs_reg) < 0) return -1;
-                if (compile_expr(c, a2, rhs_reg) < 0) return -1;
+                if (compile_expr(c, a1, lhs_reg, 0) < 0) return -1;
+                if (compile_expr(c, a2, rhs_reg, 0) < 0) return -1;
                 if (dst > 0xFF || lhs_reg > 0xFF || rhs_reg > 0xFF) {
                     c->ok = 0; return -1;
                 }
@@ -898,12 +944,12 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
     }
 
     /* Compile the head into fn_reg. */
-    if (compile_expr(c, head, fn_reg) < 0) return -1;
+    if (compile_expr(c, head, fn_reg, 0) < 0) return -1;
 
     /* Compile each argument into its slot. */
     cur = form->as.cons.cdr;
     for (int i = 0; i < argc; i++) {
-        if (compile_expr(c, cur->as.cons.car, arg_base + i) < 0) return -1;
+        if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0) return -1;
         cur = cur->as.cons.cdr;
     }
 
@@ -923,10 +969,6 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
     return 0;
 }
 
-static int compile_call(compiler_t *c, mino_val_t *form, int dst)
-{
-    return compile_call_impl(c, form, dst, 0);
-}
 
 /* ------------------------------------------------------------------- */
 /* Form dispatch                                                       */
@@ -951,7 +993,7 @@ static int compile_symbol_ref(compiler_t *c, mino_val_t *sym, int dst)
     return 0;
 }
 
-static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
+static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     if (form == NULL) {
         int k = add_const(c, mino_nil(c->S));
@@ -1018,18 +1060,18 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
     if (head != NULL && head->type == MINO_SYMBOL
         && find_local(c, head->as.s.data) < 0) {
         const char *name = head->as.s.data;
-        if (strcmp(name, "if") == 0)   return compile_if(c, form, dst);
-        if (strcmp(name, "do") == 0)   return compile_do(c, form, dst);
+        if (strcmp(name, "if") == 0)   return compile_if(c, form, dst, tail);
+        if (strcmp(name, "do") == 0)   return compile_do(c, form, dst, tail);
         if (strcmp(name, "let") == 0
-            || strcmp(name, "let*") == 0) return compile_let(c, form, dst);
-        if (strcmp(name, "quote") == 0) return compile_quote(c, form, dst);
-        if (strcmp(name, "def") == 0)   return compile_def(c, form, dst);
+            || strcmp(name, "let*") == 0) return compile_let(c, form, dst, tail);
+        if (strcmp(name, "quote") == 0) return compile_quote(c, form, dst, tail);
+        if (strcmp(name, "def") == 0)   return compile_def(c, form, dst, tail);
         if (strcmp(name, "fn") == 0
-            || strcmp(name, "fn*") == 0) return compile_fn_literal(c, form, dst);
+            || strcmp(name, "fn*") == 0) return compile_fn_literal(c, form, dst, tail);
         if (strcmp(name, "loop") == 0
-            || strcmp(name, "loop*") == 0) return compile_loop(c, form, dst);
-        if (strcmp(name, "recur") == 0) return compile_recur(c, form, dst);
-        if (strcmp(name, "lazy-seq") == 0) return compile_lazy_seq(c, form, dst);
+            || strcmp(name, "loop*") == 0) return compile_loop(c, form, dst, tail);
+        if (strcmp(name, "recur") == 0) return compile_recur(c, form, dst, tail);
+        if (strcmp(name, "lazy-seq") == 0) return compile_lazy_seq(c, form, dst, tail);
 
         /* Other special forms have no compile-time handler yet; decline
          * so the tree-walker picks them up rather than emitting a
@@ -1039,26 +1081,10 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
             return -1;
         }
     }
-    return compile_call(c, form, dst);
+    return compile_call_impl(c, form, dst, tail);
 }
 
-/* True iff `form` is a regular call -- not a special form, not a macro
- * invocation. Used by compile_body to decide whether the last expr in
- * a body can be emitted as OP_TAILCALL. */
-static int form_is_simple_call(compiler_t *c, mino_val_t *form)
-{
-    if (!mino_is_cons(form)) return 0;
-    mino_val_t *head = form->as.cons.car;
-    if (head == NULL || head->type != MINO_SYMBOL) return 0;
-    /* A local-bound head means the call is dispatched dynamically;
-     * it cannot be a special form or a macro. */
-    if (find_local(c, head->as.s.data) >= 0) return 1;
-    if (is_special_form_name(head->as.s.data)) return 0;
-    if (head_resolves_to_macro(c, head)) return 0;
-    return 1;
-}
-
-static int compile_body(compiler_t *c, mino_val_t *body, int dst)
+static int compile_body(compiler_t *c, mino_val_t *body, int dst, int tail)
 {
     if (!mino_is_cons(body)) {
         /* Empty body: result is nil. */
@@ -1073,20 +1099,15 @@ static int compile_body(compiler_t *c, mino_val_t *body, int dst)
         mino_val_t *next = body->as.cons.cdr;
         int is_last = !mino_is_cons(next);
         if (is_last) {
-            /* Tail-position simple call -> OP_TAILCALL. The fn-emitted
-             * OP_RETURN after the body is dead code for this path; the
-             * trampoline returns via the MINO_TAIL_CALL sentinel. Non-
-             * simple-call expressions (special forms, locals, literals,
-             * macros that decline) use the normal compile_expr path. */
-            if (form_is_simple_call(c, expr)) {
-                if (compile_call_impl(c, expr, dst, 1) < 0) return -1;
-            } else {
-                if (compile_expr(c, expr, dst) < 0) return -1;
-            }
+            /* Last expression carries the body's tail flag. compile_expr
+             * propagates it into control forms (if/do/let/loop) and into
+             * compile_call_impl, which emits OP_TAILCALL when tail is
+             * set so the trampoline keeps the C stack flat. */
+            if (compile_expr(c, expr, dst, tail) < 0) return -1;
         } else {
             int t = alloc_reg(c);
             if (t < 0) return -1;
-            if (compile_expr(c, expr, t) < 0) return -1;
+            if (compile_expr(c, expr, t, 0) < 0) return -1;
             c->next_reg = saved_next;
         }
         body = next;
@@ -1172,7 +1193,7 @@ static int compile_clause(compiler_t *c, mino_val_t *params, mino_val_t *body,
 
     int ret_reg = alloc_reg(c);
     if (ret_reg < 0) return -1;
-    if (compile_body(c, body, ret_reg) < 0) return -1;
+    if (compile_body(c, body, ret_reg, /*tail=*/1) < 0) return -1;
     if (!c->ok) return -1;
     emit_abc(c, OP_RETURN, (unsigned)ret_reg, 0, 0);
     if (!c->ok) return -1;

@@ -62,6 +62,9 @@ typedef enum {
     OP_GT_II,            /* int > int                                      */
     OP_GE_II,            /* int >= int                                     */
     OP_EQ_II,            /* int == int                                     */
+    OP_INC_I,            /* int inc fast lane: A=dst, B=src                */
+    OP_DEC_I,            /* int dec fast lane: A=dst, B=src                */
+    OP_ZERO_INT_P,       /* int zero? fast lane: A=dst, B=src              */
     OP_GET_KW_MAP,       /* A=dst, B=map, C=kw                             */
     OP_NTH_VEC,          /* A=dst, B=vec, C=index                          */
     /* Lexical-env management for compiled closures. OP_PUSH_ENV and
@@ -95,6 +98,13 @@ typedef enum {
     BINOP_EQ,
     BINOP__COUNT
 } mino_bc_binop_t;
+
+typedef enum {
+    UNOP_INC = 0,
+    UNOP_DEC,
+    UNOP_ZERO_P,
+    UNOP__COUNT
+} mino_bc_unop_t;
 
 /* Encoding helpers. The base ABC form occupies 24 bits; the high 8 bits
  * are zero for ABC ops and used for the BINOP sub-op when OP_BINOP_INT.
