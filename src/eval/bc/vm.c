@@ -900,7 +900,12 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             }
             /* Record the BC-side resume state BEFORE the setjmp call.
              * The longjmp-return branch only reads from S/ctx; no
-             * post-setjmp writes need to survive the longjmp. */
+             * post-setjmp writes need to survive the longjmp. The
+             * local `td` is intentionally NOT used after setjmp -- a
+             * sibling PUSHCATCH frame may share its stack slot, so by
+             * the time longjmp lands we cannot trust `td` to still
+             * carry our value. `bc_catch_stack[d].try_depth_at_push`
+             * holds the same value in heap-backed storage. */
             ctx->bc_catch_stack[ctx->bc_catch_depth].handler_pc        = hpc;
             ctx->bc_catch_stack[ctx->bc_catch_depth].reg_window_base   = base;
             ctx->bc_catch_stack[ctx->bc_catch_depth].try_depth_at_push = td;
@@ -925,12 +930,13 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                  * and longjmp (pc, env, regs, retval, ok) are
                  * overwritten here; base / bc / code / match never
                  * change after fn entry so they survive untouched. */
-                int d = --ctx->bc_catch_depth;
-                mino_val_t *ex = ctx->try_stack[td].exception;
-                S->current_ns    = ctx->try_stack[td].saved_ns;
-                S->fn_ambient_ns = ctx->try_stack[td].saved_ambient;
-                load_stack_truncate(S, ctx->try_stack[td].saved_load_len);
-                ctx->try_depth = ctx->bc_catch_stack[d].try_depth_at_push;
+                int d         = --ctx->bc_catch_depth;
+                int my_td     = ctx->bc_catch_stack[d].try_depth_at_push;
+                mino_val_t *ex = ctx->try_stack[my_td].exception;
+                S->current_ns    = ctx->try_stack[my_td].saved_ns;
+                S->fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
+                load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
+                ctx->try_depth = my_td;
                 pc      = ctx->bc_catch_stack[d].handler_pc;
                 env     = ctx->bc_catch_stack[d].env_at_push;
                 regs    = S->bc_regs + base;

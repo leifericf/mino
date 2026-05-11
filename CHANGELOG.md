@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.144.5 — Correctness Fix: BC Re-Throw Through Nested Try / Finally
+
+Nested `try` blocks where an inner `catch` handler re-throws an
+exception that an outer `try`/`finally` then catches were
+returning the inner-thrown value to the outer handler instead
+of the re-thrown one on Linux gcc. Apple clang's codegen for the
+same source returned the right value, which is why the regression
+test in `bc_try_catch_test` only failed on Linux.
+
+The bug: `OP_PUSHCATCH`'s longjmp-return branch read
+`try_stack[td].exception` where `td` was a `mino_bc_run` local
+captured before `setjmp`. The local was set in each PUSHCATCH
+case scope, but the C99 standard does not promise that distinct
+case-scope locals occupy distinct stack slots — and gcc with
+`-O2` reuses slots when their lifetimes don't visibly overlap.
+When a sibling (nested) PUSHCATCH ran and re-wrote the slot,
+the longjmp back to the outer PUSHCATCH read the inner's `td`
+value, indexing into the wrong `try_stack` entry.
+
+The fix reads `try_depth_at_push` from
+`bc_catch_stack[d]` — heap-backed storage that survives the
+longjmp unchanged — instead of from the local `td`. The PUSHCATCH
+arm-phase still stashes `td` into the catch entry where it
+belongs.
+
 ## v0.144.4 — Build Fix: Suppress gcc's `-Wclobbered` Instead Of `volatile`
 
 The v0.144.2 attempt to silence gcc's `-Wclobbered` by marking
