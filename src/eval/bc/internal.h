@@ -135,6 +135,10 @@ typedef struct mino_bc_fn {
     size_t           consts_len;
     int              n_regs;      /* number of register slots the body needs */
     int              n_params;    /* fixed param count (Phase 1 only) */
+    int              has_rest;    /* 1 iff trailing `& rest` binding -- argv
+                                   * overflow past n_params is collected into
+                                   * a list and placed in regs[n_params] at
+                                   * entry */
     int              captures;    /* 1 iff body contains inner fn literal --
                                    * forces env_child + OP_ENV_BIND of params
                                    * at entry, and let scopes bracket their

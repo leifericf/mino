@@ -134,13 +134,31 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
 {
     const mino_bc_fn_t *bc = fn_val->as.fn.bc;
     if (bc == NULL || bc->code == NULL) return NULL;
-    if (argc != bc->n_params) return NULL;   /* arity guard */
+    /* Arity guard. With a rest binding the caller may pass any number
+     * of args >= n_params (the overflow becomes the rest list). */
+    if (bc->has_rest) {
+        if (argc < bc->n_params) return NULL;
+    } else {
+        if (argc != bc->n_params) return NULL;
+    }
 
     size_t base = bc_push_window(S, bc->n_regs);
     if (base == (size_t)-1) return NULL;
 
     for (int i = 0; i < bc->n_params; i++) {
         S->bc_regs[base + (size_t)i] = argv[i];
+    }
+    /* Collect overflow args into a list and place it in the slot
+     * right after the fixed params. mino_cons walks back-to-front so
+     * we get the values in their original order. When argc ==
+     * n_params the rest binding is the empty list. */
+    if (bc->has_rest) {
+        mino_val_t *rest = mino_nil(S);
+        for (int i = argc - 1; i >= bc->n_params; i--) {
+            rest = mino_cons(S, argv[i], rest);
+            if (rest == NULL) { bc_pop_window(S, base); return NULL; }
+        }
+        S->bc_regs[base + (size_t)bc->n_params] = rest;
     }
 
     /* When the body contains an inner fn literal, extend the lexical
@@ -159,6 +177,14 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 return NULL;
             }
             env_bind_sym(S, env, p, argv[i]);
+        }
+        if (bc->has_rest) {
+            mino_val_t *rest_sym = vec_nth(fn_val->as.fn.params,
+                fn_val->as.fn.params->as.vec.len - 1);
+            if (rest_sym != NULL && rest_sym->type == MINO_SYMBOL) {
+                env_bind_sym(S, env, rest_sym,
+                    S->bc_regs[base + (size_t)bc->n_params]);
+            }
         }
     }
 

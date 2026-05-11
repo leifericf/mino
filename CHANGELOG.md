@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.111.0 — Bytecode &-Rest and Constant Vectors
+
+Single-arity fns with a trailing `& rest` binding now bc-compile.
+The compiler tracks a `has_rest` flag on the compiled record;
+the runtime relaxes its arity check to `argc >= n_params` and
+collects the overflow args into a list, placed in the register
+right after the fixed params. When the enclosing fn also captures,
+the rest list is published into the env alongside the other
+params so any inner closure sees it via `mino_env_get_sym`.
+
+Vector literals whose elements are all self-evaluating (nil /
+bool / int / float / string / keyword / char) are stashed whole
+in the constant pool and loaded with a single OP_LOAD_K -- the
+common shape `(defn f [...] [...] [literal-values])` no longer
+declines to the tree-walker on this one count. Vector literals
+with non-const elements, plus all map and set literals, still
+decline; their full lowering lands alongside the multi-arity and
+destructuring work in a follow-up cycle.
+
+Multi-arity and full destructuring (vector / map / `:as` / `:keys`)
+remain on the tree-walker for this cycle. The follow-up adds them
+together with the loop/recur and Phase-2 opcode wiring.
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.110.0 — Bytecode Closures
 
 The bc compiler emits inner `(fn ...)` and `(fn* ...)` literals,

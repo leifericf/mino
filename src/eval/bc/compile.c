@@ -781,9 +781,26 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
     }
     if (form->type == MINO_VECTOR || form->type == MINO_MAP
         || form->type == MINO_SET) {
-        /* Collection literals: decline if they contain non-self-evaluating
-         * elements, since we don't yet compile element evaluation. The
-         * tree-walker handles them. */
+        /* Vector literal with only self-evaluating elements is a
+         * constant: stash the whole vector in the pool and emit a
+         * single OP_LOAD_K. Vectors with non-const elements and
+         * non-empty maps / sets still decline (their tree-walker
+         * lowering handles element evaluation). */
+        if (form->type == MINO_VECTOR) {
+            int all_const = 1;
+            for (size_t i = 0; i < form->as.vec.len; i++) {
+                if (!is_self_evaluating(vec_nth(form, i))) {
+                    all_const = 0;
+                    break;
+                }
+            }
+            if (all_const) {
+                int k = add_const(c, form);
+                if (k < 0) return -1;
+                emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+                return 0;
+            }
+        }
         c->ok = 0;
         return -1;
     }
@@ -882,9 +899,14 @@ static int compile_body(compiler_t *c, mino_val_t *body, int dst)
 /* Compile-fn entry                                                    */
 /* ------------------------------------------------------------------- */
 
-/* Params must be a vector of plain symbols, no &-rest, no destructure. */
-static int params_simple_plain(mino_val_t *params, int *out_n)
+/* Params must be a vector. Each entry is a plain symbol; we also
+ * accept a trailing `& rest` pair, in which case the rest binding
+ * collects overflow args into a list at call time. No destructure
+ * for this cycle. out_n returns the fixed-param count; out_rest is
+ * set to 1 iff the last binding is the rest param. */
+static int params_simple_plain(mino_val_t *params, int *out_n, int *out_rest)
 {
+    *out_rest = 0;
     if (params == NULL) return 0;
     if (params->type != MINO_VECTOR) return 0;
     size_t n = params->as.vec.len;
@@ -893,8 +915,23 @@ static int params_simple_plain(mino_val_t *params, int *out_n)
         mino_val_t *p = vec_nth(params, i);
         if (p == NULL || p->type != MINO_SYMBOL) return 0;
         const char *d = p->as.s.data;
-        if (d[0] == '&') return 0;             /* &-rest */
-        if (strchr(d, '.') != NULL) return 0;  /* dotted */
+        /* A bare & marks the rest separator. The slot right after it
+         * is the rest-binding name (must be a plain symbol; we don't
+         * yet accept destructure inside the rest slot). The & itself
+         * occupies no register. */
+        if (strcmp(d, "&") == 0) {
+            if (i != n - 2) return 0;     /* must be second-to-last */
+            mino_val_t *rest_sym = vec_nth(params, n - 1);
+            if (rest_sym == NULL || rest_sym->type != MINO_SYMBOL) return 0;
+            const char *rd = rest_sym->as.s.data;
+            if (rd[0] == '&') return 0;
+            if (strchr(rd, '.') != NULL) return 0;
+            *out_n    = (int)i;            /* fixed count before & */
+            *out_rest = 1;
+            return 1;
+        }
+        if (d[0] == '&') return 0;
+        if (strchr(d, '.') != NULL) return 0;
     }
     *out_n = (int)n;
     return 1;
@@ -912,7 +949,8 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
         return MINO_BC_UNSUPPORTED;
     }
     int n_params = 0;
-    if (!params_simple_plain(fn->as.fn.params, &n_params)) {
+    int has_rest = 0;
+    if (!params_simple_plain(fn->as.fn.params, &n_params, &has_rest)) {
         fn->as.fn.bc = &mino_bc_declined;
         return MINO_BC_UNSUPPORTED;
     }
@@ -929,8 +967,13 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     bc->code_len   = 0;
     bc->consts     = NULL;
     bc->consts_len = 0;
-    bc->n_regs     = n_params;
+    /* When there's a rest binding, the runtime stores the collected
+     * overflow list in the slot right after the fixed params, so the
+     * body needs one extra register at entry. */
+    int total_param_regs = n_params + (has_rest ? 1 : 0);
+    bc->n_regs     = total_param_regs;
     bc->n_params   = n_params;
+    bc->has_rest   = has_rest;
     bc->captures   = contains_inner_fn(fn->as.fn.body);
     /* Write barrier: fn may already be OLD (top-level defns survive
      * many minor cycles before the first call triggers compile). The
@@ -946,14 +989,23 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     c.defining_ns = fn->as.fn.defining_ns;
     c.bc          = bc;
     c.n_params    = n_params;
-    c.next_reg    = n_params;
-    c.n_regs      = n_params;
+    c.next_reg    = total_param_regs;
+    c.n_regs      = total_param_regs;
     c.ok          = 1;
 
-    /* Bind params to registers 0..n_params-1. */
+    /* Bind fixed params to registers 0..n_params-1. */
     for (int i = 0; i < n_params; i++) {
         mino_val_t *p = vec_nth(fn->as.fn.params, (size_t)i);
         if (!bind_local(&c, p->as.s.data, i)) goto decline;
+    }
+    /* If rest, the binding name is in the params-vector slot right after
+     * the `&` marker (so at index n_params + 1 in the source vector).
+     * The runtime collects overflow args into a list and writes it to
+     * register n_params, which is where this local points. */
+    if (has_rest) {
+        mino_val_t *rest_sym = vec_nth(fn->as.fn.params,
+            (size_t)(fn->as.fn.params->as.vec.len - 1));
+        if (!bind_local(&c, rest_sym->as.s.data, n_params)) goto decline;
     }
 
     /* Compile body. Result goes into a fresh "ret" register that's
