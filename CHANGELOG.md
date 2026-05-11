@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.141.1 — Fused Counted-Loop: Proper Diagnostics on Miss
+
+`OP_LOOP_INT_DEC` and `OP_LOOP_INT_DEC_INC` previously bailed
+with a silent NULL return on non-int test register or
+`MIN_INT` / `MAX_INT` overflow. That dropped the proper
+"zero? requires a number" diagnostic and -- worse -- swallowed
+the integer-overflow throw that Clojure semantics demand.
+
+The miss path now calls `prim_zero_p` to decide the branch and
+to surface any non-number diagnostic, then on the non-zero
+side calls `prim_dec` (and for the two-binding form,
+`prim_inc`) so an overflow throw fires exactly as the unfused
+emission's would. Hot path is unchanged: tagged-int test,
+in-range step, single back-jump.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. tight-loop-10M stays at ~15 ms.
+
 ## v0.141.0 — Cycle Close: Measurement Gate
 
 Final measurement after the bytecode-vm perf cycle. Local

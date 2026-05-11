@@ -650,34 +650,56 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             /* Fused counted-loop step (single binding):
              *   if regs[A] == 0: fall through (exit branch follows).
              *   else: regs[A]-- and re-fetch (pc-=1).
-             * The compiler emits this only when the loop binding is
-             * known to start as an int and is updated by a (dec ...)
-             * recur; runtime checks are a single tag-bit test plus the
-             * MIN-overflow guard. */
+             * Hot path: tagged-int test, in-range decrement, single
+             * back-jump. Cold paths (non-int test, MIN_INT decrement)
+             * delegate to prim_zero_p / prim_dec so the user-visible
+             * diagnostic ("zero? requires a number", "integer
+             * overflow") fires exactly as the unfused emission
+             * would have. */
             unsigned a = A_OF(ins);
             mino_val_t *v = regs[a];
             if (v != NULL && MINO_IS_INT(v)) {
                 long long t = MINO_INT_VAL(v);
                 if (t == 0) break;
-                /* dec(MIN_INT) overflows; bail to the unfused exit
-                 * path so the boxed-int slow lane can raise. */
-                if (t == MINO_INT_MIN) { ok = 0; goto bc_done; }
-                regs[a] = MINO_MAKE_INT(t - 1);
+                if (t != MINO_INT_MIN) {
+                    regs[a] = MINO_MAKE_INT(t - 1);
+                    pc -= 1;
+                    break;
+                }
+                /* MIN_INT: fall through to the prim_dec slow path so
+                 * the throw fires. */
+            }
+            /* Slow path: call prim_zero_p first to decide the branch
+             * and to surface any non-number diagnostic. Then on
+             * non-zero, call prim_dec which raises on overflow. */
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *zp = prim_zero_p(S, list, env);
+                if (zp == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                if (mino_is_truthy(zp)) {
+                    /* Fall through to the exit branch (no recur). */
+                    break;
+                }
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *decv = prim_dec(S, list2, env);
+                if (decv == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                regs[a] = decv;
                 pc -= 1;
                 break;
             }
-            /* Non-tagged-int test register: abort with a diagnostic.
-             * The compiler's pattern check made this branch
-             * cold-by-construction. */
-            ok = 0; goto bc_done;
         }
 
         case OP_LOOP_INT_DEC_INC: {
-            /* Fused counted-loop step (two bindings):
-             *   if regs[A] == 0: fall through (exit branch follows).
-             *   else: regs[A]-- and regs[B]++ and re-fetch (pc-=1).
-             * Mirrors OP_LOOP_INT_DEC plus an increment on B with a
-             * MAX-overflow guard. */
+            /* Fused counted-loop step (two bindings). Hot path is the
+             * tagged-int / in-range case; everything else delegates to
+             * prim_zero_p / prim_dec / prim_inc so the
+             * non-number / overflow diagnostics still fire. */
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
             mino_val_t *vt = regs[a];
@@ -687,15 +709,40 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 long long t = MINO_INT_VAL(vt);
                 if (t == 0) break;
                 long long i = MINO_INT_VAL(vi);
-                if (t == MINO_INT_MIN || i == MINO_INT_MAX) {
-                    ok = 0; goto bc_done;
+                if (t != MINO_INT_MIN && i != MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(t - 1);
+                    regs[b] = MINO_MAKE_INT(i + 1);
+                    pc -= 1;
+                    break;
                 }
-                regs[a] = MINO_MAKE_INT(t - 1);
-                regs[b] = MINO_MAKE_INT(i + 1);
+                /* Overflow on dec or inc: fall through to the prim
+                 * slow path so the throw fires. */
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *zp = prim_zero_p(S, list, env);
+                if (zp == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                if (mino_is_truthy(zp)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *decv = prim_dec(S, list2, env);
+                if (decv == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                mino_val_t *list3 = mino_nil(S);
+                list3 = mino_cons(S, regs[b], list3);
+                if (list3 == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *incv = prim_inc(S, list3, env);
+                if (incv == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                regs[a] = decv;
+                regs[b] = incv;
                 pc -= 1;
                 break;
             }
-            ok = 0; goto bc_done;
         }
 
         case OP_NTH_VEC: {
