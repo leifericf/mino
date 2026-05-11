@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.130.0 — Extended Int Fast-Lane Breadth
+
+`mod`, `quot`, `rem`, `bit-and`, `bit-or`, `bit-xor`,
+`bit-shift-left`, `bit-shift-right`,
+`unsigned-bit-shift-right`, `pos?`, `neg?`, `even?`, `odd?`,
+and `bit-not` now have dedicated int+int fast-lane opcodes
+when both operands are inline-tagged ints. The handlers do
+a single `MINO_IS_INT` tag check, decode inline, run the C
+op (with the same div-by-zero / shift-range / `MIN/-1`
+bails the prim uses), and re-tag the result. The C prim
+remains the slow path: any miss -- a non-int operand, a
+shift amount outside `[0, 63]`, division by zero, or an
+overflow that escapes the tagged range -- falls back to it
+so the Clojure-correct diagnostic or numeric-tower promote
+still fires.
+
+Each new fast lane lives behind its own per-op `OP_*_II` /
+`OP_*_I` opcode rather than the generic `OP_BINOP_INT`
+sub-op dispatch, matching the existing `+`/`-`/`*`/`<`...
+pattern. The peephole tail-move folder and the producer-
+to-A rewrite see the new opcodes as foldable, so a
+`(+ acc (mod i 3))` inner loop keeps its register-stable
+shape.
+
+What this leverages from Clojure: `mod`/`quot`/`rem` and
+`bit-*` are pure, side-effect-free core prims whose
+type-and-result contract on int+int is fully specified.
+That lets the compiler emit a speculative inline opcode
+without observing call-site state; any divergence from
+that contract (boxed bigint, float, ratio) bails to the
+real prim and the numeric tower handles the promotion.
+The bytecode never has to track the operand's tier
+explicitly -- the tag bits ARE the tier check.
+
+Verification: 1 571 tests / 7 353 assertions green on
+release, ASan, UBSan. cond-branch-1M (the previously hot
+`mod` benchmark) drops from 1 340 ms to 31 ms (~43×); the
+per-iteration cost is now dominated by the loop-recur
+shape rather than the modulus call.
+
 ## v0.129.0 — Drop Arith Hot-Path Instrumentation
 
 `mino_int`, `tag_or_box_int`, and the BC arith fast lane no longer

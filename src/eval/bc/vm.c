@@ -129,6 +129,17 @@ static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
         return tag_or_box_int(S, r);
     case UNOP_ZERO_P:
         return (a == 0) ? mino_true(S) : mino_false(S);
+    case UNOP_POS_P:
+        return (a >  0) ? mino_true(S) : mino_false(S);
+    case UNOP_NEG_P:
+        return (a <  0) ? mino_true(S) : mino_false(S);
+    case UNOP_EVEN_P:
+        return ((a & 1) == 0) ? mino_true(S) : mino_false(S);
+    case UNOP_ODD_P:
+        return ((a & 1) != 0) ? mino_true(S) : mino_false(S);
+    case UNOP_BNOT:
+        /* ~a == -a - 1; always fits in the tagged range when a does. */
+        return tag_or_box_int(S, ~a);
     default:
         return NULL;
     }
@@ -175,6 +186,34 @@ static mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
     case BINOP_GT: return (a >  b) ? mino_true(S) : mino_false(S);
     case BINOP_GE: return (a >= b) ? mino_true(S) : mino_false(S);
     case BINOP_EQ: return (a == b) ? mino_true(S) : mino_false(S);
+    case BINOP_MOD:
+    case BINOP_QUOT:
+    case BINOP_REM:
+        /* Bail on b==0 (prim throws division-by-zero) or on the
+         * MINO_INT_MIN / -1 corner where the quotient escapes the
+         * tagged range and the prim's bigint-promote path is the
+         * Clojure-correct answer. */
+        if (b == 0) return NULL;
+        if (a == MINO_INT_MIN && b == -1) return NULL;
+        if (subop == BINOP_QUOT) return tag_or_box_int(S, a / b);
+        r = a % b;
+        if (subop == BINOP_MOD && r != 0 && ((r < 0) != (b < 0))) r += b;
+        return tag_or_box_int(S, r);
+    case BINOP_BAND: return tag_or_box_int(S, a & b);
+    case BINOP_BOR:  return tag_or_box_int(S, a | b);
+    case BINOP_BXOR: return tag_or_box_int(S, a ^ b);
+    case BINOP_SHL:
+        /* Shift amount must be in [0, 63]; route through unsigned so
+         * that bit-shift-left of negative values matches the prim's
+         * wrap-around result (and stays clear of signed-overflow UB). */
+        if (b < 0 || b >= 64) return NULL;
+        return tag_or_box_int(S, (long long)((unsigned long long)a << b));
+    case BINOP_SHR:
+        if (b < 0 || b >= 64) return NULL;
+        return tag_or_box_int(S, a >> b);
+    case BINOP_USHR:
+        if (b < 0 || b >= 64) return NULL;
+        return tag_or_box_int(S, (long long)((unsigned long long)a >> b));
     default:       return NULL;
     }
 }
@@ -466,25 +505,46 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         case OP_LE_II:
         case OP_GT_II:
         case OP_GE_II:
-        case OP_EQ_II: {
-            /* Speculative int+int fast lanes for the eight binary
-             * arith / compare ops. On a type miss we fall through to
-             * the corresponding prim with the same argv ABI as a
-             * regular OP_CALL. */
+        case OP_EQ_II:
+        case OP_MOD_II:
+        case OP_QUOT_II:
+        case OP_REM_II:
+        case OP_BAND_II:
+        case OP_BOR_II:
+        case OP_BXOR_II:
+        case OP_SHL_II:
+        case OP_SHR_II:
+        case OP_USHR_II: {
+            /* Speculative int+int fast lanes for the binary arith /
+             * compare / bitwise / div-class ops. On a type miss or a
+             * bail (div-by-zero, shift-out-of-range, MIN/-1 overflow)
+             * we fall through to the corresponding prim with the same
+             * argv ABI as a regular OP_CALL so the prim raises the
+             * Clojure-correct diagnostic or promotes through the
+             * numeric tower. */
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
             unsigned c = C_OF(ins);
             unsigned subop;
             mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
             switch (op) {
-            case OP_ADD_II: subop = BINOP_ADD; fallback = prim_add; break;
-            case OP_SUB_II: subop = BINOP_SUB; fallback = prim_sub; break;
-            case OP_MUL_II: subop = BINOP_MUL; fallback = prim_mul; break;
-            case OP_LT_II:  subop = BINOP_LT;  fallback = prim_lt;  break;
-            case OP_LE_II:  subop = BINOP_LE;  fallback = prim_lte; break;
-            case OP_GT_II:  subop = BINOP_GT;  fallback = prim_gt;  break;
-            case OP_GE_II:  subop = BINOP_GE;  fallback = prim_gte; break;
-            case OP_EQ_II:  subop = BINOP_EQ;  fallback = prim_eq;  break;
+            case OP_ADD_II:  subop = BINOP_ADD;  fallback = prim_add; break;
+            case OP_SUB_II:  subop = BINOP_SUB;  fallback = prim_sub; break;
+            case OP_MUL_II:  subop = BINOP_MUL;  fallback = prim_mul; break;
+            case OP_LT_II:   subop = BINOP_LT;   fallback = prim_lt;  break;
+            case OP_LE_II:   subop = BINOP_LE;   fallback = prim_lte; break;
+            case OP_GT_II:   subop = BINOP_GT;   fallback = prim_gt;  break;
+            case OP_GE_II:   subop = BINOP_GE;   fallback = prim_gte; break;
+            case OP_EQ_II:   subop = BINOP_EQ;   fallback = prim_eq;  break;
+            case OP_MOD_II:  subop = BINOP_MOD;  fallback = prim_mod; break;
+            case OP_QUOT_II: subop = BINOP_QUOT; fallback = prim_quot; break;
+            case OP_REM_II:  subop = BINOP_REM;  fallback = prim_rem; break;
+            case OP_BAND_II: subop = BINOP_BAND; fallback = prim_bit_and; break;
+            case OP_BOR_II:  subop = BINOP_BOR;  fallback = prim_bit_or;  break;
+            case OP_BXOR_II: subop = BINOP_BXOR; fallback = prim_bit_xor; break;
+            case OP_SHL_II:  subop = BINOP_SHL;  fallback = prim_bit_shift_left; break;
+            case OP_SHR_II:  subop = BINOP_SHR;  fallback = prim_bit_shift_right; break;
+            case OP_USHR_II: subop = BINOP_USHR; fallback = prim_unsigned_bit_shift_right; break;
             default: ok = 0; goto bc_done;
             }
             mino_val_t *r = binop_int_fast(S, regs[b], regs[c], subop);
@@ -504,7 +564,12 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
 
         case OP_INC_I:
         case OP_DEC_I:
-        case OP_ZERO_INT_P: {
+        case OP_ZERO_INT_P:
+        case OP_POS_P_I:
+        case OP_NEG_P_I:
+        case OP_EVEN_P_I:
+        case OP_ODD_P_I:
+        case OP_BNOT_I: {
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
             unsigned subop;
@@ -513,6 +578,11 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             case OP_INC_I:      subop = UNOP_INC;    fallback = prim_inc;    break;
             case OP_DEC_I:      subop = UNOP_DEC;    fallback = prim_dec;    break;
             case OP_ZERO_INT_P: subop = UNOP_ZERO_P; fallback = prim_zero_p; break;
+            case OP_POS_P_I:    subop = UNOP_POS_P;  fallback = prim_pos_p;  break;
+            case OP_NEG_P_I:    subop = UNOP_NEG_P;  fallback = prim_neg_p;  break;
+            case OP_EVEN_P_I:   subop = UNOP_EVEN_P; fallback = prim_even_p; break;
+            case OP_ODD_P_I:    subop = UNOP_ODD_P;  fallback = prim_odd_p;  break;
+            case OP_BNOT_I:     subop = UNOP_BNOT;   fallback = prim_bit_not; break;
             default: ok = 0; goto bc_done;
             }
             mino_val_t *r = unop_int_fast(S, regs[b], subop);

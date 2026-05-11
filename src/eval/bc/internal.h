@@ -67,6 +67,25 @@ typedef enum {
     OP_INC_I,            /* int inc fast lane: A=dst, B=src                */
     OP_DEC_I,            /* int dec fast lane: A=dst, B=src                */
     OP_ZERO_INT_P,       /* int zero? fast lane: A=dst, B=src              */
+    /* Extended int+int binary fast lanes. Same ABC shape as OP_ADD_II;
+     * each has a dedicated fallback prim for the type-miss / div-zero /
+     * shift-bounds path so the slow case still produces the correct
+     * Clojure-semantics diagnostic. */
+    OP_MOD_II,           /* int mod  int                                   */
+    OP_QUOT_II,          /* int quot int                                   */
+    OP_REM_II,           /* int rem  int                                   */
+    OP_BAND_II,          /* int bit-and int                                */
+    OP_BOR_II,           /* int bit-or  int                                */
+    OP_BXOR_II,          /* int bit-xor int                                */
+    OP_SHL_II,           /* int bit-shift-left   int                       */
+    OP_SHR_II,           /* int bit-shift-right  int                       */
+    OP_USHR_II,          /* int unsigned-bit-shift-right int               */
+    /* Extended int unary fast lanes. Same shape as OP_INC_I. */
+    OP_POS_P_I,          /* int pos?   fast lane                           */
+    OP_NEG_P_I,          /* int neg?   fast lane                           */
+    OP_EVEN_P_I,         /* int even?  fast lane                           */
+    OP_ODD_P_I,          /* int odd?   fast lane                           */
+    OP_BNOT_I,           /* int bit-not fast lane                          */
     OP_GET_KW_MAP,       /* A=dst, B=map, C=kw                             */
     OP_NTH_VEC,          /* A=dst, B=vec, C=index                          */
     /* Lexical-env management for compiled closures. OP_PUSH_ENV and
@@ -94,6 +113,15 @@ typedef enum {
     BINOP_GT,
     BINOP_GE,
     BINOP_EQ,
+    BINOP_MOD,
+    BINOP_QUOT,
+    BINOP_REM,
+    BINOP_BAND,
+    BINOP_BOR,
+    BINOP_BXOR,
+    BINOP_SHL,
+    BINOP_SHR,
+    BINOP_USHR,
     BINOP__COUNT
 } mino_bc_binop_t;
 
@@ -101,6 +129,11 @@ typedef enum {
     UNOP_INC = 0,
     UNOP_DEC,
     UNOP_ZERO_P,
+    UNOP_POS_P,
+    UNOP_NEG_P,
+    UNOP_EVEN_P,
+    UNOP_ODD_P,
+    UNOP_BNOT,
     UNOP__COUNT
 } mino_bc_unop_t;
 

@@ -291,10 +291,15 @@ static int producer_writes_to_A_dst(unsigned op)
     case OP_GETGLOBAL:
     case OP_CLOSURE:
     case OP_MAKE_LAZY:
-    case OP_ADD_II: case OP_SUB_II: case OP_MUL_II:
-    case OP_LT_II:  case OP_LE_II:  case OP_GT_II:
-    case OP_GE_II:  case OP_EQ_II:
-    case OP_INC_I:  case OP_DEC_I:  case OP_ZERO_INT_P:
+    case OP_ADD_II:  case OP_SUB_II:  case OP_MUL_II:
+    case OP_LT_II:   case OP_LE_II:   case OP_GT_II:
+    case OP_GE_II:   case OP_EQ_II:
+    case OP_MOD_II:  case OP_QUOT_II: case OP_REM_II:
+    case OP_BAND_II: case OP_BOR_II:  case OP_BXOR_II:
+    case OP_SHL_II:  case OP_SHR_II:  case OP_USHR_II:
+    case OP_INC_I:   case OP_DEC_I:   case OP_ZERO_INT_P:
+    case OP_POS_P_I: case OP_NEG_P_I:
+    case OP_EVEN_P_I: case OP_ODD_P_I: case OP_BNOT_I:
     case OP_BINOP_INT:
         return 1;
     default:
@@ -1330,8 +1335,9 @@ static int compile_operand_inplace(compiler_t *c, mino_val_t *form)
     return r;
 }
 
-/* Map a binary arith / compare prim name to its BINOP_* subop. Returns
- * -1 when the name isn't one of the speculative fast lanes. */
+/* Map a binary arith / compare / bitwise / div-class prim name to its
+ * BINOP_* subop. Returns -1 when the name isn't one of the speculative
+ * fast lanes. */
 static int binop_subop_for_name(const char *name)
 {
     if (strcmp(name, "+") == 0)  return BINOP_ADD;
@@ -1342,15 +1348,30 @@ static int binop_subop_for_name(const char *name)
     if (strcmp(name, ">") == 0)  return BINOP_GT;
     if (strcmp(name, ">=") == 0) return BINOP_GE;
     if (strcmp(name, "=") == 0)  return BINOP_EQ;
+    if (strcmp(name, "mod")  == 0) return BINOP_MOD;
+    if (strcmp(name, "quot") == 0) return BINOP_QUOT;
+    if (strcmp(name, "rem")  == 0) return BINOP_REM;
+    if (strcmp(name, "bit-and") == 0) return BINOP_BAND;
+    if (strcmp(name, "bit-or")  == 0) return BINOP_BOR;
+    if (strcmp(name, "bit-xor") == 0) return BINOP_BXOR;
+    if (strcmp(name, "bit-shift-left")  == 0) return BINOP_SHL;
+    if (strcmp(name, "bit-shift-right") == 0) return BINOP_SHR;
+    if (strcmp(name, "unsigned-bit-shift-right") == 0) return BINOP_USHR;
     return -1;
 }
 
-/* Map a unary numeric prim name to its UNOP_* subop. */
+/* Map a unary numeric / predicate / bitwise prim name to its UNOP_*
+ * subop. */
 static int unop_subop_for_name(const char *name)
 {
     if (strcmp(name, "inc")   == 0) return UNOP_INC;
     if (strcmp(name, "dec")   == 0) return UNOP_DEC;
     if (strcmp(name, "zero?") == 0) return UNOP_ZERO_P;
+    if (strcmp(name, "pos?")  == 0) return UNOP_POS_P;
+    if (strcmp(name, "neg?")  == 0) return UNOP_NEG_P;
+    if (strcmp(name, "even?") == 0) return UNOP_EVEN_P;
+    if (strcmp(name, "odd?")  == 0) return UNOP_ODD_P;
+    if (strcmp(name, "bit-not") == 0) return UNOP_BNOT;
     return -1;
 }
 
@@ -1382,7 +1403,9 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                     c->ok = 0; return -1;
                 }
                 static const mino_bc_op_t unop_op[UNOP__COUNT] = {
-                    OP_INC_I, OP_DEC_I, OP_ZERO_INT_P,
+                    OP_INC_I,    OP_DEC_I,    OP_ZERO_INT_P,
+                    OP_POS_P_I,  OP_NEG_P_I,
+                    OP_EVEN_P_I, OP_ODD_P_I,  OP_BNOT_I,
                 };
                 emit_abc(c, unop_op[usubop], (unsigned)dst,
                          (unsigned)src_reg, 0);
@@ -1412,9 +1435,12 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                  * registers directly, sparing the alloc + OP_MOVE pair
                  * for the common (op local local) shape. */
                 static const mino_bc_op_t binop_op[BINOP__COUNT] = {
-                    OP_ADD_II, OP_SUB_II, OP_MUL_II,
-                    OP_LT_II,  OP_LE_II,  OP_GT_II,
-                    OP_GE_II,  OP_EQ_II,
+                    OP_ADD_II,  OP_SUB_II,  OP_MUL_II,
+                    OP_LT_II,   OP_LE_II,   OP_GT_II,
+                    OP_GE_II,   OP_EQ_II,
+                    OP_MOD_II,  OP_QUOT_II, OP_REM_II,
+                    OP_BAND_II, OP_BOR_II,  OP_BXOR_II,
+                    OP_SHL_II,  OP_SHR_II,  OP_USHR_II,
                 };
                 emit_abc(c, binop_op[subop], (unsigned)dst,
                          (unsigned)lhs_reg, (unsigned)rhs_reg);
