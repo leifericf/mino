@@ -136,8 +136,14 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                                 mino_val_t *pattern, mino_val_t *val,
                                 const char *ctx)
 {
-    /* Collect :keys, :or, :as, and explicit bindings from the pattern map. */
+    /* Collect :keys / :strs / :syms / :or / :as and explicit bindings
+     * from the pattern map. Earlier versions only handled :keys, which
+     * silently dropped :strs and :syms bindings when the destructure
+     * landed in the tree-walker (the BC-side expander has always
+     * handled all three). */
     mino_val_t *keys_vec  = NULL;
+    mino_val_t *strs_vec  = NULL;
+    mino_val_t *syms_vec  = NULL;
     mino_val_t *or_map    = NULL;
     mino_val_t *as_sym    = NULL;
     size_t i;
@@ -215,6 +221,12 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
         if (mino_type_of(pkey) == MINO_KEYWORD && pkey->as.s.len == 4
             && memcmp(pkey->as.s.data, "keys", 4) == 0) {
             keys_vec = pval;
+        } else if (mino_type_of(pkey) == MINO_KEYWORD && pkey->as.s.len == 4
+                   && memcmp(pkey->as.s.data, "strs", 4) == 0) {
+            strs_vec = pval;
+        } else if (mino_type_of(pkey) == MINO_KEYWORD && pkey->as.s.len == 4
+                   && memcmp(pkey->as.s.data, "syms", 4) == 0) {
+            syms_vec = pval;
         } else if (mino_type_of(pkey) == MINO_KEYWORD && pkey->as.s.len == 2
                    && memcmp(pkey->as.s.data, "or", 2) == 0) {
             or_map = pval;
@@ -263,6 +275,66 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
             }
             if (found == NULL) found = mino_nil(S);
             if (!bind_sym(S, env, ksym, found)) return 0;
+        }
+    }
+
+    /* :strs [a b] -- look up "a", "b" (strings) in val. */
+    if (strs_vec != NULL && mino_type_of(strs_vec) == MINO_VECTOR) {
+        for (i = 0; i < strs_vec->as.vec.len; i++) {
+            mino_val_t *ssym = vec_nth(strs_vec, i);
+            mino_val_t *lookup_key;
+            mino_val_t *found;
+            if (ssym == NULL || mino_type_of(ssym) != MINO_SYMBOL) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "syntax", "MSY003",
+                              ":strs elements must be symbols");
+                return 0;
+            }
+            lookup_key = mino_string_n(S, ssym->as.s.data, ssym->as.s.len);
+            found = NULL;
+            if (mino_type_of(val) == MINO_MAP) {
+                found = map_get_val(val, lookup_key);
+            }
+            if (found == NULL && or_map != NULL
+                && mino_type_of(or_map) == MINO_MAP) {
+                mino_val_t *deflt = map_get_val(or_map, ssym);
+                if (deflt != NULL) {
+                    found = eval(S, deflt, env);
+                    if (found == NULL) return 0;
+                }
+            }
+            if (found == NULL) found = mino_nil(S);
+            if (!bind_sym(S, env, ssym, found)) return 0;
+        }
+    }
+
+    /* :syms [a b] -- look up 'a, 'b (symbols) in val. */
+    if (syms_vec != NULL && mino_type_of(syms_vec) == MINO_VECTOR) {
+        for (i = 0; i < syms_vec->as.vec.len; i++) {
+            mino_val_t *ssym = vec_nth(syms_vec, i);
+            mino_val_t *lookup_key;
+            mino_val_t *found;
+            if (ssym == NULL || mino_type_of(ssym) != MINO_SYMBOL) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "syntax", "MSY003",
+                              ":syms elements must be symbols");
+                return 0;
+            }
+            lookup_key = mino_symbol_n(S, ssym->as.s.data, ssym->as.s.len);
+            found = NULL;
+            if (mino_type_of(val) == MINO_MAP) {
+                found = map_get_val(val, lookup_key);
+            }
+            if (found == NULL && or_map != NULL
+                && mino_type_of(or_map) == MINO_MAP) {
+                mino_val_t *deflt = map_get_val(or_map, ssym);
+                if (deflt != NULL) {
+                    found = eval(S, deflt, env);
+                    if (found == NULL) return 0;
+                }
+            }
+            if (found == NULL) found = mino_nil(S);
+            if (!bind_sym(S, env, ssym, found)) return 0;
         }
     }
 

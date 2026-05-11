@@ -1209,6 +1209,43 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
         }
         return 1;
     }
-    /* Maps and sets: delegate to mino_eq (no lazy forcing needed inside). */
+    /* Maps and sets can hold lazy seqs as values / elements (e.g. the
+     * `& rest` binding from a bc-compiled fn lands as a chunked /
+     * lazy seq, which a literal-quoted cons would equal under
+     * `=`). Forcing has to walk into each entry; delegating to the
+     * non-forcing mino_eq would short-circuit on the lazy-cdr-end
+     * heuristic and incorrectly answer false. */
+    if (mino_type_of(a) == MINO_MAP && mino_type_of(b) == MINO_MAP) {
+        size_t i;
+        if (a->as.map.len != b->as.map.len) return 0;
+        for (i = 0; i < a->as.map.len; i++) {
+            mino_val_t *key = vec_nth(a->as.map.key_order, i);
+            mino_val_t *av  = map_get_val(a, key);
+            mino_val_t *bv  = map_get_val(b, key);
+            if (bv == NULL) return 0;
+            if (!mino_eq_force(S, av, bv)) return 0;
+        }
+        return 1;
+    }
+    if (mino_type_of(a) == MINO_SET && mino_type_of(b) == MINO_SET) {
+        size_t i;
+        if (a->as.set.len != b->as.set.len) return 0;
+        for (i = 0; i < a->as.set.len; i++) {
+            mino_val_t *elem = vec_nth(a->as.set.key_order, i);
+            /* Set membership is keyed by mino_eq (=> hashed). For
+             * lazy elements, force before looking up so the
+             * structural compare in hamt_get sees the forced shape. */
+            mino_val_t *e_forced = elem;
+            if (e_forced != NULL && mino_type_of(e_forced) == MINO_LAZY) {
+                mino_val_t *f = lazy_force(S, (mino_val_t *)e_forced);
+                if (f != NULL) e_forced = f;
+            }
+            if (hamt_get(b->as.set.root, e_forced,
+                         hash_val(e_forced), 0u) == NULL) {
+                return 0;
+            }
+        }
+        return 1;
+    }
     return mino_eq(a, b);
 }

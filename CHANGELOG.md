@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.143.0 — Tree-Walker `:strs` / `:syms` Destructure And Forcing Map Equality
+
+Two correctness fixes that surfaced during the bytecode-VM cycle.
+
+**Tree-walker map destructure now handles `:strs` and `:syms`.**
+`bind_map_destructure` only knew about `:keys`, silently ignoring
+the other two forms (BC-side expansion in `destructure_pair`
+already covered them). After this fix, `(let [{:strs [a b]} {"a"
+1 "b" 2}] [a b])` and the `:syms` analogue work everywhere they
+should, including any path that lands in the tree-walker
+fallback (multi-arity, declined-BC fns, eval-string callers).
+
+**`mino_eq_force` now walks into map values and set elements
+instead of delegating to non-forcing `mino_eq`.** The non-forcing
+helper treats an unrealised `lazy-seq` cdr as end-of-seq -- the
+right call for the contexts where forcing is unsafe but the
+wrong one for `=`, which the user expects to compare contents
+semantically. A bc-compiled fn's `& rest` binding lands as a
+chunked / lazy seq (the `nthnext` expansion the BC destructure
+uses), so a map value carrying that rest seq would compare
+unequal to the same value built from a literal cons. With the
+forcing path now reaching into map / set entries, that case
+matches user expectation:
+
+    (let [r {:head 1 :tail (rest [1 2 3])}
+          e {:head 1 :tail '(2 3)}]
+      (= r e))                ;=> true (was false)
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. Bench: no regression on tight-loop-10M (~15 ms)
+or on the other matrix entries (the forcing path is only on
+the rare lazy-cdr-in-map case).
+
 ## v0.142.0 — Flatmap For Small Persistent Maps
 
 MINO_MAP now carries two representations behind one shape:
@@ -27,7 +60,7 @@ metadata-merge in the reader, clone). Direct `hamt_assoc` /
 `hamt_get` calls outside the HAMT primitives are gone from the
 map path.
 
-**Why this works for Clojure-1 specifically:** keyword keys
+**Why this works for Clojure specifically:** keyword keys
 compare pointer-equal under `mino_eq`'s identity short-circuit,
 so the inner loop of `flat_find_index` is N pointer compares
 plus at most one structural compare. For the typical `{:k1 v1
