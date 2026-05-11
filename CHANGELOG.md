@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.140.0 — Direct Compile for when / and / or
+
+`(when test body...)`, `(and a b ...)`, and `(or a b ...)` no
+longer fall back to the tree-walker. The compiler emits direct
+short-circuit `OP_JMPIFNOT` chains: `when` jumps past the body
+on a falsy test (storing nil); `and` returns the first falsy
+arg; `or` returns the first truthy arg. The last arg of `and` /
+`or` is compiled in tail position so `(and ... (recur ...))`
+still goes through the bytecode trampoline.
+
+What this leverages from Clojure: the short-circuit operators
+are total over the truthy/falsy axis and their values are
+deterministic from the args' source order. The compiler can
+lower each arg's evaluation to a single register write + one
+conditional jump, no thunking or wrapper functions.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan.
+
 ## v0.139.0 — Collection Fast Lanes: nth-vec and get-kw-map
 
 `(nth v idx)` and `(get m :kw)` get compile-time specialized

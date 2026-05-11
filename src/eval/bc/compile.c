@@ -592,6 +592,116 @@ static int compile_do(compiler_t *c, mino_val_t *form, int dst, int tail)
     return compile_body(c, body, dst, tail);
 }
 
+/* Count cons args starting at `args` (a cons-list). */
+static int count_args(mino_val_t *args)
+{
+    int n = 0;
+    while (mino_is_cons(args)) { n++; args = args->as.cons.cdr; }
+    return n;
+}
+
+static int compile_when(compiler_t *c, mino_val_t *form, int dst, int tail)
+{
+    /* (when test body...) == (if test (do body...) nil). The body is
+     * implicit-do; falsy test stores nil in dst and skips the body. */
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) { c->ok = 0; return -1; }
+    mino_val_t *test_form = args->as.cons.car;
+    mino_val_t *body      = args->as.cons.cdr;
+
+    int saved_next = c->next_reg;
+    int test_reg = alloc_reg(c);
+    if (test_reg < 0) return -1;
+    if (compile_expr(c, test_form, test_reg, 0) < 0) return -1;
+    c->next_reg = saved_next;
+
+    int jmp_to_else = emit_jmp_placeholder(c, OP_JMPIFNOT, (unsigned)test_reg);
+    if (jmp_to_else < 0) return -1;
+
+    if (compile_body(c, body, dst, tail) < 0) return -1;
+
+    int jmp_to_end = emit_jmp_placeholder(c, OP_JMP, 0);
+    if (jmp_to_end < 0) return -1;
+
+    patch_jmp(c, jmp_to_else);
+    /* Falsy test path: result is nil. */
+    int k = add_const(c, mino_nil(c->S));
+    if (k < 0) return -1;
+    emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+
+    patch_jmp(c, jmp_to_end);
+    return 0;
+}
+
+static int compile_and(compiler_t *c, mino_val_t *form, int dst, int tail)
+{
+    /* (and) -> true. (and a) -> a. (and a b ...) short-circuits on the
+     * first falsy arg, returning its value; otherwise the last arg's
+     * value is the result (in tail position). */
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) {
+        int k = add_const(c, mino_true(c->S));
+        if (k < 0) return -1;
+        emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+        return 0;
+    }
+    int n = count_args(args);
+    if (n == 1) {
+        return compile_expr(c, args->as.cons.car, dst, tail);
+    }
+    if (n > 64) { c->ok = 0; return -1; }
+    int end_jumps[64];
+    int n_end_jumps = 0;
+    mino_val_t *cur = args;
+    for (int i = 0; i < n - 1; i++) {
+        if (compile_expr(c, cur->as.cons.car, dst, 0) < 0) return -1;
+        int j = emit_jmp_placeholder(c, OP_JMPIFNOT, (unsigned)dst);
+        if (j < 0) return -1;
+        end_jumps[n_end_jumps++] = j;
+        cur = cur->as.cons.cdr;
+    }
+    /* Last arg evaluated in tail position. */
+    if (compile_expr(c, cur->as.cons.car, dst, tail) < 0) return -1;
+    for (int i = 0; i < n_end_jumps; i++) patch_jmp(c, end_jumps[i]);
+    return 0;
+}
+
+static int compile_or(compiler_t *c, mino_val_t *form, int dst, int tail)
+{
+    /* (or) -> nil. (or a) -> a. (or a b ...) returns the first truthy
+     * arg or the last arg's value otherwise. */
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) {
+        int k = add_const(c, mino_nil(c->S));
+        if (k < 0) return -1;
+        emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+        return 0;
+    }
+    int n = count_args(args);
+    if (n == 1) {
+        return compile_expr(c, args->as.cons.car, dst, tail);
+    }
+    if (n > 64) { c->ok = 0; return -1; }
+    int end_jumps[64];
+    int n_end_jumps = 0;
+    mino_val_t *cur = args;
+    for (int i = 0; i < n - 1; i++) {
+        if (compile_expr(c, cur->as.cons.car, dst, 0) < 0) return -1;
+        /* Truthy: keep dst's value and jump to end.  Synthesize
+         * "jump if truthy" via JMPIFNOT skip; JMP end; skip:. */
+        int skip = emit_jmp_placeholder(c, OP_JMPIFNOT, (unsigned)dst);
+        if (skip < 0) return -1;
+        int end = emit_jmp_placeholder(c, OP_JMP, 0);
+        if (end < 0) return -1;
+        end_jumps[n_end_jumps++] = end;
+        patch_jmp(c, skip);
+        cur = cur->as.cons.cdr;
+    }
+    if (compile_expr(c, cur->as.cons.car, dst, tail) < 0) return -1;
+    for (int i = 0; i < n_end_jumps; i++) patch_jmp(c, end_jumps[i]);
+    return 0;
+}
+
 /* Walk a let / loop binding vector and return 1 iff every LHS is a
  * plain MINO_SYMBOL. When this returns 0 the caller can run
  * prim_destructure on the vector to expand the destructure patterns
@@ -2128,6 +2238,9 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail)
         if (strcmp(name, "try") == 0)   return compile_try(c, form, dst, tail);
         if (strcmp(name, "throw") == 0) return compile_throw(c, form, dst, tail);
         if (strcmp(name, "binding") == 0) return compile_binding(c, form, dst, tail);
+        if (strcmp(name, "when") == 0)  return compile_when(c, form, dst, tail);
+        if (strcmp(name, "and") == 0)   return compile_and(c, form, dst, tail);
+        if (strcmp(name, "or") == 0)    return compile_or(c, form, dst, tail);
 
         /* Other special forms have no compile-time handler yet; decline
          * so the tree-walker picks them up rather than emitting a
