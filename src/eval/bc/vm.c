@@ -598,6 +598,74 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_ADD_IK:
+        case OP_SUB_IK:
+        case OP_LT_IK:
+        case OP_LE_IK:
+        case OP_EQ_IK: {
+            /* Immediate-operand variants: lhs in B reg, signed 8-bit
+             * imm in C. The imm is by-construction an int (compile-time
+             * literal), so only the lhs register needs a tag check. On
+             * a tag miss we synthesize the literal back into a tagged
+             * int and reuse the existing prim fallback path. */
+            unsigned a    = A_OF(ins);
+            unsigned b    = B_OF(ins);
+            long long imm = (long long)(int8_t)C_OF(ins);
+            mino_val_t *lhs = regs[b];
+            mino_val_t *r;
+            if (MINO_IS_INT(lhs)) {
+                long long la = MINO_INT_VAL(lhs);
+                long long out;
+                switch (op) {
+                case OP_ADD_IK:
+#if defined(__GNUC__) || defined(__clang__)
+                    if (__builtin_saddll_overflow(la, imm, &out)) { r = NULL; break; }
+#else
+                    out = la + imm;
+#endif
+                    r = tag_or_box_int(S, out); break;
+                case OP_SUB_IK:
+#if defined(__GNUC__) || defined(__clang__)
+                    if (__builtin_ssubll_overflow(la, imm, &out)) { r = NULL; break; }
+#else
+                    out = la - imm;
+#endif
+                    r = tag_or_box_int(S, out); break;
+                case OP_LT_IK: r = (la <  imm) ? mino_true(S) : mino_false(S); break;
+                case OP_LE_IK: r = (la <= imm) ? mino_true(S) : mino_false(S); break;
+                case OP_EQ_IK: r = (la == imm) ? mino_true(S) : mino_false(S); break;
+                default: ok = 0; goto bc_done;
+                }
+            } else {
+                r = NULL;
+            }
+            if (r == NULL) {
+                /* Fallback path: rebuild a cons-spine arg list with the
+                 * literal as a freshly-tagged int and call the prim. */
+                mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
+                mino_val_t *list, *imv;
+                switch (op) {
+                case OP_ADD_IK: fallback = prim_add; break;
+                case OP_SUB_IK: fallback = prim_sub; break;
+                case OP_LT_IK:  fallback = prim_lt;  break;
+                case OP_LE_IK:  fallback = prim_lte; break;
+                case OP_EQ_IK:  fallback = prim_eq;  break;
+                default: ok = 0; goto bc_done;
+                }
+                imv  = mino_int(S, imm);
+                if (imv == NULL) { ok = 0; goto bc_done; }
+                list = mino_cons(S, imv, mino_nil(S));
+                if (list == NULL) { ok = 0; goto bc_done; }
+                list = mino_cons(S, regs[b], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                r = fallback(S, list, env);
+                if (r == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+            }
+            regs[a] = r;
+            break;
+        }
+
         case OP_BINOP_INT: {
             /* The original Phase-1 generic binop with its sub-op
              * encoded in the low nibble of the instruction. The

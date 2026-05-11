@@ -297,6 +297,8 @@ static int producer_writes_to_A_dst(unsigned op)
     case OP_MOD_II:  case OP_QUOT_II: case OP_REM_II:
     case OP_BAND_II: case OP_BOR_II:  case OP_BXOR_II:
     case OP_SHL_II:  case OP_SHR_II:  case OP_USHR_II:
+    case OP_ADD_IK:  case OP_SUB_IK:
+    case OP_LT_IK:   case OP_LE_IK:   case OP_EQ_IK:
     case OP_INC_I:   case OP_DEC_I:   case OP_ZERO_INT_P:
     case OP_POS_P_I: case OP_NEG_P_I:
     case OP_EVEN_P_I: case OP_ODD_P_I: case OP_BNOT_I:
@@ -1422,6 +1424,55 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 int saved_next = c->next_reg;
                 mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
                 mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                /* Immediate-operand fast lane. If one operand is a
+                 * compile-time int literal that fits in signed 8 bits
+                 * and the op has an IK form, emit it directly --
+                 * sparing the OP_LOAD_K + register slot for the
+                 * literal. The compile-time `subop` BINOP_ADD / SUB /
+                 * LT / LE / EQ map to OP_*_IK. Commutative ops (+, =)
+                 * tolerate the literal on either side; subtract and
+                 * the comparators require the literal on the right
+                 * (a < lit not lit < a). */
+                {
+                    int ik_op = -1;
+                    mino_val_t *lit_val  = NULL;
+                    mino_val_t *reg_val  = NULL;
+                    switch (subop) {
+                    case BINOP_ADD: ik_op = OP_ADD_IK; break;
+                    case BINOP_SUB: ik_op = OP_SUB_IK; break;
+                    case BINOP_LT:  ik_op = OP_LT_IK;  break;
+                    case BINOP_LE:  ik_op = OP_LE_IK;  break;
+                    case BINOP_EQ:  ik_op = OP_EQ_IK;  break;
+                    default: break;
+                    }
+                    if (ik_op >= 0) {
+                        int commutative = (subop == BINOP_ADD || subop == BINOP_EQ);
+                        if (MINO_IS_INT(a2)) {
+                            long long n = MINO_INT_VAL(a2);
+                            if (n >= -128 && n <= 127) {
+                                lit_val = a2; reg_val = a1;
+                            }
+                        } else if (commutative && MINO_IS_INT(a1)) {
+                            long long n = MINO_INT_VAL(a1);
+                            if (n >= -128 && n <= 127) {
+                                lit_val = a1; reg_val = a2;
+                            }
+                        }
+                        if (lit_val != NULL) {
+                            int rg = compile_operand_inplace(c, reg_val);
+                            if (rg < 0) return -1;
+                            if (dst > 0xFF || rg > 0xFF) {
+                                c->ok = 0; return -1;
+                            }
+                            long long n = MINO_INT_VAL(lit_val);
+                            emit_abc(c, (mino_bc_op_t)ik_op,
+                                     (unsigned)dst, (unsigned)rg,
+                                     (unsigned)(n & 0xFF));
+                            c->next_reg = saved_next;
+                            return 0;
+                        }
+                    }
+                }
                 int lhs_reg = compile_operand_inplace(c, a1);
                 if (lhs_reg < 0) return -1;
                 int rhs_reg = compile_operand_inplace(c, a2);

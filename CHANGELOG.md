@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.131.0 — Immediate-Operand Fast Lanes
+
+Five new immediate-operand opcodes -- `OP_ADD_IK`, `OP_SUB_IK`,
+`OP_LT_IK`, `OP_LE_IK`, `OP_EQ_IK` -- encode a compile-time
+int literal in the C operand slot (signed 8-bit, range
+`[-128, 127]`). When `(+ x 2)` / `(< i 10)` / `(= mode 1)`
+appears at compile time with the literal in range, the
+compiler emits the IK form directly instead of the OP_LOAD_K
++ register-slot + OP_*_II pair.
+
+The reduction is: one fewer opcode dispatch per occurrence,
+one fewer live register through the surrounding peephole
+window (helps the linear-scan allocator), and one fewer tag
+check at runtime (the immediate is by construction an int).
+Commutative ops (`+`, `=`) accept the literal on either
+side; `-`, `<`, `<=` require it on the right. Anything
+outside the range, or operand types the compiler can't
+prove are int literals, falls through to OP_*_II as before.
+
+Verification: 1 571 tests / 7 353 assertions green on
+release, ASan, UBSan.
+
 ## v0.130.0 — Extended Int Fast-Lane Breadth
 
 `mod`, `quot`, `rem`, `bit-and`, `bit-or`, `bit-xor`,

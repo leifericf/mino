@@ -86,6 +86,15 @@ typedef enum {
     OP_EVEN_P_I,         /* int even?  fast lane                           */
     OP_ODD_P_I,          /* int odd?   fast lane                           */
     OP_BNOT_I,           /* int bit-not fast lane                          */
+    /* Immediate-operand variants. ABC form: A=dst, B=lhs reg, C=signed
+     * 8-bit immediate (in [-128, 127]). The compiler folds small int
+     * literals into the C slot so a `(< i 10)` / `(+ i 2)` etc. avoids
+     * the OP_LOAD_K + extra register slot for the literal. */
+    OP_ADD_IK,           /* A=dst, B=lhs reg, sC=signed imm                */
+    OP_SUB_IK,           /* "                                              */
+    OP_LT_IK,            /* "                                              */
+    OP_LE_IK,            /* "                                              */
+    OP_EQ_IK,            /* "                                              */
     OP_GET_KW_MAP,       /* A=dst, B=map, C=kw                             */
     OP_NTH_VEC,          /* A=dst, B=vec, C=index                          */
     /* Lexical-env management for compiled closures. OP_PUSH_ENV and
