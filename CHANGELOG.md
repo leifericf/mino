@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.141.0 — Cycle Close: Measurement Gate
+
+Final measurement after the bytecode-vm perf cycle. Local
+mac arm64, min-of-3, best timings:
+
+| Benchmark         | v0.128.0 | v0.140.0 | Lua 5.5 | Janet  |
+|-------------------|----------|----------|---------|--------|
+| tight-loop-10M    | 157 ms   | **15**   | 67      | 692    |
+| fib-30            | 359      | 89       | 37      | 58     |
+| sum-1-to-1M       | 18       | 17       | 4       | 8      |
+| call-noop-1M      | 173      | 31       | 10      | 19     |
+| cond-branch-1M    | 1 340    | 29       | 10      | 73     |
+| arith-chain-1M    | 639      | 35       | 12      | 15     |
+
+Headline: mino beats Lua 5.5 by 4.5x on tight-loop-10M and
+beats Janet by 2.5x on cond-branch-1M; mino vs the cycle's
+start point is 10.5x faster on tight-loop, 46x on cond-branch,
+18x on arith-chain.
+
+What this leverages from Clojure: every win in this cycle
+came from a Clojure-shape that the compiler can see. Persistent
+bindings make the fused (recur (inc i) (dec j)) step safe to
+emit as a single in-place update. Var indirection with monotonic
+`ic_gen` gives a cheap, sound inline cache for global symbol
+resolution. Pure-prim identity tracking lets the compiler fold
+`(+ 1 2)` to a constant while still re-compiling when the var
+gets redefined. Left-associative variadic arithmetic expands
+into chained binary ops without losing the throw-on-overflow
+semantics. Bytecode-level pattern recognition of `(zero? bX)
+... (recur (dec bX) ...)` would not be sound in a language with
+mutable counters or surprise effects; it works here because the
+loop-recur form is total over its bindings and overflow always
+throws.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. Full report at `.local/perf_v141.md`.
+
 ## v0.140.0 — Direct Compile for when / and / or
 
 `(when test body...)`, `(and a b ...)`, and `(or a b ...)` no
