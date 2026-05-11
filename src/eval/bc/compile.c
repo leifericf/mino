@@ -266,6 +266,95 @@ static int find_local(compiler_t *c, const char *name)
 }
 
 /* ------------------------------------------------------------------- */
+/* Tail-position peephole                                              */
+/* ------------------------------------------------------------------- */
+
+/* Replace the A operand of an instruction. A occupies bits 8..15 in
+ * every encoding form (ABC, ABx, AsBx), so the rewrite is a uniform
+ * bit-twiddle. */
+static mino_bc_insn_t set_A_field(mino_bc_insn_t ins, unsigned new_a)
+{
+    return (ins & ~((mino_bc_insn_t)0xFFu << 8))
+         | ((mino_bc_insn_t)(new_a & 0xFFu) << 8);
+}
+
+/* True iff `op` writes a value to its A operand. The peephole only
+ * folds these producers; OP_CALL (result goes to C), OP_SETGLOBAL
+ * (writes to a global, not a register), OP_RETURN / OP_TAILCALL
+ * (don't produce a value-in-register at all) are not folded. */
+static int producer_writes_to_A_dst(unsigned op)
+{
+    switch (op) {
+    case OP_MOVE:
+    case OP_LOAD_K:
+    case OP_GETGLOBAL:
+    case OP_CLOSURE:
+    case OP_MAKE_LAZY:
+    case OP_ADD_II: case OP_SUB_II: case OP_MUL_II:
+    case OP_LT_II:  case OP_LE_II:  case OP_GT_II:
+    case OP_GE_II:  case OP_EQ_II:
+    case OP_INC_I:  case OP_DEC_I:  case OP_ZERO_INT_P:
+    case OP_BINOP_INT:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* True iff any OP_JMP / OP_JMPIFNOT in code[0..code_len) targets pc. */
+static int pc_is_jump_target(const mino_bc_insn_t *code, size_t code_len,
+                             size_t target_pc)
+{
+    for (size_t pc = 0; pc < code_len; pc++) {
+        mino_bc_insn_t ins = code[pc];
+        unsigned op = OP_OF(ins);
+        if (op != OP_JMP && op != OP_JMPIFNOT) continue;
+        long off = sBx_OF(ins);
+        long target = (long)pc + 1 + off;
+        if (target >= 0 && (size_t)target == target_pc) return 1;
+    }
+    return 0;
+}
+
+/* Fold the tail-position MOVE that closes a clause's body, when one
+ * is present. Pattern: the body's last emitted instruction is
+ * `OP_MOVE A B`, the immediately preceding instruction is a foldable
+ * producer that wrote to B, neither the producer nor the MOVE is a
+ * jump target. In that case we rewrite the producer's A operand to
+ * the MOVE's A and drop the MOVE entirely. After the fold the
+ * surrounding OP_RETURN reads A directly from the producer's output.
+ *
+ * Only the body's terminal MOVE is folded -- the producer is at
+ * pc code_len - 2, the MOVE at code_len - 1. The MOVE's removal
+ * shrinks code_len by 1, which is safe because (1) we just verified
+ * no jump targets it, and (2) the OP_RETURN about to be emitted
+ * takes the slot the MOVE vacated. */
+static void peephole_tail_move(compiler_t *c)
+{
+    if (!c->ok) return;
+    if (c->bc->code_len < 2) return;
+    size_t move_pc = c->bc->code_len - 1;
+    mino_bc_insn_t last = c->bc->code[move_pc];
+    if (OP_OF(last) != OP_MOVE) return;
+    unsigned A = A_OF(last);
+    unsigned B = B_OF(last);
+    if (A == B) {
+        /* A == B is a true no-op. Drop it. */
+        c->bc->code_len--;
+        return;
+    }
+    size_t prod_pc = move_pc - 1;
+    mino_bc_insn_t prev = c->bc->code[prod_pc];
+    unsigned prev_op = OP_OF(prev);
+    if (!producer_writes_to_A_dst(prev_op)) return;
+    if (A_OF(prev) != B) return;
+    if (pc_is_jump_target(c->bc->code, c->bc->code_len, move_pc)) return;
+    if (pc_is_jump_target(c->bc->code, c->bc->code_len, prod_pc)) return;
+    c->bc->code[prod_pc] = set_A_field(prev, A);
+    c->bc->code_len--;
+}
+
+/* ------------------------------------------------------------------- */
 /* AST helpers                                                         */
 /* ------------------------------------------------------------------- */
 
@@ -396,6 +485,26 @@ static int compile_if(compiler_t *c, mino_val_t *form, int dst, int tail)
     if (mino_is_cons(rest2)) {
         else_form = rest2->as.cons.car;
         if (mino_is_cons(rest2->as.cons.cdr)) { c->ok = 0; return -1; }
+    }
+
+    /* Constant-condition fold. When cond is a literal whose truthiness
+     * is known at compile time, we know exactly which branch will run
+     * and can skip the JMPIFNOT / JMP scaffolding entirely. nil and
+     * false are falsy; everything else (including 0, "", :keyword, the
+     * empty list) is truthy. The fold also covers (if true ...) which
+     * shows up in the eval-floor benches as a way to keep call shape
+     * stable. */
+    if (is_self_evaluating(cond_form)) {
+        if (mino_is_truthy_inline(cond_form)) {
+            return compile_expr(c, then_form, dst, tail);
+        }
+        if (else_form != NULL) {
+            return compile_expr(c, else_form, dst, tail);
+        }
+        int k = add_const(c, mino_nil(c->S));
+        if (k < 0) return -1;
+        emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+        return 0;
     }
 
     int saved_next = c->next_reg;
@@ -1232,6 +1341,10 @@ static int compile_clause(compiler_t *c, mino_val_t *params, mino_val_t *body,
     if (ret_reg < 0) return -1;
     if (compile_body(c, body, ret_reg, /*tail=*/1) < 0) return -1;
     if (!c->ok) return -1;
+    /* Body ended with OP_MOVE ret_reg, X for a (let [x form] x)-style
+     * tail expression? Fold the producer's dst onto ret_reg and drop
+     * the MOVE before stamping the OP_RETURN. */
+    peephole_tail_move(c);
     emit_abc(c, OP_RETURN, (unsigned)ret_reg, 0, 0);
     if (!c->ok) return -1;
     return 0;

@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.117.0 — Bytecode Constant-If Fold And Tail-MOVE Peephole
+
+Two small bytecode compiler optimisations.
+
+First, `compile_if` now folds constant conditions at compile
+time. When the condition form is self-evaluating (`true`,
+`false`, `nil`, a literal int / keyword / string / char), the
+compiler evaluates truthiness on the spot and emits only the
+chosen branch. `(if true 1 0)` compiles to `OP_LOAD_K dst, k(1)`
++ `OP_RETURN` instead of the previous six-instruction
+`OP_LOAD_K cond` / `OP_JMPIFNOT` / `OP_LOAD_K then` / `OP_JMP`
+/ `OP_LOAD_K else` sequence.
+
+Second, a tail-MOVE peephole runs once per clause at the end
+of `compile_clause`. If the clause body's last emitted
+instruction is `OP_MOVE ret_reg, X`, the instruction before it
+is a foldable producer (`OP_LOAD_K`, `OP_GETGLOBAL`, any of
+the `*_II` binops, the unary fast-lane ops, `OP_CLOSURE`,
+`OP_MAKE_LAZY`) that wrote to `X`, and neither pc is a jump
+target, the producer's `A` operand is rewritten to `ret_reg`
+and the `OP_MOVE` is dropped. This catches the
+`(let [x form] x)` shape where the body's tail returns a
+binding directly -- the binding's emit becomes the return-slot
+emit, the redundant MOVE disappears.
+
+Measured against v0.116.0 (release `-O2`, min-of-3 from
+`perf_gate.clj`):
+
+```
+arith-add        1716 -> 1640  (+4.4%)
+arith-inc        1652 -> 1598  (+3.3%)
+fn-call-identity 1546 -> 1515  (+2.0%)
+if-branch        1479 -> 1448  (+2.1%)
+let-local-lookup 1445 -> 1439  (+0.4%)
+loop-recur-5     1678 -> 1652  (+1.6%)
+do-block         1604 -> 1576  (+1.7%)
+10M tight loop  1091ms -> 1054ms (+3.4%)
+```
+
+Modest, narrow wins. The eval-floor benches are largely
+call-overhead-bound, so even removing four instructions from
+the if-branch body (six down to two) only shaves 31ns out of
+a ~1500ns total. The tight loop dropped 37ms because the
+arith-add change closes a per-iteration overhead in the
+return path.
+
+Bytes/op unchanged; both folds remove instructions but no
+allocations.
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.116.0 — Bytecode Operand-Inplace For Fast Lanes
 
 The bc compiler's int fast lanes now read operand registers
