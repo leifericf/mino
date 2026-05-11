@@ -87,9 +87,13 @@ static mino_val_t *args_from_regs(mino_state_t *S, mino_val_t **regs,
  * overflow check prior to encoding caught LLONG_MAX-class wraps). */
 static inline mino_val_t *tag_or_box_int(mino_state_t *S, long long r)
 {
+#ifdef MINO_BC_PROFILE_COUNTS
     S->bc_int_make_count++;
+#endif
     if (r >= MINO_INT_MIN && r <= MINO_INT_MAX) {
+#ifdef MINO_BC_PROFILE_COUNTS
         S->bc_int_alloc_avoided++;
+#endif
         return MINO_MAKE_INT(r);
     }
     return mino_int(S, r);

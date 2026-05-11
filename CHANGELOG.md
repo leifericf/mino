@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.129.0 — Drop Arith Hot-Path Instrumentation
+
+`mino_int`, `tag_or_box_int`, and the BC arith fast lane no longer
+increment the `bc_int_make_count` / `bc_int_alloc_avoided` counters
+on every tagged-int production. The counters are gated behind
+`MINO_BC_PROFILE_COUNTS`; turn the macro on when investigating
+alloc-avoidance, leave it off in release builds.
+
+The counters were two unconditional memory writes per `mino_int`
+call -- on the hottest path the VM has (every arith result, every
+inc/dec, every range iteration). Steady-state runs paid the writes
+in cache-line traffic without observing the numbers; the macro
+moves them behind a compile-time flag without losing the
+diagnostic when wanted.
+
+Verification: 1 571 tests / 7 353 assertions green; tight-loop
+microbench unchanged in shape but faster by ~10 % (the expected
+size of two-write removal on a tagged-int-heavy inner loop).
+
 ## v0.128.0 — Destructure Bytecode Compilation
 
 Third Phase E tag. The bytecode compiler now accepts destructuring

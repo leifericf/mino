@@ -787,9 +787,10 @@ struct mino_state {
     /* Pointer-tagged int counters: bc_int_make_count counts every call
      * to mino_int(S, n); bc_int_alloc_avoided counts those that
      * returned a tagged value instead of allocating a boxed MINO_INT
-     * cell. The ratio quantifies the alloc-avoidance win from the
-     * tagged representation; the absolute numbers fall out for free
-     * in alloc-profile dumps. */
+     * cell. Only maintained when MINO_BC_PROFILE_COUNTS is defined --
+     * the increments live on the hottest path in the VM, and steady-
+     * state runs leave them off so the arith fast lane doesn't pay
+     * for two unconditional writes per tagged-int production. */
     size_t          bc_int_make_count;
     size_t          bc_int_alloc_avoided;
 
