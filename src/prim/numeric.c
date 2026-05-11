@@ -2066,11 +2066,11 @@ mino_val_t *prim_compare(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         double db = tower_to_double(b);
         return mino_int(S, da < db ? -1 : da > db ? 1 : 0);
     }
-    if (a->type == b->type && mino_type_of(a) == MINO_STRING) {
+    if (mino_type_of(a) == mino_type_of(b) && mino_type_of(a) == MINO_STRING) {
         int cmp = strcmp(a->as.s.data, b->as.s.data);
         return mino_int(S, cmp < 0 ? -1 : cmp > 0 ? 1 : 0);
     }
-    if (a->type == b->type
+    if (mino_type_of(a) == mino_type_of(b)
         && (mino_type_of(a) == MINO_KEYWORD || mino_type_of(a) == MINO_SYMBOL)) {
         /* Defer to val_compare so namespaced symbols/keywords compare
          * as Clojure does: unqualified before any qualified, and
@@ -2216,7 +2216,7 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
 {
     if (a == NULL || b == NULL) return -2;
     /* Same-type fast paths. */
-    if (a->type == b->type) {
+    if (mino_type_of(a) == mino_type_of(b)) {
         switch (mino_type_of(a)) {
         case MINO_INT:
             return mino_val_int_get(a) < mino_val_int_get(b) ? -1 : mino_val_int_get(a) > mino_val_int_get(b) ? 1 : 0;
@@ -2254,7 +2254,7 @@ static int tower_cmp(const mino_val_t *a, const mino_val_t *b)
     {
         double da = tower_to_double(a);
         double db = tower_to_double(b);
-        if (a->type < 0) return -2; /* unreachable defensive */
+        if ((int)mino_type_of(a) < 0) return -2; /* unreachable defensive */
         return da < db ? -1 : da > db ? 1 : 0;
     }
 }

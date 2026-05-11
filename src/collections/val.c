@@ -506,7 +506,7 @@ int record_field_index(const mino_val_t *r, const mino_val_t *key)
     for (i = 0; i < n; i++) {
         mino_val_t *fk = vec_nth(fields, i);
         if (fk == NULL) continue;
-        if (fk->type == key->type
+        if (mino_type_of(fk) == mino_type_of(key)
             && fk->as.s.len == key->as.s.len
             && memcmp(fk->as.s.data, key->as.s.data, key->as.s.len) == 0) {
             return (int)i;
@@ -700,7 +700,7 @@ static void eq_seq_step(const mino_val_t **cur, size_t *idx)
         if (next < ch->as.chunk.len) { *idx = next; return; }
         *cur = c->as.chunked_cons.more;
         *idx = 0;
-        if (*cur != NULL && (*cur)->type == MINO_CHUNKED_CONS) {
+        if (*cur != NULL && mino_type_of(*cur) == MINO_CHUNKED_CONS) {
             *idx = (*cur)->as.chunked_cons.off;
         }
         return;
@@ -857,7 +857,7 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return mino_is_nil(a) && mino_is_nil(b);
     }
     if (a == b) return 1;
-    if (a->type != b->type) {
+    if (mino_type_of(a) != mino_type_of(b)) {
         /*
          * Cross-tier integer equality: int and bigint represent the
          * same arbitrary-precision integer kind, and Clojure treats
@@ -877,8 +877,8 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
          * element-wise.  Matches Clojure where (= '(1 2) [1 2]) is true.
          */
         {
-            int a_seq = is_sequential(a->type);
-            int b_seq = is_sequential(b->type);
+            int a_seq = is_sequential(mino_type_of(a));
+            int b_seq = is_sequential(mino_type_of(b));
             if (a_seq && b_seq) {
                 return eq_seq_like(a, b);
             }
@@ -1186,7 +1186,7 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b)
         return eq_seq_like_force(S, a, b);
     }
     /* Cross-type sequential: cons vs vector, nil vs vector, etc. */
-    if (a->type != b->type && is_sequential(a->type) && is_sequential(b->type)) {
+    if (mino_type_of(a) != mino_type_of(b) && is_sequential(mino_type_of(a)) && is_sequential(mino_type_of(b))) {
         /* Force any remaining lazy seqs in elements during comparison. */
         return eq_seq_like_force(S, a, b);
     }

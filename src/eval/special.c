@@ -141,7 +141,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
             mino_val_t *sym = mino_symbol(S, cur);
             mino_val_t *meta = ns_env_get_meta(S, cur);
             if (meta != NULL && sym != NULL) {
-                mino_val_t *copy = alloc_val(S, sym->type);
+                mino_val_t *copy = alloc_val(S, mino_type_of(sym));
                 copy->as   = sym->as;
                 copy->meta = meta;
                 return copy;

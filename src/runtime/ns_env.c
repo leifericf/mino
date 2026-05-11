@@ -122,7 +122,7 @@ mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name)
     mino_val_t *sym  = mino_symbol(S, name);
     mino_val_t *meta = ns_env_get_meta(S, name);
     if (meta != NULL && sym != NULL) {
-        mino_val_t *copy = alloc_val(S, sym->type);
+        mino_val_t *copy = alloc_val(S, mino_type_of(sym));
         copy->as   = sym->as;
         copy->meta = meta;
         return copy;

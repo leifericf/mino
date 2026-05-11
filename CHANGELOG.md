@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.121.0 — Generic-Deref Audit for Tagged-Int Safety
+
+Closes the remaining audit gaps that v0.120.0's `->type ==` / `->as.i`
+sweep didn't catch, so the v0.122.0 constructor flip can land without
+revisiting the call-site layer.
+
+The v0.120.0 perl regex caught `X->type ==`, `X->type !=`, and
+`switch (X->type)`, but missed several patterns where `X->type` is
+still read as a plain value:
+
+- `X->type` passed as a function argument
+  (`meta_readable(obj->type)`, `supports_meta(obj->type)`,
+  `alloc_val(S, obj->type)`).
+- Cross-type comparisons (`a->type == b->type`, `a->type != b->type`,
+  `a->type < b->type`).
+- Defensive checks like `a->type < 0`.
+
+This tag rewrites those sites to use `mino_type_of(X)` so they stay
+correct when `X` is inline-tagged. Files touched:
+
+- `src/prim/meta.c` — every `obj->type` access in `prim_meta`,
+  `prim_with_meta`, `prim_vary_meta`, `prim_alter_meta`.
+- `src/prim/numeric.c` — three `a->type == b->type` cross-compares in
+  the compare/tower paths plus one defensive `a->type < 0`.
+- `src/prim/ns.c` — `ks[i]->type == MINO_SYMBOL` in
+  `names_contains`.
+- `src/collections/val.c` — record field lookup, chunked-cons
+  iteration, and the equality cross-type / sequential branches.
+- `src/collections/rbtree.c` — `val_compare`'s same-type and
+  fallback-ordering paths.
+- `src/runtime/ns_env.c` and `src/eval/special.c` — `alloc_val(S,
+  sym->type)` rewritten to use `mino_type_of(sym)` for hygiene.
+
+The `->meta` read sites surveyed during this tag were all found to be
+safe: every one either operates on a freshly-allocated value (`out`,
+`copy`, `result`, `new_rec`, etc.) or is inside a type-discriminated
+branch that already excludes `MINO_INT` via `mino_type_of`. No further
+guards needed for those.
+
+Verification: the constructor flip was temporarily applied at this
+tag and the full suite ran green (release + ASan + UBSan, 1557 /
+7279); the flip was then reverted so this commit ships the audit
+alone. The actual `mino_int(S, n)` flip lands at v0.122.0 as a six-
+line constructor change.
+
+Perf gate **skipped** at this tag: no behavior change.
+
 ## v0.120.0 — Tag-Safe Type Discrimination at Call Sites
 
 Migrates every type-discrimination site to the `mino_type_of(v)`

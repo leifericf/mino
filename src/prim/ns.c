@@ -209,7 +209,7 @@ static int names_contains(mino_val_t **ks, size_t n, const char *name)
 {
     size_t i;
     for (i = 0; i < n; i++) {
-        if (ks[i] != NULL && ks[i]->type == MINO_SYMBOL
+        if (ks[i] != NULL && mino_type_of(ks[i]) == MINO_SYMBOL
             && strlen(name) == ks[i]->as.s.len
             && memcmp(ks[i]->as.s.data, name, ks[i]->as.s.len) == 0)
             return 1;

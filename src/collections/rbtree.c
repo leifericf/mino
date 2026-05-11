@@ -41,7 +41,7 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
              : a->as.s.len > b->as.s.len ? 1 : 0;
     }
     if ((mino_type_of(a) == MINO_SYMBOL || mino_type_of(a) == MINO_KEYWORD)
-         && a->type == b->type) {
+         && mino_type_of(a) == mino_type_of(b)) {
         /* Symbols and keywords compare like Clojure's Symbol.compareTo:
          * unqualified (nil ns) sorts before any qualified one; within
          * the same ns the names are compared lexicographically. mino
@@ -87,7 +87,11 @@ int val_compare(const mino_val_t *a, const mino_val_t *b)
         return a->as.vec.len < b->as.vec.len ? -1
              : a->as.vec.len > b->as.vec.len ? 1 : 0;
     }
-    return a->type < b->type ? -1 : a->type > b->type ? 1 : 0;
+    {
+        mino_type_t ta = mino_type_of(a);
+        mino_type_t tb = mino_type_of(b);
+        return ta < tb ? -1 : ta > tb ? 1 : 0;
+    }
 }
 
 /* Compare with optional custom comparator function.
