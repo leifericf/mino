@@ -143,6 +143,25 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         S->bc_regs[base + (size_t)i] = argv[i];
     }
 
+    /* When the body contains an inner fn literal, extend the lexical
+     * env with a fresh child and publish the params into it. Any
+     * OP_CLOSURE emitted by the body then captures an env that
+     * already has the outer's params (and, via OP_PUSH_ENV, any
+     * let-bindings) visible to the inner fn. Fns without inner fns
+     * skip the env_alloc + n_params hash inserts entirely. */
+    if (bc->captures) {
+        env = env_child(S, env);
+        if (env == NULL) { bc_pop_window(S, base); return NULL; }
+        for (int i = 0; i < bc->n_params; i++) {
+            mino_val_t *p = vec_nth(fn_val->as.fn.params, (size_t)i);
+            if (p == NULL || p->type != MINO_SYMBOL) {
+                bc_pop_window(S, base);
+                return NULL;
+            }
+            env_bind_sym(S, env, p, argv[i]);
+        }
+    }
+
     mino_val_t **regs = S->bc_regs + base;
     const mino_bc_insn_t *code = bc->code;
     size_t pc = 0;
@@ -280,6 +299,35 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
             closure->as.fn.shape = child->as.fn.shape;
             regs[a] = closure;
+            break;
+        }
+
+        case OP_PUSH_ENV: {
+            mino_env_t *child = env_child(S, env);
+            if (child == NULL) { ok = 0; goto bc_done; }
+            env = child;
+            break;
+        }
+
+        case OP_POP_ENV: {
+            if (env == NULL || env->parent == NULL) {
+                /* Can't happen if the compiler emits matched
+                 * PUSH/POP pairs around every let scope; defensive. */
+                ok = 0; goto bc_done;
+            }
+            env = env->parent;
+            break;
+        }
+
+        case OP_ENV_BIND: {
+            unsigned a  = A_OF(ins);
+            unsigned bx = Bx_OF(ins);
+            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
+            mino_val_t *sym = bc->consts[bx];
+            if (sym == NULL || sym->type != MINO_SYMBOL) {
+                ok = 0; goto bc_done;
+            }
+            env_bind_sym(S, env, sym, regs[a]);
             break;
         }
 

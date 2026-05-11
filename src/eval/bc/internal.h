@@ -64,6 +64,15 @@ typedef enum {
     OP_EQ_II,            /* int == int                                     */
     OP_GET_KW_MAP,       /* A=dst, B=map, C=kw                             */
     OP_NTH_VEC,          /* A=dst, B=vec, C=index                          */
+    /* Lexical-env management for compiled closures. OP_PUSH_ENV and
+     * OP_POP_ENV bracket let scopes when the enclosing fn captures
+     * (its body contains an inner fn literal); OP_ENV_BIND publishes
+     * a let-binding or fn-param into the current env so OP_CLOSURE
+     * picks it up via the env chain. Fns without inner fns skip
+     * these ops entirely and keep their bindings register-only. */
+    OP_PUSH_ENV,         /*                                                  */
+    OP_POP_ENV,          /*                                                  */
+    OP_ENV_BIND,         /* A=src reg, Bx=name symbol const idx              */
     OP__COUNT
 } mino_bc_op_t;
 
@@ -126,6 +135,10 @@ typedef struct mino_bc_fn {
     size_t           consts_len;
     int              n_regs;      /* number of register slots the body needs */
     int              n_params;    /* fixed param count (Phase 1 only) */
+    int              captures;    /* 1 iff body contains inner fn literal --
+                                   * forces env_child + OP_ENV_BIND of params
+                                   * at entry, and let scopes bracket their
+                                   * bindings with OP_PUSH_ENV / OP_POP_ENV */
 } mino_bc_fn_t;
 
 /* Compile / run status. Returned from mino_bc_compile_fn and consulted

@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.110.0 — Bytecode Closures
+
+The bc compiler emits inner `(fn ...)` and `(fn* ...)` literals,
+including the named-fn `(fn name [params] body)` form that lets a
+closure recurse by name. Three new opcodes -- `OP_PUSH_ENV`,
+`OP_POP_ENV`, `OP_ENV_BIND` -- manage the lexical-env chain so
+captured closures see exactly the let-scoped bindings that were in
+scope at OP_CLOSURE time. Fns whose body contains no inner fn skip
+the env machinery and keep their bindings register-only.
+
+A pre-scan over the fn body sets a `captures` flag on the compiled
+record. When set, the runtime extends the captured env with a
+fresh child at entry and publishes the fn's params into it, and
+the compiler brackets every let scope with PUSH_ENV / POP_ENV plus
+an OP_ENV_BIND per binding. Named-fn literals emit a 4-instruction
+sequence that wraps a child env around the OP_CLOSURE itself so the
+closure captures an env that already has its name pointing at it.
+
+Inner fn literals are stored as MINO_FN templates in the outer
+fn's constant pool. OP_CLOSURE copies the template's params, body,
+defining-ns, shape, and bc into a fresh closure value and seals in
+the live env; each invocation that reaches OP_CLOSURE therefore
+produces a distinct closure over the current lexical chain.
+
+Multi-arity inner fns are normalised via `build_multi_arity_clauses`
+(the same helper eval_fn uses) so the template's params/body shape
+matches what the tree-walker fallback expects; their bc remains the
+declined sentinel for this cycle and the closures fall back to the
+tree-walker at apply_callable time. Single-arity inner fns whose
+body the compiler covers run on the bc dispatch from the first call.
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.109.0 — Bytecode Macro-Aware Emit
 
 The bc compiler emits `OP_CALL` for non-tail regular calls and

@@ -39,7 +39,9 @@
 #include "mino.h"
 #include "runtime/internal.h"
 #include "eval/internal.h"
+#include "eval/special_internal.h"  /* build_multi_arity_clauses */
 #include "eval/bc/internal.h"
+#include "collections/internal.h"   /* make_fn */
 
 extern mino_val_t *mino_nil(mino_state_t *S);
 
@@ -309,6 +311,40 @@ static int is_special_form_name(const char *name)
 static int compile_expr(compiler_t *c, mino_val_t *form, int dst);
 static int compile_body(compiler_t *c, mino_val_t *body, int dst);
 
+/* Pre-scan: does the form tree contain an inner (fn ...) or (fn* ...)
+ * literal? When yes, the enclosing fn captures, which forces
+ * env-binding of params and bracketing of let scopes with
+ * OP_PUSH_ENV / OP_POP_ENV so the inner closures see the right
+ * lexical chain. Quote-forms are data, not code -- their inner
+ * fn-shaped lists are not closures. */
+static int contains_inner_fn(mino_val_t *form)
+{
+    if (form == NULL) return 0;
+    if (form->type == MINO_VECTOR) {
+        for (size_t i = 0; i < form->as.vec.len; i++) {
+            if (contains_inner_fn(vec_nth(form, i))) return 1;
+        }
+        return 0;
+    }
+    if (form->type == MINO_MAP || form->type == MINO_SET) {
+        /* Conservative: treat as not containing inner fn. Map / set
+         * literals with inner-fn values would be unusual and the
+         * compile-time pre-scan stops at the outermost fn anyway. */
+        return 0;
+    }
+    if (!mino_is_cons(form)) return 0;
+    mino_val_t *head = form->as.cons.car;
+    if (head != NULL && head->type == MINO_SYMBOL) {
+        if (sym_is(head, "fn") || sym_is(head, "fn*")) return 1;
+        if (sym_is(head, "quote") || sym_is(head, "quote*")) return 0;
+    }
+    while (mino_is_cons(form)) {
+        if (contains_inner_fn(form->as.cons.car)) return 1;
+        form = form->as.cons.cdr;
+    }
+    return 0;
+}
+
 /* ------------------------------------------------------------------- */
 /* Special-form compilers                                              */
 /* ------------------------------------------------------------------- */
@@ -380,6 +416,16 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst)
 
     int saved_n_locals = c->n_locals;
     int saved_next_reg = c->next_reg;
+    int pushed_env = 0;
+    /* When the enclosing fn captures, every let scope publishes its
+     * bindings into a fresh env_child so inner closures see exactly
+     * the let-scoped names that were in scope at OP_CLOSURE time --
+     * and stop seeing them after the let body returns. Fns that
+     * don't capture skip this and stay register-only. */
+    if (c->bc->captures) {
+        emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
+        pushed_env = 1;
+    }
 
     for (size_t i = 0; i < blen; i += 2) {
         mino_val_t *name_form = vec_nth(bindings, i);
@@ -391,10 +437,16 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst)
         if (reg < 0) goto out;
         if (compile_expr(c, val_form, reg) < 0) goto out;
         if (!bind_local(c, name_form->as.s.data, reg)) goto out;
+        if (pushed_env) {
+            int k = add_const(c, name_form);
+            if (k < 0) goto out;
+            emit_abx(c, OP_ENV_BIND, (unsigned)reg, (unsigned)k);
+        }
     }
 
     if (compile_body(c, body, dst) < 0) goto out;
 
+    if (pushed_env) emit_abc(c, OP_POP_ENV, 0, 0, 0);
     c->n_locals = saved_n_locals;
     c->next_reg = saved_next_reg;
     return 0;
@@ -403,6 +455,93 @@ out:
     c->n_locals = saved_n_locals;
     c->next_reg = saved_next_reg;
     return -1;
+}
+
+/* Compile an inner (fn ...) or (fn* ...) literal into a child template.
+ * The template is a MINO_FN with .params / .body / .bc populated; it
+ * lives in the outer fn's constant pool. OP_CLOSURE at runtime copies
+ * the template's bc pointer into a fresh closure value and seals in
+ * the current env, so each invocation that reaches OP_CLOSURE produces
+ * a distinct closure over the live lexical chain.
+ *
+ * If the inner fn declines bc compilation (e.g., multi-arity, contains
+ * a special form we can't yet emit), its template carries the declined
+ * sentinel and the closure built from it falls back to the tree-walker
+ * at apply_callable time. The outer fn can still compile -- decline of
+ * an inner fn is local. */
+static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst)
+{
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) { c->ok = 0; return -1; }
+
+    /* Optional name: (fn name [params] body...). The name lets the
+     * body recurse by referring to the just-built closure. eval_fn
+     * does this by wrapping a fresh env_child whose only binding is
+     * name -> closure; we reproduce the same shape by emitting an
+     * OP_PUSH_ENV before the OP_CLOSURE and an OP_ENV_BIND right
+     * after, then OP_POP_ENV to restore the outer's env. The closure
+     * captures the pushed env, so the binding is visible to its body
+     * via the env chain. */
+    mino_val_t *fn_name = NULL;
+    mino_val_t *first   = args->as.cons.car;
+    mino_val_t *rest    = args->as.cons.cdr;
+    if (first != NULL && first->type == MINO_SYMBOL
+        && mino_is_cons(rest)) {
+        mino_val_t *after = rest->as.cons.car;
+        if (after != NULL
+            && (mino_is_cons(after) || mino_is_nil(after)
+                || after->type == MINO_VECTOR)) {
+            fn_name = first;
+            args    = rest;
+        }
+    }
+
+    mino_val_t *params = args->as.cons.car;
+    mino_val_t *body   = args->as.cons.cdr;
+
+    /* Multi-arity detection. eval_fn recognises a fn whose first arg
+     * is itself a (params-vec body...) clause -- the canonical
+     * `(fn ([x] ...) ([x y] ...))` shape -- and rewrites params/body
+     * via build_multi_arity_clauses. The bc compiler declines multi-
+     * arity for now, but we still have to normalise the template's
+     * shape so the tree-walker fallback at apply_callable time sees
+     * what eval_fn would have produced. */
+    if (mino_is_cons(params) && params->as.cons.car != NULL
+        && (params->as.cons.car->type == MINO_VECTOR
+            || mino_is_cons(params->as.cons.car)
+            || mino_is_nil(params->as.cons.car))
+        && params->as.cons.car->type == MINO_VECTOR) {
+        mino_val_t *clauses = build_multi_arity_clauses(
+            c->S, form, args, "MSY002", "fn");
+        if (clauses == NULL) { c->ok = 0; return -1; }
+        params = NULL;
+        body   = clauses;
+    }
+
+    /* Build a template MINO_FN. The env field gets nil here; OP_CLOSURE
+     * supplies the real env at each invocation. */
+    mino_val_t *tmpl = make_fn(c->S, params, body, NULL);
+    if (tmpl == NULL) { c->ok = 0; return -1; }
+    tmpl->as.fn.defining_ns = c->defining_ns;
+    /* Recurse: compile the inner. If decline, the template's bc gets
+     * the declined sentinel and the closure falls back at call time.
+     * Either result is fine for the outer's purposes. */
+    (void)mino_bc_compile_fn(c->S, tmpl);
+
+    int k = add_const(c, tmpl);
+    if (k < 0) return -1;
+
+    if (fn_name != NULL) {
+        int name_k = add_const(c, fn_name);
+        if (name_k < 0) return -1;
+        emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
+        emit_abx(c, OP_CLOSURE, (unsigned)dst, (unsigned)k);
+        emit_abx(c, OP_ENV_BIND, (unsigned)dst, (unsigned)name_k);
+        emit_abc(c, OP_POP_ENV, 0, 0, 0);
+    } else {
+        emit_abx(c, OP_CLOSURE, (unsigned)dst, (unsigned)k);
+    }
+    return 0;
 }
 
 static int compile_quote(compiler_t *c, mino_val_t *form, int dst)
@@ -673,6 +812,8 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst)
             || strcmp(name, "let*") == 0) return compile_let(c, form, dst);
         if (strcmp(name, "quote") == 0) return compile_quote(c, form, dst);
         if (strcmp(name, "def") == 0)   return compile_def(c, form, dst);
+        if (strcmp(name, "fn") == 0
+            || strcmp(name, "fn*") == 0) return compile_fn_literal(c, form, dst);
 
         /* Other special forms have no compile-time handler yet; decline
          * so the tree-walker picks them up rather than emitting a
@@ -790,6 +931,7 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
     bc->consts_len = 0;
     bc->n_regs     = n_params;
     bc->n_params   = n_params;
+    bc->captures   = contains_inner_fn(fn->as.fn.body);
     /* Write barrier: fn may already be OLD (top-level defns survive
      * many minor cycles before the first call triggers compile). The
      * just-allocated bc is YOUNG. Without the barrier, the next minor
