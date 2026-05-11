@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.144.1 — GC Fix: Compiled Bytecode Children Traced Via Remset
+
+The compiled-bytecode record (`mino_bc_fn_t`) was allocated as
+`GC_T_RAW`, so `gc_trace_children` did nothing when the record
+reached the trace via the remembered set. The record's `code`,
+`consts`, `clauses`, and `ic_slots` buffers were reached only
+through `MINO_FN`'s trace; when a write barrier on the bc
+record added it to the remset (e.g. `ensure_code` growing the
+code buffer under an OLD bc with a YOUNG replacement), the
+minor's mark walked the bc header but pushed none of its
+children. The next sweep then freed the still-referenced YOUNG
+buffers.
+
+The fix is a new `GC_T_BC` tag with its own child-tracing
+branch in `gc_trace_children` that pushes `code`, `consts`,
+`clauses`, and the `ic_slots` buffer plus each slot's `sym`
+and `cached` value fields. `mino_bc_compile_fn` now allocates
+the record with this tag.
+
+The bug was latent — exposed by a regression test that builds
+a 12-entry HAMT and shrinks it back to 5 via `reduce dissoc`,
+a pattern that produces enough fresh allocation to age and
+promote the bc record between compile and execution. ASan
+reported `heap-use-after-free` at `mino_bc_run`'s `code[pc++]`
+read. Test suite, ASan, UBSan all green after the fix.
+
 ## v0.144.0 — Cached Hash On Immutable Collection Headers
 
 Vectors, maps, and sets gain a `cached_hash` field on their value

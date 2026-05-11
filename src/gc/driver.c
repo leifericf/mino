@@ -647,6 +647,28 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         gc_mark_child_push(S, rb->right);
         break;
     }
+    case GC_T_BC: {
+        /* The bc record carries pointers to its code, consts, clauses,
+         * and ic_slots buffers. These are normally reached via
+         * MINO_FN's trace, but a write barrier on the bc record
+         * (e.g. ensure_code growing the code buffer) adds the bc
+         * directly to the remset, and minor mark then needs to push
+         * its YOUNG children itself. Without this case the bc lives
+         * but its buffers are silently swept. */
+        struct mino_bc_fn *bc = (struct mino_bc_fn *)(h + 1);
+        gc_mark_child_push(S, bc->code);
+        gc_mark_child_push(S, bc->consts);
+        gc_mark_child_push(S, bc->clauses);
+        if (bc->ic_slots != NULL && bc->ic_slots_len > 0) {
+            int i;
+            gc_mark_child_push(S, bc->ic_slots);
+            for (i = 0; i < bc->ic_slots_len; i++) {
+                gc_mark_child_push(S, bc->ic_slots[i].sym);
+                gc_mark_child_push(S, bc->ic_slots[i].cached);
+            }
+        }
+        break;
+    }
     case GC_T_RAW:
     default:
         break;

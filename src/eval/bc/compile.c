@@ -2596,7 +2596,7 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
      * fn->as.fn.bc with the sentinel and the partial buffers fall out
      * of reachability. */
     mino_bc_fn_t *bc = (mino_bc_fn_t *)gc_alloc_typed(
-        S, GC_T_RAW, sizeof(*bc));
+        S, GC_T_BC, sizeof(*bc));
     if (bc == NULL) { fn->as.fn.bc = &mino_bc_declined; return MINO_BC_UNSUPPORTED; }
     memset(bc, 0, sizeof(*bc));
     bc->n_clauses = n_clauses;
