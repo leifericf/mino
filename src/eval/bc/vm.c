@@ -698,6 +698,65 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             ok = 0; goto bc_done;
         }
 
+        case OP_NTH_VEC: {
+            /* Fast lane for (nth vec int). Falls through to prim_nth on
+             * any type miss so the diagnostic (wrong type / out-of-
+             * range / lazy-seq stride) stays Clojure-correct. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *idx_v = regs[cc];
+            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR
+                && idx_v != NULL && MINO_IS_INT(idx_v)) {
+                long long idx = MINO_INT_VAL(idx_v);
+                if (idx >= 0 && (size_t)idx < coll->as.vec.len) {
+                    regs[a] = vec_nth(coll, (size_t)idx);
+                    break;
+                }
+            }
+            /* Miss: cons the arg pair and call prim_nth so all of its
+             * lazy-seq / chunk / nil / negative-index / out-of-range /
+             * type-error paths fire exactly as the slow lane would. */
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, idx_v, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_nth(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_GET_KW_MAP: {
+            /* Fast lane for (get map keyword) -> map value or nil. On a
+             * map+keyword pair this is a single hash + HAMT lookup, no
+             * arg-list cons. Misses fall back to prim_get so non-map
+             * collections / non-keyword keys / 3-arg default forms keep
+             * their full semantics. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *key  = regs[cc];
+            if (coll != NULL && mino_type_of(coll) == MINO_MAP
+                && key != NULL && mino_type_of(key) == MINO_KEYWORD) {
+                mino_val_t *v = map_get_val(coll, key);
+                regs[a] = v == NULL ? mino_nil(S) : v;
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, key, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_get(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
         case OP_ADD_IK:
         case OP_SUB_IK:
         case OP_LT_IK:

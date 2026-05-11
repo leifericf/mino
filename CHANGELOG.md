@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.139.0 — Collection Fast Lanes: nth-vec and get-kw-map
+
+`(nth v idx)` and `(get m :kw)` get compile-time specialized
+opcodes. `OP_NTH_VEC` reads the vector's leaf directly when the
+collection is a `MINO_VECTOR` and the index is a tagged int;
+`OP_GET_KW_MAP` does a single hash + HAMT lookup when the
+collection is a `MINO_MAP` and the key is a `MINO_KEYWORD`. Any
+miss (lazy seq / non-keyword / non-vector / out-of-range) falls
+back to `prim_nth` / `prim_get` so the diagnostics stay
+Clojure-correct.
+
+What this leverages from Clojure: persistent vectors and maps
+publish a stable internal layout. The hot path for an indexed
+get is always vector-with-int-index or map-with-keyword-key, and
+both go through one specialised data structure read. The
+fallback handles the long tail of polymorphic shapes without
+penalising the common case.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. 100k nth-on-vector: 3 ms (~30 ns/op). 100k get-kw
+on an 8-entry map: 3 ms.
+
 ## v0.138.0 — Broader Int Fast Lane Inside Reduce
 
 `prim_reduce`'s inner loop already shortcuts (`+`, `*`) on

@@ -338,6 +338,7 @@ static int producer_writes_to_A_dst(unsigned op)
     case OP_SHL_II:  case OP_SHR_II:  case OP_USHR_II:
     case OP_ADD_IK:  case OP_SUB_IK:
     case OP_LT_IK:   case OP_LE_IK:   case OP_EQ_IK:
+    case OP_NTH_VEC: case OP_GET_KW_MAP:
     case OP_INC_I:   case OP_DEC_I:   case OP_ZERO_INT_P:
     case OP_POS_P_I: case OP_NEG_P_I:
     case OP_EVEN_P_I: case OP_ODD_P_I: case OP_BNOT_I:
@@ -1920,6 +1921,52 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 };
                 emit_abc(c, binop_op[subop], (unsigned)dst,
                          (unsigned)lhs_reg, (unsigned)rhs_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* Collection fast lanes: (nth v idx) and (get m :kw) get
+         * compile-time specialized opcodes that read the vector / map
+         * directly when types match and fall back to prim_nth / prim_get
+         * for any miss (lazy seq nth, non-keyword key, etc.). */
+        if (strcmp(head->as.s.data, "nth") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                int vec_reg = compile_operand_inplace(c, a1);
+                if (vec_reg < 0) return -1;
+                int idx_reg = compile_operand_inplace(c, a2);
+                if (idx_reg < 0) return -1;
+                if (dst > 0xFF || vec_reg > 0xFF || idx_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_NTH_VEC, (unsigned)dst,
+                         (unsigned)vec_reg, (unsigned)idx_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        if (strcmp(head->as.s.data, "get") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                int coll_reg = compile_operand_inplace(c, a1);
+                if (coll_reg < 0) return -1;
+                int key_reg = compile_operand_inplace(c, a2);
+                if (key_reg < 0) return -1;
+                if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_GET_KW_MAP, (unsigned)dst,
+                         (unsigned)coll_reg, (unsigned)key_reg);
                 c->next_reg = saved_next;
                 return 0;
             }
