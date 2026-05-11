@@ -73,6 +73,17 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env,
 mino_val_t *eval(mino_state_t *S, mino_val_t *form, mino_env_t *env);
 mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                            mino_env_t *env);
+/* argv ABI variant: invoke `fn` with a slice of `argc` pointers from
+ * `argv`. Skips the cons-spine build+walk used by callers that already
+ * have their args in argv form (BC's OP_CALL, in particular).
+ *
+ * Fast paths handled directly: MINO_PRIM with fn2, MINO_FN bc-runnable.
+ * Slow paths (PRIM-fn1, MINO_FN tree-walker, MINO_MACRO, non-fn
+ * callables) build a cons list internally and delegate to
+ * apply_callable to reuse its trampoline and multi-arity dispatch. */
+mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
+                                mino_val_t **argv, int argc,
+                                mino_env_t *env);
 
 /* ------------------------------------------------------------------------- */
 /* print.c                                                                   */

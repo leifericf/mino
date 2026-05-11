@@ -399,9 +399,12 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             unsigned argn = B_OF(ins);
             unsigned ret  = C_OF(ins);
             mino_val_t *callee = regs[a];
-            mino_val_t *args   = args_from_regs(S, regs + a + 1, argn);
-            if (args == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = apply_callable(S, callee, args, env);
+            /* argv ABI: hand the caller's register slice straight to
+             * apply_callable_argv. For PRIM-fn2 and bc-FN callees the
+             * cons-spine is never built; legacy callees fall back to a
+             * cons rebuild inside apply_callable_argv. */
+            mino_val_t *r = apply_callable_argv(S, callee, regs + a + 1,
+                                                (int)argn, env);
             if (r == NULL) { ok = 0; goto bc_done; }
             S->bc_regs[base + ret] = r;
             break;
@@ -415,7 +418,10 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             if (args == NULL) { ok = 0; goto bc_done; }
             /* Hand off via the MINO_TAIL_CALL sentinel; the outer
              * apply_callable trampoline picks up the new (fn, args)
-             * without growing the C stack. */
+             * without growing the C stack. The sentinel's args field
+             * stays in cons-format for legacy callers that read it
+             * directly; the trampoline inside apply_callable_argv
+             * walks it back to argv for bc-FN targets. */
             S->tail_call_sentinel.as.tail_call.fn   = callee;
             S->tail_call_sentinel.as.tail_call.args = args;
             retval = &S->tail_call_sentinel;

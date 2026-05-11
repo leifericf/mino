@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.134.0 — argv ABI for BC Calls
+
+`OP_CALL` no longer builds a cons-spine arg list when
+dispatching to a callable. The new `apply_callable_argv`
+entry point takes `argv` + `argc` directly; for the two
+hot callee shapes -- argv-ABI C prims and bytecode-
+runnable user fns -- the call goes from register slice
+to argv to callee with zero cons cells allocated.
+
+Before: every OP_CALL allocated N cons cells, then
+`apply_callable` walked them right back into an argv
+scratch array. After: the register slice IS the argv;
+`apply_callable_argv` jumps straight to the prim's fn2
+or the fn's bc trampoline. Legacy callees (fn1 prims,
+tree-walker fns, macros, non-fn callables) still get a
+cons list, built lazily on the slow path.
+
+OP_TAILCALL still produces a cons-format MINO_TAIL_CALL
+sentinel for the trampoline; the trampoline inside
+apply_callable_argv walks it back to argv for bc-FN
+targets. Non-bc tail-call targets get the existing
+`apply_callable` handoff.
+
+Verification: 1 571 tests / 7 353 assertions green on
+release, ASan, UBSan. call-noop-1M: 173 ms -> ~58 ms
+(~3x). fib-30: 359 ms -> ~188 ms (~1.9x).
+
 ## v0.133.0 — N-Arity Arithmetic Expansion
 
 `(+ a b c d)` is no longer a four-arg cons-spine call into
