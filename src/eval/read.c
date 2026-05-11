@@ -1337,25 +1337,18 @@ static mino_val_t *read_metadata_form(mino_state_t *S, const char **p)
         }
         /* Merge with any existing metadata from chained ^ syntax. */
         if (target->meta != NULL && mino_type_of(target->meta) == MINO_MAP) {
-            size_t i;
-            size_t ko_len;
-            mino_val_t *ko = meta_val->as.map.key_order;
+            size_t      i;
+            size_t      ko_len;
+            mino_val_t *ko    = meta_val->as.map.key_order;
+            mino_val_t *merged = target->meta;
             ko_len = (ko != NULL) ? ko->as.vec.len : 0;
             for (i = 0; i < ko_len; i++) {
                 mino_val_t *k = vec_nth(ko, i);
                 mino_val_t *v = map_get_val(meta_val, k);
-                int replaced = 0;
-                hamt_entry_t *e = hamt_entry_new(S, k, v);
-                uint32_t h = hash_val(k);
-                mino_hamt_node_t *nr = hamt_assoc(S,
-                    target->meta->as.map.root, e, h, 0, &replaced);
-                if (!replaced) {
-                    target->meta->as.map.key_order =
-                        vec_conj1(S, target->meta->as.map.key_order, k);
-                    target->meta->as.map.len++;
-                }
-                target->meta->as.map.root = nr;
+                merged = mino_map_assoc1(S, merged, k, v);
+                if (merged == NULL) return NULL;
             }
+            target->meta = merged;
         } else {
             target->meta = meta_val;
         }

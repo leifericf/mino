@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.142.0 — Flatmap For Small Persistent Maps
+
+MINO_MAP now carries two representations behind one shape:
+
+  - **Flatmap** (len ≤ 8): `root` is `NULL`, a new `val_order`
+    vector parallels `key_order`. Lookup is a linear scan via
+    `mino_eq` over the insertion-order keys. No per-entry hash,
+    no `hamt_entry_t` allocation, no bitmap-node allocation.
+
+  - **HAMT** (len > 8 or promoted-and-stayed): unchanged from
+    before -- `root` non-`NULL`, `val_order` `NULL`. Lookup
+    goes through `hamt_get` as it always did.
+
+Promotion (flat → HAMT) happens lazily at the assoc that
+pushes len past the threshold. Demotion is intentionally never
+done: a map that was once HAMT stays HAMT even after dissoc
+shrinks it below 8, so callers that thrash around the boundary
+don't pay re-build cost on every write.
+
+A single discriminator carries the mode -- `val_order != NULL`
+means flat -- which the new `mino_map_lookup` / `mino_map_assoc1`
+/ `mino_map_dissoc1` helpers branch on. All map mutators now go
+through these helpers (assoc, dissoc, merge, agent watches,
+metadata-merge in the reader, clone). Direct `hamt_assoc` /
+`hamt_get` calls outside the HAMT primitives are gone from the
+map path.
+
+**Why this works for Clojure-1 specifically:** keyword keys
+compare pointer-equal under `mino_eq`'s identity short-circuit,
+so the inner loop of `flat_find_index` is N pointer compares
+plus at most one structural compare. For the typical `{:k1 v1
+:k2 v2}` shape -- a configuration map, a record-with-extra-keys,
+a destructure options bag -- 8 pointer compares beats one
+`hash_val` of the keyword's bytes followed by a HAMT bitmap
+test and slot index.
+
+The cache-line crossover is the threshold: 8 keyword keys
+fit in roughly one 64-byte vector tail-slot line on arm64.
+Past that, the HAMT's `log32 N` walk reclaims the lead.
+
+Threshold lives in `collections/internal.h` as
+`MINO_FLATMAP_THRESHOLD = 8u`; the GC walker (`gc/driver.c`
+and `gc/minor.c`) marks/verifies `val_order` alongside the
+existing `root` / `key_order` so the field never goes
+unscanned.
+
+Verification: 1 571 tests / 7 353 assertions green on release,
+ASan, UBSan. Behavioural equivalence: flat and HAMT-built maps
+with the same content compare `=` and `hash` the same; `keys`
+/ `vals` / `seq` walk in insertion order in both modes; meta
+is preserved across the threshold transition.
+
 ## v0.141.2 — Fast-Lane Emission Honours User Shadows
 
 The speculative `OP_*_II` / `OP_*_IK` / unary `OP_*_I` opcodes

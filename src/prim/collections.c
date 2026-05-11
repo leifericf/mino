@@ -963,52 +963,34 @@ mino_val_t *prim_rest_argv(mino_state_t *S, mino_val_t **argv, int argc,
 }
 
 /* Layer n k/v pairs onto an existing map, returning a new map value that
- * shares structure with `coll`. Nil is treated as an empty map.
- *
- * Suppress GC during the rebuild: intermediate `root`/`order`/entry/slot
- * allocations live only on the C stack between iterations, and mino's GC
- * is precise over its own roots -- a minor or incremental-major step
- * mid-loop would reclaim them. Same pattern as mino_map. */
+ * shares structure with `coll`. Nil is treated as an empty map. Routes
+ * through mino_map_assoc1 so both flatmap and HAMT representations are
+ * handled transparently, including any flatmap -> HAMT promotion when
+ * the accumulating size crosses the threshold. */
 static mino_val_t *map_assoc_pairs(mino_state_t *S, mino_val_t *coll,
                                     mino_val_t *p, size_t extra_pairs)
 {
-    mino_hamt_node_t *root;
-    mino_val_t       *order;
-    mino_val_t       *out;
-    size_t            len_out;
-    size_t            i;
+    mino_val_t *acc;
+    size_t      i;
     mino_current_ctx(S)->gc_depth++;
     if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
-        root    = NULL;
-        order   = mino_vector(S, NULL, 0);
-        len_out = 0;
+        mino_val_t **noargs = NULL;
+        acc = mino_map(S, noargs, noargs, 0);
     } else {
-        root    = coll->as.map.root;
-        order   = coll->as.map.key_order;
-        len_out = coll->as.map.len;
+        acc = coll;
     }
     for (i = 0; i < extra_pairs; i++) {
-        mino_val_t   *k = p->as.cons.car;
-        mino_val_t   *v = p->as.cons.cdr->as.cons.car;
-        hamt_entry_t *e = hamt_entry_new(S, k, v);
-        uint32_t      h = hash_val(k);
-        int           replaced = 0;
-        root = hamt_assoc(S, root, e, h, 0u, &replaced);
-        if (!replaced) {
-            order = vec_conj1(S, order, k);
-            len_out++;
-        }
+        mino_val_t *k = p->as.cons.car;
+        mino_val_t *v = p->as.cons.cdr->as.cons.car;
+        acc = mino_map_assoc1(S, acc, k, v);
+        if (acc == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
         p = p->as.cons.cdr->as.cons.cdr;
     }
-    out = alloc_val(S, MINO_MAP);
-    out->as.map.root      = root;
-    out->as.map.key_order = order;
-    out->as.map.len       = len_out;
     if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
-        out->meta = coll->meta;
+        acc->meta = coll->meta;
     }
     mino_current_ctx(S)->gc_depth--;
-    return out;
+    return acc;
 }
 
 mino_val_t *prim_assoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1826,31 +1808,8 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             } else {
                 /* acc is already a plain map (degraded earlier); drop
                  * the key the normal way. */
-                uint32_t h = hash_val(key);
-                if (hamt_get(acc->as.map.root, key, h, 0u) != NULL) {
-                    mino_val_t *new_map = alloc_val(S, MINO_MAP);
-                    mino_val_t *order   = mino_vector(S, NULL, 0);
-                    mino_hamt_node_t *root = NULL;
-                    size_t mi;
-                    size_t new_len = 0;
-                    for (mi = 0; mi < acc->as.map.len; mi++) {
-                        mino_val_t *k = vec_nth(acc->as.map.key_order, mi);
-                        if (!mino_eq(k, key)) {
-                            mino_val_t   *v  = map_get_val(acc, k);
-                            hamt_entry_t *e2 = hamt_entry_new(S, k, v);
-                            uint32_t      h2 = hash_val(k);
-                            int rep = 0;
-                            root = hamt_assoc(S, root, e2, h2, 0u, &rep);
-                            order = vec_conj1(S, order, k);
-                            new_len++;
-                        }
-                    }
-                    new_map->as.map.root      = root;
-                    new_map->as.map.key_order = order;
-                    new_map->as.map.len       = new_len;
-                    new_map->meta             = acc->meta;
-                    acc = new_map;
-                }
+                acc = mino_map_dissoc1(S, acc, key);
+                if (acc == NULL) return NULL;
             }
             p = p->as.cons.cdr;
         }
@@ -1862,31 +1821,8 @@ mino_val_t *prim_dissoc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     p = args->as.cons.cdr;
     while (mino_is_cons(p)) {
         mino_val_t *key = p->as.cons.car;
-        uint32_t    h   = hash_val(key);
-        if (hamt_get(coll->as.map.root, key, h, 0u) != NULL) {
-            mino_val_t *new_map = alloc_val(S, MINO_MAP);
-            mino_val_t *order   = mino_vector(S, NULL, 0);
-            mino_hamt_node_t *root = NULL;
-            size_t i;
-            size_t new_len = 0;
-            for (i = 0; i < coll->as.map.len; i++) {
-                mino_val_t *k = vec_nth(coll->as.map.key_order, i);
-                if (!mino_eq(k, key)) {
-                    mino_val_t   *v  = map_get_val(coll, k);
-                    hamt_entry_t *e2 = hamt_entry_new(S, k, v);
-                    uint32_t      h2 = hash_val(k);
-                    int rep = 0;
-                    root = hamt_assoc(S, root, e2, h2, 0u, &rep);
-                    order = vec_conj1(S, order, k);
-                    new_len++;
-                }
-            }
-            new_map->as.map.root      = root;
-            new_map->as.map.key_order = order;
-            new_map->as.map.len       = new_len;
-            new_map->meta             = coll->meta;
-            coll = new_map;
-        }
+        coll = mino_map_dissoc1(S, coll, key);
+        if (coll == NULL) return NULL;
         p = p->as.cons.cdr;
     }
     return coll;

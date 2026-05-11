@@ -245,7 +245,8 @@ static void gc_verify_remset_complete(mino_state_t *S)
                 gc_verify_check(S, h, v->as.vec.tail); break;
             case MINO_MAP:
                 gc_verify_check(S, h, v->as.map.root);
-                gc_verify_check(S, h, v->as.map.key_order); break;
+                gc_verify_check(S, h, v->as.map.key_order);
+                gc_verify_check(S, h, v->as.map.val_order); break;
             case MINO_SET:
                 gc_verify_check(S, h, v->as.set.root);
                 gc_verify_check(S, h, v->as.set.key_order); break;

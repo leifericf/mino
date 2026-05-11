@@ -398,12 +398,6 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t       *a, *key, *fn, *watches, *new_map;
     mino_val_t      **watches_slot;
     mino_val_t      **validator_slot;
-    mino_hamt_node_t *root;
-    mino_val_t       *order;
-    size_t            len;
-    hamt_entry_t     *e;
-    uint32_t          h;
-    int               replaced = 0;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)
@@ -429,25 +423,12 @@ mino_val_t *prim_add_watch(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     watches = *watches_slot;
     if (watches == NULL || mino_type_of(watches) != MINO_MAP) {
-        root  = NULL;
-        order = mino_vector(S, NULL, 0);
-        len   = 0;
-    } else {
-        root  = watches->as.map.root;
-        order = watches->as.map.key_order;
-        len   = watches->as.map.len;
+        mino_val_t **noargs = NULL;
+        watches = mino_map(S, noargs, noargs, 0);
+        if (watches == NULL) return NULL;
     }
-    e = hamt_entry_new(S, key, fn);
-    h = hash_val(key);
-    root = hamt_assoc(S, root, e, h, 0u, &replaced);
-    if (!replaced) {
-        order = vec_conj1(S, order, key);
-        len++;
-    }
-    new_map = alloc_val(S, MINO_MAP);
-    new_map->as.map.root      = root;
-    new_map->as.map.key_order = order;
-    new_map->as.map.len       = len;
+    new_map = mino_map_assoc1(S, watches, key, fn);
+    if (new_map == NULL) return NULL;
     gc_write_barrier(S, a, *watches_slot, new_map);
     *watches_slot = new_map;
     return a;
@@ -460,7 +441,6 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
     mino_val_t  *a, *key, *watches;
     mino_val_t **watches_slot;
     mino_val_t **validator_slot;
-    uint32_t     h;
     (void)env;
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
@@ -474,28 +454,9 @@ mino_val_t *prim_remove_watch(mino_state_t *S, mino_val_t *args,
     if (watchable_check_state(S, a)) return NULL;
     watches = *watches_slot;
     if (watches == NULL || mino_type_of(watches) != MINO_MAP) return a;
-    h = hash_val(key);
-    if (hamt_get(watches->as.map.root, key, h, 0u) != NULL) {
-        mino_val_t       *new_map = alloc_val(S, MINO_MAP);
-        mino_val_t       *order   = mino_vector(S, NULL, 0);
-        mino_hamt_node_t *root    = NULL;
-        size_t            new_len = 0;
-        size_t            i;
-        for (i = 0; i < watches->as.map.len; i++) {
-            mino_val_t *k = vec_nth(watches->as.map.key_order, i);
-            if (!mino_eq(k, key)) {
-                mino_val_t   *v  = map_get_val(watches, k);
-                hamt_entry_t *e2 = hamt_entry_new(S, k, v);
-                uint32_t      h2 = hash_val(k);
-                int rep = 0;
-                root = hamt_assoc(S, root, e2, h2, 0u, &rep);
-                order = vec_conj1(S, order, k);
-                new_len++;
-            }
-        }
-        new_map->as.map.root      = root;
-        new_map->as.map.key_order = order;
-        new_map->as.map.len       = new_len;
+    if (mino_map_lookup(watches, key) != NULL) {
+        mino_val_t *new_map = mino_map_dissoc1(S, watches, key);
+        if (new_map == NULL) return NULL;
         gc_write_barrier(S, a, *watches_slot, new_map);
         *watches_slot = new_map;
     }

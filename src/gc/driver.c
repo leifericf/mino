@@ -436,6 +436,7 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         case MINO_MAP:
             gc_mark_child_push(S, v->as.map.root);
             gc_mark_child_push(S, v->as.map.key_order);
+            gc_mark_child_push(S, v->as.map.val_order);
             break;
         case MINO_SET:
             gc_mark_child_push(S, v->as.set.root);

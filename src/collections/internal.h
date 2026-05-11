@@ -60,6 +60,15 @@ struct mino_vec_node {
 #define HAMT_W     (1u << HAMT_B)
 #define HAMT_MASK  (HAMT_W - 1u)
 
+/* Flatmap (small persistent map) threshold. Below this size, MINO_MAP
+ * uses a linear-scan layout (key_order + val_order vectors) instead of
+ * a HAMT — no per-entry hash on lookup, no hamt_entry_t allocations,
+ * no bitmap-node allocations. Past this size, the map promotes to a
+ * HAMT and never demotes back. 8 is the cache-line crossover where
+ * linear scan beats hash+HAMT-walk for typical Clojure keyword keys
+ * (which compare pointer-equal via mino_eq's identity short-circuit). */
+#define MINO_FLATMAP_THRESHOLD 8u
+
 typedef struct {
     mino_val_t *key;
     mino_val_t *val;
@@ -140,6 +149,26 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
 mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
                      uint32_t hash, unsigned shift);              /* borrowed */
 mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key); /* borrowed */
+
+/* Unified persistent-map ops covering both flatmap (small) and HAMT
+ * (large) representations. These are the entry points all map mutators
+ * should use; direct hamt_assoc/hamt_get on m->as.map.root is only
+ * correct for HAMT-mode maps. Each returns a new map sharing structure
+ * with the predecessor where possible.
+ *
+ *   mino_map_lookup     -- O(N) on flat, O(log32 N) on HAMT; returns
+ *                          NULL when key is absent.
+ *   mino_map_assoc1     -- insert/replace one k/v; may promote flat -> HAMT.
+ *   mino_map_dissoc1    -- remove one key; never demotes HAMT -> flat.
+ *
+ * mino_map_assoc1/dissoc1 carry the source map's meta forward when the
+ * caller does not need to override it; print/seq/clone all operate on
+ * either representation via the existing key_order vector. */
+mino_val_t *mino_map_lookup(const mino_val_t *m, const mino_val_t *key);
+mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
+                            mino_val_t *key, mino_val_t *val);
+mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
+                             mino_val_t *key);
 
 /* ------------------------------------------------------------------------- */
 /* val.c: record helpers                                                     */

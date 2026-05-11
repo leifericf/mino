@@ -543,11 +543,237 @@ mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
     return NULL;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Flatmap: small-persistent-map fast path                                   */
+/* ------------------------------------------------------------------------- */
+/*
+ * For len <= MINO_FLATMAP_THRESHOLD, we skip the HAMT entirely and keep
+ * keys + values in two parallel insertion-order vectors. Lookup is a
+ * linear scan via mino_eq -- which short-circuits on pointer-eq for
+ * the typical keyword key case, so the inner loop is N pointer
+ * compares + at most one structural compare. Construction skips the
+ * per-entry hash + hamt_entry_t alloc + bitmap-node alloc.
+ *
+ * Promotion (flat -> HAMT) happens lazily at the assoc that pushes len
+ * past the threshold. Demotion is intentionally never done: a map that
+ * was once HAMT stays HAMT even after dissoc shrinks it, so callers
+ * that thrash around the boundary don't pay re-build cost on every
+ * write.
+ */
+
+/* Linear scan for `key` in a flat key_order vector. Returns the
+ * matching index, or len when absent. */
+static size_t flat_find_index(const mino_val_t *key_order,
+                              const mino_val_t *key, size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i++) {
+        if (mino_eq(vec_nth(key_order, i), key)) return i;
+    }
+    return len;
+}
+
+/* Build a HAMT from a parallel (key_order, val_order) pair of vectors.
+ * Used by the flat -> HAMT promotion path. Caller is responsible for
+ * gc_depth suppression around the call. */
+static mino_hamt_node_t *hamt_from_flat(mino_state_t *S,
+                                         const mino_val_t *key_order,
+                                         const mino_val_t *val_order,
+                                         size_t len)
+{
+    mino_hamt_node_t *root = NULL;
+    size_t i;
+    for (i = 0; i < len; i++) {
+        mino_val_t   *k = vec_nth(key_order, i);
+        mino_val_t   *vv = vec_nth(val_order, i);
+        hamt_entry_t *e  = hamt_entry_new(S, k, vv);
+        uint32_t      h  = hash_val(k);
+        int           replaced = 0;
+        if (e == NULL) return NULL;
+        root = hamt_assoc(S, root, e, h, 0u, &replaced);
+        if (root == NULL) return NULL;
+    }
+    return root;
+}
+
 /* Convenience: look up a key in a map value. */
 mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key)
 {
-    uint32_t h = hash_val(key);
-    return hamt_get(m->as.map.root, key, h, 0u);
+    return mino_map_lookup(m, key);
+}
+
+mino_val_t *mino_map_lookup(const mino_val_t *m, const mino_val_t *key)
+{
+    if (m == NULL || m->as.map.len == 0) return NULL;
+    if (m->as.map.val_order != NULL) {
+        /* Flatmap: linear scan. */
+        size_t i = flat_find_index(m->as.map.key_order, key, m->as.map.len);
+        if (i == m->as.map.len) return NULL;
+        return vec_nth(m->as.map.val_order, i);
+    }
+    {
+        uint32_t h = hash_val(key);
+        return hamt_get(m->as.map.root, key, h, 0u);
+    }
+}
+
+mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
+                            mino_val_t *key, mino_val_t *val)
+{
+    mino_val_t *out;
+    mino_current_ctx(S)->gc_depth++;
+    out = alloc_val(S, MINO_MAP);
+    if (m == NULL || m->as.map.len == 0) {
+        mino_val_t *ko = mino_vector(S, NULL, 0);
+        mino_val_t *vo = mino_vector(S, NULL, 0);
+        ko = vec_conj1(S, ko, key);
+        vo = vec_conj1(S, vo, val);
+        out->as.map.root      = NULL;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = vo;
+        out->as.map.len       = 1;
+        if (m != NULL) out->meta = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+    if (m->as.map.val_order != NULL) {
+        /* Flatmap source. */
+        size_t      old_len = m->as.map.len;
+        size_t      i       = flat_find_index(m->as.map.key_order, key, old_len);
+        mino_val_t *ko, *vo;
+        if (i < old_len) {
+            /* Replace existing value in place. */
+            ko = m->as.map.key_order;
+            vo = vec_assoc1(S, m->as.map.val_order, i, val);
+            out->as.map.root      = NULL;
+            out->as.map.key_order = ko;
+            out->as.map.val_order = vo;
+            out->as.map.len       = old_len;
+            out->meta             = m->meta;
+            mino_current_ctx(S)->gc_depth--;
+            return out;
+        }
+        /* New key: append. Promote to HAMT if we'd exceed threshold. */
+        if (old_len + 1 > MINO_FLATMAP_THRESHOLD) {
+            mino_hamt_node_t *root;
+            int               replaced = 0;
+            hamt_entry_t     *e;
+            ko = vec_conj1(S, m->as.map.key_order, key);
+            root = hamt_from_flat(S, m->as.map.key_order,
+                                   m->as.map.val_order, old_len);
+            if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+            e = hamt_entry_new(S, key, val);
+            if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+            root = hamt_assoc(S, root, e, hash_val(key), 0u, &replaced);
+            if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+            out->as.map.root      = root;
+            out->as.map.key_order = ko;
+            out->as.map.val_order = NULL;
+            out->as.map.len       = old_len + 1;
+            out->meta             = m->meta;
+            mino_current_ctx(S)->gc_depth--;
+            return out;
+        }
+        ko = vec_conj1(S, m->as.map.key_order, key);
+        vo = vec_conj1(S, m->as.map.val_order, val);
+        out->as.map.root      = NULL;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = vo;
+        out->as.map.len       = old_len + 1;
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+    /* HAMT source. */
+    {
+        hamt_entry_t     *e        = hamt_entry_new(S, key, val);
+        uint32_t          h        = hash_val(key);
+        int               replaced = 0;
+        mino_hamt_node_t *root;
+        mino_val_t       *ko       = m->as.map.key_order;
+        if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+        root = hamt_assoc(S, m->as.map.root, e, h, 0u, &replaced);
+        if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+        if (!replaced) ko = vec_conj1(S, ko, key);
+        out->as.map.root      = root;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = NULL;
+        out->as.map.len       = m->as.map.len + (replaced ? 0 : 1);
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+}
+
+mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
+                             mino_val_t *key)
+{
+    mino_val_t *out;
+    if (m == NULL || m->as.map.len == 0) return m;
+    mino_current_ctx(S)->gc_depth++;
+    if (m->as.map.val_order != NULL) {
+        /* Flatmap: rebuild without the matching slot. */
+        size_t old_len = m->as.map.len;
+        size_t idx     = flat_find_index(m->as.map.key_order, key, old_len);
+        size_t i;
+        mino_val_t *ko, *vo;
+        if (idx == old_len) { mino_current_ctx(S)->gc_depth--; return m; }
+        ko = mino_vector(S, NULL, 0);
+        vo = mino_vector(S, NULL, 0);
+        for (i = 0; i < old_len; i++) {
+            if (i == idx) continue;
+            ko = vec_conj1(S, ko, vec_nth(m->as.map.key_order, i));
+            vo = vec_conj1(S, vo, vec_nth(m->as.map.val_order, i));
+        }
+        out = alloc_val(S, MINO_MAP);
+        out->as.map.root      = NULL;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = vo;
+        out->as.map.len       = old_len - 1;
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+    /* HAMT source. There's no in-place hamt_dissoc here; the existing
+     * pattern (mirrored from prim_dissoc) rebuilds the HAMT from
+     * key_order minus the dissoc'd key. Bail out early when the key is
+     * absent so unchanged maps stay pointer-equal. */
+    {
+        size_t            old_len = m->as.map.len;
+        mino_val_t       *ko;
+        mino_hamt_node_t *root    = NULL;
+        size_t            i;
+        if (mino_map_lookup(m, key) == NULL) {
+            mino_current_ctx(S)->gc_depth--;
+            return m;
+        }
+        ko = mino_vector(S, NULL, 0);
+        for (i = 0; i < old_len; i++) {
+            mino_val_t *k = vec_nth(m->as.map.key_order, i);
+            if (mino_eq(k, key)) continue;
+            ko = vec_conj1(S, ko, k);
+        }
+        for (i = 0; i < old_len; i++) {
+            mino_val_t   *k = vec_nth(m->as.map.key_order, i);
+            mino_val_t   *vv;
+            hamt_entry_t *e;
+            int           replaced = 0;
+            if (mino_eq(k, key)) continue;
+            vv = hamt_get(m->as.map.root, k, hash_val(k), 0u);
+            e  = hamt_entry_new(S, k, vv);
+            if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+            root = hamt_assoc(S, root, e, hash_val(k), 0u, &replaced);
+            if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+        }
+        out = alloc_val(S, MINO_MAP);
+        out->as.map.root      = root;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = NULL;
+        out->as.map.len       = old_len - 1;
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
 }
 
 /*
@@ -555,34 +781,73 @@ mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key)
  * last-write-wins, and the resulting map iterates keys in the order they
  * first appeared in the source sequence. Caller retains ownership of the
  * source arrays.
+ *
+ * When the source has at most MINO_FLATMAP_THRESHOLD distinct keys we
+ * land in flatmap form (root = NULL, val_order non-NULL); otherwise we
+ * build the HAMT directly with no flat intermediary.
  */
 mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals, size_t len)
 {
     mino_val_t       *v;
-    mino_hamt_node_t *root     = NULL;
-    mino_val_t       *order;
-    size_t            len_out  = 0;
-    size_t            i;
     /* Suppress GC during construction so caller-owned key/value arrays
      * stay valid. Without this, intermediate allocations (hamt_entry_new,
      * vec_conj1) could trigger collection that reclaims values the caller
      * holds only on the C stack. */
     mino_current_ctx(S)->gc_depth++;
-    v     = alloc_val(S, MINO_MAP);
-    order = mino_vector(S, NULL, 0);
-    for (i = 0; i < len; i++) {
-        hamt_entry_t *e        = hamt_entry_new(S, keys[i], vals[i]);
-        uint32_t      h        = hash_val(keys[i]);
-        int           replaced = 0;
-        root = hamt_assoc(S, root, e, h, 0u, &replaced);
-        if (!replaced) {
-            order = vec_conj1(S, order, keys[i]);
-            len_out++;
+    v = alloc_val(S, MINO_MAP);
+    if (len <= MINO_FLATMAP_THRESHOLD) {
+        /* Flat path: keep keys/vals in parallel order vectors, no HAMT. */
+        mino_val_t *order = mino_vector(S, NULL, 0);
+        mino_val_t *vals_ord = (len == 0) ? NULL : mino_vector(S, NULL, 0);
+        size_t      len_out = 0;
+        size_t      i;
+        for (i = 0; i < len; i++) {
+            size_t idx = flat_find_index(order, keys[i], len_out);
+            if (idx < len_out) {
+                vals_ord = vec_assoc1(S, vals_ord, idx, vals[i]);
+            } else {
+                order    = vec_conj1(S, order, keys[i]);
+                vals_ord = vec_conj1(S, vals_ord, vals[i]);
+                len_out++;
+            }
         }
+        if (len_out == 0) {
+            v->as.map.root      = NULL;
+            v->as.map.key_order = order;
+            v->as.map.val_order = NULL;
+            v->as.map.len       = 0;
+        } else if (len_out <= MINO_FLATMAP_THRESHOLD) {
+            v->as.map.root      = NULL;
+            v->as.map.key_order = order;
+            v->as.map.val_order = vals_ord;
+            v->as.map.len       = len_out;
+        } else {
+            /* Cannot happen — len_out <= len <= threshold. */
+            v->as.map.root      = NULL;
+            v->as.map.key_order = order;
+            v->as.map.val_order = vals_ord;
+            v->as.map.len       = len_out;
+        }
+    } else {
+        mino_hamt_node_t *root    = NULL;
+        mino_val_t       *order   = mino_vector(S, NULL, 0);
+        size_t            len_out = 0;
+        size_t            i;
+        for (i = 0; i < len; i++) {
+            hamt_entry_t *e        = hamt_entry_new(S, keys[i], vals[i]);
+            uint32_t      h        = hash_val(keys[i]);
+            int           replaced = 0;
+            root = hamt_assoc(S, root, e, h, 0u, &replaced);
+            if (!replaced) {
+                order = vec_conj1(S, order, keys[i]);
+                len_out++;
+            }
+        }
+        v->as.map.root      = root;
+        v->as.map.key_order = order;
+        v->as.map.val_order = NULL;
+        v->as.map.len       = len_out;
     }
-    v->as.map.root      = root;
-    v->as.map.key_order = order;
-    v->as.map.len       = len_out;
     mino_current_ctx(S)->gc_depth--;
     return v;
 }

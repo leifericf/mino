@@ -27,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 141
-#define MINO_VERSION_PATCH 2
+#define MINO_VERSION_MINOR 142
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -357,9 +357,18 @@ struct mino_val {
             size_t           offset;   /* first visible element (0 unless subvec) */
             size_t           blen;     /* backing total (len+offset when no nesting) */
         } vec;
-        struct {          /* MINO_MAP: HAMT keyed by hash(key) */
-            mino_hamt_node_t *root;      /* HAMT root (NULL when len == 0) */
+        struct {          /* MINO_MAP: flatmap (small) or HAMT (large) */
+            /* Two representations behind one shape:
+             *   - Flatmap (len <= MINO_FLATMAP_THRESHOLD): root == NULL,
+             *     val_order non-NULL, lookup is linear scan over key_order.
+             *   - HAMT (len > threshold OR promoted-and-stayed): root
+             *     non-NULL, val_order == NULL, lookup goes through hamt_get.
+             *   - Empty map: root == NULL, val_order == NULL, len == 0.
+             * Promotion is one-way: once HAMT, never demoted back to flat
+             * even if dissoc shrinks below the threshold. */
+            mino_hamt_node_t *root;      /* HAMT root, or NULL for flatmap/empty */
             mino_val_t       *key_order; /* MINO_VECTOR of keys, insertion order */
+            mino_val_t       *val_order; /* MINO_VECTOR of vals (flatmap), or NULL */
             size_t            len;       /* number of entries */
         } map;
         struct {          /* MINO_SET: HAMT with sentinel values */

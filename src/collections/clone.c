@@ -127,8 +127,7 @@ static mino_val_t *clone_val(mino_state_t *dst, const mino_val_t *v)
         }
         for (i = 0; i < len; i++) {
             mino_val_t *src_key = vec_nth(v->as.map.key_order, i);
-            mino_val_t *src_val = hamt_get(v->as.map.root, src_key,
-                                           hash_val(src_key), 0);
+            mino_val_t *src_val = mino_map_lookup(v, src_key);
             keys[i]  = clone_val(dst, src_key);
             if (keys[i] == NULL) {
                 size_t j;
