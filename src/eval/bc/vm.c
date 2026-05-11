@@ -238,7 +238,8 @@ static mino_val_t *resolve_global(mino_state_t *S, mino_val_t *sym,
 }
 
 mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
-                        mino_val_t **argv, int argc, mino_env_t *env)
+                        mino_val_t **argv, int argc,
+                        mino_env_t *volatile env)
 {
     const mino_bc_fn_t *bc = fn_val->as.fn.bc;
     if (bc == NULL || bc->code == NULL) return NULL;
@@ -272,7 +273,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
      * we get the values in their original order. When argc ==
      * n_params the rest binding is the empty list. */
     if (match->has_rest) {
-        mino_val_t *rest = mino_nil(S);
+        mino_val_t *volatile rest = mino_nil(S);
         for (int i = argc - 1; i >= match->n_params; i--) {
             rest = mino_cons(S, argv[i], rest);
             if (rest == NULL) { bc_pop_window(S, base); return NULL; }
@@ -382,7 +383,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             unsigned bx = Bx_OF(ins);
             if ((int)bx >= bc->ic_slots_len) { ok = 0; goto bc_done; }
             mino_bc_ic_slot_t *slot = &bc->ic_slots[bx];
-            int dyn_active = (mino_current_ctx(S)->dyn_stack != NULL);
+            int dyn_active = (ctx->dyn_stack != NULL);
             if (!dyn_active
                 && slot->cached != NULL
                 && slot->gen == S->ic_gen) {

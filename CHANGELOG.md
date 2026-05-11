@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.144.2 — Build Fix: Mark setjmp-Adjacent Locals `volatile`
+
+GCC's `-Werror=clobbered` flagged three locals in `mino_bc_run`
+that could be modified between `setjmp` and a matching `longjmp`
+return: the `env` parameter (rewritten on catch-frame unwind),
+the `rest` cons-list local in the variadic dispatch (built before
+setjmp and read after), and the `t` local inside the inlined
+`mino_current_ctx` (reached after setjmp via a TLS load + branch).
+Apple clang doesn't emit this warning so local builds were
+green; the Linux CI build (gcc 12) failed at `cc1: all warnings
+being treated as errors`.
+
+The fix marks `env` and `rest` `volatile` in `mino_bc_run` and
+replaces the second `mino_current_ctx(S)` call after `setjmp`
+with the already-captured `ctx` local that was set before the
+try frame. The hot path is unchanged: `ctx` reads the same TLS
+slot once at fn entry; the `volatile`-marked locals only matter
+to the compiler's analysis, not to the emitted code.
+
 ## v0.144.1 — GC Fix: Compiled Bytecode Children Traced Via Remset
 
 The compiled-bytecode record (`mino_bc_fn_t`) was allocated as
