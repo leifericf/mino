@@ -1,30 +1,46 @@
 /*
  * eval/bc/compile.c -- AST-to-bytecode compiler.
  *
- * Phase 1 coverage:
+ * Coverage:
  *   - literals (nil / bool / int / float / string / keyword / char)
+ *   - constant vector literals (all-self-evaluating elements)
  *   - bare symbol refs (locals via register, globals via OP_GETGLOBAL)
  *   - (if c t e), (if c t)
  *   - (do e1 e2 ...)
  *   - (let [b v ...] body...) with plain-symbol bindings only
+ *   - (loop [b v ...] body...) + (recur ...) with plain-symbol bindings
  *   - (quote x)
- *   - function application -- single arity, no &-rest, no destructure
- *   - (def name expr)
+ *   - (lazy-seq body...) -- body realised on the tree-walker
+ *   - function application: multi-arity, optional & rest, no destructure
+ *   - inner (fn ...) / (fn* ...) literals via OP_CLOSURE
+ *   - (def name) / (def name expr) without metadata
+ *   - tail position propagated through if / do / let / loop so
+ *     recursive arms emit OP_TAILCALL (constant C stack via trampoline)
+ *   - speculative int fast lanes:
+ *       binary: + - * < <= > >= = (OP_*_II)
+ *       unary:  inc, dec, zero?   (OP_INC_I / OP_DEC_I / OP_ZERO_INT_P)
  *
  * Decline conditions (any of these -> MINO_BC_UNSUPPORTED, fn falls back
  * to the tree-walker):
- *   - multi-arity fn (fn->as.fn.params == NULL)
- *   - params with &-rest, destructuring, :as, &-list shape
- *   - body uses (try/catch/finally), (throw), (loop/recur),
- *     (binding), (lazy-seq), (set!), inner (fn ...) literal
- *   - macro expansion not present in the form (we don't expand inside
- *     the compiler in Phase 1; macros expand on the eval path before
- *     reaching the compiler when applicable)
+ *   - params with destructuring / :as / map shape (& rest is accepted)
+ *   - body uses (try/catch/finally), (throw), (binding), (set!)
+ *   - body uses other not-yet-handled special forms (when, and, or,
+ *     quasiquote, case, cond, defrecord, ...): they're typically
+ *     macroexpanded before the compiler sees them, but raw occurrences
+ *     decline so the tree-walker handles them rather than emitting a
+ *     bogus regular call
+ *   - call head resolves to a MINO_MACRO (macros expand on the eval
+ *     path before reaching the compiler when applicable; a residual
+ *     macro-head form declines)
+ *   - jump offset out of 16-bit signed range
  *
- * Compilation is single-pass; the register allocator is "stupid first":
- * one fresh register per AST temp, freed only at the end of the
- * enclosing `let` scope. The linear-scan smart allocator and the
- * peephole pass land in Phase 2.
+ * Register allocation: single-pass stack-discipline plus
+ * compile_operand_inplace for fast-lane operand positions. Locals are
+ * read straight from their binding register without an extra MOVE; the
+ * unary and binary fast lanes use independent B / C operand slots so
+ * (op local local) compiles to a single instruction. Temps for sub-
+ * expressions are allocated above the current high-water mark and
+ * released by next_reg restore at scope end.
  *
  * Var-indirection discipline: every reference to a global name compiles
  * to OP_GETGLOBAL with the symbol in the const pool, never a baked
@@ -155,8 +171,8 @@ static int ensure_code(compiler_t *c, size_t need)
 
 static int add_const(compiler_t *c, mino_val_t *v)
 {
-    /* No dedup in Phase 1: the const pool is per-fn and typical bodies
-     * have small pools, so a duplicate symbol const is cheap. */
+    /* No dedup: the const pool is per-fn and typical bodies have small
+     * pools, so a duplicate symbol const is cheap. */
     if (!ensure_consts(c, c->bc->consts_len + 1)) return -1;
     if (c->bc->consts_len > 0xFFFFu) { c->ok = 0; return -1; }
     int k = (int)c->bc->consts_len;
@@ -822,6 +838,31 @@ static int head_resolves_to_macro(compiler_t *c, mino_val_t *head)
     return v != NULL && v->type == MINO_MACRO;
 }
 
+/* Compile `form` so its value lands in some register, preferring to
+ * reuse an existing register without emitting code. Returns the
+ * register, or -1 on error.
+ *
+ * When `form` is a local symbol, the local's register is returned
+ * directly: no alloc, no MOVE. This is the central register-pressure
+ * win for the binop / unop fast lanes, which only constrain that
+ * operands be in registers (not that they sit at any particular slot).
+ *
+ * For anything else, a fresh temp is allocated and the form is
+ * compiled into it. The caller is responsible for the alloc/free
+ * discipline via saved_next; any temps allocated here live until the
+ * next_reg high-water restore. */
+static int compile_operand_inplace(compiler_t *c, mino_val_t *form)
+{
+    if (form != NULL && form->type == MINO_SYMBOL) {
+        int local = find_local(c, form->as.s.data);
+        if (local >= 0) return local;
+    }
+    int r = alloc_reg(c);
+    if (r < 0) return -1;
+    if (compile_expr(c, form, r, 0) < 0) return -1;
+    return r;
+}
+
 /* Map a binary arith / compare prim name to its BINOP_* subop. Returns
  * -1 when the name isn't one of the speculative fast lanes. */
 static int binop_subop_for_name(const char *name)
@@ -867,10 +908,9 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
             while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
             if (argc_check == 1) {
                 int saved_next = c->next_reg;
-                int src_reg = alloc_reg(c);
-                if (src_reg < 0) return -1;
                 mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                if (compile_expr(c, a1, src_reg, 0) < 0) return -1;
+                int src_reg = compile_operand_inplace(c, a1);
+                if (src_reg < 0) return -1;
                 if (dst > 0xFF || src_reg > 0xFF) {
                     c->ok = 0; return -1;
                 }
@@ -890,23 +930,20 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
             while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
             if (argc_check == 2) {
                 int saved_next = c->next_reg;
-                int lhs_reg = alloc_reg(c);
-                if (lhs_reg < 0) return -1;
-                int rhs_reg = alloc_reg(c);
-                if (rhs_reg < 0) return -1;
                 mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
                 mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                if (compile_expr(c, a1, lhs_reg, 0) < 0) return -1;
-                if (compile_expr(c, a2, rhs_reg, 0) < 0) return -1;
+                int lhs_reg = compile_operand_inplace(c, a1);
+                if (lhs_reg < 0) return -1;
+                int rhs_reg = compile_operand_inplace(c, a2);
+                if (rhs_reg < 0) return -1;
                 if (dst > 0xFF || lhs_reg > 0xFF || rhs_reg > 0xFF) {
                     c->ok = 0; return -1;
                 }
                 /* Per-op specialized opcode. ABC form: A=dst, B=lhs,
-                 * C=rhs. The original OP_BINOP_INT encoding tried to
-                 * pack the subop into the instruction's low nibble,
-                 * which collides with the op byte; the per-op variants
-                 * sidestep the encoding mess and are what Phase-4
-                 * specialization would have promoted to anyway. */
+                 * C=rhs. The B/C operands are independent reg indices
+                 * so compile_operand_inplace can return locals'
+                 * registers directly, sparing the alloc + OP_MOVE pair
+                 * for the common (op local local) shape. */
                 static const mino_bc_op_t binop_op[BINOP__COUNT] = {
                     OP_ADD_II, OP_SUB_II, OP_MUL_II,
                     OP_LT_II,  OP_LE_II,  OP_GT_II,

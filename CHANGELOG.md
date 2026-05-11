@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.116.0 — Bytecode Operand-Inplace For Fast Lanes
+
+The bc compiler's int fast lanes now read operand registers
+directly when the operand is a local. Before, `(+ x j)` with
+`x` and `j` both as locals allocated two fresh temp registers,
+emitted `OP_MOVE temp1, x_reg` and `OP_MOVE temp2, j_reg`, then
+emitted `OP_ADD_II dst, temp1, temp2`. After,
+`compile_operand_inplace` returns the local's existing register,
+the two MOVEs are gone, and the binop becomes
+`OP_ADD_II dst, x_reg, j_reg`. Same change covers the unary
+lanes for `inc`, `dec`, and `zero?`. Literals and non-local
+refs still allocate temps and run through `compile_expr` as
+before, since the operand must live in some register for the
+opcode to read it.
+
+The net is fewer instructions and lower `n_regs` for the
+common shapes -- `(fn [x j] (+ x j))` drops from `n_regs=5`
+(params + ret + 2 temps) to `n_regs=3` (just params + ret).
+Per-call cost in `bc_push_window` falls in proportion; the
+high-water mark amplifies through every recursive arm.
+
+Measured against v0.115.0 (release `-O2`, min-of-3 from
+`perf_gate.clj`):
+
+```
+arith-add        1810 -> 1716  (+5.5%)
+arith-inc        1737 -> 1652  (+5.1%)
+fn-call-identity 1640 -> 1546  (+6.1%)
+if-branch        1580 -> 1479  (+6.8%)
+let-local-lookup 1523 -> 1445  (+5.4%)
+loop-recur-5     1812 -> 1678  (+8.0%)
+10M tight loop  1183ms -> 1091ms (+8.4%)
+fib(20)         2.45ms -> 2.29ms (+6.9%)
+```
+
+The header block in `src/eval/bc/compile.c` no longer claims
+"Phase 1" coverage or a "stupid first" allocator; it now lists
+the actual special-form coverage as of this release.
+
+All 1557 tests, 7279 assertions pass on release / ASan / UBSan.
+
 ## v0.115.0 — Bytecode Tail-Position Propagation And Unary Int Fast Lanes
 
 The bc compiler now propagates tail position through `if`, `do`,

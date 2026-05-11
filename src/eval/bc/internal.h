@@ -38,20 +38,22 @@ typedef enum {
     OP_RETURN,         /* A=src                                           */
     OP_CLOSURE,        /* A=dst, Bx=child fn const index                  */
     OP_BINOP_INT,      /* A=dst, B=lhs, C=rhs; op nibble in instr top byte */
-    /* Phase 2 scaffolding: full handlers land alongside compile-time
-     * emission once macro detection and tail-call discipline are
-     * tightened up. The opcode IDs are reserved now so the encoding
-     * is stable for the cycle. */
+    /* Opcode IDs reserved for forms the compiler doesn't yet emit:
+     * try/catch/throw, dynamic binding push/pop. Handlers land alongside
+     * compile-time emission in a later release; reserving the IDs now
+     * keeps the encoding stable. */
     OP_PUSHCATCH,      /* A=handler_pc_offset (sBx packed in Bx), B=reg_top_save */
     OP_POPCATCH,       /*                                                  */
     OP_THROW,          /* A=err                                            */
     OP_PUSHDYN,        /* A=var_k, B=val                                   */
     OP_POPDYN,         /* A=count                                          */
     OP_MAKE_LAZY,      /* A=dst, Bx=thunk const index                      */
-    /* Phase 4 specialization opcodes. The VM dispatch loop rewrites
-     * generic OP_GETGLOBAL / OP_CALL / OP_BINOP_INT sites to these
-     * after observing stable runtime shapes; each specialized handler
-     * version-checks its assumption and deopts on mismatch. */
+    /* Specialization opcodes. The intent was that the dispatch loop
+     * would rewrite generic OP_GETGLOBAL / OP_CALL / OP_BINOP_INT
+     * sites to these after observing stable runtime shapes; in
+     * practice the compiler emits the per-op int specializations
+     * directly when the head matches a known prim, so the
+     * _CACHED variants are reserved for future use. */
     OP_GETGLOBAL_CACHED, /* A=dst, Bx=ic slot index                        */
     OP_CALL_CACHED,      /* A=fn, B=argc, C=ret_base; cached callable      */
     OP_ADD_II,           /* A=dst, B=lhs, C=rhs; int+int add              */
@@ -79,14 +81,10 @@ typedef enum {
     OP__COUNT
 } mino_bc_op_t;
 
-/* Sub-op nibble for OP_BINOP_INT (encoded in the C operand high bits is
- * not portable across 8-bit C; we reuse the 8-bit C slot directly when
- * sub-op fits in 4 bits and the operand range is small). Phase 1 stores
- * the sub-op in a dedicated 8-bit byte by re-purposing the C operand's
- * upper nibble. To keep things simple we use a separate field: pack the
- * sub-op into the instruction's top 8 bits by extending the encoding —
- * the C operand stays in the conventional position. The encoder helper
- * MK_BINOP_INT below hides this. */
+/* Sub-op enum for the generic OP_BINOP_INT opcode. The compiler emits
+ * the per-op OP_*_II variants directly today; this enum is retained
+ * so the dispatch helpers in vm.c can share one switch across both
+ * the generic and specialized lanes. */
 typedef enum {
     BINOP_ADD = 0,
     BINOP_SUB,
@@ -160,11 +158,14 @@ typedef struct mino_bc_fn {
     mino_val_t     **consts;      /* const pool: nil/true/false/symbols/literals/child fns */
     size_t           consts_len;
     int              n_regs;      /* number of register slots the body needs */
-    int              n_params;    /* fixed param count (Phase 1 only) */
-    int              has_rest;    /* 1 iff trailing `& rest` binding -- argv
-                                   * overflow past n_params is collected into
-                                   * a list and placed in regs[n_params] at
-                                   * entry */
+    int              n_params;    /* fixed param count of clauses[0]; the
+                                   * single-arity fast path in mino_bc_run
+                                   * reads this directly without indexing
+                                   * the clauses array */
+    int              has_rest;    /* 1 iff clauses[0] ends in `& rest` --
+                                   * argv overflow past n_params is
+                                   * collected into a list and placed in
+                                   * regs[n_params] at entry */
     int              n_clauses;   /* >= 1; 1 for single-arity, N for multi */
     mino_bc_clause_t *clauses;    /* n_clauses entries; clauses[0] mirrors
                                    * n_params / has_rest for the single-
