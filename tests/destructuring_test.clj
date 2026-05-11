@@ -161,3 +161,34 @@
     (is (= 1 a))
     (is (= 2 b))
     (is (= 3 c))))
+
+;; --- String- and symbol-keyed map destructure ---
+
+(deftest map-destructure-strs
+  (let [{:strs [a b]} {"a" 1 "b" 2}]
+    (is (= 1 a))
+    (is (= 2 b))))
+
+(deftest map-destructure-syms
+  (let [{:syms [x y]} {'x 10 'y 20}]
+    (is (= 10 x))
+    (is (= 20 y))))
+
+(deftest map-destructure-strs-with-defaults
+  (let [{:strs [a b c] :or {b 99 c 100}} {"a" 1 "c" 3}]
+    (is (= 1 a))
+    (is (= 99 b))
+    (is (= 3 c))))
+
+(deftest map-destructure-strs-and-keys
+  (let [{:keys [k] :strs [s]} {:k 1 "s" 2}]
+    (is (= 1 k))
+    (is (= 2 s))))
+
+(deftest map-destructure-strs-fn-params
+  (defn pick__dt [{:strs [host port]}] [host port])
+  (is (= ["x" 80] (pick__dt {"host" "x" "port" 80}))))
+
+(deftest map-destructure-syms-fn-params
+  (defn pick-syms__dt [{:syms [a b]}] [a b])
+  (is (= [1 2] (pick-syms__dt {'a 1 'b 2}))))

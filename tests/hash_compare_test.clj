@@ -41,3 +41,14 @@
   (is (= 0 (compare nil nil)))
   (is (= -1 (compare nil 1)))
   (is (= 1 (compare 1 nil))))
+
+;; --- Forcing equality on lazy contents ---
+
+(deftest map-eq-forces-lazy-value
+  (is (= {:tail (rest [1 2 3])} {:tail '(2 3)}))
+  (is (= {:a 1 :b (rest [10 20 30])} {:a 1 :b '(20 30)}))
+  (is (not= {:tail (rest [1 2 3])} {:tail '(2 4)})))
+
+(deftest nested-map-eq-forces-deep
+  (is (= {:outer {:inner (rest [9 8 7])}}
+         {:outer {:inner '(8 7)}})))
