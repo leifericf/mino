@@ -82,3 +82,18 @@
 
 (deftest ex-message-non-map
   (is (= nil (ex-message 42))))
+
+(deftest tagged-literal-missing-body-names-the-tag
+  ;; `#foo` at EOF used to surface as "unbound symbol: form" -- a leak
+  ;; from inside core/tagged-literal whose `form` parameter was bound
+  ;; to NULL. The reader now reports the actual cause and names the
+  ;; tag at the read site.
+  (let [err (try (read-string "#foo") nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"tagged literal" err)))
+    (is (some? (re-find #"#foo" err))))
+  (let [err (try (read-string "(a b #foo)") nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"tagged literal" err)))))

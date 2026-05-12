@@ -76,6 +76,20 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: Tagged Literal With Missing Body Now Names The Tag
+
+`#foo` at EOF -- or `#foo` followed immediately by a closing delimiter
+(`(a b #foo)`) -- used to surface as the deeply misleading `unbound
+symbol: form`. The reader passed `body=NULL` through to core's
+`tagged-literal` fn, whose `form` parameter then read as unbound; the
+fn's internal parameter name leaked into a user-facing error with no
+mention of the tag, the position, or even that a reader macro was
+involved. The reader now detects EOF and immediate-closer positions
+before recursing into the body read and emits
+`tagged literal #foo: missing form` at the actual offense site, plus
+the reader-conditional variant when the body was a `#?(...)` that
+resolved to nothing on mino's dialect.
+
 ### Fixed: Uncaught Throws Now Preserve The Original Message In The Diagnostic
 
 Three intertwined gaps lost the thrown value's information at the

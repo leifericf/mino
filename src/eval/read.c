@@ -1947,8 +1947,44 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
         while (!is_terminator((*p)[tag_len])) tag_len++;
         ADVANCE_N(S, p, tag_len);
         skip_ws(S, p);
+        /* Detect a missing body up front -- EOF or an immediate closing
+         * delimiter -- so we can name the tag in the diagnostic. Without
+         * this, EOF would surface from inside core/tagged-literal as the
+         * misleading "unbound symbol: form" (its `form` parameter bound
+         * to NULL), and a `)` closer would surface as the generic
+         * "unexpected ')'" with no mention that the bare `#tag` was
+         * what consumed everything up to it. */
+        if (**p == '\0' || **p == ')' || **p == ']' || **p == '}') {
+            char buf[256];
+            snprintf(buf, sizeof(buf),
+                "tagged literal #%.*s: missing form",
+                (int)tag_len, tag_start);
+            set_reader_diag(S, MRE008, buf,
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
         body = read_form(S, p);
         if (body == NULL && mino_last_error(S) != NULL) return NULL;
+        if (body == NULL) {
+            /* Body resolved to nothing via a reader conditional -- the
+             * fallback path would pass NULL through to core's
+             * `tagged-literal` fn and surface as "unbound symbol:
+             * form". Name the offender at the read site. */
+            char buf[256];
+            if (S->reader_last_cond_empty) {
+                snprintf(buf, sizeof(buf),
+                    "tagged literal #%.*s: form was a reader conditional"
+                    " with no matching arm for dialect :%s",
+                    (int)tag_len, tag_start, S->reader_dialect);
+            } else {
+                snprintf(buf, sizeof(buf),
+                    "tagged literal #%.*s: missing form",
+                    (int)tag_len, tag_start);
+            }
+            set_reader_diag(S, MRE008, buf,
+                            S->reader_line, S->reader_col);
+            return NULL;
+        }
         tag_sym  = mino_symbol_n(S, tag_start, tag_len);
         call_env = current_ns_env(S);
 
