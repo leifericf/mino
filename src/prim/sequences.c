@@ -597,34 +597,117 @@ static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
     return acc;
 }
 
-/* Direct-walk fast path for (reduce fn coll [init]) over a persistent
- * set. Walks key_order, the insertion-order vector of elements --
- * same order seq_iter would yield -- but skips the seq_iter switch
- * dispatch and goes straight through reduce_step's int+int lane. */
-static mino_val_t *reduce_set_direct(mino_state_t *S, mino_val_t *fn,
-                                     mino_val_t *acc, int has_init,
-                                     mino_val_t *s, mino_env_t *env)
+/* Recursive trie walker for vector reduce. `pos_io` tracks the
+ * absolute backing position visited so far so subvec offset/len
+ * windows can be honored without a separate offset-aware codepath.
+ * Returns 0 = continue, 1 = stop (Reduced fired), -1 = error. */
+static int reduce_vec_trie_walk(mino_state_t *S, mino_val_t *fn,
+                                mino_val_t **acc_io, mino_env_t *env,
+                                const mino_vec_node_t *node, unsigned shift,
+                                size_t *pos_io, size_t start, size_t end)
 {
-    size_t      i, n = s->as.set.len;
-    mino_val_t *ko;
+    unsigned i;
+    if (shift == 0) {
+        /* Leaf: iterate the 32-slot block directly. The hot inner loop
+         * is the only path that allocates an inline-tagged int via
+         * reduce_step's int+int lane -- no per-step vec_nth, no
+         * seq_iter switch. */
+        for (i = 0; i < node->count; i++) {
+            size_t p = *pos_io;
+            (*pos_io)++;
+            if (p >= end) return 0;
+            if (p < start) continue;
+            {
+                int rc = reduce_step(S, fn, acc_io,
+                                     (mino_val_t *)node->slots[i], env);
+                if (rc != 0) return rc;
+            }
+        }
+        return 0;
+    }
+    for (i = 0; i < node->count; i++) {
+        mino_vec_node_t *child = (mino_vec_node_t *)node->slots[i];
+        int rc;
+        if (*pos_io >= end) return 0;
+        if (child == NULL) continue;
+        rc = reduce_vec_trie_walk(S, fn, acc_io, env, child,
+                                  shift - MINO_VEC_B, pos_io, start, end);
+        if (rc != 0) return rc;
+    }
+    return 0;
+}
+
+/* Walk a vector (or, indirectly, a set's key_order vector) applying
+ * reduce_step. Skips the seq_iter dispatch and the per-element
+ * vec_nth's O(log32) trie navigation; one leaf pass visits each
+ * element with a tight 32-slot inner loop. Honors offset (subvec)
+ * by passing absolute backing positions into the walker. */
+static mino_val_t *reduce_vec_apply(mino_state_t *S, mino_val_t *fn,
+                                    mino_val_t *acc, int has_init,
+                                    const mino_val_t *v, mino_env_t *env)
+{
+    size_t n          = v->as.vec.len;
+    size_t offset     = v->as.vec.offset;
+    size_t trie_count = v->as.vec.blen - v->as.vec.tail_len;
+    size_t start      = offset;
+    size_t end        = offset + n;
+    size_t pos        = 0;
     if (n == 0) {
         if (has_init) return acc;
         return apply_callable(S, fn, mino_nil(S), env);
     }
-    ko = s->as.set.key_order;
     if (!has_init) {
-        acc = vec_nth(ko, 0);
-        i   = 1;
-    } else {
-        i = 0;
+        acc   = vec_nth(v, 0);
+        start = offset + 1;
     }
-    for (; i < n; i++) {
-        mino_val_t *elem = vec_nth(ko, i);
-        int rc = reduce_step(S, fn, &acc, elem, env);
+    if (trie_count > 0 && v->as.vec.root != NULL && start < trie_count
+        && end > 0) {
+        size_t trie_end = end < trie_count ? end : trie_count;
+        int rc = reduce_vec_trie_walk(S, fn, &acc, env, v->as.vec.root,
+                                      v->as.vec.shift, &pos, start,
+                                      trie_end);
         if (rc == -1) return NULL;
         if (rc == 1)  return acc;
     }
+    /* Tail: first element sits at absolute position trie_count. */
+    if (v->as.vec.tail_len > 0 && end > trie_count) {
+        unsigned i;
+        for (i = 0; i < v->as.vec.tail_len; i++) {
+            size_t p = trie_count + i;
+            if (p >= end) break;
+            if (p < start) continue;
+            {
+                int rc = reduce_step(S, fn, &acc,
+                                     (mino_val_t *)v->as.vec.tail->slots[i],
+                                     env);
+                if (rc == -1) return NULL;
+                if (rc == 1)  return acc;
+            }
+        }
+    }
     return acc;
+}
+
+/* Direct-walk fast path for (reduce fn vec [init]). */
+static mino_val_t *reduce_vec_direct(mino_state_t *S, mino_val_t *fn,
+                                     mino_val_t *acc, int has_init,
+                                     mino_val_t *v, mino_env_t *env)
+{
+    return reduce_vec_apply(S, fn, acc, has_init, v, env);
+}
+
+/* Direct-walk fast path for (reduce fn set [init]). Routes through
+ * reduce_vec_apply since the set's insertion-order key_order is
+ * itself a vector. */
+static mino_val_t *reduce_set_direct(mino_state_t *S, mino_val_t *fn,
+                                     mino_val_t *acc, int has_init,
+                                     mino_val_t *s, mino_env_t *env)
+{
+    if (s->as.set.len == 0) {
+        if (has_init) return acc;
+        return apply_callable(S, fn, mino_nil(S), env);
+    }
+    return reduce_vec_apply(S, fn, acc, has_init, s->as.set.key_order, env);
 }
 
 mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -655,6 +738,8 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return reduce_map_direct(S, fn, NULL, 0, coll, env);
         if (mino_type_of(coll) == MINO_SET)
             return reduce_set_direct(S, fn, NULL, 0, coll, env);
+        if (mino_type_of(coll) == MINO_VECTOR)
+            return reduce_vec_direct(S, fn, NULL, 0, coll, env);
         seq_iter_init(S, &it, coll);
         if (seq_iter_done(&it)) {
             return apply_callable(S, fn, mino_nil(S), env);
@@ -679,6 +764,8 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return reduce_map_direct(S, fn, acc, 1, coll, env);
         if (mino_type_of(coll) == MINO_SET)
             return reduce_set_direct(S, fn, acc, 1, coll, env);
+        if (mino_type_of(coll) == MINO_VECTOR)
+            return reduce_vec_direct(S, fn, acc, 1, coll, env);
         seq_iter_init(S, &it, coll);
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reduce requires 2 or 3 arguments");

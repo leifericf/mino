@@ -30,6 +30,31 @@ Backed by `tests/reduce_perf_test.clj` parity tests at the
 flatmap / HAMT boundary (sizes 0, 1, 8, 9, 100), `reduced?`
 early-exit, and the MapEntry `vector?` / destructure contract.
 
+### Direct-Walk Reduce Over Vector
+
+`(reduce f v)` and `(reduce f init v)` over a persistent vector no
+longer route through `seq_iter`; a recursive trie walker visits
+each 32-wide leaf in order, dispatching the inner step through the
+shared `reduce_step`. The win is the per-element `vec_nth`'s
+O(log32 n) trie navigation collapsing to one DFS pass that touches
+each leaf once. Sets share the same walker via their `key_order`
+backing vector. Subvec offset/len windows are honored by passing
+absolute backing positions into the walker -- one walker, no
+separate offset-aware codepath.
+
+Bench delta (5 runs each, M3 Pro):
+
+| Bench                  | Before   | After    | Speedup |
+|------------------------|---------:|---------:|--------:|
+| reduce-vec-10k         | 0.2 ms   | 0.1 ms   | 2.0×    |
+| reduce-vec-100k        | 1.0 ms   | 0.4 ms   | 2.5×    |
+| reduce-vec-1M          | 10.7 ms  | 5.7 ms   | 1.9×    |
+
+Backed by `tests/reduce_perf_test.clj` parity tests at sizes
+0, 1, 31, 32, 33, 1024, 10000 (which cross the tail-only and
+multi-level-trie boundaries), `reduced?` early-exit, and a
+subvec offset case.
+
 ## v0.144.6 — Correctness Fixes: BC Closure Capture, Catch Unwind, And Loud Limit Errors
 
 Adversarial whitebox testing of the bytecode VM surfaced four bugs.

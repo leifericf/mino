@@ -88,6 +88,35 @@
   (testing "no-init: first element becomes acc"
     (is (= 1 (reduce + #{1})))))
 
+(deftest reduce-vec-direct-parity
+  (testing "empty vec with init returns init"
+    (is (= :init (reduce (fn [a _] a) :init []))))
+  (testing "empty vec without init calls (f) once"
+    (is (= 0 (reduce + []))))
+  (testing "size 1"
+    (is (= 42 (reduce + 0 [42]))))
+  (testing "size 31 (root NULL, all in tail)"
+    (is (= (reduce + (range 31)) (reduce + 0 (vec (range 31))))))
+  (testing "size 32 (root NULL, full tail)"
+    (is (= (reduce + (range 32)) (reduce + 0 (vec (range 32))))))
+  (testing "size 33 (one leaf in trie, one in tail)"
+    (is (= (reduce + (range 33)) (reduce + 0 (vec (range 33))))))
+  (testing "size 1024 (full second-level branch)"
+    (is (= 523776 (reduce + 0 (vec (range 1024)))))) ;; (1023*1024)/2
+  (testing "size 10000"
+    (is (= 49995000 (reduce + 0 (vec (range 10000))))))
+  (testing "no-init: first elem becomes acc"
+    (is (= 45 (reduce + (vec (range 10))))))
+  (testing "reduced early-exits"
+    (let [v (vec (range 100))]
+      (is (= 45 (reduce (fn [a x] (if (>= x 10) (reduced a) (+ a x)))
+                        0 v)))))
+  (testing "subvec honors offset/len"
+    (let [v (subvec (vec (range 100)) 10 20)]
+      (is (= 145 (reduce + 0 v))))) ;; 10+11+...+19
+  (testing "non-int elements (collected)"
+    (is (= [:a :b :c] (reduce conj [] [:a :b :c])))))
+
 (deftest reduce-map-seq-matches-map-entry
   ;; (seq m) now yields MINO_MAP_ENTRY for each pair, which is
   ;; vector?-true and `=`-equal to [k v]. Verify both contracts.
