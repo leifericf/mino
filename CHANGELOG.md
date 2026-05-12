@@ -1,5 +1,77 @@
 # Changelog
 
+## v0.149.0 — clojure-test-suite Conformance Pass: 220 / 220 Files, 5340 / 5340 Assertions
+
+Five focused changes bring the external `jank-lang/clojure-test-suite`
+from 211/220 files green to 220/220, all 5340 assertions passing, with
+mino's own 7527-assertion suite unchanged. Every change is a behavioural
+alignment with JVM Clojure canon — no test-rigging, no compatibility
+shims, no JVM-class-name aliases.
+
+### `abs` Of `Long/MIN_VALUE` Returns `Long/MIN_VALUE`
+
+`(abs Long/MIN_VALUE)` previously threw `MCT001 integer overflow`
+because `(- x)` overflowed under mino's checked arithmetic. JVM
+`Math/abs` returns `Long/MIN_VALUE` for that input — a 2's-complement
+quirk that all of Clojure relies on. `abs` now routes integer
+negation through `unchecked-negate` to match. Other numeric types
+(ratio, bigdec, bigint, double, NaN, ±Inf) keep their normal paths.
+
+### `derive` Validates Input Shape
+
+The 3-arity `(derive h tag parent)` form silently accepted nil
+parents, non-Named / non-type parents, and structurally invalid
+hierarchies — failures surfaced indirectly as `assoc: expected a
+map or vector` or as a vacuous succeed. `derive` now rejects each
+case up front with an `ex-info` whose message names the contract
+violation: tag and parent must be a keyword, symbol, or record
+type; the hierarchy must be a map carrying map-valued `:parents`,
+`:ancestors`, and `:descendants`. Namespacing requirements stay
+lenient (matching babashka and ClojureScript).
+
+### `some`, `every?`, And `zipmap` Validate Seqability
+
+The C primitives `prim_some`, `prim_every_p`, and `prim_zipmap`
+iterated through `seq_iter` directly. `seq_iter`'s unknown-type
+fall-through treated non-seqable inputs (keywords, numbers,
+booleans) as empty, so `(some pred :kw)` silently returned `nil`,
+`(every? pred 42)` silently returned `true`, and `(zipmap
+:not-seqable [1 2 3])` silently returned `{}`. Each primitive now
+calls `prim_seq` on its collection argument up front; non-seqable
+inputs throw `MTY001 seq: cannot coerce <type> to a sequence`.
+Matches `prim_set`'s long-standing pattern.
+
+### Dropped JVM-Class-Name Bridges From `clojure.core`
+
+`src/core.clj` carried three bridges added in the original
+test-suite compatibility pass:
+
+```clj
+(def clojure.lang.IPending :future)
+(def clojure.lang.BigInt :bigint)
+(ns clojure.lang.MapEntry) (defn create [k v] (map-entry k v))
+```
+
+These let suite assertions like `(instance? clojure.lang.BigInt 1N)`
+and `(clojure.lang.MapEntry/create 'k 'v)` resolve on mino without
+the test author having to thread a reader-conditional. That
+side-stepped the convention every other dialect uses — `:bb`,
+`:cljs`, `:cljr`, `:lpy`, `:jank` all carry per-test reader-cond
+arms instead. The bridges are gone; the corresponding test files
+now resolve their `:default` arm only on the JVM.
+
+### Added `thread-sleep` Primitive
+
+mino had no exposed sleep primitive, so the test-suite portability
+shim was `(defn sleep [ms] nil)` — a no-op. Tests in
+`realized_qmark.cljc` and `add_watch.cljc` were passing through
+worker-thread scheduling latency rather than honest waiting. The
+new `thread-sleep` C primitive in `src/prim/proc.c` is
+`nanosleep`-backed, restarts on `EINTR` using the residual time,
+validates that its argument is a non-negative integer, and returns
+nil. The portability shim now delegates to it, so the sleep-using
+tests actually wait the intended duration.
+
 ## v0.148.0 — Move More Of clojure.core Into C: distinct?, merge-with, complement, comp, partial, juxt
 
 Six more `core.clj` defns move to C primitives in
