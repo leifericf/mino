@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #ifndef _WIN32
 #include <sys/wait.h>
 #endif
@@ -258,6 +259,36 @@ mino_val_t *prim_sh_bang(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return map_get_val(result, mino_keyword(S, "out"));
 }
 
+/* (thread-sleep ms) -- block the current thread for ms milliseconds.
+ * Returns nil. Negative or non-integer ms throws. */
+mino_val_t *prim_thread_sleep(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ms_val;
+    long long   ms;
+    struct timespec ts;
+    (void)env;
+
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "thread-sleep requires exactly 1 argument");
+    }
+    ms_val = args->as.cons.car;
+    if (!mino_to_int(ms_val, &ms)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "thread-sleep: argument must be an integer");
+    }
+    if (ms < 0) {
+        return prim_throw_classified(S, "eval/contract", "MCT001",
+            "thread-sleep: argument must be non-negative");
+    }
+    ts.tv_sec  = (time_t)(ms / 1000);
+    ts.tv_nsec = (long)((ms % 1000) * 1000000L);
+    while (nanosleep(&ts, &ts) == -1) {
+        /* Restart on EINTR using the residual time written into ts. */
+    }
+    return mino_nil(S);
+}
+
 /* ---- install ---- */
 
 const mino_prim_def k_prims_proc[] = {
@@ -265,6 +296,8 @@ const mino_prim_def k_prims_proc[] = {
      "Runs an external command. Returns {:exit n :out \"...\"}."},
     {"sh!", prim_sh_bang,
      "Runs an external command. Returns stdout; throws on non-zero exit."},
+    {"thread-sleep", prim_thread_sleep,
+     "Blocks the current thread for the given number of milliseconds. Returns nil."},
 };
 
 const size_t k_prims_proc_count =

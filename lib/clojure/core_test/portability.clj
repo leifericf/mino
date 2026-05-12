@@ -10,4 +10,4 @@
 
 (defn big-int? [n] (bigint? n))
 
-(defn sleep [ms] nil)
+(defn sleep [ms] (thread-sleep ms))
