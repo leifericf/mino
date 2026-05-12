@@ -889,15 +889,52 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     ex = args->as.cons.car;
     if (mino_current_ctx(S)->try_depth <= 0) {
-        /* No enclosing try -- format as fatal error. */
+        /* No enclosing try -- format as fatal error. The thrown value
+         * may be a plain string, a normalized diagnostic map (carrying
+         * :mino/kind/:mino/code/:mino/message), or an ex-info-style
+         * {:message ... :data ...}. Probe each shape so the original
+         * message survives in the surfaced diagnostic instead of the
+         * bare "unhandled exception". */
         char msg[512];
+        const char *kind = "user";
+        const char *code = "MUS001";
+        char        kbuf[64];
+        char        cbuf[32];
         if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
+        } else if (ex != NULL && mino_type_of(ex) == MINO_MAP) {
+            mino_val_t *m_msg = map_get_val(ex,
+                mino_keyword(S, "mino/message"));
+            mino_val_t *m_kind = map_get_val(ex,
+                mino_keyword(S, "mino/kind"));
+            mino_val_t *m_code = map_get_val(ex,
+                mino_keyword(S, "mino/code"));
+            if (m_msg == NULL || mino_type_of(m_msg) != MINO_STRING) {
+                m_msg = map_get_val(ex, mino_keyword(S, "message"));
+            }
+            if (m_msg != NULL && mino_type_of(m_msg) == MINO_STRING) {
+                snprintf(msg, sizeof(msg), "%.*s",
+                         (int)m_msg->as.s.len, m_msg->as.s.data);
+            } else {
+                snprintf(msg, sizeof(msg), "unhandled exception");
+            }
+            if (m_kind != NULL && mino_type_of(m_kind) == MINO_KEYWORD
+                && m_kind->as.s.len < sizeof(kbuf)) {
+                memcpy(kbuf, m_kind->as.s.data, m_kind->as.s.len);
+                kbuf[m_kind->as.s.len] = '\0';
+                kind = kbuf;
+            }
+            if (m_code != NULL && mino_type_of(m_code) == MINO_STRING
+                && m_code->as.s.len < sizeof(cbuf)) {
+                memcpy(cbuf, m_code->as.s.data, m_code->as.s.len);
+                cbuf[m_code->as.s.len] = '\0';
+                code = cbuf;
+            }
         } else {
             snprintf(msg, sizeof(msg), "unhandled exception");
         }
-        return prim_throw_classified(S, "user", "MUS001", msg);
+        return prim_throw_classified(S, kind, code, msg);
     }
     mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
     longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);

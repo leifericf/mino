@@ -1101,10 +1101,46 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 longjmp(ctx->try_stack[ctx->try_depth - 1].buf, 1);
                 /* unreachable */
             }
-            /* No enclosing try -- format as fatal user error and bail
-             * through the standard error path. */
-            prim_throw_classified(S, "user", "MUS001",
-                "unhandled exception (no try)");
+            /* No enclosing try -- format as a fatal user error and bail
+             * through the standard error path. Mirror prim_throw's
+             * "unhandled exception: <value>" shape so the original
+             * thrown value survives in the diagnostic message (without
+             * it, a worker thunk's `(throw "msg")` would surface as
+             * the bare "unhandled exception" and the cause would be
+             * lost). Maps preserve their carried kind/code/message,
+             * matching what the tree-walker path in state.c does. */
+            if (exc != NULL && mino_type_of(exc) == MINO_MAP) {
+                /* Two map shapes survive an uncaught throw: an already-
+                 * normalized diagnostic carrying :mino/kind/:mino/code/
+                 * :mino/message (e.g. from a re-throw of a caught
+                 * value) and an ex-info-style {:message ... :data ...}
+                 * from user code. Probe both so the original message
+                 * survives in either case. */
+                mino_val_t *msg  = map_get_val(exc,
+                    mino_keyword(S, "mino/message"));
+                mino_val_t *kind = map_get_val(exc,
+                    mino_keyword(S, "mino/kind"));
+                mino_val_t *code = map_get_val(exc,
+                    mino_keyword(S, "mino/code"));
+                if (msg == NULL || mino_type_of(msg) != MINO_STRING) {
+                    msg = map_get_val(exc, mino_keyword(S, "message"));
+                }
+                prim_throw_classified(S,
+                    (kind != NULL && mino_type_of(kind) == MINO_KEYWORD)
+                        ? kind->as.s.data : "user",
+                    (code != NULL && mino_type_of(code) == MINO_STRING)
+                        ? code->as.s.data : "MUS001",
+                    (msg != NULL && mino_type_of(msg) == MINO_STRING)
+                        ? msg->as.s.data : "unhandled exception");
+            } else if (exc != NULL && mino_type_of(exc) == MINO_STRING) {
+                char msg[512];
+                snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
+                         (int)exc->as.s.len, exc->as.s.data);
+                prim_throw_classified(S, "user", "MUS001", msg);
+            } else {
+                prim_throw_classified(S, "user", "MUS001",
+                    "unhandled exception");
+            }
             ok = 0;
             goto bc_done;
         }

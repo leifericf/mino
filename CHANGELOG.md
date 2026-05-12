@@ -76,6 +76,39 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: Uncaught Throws Now Preserve The Original Message In The Diagnostic
+
+Three intertwined gaps lost the thrown value's information at the
+boundary between "throw with no enclosing try" and the diagnostic the
+embedder / caller actually saw:
+
+- `prim_throw` (tree-walker no-try path) emitted the bare `unhandled
+  exception` for everything that wasn't a plain string, so an ex-info
+  or pre-built diagnostic map landed in the embedder with no clue
+  about the actual cause. Map throws are now unwrapped: kind / code /
+  message come from the carried `:mino/kind` / `:mino/code` /
+  `:mino/message` if present, falling back to the ex-info
+  `:message` shape.
+- The BC VM's `OP_THROW` no-try path emitted the literal string
+  `unhandled exception (no try)` -- losing the thrown value entirely.
+  It now mirrors `prim_throw`, so a thrown string surfaces as
+  `unhandled exception: <thrown>` and a thrown map surfaces with
+  its message.
+- The worker side of `future` then captured nothing on failure
+  (`impl->exception = NULL; /* TODO: capture diag */`), so
+  `mino_future_deref` always synthesized the generic `future failed`
+  no matter what the worker thunk threw. The worker now captures
+  the latched diagnostic as a value-map under state_lock, the GC
+  retains it through the existing `impl->exception` trace slot, and
+  the consumer-side deref rethrows with the captured
+  kind / code / message. The deref now propagates the worker's
+  cause instead of a generic `future failed`.
+
+Together these mean `(let [f (future (throw "MYORIG"))] @f)` surfaces
+as `unhandled exception: MYORIG` on the consumer side instead of the
+opaque `future failed`. Regressions live in
+`tests/host_threads_test.clj`.
+
 ### Fixed: Set And Namespaced-Map Readers Now Skip Reader-Cond No-Match Forms
 
 The plain map / vector / list readers all skip an inner form that

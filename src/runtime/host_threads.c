@@ -316,23 +316,36 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
         }
     }
 
-    /* Publish result. Note: mino_call returns NULL on uncaught throw;
-     * we capture the diagnostic into the exception field so deref can
-     * rethrow on the waiter side. */
-    mu_lock(&impl->mu);
-    if (impl->state_tag == MINO_FUTURE_PENDING) {
+    /* Publish result. mino_call returns NULL on uncaught throw; we
+     * capture the worker's diagnostic as a value-map BEFORE taking
+     * impl->mu since the conversion allocates through the GC (needs
+     * state_lock). The captured value is reachable from the future
+     * (the GC traces impl->exception), so consumer-side deref can
+     * rethrow with the original kind/code/message rather than the
+     * generic "future failed". If state_tag was already CANCELLED,
+     * leave it as CANCELLED and drop the result. */
+    {
+        mino_val_t *captured = NULL;
         if (result == NULL) {
-            impl->state_tag = MINO_FUTURE_FAILED;
-            impl->exception = NULL; /* TODO: capture diag */
-        } else {
-            impl->state_tag = MINO_FUTURE_RESOLVED;
-            impl->result    = result;
+            mino_lock(S);
+            if (mino_last_error(S) != NULL) {
+                captured = mino_last_error_map(S);
+            }
+            mino_unlock(S);
         }
-        cv_broadcast(&impl->cv);
+        mu_lock(&impl->mu);
+        if (impl->state_tag == MINO_FUTURE_PENDING) {
+            if (result == NULL) {
+                impl->state_tag = MINO_FUTURE_FAILED;
+                impl->exception = captured;
+            } else {
+                impl->state_tag = MINO_FUTURE_RESOLVED;
+                impl->result    = result;
+            }
+            cv_broadcast(&impl->cv);
+        }
+        mu_unlock(&impl->mu);
     }
-    /* If state_tag was already CANCELLED, leave it as CANCELLED and
-     * drop the result. */
-    mu_unlock(&impl->mu);
 
     if (S->thread_pool == NULL && S->thread_end_fn != NULL) {
         S->thread_end_fn(S, S->thread_factory_ctx);
@@ -538,6 +551,45 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
     if (impl->state_tag == MINO_FUTURE_CANCELLED) {
         return prim_throw_classified(S, "mino/cancelled", "MTH002",
                                      "future was cancelled");
+    }
+    /* FAILED with a captured worker diag: rethrow with the original
+     * kind/code/message. The captured value-map is the diag the
+     * worker latched right before it failed, so the consumer sees
+     * the actual cause rather than a generic "future failed". */
+    if (impl->exception != NULL
+        && mino_type_of(impl->exception) == MINO_MAP) {
+        mino_val_t *ex      = impl->exception;
+        mino_val_t *k_kind  = mino_keyword(S, "mino/kind");
+        mino_val_t *k_code  = mino_keyword(S, "mino/code");
+        mino_val_t *k_msg   = mino_keyword(S, "mino/message");
+        mino_val_t *v_kind  = map_get_val(ex, k_kind);
+        mino_val_t *v_code  = map_get_val(ex, k_code);
+        mino_val_t *v_msg   = map_get_val(ex, k_msg);
+        char        kbuf[64];
+        char        cbuf[32];
+        char        mbuf[512];
+        const char *kind = "mino/future-failed";
+        const char *code = "MTH003";
+        const char *msg  = "future failed";
+        if (v_kind != NULL && mino_type_of(v_kind) == MINO_KEYWORD
+            && v_kind->as.s.len < sizeof(kbuf)) {
+            memcpy(kbuf, v_kind->as.s.data, v_kind->as.s.len);
+            kbuf[v_kind->as.s.len] = '\0';
+            kind = kbuf;
+        }
+        if (v_code != NULL && mino_type_of(v_code) == MINO_STRING
+            && v_code->as.s.len < sizeof(cbuf)) {
+            memcpy(cbuf, v_code->as.s.data, v_code->as.s.len);
+            cbuf[v_code->as.s.len] = '\0';
+            code = cbuf;
+        }
+        if (v_msg != NULL && mino_type_of(v_msg) == MINO_STRING
+            && v_msg->as.s.len < sizeof(mbuf)) {
+            memcpy(mbuf, v_msg->as.s.data, v_msg->as.s.len);
+            mbuf[v_msg->as.s.len] = '\0';
+            msg = mbuf;
+        }
+        return prim_throw_classified(S, kind, code, msg);
     }
     /* FAILED with no captured exception (worker hit OOM): synthesize. */
     return prim_throw_classified(S, "mino/future-failed", "MTH003",

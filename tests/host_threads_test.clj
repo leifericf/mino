@@ -103,4 +103,39 @@
           (recur (dec iters))))
       (is (= 0 (mino-thread-count))))))
 
+(deftest future-deref-preserves-thrown-string-message
+  ;; A worker thunk that throws a string used to surface on the
+  ;; consumer side as the generic "future failed" -- the original
+  ;; message was lost in the BC VM's no-try path, and the deref
+  ;; rethrow did not propagate any worker diagnostic. Both fixed
+  ;; together: the consumer now sees the worker's "unhandled
+  ;; exception: <thrown>" so the cause is greppable.
+  (let [f (future (throw "original-msg"))
+        err (try @f nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"original-msg" err)))))
+
+(deftest future-deref-preserves-thrown-map-message
+  (let [f (future (throw (ex-info "boom" {:n 42})))
+        err (try @f nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"boom" err)))))
+
+(deftest bc-throw-without-try-names-the-value
+  ;; Same shape, single-threaded: the bytecode VM's no-try path
+  ;; used to emit a bare "unhandled exception (no try)" with no
+  ;; mention of the actual thrown value. Mirror the tree-walker
+  ;; behaviour so the value is in the message.
+  (let [err (try
+              ;; Wrapped in an eval so the throw goes through the bc
+              ;; vm's no-enclosing-try path even though the outer try
+              ;; would otherwise catch it under the same compilation.
+              (eval '(throw "bc-direct-throw"))
+              nil
+              (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"bc-direct-throw" err)))))
+
 (run-tests-and-exit)
