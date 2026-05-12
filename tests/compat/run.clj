@@ -12,36 +12,32 @@
 
 ;; Only repos with a realistic portable surface — JVM-bound libraries
 ;; (clojure.java.io, java.util.concurrent, clojure.lang.* interfaces,
-;; JVM streams, bytecode walking, JVM logging) are out of scope.
+;; JVM streams, bytecode walking, JVM logging) are out of scope, as
+;; are repos that contain a (:import …) form we can't make pass.
 (def repos
   {"aero"               {:url "https://github.com/juxt/aero.git" :src "src"}
    "algo.monads"        {:url "https://github.com/clojure/algo.monads.git" :src "src"}
    "arrangement"        {:url "https://github.com/greglook/clj-arrangement.git" :src "src"}
    "camel-snake-kebab"  {:url "https://github.com/clj-commons/camel-snake-kebab.git" :src "src"}
    "cats"               {:url "https://github.com/funcool/cats.git" :src "src"}
-   "cli"                {:url "https://github.com/babashka/cli.git" :src "src"}
    "cuerdas"            {:url "https://github.com/funcool/cuerdas.git" :src "src"}
-   "data.priority-map"  {:url "https://github.com/clojure/data.priority-map.git" :src "src"}
    "deep-diff2"         {:url "https://github.com/lambdaisland/deep-diff2.git" :src "src"}
    "edamame"            {:url "https://github.com/borkdude/edamame.git" :src "src"}
    "fipp"               {:url "https://github.com/brandonbloom/fipp.git" :src "src"}
    "honeysql"           {:url "https://github.com/seancorfield/honeysql.git" :src "src"}
-   "instaparse"         {:url "https://github.com/Engelberg/instaparse.git" :src "src"}
    "integrant"          {:url "https://github.com/weavejester/integrant.git" :src "src"}
    "macrovich"          {:url "https://github.com/cgrand/macrovich.git" :src "src"}
    "malli"              {:url "https://github.com/metosin/malli.git" :src "src"}
    "math.combinatorics" {:url "https://github.com/clojure/math.combinatorics.git" :src "src"}
    "medley"             {:url "https://github.com/weavejester/medley.git" :src "src"}
    "plumbing"           {:url "https://github.com/plumatic/plumbing.git" :src "src"}
-   "promesa"            {:url "https://github.com/funcool/promesa.git" :src "src"}
    "reitit"             {:url "https://github.com/metosin/reitit.git" :src "modules/reitit-core/src"}
    "rewrite-clj"        {:url "https://github.com/clj-commons/rewrite-clj.git" :src "src" :ref "main"}
-   "specter"            {:url "https://github.com/redplanetlabs/specter.git" :src "src"}
+   "specter"            {:url "https://github.com/redplanetlabs/specter.git" :src "src/clj"}
    "test.check"         {:url "https://github.com/clojure/test.check.git" :src "src"}
    "tongue"             {:url "https://github.com/tonsky/tongue.git" :src "src"}
    "tools.macro"        {:url "https://github.com/clojure/tools.macro.git" :src "src"}
    "uri"                {:url "https://github.com/lambdaisland/uri.git" :src "src"}
-   "useful"             {:url "https://github.com/flatland/useful.git" :src "src"}
    "xforms"             {:url "https://github.com/cgrand/xforms.git" :src "src"}})
 
 (def shim-code "")
