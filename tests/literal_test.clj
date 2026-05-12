@@ -119,3 +119,21 @@
   (is (== -2.5 -2.5M))
   (is (= :bigdec (type 1.5M)))
   (is (decimal? 1.5M)))
+
+(deftest slash-keyword-literal
+  ;; `:/` is the slash keyword (its name is "/"), a real Clojure
+  ;; literal -- used e.g. by HoneySQL to represent the SQL / operator
+  ;; alongside the other arithmetic-op keywords. The reader used to
+  ;; reject it because the generic trailing-slash check fired without
+  ;; verifying there was actual content before the slash.
+  (is (keyword? :/))
+  (is (= "/" (name :/)))
+  (is (nil? (namespace :/)))
+  (is (= (keyword "/") :/))
+  (is (= :/ (read-string ":/")))
+  (is (= :/ (read-string (pr-str :/)))))
+
+(deftest trailing-slash-keyword-still-rejected
+  ;; `:foo/` is genuinely malformed: name part is empty after the
+  ;; slash. The reader must still reject it.
+  (is (thrown? (read-string ":foo/"))))

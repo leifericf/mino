@@ -1072,10 +1072,16 @@ static mino_val_t *read_atom(mino_state_t *S, const char **p)
             memcpy(full + resolved_ns_len + 1, kw_name, kw_name_len);
             return mino_keyword_n(S, full, resolved_ns_len + 1 + kw_name_len);
         }
-        /* Reject trailing slash like :bar/ */
+        /* Reject trailing slash like :bar/ (name part empty after
+         * slash). The slash keyword `:/` is the lone exception:
+         * its name is "/", so the slash IS the name rather than a
+         * terminator -- HoneySQL and similar tooling use it as the
+         * keyword form of the divide operator. */
         {
             const char *slash = memchr(start + 1, '/', len - 1);
-            if (slash != NULL && slash == start + len - 1) {
+            if (slash != NULL
+                && slash == start + len - 1
+                && slash > start + 1) {
                 set_reader_diag(S, MRE008, "malformed keyword",
                                 S->reader_line, S->reader_col);
                 return NULL;

@@ -37,6 +37,19 @@ value" diagnostic if nothing upstream set one — so any future
 silent-NULL leak surfaces at its actual eval site instead of as
 arbitrary collateral damage downstream.
 
+### Fixed: `:/` Now Reads As The Slash Keyword
+
+The reader rejected `:/` as a malformed keyword because the generic
+trailing-slash check fired any time `/` was the final character of a
+keyword body, regardless of whether the slash was the entire name. The
+result was that the slash keyword — used in real Clojure code (e.g.
+HoneySQL represents the SQL `/` operator with `:/` alongside the rest
+of its arithmetic-op keywords) — was unreadable on mino even though
+`(keyword "/")` produced the same value at runtime and the printer
+emitted `:/` back. The check now also verifies that there is content
+before the slash, so `:bar/` still reports `malformed keyword` while
+`:/` reads as the keyword whose name is `"/"`.
+
 ### Fixed: Wrap-One Reader Macros Now Name Empty Reader Conditionals
 
 `@`, `'`, `` ` ``, `~`, `~@`, and `#'` produced the bare diagnostic
