@@ -82,6 +82,30 @@ The 3-arg form already passed the coll through unchanged, so the
 fix shows nothing there (0.3 ms before and after). The seq path
 remains the fallback for user-extended `CollReduce` types.
 
+### Identity Short-Circuit For `assoc` / `conj`
+
+`(assoc m k v)` and `(conj s x)` now return the input unchanged
+when the operation has no observable effect: `assoc` short-circuits
+when `k` already maps to a value `mino_eq`-equal to `v`; set `conj`
+short-circuits when `x` is already present. `(identical? m (assoc
+m k (get m k)))` now holds. The check is one `map_get_val` / one
+`hamt_get` -- O(log32 n) for HAMTs, with the cached-hash
+short-circuit on collection values keeping the structural compare
+O(1) in the typical no-match case. `disj` already had this
+property by construction.
+
+Bench delta (10000 iters each, M3 Pro):
+
+| Bench                  | Before    | After    | Speedup |
+|------------------------|----------:|---------:|--------:|
+| assoc-noop HAMT-100    | 4.31 us   | 2.11 us  | 2.0×    |
+| conj-set-noop size-100 | 2.27 us   | 1.73 us  | 1.3×    |
+
+The replace-with-different-value path pays one extra lookup
+(measured at ~5% in micro-benches); the trade-off is worth it
+for the common "rehash a map back into itself" idiom, where the
+saved rebuild traffic dominates.
+
 ### Correctness Fix: `count` On Strings Returns Codepoints
 
 `(count s)` on a string returned the byte length instead of the

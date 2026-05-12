@@ -1518,12 +1518,24 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Set helper: add one element to a set, returning a new set. */
 mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem)
 {
-    mino_val_t       *v        = alloc_val(S, MINO_SET);
-    mino_val_t       *sentinel = mino_true(S);
-    hamt_entry_t     *e        = hamt_entry_new(S, elem, sentinel);
-    uint32_t          h        = hash_val(elem);
+    mino_val_t       *v;
+    mino_val_t       *sentinel;
+    hamt_entry_t     *e;
+    uint32_t          h;
     int               replaced = 0;
-    mino_hamt_node_t *root     = hamt_assoc(S, s->as.set.root, e, h, 0u, &replaced);
+    mino_hamt_node_t *root;
+    /* Identity short-circuit: if elem is already in the set, return s
+     * unchanged. Lets `(identical? s (conj s x))` hold for the
+     * "already-present" idiom and saves the HAMT rebuild traffic. */
+    if (s->as.set.len > 0
+        && hamt_get(s->as.set.root, elem, hash_val(elem), 0u) != NULL) {
+        return (mino_val_t *)s;
+    }
+    v        = alloc_val(S, MINO_SET);
+    sentinel = mino_true(S);
+    e        = hamt_entry_new(S, elem, sentinel);
+    h        = hash_val(elem);
+    root     = hamt_assoc(S, s->as.set.root, e, h, 0u, &replaced);
     v->as.set.root      = root;
     v->meta              = s->meta;
     if (replaced) {

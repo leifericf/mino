@@ -277,3 +277,58 @@
     (is (= {:tag :large} (meta tagged)))
     (is (= {:tag :large} (meta (assoc tagged 100 100))))
     (is (= {:tag :large} (meta (dissoc tagged 5))))))
+
+(deftest assoc-noop-short-circuit
+  ;; (assoc m k existing-v) returns m unchanged (`identical?`-eq).
+  ;; Flatmap and HAMT layouts both honor the short-circuit.
+  (testing "flatmap: replace with same value is identical?"
+    (let [m {:a 1 :b 2}]
+      (is (identical? m (assoc m :a 1)))
+      (is (identical? m (assoc m :a (get m :a))))))
+  (testing "HAMT: replace with same value is identical?"
+    (let [big (loop [i 0 m {}]
+                (if (< i 50) (recur (inc i) (assoc m i i)) m))]
+      (is (identical? big (assoc big 5 5)))
+      (is (identical? big (assoc big 5 (get big 5))))))
+  (testing "replace with different value returns new map"
+    (let [m {:a 1}]
+      (is (not (identical? m (assoc m :a 2))))
+      (is (= {:a 2} (assoc m :a 2)))))
+  (testing "absent key returns new map"
+    (let [m {:a 1}]
+      (is (not (identical? m (assoc m :b 2))))
+      (is (= {:a 1 :b 2} (assoc m :b 2)))))
+  (testing "= uses Clojure's tier-strict semantics"
+    ;; (= 1 1.0) is false in Clojure, so 1 and 1.0 are NOT treated
+    ;; as the same value here; the assoc returns a new map. The
+    ;; no-op short-circuit triggers on mino_eq equality, which is
+    ;; the same predicate `=` exposes to script-level callers.
+    (let [m {:a 1}]
+      (is (not (identical? m (assoc m :a 1.0)))))))
+
+(deftest conj-set-noop-short-circuit
+  ;; (conj s x) where x is already in s returns s unchanged.
+  (testing "already-present: identical?"
+    (let [s #{:a :b :c}]
+      (is (identical? s (conj s :a)))
+      (is (identical? s (conj s :c)))))
+  (testing "absent element: new set"
+    (let [s #{:a}]
+      (is (not (identical? s (conj s :b))))
+      (is (= #{:a :b} (conj s :b)))))
+  (testing "size up to HAMT boundary"
+    (let [s (loop [i 0 s #{}]
+              (if (< i 50) (recur (inc i) (conj s i)) s))]
+      (is (identical? s (conj s 25))))))
+
+(deftest disj-set-noop-short-circuit
+  ;; (disj s x) where x is absent returns s unchanged. The existing
+  ;; prim_disj implementation already inherits this from the
+  ;; "only rebuild on hit" structure; the test pins that contract.
+  (testing "absent element: identical?"
+    (let [s #{:a :b :c}]
+      (is (identical? s (disj s :z)))))
+  (testing "present element: new set"
+    (let [s #{:a :b}]
+      (is (not (identical? s (disj s :a))))
+      (is (= #{:b} (disj s :a))))))

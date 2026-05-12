@@ -633,6 +633,17 @@ mino_val_t *mino_map_assoc1(mino_state_t *S, mino_val_t *m,
                             mino_val_t *key, mino_val_t *val)
 {
     mino_val_t *out;
+    /* Identity short-circuit: if the key already maps to a value that
+     * compares `mino_eq`-equal to `val`, return m unchanged. The
+     * cached-hash on collection values keeps this O(1) in the miss
+     * case for sequable vals; for cheap scalar vals the structural
+     * compare is constant-time anyway. Lets `(identical? m (assoc m
+     * k (get m k)))` hold and saves the rebuild traffic on the
+     * surprisingly common "replace with current value" idiom. */
+    if (m != NULL && m->as.map.len > 0) {
+        mino_val_t *existing = map_get_val(m, key);
+        if (existing != NULL && mino_eq(existing, val)) return m;
+    }
     mino_current_ctx(S)->gc_depth++;
     out = alloc_val(S, MINO_MAP);
     if (m == NULL || m->as.map.len == 0) {
