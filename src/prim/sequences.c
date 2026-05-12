@@ -1790,6 +1790,15 @@ mino_val_t *prim_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     pred = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || mino_is_nil(coll)) return mino_true(S);
+    /* Validate seqability eagerly so non-seqable inputs throw rather
+     * than vacuously returning true. */
+    {
+        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        if (seqd == NULL) return NULL;
+        if (mino_type_of(seqd) == MINO_NIL) return mino_true(S);
+        coll = seqd;
+    }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
@@ -1817,6 +1826,15 @@ mino_val_t *prim_some(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     pred = args->as.cons.car;
     coll = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || mino_is_nil(coll)) return mino_nil(S);
+    /* Validate seqability eagerly so non-seqable inputs throw rather
+     * than silently returning nil. */
+    {
+        mino_val_t *seq_args = mino_cons(S, coll, mino_nil(S));
+        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        if (seqd == NULL) return NULL;
+        if (mino_type_of(seqd) == MINO_NIL) return mino_nil(S);
+        coll = seqd;
+    }
     seq_iter_init(S, &it, coll);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
@@ -2205,6 +2223,22 @@ mino_val_t *prim_zipmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     result = mino_map(S, NULL, NULL, 0);
     if (ks == NULL || mino_is_nil(ks)) return result;
     if (vs == NULL || mino_is_nil(vs)) return result;
+    /* Validate seqability of both inputs eagerly so non-seqable keys or
+     * vals throw rather than silently producing an empty map. */
+    {
+        mino_val_t *seq_args = mino_cons(S, ks, mino_nil(S));
+        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        if (seqd == NULL) return NULL;
+        if (mino_type_of(seqd) == MINO_NIL) return result;
+        ks = seqd;
+    }
+    {
+        mino_val_t *seq_args = mino_cons(S, vs, mino_nil(S));
+        mino_val_t *seqd = prim_seq(S, seq_args, env);
+        if (seqd == NULL) return NULL;
+        if (mino_type_of(seqd) == MINO_NIL) return result;
+        vs = seqd;
+    }
     seq_iter_init(S, &k_it, ks);
     seq_iter_init(S, &v_it, vs);
     while (!seq_iter_done(&k_it) && !seq_iter_done(&v_it)) {
