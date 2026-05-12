@@ -2322,17 +2322,21 @@
   type or :default override on coll-reduce takes precedence over the
   built-in seq-driven reduction."
     ([f coll]
-     (let [s (seq coll)]
-       (if (nil? s)
-         (f)
-         (let [init  (first s)
-               rs    (rest s)
-               table @CollReduce--coll-reduce
-               impl  (or (get table (type rs))
-                         (get table :default))]
-           (if impl
-             (impl rs f init)
-             (internal-reduce f init rs))))))
+     ;; Look up the protocol impl on the ORIGINAL coll's type. If
+     ;; no user override exists, hand the coll through to the C
+     ;; primitive as-is -- it has its own 2-arg fast paths (int
+     ;; range, persistent vec/map/set) that rely on coll being
+     ;; the unforced source value. Only seq-decompose when a
+     ;; user-extended CollReduce impl is taking over.
+     (let [table @CollReduce--coll-reduce
+           impl  (or (get table (type coll))
+                     (get table :default))]
+       (if impl
+         (let [s (seq coll)]
+           (if (nil? s)
+             (f)
+             (impl (rest s) f (first s))))
+         (internal-reduce f coll))))
     ([f init coll]
      (let [table @CollReduce--coll-reduce
            impl  (or (get table (type coll))

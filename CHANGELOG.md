@@ -55,6 +55,33 @@ Backed by `tests/reduce_perf_test.clj` parity tests at sizes
 multi-level-trie boundaries), `reduced?` early-exit, and a
 subvec offset case.
 
+### Reduce Wrapper Preserves C-Side Fast Paths
+
+The Clojure-level `reduce` 2-arg form was eagerly `seq`-decomposing
+the coll before dispatching: it would `(let [s (seq coll)] ...)` and
+pass `(rest s)` to `internal-reduce` regardless of whether a
+`CollReduce` protocol impl had been registered. That destroyed every
+2-arg fast path in `prim_reduce` -- the int-range fast lane, the
+direct map / vec / set walks from this same cycle -- because by the
+time the C primitive saw the coll, it was already a forced
+chunked-cons.
+
+The wrapper now looks up the protocol impl on the ORIGINAL coll's
+type and only seq-decomposes when an extended impl is taking over.
+Built-in collections (lazy ranges, vectors, maps, sets) hand
+through unmodified to the C primitive, which has its own fast
+paths and now actually gets to run them.
+
+Bench delta (5 runs each, M3 Pro):
+
+| Bench                          | Before    | After    | Speedup |
+|--------------------------------|----------:|---------:|--------:|
+| sum-1-to-1M `reduce + (range)` | 53.8 ms   | 0.3 ms   | 180×    |
+
+The 3-arg form already passed the coll through unchanged, so the
+fix shows nothing there (0.3 ms before and after). The seq path
+remains the fallback for user-extended `CollReduce` types.
+
 ### Correctness Fix: `count` On Strings Returns Codepoints
 
 `(count s)` on a string returned the byte length instead of the
