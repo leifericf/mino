@@ -3189,24 +3189,6 @@
   [t x]
   (= t (type x)))
 
-;; Bridge a small set of JVM interface names to mino's type keywords.
-;; This lets cross-dialect tests that use `(instance? clojure.lang.IFoo
-;; x)` succeed on mino without each test author having to thread a
-;; reader-conditional. The mapping is kept narrow to JVM interfaces
-;; that have an exact mino equivalent; types that mino doesn't support
-;; (Float vs Double, IBlockingDeref distinct from IPending, ...) are
-;; deliberately not bridged.
-(def clojure.lang.IPending :future)
-(def clojure.lang.BigInt :bigint)
-
-;; Bridge `clojure.lang.MapEntry/create` to mino's MAP_ENTRY type.
-;; Cross-dialect tests use it under `:default` to build a map entry
-;; literal; the C primitive `map-entry` returns a MINO_MAP_ENTRY,
-;; which `key`/`val` accept.
-(ns clojure.lang.MapEntry)
-(defn create [k v] (clojure.core/map-entry k v))
-(in-ns 'clojure.core)
-
 ;; In Clojure JVM the primed arithmetic forms (`+'`, `-'`, `*'`,
 ;; `inc'`, `dec'`) auto-promote to BigInt; the unprimed forms throw
 ;; on overflow. mino now matches that contract: the unprimed +/-/*/
