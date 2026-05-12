@@ -8,6 +8,7 @@
 
 #include "prim/internal.h"
 #include "runtime/host_threads.h"
+#include "collections/internal.h"   /* make_fn */
 
 /* ------------------------------------------------------------------------- */
 /* seq and realized?                                                         */
@@ -1844,6 +1845,278 @@ mino_val_t *prim_not_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_is_truthy_inline(r) ? mino_false(S) : mino_true(S);
 }
 
+/* Helper: build a [& args] params vector. */
+static mino_val_t *params_amp_args(mino_state_t *S)
+{
+    mino_val_t *items[2];
+    items[0] = mino_symbol(S, "&");
+    items[1] = mino_symbol(S, "args");
+    return mino_vector(S, items, 2);
+}
+
+/* (complement f) — returns a fn whose result is (not (apply f args)). */
+mino_val_t *prim_complement(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *f;
+    mino_env_t *fn_env;
+    mino_val_t *body;
+    size_t n;
+    arg_count(S, args, &n);
+    if (n != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "complement requires 1 argument");
+    }
+    f = args->as.cons.car;
+    fn_env = env_child(S, env);
+    env_bind(S, fn_env, "f", f);
+    /* body forms: ((not (apply f args))) */
+    {
+        mino_val_t *apply_form = mino_cons(S, mino_symbol(S, "apply"),
+            mino_cons(S, mino_symbol(S, "f"),
+                mino_cons(S, mino_symbol(S, "args"), mino_nil(S))));
+        mino_val_t *not_form = mino_cons(S, mino_symbol(S, "not"),
+            mino_cons(S, apply_form, mino_nil(S)));
+        body = mino_cons(S, not_form, mino_nil(S));
+    }
+    return make_fn(S, params_amp_args(S), body, fn_env);
+}
+
+/* (comp) -> identity; (comp f) -> f; (comp f g ...) -> applied right to left.
+ * Result is (fn [& args] (f (g (... (apply h args))))). */
+mino_val_t *prim_comp(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    size_t n;
+    mino_val_t *fs_vec;
+    mino_env_t *fn_env;
+    mino_val_t *body;
+    arg_count(S, args, &n);
+    if (n == 0) {
+        mino_val_t *identity = var_find(S, "clojure.core", "identity");
+        if (identity != NULL && mino_type_of(identity) == MINO_VAR) {
+            return identity->as.var.root;
+        }
+        return mino_nil(S);
+    }
+    if (n == 1) return args->as.cons.car;
+    /* Capture the fns as a vector in the closure env. The body's apply
+     * chain reads from this vector by index so we don't allocate per
+     * invocation. Build body as:
+     *   (let [r (apply LAST args)]
+     *     (PEN-2 (PEN-3 (... (FIRST r) ...))))
+     * Simpler: build a recursive (reduce (fn [a g] (g a)) ((last fs) args) ...)
+     * Even simpler: emit (apply (fn [...] (f1 (f2 (... (apply fk args))))) ...).
+     * Most compact: use a Clojure form that reads fs from the env at
+     * each call. */
+    {
+        mino_val_t **items = (mino_val_t **)malloc(n * sizeof(mino_val_t *));
+        mino_val_t *cur;
+        size_t i;
+        if (items == NULL) {
+            return prim_throw_classified(S, "eval/oom", "MOM001",
+                "comp: out of memory");
+        }
+        cur = args;
+        for (i = 0; i < n; i++) {
+            items[i] = cur->as.cons.car;
+            cur = cur->as.cons.cdr;
+        }
+        fs_vec = mino_vector(S, items, n);
+        free(items);
+    }
+    fn_env = env_child(S, env);
+    env_bind(S, fn_env, "fs", fs_vec);
+    /* body: ((reduce (fn [acc f] (f acc))
+     *                (apply (peek fs) args)
+     *                (rseq (pop fs)))) */
+    {
+        mino_val_t *sym_acc   = mino_symbol(S, "acc");
+        mino_val_t *sym_f     = mino_symbol(S, "f");
+        mino_val_t *sym_args  = mino_symbol(S, "args");
+        mino_val_t *sym_fs    = mino_symbol(S, "fs");
+        /* inner-fn params: [acc f] */
+        mino_val_t *inner_params_items[2] = {sym_acc, sym_f};
+        mino_val_t *inner_params = mino_vector(S, inner_params_items, 2);
+        /* inner-fn body: ((f acc)) */
+        mino_val_t *inner_call = mino_cons(S, sym_f,
+            mino_cons(S, sym_acc, mino_nil(S)));
+        mino_val_t *inner_body = mino_cons(S, inner_call, mino_nil(S));
+        mino_val_t *inner_fn = mino_cons(S, mino_symbol(S, "fn"),
+            mino_cons(S, inner_params,
+                mino_cons(S, inner_call, mino_nil(S))));
+        (void)inner_body;
+        /* init form: (apply (peek fs) args) */
+        mino_val_t *peek_call = mino_cons(S, mino_symbol(S, "peek"),
+            mino_cons(S, sym_fs, mino_nil(S)));
+        mino_val_t *init_form = mino_cons(S, mino_symbol(S, "apply"),
+            mino_cons(S, peek_call,
+                mino_cons(S, sym_args, mino_nil(S))));
+        /* (rseq (pop fs)) */
+        mino_val_t *pop_call = mino_cons(S, mino_symbol(S, "pop"),
+            mino_cons(S, sym_fs, mino_nil(S)));
+        mino_val_t *rseq_call = mino_cons(S, mino_symbol(S, "rseq"),
+            mino_cons(S, pop_call, mino_nil(S)));
+        /* (reduce inner-fn init-form rseq-call) */
+        mino_val_t *reduce_form = mino_cons(S, mino_symbol(S, "reduce"),
+            mino_cons(S, inner_fn,
+                mino_cons(S, init_form,
+                    mino_cons(S, rseq_call, mino_nil(S)))));
+        body = mino_cons(S, reduce_form, mino_nil(S));
+    }
+    return make_fn(S, params_amp_args(S), body, fn_env);
+}
+
+/* (partial f) -> f; (partial f & args) -> fn that calls f with args prepended. */
+mino_val_t *prim_partial(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *f;
+    mino_val_t *bound_args;
+    mino_env_t *fn_env;
+    mino_val_t *body;
+    size_t n;
+    arg_count(S, args, &n);
+    if (n == 0) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "partial requires at least 1 argument");
+    }
+    f = args->as.cons.car;
+    if (n == 1) return f;
+    bound_args = args->as.cons.cdr;
+    fn_env = env_child(S, env);
+    env_bind(S, fn_env, "f", f);
+    env_bind(S, fn_env, "bound", bound_args);
+    /* body: ((apply f (concat bound args))) */
+    {
+        mino_val_t *concat_call = mino_cons(S, mino_symbol(S, "concat"),
+            mino_cons(S, mino_symbol(S, "bound"),
+                mino_cons(S, mino_symbol(S, "args"), mino_nil(S))));
+        mino_val_t *apply_form = mino_cons(S, mino_symbol(S, "apply"),
+            mino_cons(S, mino_symbol(S, "f"),
+                mino_cons(S, concat_call, mino_nil(S))));
+        body = mino_cons(S, apply_form, mino_nil(S));
+    }
+    return make_fn(S, params_amp_args(S), body, fn_env);
+}
+
+/* (juxt f g ...) — returns a fn that returns [(f a..) (g a..) ...] for its args. */
+mino_val_t *prim_juxt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fs;
+    mino_env_t *fn_env;
+    mino_val_t *body;
+    size_t n;
+    arg_count(S, args, &n);
+    if (n == 0) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "juxt requires at least 1 argument");
+    }
+    fs = args; /* keep the cons list; bind it as 'fs' */
+    fn_env = env_child(S, env);
+    env_bind(S, fn_env, "fs", fs);
+    /* body: ((mapv (fn [f] (apply f args)) fs)) */
+    {
+        mino_val_t *inner_params_items[1] = {mino_symbol(S, "f")};
+        mino_val_t *inner_params = mino_vector(S, inner_params_items, 1);
+        mino_val_t *apply_call = mino_cons(S, mino_symbol(S, "apply"),
+            mino_cons(S, mino_symbol(S, "f"),
+                mino_cons(S, mino_symbol(S, "args"), mino_nil(S))));
+        mino_val_t *inner_fn = mino_cons(S, mino_symbol(S, "fn"),
+            mino_cons(S, inner_params,
+                mino_cons(S, apply_call, mino_nil(S))));
+        mino_val_t *mapv_call = mino_cons(S, mino_symbol(S, "mapv"),
+            mino_cons(S, inner_fn,
+                mino_cons(S, mino_symbol(S, "fs"), mino_nil(S))));
+        body = mino_cons(S, mapv_call, mino_nil(S));
+    }
+    return make_fn(S, params_amp_args(S), body, fn_env);
+}
+
+/* (distinct? x ...) — true iff no two args are equal. Empty arglist → true. */
+mino_val_t *prim_distinct_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *cur = args;
+    mino_val_t *seen;
+    size_t n_args = 0;
+    (void)env;
+    if (cur == NULL || mino_is_nil(cur) || !mino_is_cons(cur)) {
+        return mino_true(S);
+    }
+    seen = mino_set(S, NULL, 0);
+    while (mino_is_cons(cur)) {
+        mino_val_t *x = cur->as.cons.car;
+        seen = set_conj1(S, seen, x);
+        if (seen == NULL) return NULL;
+        n_args++;
+        cur = cur->as.cons.cdr;
+    }
+    return seen->as.set.len == n_args ? mino_true(S) : mino_false(S);
+}
+
+/* (merge-with f m1 m2 ...) — merge maps, calling (f a b) to combine
+ * values at shared keys. Returns nil if every map is nil. */
+mino_val_t *prim_merge_with(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fn;
+    mino_val_t *cur;
+    mino_val_t *result = NULL;
+    int any_non_nil = 0;
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "merge-with requires at least 1 argument: combiner f");
+    }
+    fn  = args->as.cons.car;
+    cur = args->as.cons.cdr;
+    while (mino_is_cons(cur)) {
+        mino_val_t *m = cur->as.cons.car;
+        cur = cur->as.cons.cdr;
+        if (m == NULL || mino_is_nil(m)) continue;
+        if (mino_type_of(m) != MINO_MAP) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "merge-with: every input must be a map or nil");
+        }
+        any_non_nil = 1;
+        if (result == NULL) {
+            result = m;
+            continue;
+        }
+        {
+            seq_iter_t it;
+            seq_iter_init(S, &it, m);
+            while (!seq_iter_done(&it)) {
+                mino_val_t *kv = seq_iter_val(S, &it);
+                mino_val_t *k, *v;
+                if (kv != NULL && mino_type_of(kv) == MINO_MAP_ENTRY) {
+                    k = kv->as.map_entry.k;
+                    v = kv->as.map_entry.v;
+                } else if (kv != NULL && mino_type_of(kv) == MINO_VECTOR
+                           && kv->as.vec.len >= 2) {
+                    k = vec_nth(kv, 0);
+                    v = vec_nth(kv, 1);
+                } else {
+                    seq_iter_next(S, &it);
+                    continue;
+                }
+                {
+                    mino_val_t *existing = mino_map_lookup(result, k);
+                    if (existing == NULL) {
+                        result = mino_map_assoc1(S, result, k, v);
+                    } else {
+                        mino_val_t *call_args =
+                            mino_cons(S, existing,
+                                mino_cons(S, v, mino_nil(S)));
+                        mino_val_t *combined =
+                            apply_callable(S, fn, call_args, env);
+                        if (combined == NULL) return NULL;
+                        result = mino_map_assoc1(S, result, k, combined);
+                    }
+                    if (result == NULL) return NULL;
+                }
+                seq_iter_next(S, &it);
+            }
+        }
+    }
+    return any_non_nil ? result : mino_nil(S);
+}
+
 /* (group-by f coll) — map of (f x) -> vector of items in coll where
  * f's result is the key. Preserves encounter order within each bucket. */
 mino_val_t *prim_group_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -2012,6 +2285,18 @@ const mino_prim_def k_prims_sequences[] = {
      "Returns a map from distinct items in coll to the number of times they appear."},
     {"group-by",  prim_group_by,
      "Returns a map of the items in coll grouped by the result of f."},
+    {"distinct?", prim_distinct_p,
+     "Returns true if no two of the arguments are equal."},
+    {"merge-with", prim_merge_with,
+     "Returns the merge of the given maps, calling f to combine values at shared keys."},
+    {"complement", prim_complement,
+     "Returns a function that returns the logical opposite of f."},
+    {"comp",      prim_comp,
+     "Returns a function that is the composition of the given functions."},
+    {"partial",   prim_partial,
+     "Returns a function that applies f with the given arguments prepended."},
+    {"juxt",      prim_juxt,
+     "Returns a function that returns a vector of applying each f to its args."},
 };
 
 const size_t k_prims_sequences_count =

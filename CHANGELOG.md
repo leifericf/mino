@@ -1,34 +1,23 @@
 # Changelog
 
-## v0.147.0 — Phase 2 (Partial): Port Thin core.clj Wrappers to C
+## v0.147.0 — Move Seq Predicates And Map Builders Into C
 
-Phase 2 of the lean-embed cycle. The first batch of `core.clj` defns
-moves to C primitives, shrinking the install-time parse and eval cost
-of `core.clj` and pre-staging these names for embedders running on a
-future Floor tier that does not evaluate `core.clj` at all.
+`every?`, `some`, `not-any?`, `not-every?`, `zipmap`, `frequencies`,
+and `group-by` move from `core.clj` defns to C primitives in
+`src/prim/sequences.c`. User-visible behaviour is identical — same
+names, same arities, same contracts, same diagnostics for type and
+arity errors.
 
-Ported to `src/prim/sequences.c`:
+The motivation is install-time cost on the new Floor tier: every
+form deleted from `core.clj` is one fewer to parse and evaluate when
+the host calls `mino_install_clojure_core` (and any embedder that
+stays on `mino_install_minimal` gets the C-level prims without the
+`core.clj` eval at all). The combined deletion is ~50 lines of
+Clojure.
 
-- `every?` — true if (pred x) is truthy for every x in coll.
-- `some` — first truthy (pred x) result, else nil.
-- `not-any?` — negation of `some`.
-- `not-every?` — negation of `every?`.
-- `zipmap` — keys / vals → map. Stops at the shorter coll.
-- `frequencies` — count occurrences of each distinct item.
-- `group-by` — group items by (f x) into per-key vectors.
+Standalone test suite stays at 1616 tests, 7527 assertions, green.
 
-User-visible behaviour: identical. Same names, same arities, same
-contracts, same diagnostics for type / arity errors. The standalone
-test suite (1616 tests, 7527 assertions) is green.
-
-Remaining Phase 2 candidates (`comp`, `partial`, `complement`, `juxt`,
-`mapcat`, `concat`, `partition*`, `interleave`, `interpose`,
-`tree-seq`, `flatten`, `merge-with`, `take-while`, `drop-while`,
-`take-nth`, `iterate`, `cycle`, `repeatedly`, `distinct`) need
-closure or lazy-seq C infrastructure that is not yet in place; they
-remain in `core.clj` for this release.
-
-## v0.146.0 — Capability-Gated Install: Lean Embedded Footprint, Same Standalone Surface
+## v0.146.0 — Capability-Gated Install API For Embedders
 
 Embedded mino's `mino_install_core` was monolithic — every fresh runtime
 parsed and evaluated all ~117 KB of `core.clj` and registered every C
@@ -98,9 +87,9 @@ The capability install ordering rule: a capability that gates a
 `mino_install_all` does the same for the I/O / fs / proc / stm /
 agent / async / host tier.
 
-Subsequent phases of the lean-embed cycle (porting thin `core.clj`
-wrappers to C, pre-parsed AST, pre-compiled bytecode, image-based
-bootstrap) will compose on top of this surface without breaking it.
+Follow-on work — porting thin `core.clj` wrappers to C, pre-parsed
+core AST, pre-compiled bytecode, image-based bootstrap — composes on
+top of this surface without breaking it.
 
 ## v0.145.1 — Task Runner Fix: Pre-Resolve Tasks Outside The BC Doseq Body
 

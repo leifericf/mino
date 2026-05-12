@@ -336,45 +336,8 @@
 
 ;; --- Higher-order functions ---
 
-(defn comp
-  "Returns a function that is the composition of the given functions."
-  ([] identity)
-  ([f] f)
-  ([f g]
-   (fn ([] (f (g)))
-       ([x] (f (g x)))
-       ([x y] (f (g x y)))
-       ([x y z] (f (g x y z)))
-       ([x y z & args] (f (apply g x y z args)))))
-  ([f g & fs]
-   (reduce comp (cons f (cons g fs)))))
-
-(defn partial
-  "Returns a function that applies f with the given arguments prepended."
-  ([f] f)
-  ([f arg1]
-   (fn ([] (f arg1))
-       ([x] (f arg1 x))
-       ([x y] (f arg1 x y))
-       ([x y z] (f arg1 x y z))
-       ([x y z & args] (apply f arg1 x y z args))))
-  ([f arg1 arg2]
-   (fn ([] (f arg1 arg2))
-       ([x] (f arg1 arg2 x))
-       ([x y] (f arg1 arg2 x y))
-       ([x y z] (f arg1 arg2 x y z))
-       ([x y z & args] (apply f arg1 arg2 x y z args))))
-  ([f arg1 arg2 arg3]
-   (fn ([] (f arg1 arg2 arg3))
-       ([x] (f arg1 arg2 arg3 x))
-       ([x y] (f arg1 arg2 arg3 x y))
-       ([x y z] (f arg1 arg2 arg3 x y z))
-       ([x y z & args] (apply f arg1 arg2 arg3 x y z args))))
-  ([f arg1 arg2 arg3 & more]
-   (fn [& args] (apply f arg1 arg2 arg3 (concat more args)))))
-(defn complement
-  "Returns a function that returns the logical opposite of f."
-  [f] (fn [& args] (not (apply f args))))
+;; comp, partial, complement are registered as C primitives
+;; (see src/prim/sequences.c).
 
 ;; --- Trivial compositions ---
 
@@ -473,11 +436,7 @@
 
 ;; --- More higher-order ---
 
-(defn juxt
-  "Returns a function that returns a vector of applying each f to its
-   args."
-  [& fs]
-  (fn [& args] (vec (map (fn [f] (apply f args)) fs))))
+;; juxt is registered as a C primitive (see src/prim/sequences.c).
 
 (defn mapcat
   "Returns the result of applying concat to the result of mapping f
@@ -805,11 +764,7 @@
 ;; produced by `seq` on other collections are seqs but not lists.
 ;; atom? is defined as a C primitive; no mino-level fallback needed.
 ;; not-any? / not-every? are C primitives (see src/prim/sequences.c).
-(defn distinct? "Returns true if no two of the arguments are equal." [& xs]
-  (if (empty? xs)
-    true
-    (let [s (set xs)]
-      (= (count s) (count xs)))))
+;; distinct? is registered as a C primitive (see src/prim/sequences.c).
 (def array-map    "Creates a hash-map." hash-map)
 (defn sorted?
   "Returns true if x is a sorted collection."
@@ -1158,22 +1113,7 @@
       (assoc m k (apply update-in (get m k) (rest ks) f args))
       (assoc m k (apply f (get m k) args)))))
 
-(defn merge-with
-  "Returns a map that is the merge of the given maps, using f to
-   combine values at shared keys."
-  [f & maps]
-  (when (some identity maps)
-    (reduce (fn [acc m]
-      (if m
-        (reduce (fn [a kv]
-          (let [k (first kv)
-                v (second kv)]
-            (if (contains? a k)
-              (assoc a k (f (get a k) v))
-              (assoc a k v))))
-          (if acc acc (with-meta {} (meta m))) (seq m))
-        acc))
-      nil maps)))
+;; merge-with is registered as a C primitive (see src/prim/sequences.c).
 
 (defn reduce-kv
   "Reduces a map with f taking accumulator, key, and value."
