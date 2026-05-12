@@ -29,7 +29,15 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         }
         return mino_string_n(S, data, len);
     }
-    return prim_throw_classified(S, "eval/type", "MTY001", "name: expected a keyword, symbol, or string");
+    {
+        char        buf[256];
+        mino_val_t *printed = print_to_string(S, v);
+        snprintf(buf, sizeof(buf),
+                 "name: expected a keyword, symbol, or string, got: %.*s",
+                 printed != NULL ? (int)printed->as.s.len : 0,
+                 printed != NULL ? printed->as.s.data : "");
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
 }
 
 mino_val_t *prim_rand(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1001,7 +1009,13 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return prim_throw_classified(S, "eval/type", "MTY001", "namespace: argument must not be nil");
     }
     if (mino_type_of(v) != MINO_SYMBOL && mino_type_of(v) != MINO_KEYWORD) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "namespace: expected a symbol or keyword");
+        char        buf[256];
+        mino_val_t *printed = print_to_string(S, v);
+        snprintf(buf, sizeof(buf),
+                 "namespace: expected a symbol or keyword, got: %.*s",
+                 printed != NULL ? (int)printed->as.s.len : 0,
+                 printed != NULL ? printed->as.s.data : "");
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
     }
     data = v->as.s.data;
     len  = v->as.s.len;

@@ -43,3 +43,24 @@
 
 (deftest load-string-rejects-non-string
   (is (thrown? (load-string 42))))
+
+(deftest name-error-names-the-offender
+  ;; (name x) for non-keyword/symbol/string values used to throw the
+  ;; bare "name: expected a keyword, symbol, or string" -- which was
+  ;; useless several frames downstream of the bad call site. The
+  ;; error message now includes `pr-str` of the offending value so
+  ;; the caller is greppable from the message alone.
+  (let [err (try (name [1 2]) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"\[1 2\]" err))))
+  (let [err (try (name 42) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"42" err)))))
+
+(deftest namespace-error-names-the-offender
+  (let [err (try (namespace [1 2]) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"\[1 2\]" err)))))

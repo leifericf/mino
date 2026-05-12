@@ -2136,10 +2136,17 @@
                   (map (fn [m]
                     (let [mname (first m)
                           params (second m)
-                          body (drop 2 m)
-                          dsym (symbol pns (str pname "--" (name mname)))]
-                      (list 'swap! dsym 'assoc type-kw
-                            (apply list 'fn params body))))
+                          body (drop 2 m)]
+                      (when-not (symbol? mname)
+                        (throw (str "extend-type: method must start with a"
+                                    " name symbol, got: " (pr-str m))))
+                      (when-not (vector? params)
+                        (throw (str "extend-type: method " (pr-str mname)
+                                    " must have a params vector, got: "
+                                    (pr-str params))))
+                      (let [dsym (symbol pns (str pname "--" (name mname)))]
+                        (list 'swap! dsym 'assoc type-kw
+                              (apply list 'fn params body)))))
                    methods)))
               groups)]
     (apply list 'do (vec swaps))))

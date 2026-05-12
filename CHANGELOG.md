@@ -37,6 +37,32 @@ value" diagnostic if nothing upstream set one — so any future
 silent-NULL leak surfaces at its actual eval site instead of as
 arbitrary collateral damage downstream.
 
+### Fixed: `name` / `namespace` / `extend-type` Errors Now Name The Offender
+
+Three diagnostic gaps that consistently surfaced as the wrong error
+many frames downstream of the actual call site:
+
+- `(name x)` and `(namespace x)` threw the bare `name: expected a
+  keyword, symbol, or string` / `namespace: expected a symbol or
+  keyword` regardless of what `x` actually was. The prims now include
+  `pr-str` of the offender in the message (`... got: [1 2]`,
+  `... got: 42`), so the caller is greppable from the message alone.
+- `(extend-type T Proto (method [args] body) ...)` did `(name mname)`
+  on the method's first form to compute the dispatch symbol. When
+  the spec used the JVM-only IFn shorthand
+  (`Proto ([this kw] (get this kw))` -- no method name, just a
+  params vector lifted in place of the name) the macro silently
+  cascaded into `name: expected a keyword, symbol, or string`,
+  which named neither the macro nor the malformed spec. The macro
+  now checks both `(symbol? mname)` and `(vector? params)` up front
+  and throws `extend-type: method must start with a name symbol,
+  got: ([this kw] (get this kw))` / `extend-type: method <mname>
+  must have a params vector, got: <printed>`. lambdaisland/uri.cljc
+  (its `(defrecord URI [...] IFn ([this kw] (get this kw)))` form)
+  now fails at its own call site with a message that names the
+  shape problem; the underlying IFn shorthand is still JVM-only and
+  doesn't load, but the offender is now obvious.
+
 ### Fixed: `:/` Now Reads As The Slash Keyword
 
 The reader rejected `:/` as a malformed keyword because the generic

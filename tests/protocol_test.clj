@@ -112,3 +112,24 @@
   (testing "extend-type preserves the protocol's namespace prefix"
     (require '[proto-test-source-ns :as src])
     (is (= "frob:hi" (src/frob "hi")))))
+
+(defprotocol BadShapeProto (bad-shape-m [_]))
+(defrecord BadShapeR [])
+
+(deftest extend-type-rejects-method-without-name
+  ;; In portable Clojure code, IFn-style "shortcut" specs sometimes
+  ;; appear: `(extend-type T IFn ([this kw] body))` -- a method with
+  ;; the params vector in place of the method name. This is JVM-only
+  ;; sugar (Clojure compiles it through clojure.lang.IFn directly).
+  ;; mino has no IFn so the form is malformed; the macro must reject
+  ;; it with a clear message that names the offender rather than
+  ;; letting the failure cascade into the opaque
+  ;; "name: expected a keyword, symbol, or string" from the macro
+  ;; internals.
+  (let [err (try
+              (eval '(extend-type BadShapeR BadShapeProto ([this] :x)))
+              nil
+              (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"extend-type" err)))
+    (is (some? (re-find #"method" err)))))
