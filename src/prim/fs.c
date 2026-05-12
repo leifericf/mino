@@ -18,6 +18,7 @@
  */
 
 #include "prim/internal.h"
+#include "mino.h"
 #include "path_buf.h"
 #include <dirent.h>
 #include <sys/stat.h>
@@ -213,6 +214,9 @@ const size_t k_prims_fs_count =
 
 void mino_install_fs(mino_state_t *S, mino_env_t *env)
 {
-    prim_install_table_with_capability(S, env, "clojure.core",
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_fs, k_prims_fs_count, "fs");
+    S->caps_installed |= MINO_CAP_FS;
 }

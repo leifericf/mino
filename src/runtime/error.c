@@ -91,6 +91,20 @@ void set_error_at(mino_state_t *S, const mino_val_t *form, const char *msg)
 void set_eval_diag(mino_state_t *S, const mino_val_t *form,
                    const char *kind, const char *code, const char *msg)
 {
+    set_eval_diag_with_data(S, form, kind, code, msg, NULL, NULL);
+}
+
+/* Extended variant: attach a data payload and an optional note. Used
+ * by the capability-aware MNS002 diagnostic so the unbound-symbol
+ * error carries `{:capability ... :symbol ... :reason :not-installed
+ * :enable-via "..."}` and a follow-on hint pointing at the C install
+ * entry point. Falls back to set_eval_diag's behaviour when the
+ * extension fields are NULL. */
+void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
+                             const char *kind, const char *code,
+                             const char *msg, mino_val_t *data,
+                             const char *note)
+{
     /* Inside a try block, convert diagnostics to thrown exceptions so they
      * are catchable by the surrounding catch clause. */
     if (mino_current_ctx(S)->try_depth > 0) {
@@ -108,6 +122,12 @@ void set_eval_diag(mino_state_t *S, const mino_val_t *form,
             span.line   = form->as.cons.line;
             span.column = form->as.cons.column;
             diag_set_span(d, span);
+        }
+        if (d != NULL && data != NULL) {
+            diag_set_data(d, data);
+        }
+        if (d != NULL && note != NULL && note[0] != '\0') {
+            diag_add_note(d, note);
         }
         set_diag(S, d);
     }

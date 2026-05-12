@@ -11,6 +11,7 @@
 
 #include "eval/special_internal.h"
 #include "prim/internal.h"
+#include "mino.h"
 
 /* --- Evaluator helpers: one per value kind. --- */
 
@@ -168,6 +169,38 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
         if (amb != NULL) v = mino_env_get_sym(amb, form);
     }
     if (v == NULL) {
+        const mino_capability_info_t *cap = mino_capability_for_symbol(data);
+        if (cap != NULL) {
+            char  msg[400];
+            char  note[200];
+            mino_val_t *keys[4];
+            mino_val_t *vals[4];
+            mino_val_t *data_map;
+
+            snprintf(msg, sizeof(msg),
+                "%s is not installed in this runtime "
+                "(capability '%s' disabled by host)",
+                data, cap->name);
+            snprintf(note, sizeof(note),
+                "the host can enable this capability by calling %s "
+                "from C before mino_install_core",
+                cap->install_fn);
+
+            keys[0] = mino_keyword(S, "capability");
+            vals[0] = mino_keyword(S, cap->name);
+            keys[1] = mino_keyword(S, "symbol");
+            vals[1] = mino_symbol(S, data);
+            keys[2] = mino_keyword(S, "reason");
+            vals[2] = mino_keyword(S, "not-installed");
+            keys[3] = mino_keyword(S, "enable-via");
+            vals[3] = mino_string(S, cap->install_fn);
+            data_map = mino_map(S, keys, vals, 4);
+
+            set_eval_diag_with_data(S,
+                mino_current_ctx(S)->eval_current_form,
+                "capability", "MNS002", msg, data_map, note);
+            return NULL;
+        }
         char msg[300];
         snprintf(msg, sizeof(msg), "unbound symbol: %s", data);
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);

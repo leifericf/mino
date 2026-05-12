@@ -15,6 +15,7 @@
  */
 
 #include "prim/internal.h"
+#include "mino.h"
 #include "imath.h"
 
 #include <stdio.h>
@@ -1784,3 +1785,13 @@ const mino_prim_def k_prims_bignum[] = {
 
 const size_t k_prims_bignum_count =
     sizeof(k_prims_bignum) / sizeof(k_prims_bignum[0]);
+
+void mino_install_bignum(mino_state_t *S, mino_env_t *env)
+{
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_bignum, k_prims_bignum_count,
+                                       "bignum");
+    S->caps_installed |= MINO_CAP_BIGNUM;
+}

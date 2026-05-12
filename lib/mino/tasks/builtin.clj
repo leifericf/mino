@@ -336,12 +336,16 @@
      - embed_multi_state: 16 mino_state_t x 16 pthreads, asserts the
        embedding API is safe under the one-state-per-thread contract.
      - embed_stm_test: STM Layer 2a smoke test (mino_tx_run,
-       mino_tx_alter_c, mino_tx_commute_c, mino_tx_ensure, watches)."
+       mino_tx_alter_c, mino_tx_commute_c, mino_tx_ensure, watches).
+     - embed_caps_test: capability-gated install surface -- minimal /
+       selective caps / install_all paths and MNS002 diagnostics."
   []
   (compile-and-run-embed-test "tests/embed_multi_state.c"
                               "embed_multi_state")
   (compile-and-run-embed-test "tests/embed_stm_test.c"
-                              "embed_stm_test"))
+                              "embed_stm_test")
+  (compile-and-run-embed-test "tests/embed_caps_test.c"
+                              "embed_caps_test"))
 
 ;; ---- Architecture quality gates ----
 

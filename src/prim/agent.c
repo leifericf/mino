@@ -56,6 +56,7 @@
  */
 
 #include "prim/internal.h"
+#include "mino.h"
 #include "eval/internal.h"
 #include "runtime/host_threads.h"
 
@@ -1580,8 +1581,12 @@ const size_t k_prims_agent_count = sizeof(k_prims_agent)
 
 void mino_install_agent(mino_state_t *S, mino_env_t *env)
 {
-    prim_install_table(S, env, "clojure.core",
-                       k_prims_agent, k_prims_agent_count);
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_agent, k_prims_agent_count,
+                                       "agent");
+    S->caps_installed |= MINO_CAP_AGENT;
     /* Intern *agent* as a dynamic var with nil default. The
      * dispatcher (agent_apply_action) pushes a thread binding for
      * this name to the running agent so action/validator/watch
@@ -1593,7 +1598,7 @@ void mino_install_agent(mino_state_t *S, mino_env_t *env)
         if (agent_var != NULL) {
             agent_var->as.var.dynamic = 1;
             var_set_root(S, agent_var, mino_nil(S));
-            mino_env_set(S, env, "*agent*", agent_var->as.var.root);
+            mino_env_set(S, core_env, "*agent*", agent_var->as.var.root);
         }
     }
 }

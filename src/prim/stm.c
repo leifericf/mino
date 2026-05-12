@@ -64,6 +64,7 @@
  */
 
 #include "prim/internal.h"
+#include "mino.h"
 #include "eval/internal.h"
 #include <setjmp.h>
 
@@ -1259,7 +1260,11 @@ static void stm_lazy_init_commit_lock(mino_state_t *S)
 
 void mino_install_stm(mino_state_t *S, mino_env_t *env)
 {
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
     stm_lazy_init_commit_lock(S);
-    prim_install_table(S, env, "clojure.core",
-                       k_prims_stm, k_prims_stm_count);
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_stm, k_prims_stm_count,
+                                       "stm");
+    S->caps_installed |= MINO_CAP_STM;
 }

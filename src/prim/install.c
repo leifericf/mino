@@ -10,7 +10,9 @@
  */
 
 #include "prim/internal.h"
+#include "mino.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void prim_install_table(mino_state_t *S, mino_env_t *env, const char *ns_name,
@@ -146,11 +148,14 @@ static void install_core_mino(mino_state_t *S, mino_env_t *env)
 }
 
 /* k_core_domains -- ordered list of primitive domains installed into
- * every state's core env.  io_core carries pr-builtin and
+ * every state's floor env. io_core carries pr-builtin and
  * set-print-method! so core.clj can wire its print-method multimethod
- * before any code calls pr.  Host and async domains install here even
- * though they expose mino_install_host / mino_install_async helpers, so
- * embedders bypassing mino_install_core can still install them directly.
+ * before any code calls pr.
+ *
+ * Capability-gated domains (regex, bignum, host, async, io, fs, proc,
+ * stm, agent) are NOT in this list. They install via their own
+ * `mino_install_<cap>` entry point; the standalone CLI brings them in
+ * through `mino_install_clojure_core` / `mino_install_all`.
  */
 static const mino_prim_domain k_core_domains[] = {
     {"numeric",     k_prims_numeric,     &k_prims_numeric_count},
@@ -160,90 +165,246 @@ static const mino_prim_domain k_core_domains[] = {
     {"lazy",        k_prims_lazy,        &k_prims_lazy_count},
     {"string",      k_prims_string,      &k_prims_string_count},
     {"reflection",  k_prims_reflection,  &k_prims_reflection_count},
-    {"regex",       k_prims_regex,       &k_prims_regex_count},
     {"stateful",    k_prims_stateful,    &k_prims_stateful_count},
     {"module",      k_prims_module,      &k_prims_module_count},
     {"ns",          k_prims_ns,          &k_prims_ns_count},
-    {"bignum",      k_prims_bignum,      &k_prims_bignum_count},
     {"io_core",     k_prims_io_core,     &k_prims_io_core_count},
-    {"host",        k_prims_host,        &k_prims_host_count},
-    {"async",       k_prims_async,       &k_prims_async_count},
 };
 
 #define K_CORE_DOMAIN_COUNT \
     (sizeof(k_core_domains) / sizeof(k_core_domains[0]))
 
-void mino_install_core(mino_state_t *S, mino_env_t *env)
+/* ------------------------------------------------------------------------- */
+/* Capability registry                                                       */
+/* ------------------------------------------------------------------------- */
+
+static const mino_capability_info_t k_capability_info[] = {
+    { "floor",        MINO_CAP_FLOOR,        "mino_install_minimal",
+      "Numeric, collections, sequences, printing, foundational macros." },
+    { "regex",        MINO_CAP_REGEX,        "mino_install_regex",
+      "re-pattern / re-find / re-matches / re-seq / re-matcher." },
+    { "bignum",       MINO_CAP_BIGNUM,       "mino_install_bignum",
+      "Arbitrary-precision integers, ratios, decimals, primed arithmetic." },
+    { "multimethods", MINO_CAP_MULTIMETHODS, "mino_install_multimethods",
+      "defmulti / defmethod / hierarchies / print-method dispatch." },
+    { "protocols",    MINO_CAP_PROTOCOLS,    "mino_install_protocols",
+      "defprotocol / extend-protocol / extend-type / satisfies?." },
+    { "transducers",  MINO_CAP_TRANSDUCERS,  "mino_install_transducers",
+      "transduce / sequence / xform-arity into / completing / halt-when." },
+    { "io",           MINO_CAP_IO,           "mino_install_io",
+      "slurp / spit / read-line / time-ms / nano-time / file-seq." },
+    { "fs",           MINO_CAP_FS,           "mino_install_fs",
+      "file-exists? / directory? / mkdir-p / rm-rf." },
+    { "proc",         MINO_CAP_PROC,         "mino_install_proc",
+      "sh / sh! (external process execution)." },
+    { "stm",          MINO_CAP_STM,          "mino_install_stm",
+      "ref / dosync / alter / commute / ensure / ref-set." },
+    { "agent",        MINO_CAP_AGENT,        "mino_install_agent",
+      "agent / send / send-off / await / agent-error / restart-agent." },
+    { "host",         MINO_CAP_HOST,         "mino_install_host",
+      "Host interop dispatcher (FFI / JNI surface for embedder values)." },
+    { "async",        MINO_CAP_ASYNC,        "mino_install_async",
+      "chan / go / <! / >! / alts! / timeout (core.async surface)." },
+    { NULL,           0u,                    NULL,                          NULL },
+};
+
+const mino_capability_info_t *mino_capability_list(void)
 {
-    volatile char probe = 0;
-    size_t i;
-    mino_env_t  *core_env;
-    const char  *saved_ns;
+    return k_capability_info;
+}
 
-    gc_note_host_frame(S, (void *)&probe);
-    (void)probe;
+unsigned int mino_capabilities(const mino_state_t *S)
+{
+    return (S != NULL) ? S->caps_installed : 0u;
+}
 
-    /* All bundled-core bindings (primitives + core.clj defs) live in
-     * the clojure.core ns env. Every other ns env (including the
-     * embedder's default) chains its parent here so unqualified lookup
-     * walks lexical → current-ns env → clojure.core. */
-    core_env = ns_env_ensure(S, "clojure.core");
+int mino_capability_installed(const mino_state_t *S, unsigned int cap)
+{
+    if (S == NULL || cap == 0u) return 0;
+    return (S->caps_installed & cap) == cap;
+}
 
-    mino_env_set(S, core_env, "math-pi", mino_float(S, 3.14159265358979323846));
+/* Hand-curated map of canonical Clojure-side names → capability. Used
+ * by the eval_symbol MNS002 diagnostic so an unbound `defmulti` reports
+ * "capability 'multimethods' disabled by host" instead of a bare
+ * unbound-symbol error. Order doesn't matter; lookup is linear.
+ *
+ * Names that are C primitives (re-find, bigint, slurp, sh, ref, agent,
+ * chan, ...) are NOT listed here -- they're discovered through their
+ * capability label via a sweep of the per-capability prim tables. */
+typedef struct {
+    const char  *name;
+    unsigned int cap;
+} clj_name_capability_t;
 
-    for (i = 0; i < K_CORE_DOMAIN_COUNT; i++) {
-        prim_install_table(S, core_env, "clojure.core",
-                           k_core_domains[i].defs,
-                           *k_core_domains[i].count_ptr);
+static const clj_name_capability_t k_clj_capability_names[] = {
+    /* multimethods */
+    { "defmulti",         MINO_CAP_MULTIMETHODS },
+    { "defmethod",        MINO_CAP_MULTIMETHODS },
+    { "make-hierarchy",   MINO_CAP_MULTIMETHODS },
+    { "derive",           MINO_CAP_MULTIMETHODS },
+    { "underive",         MINO_CAP_MULTIMETHODS },
+    { "isa?",             MINO_CAP_MULTIMETHODS },
+    { "ancestors",        MINO_CAP_MULTIMETHODS },
+    { "descendants",      MINO_CAP_MULTIMETHODS },
+    { "prefer-method",    MINO_CAP_MULTIMETHODS },
+    { "remove-method",    MINO_CAP_MULTIMETHODS },
+    { "methods",          MINO_CAP_MULTIMETHODS },
+    { "get-method",       MINO_CAP_MULTIMETHODS },
+    { "prefers",          MINO_CAP_MULTIMETHODS },
+    { "print-method",     MINO_CAP_MULTIMETHODS },
+    /* protocols */
+    { "defprotocol",      MINO_CAP_PROTOCOLS },
+    { "extend-protocol",  MINO_CAP_PROTOCOLS },
+    { "extend-type",      MINO_CAP_PROTOCOLS },
+    { "extend",           MINO_CAP_PROTOCOLS },
+    { "extends?",         MINO_CAP_PROTOCOLS },
+    { "satisfies?",       MINO_CAP_PROTOCOLS },
+    { "protocol-dispatch",MINO_CAP_PROTOCOLS },
+    /* transducers */
+    { "transduce",        MINO_CAP_TRANSDUCERS },
+    { "sequence",         MINO_CAP_TRANSDUCERS },
+    { "eduction",         MINO_CAP_TRANSDUCERS },
+    { "completing",       MINO_CAP_TRANSDUCERS },
+    { "halt-when",        MINO_CAP_TRANSDUCERS },
+    { "cat",              MINO_CAP_TRANSDUCERS },
+    { "internal-reduce",  MINO_CAP_TRANSDUCERS },
+    /* regex helpers defined in core.clj */
+    { "re-seq",           MINO_CAP_REGEX },
+    { "re-matcher",       MINO_CAP_REGEX },
+    { "re-groups",        MINO_CAP_REGEX },
+    /* bignum primed arithmetic in core.clj */
+    { "+'",               MINO_CAP_BIGNUM },
+    { "-'",               MINO_CAP_BIGNUM },
+    { "*'",               MINO_CAP_BIGNUM },
+    { "inc'",             MINO_CAP_BIGNUM },
+    { "dec'",             MINO_CAP_BIGNUM },
+    { NULL,               0u },
+};
+
+/* Per-capability prim-table sweep registry. mino_capability_for_symbol
+ * walks these tables looking for a name match. Order them by frequency
+ * (regex / bignum first; agent / host last) for the common-case win on
+ * partial-install diagnostics. */
+typedef struct {
+    unsigned int          cap;
+    const mino_prim_def  *defs;
+    const size_t         *count_ptr;
+} cap_prim_table_t;
+
+static const cap_prim_table_t k_cap_prim_tables[] = {
+    { MINO_CAP_REGEX,  k_prims_regex,  &k_prims_regex_count  },
+    { MINO_CAP_BIGNUM, k_prims_bignum, &k_prims_bignum_count },
+    { MINO_CAP_IO,     k_prims_io,     &k_prims_io_count     },
+    { MINO_CAP_FS,     k_prims_fs,     &k_prims_fs_count     },
+    { MINO_CAP_PROC,   k_prims_proc,   &k_prims_proc_count   },
+    { MINO_CAP_STM,    k_prims_stm,    &k_prims_stm_count    },
+    { MINO_CAP_HOST,   k_prims_host,   &k_prims_host_count   },
+    { MINO_CAP_ASYNC,  k_prims_async,  &k_prims_async_count  },
+};
+
+#define K_CAP_PRIM_TABLE_COUNT \
+    (sizeof(k_cap_prim_tables) / sizeof(k_cap_prim_tables[0]))
+
+static const mino_capability_info_t *capability_info_for_bit(unsigned int bit)
+{
+    const mino_capability_info_t *p;
+    for (p = k_capability_info; p->name != NULL; p++) {
+        if (p->bit == bit) return p;
     }
+    return NULL;
+}
 
-    saved_ns      = S->current_ns;
-    S->current_ns = "clojure.core";
-    install_core_mino(S, core_env);
-    S->current_ns = saved_ns;
+const mino_capability_info_t *mino_capability_for_symbol(const char *name)
+{
+    size_t i, j;
+    const clj_name_capability_t *cn;
+    if (name == NULL || name[0] == '\0') return NULL;
 
-    /* Install string operations into the clojure.string namespace,
-     * matching the namespace name that Babashka, ClojureScript, and
-     * Jank use. The wrappers in lib/clojure/string.clj layer
-     * nil-handling on top. Putting these here instead of clojure.core
-     * means a fresh user namespace doesn't accidentally inherit (and
-     * shadow) names like `join` or `split` through :refer-clojure. */
-    {
-        mino_env_t *cs_env = ns_env_ensure(S, "clojure.string");
-        if (cs_env != NULL) {
-            prim_install_table(S, cs_env, "clojure.string",
-                               k_prims_clojure_string,
-                               k_prims_clojure_string_count);
+    /* Hand-curated Clojure-side names first -- short list, fast hit. */
+    for (cn = k_clj_capability_names; cn->name != NULL; cn++) {
+        if (strcmp(cn->name, name) == 0) {
+            return capability_info_for_bit(cn->cap);
         }
     }
 
-    /* Install REPL helpers (`doc`, `source`, `apropos`) into the
-     * clojure.repl namespace. Users opt in via
-     * (require '[clojure.repl :refer [doc apropos source]]); a fresh
-     * user namespace doesn't see them by default, matching canon. */
-    {
-        mino_env_t *cr_env = ns_env_ensure(S, "clojure.repl");
-        if (cr_env != NULL) {
-            prim_install_table(S, cr_env, "clojure.repl",
-                               k_prims_clojure_repl,
-                               k_prims_clojure_repl_count);
+    /* Sweep capability-tagged prim tables. Each prim's name is checked
+     * directly; on hit, return the owning capability. */
+    for (i = 0; i < K_CAP_PRIM_TABLE_COUNT; i++) {
+        const mino_prim_def *defs = k_cap_prim_tables[i].defs;
+        size_t               n    = *k_cap_prim_tables[i].count_ptr;
+        for (j = 0; j < n; j++) {
+            if (defs[j].name != NULL && strcmp(defs[j].name, name) == 0) {
+                return capability_info_for_bit(k_cap_prim_tables[i].cap);
+            }
         }
     }
+    return NULL;
+}
 
-    /* The embedder's env stays parent-less. eval_symbol falls back to
-     * current_ns_env after the lexical chain runs out, and per-ns envs
-     * chain to clojure.core themselves -- so a namespace that detaches
-     * its parent (e.g. via :refer-clojure :only) is properly isolated
-     * instead of leaking core bindings through the embedder root.
-     * clojure.core itself stays as-is. */
-    (void)core_env;
+/* ------------------------------------------------------------------------- */
+/* `mino-installed?` primitive                                               */
+/* ------------------------------------------------------------------------- */
+
+/* (mino-installed? cap) -- consults the runtime's capability bitmask.
+ * cap may be a keyword, symbol, or string carrying the capability label
+ * ("io", "regex", ...). Returns true / false. The floor always reports
+ * true. Used by core.clj `(when (mino-installed? :cap) ...)` gates so
+ * optional sections skip cleanly when their capability is off. */
+static mino_val_t *prim_mino_installed_p(mino_state_t *S, mino_val_t *args,
+                                          mino_env_t *env)
+{
+    mino_val_t *arg;
+    const char *label = NULL;
+    const mino_capability_info_t *p;
     (void)env;
 
-    /* Intern *ns* as a dynamic var so find-var on the qualified name
-     * clojure.core followed by /-star-ns-star resolves and (deref ...)
-     * tracks the user-visible namespace. The bare-symbol fast path in
-     * eval/special.c stays as a fallback for embedders that look up
-     * *ns* before the var is interned. */
+    if (mino_args_parse(S, "mino-installed?", args, "v", &arg) != 0) {
+        return NULL;
+    }
+    if (arg == NULL) return mino_false(S);
+    switch (mino_type_of(arg)) {
+    case MINO_KEYWORD: case MINO_STRING: case MINO_SYMBOL:
+        label = arg->as.s.data;
+        break;
+    default:
+        return prim_throw_classified(S, "eval/type", "MNS003",
+            "mino-installed?: expected keyword, string, or symbol");
+    }
+    if (label == NULL) return mino_false(S);
+
+    for (p = k_capability_info; p->name != NULL; p++) {
+        if (strcmp(p->name, label) == 0) {
+            return mino_capability_installed(S, p->bit)
+                ? mino_true(S) : mino_false(S);
+        }
+    }
+    /* Unknown capability label -- conservative: not installed. */
+    return mino_false(S);
+}
+
+static const mino_prim_def k_prims_capability[] = {
+    {"mino-installed?", prim_mino_installed_p,
+     "Returns true if a named capability has been installed on this "
+     "runtime. Argument is a keyword, symbol, or string; supported names "
+     "include :floor :regex :bignum :multimethods :protocols :transducers "
+     ":io :fs :proc :stm :agent :host :async. Used by core.clj sections "
+     "to gate optional surface on the host's install picks."},
+};
+
+static const size_t k_prims_capability_count =
+    sizeof(k_prims_capability) / sizeof(k_prims_capability[0]);
+
+/* ------------------------------------------------------------------------- */
+/* Internal: floor setup and finalize                                        */
+/* ------------------------------------------------------------------------- */
+
+/* Wire up the dynamic vars and ns scaffolding that mino_install_core
+ * historically installed. Used by both mino_install_minimal (where
+ * core.clj is NOT evaluated) and the higher-tier installers so vars
+ * like *ns* / *out* / *in* / *data-readers* are always available. */
+static void install_floor_vars(mino_state_t *S, mino_env_t *core_env)
+{
     {
         mino_val_t *var = var_intern(S, "clojure.core", "*ns*");
         if (var != NULL) {
@@ -255,14 +416,6 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
             mino_publish_current_ns(S);
         }
     }
-
-    /* Intern *out*, *err*, and *in* as dynamic vars holding sentinel
-     * keywords (:mino/stdout, :mino/stderr, :mino/stdin). The print
-     * and read primitives consult these via dyn_lookup first, so a
-     * (binding [*out* (atom "")] ...) wrap captures output into the
-     * atom and a (binding [*in* (atom "1 2\n")] ...) wrap feeds
-     * input from a string. Without a binding, the sentinel keyword
-     * identifies the default FILE* source. */
     {
         mino_val_t *out_var = var_intern(S, "clojure.core", "*out*");
         mino_val_t *err_var = var_intern(S, "clojure.core", "*err*");
@@ -283,14 +436,6 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
             mino_env_set(S, core_env, "*in*", in_var->as.var.root);
         }
     }
-
-    /* Intern *data-readers* and *default-data-reader-fn* as dynamic
-     * vars consulted by the reader for #tag forms. Defaults are an
-     * empty map and nil, respectively, mirroring Clojure-canon. Tag
-     * lookup is by symbol; users register entries via
-     * (binding [*data-readers* {'inst clojure.instant/read-instant-date}]
-     *   (read-string "#inst \"2026-04-27\"")) or by altering the
-     * var root for process-wide defaults. */
     {
         mino_val_t *dr_var  = var_intern(S, "clojure.core", "*data-readers*");
         mino_val_t *def_var = var_intern(S, "clojure.core",
@@ -307,4 +452,128 @@ void mino_install_core(mino_state_t *S, mino_env_t *env)
                          def_var->as.var.root);
         }
     }
+}
+
+static mino_env_t *floor_install_prim_tables(mino_state_t *S)
+{
+    size_t      i;
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+
+    mino_env_set(S, core_env, "math-pi", mino_float(S, 3.14159265358979323846));
+
+    for (i = 0; i < K_CORE_DOMAIN_COUNT; i++) {
+        prim_install_table(S, core_env, "clojure.core",
+                           k_core_domains[i].defs,
+                           *k_core_domains[i].count_ptr);
+    }
+    /* The capability-introspection prims live in the floor so
+     * `(mino-installed? :cap)` is always available, regardless of
+     * what else the embedder did or did not install. */
+    prim_install_table(S, core_env, "clojure.core",
+                       k_prims_capability, k_prims_capability_count);
+
+    /* clojure.string namespace (the wrappers in lib_clojure_string layer
+     * over these). Always in the floor -- they're string ops, not I/O. */
+    {
+        mino_env_t *cs_env = ns_env_ensure(S, "clojure.string");
+        if (cs_env != NULL) {
+            prim_install_table(S, cs_env, "clojure.string",
+                               k_prims_clojure_string,
+                               k_prims_clojure_string_count);
+        }
+    }
+    /* clojure.repl namespace -- doc, source, apropos. */
+    {
+        mino_env_t *cr_env = ns_env_ensure(S, "clojure.repl");
+        if (cr_env != NULL) {
+            prim_install_table(S, cr_env, "clojure.repl",
+                               k_prims_clojure_repl,
+                               k_prims_clojure_repl_count);
+        }
+    }
+    return core_env;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Public install API                                                        */
+/* ------------------------------------------------------------------------- */
+
+void mino_install_minimal(mino_state_t *S, mino_env_t *env)
+{
+    volatile char probe = 0;
+    mino_env_t   *core_env;
+
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+    (void)env;
+
+    core_env = floor_install_prim_tables(S);
+    install_floor_vars(S, core_env);
+    S->caps_installed |= MINO_CAP_FLOOR;
+}
+
+void mino_install_multimethods(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    /* No C-prim surface; capability is implemented in core.clj sections
+     * gated on `(mino-installed? :multimethods)`. The bit must be set
+     * before mino_install_clojure_core / mino_install_core evaluates
+     * core.clj so the section runs. */
+    S->caps_installed |= MINO_CAP_MULTIMETHODS;
+}
+
+void mino_install_protocols(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    S->caps_installed |= MINO_CAP_PROTOCOLS;
+}
+
+void mino_install_transducers(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    S->caps_installed |= MINO_CAP_TRANSDUCERS;
+}
+
+void mino_install_clojure_core(mino_state_t *S, mino_env_t *env)
+{
+    volatile char probe = 0;
+    mino_env_t   *core_env;
+    const char   *saved_ns;
+
+    gc_note_host_frame(S, (void *)&probe);
+    (void)probe;
+
+    /* Install the floor scaffold first (idempotent); the embedder is
+     * responsible for having flipped the per-capability bits and
+     * installed the related C prims via mino_install_<cap> before
+     * this call. The standalone CLI's mino_install_core wrapper sets
+     * the canonical Clojure-core surface up front so existing
+     * embedders see no behaviour change. */
+    if ((S->caps_installed & MINO_CAP_FLOOR) == 0) {
+        mino_install_minimal(S, env);
+    }
+    core_env = ns_env_ensure(S, "clojure.core");
+
+    saved_ns      = S->current_ns;
+    S->current_ns = "clojure.core";
+    install_core_mino(S, core_env);
+    S->current_ns = saved_ns;
+    (void)env;
+}
+
+/* Backward-compat alias. Existing embedders calling mino_install_core
+ * get the canonical Clojure-core surface: floor + regex + bignum +
+ * multimethods + protocols + transducers, evaluated as if every
+ * capability had been opted in. mino_install_all chains this with
+ * the I/O / fs / proc / stm / agent / host / async installers. */
+void mino_install_core(mino_state_t *S, mino_env_t *env)
+{
+    if ((S->caps_installed & MINO_CAP_REGEX) == 0)
+        mino_install_regex(S, env);
+    if ((S->caps_installed & MINO_CAP_BIGNUM) == 0)
+        mino_install_bignum(S, env);
+    S->caps_installed |= MINO_CAP_MULTIMETHODS;
+    S->caps_installed |= MINO_CAP_PROTOCOLS;
+    S->caps_installed |= MINO_CAP_TRANSDUCERS;
+    mino_install_clojure_core(S, env);
 }

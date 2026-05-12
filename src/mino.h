@@ -27,8 +27,8 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 145
-#define MINO_VERSION_PATCH 1
+#define MINO_VERSION_MINOR 146
+#define MINO_VERSION_PATCH 0
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1454,6 +1454,104 @@ void mino_install_mino_tooling(mino_state_t *S, mino_env_t *env);
  * subset they care about explicitly.
  */
 void mino_install_all(mino_state_t *S, mino_env_t *env);
+
+/* ------------------------------------------------------------------------- */
+/* Capability-gated install API                                              */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Capability identifiers. Each bit corresponds to an `mino_install_<cap>`
+ * entry point. The set of installed capabilities is tracked on the
+ * state and surfaced to mino code via `(mino-installed? :cap)` and to
+ * the REPL via `:capabilities`. Embedders inspect installed bits
+ * with `mino_capability_installed` and enumerate the full set with
+ * `mino_capability_list`.
+ *
+ * MINO_CAP_FLOOR is the implicit "always on" baseline (numeric / coll
+ * / seq / printing / foundational macros). The other bits flip as the
+ * corresponding `mino_install_<cap>` is invoked.
+ */
+#define MINO_CAP_FLOOR         (1u <<  0)
+#define MINO_CAP_REGEX         (1u <<  1)
+#define MINO_CAP_BIGNUM        (1u <<  2)
+#define MINO_CAP_MULTIMETHODS  (1u <<  3)
+#define MINO_CAP_PROTOCOLS     (1u <<  4)
+#define MINO_CAP_TRANSDUCERS   (1u <<  5)
+#define MINO_CAP_IO            (1u <<  6)
+#define MINO_CAP_FS            (1u <<  7)
+#define MINO_CAP_PROC          (1u <<  8)
+#define MINO_CAP_STM           (1u <<  9)
+#define MINO_CAP_AGENT         (1u << 10)
+#define MINO_CAP_HOST          (1u << 11)
+#define MINO_CAP_ASYNC         (1u << 12)
+
+/*
+ * Install only the floor: foundational C primitives plus the unconditional
+ * sections of core.clj (defn / when / cond / and / or / threading / lazy
+ * seqs / basic collections / printing). Does NOT install regex, bignum,
+ * multimethods, protocols, transducers, I/O, fs, proc, stm, agents, host
+ * interop, or async. Embedders opt into those with the per-capability
+ * hooks below before the first eval.
+ *
+ * Use when targeting Lua-class cold start in embedded mode.
+ */
+void mino_install_minimal(mino_state_t *S, mino_env_t *env);
+
+/*
+ * Per-capability install hooks. Each sets the corresponding MINO_CAP_*
+ * bit on the state and registers the capability's C primitives. For
+ * capabilities whose user-visible surface is implemented in core.clj
+ * (multimethods, protocols, transducers, regex helpers, bignum primed
+ * arithmetic), the matching core.clj section is gated on
+ * `(mino-installed? :cap)` and activates when this hook runs before
+ * `mino_install_core` (or its `mino_install_clojure_core` alias).
+ *
+ * mino_install_io / _fs / _proc / _stm / _agent / _host / _async are
+ * declared elsewhere in this header — they predate this API and are
+ * order-free with respect to core.clj.
+ */
+void mino_install_regex(mino_state_t *S, mino_env_t *env);
+void mino_install_bignum(mino_state_t *S, mino_env_t *env);
+void mino_install_multimethods(mino_state_t *S, mino_env_t *env);
+void mino_install_protocols(mino_state_t *S, mino_env_t *env);
+void mino_install_transducers(mino_state_t *S, mino_env_t *env);
+
+/*
+ * Install the full Clojure-core surface: floor + multimethods + protocols
+ * + transducers + regex + bignum, then evaluate core.clj. Equivalent to
+ * the existing mino_install_core which is kept as a backward-compat
+ * alias; new embedder code should prefer this name. Does NOT install
+ * I/O or process capabilities — see mino_install_all for "everything".
+ */
+void mino_install_clojure_core(mino_state_t *S, mino_env_t *env);
+
+/*
+ * Inspect installed capabilities. Bit set per MINO_CAP_*.
+ */
+unsigned int mino_capabilities(const mino_state_t *S);
+int          mino_capability_installed(const mino_state_t *S, unsigned int cap);
+
+/*
+ * Enumerate the full capability registry. The returned array is
+ * static, NULL-terminated, and ordered to match the install-tier
+ * grouping used by the REPL's `:capabilities` view.
+ */
+typedef struct {
+    const char  *name;       /* canonical label ("io", "regex", ...) */
+    unsigned int bit;        /* MINO_CAP_* */
+    const char  *install_fn; /* C entry point name ("mino_install_io") */
+    const char  *summary;    /* one-line UX description */
+} mino_capability_info_t;
+
+const mino_capability_info_t *mino_capability_list(void);
+
+/*
+ * Look up the capability that owns a given symbol name, if any. Returns
+ * the capability info pointer or NULL when the name is not a known
+ * gateable primitive or canonical core.clj definition. Used by the
+ * eval_symbol MNS002 diagnostic to enrich "unbound symbol" errors.
+ */
+const mino_capability_info_t *mino_capability_for_symbol(const char *name);
 
 /* ------------------------------------------------------------------------- */
 /* Execution limits                                                          */

@@ -6,6 +6,7 @@
  */
 
 #include "prim/internal.h"
+#include "mino.h"
 #include <stdarg.h>
 
 /* Count args in a cons list. */
@@ -255,7 +256,10 @@ const size_t k_prims_host_count =
 
 void mino_install_host(mino_state_t *S, mino_env_t *env)
 {
-    prim_install_table_with_capability(S, env, "clojure.core",
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_host, k_prims_host_count,
                                        "host");
+    S->caps_installed |= MINO_CAP_HOST;
 }

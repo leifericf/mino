@@ -796,7 +796,9 @@
 
 (defn integer?
   "Returns true if x is an integer (long or bigint)."
-  [x] (or (int? x) (bigint? x)))
+  [x] (if (mino-installed? :bignum)
+        (or (int? x) (bigint? x))
+        (int? x)))
 ;; pos-int? / neg-int? / nat-int? specifically test the long-sized
 ;; int tier per Clojure's contract: `(neg-int? -1N)` returns false on
 ;; the JVM because clojure.core/neg-int? composes int? (Long-only),
@@ -1775,6 +1777,14 @@
   (prewalk (fn [x] (if (contains? smap x) (get smap x) x)) form))
 
 ;; --- Regex ---
+;;
+;; Gated on the :regex capability. When the host did not call
+;; mino_install_regex (or mino_install_clojure_core / mino_install_all),
+;; the entire section is skipped: re-pattern / re-find / re-matches are
+;; not bound, so any code calling them triggers a MNS002 "capability
+;; not installed" diagnostic instead of a bare unbound-symbol error.
+
+(when (mino-installed? :regex)
 
 ;; re-pattern is a C primitive that returns a MINO_REGEX from a
 ;; string source (and a no-op on an existing regex). Note that
@@ -1876,6 +1886,8 @@
       (throw (ex-info "No match has been performed by the matcher"
                       {:matcher m})))
     last-match))
+
+) ;; end (when (mino-installed? :regex) ...)
 
 ;; --- Complex macros ---
 
@@ -2110,6 +2122,10 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Protocols: polymorphic dispatch on the type of the first argument.
+;; Gated on the :protocols capability -- defprotocol / extend-protocol /
+;; extend-type / satisfies? are absent when the host did not install
+;; protocols. The CollReduce / IKVReduce / Datafiable / Navigable
+;; extension points further down also live in this gate.
 ;;
 ;; (defprotocol Name
 ;;   (method1 [this])
@@ -2128,6 +2144,8 @@
 ;;
 ;; (satisfies? Name x) returns true if x's type has implementations for Name.
 ;; ---------------------------------------------------------------------------
+
+(when (mino-installed? :protocols)
 
 (defn protocol-dispatch [dispatch-atom mname & args]
   (let [target (first args)
@@ -2356,6 +2374,10 @@
       (if impl
         (impl m f init)
         (internal-reduce-kv f init m))))
+
+) ;; end (when (mino-installed? :protocols) ...)
+
+(when (mino-installed? :multimethods)
 
 ;; ---------------------------------------------------------------------------
 ;; Hierarchies: immutable parent/child/ancestor/descendant relationships.
@@ -2645,6 +2667,8 @@
 
 (set-print-method! print-method)
 
+) ;; end (when (mino-installed? :multimethods) ...)
+
 (defmacro with-out-str
   "Evaluates body with *out* bound to a fresh string-collecting atom,
   and returns the accumulated string."
@@ -2692,13 +2716,19 @@
            (finally (close ~name)))))))
 
 ;; ---------------------------------------------------------------------------
-;; Transducers: composable algorithmic transformations.
+;; Transducers: composable algorithmic transformations. Gated on
+;; :transducers -- when off, the C-level `into` primitive handles
+;; (into to from) directly and transducer-aware shapes like
+;; (transduce xf f coll) raise a MNS002 "capability not installed"
+;; diagnostic. Depends on :protocols (reduce-kv lives there).
 ;;
 ;; A transducer is a function (rf -> rf) where rf is a reducing function
 ;; with three arities: ([] init), ([result] completion), ([result input] step).
 ;;
 ;; Use (transduce xf f coll) or (into to xf from) to apply.
 ;; ---------------------------------------------------------------------------
+
+(when (mino-installed? :transducers)
 
 (defn cat
   "A transducer that concatenates the contents of each input."
@@ -2841,6 +2871,8 @@
     (if (= 1 (count xfs))
       (sequence (first xfs) coll)
       (sequence (apply comp xfs) coll))))
+
+) ;; end (when (mino-installed? :transducers) ...)
 
 ;; --- Array constructors ---
 ;;

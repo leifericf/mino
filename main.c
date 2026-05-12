@@ -376,12 +376,49 @@ static void print_repl_help(FILE *out)
 {
     fputs(
         "REPL meta-commands:\n"
-        "  :help      Show this help\n"
-        "  :quit      Exit the REPL (or press Ctrl-D)\n"
+        "  :help          Show this help\n"
+        "  :quit          Exit the REPL (or press Ctrl-D)\n"
+        "  :capabilities  Show installed vs. available capabilities (alias :caps)\n"
         "\n"
         "Type a form and press Enter to evaluate it. Multi-line forms are\n"
         "gathered until the parens balance.\n",
         out);
+}
+
+/* Two-column capability listing for the REPL `:capabilities` command.
+ * The full registry is enumerated; each entry is printed under
+ * INSTALLED or AVAILABLE depending on the runtime's bitmask. */
+static void print_repl_capabilities(FILE *out, mino_state_t *S)
+{
+    const mino_capability_info_t *p;
+    int total = 0, installed = 0, longest = 0;
+
+    for (p = mino_capability_list(); p->name != NULL; p++) {
+        int n = (int)strlen(p->name);
+        if (n > longest) longest = n;
+        total++;
+        if (mino_capability_installed(S, p->bit)) installed++;
+    }
+
+    fprintf(out, "Capabilities: %d of %d installed\n\n", installed, total);
+    fprintf(out, "  %-*s  %-24s  %s\n", longest, "name", "C entry point",
+            "description");
+    fprintf(out, "  %-*s  %-24s  %s\n", longest, "----",
+            "-------------",
+            "-----------");
+    for (p = mino_capability_list(); p->name != NULL; p++) {
+        const char *mark = mino_capability_installed(S, p->bit)
+                          ? "  [x]" : "  [ ]";
+        fprintf(out, "%s %-*s  %-24s  %s\n",
+                mark, longest, p->name,
+                p->install_fn != NULL ? p->install_fn : "",
+                p->summary != NULL ? p->summary : "");
+    }
+    fputc('\n', out);
+    fputs("  [x] installed   [ ] available -- call the C entry point\n",
+          out);
+    fputs("      from the embedder to enable. mino-installed? exposes\n", out);
+    fputs("      the same bits to running code.\n", out);
 }
 
 /* Exec a companion binary ("mino-nrepl" / "mino-lsp") from PATH, passing
@@ -948,8 +985,24 @@ int main(int argc, char **argv)
         return exit_code;
     }
 
-    fprintf(stderr, "mino %s\n", mino_version_string());
-    fputs("Type :help for help, :quit to exit\n", stderr);
+    {
+        const mino_capability_info_t *p;
+        int total = 0, installed = 0;
+        for (p = mino_capability_list(); p->name != NULL; p++) {
+            total++;
+            if (mino_capability_installed(S, p->bit)) installed++;
+        }
+        if (installed < total) {
+            fprintf(stderr,
+                "mino %s (embedded, %d of %d capabilities installed)\n",
+                mino_version_string(), installed, total);
+            fputs("Type :capabilities to see the full list, "
+                  ":help for help, :quit to exit\n", stderr);
+        } else {
+            fprintf(stderr, "mino %s\n", mino_version_string());
+            fputs("Type :help for help, :quit to exit\n", stderr);
+        }
+    }
     fputs("mino=> ", stderr);
     fflush(stderr);
 
@@ -1004,6 +1057,18 @@ int main(int argc, char **argv)
                 }
                 if (strcmp(name, "help") == 0) {
                     print_repl_help(stderr);
+                    {
+                        size_t consumed  = (size_t)(end - buf);
+                        size_t remaining = len - consumed;
+                        memmove(buf, end, remaining + 1);
+                        len = remaining;
+                    }
+                    awaiting_continuation = 0;
+                    continue;
+                }
+                if (strcmp(name, "capabilities") == 0
+                    || strcmp(name, "caps") == 0) {
+                    print_repl_capabilities(stderr, S);
                     {
                         size_t consumed  = (size_t)(end - buf);
                         size_t remaining = len - consumed;

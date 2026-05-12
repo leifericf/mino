@@ -682,6 +682,15 @@ struct mino_state {
     size_t          meta_table_len;
     size_t          meta_table_cap;
 
+    /* Capability bitmask. Bit set per MINO_CAP_* constant in mino.h
+     * when the corresponding `mino_install_<cap>` runs. Consulted by
+     * the `mino-installed?` primitive for core.clj gates and by the
+     * eval_symbol MNS002 diagnostic to enrich "unbound symbol" errors
+     * with the capability that would enable the name. Defaults to 0
+     * so a bare `mino_state_new` + `mino_install_minimal` runtime sees
+     * no capabilities until the embedder opts in. */
+    unsigned int    caps_installed;
+
     /* === Printer, reader, source diagnostics =========================== */
 
     /* Printer */
@@ -1209,6 +1218,13 @@ const char *source_cache_get_line(mino_state_t *S, const char *file,
 void        set_eval_diag(mino_state_t *S, const mino_val_t *form,
                           const char *kind, const char *code,
                           const char *msg);
+/* Extended variant of set_eval_diag that also attaches a `:mino/data`
+ * payload (GC-owned; the runtime keeps it alive while the diag is
+ * live) and an optional note. Pass NULL for either to skip. */
+void        set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
+                                    const char *kind, const char *code,
+                                    const char *msg, mino_val_t *data,
+                                    const char *note);
 const char *type_tag_str(const mino_val_t *v);                    /* static string */
 void        push_frame(mino_state_t *S, const char *name,     /* name: borrowed */
                        const char *file, int line,            /* file: borrowed */

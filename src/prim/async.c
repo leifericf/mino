@@ -18,6 +18,7 @@
 
 #include "runtime/internal.h"
 #include "prim/internal.h"
+#include "mino.h"
 #include "async/scheduler.h"
 #include "async/timer.h"
 
@@ -127,7 +128,10 @@ const size_t k_prims_async_count =
 
 void mino_install_async(mino_state_t *S, mino_env_t *env)
 {
-    prim_install_table_with_capability(S, env, "clojure.core",
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
                                        k_prims_async, k_prims_async_count,
                                        "async");
+    S->caps_installed |= MINO_CAP_ASYNC;
 }

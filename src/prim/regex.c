@@ -3,6 +3,7 @@
  */
 
 #include "prim/internal.h"
+#include "mino.h"
 #include "regex/re.h"
 
 /* Construct a MINO_REGEX wrapping the given source string. The source
@@ -186,3 +187,13 @@ const mino_prim_def k_prims_regex[] = {
 
 const size_t k_prims_regex_count =
     sizeof(k_prims_regex) / sizeof(k_prims_regex[0]);
+
+void mino_install_regex(mino_state_t *S, mino_env_t *env)
+{
+    mino_env_t *core_env = ns_env_ensure(S, "clojure.core");
+    (void)env;
+    prim_install_table_with_capability(S, core_env, "clojure.core",
+                                       k_prims_regex, k_prims_regex_count,
+                                       "regex");
+    S->caps_installed |= MINO_CAP_REGEX;
+}

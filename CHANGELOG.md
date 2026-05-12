@@ -1,5 +1,79 @@
 # Changelog
 
+## v0.146.0 — Capability-Gated Install: Lean Embedded Footprint, Same Standalone Surface
+
+Embedded mino's `mino_install_core` was monolithic — every fresh runtime
+parsed and evaluated all ~117 KB of `core.clj` and registered every C
+primitive whether the host needed it or not. Hosts that wanted just a
+calculator paid the full Clojure-stdlib bill. This release introduces a
+capability-gated install API so embedders opt into exactly the surface
+they need, without changing what a `mino_install_core`-equipped runtime
+exposes to user Clojure code.
+
+The new surface:
+
+- `mino_install_minimal(S, env)`  — reader, evaluator, GC, persistent
+  collections, numeric ops, basic seq, foundational macros. No
+  `core.clj` evaluation; sub-millisecond install cost.
+- `mino_install_regex(S, env)`, `mino_install_bignum`,
+  `mino_install_multimethods`, `mino_install_protocols`,
+  `mino_install_transducers` — each flips a capability bit and (for
+  the C-backed ones) registers its prims into `clojure.core`.
+- `mino_install_clojure_core(S, env)` — evaluates `core.clj` against
+  whatever capability bits the host has set. Optional sections (regex,
+  multimethods, protocols, transducers, bignum-aware `integer?`) are
+  wrapped in `(when (mino-installed? :cap) ...)` and skip cleanly when
+  their capability is off.
+- `mino_install_core(S, env)` is preserved as a back-compat alias that
+  pre-sets the canonical Clojure-core caps (regex + bignum +
+  multimethods + protocols + transducers) and then calls
+  `mino_install_clojure_core`. Existing embedders see no behaviour
+  change.
+
+`mino_state_t` carries a new `caps_installed` bitmask; `MINO_CAP_*`
+constants and `mino_capability_installed(S, bit)` / `mino_capabilities(S)`
+let host code query what is on. A static capability registry powers
+`mino_capability_for_symbol(name)`, used by the symbol-resolution path
+to raise an enriched diagnostic when user code calls a name from a
+capability the host disabled.
+
+New diagnostic code **MNS002** (capability-disabled), distinct from
+**MNS001** (unbound symbol). The `:mino/data` payload carries
+`{:capability :symbol :reason :enable-via}` so user-side error handlers
+can pattern-match on the disabled capability. Example:
+
+```
+error[MNS002]: slurp is not installed in this runtime
+               (capability 'io' disabled by host)
+note: the host can enable this capability by calling
+      mino_install_io from C before mino_install_core
+```
+
+REPL UX gains a `:capabilities` (alias `:caps`) command that prints a
+two-column installed-vs-not table, and the banner shows
+"embedded, N of M capabilities installed" plus a one-liner pointing
+to `:capabilities` when the runtime is in a partial-install state.
+
+Standalone `./mino`, `./mino -e ...`, `./mino script.clj`, REPL, all
+remain unchanged at the user-visible surface: same Clojure-core names,
+same diagnostics for non-capability errors, same 1616-test suite green.
+
+Embedded surface: a host that wants the full Clojure runtime still
+calls `mino_install_core` and gets bit-for-bit identical behaviour. A
+host that wants a lean numeric/collection-only mino calls
+`mino_install_minimal` and skips the `core.clj` eval entirely.
+
+The capability install ordering rule: a capability that gates a
+`core.clj` section must have its bit set **before**
+`mino_install_clojure_core` runs. The back-compat
+`mino_install_core` wrapper handles this for the canonical caps;
+`mino_install_all` does the same for the I/O / fs / proc / stm /
+agent / async / host tier.
+
+Subsequent phases of the lean-embed cycle (porting thin `core.clj`
+wrappers to C, pre-parsed AST, pre-compiled bytecode, image-based
+bootstrap) will compose on top of this surface without breaking it.
+
 ## v0.145.1 — Task Runner Fix: Pre-Resolve Tasks Outside The BC Doseq Body
 
 `mino task <name>` raised a confusing `subs: first argument must be
