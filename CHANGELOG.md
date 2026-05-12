@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.148.0 — Move More Of clojure.core Into C: distinct?, merge-with, complement, comp, partial, juxt
+
+Six more `core.clj` defns move to C primitives in
+`src/prim/sequences.c`. User-visible behaviour is identical.
+
+- `distinct?` — varargs, returns true iff no two args are equal.
+- `merge-with` — variadic over maps; calls `(f a b)` to combine
+  values at shared keys.
+- `complement`, `comp`, `partial`, `juxt` — closure-returning HOFs.
+  Each constructs a `MINO_FN` whose body is a short Clojure form
+  that references the captured fn(s) by name from the closure env.
+  `comp` uses `(reduce (fn [a f] (f a)) (apply LAST args) (rseq (pop FS)))`,
+  `partial` uses `(apply f (concat bound args))`, `complement` uses
+  `(not (apply f args))`, `juxt` uses `(mapv (fn [f] (apply f args)) fs)`.
+
+The closure-construction pattern (make a `MINO_FN` from C with a
+captured env) generalises — follow-on releases can use it to port
+more HOF surface without growing core.clj.
+
 ## v0.147.0 — Move Seq Predicates And Map Builders Into C
 
 `every?`, `some`, `not-any?`, `not-every?`, `zipmap`, `frequencies`,
