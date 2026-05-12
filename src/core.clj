@@ -357,7 +357,16 @@
      (apply == y more)
      false)))
 ;; pos?, neg?, even?, odd? are C primitives.
-(defn abs "Returns the absolute value of x." [x] (if (< x 0) (- x) x))
+(defn abs
+  "Returns the absolute value of x. Matches JVM Math/abs 2's-complement
+   semantics: (abs Long/MIN_VALUE) returns Long/MIN_VALUE rather than
+   overflowing, since the true absolute value is unrepresentable in a
+   signed 64-bit int."
+  [x]
+  (cond
+    (not (neg? x)) x
+    (int? x)       (unchecked-negate x)
+    :else          (- x)))
 (defn max "Returns the greatest of the given values."
                   ([a] a)
                   ([a b] (if (NaN? a) a (if (NaN? b) b (if (> a b) a b))))
