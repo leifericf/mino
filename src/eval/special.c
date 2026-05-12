@@ -154,19 +154,45 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
     /* Unqualified: dynamic → lexical → current-ns env → fn ambient ns.
      * The lexical and ns-env walks use mino_env_get_sym to avoid
      * recomputing strlen on every parent frame; the symbol carries
-     * its own length already. */
+     * its own length already. Track whether the value came from an
+     * ns env lookup (vs. lexical/dynamic) so we can auto-deref var
+     * bindings only on the ns-env path -- lexical/dynamic bindings to
+     * a var (e.g. `(let [v (resolve 'foo)] ...)`) must preserve the
+     * var as the binding value. */
+    int from_ns_env = 0;
     v = (mino_current_ctx(S)->dyn_stack != NULL) ? dyn_lookup(S, data) : NULL;
     if (v == NULL) v = mino_env_get_sym(env, form);
     if (v == NULL) {
         mino_env_t *ns_env = current_ns_env(S);
-        if (ns_env != NULL) v = mino_env_get_sym(ns_env, form);
+        if (ns_env != NULL) {
+            v = mino_env_get_sym(ns_env, form);
+            if (v != NULL) from_ns_env = 1;
+        }
     }
     if (v == NULL && S->fn_ambient_ns != NULL
         && S->fn_ambient_ns != S->current_ns
         && (S->current_ns == NULL
             || strcmp(S->fn_ambient_ns, S->current_ns) != 0)) {
         mino_env_t *amb = ns_env_lookup(S, S->fn_ambient_ns);
-        if (amb != NULL) v = mino_env_get_sym(amb, form);
+        if (amb != NULL) {
+            v = mino_env_get_sym(amb, form);
+            if (v != NULL) from_ns_env = 1;
+        }
+    }
+    /* Auto-deref a var binding that came from the namespace env.
+     * `def` and the ns-form refer path bind the value directly so
+     * this is usually a no-op, but `clojure.core/refer` (the
+     * function) binds the source var to preserve its source
+     * namespace for syntax-quote and metadata. Without this unwrap,
+     * calling a referred fn like `(println ...)` after
+     * `(clojure.core/refer 'clojure.core)` surfaces as "not a
+     * function (got var)" because the symbol resolves to the var
+     * itself rather than the fn at its root. Lexical / dynamic
+     * bindings that happen to hold a var are left intact so
+     * `(let [v (resolve 'foo)] v)` still returns the var. */
+    if (from_ns_env && v != NULL && mino_type_of(v) == MINO_VAR
+        && v->as.var.bound) {
+        v = v->as.var.root;
     }
     if (v == NULL) {
         const mino_capability_info_t *cap = mino_capability_for_symbol(data);

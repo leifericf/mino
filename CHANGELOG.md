@@ -76,6 +76,24 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: `clojure.core/refer` Now Binds Callable Vars Correctly
+
+Calling `(clojure.core/refer 'clojure.core)` directly (rather than
+through `(:require ... :refer :all)` in an ns form) bound the source
+var into the destination namespace's env -- which preserves the source
+ns for syntax-quote and metadata -- but the unqualified-symbol lookup
+in `eval_symbol` did not auto-deref a var found in the namespace env
+chain. The next call to any referred fn (`(println ...)`, `(+ 1 2)`,
+etc.) surfaced as the deeply confusing `not a function (got var)`,
+since the symbol resolved to the var value itself instead of the fn
+at its root.
+
+`eval_symbol` now auto-derefs a var binding when the binding came from
+the namespace env chain, matching JVM Clojure's lookup semantics.
+Lexical / dynamic bindings that hold a var (e.g. the result of
+`(let [v (resolve 'foo)] v)`) are left intact so callers that need the
+var get the var.
+
 ### Fixed: Tagged Literal With Missing Body Now Names The Tag
 
 `#foo` at EOF -- or `#foo` followed immediately by a closing delimiter
