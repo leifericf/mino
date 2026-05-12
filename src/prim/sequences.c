@@ -340,13 +340,16 @@ mino_val_t *seq_iter_val(mino_state_t *S, const seq_iter_t *it)
     case MINO_MAP_ENTRY:
         return it->idx == 0 ? c->as.map_entry.k : c->as.map_entry.v;
     case MINO_MAP: {
-        /* Yield [key value] vectors for maps. */
+        /* Yield MINO_MAP_ENTRY (one alloc) instead of a 2-vector
+         * (header + 2-slot trie node, two allocs). Equal to [k v]
+         * across mino_eq's cross-type sequential path, prints as
+         * `[k v]`, and `vector?` is true -- the same contract
+         * prim_seq's seq_kv_pair already uses for maps. */
         mino_val_t *key = vec_nth(c->as.map.key_order, it->idx);
-        mino_val_t *val = map_get_val(c, key);
-        mino_val_t *kv[2];
-        kv[0] = key;
-        kv[1] = val;
-        return mino_vector(S, kv, 2);
+        mino_val_t *val = c->as.map.val_order != NULL
+                              ? vec_nth(c->as.map.val_order, it->idx)
+                              : map_get_val(c, key);
+        return mino_map_entry(S, key, val);
     }
     case MINO_SET:    return vec_nth(c->as.set.key_order, it->idx);
     case MINO_STRING: {
@@ -494,6 +497,136 @@ static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
     return mino_int(S, acc);
 }
 
+/* Inner reduction step: combine acc and elem under fn, honoring the
+ * int+int arithmetic fast lane and MINO_REDUCED early-exit. Returns
+ * 0 = continue, 1 = stop (acc holds the final), -1 = error. */
+static int reduce_step(mino_state_t *S, mino_val_t *fn, mino_val_t **acc_io,
+                       mino_val_t *elem, mino_env_t *env)
+{
+    mino_val_t *acc = *acc_io;
+    if (fn != NULL && mino_type_of(fn) == MINO_PRIM
+        && fn->as.prim.fn != NULL
+        && acc != NULL && mino_val_int_p(acc)
+        && elem != NULL && mino_val_int_p(elem)) {
+        mino_prim_fn p  = fn->as.prim.fn;
+        long long    ai = mino_val_int_get(acc);
+        long long    bi = mino_val_int_get(elem);
+        long long    r;
+        int          handled = 0;
+        if (p == prim_add) {
+#if defined(__GNUC__) || defined(__clang__)
+            if (!__builtin_add_overflow(ai, bi, &r)) {
+                *acc_io = mino_int(S, r);
+                handled = 1;
+            }
+#endif
+        } else if (p == prim_mul) {
+#if defined(__GNUC__) || defined(__clang__)
+            if (!__builtin_mul_overflow(ai, bi, &r)) {
+                *acc_io = mino_int(S, r);
+                handled = 1;
+            }
+#endif
+        } else if (p == prim_sub) {
+#if defined(__GNUC__) || defined(__clang__)
+            if (!__builtin_sub_overflow(ai, bi, &r)) {
+                *acc_io = mino_int(S, r);
+                handled = 1;
+            }
+#endif
+        } else if (p == prim_bit_and) {
+            *acc_io = mino_int(S, ai & bi);
+            handled = 1;
+        } else if (p == prim_bit_or) {
+            *acc_io = mino_int(S, ai | bi);
+            handled = 1;
+        } else if (p == prim_bit_xor) {
+            *acc_io = mino_int(S, ai ^ bi);
+            handled = 1;
+        }
+        if (handled) return 0;
+    }
+    {
+        mino_val_t *call_a = mino_cons(
+            S, acc, mino_cons(S, elem, mino_nil(S)));
+        *acc_io = apply_callable(S, fn, call_a, env);
+    }
+    if (*acc_io == NULL) return -1;
+    if (mino_type_of(*acc_io) == MINO_REDUCED) {
+        *acc_io = (*acc_io)->as.reduced.val;
+        return 1;
+    }
+    return 0;
+}
+
+/* Direct-walk fast path for (reduce fn coll [init]) over a persistent
+ * map. Yields a MINO_MAP_ENTRY per pair (cheaper than the [k v] vector
+ * pair seq_iter_val once produced) and skips the seq_iter switch
+ * dispatch. Iteration order matches key_order (insertion order),
+ * which is the order seq_iter walks. For flatmaps we read val_order
+ * in parallel; for HAMT we resolve via map_get_val. */
+static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
+                                     mino_val_t *acc, int has_init,
+                                     mino_val_t *m, mino_env_t *env)
+{
+    size_t      i, n = m->as.map.len;
+    int         is_flat = (m->as.map.val_order != NULL);
+    mino_val_t *ko, *vo;
+    if (n == 0) {
+        if (has_init) return acc;
+        return apply_callable(S, fn, mino_nil(S), env);
+    }
+    ko = m->as.map.key_order;
+    vo = m->as.map.val_order;
+    if (!has_init) {
+        mino_val_t *k0 = vec_nth(ko, 0);
+        mino_val_t *v0 = is_flat ? vec_nth(vo, 0) : map_get_val(m, k0);
+        acc = mino_map_entry(S, k0, v0);
+        i   = 1;
+    } else {
+        i = 0;
+    }
+    for (; i < n; i++) {
+        mino_val_t *k = vec_nth(ko, i);
+        mino_val_t *v = is_flat ? vec_nth(vo, i) : map_get_val(m, k);
+        mino_val_t *entry = mino_map_entry(S, k, v);
+        int rc = reduce_step(S, fn, &acc, entry, env);
+        if (rc == -1) return NULL;
+        if (rc == 1)  return acc;
+    }
+    return acc;
+}
+
+/* Direct-walk fast path for (reduce fn coll [init]) over a persistent
+ * set. Walks key_order, the insertion-order vector of elements --
+ * same order seq_iter would yield -- but skips the seq_iter switch
+ * dispatch and goes straight through reduce_step's int+int lane. */
+static mino_val_t *reduce_set_direct(mino_state_t *S, mino_val_t *fn,
+                                     mino_val_t *acc, int has_init,
+                                     mino_val_t *s, mino_env_t *env)
+{
+    size_t      i, n = s->as.set.len;
+    mino_val_t *ko;
+    if (n == 0) {
+        if (has_init) return acc;
+        return apply_callable(S, fn, mino_nil(S), env);
+    }
+    ko = s->as.set.key_order;
+    if (!has_init) {
+        acc = vec_nth(ko, 0);
+        i   = 1;
+    } else {
+        i = 0;
+    }
+    for (; i < n; i++) {
+        mino_val_t *elem = vec_nth(ko, i);
+        int rc = reduce_step(S, fn, &acc, elem, env);
+        if (rc == -1) return NULL;
+        if (rc == 1)  return acc;
+    }
+    return acc;
+}
+
 mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn;
@@ -518,6 +651,10 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 S, fn, NULL, 0, r_start, r_end, r_step);
             if (fast != NULL) return fast;
         }
+        if (mino_type_of(coll) == MINO_MAP)
+            return reduce_map_direct(S, fn, NULL, 0, coll, env);
+        if (mino_type_of(coll) == MINO_SET)
+            return reduce_set_direct(S, fn, NULL, 0, coll, env);
         seq_iter_init(S, &it, coll);
         if (seq_iter_done(&it)) {
             return apply_callable(S, fn, mino_nil(S), env);
@@ -538,69 +675,21 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 S, fn, acc, 1, r_start, r_end, r_step);
             if (fast != NULL) return fast;
         }
+        if (mino_type_of(coll) == MINO_MAP)
+            return reduce_map_direct(S, fn, acc, 1, coll, env);
+        if (mino_type_of(coll) == MINO_SET)
+            return reduce_set_direct(S, fn, acc, 1, coll, env);
         seq_iter_init(S, &it, coll);
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reduce requires 2 or 3 arguments");
     }
-    /* Inner loop. The numeric int+int fast lane checks fn against the
-     * canonical arithmetic / comparison prims and computes directly
-     * with __builtin_*_overflow when both operands are MINO_INT, just
-     * like eval_apply_regular_call's lane but on the C-side reduce
-     * iterator. Saves the per-step 2-element cons spine. */
+    /* Inner loop: reduce_step handles the int+int fast lane and the
+     * MINO_REDUCED early-exit; we just drive seq_iter. */
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
-        if (fn != NULL && mino_type_of(fn) == MINO_PRIM
-            && fn->as.prim.fn != NULL
-            && acc != NULL && mino_val_int_p(acc)
-            && elem != NULL && mino_val_int_p(elem)) {
-            mino_prim_fn p  = fn->as.prim.fn;
-            long long    ai = mino_val_int_get(acc);
-            long long    bi = mino_val_int_get(elem);
-            long long    r;
-            int          handled = 0;
-            if (p == prim_add) {
-#if defined(__GNUC__) || defined(__clang__)
-                if (!__builtin_add_overflow(ai, bi, &r)) {
-                    acc = mino_int(S, r);
-                    handled = 1;
-                }
-#endif
-            } else if (p == prim_mul) {
-#if defined(__GNUC__) || defined(__clang__)
-                if (!__builtin_mul_overflow(ai, bi, &r)) {
-                    acc = mino_int(S, r);
-                    handled = 1;
-                }
-#endif
-            } else if (p == prim_sub) {
-#if defined(__GNUC__) || defined(__clang__)
-                if (!__builtin_sub_overflow(ai, bi, &r)) {
-                    acc = mino_int(S, r);
-                    handled = 1;
-                }
-#endif
-            } else if (p == prim_bit_and) {
-                acc = mino_int(S, ai & bi);
-                handled = 1;
-            } else if (p == prim_bit_or) {
-                acc = mino_int(S, ai | bi);
-                handled = 1;
-            } else if (p == prim_bit_xor) {
-                acc = mino_int(S, ai ^ bi);
-                handled = 1;
-            }
-            if (handled) {
-                seq_iter_next(S, &it);
-                continue;
-            }
-        }
-        {
-            mino_val_t *call_a = mino_cons(
-                S, acc, mino_cons(S, elem, mino_nil(S)));
-            acc = apply_callable(S, fn, call_a, env);
-        }
-        if (acc == NULL) return NULL;
-        if (mino_type_of(acc) == MINO_REDUCED) return acc->as.reduced.val;
+        int rc = reduce_step(S, fn, &acc, elem, env);
+        if (rc == -1) return NULL;
+        if (rc == 1)  return acc;
         seq_iter_next(S, &it);
     }
     return acc;

@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased — Fusion Cycle (v0.145.0)
+
+### Direct-Walk Reduce Over Map And Set
+
+`(reduce f m)` and `(reduce f s)` previously routed through the
+generic `seq_iter` dispatch and allocated a fresh `[k v]` vector
+per map entry (a vector header plus a 2-slot trie node — two
+allocs). Map / set reduce now take a typed direct-walk path that
+skips the seq dispatch entirely and yields `MINO_MAP_ENTRY`
+(single alloc, equal to `[k v]` via the cross-type sequential
+path in `mino_eq`, prints as `[k v]`, and `vector?`-true).
+`seq_iter_val` aligns on the same `mino_map_entry` shape so any
+caller that walks a map through `seq` sees the cheaper
+representation too. Flatmaps read the parallel `val_order` vector
+directly; HAMTs resolve via `map_get_val`. The inner reduce step
+is factored into a shared `reduce_step` helper so the existing
+int+int arithmetic lane and `reduced?` early-exit serve both the
+direct and seq paths.
+
+Bench delta (5 runs each, M3 Pro):
+
+| Bench                  | Before  | After   | Speedup |
+|------------------------|--------:|--------:|--------:|
+| reduce-over-map-1k     | 1.9 ms  | 1.1 ms  | 1.7×    |
+| reduce-over-map-10k    | 8.6 ms  | 5.4 ms  | 1.6×    |
+
+Backed by `tests/reduce_perf_test.clj` parity tests at the
+flatmap / HAMT boundary (sizes 0, 1, 8, 9, 100), `reduced?`
+early-exit, and the MapEntry `vector?` / destructure contract.
+
 ## v0.144.6 — Correctness Fixes: BC Closure Capture, Catch Unwind, And Loud Limit Errors
 
 Adversarial whitebox testing of the bytecode VM surfaced four bugs.
