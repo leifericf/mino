@@ -17,6 +17,20 @@
   (is (= "el" (subs "hello" 1 3)))
   (is (= "llo" (subs "hello" 2))))
 
+(deftest count-string-codepoints
+  ;; count of a string returns the codepoint count (Clojure semantics),
+  ;; matching subs / nth / char-at which index in codepoints. For
+  ;; ASCII the byte and codepoint counts coincide; for multi-byte
+  ;; UTF-8 they diverge.
+  (is (= 0 (count "")))
+  (is (= 3 (count "abc")))
+  ;; em-dash is 3 bytes / 1 codepoint
+  (is (= 4 (count "ab—c")))
+  (is (= 2 (count "你好")))
+  ;; (subs s 0 (count s)) round-trips the whole string after the fix.
+  (let [s "ab—c你好"]
+    (is (= s (subs s 0 (count s))))))
+
 (deftest split-fn
   (is (= ["a" "b" "c"] (split "a,b,c" ",")))
   (is (= ["a" "b" "c"] (split "abc" ""))))

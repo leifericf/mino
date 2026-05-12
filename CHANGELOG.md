@@ -55,6 +55,24 @@ Backed by `tests/reduce_perf_test.clj` parity tests at sizes
 multi-level-trie boundaries), `reduced?` early-exit, and a
 subvec offset case.
 
+### Correctness Fix: `count` On Strings Returns Codepoints
+
+`(count s)` on a string returned the byte length instead of the
+codepoint count, while `subs` / `nth` / `char-at` index by
+codepoint (matching the documented "strings are sequences of
+chars" model). For ASCII the two agree; with multi-byte UTF-8 in
+the string they diverged, so e.g.
+`(subs s 0 (- (count s) 1))` would raise "index out of range" on
+otherwise-fine input. `prim_count`'s MINO_STRING case now walks
+the UTF-8 codepoints via the shared `utf8_codepoint_count`
+helper (exposed from string.c through `prim/internal.h`).
+
+Surfaced because `src/core.clj` carries em-dashes in its
+docstrings -- the build's `gen-core-header` step does
+`(subs src 0 (- (count src) 1))` to trim a trailing newline,
+which masked the bug while incremental builds skipped that step.
+Backed by parity tests at `tests/string_test.clj`.
+
 ## v0.144.6 — Correctness Fixes: BC Closure Capture, Catch Unwind, And Loud Limit Errors
 
 Adversarial whitebox testing of the bytecode VM surfaced four bugs.

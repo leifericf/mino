@@ -362,7 +362,12 @@ static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
     case MINO_SET:    return mino_int(S, (long long)coll->as.set.len);
     case MINO_SORTED_MAP:
     case MINO_SORTED_SET: return mino_int(S, (long long)coll->as.sorted.len);
-    case MINO_STRING: return mino_int(S, (long long)coll->as.s.len);
+    case MINO_STRING:
+        /* Codepoint count, matching subs / nth / char-at semantics
+         * (and Clojure's char-counted strings). For ASCII content
+         * the byte walk and codepoint walk coincide. */
+        return mino_int(S,
+            utf8_codepoint_count(coll->as.s.data, coll->as.s.len));
     case MINO_RECORD: {
         mino_val_t *fields = coll->as.record.type->as.record_type.fields;
         size_t n = (fields != NULL) ? fields->as.vec.len : 0;

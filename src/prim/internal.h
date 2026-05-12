@@ -257,6 +257,15 @@ mino_val_t *prim_random_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 mino_val_t *prim_parse_uuid(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *mino_uuid_from_bytes(mino_state_t *S, const unsigned char *b);
 int mino_uuid_parse(const char *s, size_t len, unsigned char out[16]);
+/* UTF-8 helpers used by string and collection primitives to count and
+ * walk codepoints. Step returns the byte length of the codepoint at
+ * pos (1..4); skip walks n codepoints forward; count returns the
+ * total codepoint count. Lenient: malformed sequences advance one
+ * byte rather than aborting. */
+size_t    utf8_codepoint_step(const char *data, size_t bytes, size_t pos);
+size_t    utf8_skip_codepoints(const char *data, size_t bytes,
+                               size_t pos, long long n);
+long long utf8_codepoint_count(const char *data, size_t bytes);
 
 /* io.c */
 mino_val_t *prim_println(mino_state_t *S, mino_val_t *args, mino_env_t *env);

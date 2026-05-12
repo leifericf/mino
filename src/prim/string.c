@@ -337,7 +337,7 @@ mino_val_t *prim_char_at(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 /* Step one UTF-8 codepoint forward starting at byte index `pos` in
  * `data` (length `bytes`). Returns the byte length of the codepoint;
  * malformed leading bytes step by 1 to keep the walk bounded. */
-static size_t utf8_codepoint_step(const char *data, size_t bytes, size_t pos)
+size_t utf8_codepoint_step(const char *data, size_t bytes, size_t pos)
 {
     unsigned char b;
     if (pos >= bytes) return 0;
@@ -351,8 +351,8 @@ static size_t utf8_codepoint_step(const char *data, size_t bytes, size_t pos)
 
 /* Walk `n` codepoints into `data` starting at `pos`; return the
  * resulting byte offset, capped at `bytes`. */
-static size_t utf8_skip_codepoints(const char *data, size_t bytes,
-                                   size_t pos, long long n)
+size_t utf8_skip_codepoints(const char *data, size_t bytes,
+                            size_t pos, long long n)
 {
     while (n > 0 && pos < bytes) {
         pos += utf8_codepoint_step(data, bytes, pos);
@@ -362,7 +362,7 @@ static size_t utf8_skip_codepoints(const char *data, size_t bytes,
 }
 
 /* Count codepoints in [data, data+bytes). */
-static long long utf8_codepoint_count(const char *data, size_t bytes)
+long long utf8_codepoint_count(const char *data, size_t bytes)
 {
     long long count = 0;
     size_t pos = 0;
