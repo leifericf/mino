@@ -1499,15 +1499,32 @@ static mino_val_t *read_wrap_one(mino_state_t *S, const char **p,
                                  const char *sym_name, const char *after_msg,
                                  int q_line, int q_col)
 {
-    mino_val_t *inner = read_form(S, p);
+    mino_val_t *inner;
     mino_val_t *outer;
+    S->reader_last_cond_empty = 0;
+    inner = read_form(S, p);
     if (inner == NULL) {
         if (mino_last_error(S) == NULL) {
-            set_reader_diag(S, MRE009, after_msg,
-                            S->reader_line, S->reader_col);
+            if (S->reader_last_cond_empty) {
+                char buf[256];
+                /* Reader conditional with no matching arm landed in a
+                 * position where a form is required. The user-visible
+                 * symptom (`expected form after @`) doesn't name the
+                 * actual cause; surface it explicitly so the offending
+                 * `#?(...)` is greppable from the message. */
+                snprintf(buf, sizeof(buf),
+                    "%s: form was a reader conditional with no matching"
+                    " arm for dialect :%s (add a :default arm)",
+                    after_msg, S->reader_dialect);
+                set_reader_diag(S, MRE009, buf, q_line, q_col);
+            } else {
+                set_reader_diag(S, MRE009, after_msg,
+                                S->reader_line, S->reader_col);
+            }
         }
         return NULL;
     }
+    S->reader_last_cond_empty = 0;
     outer = mino_cons(S, mino_symbol(S, sym_name),
                       mino_cons(S, inner, mino_nil(S)));
     outer->as.cons.file   = S->reader_file;
@@ -1865,7 +1882,12 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
          * "no form produced" to the enclosing reader (list, vector,
          * or map). The enclosing reader will continue to the next
          * form. For maps this is critical -- the map reader must
-         * consume and discard the paired value. */
+         * consume and discard the paired value. Set the transient
+         * flag so wrap-one macros (`@`, `'`, `` ` ``, `~`, `~@`,
+         * `#'`) that immediately follow can recognise the cause
+         * and emit a clearer diagnostic instead of "expected form
+         * after @". */
+        S->reader_last_cond_empty = 1;
         return NULL;
     }
     if (isalpha((unsigned char)next)) {

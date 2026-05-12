@@ -41,3 +41,31 @@
 
 (deftest reader-cond-nested
   (is (= :yes #?(:mino #?(:mino :yes :default :no) :default :nope))))
+
+(deftest reader-cond-empty-after-deref-is-diagnosable
+  ;; `@#?(:clj … :cljs …)` resolves to a bare `@` on mino's dialect.
+  ;; The bare diagnostic ("expected form after @") doesn't name the
+  ;; reader-conditional cause. The reader should mention it.
+  (let [err (try (read-string "@#?(:clj :x :cljs :y)") nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"reader conditional" err)))
+    (is (some? (re-find #":mino" err)))))
+
+(deftest reader-cond-empty-after-quote-is-diagnosable
+  (let [err (try (read-string "'#?(:clj :x :cljs :y)") nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"reader conditional" err)))))
+
+(deftest reader-cond-empty-after-syntax-quote-is-diagnosable
+  (let [err (try (read-string "`#?(:clj :x :cljs :y)") nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"reader conditional" err)))))
+
+(deftest reader-cond-empty-after-unquote-is-diagnosable
+  (let [err (try (read-string "`(foo ~#?(:clj :x :cljs :y))") nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"reader conditional" err)))))

@@ -709,6 +709,14 @@ struct mino_state {
      *   1 = preserve (return a reader-conditional record)
      *   2 = disallow (error on any #? or #?@) */
     int             reader_cond_mode;
+    /* Transient flag: set by `#?(...)` when no branch matched so the
+     * read returned NULL silently (the "no form produced" signal that
+     * lists/vectors/maps handle by skipping). Wrap-one reader macros
+     * (`@`, `'`, `` ` ``, `~`, `~@`, `#'`) check this when they get a
+     * silent NULL inner so the diagnostic names the actual cause
+     * instead of the misleading "expected form after @". Reset at the
+     * entry of every `read_form` call. */
+    int             reader_last_cond_empty;
 
     /* Filename intern table. Strings are malloc-owned, freed at state
      * teardown. Held here (not process-global) so two runtimes on two

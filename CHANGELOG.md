@@ -37,6 +37,24 @@ value" diagnostic if nothing upstream set one — so any future
 silent-NULL leak surfaces at its actual eval site instead of as
 arbitrary collateral damage downstream.
 
+### Fixed: Wrap-One Reader Macros Now Name Empty Reader Conditionals
+
+`@`, `'`, `` ` ``, `~`, `~@`, and `#'` produced the bare diagnostic
+`expected form after @` (or its sibling) when the form that should
+follow was a `#?(...)` whose arms didn't match mino's dialect — so the
+reader silently returned NULL to "produce no form" (the signal that
+lists/vectors/maps handle by skipping). In a wrap-one position there
+*is* no enclosing structure to absorb the empty, so the macro failed
+with a message that named neither the macro's expectations nor the
+reader-conditional cause.
+
+The reader now sets a transient `reader_last_cond_empty` flag on the
+state when `#?(...)` matches no arm, and the wrap-one macros consult
+it when their inner read returns silent NULL. The new diagnostic is
+`expected form after @: form was a reader conditional with no matching
+arm for dialect :mino (add a :default arm)` — the offender is named in
+the message so the malformed file is greppable at first sight.
+
 ### Fixed: `defrecord` / `deftype` Now Reject Non-Vector Fields At The Call Site
 
 `defrecord` and `deftype` previously assumed `fields` was a vector and

@@ -99,9 +99,10 @@ static void state_init(mino_state_t *S)
             S->small_ints[si].as.i = (long long)(si + MINO_SMALL_INT_LO);
         }
     }
-    S->reader_line         = 1;
-    S->reader_col          = 1;
-    S->reader_dialect      = "mino";
+    S->reader_line             = 1;
+    S->reader_col              = 1;
+    S->reader_dialect          = "mino";
+    S->reader_last_cond_empty  = 0;
     S->current_ns          = "user";
     /* Host-thread grant defaults to single-threaded. Standalone `./mino`
      * raises this to cpu_count after mino_install_all; embedders opt
