@@ -464,6 +464,24 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
                 gc_mark_child_push(S, bc->code);
                 gc_mark_child_push(S, bc->consts);
                 gc_mark_child_push(S, bc->clauses);
+                /* Clause params_vec: when the compiler rewrites a
+                 * destructuring param list it mints a fresh gensym
+                 * vector and stores it on the clause. The original
+                 * (pre-rewrite) params vector still hangs off
+                 * fn.params, but the gensym vector is reachable ONLY
+                 * via clauses[i].params_vec. clauses is GC_T_RAW
+                 * (POD), so the GC's tag-walk can't see its embedded
+                 * value pointers -- push them explicitly here so
+                 * gensym slots survive the next major cycle. Without
+                 * this push, mino_bc_run later sees NULL slots when
+                 * binding params, returns NULL silently, and the
+                 * misleading error surfaces several frames upstream
+                 * as e.g. "seq requires one argument". */
+                if (bc->clauses != NULL && bc->n_clauses > 0) {
+                    for (int i = 0; i < bc->n_clauses; i++) {
+                        gc_mark_child_push(S, bc->clauses[i].params_vec);
+                    }
+                }
                 /* IC slots: a GC_T_RAW POD buffer whose embedded sym/
                  * cached pointers the GC can't see without an explicit
                  * walk. Push the buffer itself so the slot storage

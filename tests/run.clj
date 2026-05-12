@@ -32,6 +32,7 @@
 (require "tests/repl_test")
 (require "tests/gc_test")
 (require "tests/regression_hamt_str_churn")
+(require "tests/regression_bc_clause_params_gc")
 (require "tests/gc_generational_test")
 (require "tests/gc_incremental_test")
 (require "tests/math_test")

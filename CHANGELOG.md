@@ -1,5 +1,42 @@
 # Changelog
 
+## Unreleased
+
+### Fixed: BC Clause Params Vector Was Not Traced By The GC
+
+The bytecode compiler rewrites destructured params like `[[a b]]` into
+a gensym placeholder plus a wrapping `let`, and stashes the gensym
+vector on `clauses[i].params_vec`. The `clauses` buffer is allocated
+as `GC_T_RAW` (POD), so the GC tag-walk could not see the embedded
+value pointers. The original (pre-rewrite) params vector still lived
+on `fn.params` and stayed reachable, but the gensym vector was held
+ONLY by the clause record — so a major collection could reclaim it
+while the bytecode was still in use. The runtime then read a NULL
+slot when binding params, returned NULL silently, and that NULL
+propagated upward until it surfaced — several frames later — as a
+misleading "seq requires one argument" error from whatever prim
+happened to be next on the eval path.
+
+The user-visible repro: `extend-type` with six or more protocol
+groups (`extend-type T P1 (m1 [_] 1) P2 (m2 [_] 2) ... P6 (m6 [_] 6)`).
+The macro expands to `(apply list 'do (vec (mapcat fn groups)))`;
+the inner `(fn [[proto methods]] ...)` is exactly the destructured
+shape whose gensym vector got collected mid-iteration.
+
+The MINO_FN tracer in `src/gc/driver.c` now pushes each
+`clauses[i].params_vec` explicitly. Regression test in
+`tests/regression_bc_clause_params_gc.clj` locks the behaviour in.
+
+While digging through the symptom, `eval_apply_regular_call` was
+also tightened: when `eval_args` returned NULL without an error
+latched, the previous guard `evaled == NULL && mino_last_error !=
+NULL` let the NULL slip through to `apply_callable`, where it
+produced the misleading prim-arity error. The guard now always
+bails on NULL and synthesises an "argument evaluation produced no
+value" diagnostic if nothing upstream set one — so any future
+silent-NULL leak surfaces at its actual eval site instead of as
+arbitrary collateral damage downstream.
+
 ## v0.149.0 — clojure-test-suite Conformance Pass: 220 / 220 Files, 5340 / 5340 Assertions
 
 Five focused changes bring the external `jank-lang/clojure-test-suite`

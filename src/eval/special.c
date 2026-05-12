@@ -804,10 +804,16 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
         }
         if (spilled) {
             /* Too many args for the stack scratch -- fall back to cons
-             * eval + apply_callable's argv-aware dispatch path. */
+             * eval + apply_callable's argv-aware dispatch path. Same
+             * always-bail-on-NULL contract as the main PRIM/FN path
+             * below. */
             evaled = eval_args(S, args, env);
             gc_unpin(1);
-            if (evaled == NULL && mino_last_error(S) != NULL) {
+            if (evaled == NULL) {
+                if (mino_last_error(S) == NULL) {
+                    set_eval_diag(S, form, "internal", "MIN002",
+                        "argument evaluation produced no value");
+                }
                 return NULL;
             }
             return apply_callable(S, fn, evaled, env);
@@ -831,7 +837,23 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
     if (mino_type_of(fn) == MINO_PRIM || mino_type_of(fn) == MINO_FN) {
         evaled = eval_args(S, args, env);
         gc_unpin(1);
-        if (evaled == NULL && mino_last_error(S) != NULL) {
+        /* eval_args returns NULL on any inner-eval failure. Always
+         * bail when evaled is NULL: silently passing NULL to
+         * apply_callable lets it reach prims that then complain about
+         * the wrong condition (e.g. (seq) raises "seq requires one
+         * argument" because args is the literal C NULL, not a one-cons
+         * list). The previous `&& mino_last_error != NULL` gate let
+         * NULL leak through when an inner step cleared the latched
+         * error (try/catch handlers do this) without producing a real
+         * result. Promote the silent state to an explicit diagnostic
+         * so callers see "argument evaluation produced no value" at
+         * the actual failure site rather than a downstream prim-arity
+         * lie. */
+        if (evaled == NULL) {
+            if (mino_last_error(S) == NULL) {
+                set_eval_diag(S, form, "internal", "MIN002",
+                    "argument evaluation produced no value");
+            }
             return NULL;
         }
         if (tail && mino_type_of(fn) == MINO_FN) {
@@ -852,10 +874,14 @@ static mino_val_t *eval_apply_regular_call(mino_state_t *S, mino_val_t *form,
         return eval_impl(S, expanded, env, tail);
     }
     /* Non-fn callables: keyword, map, vector, set, sorted-map,
-     * sorted-set. */
+     * sorted-set. Same always-bail-on-NULL contract. */
     gc_unpin(1);
     evaled = eval_args(S, args, env);
-    if (evaled == NULL && mino_last_error(S) != NULL) {
+    if (evaled == NULL) {
+        if (mino_last_error(S) == NULL) {
+            set_eval_diag(S, form, "internal", "MIN002",
+                "argument evaluation produced no value");
+        }
         return NULL;
     }
     return apply_non_fn_callable(S, fn, evaled, form);
