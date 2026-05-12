@@ -3122,6 +3122,9 @@
    on the type. Specs follow the same shape as extend-type:
    protocol-name followed by one or more (method [args] body) forms."
   [name fields & specs]
+  (when-not (vector? fields)
+    (throw (str "defrecord: fields must be a vector, got: "
+                (pr-str fields))))
   (let [ns-str    (str (ns-name *ns*))
         name-str  (str name)
         ctor      (symbol (str "->" name))
@@ -3141,6 +3144,9 @@
    expose, so the deftype/defrecord distinction collapses; values
    created either way are real types with map-isomorphic behaviour."
   [name fields & specs]
+  (when-not (vector? fields)
+    (throw (str "deftype: fields must be a vector, got: "
+                (pr-str fields))))
   (apply list 'defrecord name fields specs))
 
 (defmacro reify

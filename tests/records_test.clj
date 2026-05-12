@@ -137,3 +137,30 @@
   (let [s (->Stable 1)]
     (defrecord Stable [v])
     (is (instance? Stable s))))
+
+(deftest defrecord-rejects-non-vector-fields
+  ;; Real-world trigger: a portable .cljc file uses a reader conditional
+  ;; for the fields slot (e.g. #?(:clj [...] :cljs [...])). On mino's
+  ;; dialect that resolves to nothing, leaving the next form in the
+  ;; fields position — typically a protocol name symbol. The macro must
+  ;; reject this with a diagnostic that names the actual problem rather
+  ;; than letting the failure surface downstream as "vec: cannot create
+  ;; a vector from :symbol", which is opaque at the call site.
+  (let [thrown (try
+                 (eval '(defrecord Bad ProtoName))
+                 nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? thrown))
+    (is (some? (re-find #"defrecord" thrown)))
+    (is (some? (re-find #"fields" thrown)))
+    (is (some? (re-find #"vector" thrown)))))
+
+(deftest deftype-rejects-non-vector-fields
+  (let [thrown (try
+                 (eval '(deftype Bad ProtoName (m [_] :x)))
+                 nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? thrown))
+    (is (some? (re-find #"deftype" thrown)))
+    (is (some? (re-find #"fields" thrown)))
+    (is (some? (re-find #"vector" thrown)))))

@@ -37,6 +37,20 @@ value" diagnostic if nothing upstream set one — so any future
 silent-NULL leak surfaces at its actual eval site instead of as
 arbitrary collateral damage downstream.
 
+### Fixed: `defrecord` / `deftype` Now Reject Non-Vector Fields At The Call Site
+
+`defrecord` and `deftype` previously assumed `fields` was a vector and
+passed it straight to internal helpers; when a caller handed in a
+symbol or list — typically because a reader conditional in the fields
+slot resolved to nothing on mino's dialect (`#?(:clj [...] :cljs [...])`
+with no `:default` arm leaves the next form sitting in the fields
+position, which is usually a protocol name) — the failure surfaced
+several frames later as the opaque `vec: cannot create a vector from
+:symbol`. Both macros now check up front and throw `defrecord: fields
+must be a vector, got: <printed value>` / `deftype: fields must be a
+vector, got: ...`, naming the actual offender so the malformed call
+site is obvious from the message alone.
+
 ## v0.149.0 — clojure-test-suite Conformance Pass: 220 / 220 Files, 5340 / 5340 Assertions
 
 Five focused changes bring the external `jank-lang/clojure-test-suite`
