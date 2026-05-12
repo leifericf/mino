@@ -100,6 +100,21 @@ fold-through path; with env publishing in play, an inner closure
 could otherwise capture a stale folded value before a global
 resolution shifted.
 
+### Dead-Binding Elimination In The BC Compiler
+
+A `let` binding whose name appears nowhere in the rest of the
+bindings or the body, and whose right-hand side is observably
+side-effect-free (literal, symbol, or pure-prim call over
+side-effect-free args), is dropped entirely at compile time: no
+register allocation, no value emission, no env publish. Macros
+that expand to verbose `(let [_ ... ...] body)` shapes around a
+binding that the body never reads now collapse to just the body.
+Side-effecting unused bindings (e.g., `(let [_ (println "hi")]
+:done)`) are kept; the dead-form check requires `is_side_effect_
+free`, which only admits values it can see through. Capturing
+`let`s opt out for the same reason as Phase E1: env publishing
+is itself observable.
+
 ### Identity Short-Circuit For `assoc` / `conj`
 
 `(assoc m k v)` and `(conj s x)` now return the input unchanged

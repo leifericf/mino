@@ -508,8 +508,11 @@ static int compile_body(compiler_t *c, mino_val_t *body, int dst, int tail);
 /* Forward decl: defined alongside try_fold_call further down. Used by
  * compile_let to compute the compile-time-known value of a binding's
  * right-hand side, if any. */
-static int try_fold_arg(compiler_t *c, mino_val_t *v, mino_val_t **out);
-static int fold_result_constable(mino_val_t *v);
+typedef struct pure_prim pure_prim_t;
+static int          try_fold_arg(compiler_t *c, mino_val_t *v,
+                                 mino_val_t **out);
+static int          fold_result_constable(mino_val_t *v);
+static const pure_prim_t *should_fold_call(compiler_t *c, mino_val_t *head);
 
 /* Pre-scan: does the form tree contain a form that captures the
  * current lexical env -- an inner (fn ...) literal or a (lazy-seq ...)
@@ -767,6 +770,64 @@ static mino_val_t *expand_destructure_bindings(compiler_t *c,
     return expanded;
 }
 
+/* Count syntactic references to the symbol with interned name `name`
+ * in `form`. Conservative: counts any occurrence in the AST without
+ * tracking inner shadows or quote contexts. A 0 result is safe to
+ * trust (the binding's name appears nowhere in the body), which is
+ * all dead-binding elimination needs; over-counting just declines
+ * the optimisation. */
+static int count_symbol_uses(mino_val_t *form, const char *name)
+{
+    if (form == NULL) return 0;
+    if (mino_type_of(form) == MINO_SYMBOL) {
+        return (form->as.s.data == name
+                || (form->as.s.data != NULL
+                    && strcmp(form->as.s.data, name) == 0)) ? 1 : 0;
+    }
+    if (mino_type_of(form) == MINO_CONS) {
+        return count_symbol_uses(form->as.cons.car, name)
+             + count_symbol_uses(form->as.cons.cdr, name);
+    }
+    if (mino_type_of(form) == MINO_VECTOR) {
+        size_t n = form->as.vec.len;
+        int    total = 0;
+        for (size_t i = 0; i < n; i++) {
+            total += count_symbol_uses(vec_nth(form, i), name);
+        }
+        return total;
+    }
+    return 0;
+}
+
+/* True when `val_form` is observably side-effect-free: a literal, a
+ * symbol reference, or a pure-prim call whose args are themselves
+ * side-effect-free. Side-effecting forms (println, def, atom-deref,
+ * IO, user fns we can't see through) must be kept for their effect
+ * even when their binding is unused. */
+static int is_side_effect_free(compiler_t *c, mino_val_t *form);
+
+static int is_side_effect_free(compiler_t *c, mino_val_t *form)
+{
+    if (form == NULL) return 1;
+    if (is_self_evaluating(form)) return 1;
+    if (mino_type_of(form) == MINO_SYMBOL) return 1;
+    if (mino_type_of(form) == MINO_CONS) {
+        mino_val_t        *head = form->as.cons.car;
+        mino_val_t        *p;
+        const pure_prim_t *pp;
+        if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return 0;
+        pp = should_fold_call(c, head);
+        if (pp == NULL) return 0;
+        p = form->as.cons.cdr;
+        while (mino_is_cons(p)) {
+            if (!is_side_effect_free(c, p->as.cons.car)) return 0;
+            p = p->as.cons.cdr;
+        }
+        return 1;
+    }
+    return 0;
+}
+
 static int compile_let(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     /* (let [b1 v1 b2 v2 ...] body...) -- plain-symbol bindings, or
@@ -805,6 +866,25 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst, int tail)
         mino_val_t *val_form  = vec_nth(bindings, i + 1);
         if (name_form == NULL || mino_type_of(name_form) != MINO_SYMBOL) {
             c->ok = 0; goto out;
+        }
+        /* Phase E2 dead-binding elimination: a binding whose name
+         * appears nowhere in (the rest of the bindings + the body)
+         * and whose value expression is observably side-effect-free
+         * can be dropped entirely -- no register, no value emission,
+         * no env publish. Skipped for capturing lets since env_bind
+         * has its own observable effect (the name becomes visible
+         * to inner closures regardless of register usage). */
+        if (!pushed_env) {
+            int uses = 0;
+            for (size_t j = i + 2; j < blen; j += 2) {
+                uses += count_symbol_uses(vec_nth(bindings, j + 1),
+                                          name_form->as.s.data);
+            }
+            uses += count_symbol_uses(body, name_form->as.s.data);
+            if (uses == 0 && is_side_effect_free(c, val_form)) {
+                c->has_folds = 1;  /* gates redef-invalidate, same as folds */
+                continue;
+            }
         }
         int reg = alloc_reg(c);
         if (reg < 0) goto out;
@@ -1715,12 +1795,12 @@ static int compile_operand_inplace(compiler_t *c, mino_val_t *form)
  * compiler. The homoiconic source form gives us the literal args
  * before evaluation begins, and immutability guarantees the
  * folded value's identity stays valid for the bc's lifetime. */
-typedef struct {
+struct pure_prim {
     const char *name;
     mino_val_t *(*prim)(mino_state_t *, mino_val_t *, mino_env_t *);
     int min_arity;   /* lower bound; -1 for unrestricted */
     int max_arity;   /* upper bound; -1 for unrestricted */
-} pure_prim_t;
+};
 
 static const pure_prim_t PURE_PRIMS[] = {
     {"+",       prim_add,    0, -1},

@@ -49,6 +49,36 @@
     ;; a=3, b=7 folded; c=n*7 runtime.
     (is (= 49 (nf2 7)))))
 
+(deftest let-dead-binding-elim
+  ;; Phase E2: unused side-effect-free bindings are dropped at
+  ;; compile time -- no register, no value emission. Verified
+  ;; behaviorally; the contract is "same result as if the binding
+  ;; were present, but the binding's expression is never evaluated".
+  (testing "unused literal binding is fine"
+    (defn de1 [] (let [_unused 7] 42))
+    (is (= 42 (de1))))
+  (testing "unused pure-prim binding is fine"
+    (defn de2 [] (let [_unused (+ 1 2)] 99))
+    (is (= 99 (de2))))
+  (testing "side-effecting unused binding still runs"
+    (let [hits (atom 0)
+          run! (fn [] (swap! hits inc) :ok)]
+      (defn de3 [] (let [_unused (run!)] :done))
+      (de3)
+      (is (= 1 @hits))
+      (de3) (de3)
+      (is (= 3 @hits))))
+  (testing "unused symbol binding (pure) is dropped"
+    (let [x 7]
+      (defn de4 [] (let [_unused x] :result))
+      (is (= :result (de4)))))
+  (testing "mix of used and unused"
+    (defn de5 [] (let [a 10
+                       _b (+ 1 2)
+                       c 20]
+                   (+ a c)))
+    (is (= 30 (de5)))))
+
 (deftest let-fold-soundness-on-redef
   ;; The fold-through emits OP_LOAD_K, which the redef-invalidates-bc
   ;; soundness check (compile_ic_gen) is supposed to invalidate when
