@@ -76,6 +76,22 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: Set And Namespaced-Map Readers Now Skip Reader-Cond No-Match Forms
+
+The plain map / vector / list readers all skip an inner form that
+resolved to nothing via a reader conditional, mirroring how Clojure
+itself reads `[1 #?(:clj 2) 3]` as `[1 3]`. The set reader
+(`#{...}`) bailed instead with the misleading `unterminated set` --
+even though the closing `}` was right there. The namespaced-map
+reader (`#:foo{...}`) was worse: standalone it returned `nil`;
+embedded in a parent form (`[1 #:foo{:a #?(:clj 1)} 3]`) it
+silently surfaced as `unexpected ')'` because it bailed without
+consuming its own closing `}`. Both readers now treat NULL-without-
+-error from their inner `read_form` as "no form produced; continue"
+exactly like the other compound readers, and the namespaced-map
+reader correctly drops the paired key/value when one side is
+eliminated. Regressions live in `tests/reader_cond_test.clj`.
+
 ### Fixed: Wrap-One Reader Macros Now Name Empty Reader Conditionals
 
 `@`, `'`, `` ` ``, `~`, `~@`, and `#'` produced the bare diagnostic

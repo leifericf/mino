@@ -69,3 +69,26 @@
                  (catch e (if (map? e) (:mino/message e) (str e))))]
     (is (some? err))
     (is (some? (re-find #"reader conditional" err)))))
+
+(deftest reader-cond-empty-value-in-namespaced-map
+  ;; In a plain map literal a no-match reader conditional in the value
+  ;; slot drops the paired key entirely; the namespaced-map reader must
+  ;; honor the same shape (and not silently corrupt the surrounding form).
+  (is (= {} (read-string "#:foo{:a #?(:clj 1)}")))
+  ;; Embedded in a vector: the parent reader keeps reading after the
+  ;; closing brace -- it used to surface as "unexpected ')'" because the
+  ;; namespaced-map reader bailed without consuming its own '}'.
+  (is (= [1 {} 3] (read-string "[1 #:foo{:a #?(:clj 1)} 3]")))
+  ;; Value matched -- the namespaced prefix qualifies the key.
+  (is (= {:foo/a 99} (read-string "#:foo{:a #?(:default 99)}")))
+  ;; Key dropped by the conditional: paired value is discarded too.
+  (is (= {} (read-string "#:foo{#?(:clj :a) 1}")))
+  ;; Mixed: one entry survives, one drops.
+  (is (= {:foo/a 1} (read-string "#:foo{:a 1 :b #?(:clj 2)}"))))
+
+(deftest reader-cond-empty-element-in-set
+  ;; Same shape, in a set literal: the no-match element is dropped, the
+  ;; surrounding form is not corrupted.
+  (is (= #{1 3} (read-string "#{1 #?(:clj 2) 3}")))
+  (is (= #{1 2 3} (read-string "#{1 #?(:default 2) 3}")))
+  (is (= #{} (read-string "#{#?(:clj 1) #?(:cljs 2)}"))))

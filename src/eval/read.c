@@ -778,11 +778,13 @@ static mino_val_t *read_set_form(mino_state_t *S, const char **p)
         }
         elem = read_form(S, p);
         if (elem == NULL) {
-            if (mino_last_error(S) == NULL) {
-                set_reader_diag(S, MRE003, "unterminated set",
-                            S->reader_line, S->reader_col);
-            }
-            return NULL;
+            if (mino_last_error(S) != NULL) return NULL;
+            /* Element eliminated by a reader conditional or discard --
+             * drop it and continue, matching the plain-map / vector /
+             * list readers. Without this the set reader bailed out and
+             * the misleading "unterminated set" surfaced even though
+             * the closing '}' was right there. */
+            continue;
         }
         buf_push(S, &buf, &cap, &len, elem);
     }
@@ -1717,7 +1719,24 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
             }
             if (**p == '}') { ADVANCE(S, p); break; }
             k = read_form(S, p);
-            if (k == NULL) return NULL;
+            if (k == NULL) {
+                if (mino_last_error(S) != NULL) return NULL;
+                /* Key eliminated by reader conditional -- consume and
+                 * discard the paired value before continuing. Mirrors
+                 * the plain-map reader; without this, the namespaced-map
+                 * reader would bail without consuming its own '}', and
+                 * the parent reader would surface "unexpected '}'". */
+                skip_ws(S, p);
+                if (**p == '}') { ADVANCE(S, p); break; }
+                {
+                    mino_val_t *discard = read_form(S, p);
+                    if (discard == NULL && mino_last_error(S) != NULL)
+                        return NULL;
+                }
+                skip_ws(S, p);
+                if (**p == '}') { ADVANCE(S, p); break; }
+                continue;
+            }
             skip_ws(S, p);
             if (**p == '}' || **p == '\0') {
                 set_reader_diag(S, MRE008,
@@ -1726,7 +1745,13 @@ static mino_val_t *read_namespaced_map(mino_state_t *S, const char **p)
                 return NULL;
             }
             v = read_form(S, p);
-            if (v == NULL) return NULL;
+            if (v == NULL) {
+                if (mino_last_error(S) != NULL) return NULL;
+                /* Value form produced nothing -- drop the key too. */
+                skip_ws(S, p);
+                if (**p == '}') { ADVANCE(S, p); break; }
+                continue;
+            }
             if (len == cap) {
                 size_t       nc  = cap == 0 ? 8 : cap * 2;
                 mino_val_t **nk  = (mino_val_t **)gc_alloc_typed(S,
