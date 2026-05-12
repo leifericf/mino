@@ -2347,14 +2347,40 @@
       (assoc h :ancestors ancestors-map
              :descendants descendants-map))))
 
+(defn- valid-tag? [x]
+  ;; A derive tag must be a Named (keyword/symbol) or a record/host-type
+  ;; value. mino, like babashka and cljs, does not require namespacing.
+  (or (keyword? x) (symbol? x) (record-type? x)))
+
+(defn- valid-hierarchy? [h]
+  (and (map? h)
+       (map? (:parents h))
+       (map? (:ancestors h))
+       (map? (:descendants h))))
+
 (defn derive
   "Establishes a parent/child relationship between child and parent
    in a hierarchy."
   ([child parent]
+   (when-not (valid-tag? child)
+     (throw (ex-info "derive: tag must be a keyword, symbol, or type"
+                     {:child child :parent parent})))
+   (when-not (valid-tag? parent)
+     (throw (ex-info "derive: parent must be a keyword, symbol, or type"
+                     {:child child :parent parent})))
    (swap! global-hierarchy derive child parent)
    (swap! hierarchy-version inc)
    nil)
   ([h child parent]
+   (when-not (valid-hierarchy? h)
+     (throw (ex-info "derive: invalid hierarchy"
+                     {:h h :child child :parent parent})))
+   (when-not (valid-tag? child)
+     (throw (ex-info "derive: tag must be a keyword, symbol, or type"
+                     {:child child :parent parent})))
+   (when-not (valid-tag? parent)
+     (throw (ex-info "derive: parent must be a keyword, symbol, or type"
+                     {:child child :parent parent})))
    (when (= child parent)
      (throw (ex-info "Cannot derive tag from itself"
                      {:child child :parent parent})))
@@ -2364,10 +2390,6 @@
    (let [new-parents (update (:parents h) child
                              (fn [s] (conj (or s #{}) parent)))]
      (recompute-hierarchy (assoc h :parents new-parents)))))
-
-(defn- valid-hierarchy? [h]
-  (and (map? h) (contains? h :parents)
-       (contains? h :ancestors) (contains? h :descendants)))
 
 (defn underive
   "Removes a parent/child relationship between child and parent."
