@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.147.0 — Phase 2 (Partial): Port Thin core.clj Wrappers to C
+
+Phase 2 of the lean-embed cycle. The first batch of `core.clj` defns
+moves to C primitives, shrinking the install-time parse and eval cost
+of `core.clj` and pre-staging these names for embedders running on a
+future Floor tier that does not evaluate `core.clj` at all.
+
+Ported to `src/prim/sequences.c`:
+
+- `every?` — true if (pred x) is truthy for every x in coll.
+- `some` — first truthy (pred x) result, else nil.
+- `not-any?` — negation of `some`.
+- `not-every?` — negation of `every?`.
+- `zipmap` — keys / vals → map. Stops at the shorter coll.
+- `frequencies` — count occurrences of each distinct item.
+- `group-by` — group items by (f x) into per-key vectors.
+
+User-visible behaviour: identical. Same names, same arities, same
+contracts, same diagnostics for type / arity errors. The standalone
+test suite (1616 tests, 7527 assertions) is green.
+
+Remaining Phase 2 candidates (`comp`, `partial`, `complement`, `juxt`,
+`mapcat`, `concat`, `partition*`, `interleave`, `interpose`,
+`tree-seq`, `flatten`, `merge-with`, `take-while`, `drop-while`,
+`take-nth`, `iterate`, `cycle`, `repeatedly`, `distinct`) need
+closure or lazy-seq C infrastructure that is not yet in place; they
+remain in `core.clj` for this release.
+
 ## v0.146.0 — Capability-Gated Install: Lean Embedded Footprint, Same Standalone Surface
 
 Embedded mino's `mino_install_core` was monolithic — every fresh runtime

@@ -1774,6 +1774,177 @@ mino_val_t *prim_rsubseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return subseq_impl(S, args, 1);
 }
 
+/* (every? pred coll) — true iff (pred x) is truthy for every x in coll.
+ * Empty / nil coll → true. Short-circuits on the first falsy result. */
+mino_val_t *prim_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pred, *coll;
+    seq_iter_t  it;
+    size_t      n;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "every? requires 2 arguments: predicate and collection");
+    }
+    pred = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || mino_is_nil(coll)) return mino_true(S);
+    seq_iter_init(S, &it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val_t *test = apply_callable(S, pred, call_args, env);
+        if (test == NULL) return NULL;
+        if (!mino_is_truthy_inline(test)) return mino_false(S);
+        seq_iter_next(S, &it);
+    }
+    return mino_true(S);
+}
+
+/* (some pred coll) — first truthy value of (pred x) for any x in coll,
+ * else nil. Short-circuits on the first truthy result. */
+mino_val_t *prim_some(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *pred, *coll;
+    seq_iter_t  it;
+    size_t      n;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "some requires 2 arguments: predicate and collection");
+    }
+    pred = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    if (coll == NULL || mino_is_nil(coll)) return mino_nil(S);
+    seq_iter_init(S, &it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val_t *test = apply_callable(S, pred, call_args, env);
+        if (test == NULL) return NULL;
+        if (mino_is_truthy_inline(test)) return test;
+        seq_iter_next(S, &it);
+    }
+    return mino_nil(S);
+}
+
+/* (not-any? pred coll) — true iff (pred x) is falsy for every x in coll. */
+mino_val_t *prim_not_any_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *r = prim_some(S, args, env);
+    if (r == NULL) return NULL;
+    return mino_is_truthy_inline(r) ? mino_false(S) : mino_true(S);
+}
+
+/* (not-every? pred coll) — true iff (pred x) is falsy for at least one x. */
+mino_val_t *prim_not_every_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *r = prim_every_p(S, args, env);
+    if (r == NULL) return NULL;
+    return mino_is_truthy_inline(r) ? mino_false(S) : mino_true(S);
+}
+
+/* (group-by f coll) — map of (f x) -> vector of items in coll where
+ * f's result is the key. Preserves encounter order within each bucket. */
+mino_val_t *prim_group_by(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *fn, *coll;
+    mino_val_t *result;
+    seq_iter_t  it;
+    size_t      n;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "group-by requires 2 arguments: f and collection");
+    }
+    fn   = args->as.cons.car;
+    coll = args->as.cons.cdr->as.cons.car;
+    result = mino_map(S, NULL, NULL, 0);
+    if (coll == NULL || mino_is_nil(coll)) return result;
+    seq_iter_init(S, &it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val_t *call_args = mino_cons(S, elem, mino_nil(S));
+        mino_val_t *k = apply_callable(S, fn, call_args, env);
+        mino_val_t *bucket;
+        if (k == NULL) return NULL;
+        bucket = mino_map_lookup(result, k);
+        if (bucket == NULL || mino_is_nil(bucket)) {
+            bucket = mino_vector(S, &elem, 1);
+        } else {
+            bucket = vec_conj1(S, bucket, elem);
+        }
+        if (bucket == NULL) return NULL;
+        result = mino_map_assoc1(S, result, k, bucket);
+        if (result == NULL) return NULL;
+        seq_iter_next(S, &it);
+    }
+    return result;
+}
+
+/* (frequencies coll) — map of distinct items in coll to their count. */
+mino_val_t *prim_frequencies(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *coll;
+    mino_val_t *result;
+    seq_iter_t  it;
+    size_t      n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 1) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "frequencies requires 1 argument: collection");
+    }
+    coll = args->as.cons.car;
+    result = mino_map(S, NULL, NULL, 0);
+    if (coll == NULL || mino_is_nil(coll)) return result;
+    seq_iter_init(S, &it, coll);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(S, &it);
+        mino_val_t *cur  = mino_map_lookup(result, elem);
+        long long   prev = 0;
+        if (cur != NULL && !mino_is_nil(cur)) {
+            (void)mino_to_int(cur, &prev);
+        }
+        result = mino_map_assoc1(S, result, elem, mino_int(S, prev + 1));
+        if (result == NULL) return NULL;
+        seq_iter_next(S, &it);
+    }
+    return result;
+}
+
+/* (zipmap ks vs) — map with keys ks paired with vals vs. Stops at the
+ * shorter of the two collections. nil/empty pair returns {}. */
+mino_val_t *prim_zipmap(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *ks, *vs;
+    mino_val_t *result;
+    seq_iter_t  k_it, v_it;
+    size_t      n;
+    (void)env;
+    arg_count(S, args, &n);
+    if (n != 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "zipmap requires 2 arguments: keys and vals");
+    }
+    ks = args->as.cons.car;
+    vs = args->as.cons.cdr->as.cons.car;
+    result = mino_map(S, NULL, NULL, 0);
+    if (ks == NULL || mino_is_nil(ks)) return result;
+    if (vs == NULL || mino_is_nil(vs)) return result;
+    seq_iter_init(S, &k_it, ks);
+    seq_iter_init(S, &v_it, vs);
+    while (!seq_iter_done(&k_it) && !seq_iter_done(&v_it)) {
+        mino_val_t *k = seq_iter_val(S, &k_it);
+        mino_val_t *v = seq_iter_val(S, &v_it);
+        result = mino_map_assoc1(S, result, k, v);
+        if (result == NULL) return NULL;
+        seq_iter_next(S, &k_it);
+        seq_iter_next(S, &v_it);
+    }
+    return result;
+}
+
 const mino_prim_def k_prims_sequences[] = {
     {"reduce",   prim_reduce,
      "Reduces a collection using f. With no init, uses the first item."},
@@ -1827,6 +1998,20 @@ const mino_prim_def k_prims_sequences[] = {
      "Returns a seq on the collection, or nil if empty."},
     {"realized?", prim_realized_p,
      "Returns true if the lazy value has been realized."},
+    {"every?",    prim_every_p,
+     "Returns true if (pred x) is truthy for every x in coll."},
+    {"some",      prim_some,
+     "Returns the first truthy value of (pred x) for any x in coll, else nil."},
+    {"not-any?",  prim_not_any_p,
+     "Returns true if (pred x) is falsy for every x in coll."},
+    {"not-every?", prim_not_every_p,
+     "Returns true if (pred x) is falsy for at least one x in coll."},
+    {"zipmap",    prim_zipmap,
+     "Returns a map with keys mapped to corresponding vals."},
+    {"frequencies", prim_frequencies,
+     "Returns a map from distinct items in coll to the number of times they appear."},
+    {"group-by",  prim_group_by,
+     "Returns a map of the items in coll grouped by the result of f."},
 };
 
 const size_t k_prims_sequences_count =

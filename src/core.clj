@@ -331,23 +331,8 @@
   (assoc m k (apply f (get m k) args)))
 
 ;; --- Utility functions ---
-
-(defn some
-  "Returns the first truthy value of (pred x) for any x in coll, else
-   nil."
-  [pred coll]
-  (when-not (empty? coll)
-    (or (pred (first coll))
-        (some pred (rest coll)))))
-
-(defn every?
-  "Returns true if (pred x) is truthy for every x in coll."
-  [pred coll]
-  (if (empty? coll)
-    true
-    (if (pred (first coll))
-      (every? pred (rest coll))
-      false)))
+;; some, every?, not-any?, not-every? are registered as C primitives
+;; (see src/prim/sequences.c). zipmap is also a C prim.
 
 ;; --- Higher-order functions ---
 
@@ -480,31 +465,11 @@
         acc))
       (with-meta {} (meta m)) ks)))
 
-(defn zipmap "Returns a map with keys mapped to corresponding vals." [ks vs]
-  (letfn [(zm-impl [acc ks vs]
-            (if (and (seq ks) (seq vs))
-              (recur (assoc acc (first ks) (first vs))
-                     (rest ks) (rest vs))
-              acc))]
-    (zm-impl {} ks vs)))
+;; zipmap is registered as a C primitive (see src/prim/sequences.c).
 
-(defn frequencies
-  "Returns a map from distinct items in coll to the number of times
-   they appear."
-  [coll]
-  (persistent!
-    (reduce (fn [acc x]
-              (assoc! acc x (inc (get acc x 0))))
-            (transient {}) coll)))
+;; frequencies is registered as a C primitive (see src/prim/sequences.c).
 
-(defn group-by
-  "Returns a map of the items in coll grouped by the result of f."
-  [f coll]
-  (persistent!
-    (reduce (fn [acc x]
-              (let [k (f x)]
-                (assoc! acc k (conj (get acc k []) x))))
-            (transient {}) coll)))
+;; group-by is registered as a C primitive (see src/prim/sequences.c).
 
 ;; --- More higher-order ---
 
@@ -839,12 +804,7 @@
 ;; MINO_CHUNKED_CONS, matching Clojure's narrower contract: sequences
 ;; produced by `seq` on other collections are seqs but not lists.
 ;; atom? is defined as a C primitive; no mino-level fallback needed.
-(defn not-any?
-  "Returns true if (pred x) is falsy for every x in coll."
-  [pred coll] (not (some pred coll)))
-(defn not-every?
-  "Returns true if (pred x) is falsy for at least one x in coll."
-  [pred coll] (not (every? pred coll)))
+;; not-any? / not-every? are C primitives (see src/prim/sequences.c).
 (defn distinct? "Returns true if no two of the arguments are equal." [& xs]
   (if (empty? xs)
     true
