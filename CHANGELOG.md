@@ -1,6 +1,30 @@
 # Changelog
 
-## Unreleased — Fusion Cycle (v0.145.0)
+## v0.145.0 — Fusion Cycle
+
+Reduce, assoc/conj, and compile-time constant folding all get
+faster without a JIT, by leaning on Clojure's load-bearing
+mechanics: persistent immutable data (so direct walks don't need
+snapshots, identity short-circuits become semantically real),
+seq abstraction (so collection-typed direct paths can replace
+the generic dispatch without breaking the contract callers see),
+and homoiconicity (so the bc compiler can fold and elide on the
+AST itself).
+
+Bench picks-of-the-day (M3 Pro, 5 runs):
+
+| Bench                          | Before    | After    | Speedup |
+|--------------------------------|----------:|---------:|--------:|
+| sum-1-to-1M `reduce + (range)` | 53.8 ms   | 0.3 ms   | 180×    |
+| reduce-over-map-10k            | 8.6 ms    | 5.4 ms   | 1.6×    |
+| reduce-vec-1M                  | 10.7 ms   | 5.7 ms   | 1.9×    |
+| assoc-noop HAMT-100            | 4.31 us   | 2.11 us  | 2.0×    |
+
+The shipped phases are below in causal order: the reduce wrapper
+fix unblocked the direct-walk paths; those direct walks are the
+load-bearing prerequisite for the bench picks. Compile-time
+fold-through and dead-binding elimination are independent;
+they collapse a class of macro-heavy code.
 
 ### Direct-Walk Reduce Over Map And Set
 
@@ -30,6 +54,13 @@ Backed by `tests/reduce_perf_test.clj` parity tests at the
 flatmap / HAMT boundary (sizes 0, 1, 8, 9, 100), `reduced?`
 early-exit, and the MapEntry `vector?` / destructure contract.
 
+Leans on the seq abstraction's contract: `seq` promises to yield
+each entry, not a specific shape. Swapping the entry from
+`MINO_VECTOR` to the leaner `MINO_MAP_ENTRY` is a representation
+choice the protocol allows, and downstream `vector?` / `(first e)`
+/ destructure callers keep working because they're written against
+the contract, not the implementation.
+
 ### Direct-Walk Reduce Over Vector
 
 `(reduce f v)` and `(reduce f init v)` over a persistent vector no
@@ -54,6 +85,13 @@ Backed by `tests/reduce_perf_test.clj` parity tests at sizes
 0, 1, 31, 32, 33, 1024, 10000 (which cross the tail-only and
 multi-level-trie boundaries), `reduced?` early-exit, and a
 subvec offset case.
+
+Leans on persistent data: the trie is immutable, so a recursive
+in-place leaf walk is safe -- no snapshot, no copy-on-write, no
+race window. Subvecs share the trie with the parent and just
+carry an offset/len window, so walking by absolute backing
+positions is the natural way to honor a window without
+materialising it.
 
 ### Reduce Wrapper Preserves C-Side Fast Paths
 
@@ -82,6 +120,13 @@ The 3-arg form already passed the coll through unchanged, so the
 fix shows nothing there (0.3 ms before and after). The seq path
 remains the fallback for user-extended `CollReduce` types.
 
+Leans on Clojure's "value, not call" treatment of colls: a fresh
+`(range 1M)` and `(rest (seq (range 1M)))` are `=`-equal but not
+the same value -- one is a counted iterator the runtime can
+recognise, the other is a forced spine. Keeping the original
+value visible to the dispatcher is what lets the fast lanes
+recognise its shape.
+
 ### Let-Binding Fold-Through In The BC Compiler
 
 `(let [x (+ 1 2)] (* x x))` collapses to a single `OP_LOAD_K 9` at
@@ -99,6 +144,13 @@ publish bindings into a fresh env for an inner closure) skip the
 fold-through path; with env publishing in play, an inner closure
 could otherwise capture a stale folded value before a global
 resolution shifted.
+
+Leans on homoiconicity: a `let` is just a list with a vector of
+binding pairs, so the compiler walks it with the same code shape
+as any other form -- no separate AST layer. Late binding of vars
+makes the redef-invalidates-bc check both necessary and
+sufficient: we never have to ask "is `+` definitely canonical
+forever?"; we check at dispatch, against `compile_ic_gen`.
 
 ### Dead-Binding Elimination In The BC Compiler
 
@@ -138,6 +190,15 @@ The replace-with-different-value path pays one extra lookup
 (measured at ~5% in micro-benches); the trade-off is worth it
 for the common "rehash a map back into itself" idiom, where the
 saved rebuild traffic dominates.
+
+Leans on persistent data + cached hash. With mutable maps the
+short-circuit would be a hazard -- a caller could rely on assoc
+returning a *new* container for them to mutate. With immutable
+maps "the result is the same value" and "the result is the same
+identity" are equivalent for observability, so `identical?` after
+a no-op assoc becomes a real signal callers can pattern-match
+on. The cached hash on collection values keeps the existence
+check O(1) in the typical case.
 
 ### Correctness Fix: `count` On Strings Returns Codepoints
 
