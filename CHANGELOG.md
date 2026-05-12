@@ -82,6 +82,24 @@ The 3-arg form already passed the coll through unchanged, so the
 fix shows nothing there (0.3 ms before and after). The seq path
 remains the fallback for user-extended `CollReduce` types.
 
+### Let-Binding Fold-Through In The BC Compiler
+
+`(let [x (+ 1 2)] (* x x))` collapses to a single `OP_LOAD_K 9` at
+compile time. The compiler now remembers, on each local, the
+compile-time-known value of its right-hand side when that
+right-hand side itself folds via the existing `PURE_PRIMS` table
+(literal, pure-prim call over literals, pure-prim call over
+already-folded locals). When a later pure-prim call has all
+foldable args -- including symbol args that resolve via this
+substitution -- the call folds. The existing `has_folds` flag plus
+the `compile_ic_gen` soundness check still gate the OP_LOAD_K: a
+later `(def + -)` invalidates the bc and a recompile re-runs the
+fold against the new resolution. Capturing `let`s (those that
+publish bindings into a fresh env for an inner closure) skip the
+fold-through path; with env publishing in play, an inner closure
+could otherwise capture a stale folded value before a global
+resolution shifted.
+
 ### Identity Short-Circuit For `assoc` / `conj`
 
 `(assoc m k v)` and `(conj s x)` now return the input unchanged

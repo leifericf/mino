@@ -92,6 +92,15 @@ void mino_bc_check_require(mino_state_t *S, mino_val_t *fn)
 typedef struct local {
     const char *name;   /* interned symbol data; pointer-stable */
     int         reg;
+    /* Compile-time-known value, or NULL. Set when a let-binding's
+     * right-hand side folds to a constable value (a literal, or a
+     * pure-prim call over folded args). Treated as if the local
+     * were self-evaluating when it appears as a head-call arg, so
+     * (let [x (+ 1 2)] (* x x)) collapses to 9 at compile time.
+     * Cleared on rebind and at let scope exit (locals are
+     * restored from saved_n_locals; the value just isn't visible
+     * past the lifetime of its slot). */
+    mino_val_t *folded;
 } bc_local_t;
 
 /* The innermost active loop, if any. `entry_pc` is the bytecode offset
@@ -281,10 +290,27 @@ static int alloc_reg(compiler_t *c)
 static int bind_local(compiler_t *c, const char *name, int reg)
 {
     if (c->n_locals >= BC_MAX_LOCALS) { c->ok = 0; return 0; }
-    c->locals[c->n_locals].name = name;
-    c->locals[c->n_locals].reg  = reg;
+    c->locals[c->n_locals].name   = name;
+    c->locals[c->n_locals].reg    = reg;
+    c->locals[c->n_locals].folded = NULL;
     c->n_locals++;
     return 1;
+}
+
+/* Returns the compile-time-known value bound to `name`, or NULL when
+ * the name isn't a local or its binding's right-hand side did not
+ * fold. Scans innermost-out so an inner let-binding shadows an
+ * outer one. */
+static mino_val_t *local_folded_value(compiler_t *c, const char *name)
+{
+    for (int i = c->n_locals - 1; i >= 0; i--) {
+        if (c->locals[i].name == name
+            || (c->locals[i].name != NULL
+                && strcmp(c->locals[i].name, name) == 0)) {
+            return c->locals[i].folded;
+        }
+    }
+    return NULL;
 }
 
 static int find_local(compiler_t *c, const char *name)
@@ -479,6 +505,11 @@ static int is_special_form_name(const char *name)
  * and goes through the trampoline (constant C stack). */
 static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail);
 static int compile_body(compiler_t *c, mino_val_t *body, int dst, int tail);
+/* Forward decl: defined alongside try_fold_call further down. Used by
+ * compile_let to compute the compile-time-known value of a binding's
+ * right-hand side, if any. */
+static int try_fold_arg(compiler_t *c, mino_val_t *v, mino_val_t **out);
+static int fold_result_constable(mino_val_t *v);
 
 /* Pre-scan: does the form tree contain a form that captures the
  * current lexical env -- an inner (fn ...) literal or a (lazy-seq ...)
@@ -779,6 +810,22 @@ static int compile_let(compiler_t *c, mino_val_t *form, int dst, int tail)
         if (reg < 0) goto out;
         if (compile_expr(c, val_form, reg, 0) < 0) goto out;
         if (!bind_local(c, name_form->as.s.data, reg)) goto out;
+        /* Phase E1 fold-through: when the binding's right-hand side
+         * folded to a constable literal at compile time -- either a
+         * self-evaluating literal or a pure-prim call over already-
+         * folded args -- remember the value on the local so any
+         * later (head x ...) pure-prim call can substitute it
+         * during its own fold attempt. Only safe when the let
+         * doesn't capture (no OP_ENV_BIND): with env publishing,
+         * inner closures could pick up a stale folded value if
+         * the global resolution changes. */
+        if (!pushed_env) {
+            mino_val_t *fv = NULL;
+            if (try_fold_arg(c, val_form, &fv) && fv != NULL
+                && fold_result_constable(fv)) {
+                c->locals[c->n_locals - 1].folded = fv;
+            }
+        }
         if (pushed_env) {
             int k = add_const(c, name_form);
             if (k < 0) goto out;
@@ -1770,6 +1817,64 @@ static int head_is_canonical_pure_prim(compiler_t *c, mino_val_t *head)
     return hv->as.prim.fn == pp->prim;
 }
 
+/* Try to resolve a compile-time-known value for `form`. Returns 1 and
+ * writes the value through `out` when:
+ *   - form is self-evaluating (literal),
+ *   - form is a symbol bound to a local whose right-hand side itself
+ *     folded (Phase E1 fold-through), or
+ *   - form is a (pure-prim arg ...) call whose head resolves to the
+ *     canonical PRIM and whose args themselves all fold via this
+ *     same rule (Phase E1 recursive fold).
+ * Returns 0 otherwise; `out` is left untouched on a 0 return.
+ *
+ * The recursive fold path lets `(let [x (+ 1 2)] (* x x))` collapse
+ * to `9` at compile time -- compile_let records `x → 3`, then the
+ * outer `*` call probes its args, finds `x → 3` via this helper,
+ * and the existing try_fold_call path emits a single OP_LOAD_K. */
+static int try_fold_arg(compiler_t *c, mino_val_t *v, mino_val_t **out)
+{
+    if (is_self_evaluating(v)) { *out = v; return 1; }
+    if (v == NULL) return 0;
+    if (mino_type_of(v) == MINO_SYMBOL) {
+        mino_val_t *f = local_folded_value(c, v->as.s.data);
+        if (f != NULL) { *out = f; return 1; }
+        return 0;
+    }
+    if (mino_type_of(v) == MINO_CONS) {
+        mino_val_t        *head = v->as.cons.car;
+        const pure_prim_t *pp;
+        mino_val_t        *src;
+        mino_val_t        *args;
+        mino_val_t        *stack[64];
+        mino_val_t        *folded;
+        int                argc = 0;
+        if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return 0;
+        pp = should_fold_call(c, head);
+        if (pp == NULL) return 0;
+        src = v->as.cons.cdr;
+        while (mino_is_cons(src)) {
+            mino_val_t *fa = NULL;
+            if (argc >= (int)(sizeof(stack)/sizeof(stack[0]))) return 0;
+            if (!try_fold_arg(c, src->as.cons.car, &fa)) return 0;
+            stack[argc++] = fa;
+            src = src->as.cons.cdr;
+        }
+        if (pp->min_arity >= 0 && argc < pp->min_arity) return 0;
+        if (pp->max_arity >= 0 && argc > pp->max_arity) return 0;
+        args = mino_nil(c->S);
+        for (int i = argc - 1; i >= 0; i--) {
+            args = mino_cons(c->S, stack[i], args);
+            if (args == NULL) return 0;
+        }
+        folded = pp->prim(c->S, args, c->env);
+        if (folded == NULL) { clear_error(c->S); return 0; }
+        if (!fold_result_constable(folded)) return 0;
+        *out = folded;
+        return 1;
+    }
+    return 0;
+}
+
 /* Attempt to fold a (head literal-args...) call. Returns 0 on a
  * successful fold (LOAD_K already emitted), 1 to decline (no LOAD_K
  * emitted; caller should fall through to the normal emit path), or
@@ -1779,29 +1884,22 @@ static int try_fold_call(compiler_t *c, mino_val_t *form, int dst,
 {
     int    argc      = 0;
     mino_val_t *p    = form->as.cons.cdr;
+    mino_val_t *stack[64];
     while (mino_is_cons(p)) {
-        if (!is_self_evaluating(p->as.cons.car)) return 1;
-        argc++;
+        mino_val_t *folded_arg = NULL;
+        if (argc >= (int)(sizeof(stack)/sizeof(stack[0]))) return 1;
+        if (!try_fold_arg(c, p->as.cons.car, &folded_arg)) return 1;
+        stack[argc++] = folded_arg;
         p = p->as.cons.cdr;
     }
     if (pp->min_arity >= 0 && argc < pp->min_arity) return 1;
     if (pp->max_arity >= 0 && argc > pp->max_arity) return 1;
 
     /* Rebuild the args list as a fresh cons-spine the prim can walk.
-     * The original cdr is a syntactic cons-list with file/line meta;
-     * the prim only reads the car/cdr chain, so re-consing is the
-     * cleanest way to feed it without disturbing the source. */
+     * Substituted args replace any symbol references that folded
+     * through a let binding. */
     mino_val_t *args = mino_nil(c->S);
-    mino_val_t *src  = form->as.cons.cdr;
-    /* Walk to count, then build in reverse so mino_cons orders right. */
-    mino_val_t *stack[64];
-    int n = 0;
-    while (mino_is_cons(src) && n < (int)(sizeof(stack)/sizeof(stack[0]))) {
-        stack[n++] = src->as.cons.car;
-        src = src->as.cons.cdr;
-    }
-    if (n != argc) return 1;
-    for (int i = n - 1; i >= 0; i--) {
+    for (int i = argc - 1; i >= 0; i--) {
         args = mino_cons(c->S, stack[i], args);
         if (args == NULL) return 1;
     }
