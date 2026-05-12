@@ -679,6 +679,49 @@ static int push_dyn_binding(mino_state_t *S, mino_val_t *form,
     }
     memcpy(nbuf, sym_v->as.s.data, nlen);
     nbuf[nlen] = '\0';
+    /* Reject rebinding a non-dynamic var: JVM Clojure throws here, and
+     * silently allowing it lets a bug compile clean on mino and blow
+     * up in production on the JVM. Lookup probes the resolved var
+     * (qualified `foo/bar` or the current-ns interned form) and only
+     * fires when a var actually exists -- pure lexical names (which
+     * the macro layer often introduces via gensym) have no var so
+     * fall through to the normal dynamic-scope push. */
+    {
+        const char *slash = (nlen > 1) ? memchr(nbuf, '/', nlen) : NULL;
+        mino_val_t *var   = NULL;
+        if (slash != NULL) {
+            char        ns_buf[256];
+            size_t      ns_len = (size_t)(slash - nbuf);
+            const char *name   = slash + 1;
+            const char *resolved_ns;
+            size_t      i;
+            if (ns_len < sizeof(ns_buf)) {
+                memcpy(ns_buf, nbuf, ns_len);
+                ns_buf[ns_len] = '\0';
+                resolved_ns = ns_buf;
+                for (i = 0; i < S->ns_alias_len; i++) {
+                    if (strcmp(S->ns_aliases[i].alias, ns_buf) == 0) {
+                        resolved_ns = S->ns_aliases[i].full_name;
+                        break;
+                    }
+                }
+                var = var_find(S, resolved_ns, name);
+            }
+        } else {
+            const char *cur = S->current_ns != NULL ? S->current_ns : "user";
+            var = var_find(S, cur, nbuf);
+        }
+        if (var != NULL && mino_type_of(var) == MINO_VAR
+            && !var->as.var.dynamic) {
+            char msg[300];
+            snprintf(msg, sizeof(msg),
+                "Can't dynamically bind non-dynamic var: %s/%s",
+                var->as.var.ns != NULL ? var->as.var.ns : "?",
+                var->as.var.sym != NULL ? var->as.var.sym : nbuf);
+            set_eval_diag(S, form, "eval/binding", "MBN001", msg);
+            goto fail;
+        }
+    }
     val = eval(S, val_form, env);
     if (val == NULL) goto fail;
     b = (dyn_binding_t *)malloc(sizeof(*b));

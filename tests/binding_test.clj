@@ -30,3 +30,22 @@
   (is (= 10 (vrc-f)))
   (def vrc-x 20)
   (is (= 20 (vrc-f))))
+
+(def ^:dynamic *bt-dyn-x* :outer)
+(def bt-plain-x :outer)
+
+(deftest binding-on-dynamic-var-rebinds
+  (is (= :inner (binding [*bt-dyn-x* :inner] *bt-dyn-x*)))
+  (is (= :outer *bt-dyn-x*)))
+
+(deftest binding-on-non-dynamic-var-throws
+  ;; JVM Clojure throws "Can't dynamically bind non-dynamic var" when
+  ;; `binding` rebinds a var that wasn't declared ^:dynamic. mino used
+  ;; to accept this silently, which masks the difference and lets
+  ;; subtle bugs propagate to a real Clojure deployment that then
+  ;; fails. Match the canon behaviour: fail loud at the binding site.
+  (let [err (try (eval '(binding [bt-plain-x :inner] bt-plain-x)) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"dynamic" err)))
+    (is (some? (re-find #"bt-plain-x" err)))))

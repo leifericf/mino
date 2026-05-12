@@ -76,6 +76,19 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: `binding` Now Rejects Non-Dynamic Vars
+
+JVM Clojure throws `Can't dynamically bind non-dynamic var` when a
+`binding` form rebinds a var that wasn't declared `^:dynamic`. mino
+used to accept this silently, which let a real bug compile clean on
+mino and then blow up in production on the JVM. `eval_binding` now
+looks up the referenced var (qualified or current-ns) and rejects the
+rebind at the binding site with the same message shape as Clojure
+JVM, naming the offending var. Pure lexical names (without an
+interned var -- typical of macro-introduced gensyms) fall through to
+the normal dynamic-frame push as before, so the macro layer is
+unaffected.
+
 ### Fixed: `clojure.core/refer` Now Binds Callable Vars Correctly
 
 Calling `(clojure.core/refer 'clojure.core)` directly (rather than
