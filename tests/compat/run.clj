@@ -5,60 +5,44 @@
 ;;   ./mino tests/compat/run.clj           ;; run all repos
 ;;   REPOS=medley,hiccup ./mino tests/compat/run.clj  ;; specific repos
 
+(require '[clojure.string :refer [ends-with? starts-with? includes? split join]])
+
 (def cache-dir
   (str (getenv "HOME") "/.cache/mino-compat"))
 
+;; Only repos with a realistic portable surface — JVM-bound libraries
+;; (clojure.java.io, java.util.concurrent, clojure.lang.* interfaces,
+;; JVM streams, bytecode walking, JVM logging) are out of scope.
 (def repos
-  {"medley"          {:url "https://github.com/weavejester/medley.git" :src "src"}
-   "plumbing"        {:url "https://github.com/plumatic/plumbing.git" :src "src"}
-   "useful"          {:url "https://github.com/flatland/useful.git" :src "src"}
-   "malli"           {:url "https://github.com/metosin/malli.git" :src "src"}
-   "deep-diff2"      {:url "https://github.com/lambdaisland/deep-diff2.git" :src "src"}
-   "xforms"          {:url "https://github.com/cgrand/xforms.git" :src "src"}
-   "fs"              {:url "https://github.com/babashka/fs.git" :src "src"}
-   "edamame"         {:url "https://github.com/borkdude/edamame.git" :src "src"}
-   "cli"             {:url "https://github.com/babashka/cli.git" :src "src"}
-   "hiccup"          {:url "https://github.com/weavejester/hiccup.git" :src "src"}
-   "data.json"       {:url "https://github.com/clojure/data.json.git" :src "src"}
-   "instaparse"      {:url "https://github.com/Engelberg/instaparse.git" :src "src"}
-   "promesa"         {:url "https://github.com/funcool/promesa.git" :src "src"}
-   "tongue"          {:url "https://github.com/tonsky/tongue.git" :src "src"}
-   "rewrite-clj"     {:url "https://github.com/clj-commons/rewrite-clj.git" :src "src" :ref "main"}
-   "aero"            {:url "https://github.com/juxt/aero.git" :src "src"}
-   "selmer"          {:url "https://github.com/yogthos/selmer.git" :src "src"}
-   "timbre"          {:url "https://github.com/taoensso/timbre.git" :src "src"}
-   "babashka.nrepl"  {:url "https://github.com/babashka/babashka.nrepl.git" :src "src"}
-   "jet"             {:url "https://github.com/borkdude/jet.git" :src "src"}
-   "carve"           {:url "https://github.com/borkdude/carve.git" :src "src"}
-   "cuerdas"         {:url "https://github.com/funcool/cuerdas.git" :src "src"}
-   "tools.reader"    {:url "https://github.com/clojure/tools.reader.git" :src "src"}
-   "specter"         {:url "https://github.com/redplanetlabs/specter.git" :src "src"}
-   "test.check"      {:url "https://github.com/clojure/test.check.git" :src "src"}
-   "integrant"       {:url "https://github.com/weavejester/integrant.git" :src "src"}
+  {"aero"               {:url "https://github.com/juxt/aero.git" :src "src"}
+   "algo.monads"        {:url "https://github.com/clojure/algo.monads.git" :src "src"}
+   "arrangement"        {:url "https://github.com/greglook/clj-arrangement.git" :src "src"}
+   "camel-snake-kebab"  {:url "https://github.com/clj-commons/camel-snake-kebab.git" :src "src"}
+   "cats"               {:url "https://github.com/funcool/cats.git" :src "src"}
+   "cli"                {:url "https://github.com/babashka/cli.git" :src "src"}
+   "cuerdas"            {:url "https://github.com/funcool/cuerdas.git" :src "src"}
+   "data.priority-map"  {:url "https://github.com/clojure/data.priority-map.git" :src "src"}
+   "deep-diff2"         {:url "https://github.com/lambdaisland/deep-diff2.git" :src "src"}
+   "edamame"            {:url "https://github.com/borkdude/edamame.git" :src "src"}
+   "fipp"               {:url "https://github.com/brandonbloom/fipp.git" :src "src"}
+   "honeysql"           {:url "https://github.com/seancorfield/honeysql.git" :src "src"}
+   "instaparse"         {:url "https://github.com/Engelberg/instaparse.git" :src "src"}
+   "integrant"          {:url "https://github.com/weavejester/integrant.git" :src "src"}
+   "macrovich"          {:url "https://github.com/cgrand/macrovich.git" :src "src"}
+   "malli"              {:url "https://github.com/metosin/malli.git" :src "src"}
    "math.combinatorics" {:url "https://github.com/clojure/math.combinatorics.git" :src "src"}
-   "data.csv"        {:url "https://github.com/clojure/data.csv.git" :src "src"}
-   "core.memoize"    {:url "https://github.com/clojure/core.memoize.git" :src "src"}
-   "core.cache"      {:url "https://github.com/clojure/core.cache.git" :src "src"}
-   "data.priority-map" {:url "https://github.com/clojure/data.priority-map.git" :src "src"}
-   "tools.namespace" {:url "https://github.com/clojure/tools.namespace.git" :src "src"}
-   "tools.macro"     {:url "https://github.com/clojure/tools.macro.git" :src "src"}
-   "algo.monads"     {:url "https://github.com/clojure/algo.monads.git" :src "src"}
-   "data.finger-tree" {:url "https://github.com/clojure/data.finger-tree.git" :src "src"}
-   "data.avl"        {:url "https://github.com/clojure/data.avl.git" :src "src"}
-   "environ"         {:url "https://github.com/weavejester/environ.git" :src "src"}
-   "honeysql"        {:url "https://github.com/seancorfield/honeysql.git" :src "src"}
-   "sci"             {:url "https://github.com/babashka/sci.git" :src "src"}
-   "encore"          {:url "https://github.com/taoensso/encore.git" :src "src"}
-   "cats"            {:url "https://github.com/funcool/cats.git" :src "src"}
-   "macrovich"       {:url "https://github.com/cgrand/macrovich.git" :src "src"}
-   "potemkin"        {:url "https://github.com/clj-commons/potemkin.git" :src "src"}
-   "uri"             {:url "https://github.com/lambdaisland/uri.git" :src "src"}
-   "reitit"          {:url "https://github.com/metosin/reitit.git" :src "modules/reitit-core/src"}
-   "camel-snake-kebab" {:url "https://github.com/clj-commons/camel-snake-kebab.git" :src "src"}
-   "arrangement"     {:url "https://github.com/greglook/clj-arrangement.git" :src "src"}
-   "fipp"            {:url "https://github.com/brandonbloom/fipp.git" :src "src"}
-   "riddley"         {:url "https://github.com/ztellman/riddley.git" :src "src"}
-   "data.xml"        {:url "https://github.com/clojure/data.xml.git" :src "src"}})
+   "medley"             {:url "https://github.com/weavejester/medley.git" :src "src"}
+   "plumbing"           {:url "https://github.com/plumatic/plumbing.git" :src "src"}
+   "promesa"            {:url "https://github.com/funcool/promesa.git" :src "src"}
+   "reitit"             {:url "https://github.com/metosin/reitit.git" :src "modules/reitit-core/src"}
+   "rewrite-clj"        {:url "https://github.com/clj-commons/rewrite-clj.git" :src "src" :ref "main"}
+   "specter"            {:url "https://github.com/redplanetlabs/specter.git" :src "src"}
+   "test.check"         {:url "https://github.com/clojure/test.check.git" :src "src"}
+   "tongue"             {:url "https://github.com/tonsky/tongue.git" :src "src"}
+   "tools.macro"        {:url "https://github.com/clojure/tools.macro.git" :src "src"}
+   "uri"                {:url "https://github.com/lambdaisland/uri.git" :src "src"}
+   "useful"             {:url "https://github.com/flatland/useful.git" :src "src"}
+   "xforms"             {:url "https://github.com/cgrand/xforms.git" :src "src"}})
 
 (def shim-code "")
 
@@ -190,7 +174,7 @@
       (try
         (let [results (test-repo repo-name config original-dir)]
           (doseq [r results]
-            (swap! all-results conj r)
+            (swap! all-results conj (assoc r :repo repo-name))
             (if (= (:status r) :pass)
               (do (swap! pass-count inc)
                   (when verbose?
@@ -255,6 +239,27 @@
       (println (str "Raw pass rate: " pct "%"))
       (println (str "Effective pass rate (excl. platform+deps): " eff-pct
                     "% (" @pass-count "/" effective ")"))
+
+      ;; Per-repo classification
+      (let [per-repo (group-by :repo @all-results)
+            repo-rows (for [[rn rs] (sort per-repo)]
+                        (let [p (count (filter #(= (:status %) :pass) rs))
+                              total-r (count rs)
+                              fails (filter #(= (:status %) :fail) rs)
+                              cats (frequencies (map #(classify (:error %)) fails))
+                              n-plat (get cats :platform 0)
+                              n-dep* (get cats :missing-dep 0)
+                              n-fix* (+ (get cats :fixable 0) (get cats :unknown 0))]
+                          [rn total-r p n-plat n-dep* n-fix*]))]
+        (println "\n=== PER-REPO ===")
+        (println "repo                  total pass  plat  dep   fix")
+        (doseq [[rn total-r p np nd nf] repo-rows]
+          (println (str (subs (str rn "                      ") 0 22)
+                        (subs (str "    " total-r) (- (count (str "    " total-r)) 4)) " "
+                        (subs (str "    " p) (- (count (str "    " p)) 4)) "  "
+                        (subs (str "    " np) (- (count (str "    " np)) 4)) "  "
+                        (subs (str "    " nd) (- (count (str "    " nd)) 4)) "  "
+                        (subs (str "    " nf) (- (count (str "    " nf)) 4))))))
 
       ;; Top fixable failure reasons (deduplicated by root cause)
       (let [fixable-errors (map (comp root-cause :error) (get grouped :fixable []))
