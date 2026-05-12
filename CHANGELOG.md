@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.145.1 — Task Runner Fix: Pre-Resolve Tasks Outside The BC Doseq Body
+
+`mino task <name>` raised a confusing `subs: first argument must be
+a string` from inside the bench's `lib/mino/tasks/builtin.clj` (or
+any downstream `mino.tasks.builtin` shadow that follows the same
+`(def mino-srcs (vec (filter ... (file-seq ...))))` pattern) when
+the namespace was loaded for the first time *during* the run-task
+loop. The corruption was visible as cons-list forms from inside
+the loaded file's later `defn` bodies showing up as elements of
+the earlier `def`'s vector — the same name reused as a local in
+a later form fell through to the file-load const pool.
+
+Root cause was `mino.tasks/run-task!` triggering the file load
+from inside a bc-compiled doseq body: the file's top-level forms
+landed with the caller's lexical env in scope and the bc compile
+of those forms (specifically the def's value expression) shared
+const-pool slots with the still-mid-execution outer bc frame.
+
+The fix moves `ensure-task-fn` (the namespace require + var
+resolve step) out of the doseq body and into a separate `mapv`
+pass before any task runs, so module loads complete at the
+top-level boundary rather than nested inside an active bc frame.
+Same user-visible task semantics; the resolved task fns are now
+collected as `[task-key sym task-fn]` triples and invoked
+directly through the resolved fn rather than via `(eval (list
+sym))` — which removes a second eval-from-inside-bc edge that
+was easy to trip from any task that also issued a require.
+
+Backed by the surfaces this broke in practice (the mino-bench
+local `mino.tasks.builtin` shadow with its filesystem-walked
+`mino-srcs`) running cleanly through `mino task build` after the
+fix, and the standalone `mino.tasks.builtin/build` path
+unaffected.
+
+The underlying bc-compile-time const-pool interaction with
+nested file loads is still latent for any user code that follows
+the same shape (require triggered from inside a bc-compiled fn
+body with mutually-named locals); the cleanest workaround for
+now is to lift the require above the bc frame, which is what
+this fix does for the canonical task dispatcher.
+
 ## v0.145.0 — Fusion Cycle
 
 Reduce, assoc/conj, and compile-time constant folding all get

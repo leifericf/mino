@@ -52,9 +52,14 @@
   (first (resolve-order* target tasks #{} #{} [])))
 
 (defn- require-ns
-  "Dynamically require a namespace by name string."
+  "Dynamically require a namespace by name string. Uses the function
+   form of `require` so the namespace load happens with a clean top-
+   level evaluation rather than re-entering `eval` from a fn body —
+   the latter exposes the file's top-level forms to the caller's
+   lexical bindings and trips a bc-compile-time fold on shared local
+   names."
   [ns-name]
-  (eval (list 'require (list 'quote [(symbol ns-name)]))))
+  (require (symbol ns-name)))
 
 (defn- ensure-task-fn
   "Require the namespace of task-sym and verify it resolves."
@@ -66,20 +71,34 @@
       (throw (ex-info (str "cannot resolve task function: " task-sym)
                       {:symbol task-sym})))))
 
+(defn- prepare-task
+  "Resolve a single task entry: validate the symbol, require its
+   namespace, and return [task-key task-sym task-fn]. Pulled out of
+   run-task! and called via mapv before the run loop so all module
+   loads happen up front rather than inside the bc-compiled doseq
+   body — a load triggered from inside an active bc frame can
+   interact badly with the compiler's const-pool layout when the
+   loaded file's top-level forms close over locals named the same as
+   the caller's, and pre-resolving avoids that interaction without
+   any change to user-visible task semantics."
+  [tasks task-key]
+  (let [spec  (get tasks task-key)
+        sym   (if (map? spec) (:task spec) spec)]
+    (when (nil? sym)
+      (throw (ex-info (str "task " (name task-key) " has no :task")
+                      {:task task-key})))
+    (ensure-task-fn sym)
+    [task-key sym (deref (resolve sym))]))
+
 (defn run-task!
   "Run a task and all its dependencies in topological order."
   [target tasks]
-  (let [order (resolve-order target tasks)]
-    (doseq [task-key order]
-      (let [spec  (get tasks task-key)
-            sym   (if (map? spec) (:task spec) spec)
-            _     (when (nil? sym)
-                    (throw (ex-info (str "task " (name task-key) " has no :task")
-                                   {:task task-key})))
-            _     (ensure-task-fn sym)
-            start (time-ms)]
+  (let [order    (resolve-order target tasks)
+        prepared (mapv (fn [k] (prepare-task tasks k)) order)]
+    (doseq [[task-key _ task-fn] prepared]
+      (let [start (time-ms)]
         (println (str "--- " (name task-key) " ---"))
-        (eval (list sym))
+        (task-fn)
         (println (str "--- " (name task-key) " ("
                       (- (time-ms) start) "ms) ---"))))))
 
