@@ -1,6 +1,86 @@
 # Changelog
 
-## Unreleased
+## Unreleased — Embedding API: v1.0.0-alpha Shape
+
+The C embedding surface in `src/mino.h` moves substantially toward the
+v1.0.0 contract. The header trims to ~145 public functions (down from
+~174), the body of `struct mino_val` becomes opaque to embedders, the
+pointer-tag scheme moves to a private companion header, the 22
+parallel `mino_install_<cap>` entry points collapse to a single
+`mino_install(S, env, caps)` driven by a registry, and a small set of
+provisional surfaces is explicitly marked unstable.
+
+This is the alpha shape: not a final 1.0 commitment, but a substantial
+reduction in the surface and a cleaner contract for embedders.
+
+### Added: New Public Surface
+
+`mino_typeof` for type dispatch without struct reach-in. A complete
+predicate grid (`mino_is_int` / `_float` / `_string` / `_symbol` /
+`_keyword` / `_char` / `_bool` / `_vector` / `_map` / `_set` / `_fn` /
+`_macro` / `_prim` / `_lazy` / `_var` / `_bigint` / `_ratio` /
+`_bigdec` / `_uuid` / `_regex`). Symmetric extractors
+(`mino_to_keyword` / `_symbol` / `_char`). Structured error access via
+`mino_error_kind` / `mino_error_code` / `mino_clear_error`. The
+eval-family `_ex` matrix (`mino_eval_ex` / `mino_eval_string_ex` /
+`mino_load_file_ex`) matching the existing `mino_pcall` precedent.
+Collection builders (`mino_vector_builder_*` / `mino_map_builder_*` /
+`mino_set_builder_*`) wrapping transients with explicit names. A
+unified collection iterator (`mino_iter_new` / `_next` / `_free`) that
+walks vectors, maps, sets, lists, lazy seqs, and chunked seqs through
+one API. `mino_print_to_buf` for embedders without a `FILE *`.
+`mino_agent_deref` for parity with atom / volatile / ref deref.
+
+### Changed: Data-Driven Capability Install
+
+`mino_install(S, env, caps)` takes a `MINO_CAP_*` bitmask and
+dispatches through a registry table that owns each capability's
+install function. Three named presets cover the common shapes:
+`mino_install_minimal` (floor only), `mino_install_sandbox` (floor +
+canonical Clojure-core + safe libs), `mino_install_all` (every
+capability). New bits cover the bundled stdlib namespaces
+(`MINO_CAP_STRING_LIB`, `MINO_CAP_SET_LIB`, `MINO_CAP_WALK`,
+`MINO_CAP_EDN`, `MINO_CAP_PPRINT`, `MINO_CAP_ZIP`, `MINO_CAP_DATA`,
+`MINO_CAP_TEST`, `MINO_CAP_REPL_LIB`, `MINO_CAP_DATAFY`,
+`MINO_CAP_INSTANT`, `MINO_CAP_SPEC`, `MINO_CAP_TOOLING`).
+`MINO_CAP_DEFAULT` and `MINO_CAP_ALL` macros name the common
+combinations. `MINO_CAP_FLOOR` is always installed implicitly.
+`mino_install` is idempotent and skips re-evaluating `core.clj` on
+subsequent calls so adding capabilities to a running state cannot
+shadow user bindings.
+
+### Renamed: `mino_new` → `mino_env_new_default`
+
+`mino_new` read like a value constructor. The replacement
+`mino_env_new_default` allocates a new env and installs the sandbox
+preset in one call. Alpha posture: no compat shim. Hosts that want a
+specific tier should call `mino_env_new` + `mino_install(S, env, caps)`.
+
+### Removed: Public Per-Capability Install Entry Points
+
+The 22 `mino_install_<cap>` functions leave the public header; their
+implementations move behind the dispatch registry. Hosts that need
+fine-grained control use `mino_install(S, env, MINO_CAP_<CAP>)`. The
+`install_fn` field on `mino_capability_info_t` is gone — the struct
+is now just `{name, bit, summary}`.
+
+### Removed: Struct Reach-In, Tag Macros, Test Helpers
+
+The body of `struct mino_val`, `MINO_TAG_*`, `MINO_MAKE_*`,
+`MINO_*_VAL`, the `host_array_kind_t` enum, fault-injection helpers,
+and the chunked-seq constructors leave the public header. They live
+in a new private companion header `src/mino_internal.h` used by
+runtime internals and whitebox tests. Embedders go through the public
+predicate / extractor / iterator surface instead.
+
+### Marked Unstable: GC, Thread Pool, Allocation Profiler
+
+Three sections of the public header now carry explicit
+`[MINO_UNSTABLE_*]` banners and rendered "subject to change" badges
+on the documentation site. The contracts are functional but
+provisional and may evolve in patch releases on the alpha series.
+Symbols outside these blocks aim for source stability across the
+alpha cut.
 
 ## v0.150.0 — Stabilization Cycle: Realloc Safety, Checked-Size Arithmetic, And Embed-Test Tagging Fixes
 
