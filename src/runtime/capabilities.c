@@ -80,7 +80,7 @@ void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps)
 {
     size_t i;
     unsigned int wanted;
-    unsigned int prev;
+    int first_non_floor_install;
 
     if (S == NULL || env == NULL) return;
 
@@ -99,6 +99,12 @@ void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps)
      * paying for redundant install_* calls. Bits not in the dispatch
      * table (e.g. reserved future bits) are simply ignored. */
     wanted = caps & ~S->caps_installed;
+
+    /* Record whether this is the first time the state has any non-floor
+     * capability installed. core.clj evaluates exactly once per state;
+     * after that, additional capabilities install their C prims into
+     * the existing env without re-running the script-side surface. */
+    first_non_floor_install = ((S->caps_installed & ~MINO_CAP_FLOOR) == 0);
 
     /* Install C primitives and register bundled sources for each bit
      * in `wanted`. After this loop every capability the embedder asked
@@ -120,12 +126,11 @@ void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps)
         mino_install_clojure_test_check(S, env);
     }
 
-    /* If any non-floor capability landed, evaluate core.clj on the
-     * floor env. The gated sections inside core.clj fire based on the
-     * bits we just set. Skip if only the floor + bundled-lib bits were
-     * requested (no Clojure-core surface needed). */
-    prev = caps & ~MINO_CAP_FLOOR;
-    if (prev != 0) {
+    /* Evaluate core.clj on the floor env once we have any non-floor
+     * capability. Skip on subsequent installs against the same state:
+     * the script-side surface is already in place and re-evaluation
+     * would redefine bindings already shadowed by user code. */
+    if (first_non_floor_install && (caps & ~MINO_CAP_FLOOR) != 0) {
         mino_install_clojure_core(S, env);
     }
 }
