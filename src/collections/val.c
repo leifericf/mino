@@ -638,13 +638,20 @@ size_t mino_length(const mino_val_t *list)
 
 int mino_to_int(const mino_val_t *v, long long *out)
 {
-    if (v == NULL || !mino_val_int_p(v)) {
-        return 0;
+    if (v == NULL) return 0;
+    if (mino_val_int_p(v)) {
+        if (out != NULL) *out = mino_val_int_get(v);
+        return 1;
     }
-    if (out != NULL) {
-        *out = mino_val_int_get(v);
+    /* Mirror mino_int's auto-promote contract: when bignum is in play
+     * a bigint that fits in long long round-trips like a boxed int. */
+    if (mino_type_of(v) == MINO_BIGINT) {
+        long long tmp = 0;
+        if (!mino_as_ll(v, &tmp)) return 0;
+        if (out != NULL) *out = tmp;
+        return 1;
     }
-    return 1;
+    return 0;
 }
 
 int mino_to_float(const mino_val_t *v, double *out)

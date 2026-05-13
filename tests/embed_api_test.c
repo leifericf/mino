@@ -146,6 +146,67 @@ static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
             "throw-uncaught: error does not mention unhandled exception");
 }
 
+/* mino_to_int round-trips a value put in via mino_int regardless of
+ * the bignum capability. With bignum installed mino_int auto-promotes
+ * outside the tag range; the inverse extractor must accept bigints
+ * that fit in long long and reject those that don't. */
+static void test_to_int_bignum_round_trip(void)
+{
+    /* (a) bignum installed: mino_int(42) is a bigint and round-trips. */
+    {
+        mino_state_t *S   = mino_state_new();
+        mino_env_t   *env = mino_env_new(S);
+        long long     out = 0;
+        mino_install(S, env, MINO_CAP_BIGNUM);
+        {
+            mino_val_t *v = mino_int(S, 42);
+            REQUIRE(mino_to_int(v, &out) && out == 42,
+                    "to_int/bignum: small mino_int round-trips");
+        }
+        /* (b) Large value above the tag range round-trips too. */
+        {
+            long long large = (long long)1 << 62;
+            mino_val_t *v = mino_int(S, large);
+            out = 0;
+            REQUIRE(mino_to_int(v, &out) && out == large,
+                    "to_int/bignum: tag-overflow mino_int round-trips");
+        }
+        /* (c) bigint_from_ll: explicit bigint construction round-trips. */
+        {
+            mino_val_t *bi = mino_bigint_from_ll(S, 7);
+            out = 0;
+            REQUIRE(mino_to_int(bi, &out) && out == 7,
+                    "to_int/bignum: bigint_from_ll(7) round-trips");
+        }
+        /* (d) Out-of-range bigint correctly rejected. */
+        {
+            mino_val_t *bi = mino_bigint_from_string(S,
+                "100000000000000000000");
+            REQUIRE(bi != NULL, "to_int/bignum: huge bigint constructs");
+            REQUIRE(!mino_to_int(bi, &out),
+                    "to_int/bignum: out-of-range bigint is rejected");
+        }
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+
+    /* (e) No bignum cap: tag-overflow mino_int stays MINO_INT and
+     *     still round-trips (existing behavior preserved). */
+    {
+        mino_state_t *S   = mino_state_new();
+        mino_env_t   *env = mino_env_new(S);
+        long long large   = (long long)1 << 62;
+        long long out = 0;
+        mino_val_t *v;
+        mino_install_minimal(S, env);
+        v = mino_int(S, large);
+        REQUIRE(mino_to_int(v, &out) && out == large,
+                "to_int/no-bignum: large mino_int round-trips");
+        mino_env_free(S, env);
+        mino_state_free(S);
+    }
+}
+
 /* The _ex eval family delivers the raw thrown payload through out_ex,
  * matching the contract documented for mino_pcall. */
 static void test_eval_ex_out_ex_payload(mino_state_t *S, mino_env_t *env)
@@ -301,6 +362,7 @@ int main(void)
     test_read_null_src(S);
     test_iter_sorted(S, env);
     test_eval_ex_out_ex_payload(S, env);
+    test_to_int_bignum_round_trip();
 
     mino_env_free(S, env);
     mino_state_free(S);

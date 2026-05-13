@@ -28,6 +28,13 @@
   instead of the user's original keyword / map / `ex-info` value. The
   raw payload is now stashed before the diagnostic publish and read
   back from the protected-call shim.
+- `mino_to_int` now accepts `MINO_BIGINT` values that fit in `long long`,
+  closing the round-trip gap with `mino_int`'s bignum auto-promote.
+  Values that don't fit are still rejected (`mino_to_int` returns 0).
+  This restores the "transparent int family" contract: a host that
+  puts a `long long` in via `mino_int` can read it back via
+  `mino_to_int` whether the value was tag-inlined, boxed `MINO_INT`,
+  or promoted to `MINO_BIGINT`.
 
 ## v0.151.0 — Embedding API Revamp And Stabilization
 
