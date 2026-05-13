@@ -110,6 +110,15 @@ on the documentation site. The contracts are functional but
 provisional and may evolve in subsequent releases; symbols outside
 these blocks aim for source stability.
 
+### Verification
+
+Built and ran the full test suite (1659 tests, 7690 assertions, 0
+failures) under both AddressSanitizer and UndefinedBehaviorSanitizer.
+Built representative mino-examples binaries (`cookbook/iterate`,
+`cookbook/build_collections`, `cookbook/error_handling`,
+`cpp_embed_test`, `api_stress_test`) under ASan and ran each end to
+end — clean.
+
 ## v0.150.0 — Stabilization Cycle: Realloc Safety, Checked-Size Arithmetic, And Embed-Test Tagging Fixes
 
 Stabilization cycle landing the verified-real findings from a
