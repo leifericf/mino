@@ -77,6 +77,16 @@
            (throw (ex-info "not found" {:code 404}))
            (catch e (ex-data e))))))
 
+(deftest caught-exception-preserves-metadata
+  (testing "ex-info with attached metadata round-trips through catch"
+    (let [caught (try (throw (with-meta (ex-info "x" {}) {:my :m}))
+                      (catch e e))]
+      (is (= {:my :m} (meta caught)))))
+  (testing "plain map with metadata round-trips through catch"
+    (let [caught (try (throw (with-meta {:message "y" :data {}} {:rich :info}))
+                      (catch e e))]
+      (is (= {:rich :info} (meta caught))))))
+
 (deftest ex-info-three-arg-attaches-cause
   (testing "3-arg form returns an ex-info-shaped map"
     (let [root (ex-info "root" {:r 1})

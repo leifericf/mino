@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Fixed: `catch` Dropped Metadata From The Thrown Value
+
+`(let [c (try (throw (with-meta (ex-info "x" {}) {:my :m})) (catch e e))]
+(meta c))` returned `nil` instead of `{:my :m}`.
+`normalize_exception` in `src/eval/control.c` builds a fresh
+diagnostic map whenever the throw isn't already a `:mino/kind`-tagged
+value, and the fresh map had no metadata -- silently dropping
+anything the user (or `ex-info`'s 3-arity cause-via-meta path)
+attached. Now the normalizer copies `ex_val->meta` onto the
+diagnostic when the thrown value is a pointer-tagged allocation
+(tagged primitives like ints can't carry meta and would segfault on
+deref). A regression test in `tests/reader_macros_test.clj`
+(`caught-exception-preserves-metadata`) pins the round-trip for
+both ex-info and plain-map throws.
+
 ### Fixed: `ex-info` Now Accepts A 3-Arity `(ex-info msg data cause)`
 
 `(ex-info "outer" {} (ex-info "root" {}))` -- a routine Clojure

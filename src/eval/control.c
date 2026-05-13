@@ -96,6 +96,7 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
 mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
 {
     mino_val_t *keys[5], *vals[5];
+    mino_val_t *result;
     if (mino_type_of(ex_val) == MINO_MAP
         && map_get_val(ex_val, mino_keyword(S, "mino/kind")) != NULL) {
         return ex_val;
@@ -119,7 +120,17 @@ mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
     }
     keys[4] = mino_keyword(S, "mino/data");
     vals[4] = ex_val;
-    return mino_map(S, keys, vals, 5);
+    result = mino_map(S, keys, vals, 5);
+    /* Carry metadata from the thrown value onto the diagnostic so
+     * (meta caught) round-trips through catch. ex-info already
+     * piggybacks cause chains through metadata; rich-error-info
+     * patterns rely on it too. Guard with MINO_IS_PTR -- tagged
+     * primitives (ints, bools) cannot carry meta and dereferencing
+     * them as `mino_val_t *` would segfault. */
+    if (result != NULL && MINO_IS_PTR(ex_val) && ex_val->meta != NULL) {
+        result->meta = ex_val->meta;
+    }
+    return result;
 }
 
 mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
