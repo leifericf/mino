@@ -618,17 +618,46 @@ void mino_host_threads_quiesce(mino_state_t *S)
      * never finish and we deadlock. */
     saved_depth = mino_yield_lock(S);
 
-    /* Walk outstanding futures and wait for each. Three cases:
-     *   - Spawn-per-future: pthread_join (Win: WaitForSingleObject).
-     *   - Pool-managed: thread_started is 0 because mino didn't
-     *     pthread_create the worker, but a thunk is queued and a
-     *     pool worker will publish a result. Wait on impl->cv until
-     *     state_tag != PENDING.
-     *   - Promise (no thunk, never had a worker): may be undelivered
-     *     forever. Don't block on it -- if the user holds an
-     *     undelivered promise at exit, we must not deadlock the
-     *     process. The future cell is freed by the GC sweep when
-     *     unreachable. */
+    /* Pass 1: cancel every still-pending future and promise cell.
+     * Without this, a worker thunk blocked in mino_future_deref on
+     * a never-to-be-delivered promise — e.g. `@undelivered-gate`
+     * inside a future body — would stay parked in cv_wait forever
+     * and pthread_join would hang the embedder. Cancelling flips
+     * the state_tag to CANCELLED and broadcasts the cell's cv, so
+     * the deref's while-loop exits, throws "future was cancelled"
+     * up through the thunk, and worker_run reaches the publish
+     * path. Worker_run already no-ops the publish when state_tag
+     * is non-PENDING, so the cancelled state is preserved.
+     *
+     * The cancel scope is "every cell still PENDING when teardown
+     * begins" — that's the contract for state_free: tear down the
+     * state, no matter what is parked on a promise or in flight.
+     * Cells with no thread (bare promises) and no waiter cost
+     * nothing here; they simply move to CANCELLED before the GC
+     * sweep collects them. */
+    impl = S->future_list_head;
+    while (impl != NULL) {
+        mu_lock(&impl->mu);
+        if (impl->state_tag == MINO_FUTURE_PENDING) {
+            impl->cancel_flag = 1;
+            impl->state_tag   = MINO_FUTURE_CANCELLED;
+            cv_broadcast(&impl->cv);
+        }
+        mu_unlock(&impl->mu);
+        impl = impl->next_in_state;
+    }
+
+    /* Pass 2: join. Two waiting cases remain:
+     *   - Spawn-per-future: pthread_join (Win: WaitForSingleObject)
+     *     for the worker thread to return after its cancelled
+     *     deref unwinds.
+     *   - Pool-managed: thread_started is 0 (the pool spawned the
+     *     OS thread, not us), but a thunk was queued. Wait on
+     *     impl->cv until state_tag is no longer PENDING — after
+     *     Pass 1 it should already be CANCELLED for any cell that
+     *     hadn't completed, but the cv_wait is the safe shape and
+     *     handles the in-flight-just-finishing race too.
+     * Bare promises with no thunk and no thread skip both cases. */
     impl = S->future_list_head;
     while (impl != NULL) {
         if (impl->thread_started && !impl->thread_joined) {
@@ -646,7 +675,6 @@ void mino_host_threads_quiesce(mino_state_t *S)
             }
             mu_unlock(&impl->mu);
         }
-        /* else: promise with no thunk -- skip; nothing to wait on. */
         impl = impl->next_in_state;
     }
 

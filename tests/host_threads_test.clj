@@ -138,4 +138,19 @@
     (is (some? err))
     (is (some? (re-find #"bc-direct-throw" err)))))
 
+(deftest cancel-of-promise-unblocks-future-deref-on-it
+  ;; A worker deref'ing an undelivered promise parks in cv_wait on
+  ;; the promise's cv. Cancelling the promise must wake the worker
+  ;; so its deref returns with "future was cancelled" -- without
+  ;; this, the embedder side of state_free would block on
+  ;; pthread_join forever because the worker thread never returns.
+  (when (> (mino-thread-limit) 1)
+    (let [gate (promise)
+          f    (future @gate :unreached)]
+      (is (true? (future-cancel gate)))
+      (let [err (try @f nil
+                     (catch e (if (map? e) (:mino/message e) (str e))))]
+        (is (some? err))
+        (is (some? (re-find #"cancelled" err)))))))
+
 (run-tests-and-exit)

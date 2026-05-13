@@ -76,6 +76,27 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: `mino_state_free` No Longer Hangs On Workers Blocked On An Undelivered Promise
+
+A worker thunk that called `@undelivered-promise` parked in `cv_wait`
+on the promise's condition variable. At embedder teardown,
+`mino_host_threads_quiesce` did a straight `pthread_join` on each
+spawned worker thread — and the thread never returned because
+nothing would ever deliver the promise. The embedder process hung
+indefinitely on `mino_state_free`.
+
+Quiesce now does a cancel-pass before joining: every still-PENDING
+future and promise cell on the state's future-list is moved to
+CANCELLED and its cv is broadcast. The worker blocked in
+`mino_future_deref` on the cancelled promise wakes, exits the
+wait loop, throws `future was cancelled` up through its thunk,
+and worker_run reaches the publish path (which no-ops cleanly
+because the worker's own future was also cancelled). The
+`pthread_join` then returns and the state tears down. The
+existing `future-cancel` user-facing primitive already used this
+same mechanism for single futures; quiesce just applies it to
+the whole future-list at shutdown.
+
 ### Fixed: Forward-Declared Unbound Var Now Throws On Access
 
 `(declare x) x` returned `nil` silently on mino. JVM Clojure throws
