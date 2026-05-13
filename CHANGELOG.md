@@ -1,17 +1,19 @@
 # Changelog
 
-## Unreleased — Embedding API: v1.0.0-alpha Shape
+## Unreleased — Embedding API Revamp And Stabilization
 
-The C embedding surface in `src/mino.h` moves substantially toward the
-v1.0.0 contract. The header trims to ~145 public functions (down from
-~174), the body of `struct mino_val` becomes opaque to embedders, the
-pointer-tag scheme moves to a private companion header, the 22
-parallel `mino_install_<cap>` entry points collapse to a single
+The C embedding surface in `src/mino.h` gets a substantial cleanup.
+The header trims to ~145 public functions (down from ~174), the body
+of `struct mino_val` becomes opaque to embedders, the pointer-tag
+scheme moves to a private companion header, the 22 parallel
+`mino_install_<cap>` entry points collapse to a single
 `mino_install(S, env, caps)` driven by a registry, and a small set of
 provisional surfaces is explicitly marked unstable.
 
-This is the alpha shape: not a final 1.0 commitment, but a substantial
-reduction in the surface and a cleaner contract for embedders.
+This is a substantial reduction in the surface and a cleaner contract
+for embedders. The remaining unstable bits (GC tuning, thread-pool
+ABI, allocation profiler) are labelled as such so they can keep
+evolving without surprising callers.
 
 ### Added: New Public Surface
 
@@ -53,8 +55,8 @@ shadow user bindings.
 
 `mino_new` read like a value constructor. The replacement
 `mino_env_new_default` allocates a new env and installs the sandbox
-preset in one call. Alpha posture: no compat shim. Hosts that want a
-specific tier should call `mino_env_new` + `mino_install(S, env, caps)`.
+preset in one call. No compat shim — hosts that want a specific tier
+should call `mino_env_new` + `mino_install(S, env, caps)`.
 
 ### Removed: Public Per-Capability Install Entry Points
 
@@ -78,9 +80,8 @@ predicate / extractor / iterator surface instead.
 Three sections of the public header now carry explicit
 `[MINO_UNSTABLE_*]` banners and rendered "subject to change" badges
 on the documentation site. The contracts are functional but
-provisional and may evolve in patch releases on the alpha series.
-Symbols outside these blocks aim for source stability across the
-alpha cut.
+provisional and may evolve in subsequent releases; symbols outside
+these blocks aim for source stability.
 
 ## v0.150.0 — Stabilization Cycle: Realloc Safety, Checked-Size Arithmetic, And Embed-Test Tagging Fixes
 

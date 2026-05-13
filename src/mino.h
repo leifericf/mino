@@ -1298,10 +1298,10 @@ void mino_quiesce_threads(mino_state_t *S);
 /* Host thread pool, factory, stack-size knobs [MINO_UNSTABLE_THREADPOOL]    */
 /* ------------------------------------------------------------------------- */
 /*
- * UNSTABLE: this section is provisional for the v1.0.0-alpha series. The
- * pool ABI, factory callback shape, and stack-size knobs may change in
- * patch releases. Symbols outside this section aim for source stability
- * across alpha; symbols inside this block do not.
+ * UNSTABLE: this section is provisional. The pool ABI, factory
+ * callback shape, and stack-size knobs may change in subsequent
+ * releases. Symbols outside this section aim for source stability;
+ * symbols inside this block do not.
  *
  * The default model is "spawn-per-future": each `(future ...)` calls
  * pthread_create / CreateThread and the resulting OS thread runs the
@@ -1376,8 +1376,8 @@ void mino_set_thread_stack_size(mino_state_t *S, size_t n);
 /* ------------------------------------------------------------------------- */
 
 /*
- * UNSTABLE: GC tuning, kind enum, phase constants, and the stats struct
- * are provisional for v1.0.0-alpha. The collector is still evolving
+ * UNSTABLE: GC tuning, kind enum, phase constants, and the stats
+ * struct are provisional. The collector is still evolving
  * (generational + incremental layout, threshold heuristics) and this
  * section will track those changes. Pin behavior through explicit
  * mino_gc_collect calls at quiescent points; do not rely on tuning
@@ -1473,8 +1473,8 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out);
  * UNSTABLE: the allocation profiler is opt-in (compile-time gated on
  * -DMINO_ALLOC_PROFILE=1) and its output format is in flux. The
  * functions below are part of the public surface for parity with
- * tooling that needs profile data, but their shape may change between
- * alpha patch releases.
+ * tooling that needs profile data, but their shape may change in
+ * subsequent releases.
  *
  * Reports 1 when the binary was built with -DMINO_ALLOC_PROFILE=1, else 0.
  * The recording paths and dump output are only meaningful in profile builds.
