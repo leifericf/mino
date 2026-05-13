@@ -491,9 +491,15 @@ mino_val_t *sorted_map_assoc1(mino_state_t *S, const mino_val_t *m,
 mino_val_t *sorted_map_dissoc1(mino_state_t *S, const mino_val_t *m,
                                 const mino_val_t *key)
 {
-    mino_rb_node_t *nr = rb_dissoc(S, m->as.sorted.root, key,
-                                    m->as.sorted.comparator);
-    if (nr == m->as.sorted.root) return (mino_val_t *)m;
+    mino_rb_node_t *nr;
+    /* rb_delete clones along the descent even when the key is absent,
+     * so the returned root is never pointer-equal to the input. Guard
+     * with a containment check so an absent-key dissoc returns the
+     * receiver unchanged -- preserving count, equality, and the
+     * identity short-circuit that callers rely on. */
+    if (!rb_contains(S, m->as.sorted.root, key, m->as.sorted.comparator))
+        return (mino_val_t *)m;
+    nr = rb_dissoc(S, m->as.sorted.root, key, m->as.sorted.comparator);
     {
         mino_val_t *nv = alloc_val(S, MINO_SORTED_MAP);
         nv->as.sorted.comparator = m->as.sorted.comparator;
@@ -518,9 +524,11 @@ mino_val_t *sorted_set_conj1(mino_state_t *S, const mino_val_t *s,
 mino_val_t *sorted_set_disj1(mino_state_t *S, const mino_val_t *s,
                               const mino_val_t *elem)
 {
-    mino_rb_node_t *nr = rb_dissoc(S, s->as.sorted.root, elem,
-                                    s->as.sorted.comparator);
-    if (nr == s->as.sorted.root) return (mino_val_t *)s;
+    mino_rb_node_t *nr;
+    /* See sorted_map_dissoc1 for why a containment check is needed. */
+    if (!rb_contains(S, s->as.sorted.root, elem, s->as.sorted.comparator))
+        return (mino_val_t *)s;
+    nr = rb_dissoc(S, s->as.sorted.root, elem, s->as.sorted.comparator);
     {
         mino_val_t *nv = alloc_val(S, MINO_SORTED_SET);
         nv->as.sorted.comparator = s->as.sorted.comparator;

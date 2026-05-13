@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Fixed: `dissoc` / `disj` Of An Absent Key Corrupted Sorted-Collection Count
+
+`(dissoc sorted-map :missing)` and `(disj sorted-set :missing)` returned
+a fresh collection with `count` blindly decremented by one, even though
+the actual red-black tree was structurally unchanged. The same bug
+applied across repeated misses, so `(count (reduce dissoc m (range 100)))`
+on a three-entry sorted-map returned -97. Cascading symptoms: `(= m
+(dissoc m :missing))` was false because the count side disagreed even
+though the entries matched; the identity short-circuit
+`(identical? m (dissoc m :missing))` reported a fresh allocation; and
+the `len` field could underflow into nonsense.
+
+`rb_delete` in `src/collections/rbtree.c` clones along the descent path
+on every call, so the returned root is never pointer-equal to the input
+-- meaning the `if (nr == root) return m;` short-circuit in
+`sorted_map_dissoc1` / `sorted_set_disj1` could never fire. The
+containment check is now done before the rb_delete walk, mirroring the
+shape already used by `mino_map_dissoc1` for hash-maps. Regression
+tests in `tests/collection_test.clj` (`sorted-map-dissoc-missing-noop`,
+`sorted-set-disj-missing-noop`) pin the contract for empty,
+single-element, multi-element, and repeated-miss cases.
+
 ### Fixed: BC Clause Params Vector Was Not Traced By The GC
 
 The bytecode compiler rewrites destructured params like `[[a b]]` into

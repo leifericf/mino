@@ -332,3 +332,44 @@
     (let [s #{:a :b}]
       (is (not (identical? s (disj s :a))))
       (is (= #{:b} (disj s :a))))))
+
+(deftest sorted-map-dissoc-missing-noop
+  (testing "absent key: count and content preserved"
+    (let [m (sorted-map :a 1 :b 2)
+          m2 (dissoc m :z)]
+      (is (= 2 (count m2)))
+      (is (= m m2))
+      (is (identical? m m2))))
+  (testing "absent key: hash agrees with equality"
+    (let [m (sorted-map :a 1 :b 2)]
+      (is (= (hash m) (hash (dissoc m :z))))))
+  (testing "repeated absent dissocs do not underflow count"
+    (let [m (sorted-map :a 1 :b 2 :c 3)
+          m2 (reduce dissoc m (range 100))]
+      (is (= 3 (count m2)))
+      (is (= m m2))))
+  (testing "single-element sorted-map, dissoc missing"
+    (let [m (sorted-map :only 1)]
+      (is (= 1 (count (dissoc m :missing))))
+      (is (identical? m (dissoc m :missing)))))
+  (testing "empty sorted-map, dissoc missing"
+    (let [m (sorted-map)]
+      (is (= 0 (count (dissoc m :missing))))
+      (is (identical? m (dissoc m :missing))))))
+
+(deftest sorted-set-disj-missing-noop
+  (testing "absent element: count and content preserved"
+    (let [s (sorted-set 1 2 3)
+          s2 (disj s 99)]
+      (is (= 3 (count s2)))
+      (is (= s s2))
+      (is (identical? s s2))))
+  (testing "repeated absent disj does not underflow count"
+    (let [s (sorted-set 10 20 30)
+          s2 (reduce disj s (range 100 200))]
+      (is (= 3 (count s2)))
+      (is (= s s2))))
+  (testing "empty sorted-set, disj missing"
+    (let [s (sorted-set)]
+      (is (= 0 (count (disj s :missing))))
+      (is (identical? s (disj s :missing))))))
