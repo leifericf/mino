@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.154.0 — Record Fast Path And Keyword-As-Fn Inlining
+
+Two bytecode-VM tightenings around the most common record / map
+access patterns. `(get coll :kw)` and `(:kw coll)` now share one
+fast path that handles both maps and records: the map path is the
+existing HAMT lookup, the record path is a fixed-slot read after a
+declared-field index scan. The compiler also recognises the
+keyword-as-fn invocation shape `(:kw coll)` at emit time and
+turns it into the same fast lane that `(get coll :kw)` uses, so
+`(.field record)` style accessors no longer pay the apply-callable
+keyword-as-fn dispatch tax.
+
+User shadows, sorted-coll keys, 3-arg `get` with a default, and
+records whose ext-map carries the key all fall through to
+`prim_get`, keeping their full Clojure semantics.
+
+What this leverages from Clojure: records are immutable structs
+with a fixed declared-field set, so the slot index is stable for
+the lifetime of the record type. The keyword-as-fn invocation is
+a documented Clojure shape (`(:k m)` -> `(get m :k)`), and the
+compiler can statically rewrite a literal-keyword head into the
+get path without changing the surface contract.
+
+Benchmark matrix on local Mac M-class, min-of-5, with the empty-
+thunk harness floor subtracted:
+
+| Benchmark      | v0.153.0   | v0.154.0      | Δ      |
+|----------------|------------|---------------|--------|
+| get-kw-record  | 125 ns     | **9 ns**      | -93%   |
+| kw-fn-record   | 70 ns      | **11 ns**     | -84%   |
+| kw-fn-map      | 78 ns      | **18 ns**     | -77%   |
+| get-kw-map     | 22 ns      | 20 ns         | flat   |
+
+### Added
+
+- Record fast path inside `OP_GET_KW_MAP`: when the operand is a
+  `MINO_RECORD`, the runtime walks the type's declared-field
+  vector for an interned-keyword match and reads the value out of
+  the record's slot array directly. A field-name miss falls back
+  through `prim_get` so records carrying an ext-map still surface
+  the right value (or nil) for an absent key.
+- Compile-time recognition of the `(:kw coll)` keyword-as-fn
+  invocation shape: a literal-keyword head with exactly one
+  argument compiles to an `OP_LOAD_K` of the keyword followed by
+  `OP_GET_KW_MAP`, sharing the same map/record fast lanes that
+  `(get coll :kw)` already exercises.
+
+Verification: 1 659 tests / 7 690 assertions green on release,
+ASan, UBSan.
+
 ## v0.153.0 — Small-Prim Inlining For Vectors
 
 The single-arg seq prims `first`, `count`, and `empty?` now compile

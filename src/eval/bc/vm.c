@@ -827,21 +827,38 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         }
 
         case OP_GET_KW_MAP: {
-            /* Fast lane for (get map keyword) -> map value or nil. On a
-             * map+keyword pair this is a single hash + HAMT lookup, no
-             * arg-list cons. Misses fall back to prim_get so non-map
-             * collections / non-keyword keys / 3-arg default forms keep
-             * their full semantics. */
+            /* Fast lane for (get coll keyword) on maps and records.
+             * For MINO_MAP: single hash + HAMT lookup. For MINO_RECORD:
+             * walk the type's declared-fields vector for a name match,
+             * then fetch the value out of the record's slot array
+             * directly. Misses fall back to prim_get so non-map / non-
+             * record collections, non-keyword keys, 3-arg default
+             * forms, and records with an ext-map carrying the key
+             * keep their full semantics. */
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
             unsigned cc = C_OF(ins);
             mino_val_t *coll = regs[b];
             mino_val_t *key  = regs[cc];
-            if (coll != NULL && mino_type_of(coll) == MINO_MAP
-                && key != NULL && mino_type_of(key) == MINO_KEYWORD) {
-                mino_val_t *v = map_get_val(coll, key);
-                regs[a] = v == NULL ? mino_nil(S) : v;
-                break;
+            if (coll != NULL && key != NULL
+                && mino_type_of(key) == MINO_KEYWORD) {
+                int t = mino_type_of(coll);
+                if (t == MINO_MAP) {
+                    mino_val_t *v = map_get_val(coll, key);
+                    regs[a] = v == NULL ? mino_nil(S) : v;
+                    break;
+                }
+                if (t == MINO_RECORD) {
+                    int idx = record_field_index(coll, key);
+                    if (idx >= 0) {
+                        regs[a] = coll->as.record.vals[idx];
+                        break;
+                    }
+                    /* Keyword isn't a declared field. The slow path
+                     * also checks the optional ext-map and returns
+                     * nil for an absent key, so we route there
+                     * instead of returning nil ourselves. */
+                }
             }
             mino_val_t *list = mino_nil(S);
             list = mino_cons(S, key, list);

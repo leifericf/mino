@@ -2430,6 +2430,29 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
     }
     if (argc > 0xFF) { c->ok = 0; return -1; }   /* B operand is 8 bits */
 
+    /* Keyword-as-fn shape `(:kw coll)` with a literal keyword head
+     * and exactly one arg compiles straight to OP_GET_KW_MAP, which
+     * fast-paths both maps and records. Avoids the OP_LOAD_K of the
+     * keyword + OP_CALL + apply_callable's keyword-as-fn dispatch. */
+    if (argc == 1
+        && head != NULL && mino_type_of(head) == MINO_KEYWORD) {
+        int saved_next_kw = c->next_reg;
+        int coll_reg = compile_operand_inplace(c, form->as.cons.cdr->as.cons.car);
+        if (coll_reg < 0) return -1;
+        int key_k = add_const(c, head);
+        if (key_k < 0) return -1;
+        int key_reg = alloc_reg(c);
+        if (key_reg < 0) return -1;
+        if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
+            c->ok = 0; return -1;
+        }
+        emit_abx(c, OP_LOAD_K, (unsigned)key_reg, (unsigned)key_k);
+        emit_abc(c, OP_GET_KW_MAP, (unsigned)dst,
+                 (unsigned)coll_reg, (unsigned)key_reg);
+        c->next_reg = saved_next_kw;
+        return 0;
+    }
+
     /* Allocate consecutive regs: fn slot then argc arg slots. The OP_CALL
      * ABI requires args at A+1..A+argc. */
     int saved_next = c->next_reg;
