@@ -411,3 +411,41 @@
       (is (= :found (get m (sorted-set :a :b))))))
   (testing "empty sorted-set hashes equal to empty hash-set"
     (is (= (hash #{}) (hash (sorted-set))))))
+
+(deftest sequential-hash-honors-equality
+  (testing "empty sequentials hash equal"
+    (is (= (hash []) (hash ())))
+    (is (= (hash []) (hash (list))))
+    ;; Forcing a lazy-seq via `seq` realizes it; the hash then sees an
+    ;; empty sequence rather than the unrealized thunk.
+    (let [l (lazy-seq nil)]
+      (seq l)
+      (is (= (hash []) (hash l)))))
+  (testing "non-empty: vector, list, seq-of-vector, cons-chain hash equal"
+    (let [v  [0 1 2]
+          l  (list 0 1 2)
+          sv (seq [0 1 2])
+          cc (cons 0 (cons 1 (cons 2 nil)))]
+      (is (= v l sv cc))
+      (is (= (hash v) (hash l)))
+      (is (= (hash v) (hash sv)))
+      (is (= (hash v) (hash cc)))))
+  (testing "forced lazy seq hashes equal to vector with same content"
+    (let [r (range 3)
+          _ (doall r)
+          v [0 1 2]]
+      (is (= v r))
+      (is (= (hash v) (hash r)))))
+  (testing "sequential as HAMT-sized hash-map key, looked up by equal but distinct sequential"
+    (let [v      [0 1 2]
+          filler (zipmap (range 100) (range 100))
+          m      (assoc filler v :found)]
+      (is (= :found (get m [0 1 2])))
+      (is (= :found (get m (list 0 1 2))))
+      (is (= :found (get m (seq [0 1 2]))))
+      (is (= :found (get m (cons 0 (cons 1 (cons 2 nil))))))))
+  (testing "hash is independent of sequential representation for nested content"
+    (let [v  [[1 2] [3 4]]
+          l  (list (list 1 2) (list 3 4))]
+      (is (= v l))
+      (is (= (hash v) (hash l))))))

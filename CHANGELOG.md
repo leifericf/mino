@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Fixed: `hash` On Sequential Collections Violated Equal-Implies-Equal-Hash
+
+`(= [0 1 2] (list 0 1 2) (seq [0 1 2]) (cons 0 (cons 1 (cons 2 nil))))`
+is true across all four representations, but `hash_val` had independent
+per-type branches for `MINO_VECTOR`, `MINO_CONS`, `MINO_EMPTY_LIST`, and
+`MINO_CHUNKED_CONS` -- each producing a different hash for the same
+sequential content. The branch comment at `MINO_EMPTY_LIST` already
+acknowledged the gap. User-observable consequence: a sequential value
+used as a key in a HAMT-sized hash-map could not be retrieved by an
+equal-but-distinct sequential value of a different representation:
+`(get {[0 1 2] :found} (list 0 1 2))` returned `nil`.
+
+A new static `hash_sequential` helper now walks any sequential value
+under a unified scheme: FNV basis, tag byte `0x09` (the byte already
+used by `MINO_VECTOR` and `MINO_MAP_ENTRY`, so existing vector hashes
+and the 2-vector / map-entry parity are preserved), then per-element
+fold via `hash_uint32_bytes(h, hash_val(elem))`. Empty vector, empty
+list, `(seq ...)` output, and a realized empty lazy-seq all collapse
+to the same constant. The `cached_hash` slot on vectors is still
+honored. Regression tests in `tests/collection_test.clj`
+(`sequential-hash-honors-equality`) cover empty parity, non-empty
+vector / list / seq / cons-chain parity, realized lazy-seq parity,
+nested-content parity, and HAMT round-trip lookup with mixed-type
+keys.
+
+Known limitation: an *unrealized* lazy-seq still hashes by pointer
+identity. The helper folds in `hash_pointer_bytes(...)` when it meets
+an unrealized lazy tail because `hash_val` has no `mino_state_t` to
+allocate with and so cannot force. Callers that need lazy-content
+hash equality must force first via `seq`, `doall`, `dorun`, or any
+operation that drives iteration. Closing this gap requires threading
+state through the hash API and is tracked for a follow-up.
+
 ### Fixed: `hash` On Sorted-Map / Sorted-Set Violated Equal-Implies-Equal-Hash
 
 `hash_val` in `src/collections/map.c` had no case for `MINO_SORTED_MAP`

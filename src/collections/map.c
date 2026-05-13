@@ -116,6 +116,83 @@ static uint32_t hash_uint32_bytes(uint32_t h, uint32_t x)
     return h;
 }
 
+/* Hash any sequential value (vector, cons-chain, chunked-cons, empty
+ * list, realized lazy seq) under a unified scheme so equal content
+ * across representations always hashes equal. Tag byte 0x09 is shared
+ * with MINO_VECTOR (so existing vector hashes are preserved and
+ * MINO_MAP_ENTRY -- which already uses 0x09 -- stays compatible with a
+ * 2-element vector of the same content).
+ *
+ * Unrealized lazy seq tails are not forced (hash_val has no state to
+ * allocate with). When the walk meets one it folds in the lazy's
+ * pointer-identity hash and stops -- so two distinct unrealized lazies
+ * holding the same would-be content still hash differently. Callers
+ * that need lazy-content hash equality must force first via
+ * `(seq ...)`, `(doall ...)`, or any operation that drives iteration. */
+static uint32_t hash_sequential(const mino_val_t *original)
+{
+    uint32_t h;
+    const mino_val_t *v;
+    if (original != NULL && mino_type_of(original) == MINO_VECTOR
+        && original->as.vec.cached_hash != 0) {
+        return original->as.vec.cached_hash;
+    }
+    h = 2166136261u;
+    h = fnv_mix(h, 0x09);
+    v = original;
+    for (;;) {
+        while (v != NULL && mino_type_of(v) == MINO_LAZY
+               && v->as.lazy.realized) {
+            v = v->as.lazy.cached;
+        }
+        if (v == NULL) break;
+        {
+            mino_type_t t = mino_type_of(v);
+            if (t == MINO_NIL || t == MINO_EMPTY_LIST) break;
+            if (t == MINO_VECTOR) {
+                size_t i;
+                size_t n = v->as.vec.len;
+                for (i = 0; i < n; i++) {
+                    h = hash_uint32_bytes(h, hash_val(vec_nth(v, i)));
+                }
+                break;
+            }
+            if (t == MINO_CONS) {
+                h = hash_uint32_bytes(h, hash_val(v->as.cons.car));
+                v = v->as.cons.cdr;
+                continue;
+            }
+            if (t == MINO_CHUNKED_CONS) {
+                size_t idx = v->as.chunked_cons.off;
+                while (v != NULL && mino_type_of(v) == MINO_CHUNKED_CONS) {
+                    const mino_val_t *ch = v->as.chunked_cons.chunk;
+                    for (; idx < ch->as.chunk.len; idx++) {
+                        h = hash_uint32_bytes(h, hash_val(ch->as.chunk.vals[idx]));
+                    }
+                    v = v->as.chunked_cons.more;
+                    idx = (v != NULL && mino_type_of(v) == MINO_CHUNKED_CONS)
+                              ? v->as.chunked_cons.off : 0;
+                }
+                continue;
+            }
+            if (t == MINO_LAZY) {
+                /* Unrealized tail: can't force without state. Fold the
+                 * lazy's identity-pointer hash so the walk produces a
+                 * stable, distinguishable value, then stop. */
+                h = hash_uint32_bytes(h,
+                        hash_pointer_bytes(2166136261u, (uintptr_t)v));
+                break;
+            }
+            /* Defensive: anything else dispatched here is a bug. */
+            break;
+        }
+    }
+    if (original != NULL && mino_type_of(original) == MINO_VECTOR) {
+        ((mino_val_t *)original)->as.vec.cached_hash = h;
+    }
+    return h;
+}
+
 /* XOR-fold per-entry hashes across a red-black tree. The same mixing
  * scheme as the MINO_MAP / MINO_SET branches in hash_val, just walked
  * via tree recursion instead of the insertion-order vector. Used so
@@ -156,12 +233,7 @@ uint32_t hash_val(const mino_val_t *v)
     case MINO_NIL:
         return fnv_mix(h, 0x01);
     case MINO_EMPTY_LIST:
-        /* Distinct tag from MINO_NIL because (= '() nil) is false.
-         * Note: cross-type seq equality (e.g. (= '() [])) is true but
-         * the cons/vector/empty-list hashes are not yet unified — the
-         * equal-implies-equal-hash invariant has a known gap on the
-         * sequential cross-type axis. Tracked separately. */
-        return fnv_mix(h, 0x15);
+        return hash_sequential(v);
     case MINO_BOOL:
         h = fnv_mix(h, 0x02);
         return fnv_mix(h, (unsigned char)(mino_val_bool_get(v) ? 1 : 0));
@@ -197,24 +269,9 @@ uint32_t hash_val(const mino_val_t *v)
         h = fnv_mix(h, 0x07);
         return fnv_bytes(h, (const unsigned char *)v->as.s.data, v->as.s.len);
     case MINO_CONS:
-        h = fnv_mix(h, 0x08);
-        h = hash_uint32_bytes(h, hash_val(v->as.cons.car));
-        return hash_uint32_bytes(h, hash_val(v->as.cons.cdr));
-    case MINO_VECTOR: {
-        size_t n = v->as.vec.len;
-        size_t i;
-        if (v->as.vec.cached_hash != 0) return v->as.vec.cached_hash;
-        h = fnv_mix(h, 0x09);
-        for (i = 0; i < n; i++) {
-            h = hash_uint32_bytes(h, hash_val(vec_nth(v, i)));
-        }
-        /* Cast through const_cast pattern: the value is logically
-         * immutable but the cache field is a memo. Concurrent fills
-         * compute the same value and the write is uint32-atomic on
-         * the platforms mino targets. */
-        ((mino_val_t *)v)->as.vec.cached_hash = h;
-        return h;
-    }
+        return hash_sequential(v);
+    case MINO_VECTOR:
+        return hash_sequential(v);
     case MINO_MAP_ENTRY: {
         /* Hashes as a 2-vector of (k, v) so cross-type equality with
          * MINO_VECTOR also gives identical hashes (so a hash-map keyed
@@ -288,29 +345,13 @@ uint32_t hash_val(const mino_val_t *v)
          * in mino_eq above). */
         h = fnv_mix(h, 0x14);
         return hash_pointer_bytes(h, (uintptr_t)v);
-    case MINO_CHUNKED_CONS: {
-        /* Element-wise fold across chunk + more. Distinct tag from
-         * cons / vector (mino's seq hashing was already non-uniform
-         * across MINO_CONS / MINO_VECTOR before chunked-cons existed
-         * and is tracked as a separate divergence). */
-        const mino_val_t *cur = v;
-        size_t idx = v->as.chunked_cons.off;
-        h = fnv_mix(h, 0x15);
-        while (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS) {
-            const mino_val_t *ch = cur->as.chunked_cons.chunk;
-            for (; idx < ch->as.chunk.len; idx++) {
-                h = hash_uint32_bytes(h, hash_val(ch->as.chunk.vals[idx]));
-            }
-            cur = cur->as.chunked_cons.more;
-            idx = (cur != NULL && mino_type_of(cur) == MINO_CHUNKED_CONS)
-                      ? cur->as.chunked_cons.off : 0;
-        }
-        if (cur != NULL && mino_type_of(cur) != MINO_NIL
-            && mino_type_of(cur) != MINO_EMPTY_LIST) {
-            h = hash_uint32_bytes(h, hash_val(cur));
-        }
-        return h;
-    }
+    case MINO_CHUNKED_CONS:
+        return hash_sequential(v);
+    case MINO_LAZY:
+        /* Hashes equal to its sequential content when realized; when
+         * unrealized, falls back to identity-pointer inside
+         * hash_sequential. */
+        return hash_sequential(v);
     case MINO_BIGINT: {
         /* Bigints that fit in a long long hash under the MINO_INT tag
          * so (= 1 1N) and (hash-of 1 1N) agree. Larger magnitudes use a
