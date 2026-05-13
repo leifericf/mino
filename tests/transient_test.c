@@ -207,7 +207,7 @@ int main(void)
         fprintf(stderr, "state/env setup failed\n");
         return 1;
     }
-    mino_install_core(S, env);
+    mino_install(S, env, MINO_CAP_DEFAULT);
 
     test_vector_conj_bang(S, env);
     test_vector_assoc_bang(S, env);

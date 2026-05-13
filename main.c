@@ -401,24 +401,20 @@ static void print_repl_capabilities(FILE *out, mino_state_t *S)
     }
 
     fprintf(out, "Capabilities: %d of %d installed\n\n", installed, total);
-    fprintf(out, "  %-*s  %-24s  %s\n", longest, "name", "C entry point",
-            "description");
-    fprintf(out, "  %-*s  %-24s  %s\n", longest, "----",
-            "-------------",
-            "-----------");
+    fprintf(out, "  %-*s  %s\n", longest, "name", "description");
+    fprintf(out, "  %-*s  %s\n", longest, "----", "-----------");
     for (p = mino_capability_list(); p->name != NULL; p++) {
         const char *mark = mino_capability_installed(S, p->bit)
                           ? "  [x]" : "  [ ]";
-        fprintf(out, "%s %-*s  %-24s  %s\n",
+        fprintf(out, "%s %-*s  %s\n",
                 mark, longest, p->name,
-                p->install_fn != NULL ? p->install_fn : "",
                 p->summary != NULL ? p->summary : "");
     }
     fputc('\n', out);
-    fputs("  [x] installed   [ ] available -- call the C entry point\n",
+    fputs("  [x] installed   [ ] available -- the host can enable any\n",
           out);
-    fputs("      from the embedder to enable. mino-installed? exposes\n", out);
-    fputs("      the same bits to running code.\n", out);
+    fputs("      bit with mino_install(S, env, MINO_CAP_<NAME>) from C.\n", out);
+    fputs("      mino-installed? exposes the same bits to running code.\n", out);
 }
 
 /* Exec a companion binary ("mino-nrepl" / "mino-lsp") from PATH, passing

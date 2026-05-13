@@ -179,33 +179,59 @@ static const mino_prim_domain k_core_domains[] = {
 /* ------------------------------------------------------------------------- */
 
 static const mino_capability_info_t k_capability_info[] = {
-    { "floor",        MINO_CAP_FLOOR,        "mino_install_minimal",
+    { "floor",        MINO_CAP_FLOOR,
       "Numeric, collections, sequences, printing, foundational macros." },
-    { "regex",        MINO_CAP_REGEX,        "mino_install_regex",
+    { "regex",        MINO_CAP_REGEX,
       "re-pattern / re-find / re-matches / re-seq / re-matcher." },
-    { "bignum",       MINO_CAP_BIGNUM,       "mino_install_bignum",
+    { "bignum",       MINO_CAP_BIGNUM,
       "Arbitrary-precision integers, ratios, decimals, primed arithmetic." },
-    { "multimethods", MINO_CAP_MULTIMETHODS, "mino_install_multimethods",
+    { "multimethods", MINO_CAP_MULTIMETHODS,
       "defmulti / defmethod / hierarchies / print-method dispatch." },
-    { "protocols",    MINO_CAP_PROTOCOLS,    "mino_install_protocols",
+    { "protocols",    MINO_CAP_PROTOCOLS,
       "defprotocol / extend-protocol / extend-type / satisfies?." },
-    { "transducers",  MINO_CAP_TRANSDUCERS,  "mino_install_transducers",
+    { "transducers",  MINO_CAP_TRANSDUCERS,
       "transduce / sequence / xform-arity into / completing / halt-when." },
-    { "io",           MINO_CAP_IO,           "mino_install_io",
+    { "io",           MINO_CAP_IO,
       "slurp / spit / read-line / time-ms / nano-time / file-seq." },
-    { "fs",           MINO_CAP_FS,           "mino_install_fs",
+    { "fs",           MINO_CAP_FS,
       "file-exists? / directory? / mkdir-p / rm-rf." },
-    { "proc",         MINO_CAP_PROC,         "mino_install_proc",
+    { "proc",         MINO_CAP_PROC,
       "sh / sh! (external process execution)." },
-    { "stm",          MINO_CAP_STM,          "mino_install_stm",
+    { "stm",          MINO_CAP_STM,
       "ref / dosync / alter / commute / ensure / ref-set." },
-    { "agent",        MINO_CAP_AGENT,        "mino_install_agent",
+    { "agent",        MINO_CAP_AGENT,
       "agent / send / send-off / await / agent-error / restart-agent." },
-    { "host",         MINO_CAP_HOST,         "mino_install_host",
-      "Host interop dispatcher (FFI / JNI surface for embedder values)." },
-    { "async",        MINO_CAP_ASYNC,        "mino_install_async",
+    { "host",         MINO_CAP_HOST,
+      "Host interop dispatcher (FFI registry for embedder values)." },
+    { "async",        MINO_CAP_ASYNC,
       "chan / go / <! / >! / alts! / timeout (core.async surface)." },
-    { NULL,           0u,                    NULL,                          NULL },
+    { "string-lib",   MINO_CAP_STRING_LIB,
+      "clojure.string (capitalize / split / replace / join / ...)." },
+    { "set-lib",      MINO_CAP_SET_LIB,
+      "clojure.set (union / intersection / difference / project / ...)." },
+    { "walk",         MINO_CAP_WALK,
+      "clojure.walk (postwalk / prewalk / keywordize-keys / ...)." },
+    { "edn",          MINO_CAP_EDN,
+      "clojure.edn (read / read-string with EDN safety)." },
+    { "pprint",       MINO_CAP_PPRINT,
+      "clojure.pprint (pprint / cl-format / pprint-tabular)." },
+    { "zip",          MINO_CAP_ZIP,
+      "clojure.zip (vector / xml / tree zipper navigation)." },
+    { "data",         MINO_CAP_DATA,
+      "clojure.data (diff / EqualityPartition)." },
+    { "test",         MINO_CAP_TEST,
+      "clojure.test (deftest / is / are / testing) + test.check." },
+    { "repl-lib",     MINO_CAP_REPL_LIB,
+      "clojure.repl (doc / source / apropos)." },
+    { "datafy",       MINO_CAP_DATAFY,
+      "clojure.datafy + clojure.core.protocols (datafy / nav)." },
+    { "instant",      MINO_CAP_INSTANT,
+      "clojure.instant (read-instant-date / -calendar / -timestamp)." },
+    { "spec",         MINO_CAP_SPEC,
+      "clojure.spec.alpha (spec/def / spec/valid? / spec/explain / ...)." },
+    { "tooling",      MINO_CAP_TOOLING,
+      "mino.deps + mino.tasks (deps resolution, task runner)." },
+    { NULL,           0u,                                                NULL },
 };
 
 const mino_capability_info_t *mino_capability_list(void)
@@ -561,19 +587,3 @@ void mino_install_clojure_core(mino_state_t *S, mino_env_t *env)
     (void)env;
 }
 
-/* Backward-compat alias. Existing embedders calling mino_install_core
- * get the canonical Clojure-core surface: floor + regex + bignum +
- * multimethods + protocols + transducers, evaluated as if every
- * capability had been opted in. mino_install_all chains this with
- * the I/O / fs / proc / stm / agent / host / async installers. */
-void mino_install_core(mino_state_t *S, mino_env_t *env)
-{
-    if ((S->caps_installed & MINO_CAP_REGEX) == 0)
-        mino_install_regex(S, env);
-    if ((S->caps_installed & MINO_CAP_BIGNUM) == 0)
-        mino_install_bignum(S, env);
-    S->caps_installed |= MINO_CAP_MULTIMETHODS;
-    S->caps_installed |= MINO_CAP_PROTOCOLS;
-    S->caps_installed |= MINO_CAP_TRANSDUCERS;
-    mino_install_clojure_core(S, env);
-}

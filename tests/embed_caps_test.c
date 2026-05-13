@@ -15,7 +15,7 @@
  * 3. mino_install_all: full surface. Verify every capability bit is set.
  */
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -90,11 +90,10 @@ static void test_minimal_plus_multimethods(void)
     mino_state_t *S   = mino_state_new();
     mino_env_t   *env = mino_env_new(S);
 
-    /* Order matters: caps must be set before mino_install_clojure_core
-     * evaluates core.clj. Only multimethods is opted in; protocols,
-     * transducers, regex, bignum stay off. */
-    mino_install_multimethods(S, env);
-    mino_install_clojure_core(S, env);
+    /* Install only the multimethods bit; protocols, transducers,
+     * regex, bignum stay off. mino_install evaluates core.clj once the
+     * cap is set, so the gated defmulti section fires. */
+    mino_install(S, env, MINO_CAP_MULTIMETHODS);
 
     REQUIRE(mino_capability_installed(S, MINO_CAP_MULTIMETHODS),
             "multimethods cap is set after install");

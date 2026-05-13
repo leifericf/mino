@@ -340,6 +340,53 @@ mino_val_t *mino_chunked_cons(mino_state_t *S, mino_val_t *chunk,
 mino_val_t *mino_chunked_cons_advance(mino_state_t *S, const mino_val_t *cs);
 
 /* ------------------------------------------------------------------------- */
+/* Per-capability install functions (internal-only)                          */
+/* ------------------------------------------------------------------------- */
+
+/* Each function registers the C primitives for its capability and sets
+ * the corresponding MINO_CAP_* bit on the state. These are dispatched
+ * from the capability registry in runtime/capabilities.c; embedders use
+ * mino_install(S, env, caps) and never call these directly. */
+
+void mino_install_regex       (mino_state_t *S, mino_env_t *env);
+void mino_install_bignum      (mino_state_t *S, mino_env_t *env);
+void mino_install_multimethods(mino_state_t *S, mino_env_t *env);
+void mino_install_protocols   (mino_state_t *S, mino_env_t *env);
+void mino_install_transducers (mino_state_t *S, mino_env_t *env);
+void mino_install_io          (mino_state_t *S, mino_env_t *env);
+void mino_install_fs          (mino_state_t *S, mino_env_t *env);
+void mino_install_proc        (mino_state_t *S, mino_env_t *env);
+void mino_install_stm         (mino_state_t *S, mino_env_t *env);
+void mino_install_agent       (mino_state_t *S, mino_env_t *env);
+void mino_install_host        (mino_state_t *S, mino_env_t *env);
+void mino_install_async       (mino_state_t *S, mino_env_t *env);
+
+/* Bundled-stdlib registration hooks. Each registers the in-binary source
+ * for its namespace via mino_register_bundled_lib so a subsequent
+ * (require '[<ns>]) loads it from memory. Pairs that depend on each
+ * other ship as a single hook (clojure.repl + clojure.stacktrace;
+ * clojure.datafy + clojure.core.protocols; clojure.test +
+ * clojure.test.check). */
+void mino_install_clojure_string    (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_set       (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_walk      (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_edn       (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_pprint    (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_zip       (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_data      (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_test      (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_test_check(mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_repl      (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_datafy    (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_instant   (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_spec      (mino_state_t *S, mino_env_t *env);
+void mino_install_mino_tooling      (mino_state_t *S, mino_env_t *env);
+
+/* Internal: evaluate core.clj on the floor env. Used by mino_install
+ * after capability bits are set; idempotent. */
+void mino_install_clojure_core(mino_state_t *S, mino_env_t *env);
+
+/* ------------------------------------------------------------------------- */
 /* Fault injection (test-only)                                               */
 /* ------------------------------------------------------------------------- */
 

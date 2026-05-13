@@ -173,34 +173,5 @@ void mino_install_mino_tooling(mino_state_t *S, mino_env_t *env)
 
 void mino_install_all(mino_state_t *S, mino_env_t *env)
 {
-    /* Flip every gateable capability bit up front so the gated sections
-     * of core.clj evaluate as part of mino_install_core below. host and
-     * async used to install transparently via k_core_domains; now they
-     * route through their public hooks for consistent capability
-     * tagging. */
-    mino_install_multimethods(S, env);
-    mino_install_protocols(S, env);
-    mino_install_transducers(S, env);
-    mino_install_core(S, env);
-    mino_install_io(S, env);
-    mino_install_fs(S, env);
-    mino_install_proc(S, env);
-    mino_install_stm(S, env);
-    mino_install_agent(S, env);
-    mino_install_async(S, env);
-    mino_install_host(S, env);
-    mino_install_clojure_string(S, env);
-    mino_install_clojure_set(S, env);
-    mino_install_clojure_walk(S, env);
-    mino_install_clojure_edn(S, env);
-    mino_install_clojure_pprint(S, env);
-    mino_install_clojure_zip(S, env);
-    mino_install_clojure_data(S, env);
-    mino_install_clojure_test(S, env);
-    mino_install_clojure_repl(S, env);
-    mino_install_clojure_datafy(S, env);
-    mino_install_clojure_instant(S, env);
-    mino_install_clojure_spec(S, env);
-    mino_install_clojure_test_check(S, env);
-    mino_install_mino_tooling(S, env);
+    mino_install(S, env, MINO_CAP_ALL);
 }

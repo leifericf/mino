@@ -769,11 +769,10 @@ mino_val_t *mino_load_file(mino_state_t *S, const char *path, mino_env_t *env)
     return result;
 }
 
-mino_env_t *mino_new(mino_state_t *S)
+mino_env_t *mino_env_new_default(mino_state_t *S)
 {
     mino_env_t *env = mino_env_new(S);
-    mino_install_core(S, env);
-    mino_install_io(S, env);
+    mino_install_sandbox(S, env);
     return env;
 }
 

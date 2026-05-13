@@ -769,77 +769,23 @@ void        mino_env_free(mino_state_t *S, mino_env_t *env);
 mino_env_t *mino_env_clone(mino_state_t *S, mino_env_t *env);
 
 /*
- * Convenience: allocate a new env and install all bindings in one call.
- * Equivalent to mino_env_new() followed by mino_install_core() and
- * mino_install_io().  For a sandboxed environment without I/O, call
- * mino_env_new() and mino_install_core() directly.
+ * Convenience: allocate a new env and install the sandbox preset.
+ * Equivalent to:
+ *
+ *   mino_env_t *env = mino_env_new(S);
+ *   mino_install_sandbox(S, env);
+ *
+ * Use this when getting a runnable env in one line matters and the
+ * sandbox surface is the right contract. For a custom tier, build the
+ * env explicitly and pass a MINO_CAP_* bitmask to mino_install.
  */
-mino_env_t *mino_new(mino_state_t *S);
+mino_env_t *mino_env_new_default(mino_state_t *S);
 
 /* Define or replace a binding in `env`. */
 void        mino_env_set(mino_state_t *S, mino_env_t *env, const char *name,
                          mino_val_t *val);
 /* Look up `name`. Returns NULL if unbound. */
 mino_val_t *mino_env_get(mino_env_t *env, const char *name);
-
-/*
- * Install all core primitive bindings and the standard library into `env`.
- * This includes arithmetic, comparison, collections, sequences, predicates,
- * strings, reflection, and the `core.clj` stdlib. Does not install I/O
- * primitives; call `mino_install_io` separately to opt in.
- */
-void        mino_install_core(mino_state_t *S, mino_env_t *env);
-
-/*
- * Install I/O primitives: println, prn, slurp, spit, exit. These are kept
- * separate from mino_install_core so that sandboxed environments start with
- * no I/O capability; the host opts in by calling this function.
- */
-void        mino_install_io(mino_state_t *S, mino_env_t *env);
-
-/*
- * Install filesystem primitives: file-exists?, directory?, mkdir-p, rm-rf.
- *
- * Separate from I/O because these grant directory creation and deletion
- * capabilities.  The host opts in by calling this function.
- */
-void        mino_install_fs(mino_state_t *S, mino_env_t *env);
-
-/*
- * Install process execution primitives: sh, sh!.
- *
- * These allow spawning external processes via popen.  Separate from
- * core/io because process execution is a powerful capability that
- * sandboxed environments may wish to withhold.
- */
-void        mino_install_proc(mino_state_t *S, mino_env_t *env);
-
-/*
- * Install Software Transactional Memory primitives: ref, ref?,
- * dosync*, ref-set, alter, commute, ensure, io!, plus the watch /
- * validator extensions on refs.
- *
- * Lazy-initializes the per-state global commit lock on first call.
- * Embedders that never call this pay nothing beyond a NULL
- * `current_tx` pointer per thread context. The standalone `./mino`
- * binary calls this through `mino_install_all`.
- *
- * mino's STM uses single-version optimistic locking, NOT MVCC with
- * history. ref-min-history / ref-max-history / ref-history-count are
- * stubs returning 0 / 10 / 0. Long readers under sustained writer
- * contention may exhaust the 10000-retry cap rather than serve an
- * older snapshot from history.
- */
-void        mino_install_stm(mino_state_t *S, mino_env_t *env);
-
-/*
- * Install the agent surface: agent / agent? / send / send-off / await
- * / await-for / agent-error / restart-agent / set-error-handler! /
- * error-handler / set-error-mode! / error-mode / shutdown-agents /
- * release-pending-sends. mino_install_all calls this; embedders
- * calling only mino_new keep agents opt-out.
- */
-void        mino_install_agent(mino_state_t *S, mino_env_t *env);
 
 /*
  * Evaluate one form. Returns NULL on error and writes a message via
@@ -1025,85 +971,34 @@ void mino_register_bundled_lib(mino_state_t *S, const char *name,
                                 const char *source);
 
 /* ------------------------------------------------------------------------- */
-/* Bundled clojure.* stdlib install hooks                                    */
-/* ------------------------------------------------------------------------- */
-
-/*
- * Per-namespace install hooks for the bundled clojure.* stdlib. Each
- * call registers the in-binary source for its namespace so a
- * subsequent (require '[<ns>]) loads it from memory instead of
- * looking on disk. The C primitives that some of these namespaces
- * layer over are installed by `mino_install_core`; these hooks add
- * the wrapper sources only.
- *
- * Pairs that depend on each other ship as a single hook:
- *   - clojure.repl + clojure.stacktrace
- *   - clojure.datafy + clojure.core.protocols
- *
- * Standalone builds and embedders that want everything can call
- * `mino_install_all` instead of this surface.
- */
-void mino_install_clojure_string(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_set(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_walk(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_edn(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_pprint(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_zip(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_data(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_test(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_repl(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_datafy(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_instant(mino_state_t *S, mino_env_t *env);
-void mino_install_clojure_spec(mino_state_t *S, mino_env_t *env);
-
-/* mino.deps + mino.tasks + mino.tasks.builtin -- the bundled
- * mino-side sources for the standalone binary's `mino deps` and
- * `mino task` subcommands. Embedders that don't expose those
- * subcommands can omit this hook. */
-void mino_install_mino_tooling(mino_state_t *S, mino_env_t *env);
-
-/*
- * Register the every-bundled-namespace + every-primitive-group set
- * the standalone binary ships with. Equivalent to the sequence:
- *
- *   mino_install_core(S, env);
- *   mino_install_io(S, env);
- *   mino_install_fs(S, env);
- *   mino_install_proc(S, env);
- *   mino_install_clojure_string(S, env);
- *   mino_install_clojure_set(S, env);
- *   mino_install_clojure_walk(S, env);
- *   mino_install_clojure_edn(S, env);
- *   mino_install_clojure_pprint(S, env);
- *   mino_install_clojure_zip(S, env);
- *   mino_install_clojure_data(S, env);
- *   mino_install_clojure_test(S, env);
- *   mino_install_clojure_repl(S, env);
- *   mino_install_clojure_datafy(S, env);
- *   mino_install_clojure_instant(S, env);
- *   mino_install_clojure_spec(S, env);
- *
- * Use this when you want the same surface a brew/scoop install
- * would provide. Embedders that need a tighter footprint pick the
- * subset they care about explicitly.
- */
-void mino_install_all(mino_state_t *S, mino_env_t *env);
-
-/* ------------------------------------------------------------------------- */
 /* Capability-gated install API                                              */
 /* ------------------------------------------------------------------------- */
 
 /*
- * Capability identifiers. Each bit corresponds to an `mino_install_<cap>`
- * entry point. The set of installed capabilities is tracked on the
- * state and surfaced to mino code via `(mino-installed? :cap)` and to
- * the REPL via `:capabilities`. Embedders inspect installed bits
- * with `mino_capability_installed` and enumerate the full set with
- * `mino_capability_list`.
+ * Capabilities are addressable as bits. Pass a bitmask to mino_install to
+ * install exactly the subset the host wants:
  *
- * MINO_CAP_FLOOR is the implicit "always on" baseline (numeric / coll
- * / seq / printing / foundational macros). The other bits flip as the
- * corresponding `mino_install_<cap>` is invoked.
+ *   mino_install(S, env, MINO_CAP_IO | MINO_CAP_FS | MINO_CAP_REGEX);
+ *
+ * Or pick one of the named presets:
+ *
+ *   mino_install_minimal(S, env)  -> floor only, no core.clj
+ *   mino_install_sandbox(S, env)  -> floor + canonical Clojure-core + safe libs;
+ *                                    no I/O, FS, PROC, STM, AGENT, HOST, ASYNC
+ *   mino_install_all(S, env)      -> every capability and every bundled lib
+ *
+ * The floor (MINO_CAP_FLOOR) is always installed by any mino_install* call
+ * — numeric, collections, sequences, printing, foundational macros, plus
+ * the *ns* / *out* / *in* dynamic vars. Passing caps = 0 to mino_install
+ * is equivalent to mino_install_minimal.
+ *
+ * Capabilities are independent; mino_install does not chain implicit
+ * dependencies. Embedders who want canonical bundles use MINO_CAP_DEFAULT
+ * or MINO_CAP_ALL. mino_install is idempotent: re-installing a capability
+ * is a no-op.
+ *
+ * Calling mino_install with any non-floor capability also evaluates
+ * core.clj on the floor env so the capability-gated sections fire.
  */
 #define MINO_CAP_FLOOR         (1u <<  0)
 #define MINO_CAP_REGEX         (1u <<  1)
@@ -1118,63 +1013,78 @@ void mino_install_all(mino_state_t *S, mino_env_t *env);
 #define MINO_CAP_AGENT         (1u << 10)
 #define MINO_CAP_HOST          (1u << 11)
 #define MINO_CAP_ASYNC         (1u << 12)
+#define MINO_CAP_STRING_LIB    (1u << 13)  /* clojure.string */
+#define MINO_CAP_SET_LIB       (1u << 14)  /* clojure.set */
+#define MINO_CAP_WALK          (1u << 15)  /* clojure.walk */
+#define MINO_CAP_EDN           (1u << 16)  /* clojure.edn */
+#define MINO_CAP_PPRINT        (1u << 17)  /* clojure.pprint */
+#define MINO_CAP_ZIP           (1u << 18)  /* clojure.zip */
+#define MINO_CAP_DATA          (1u << 19)  /* clojure.data */
+#define MINO_CAP_TEST          (1u << 20)  /* clojure.test (+ clojure.test.check) */
+#define MINO_CAP_REPL_LIB      (1u << 21)  /* clojure.repl */
+#define MINO_CAP_DATAFY        (1u << 22)  /* clojure.datafy + core.protocols */
+#define MINO_CAP_INSTANT       (1u << 23)  /* clojure.instant */
+#define MINO_CAP_SPEC          (1u << 24)  /* clojure.spec.alpha */
+#define MINO_CAP_TOOLING       (1u << 25)  /* mino.deps + mino.tasks */
+
+/* The sandbox preset: floor + Clojure-core (multimethods, protocols,
+ * transducers, regex, bignum) + the bundled libraries that have no I/O
+ * surface (string, set, walk, edn, data, test, datafy). Excludes IO, FS,
+ * PROC, HOST, STM, AGENT, ASYNC. */
+#define MINO_CAP_DEFAULT (MINO_CAP_FLOOR | MINO_CAP_REGEX | MINO_CAP_BIGNUM | \
+                          MINO_CAP_MULTIMETHODS | MINO_CAP_PROTOCOLS | \
+                          MINO_CAP_TRANSDUCERS | MINO_CAP_STRING_LIB | \
+                          MINO_CAP_SET_LIB | MINO_CAP_WALK | MINO_CAP_EDN | \
+                          MINO_CAP_DATA | MINO_CAP_TEST | MINO_CAP_DATAFY)
+
+/* Every defined capability bit. */
+#define MINO_CAP_ALL     0xFFFFFFFFu
 
 /*
- * Install only the floor: foundational C primitives plus the unconditional
- * sections of core.clj (defn / when / cond / and / or / threading / lazy
- * seqs / basic collections / printing). Does NOT install regex, bignum,
- * multimethods, protocols, transducers, I/O, fs, proc, stm, agents, host
- * interop, or async. Embedders opt into those with the per-capability
- * hooks below before the first eval.
- *
- * Use when targeting Lua-class cold start in embedded mode.
+ * Install the given set of capabilities into env. FLOOR is always
+ * installed implicitly. Passing 0 installs just the floor (no core.clj),
+ * matching mino_install_minimal. Idempotent: bits already installed are
+ * skipped silently.
+ */
+void mino_install(mino_state_t *S, mino_env_t *env, unsigned int caps);
+
+/*
+ * Floor-only convenience. Installs the foundational C primitives plus
+ * the unconditional sections of core.clj's prelude (defn / when / cond /
+ * and / or / threading / lazy seqs / basic collections / printing). Does
+ * NOT evaluate core.clj. Use when targeting Lua-class cold start in
+ * embedded mode.
  */
 void mino_install_minimal(mino_state_t *S, mino_env_t *env);
 
 /*
- * Per-capability install hooks. Each sets the corresponding MINO_CAP_*
- * bit on the state and registers the capability's C primitives. For
- * capabilities whose user-visible surface is implemented in core.clj
- * (multimethods, protocols, transducers, regex helpers, bignum primed
- * arithmetic), the matching core.clj section is gated on
- * `(mino-installed? :cap)` and activates when this hook runs before
- * `mino_install_core` (or its `mino_install_clojure_core` alias).
- *
- * mino_install_io / _fs / _proc / _stm / _agent / _host / _async are
- * declared elsewhere in this header — they predate this API and are
- * order-free with respect to core.clj.
+ * Sandbox preset: equivalent to mino_install(S, env, MINO_CAP_DEFAULT).
+ * Names the recipe for "safe untrusted-script env" so embedders don't
+ * reinvent the threat model.
  */
-void mino_install_regex(mino_state_t *S, mino_env_t *env);
-void mino_install_bignum(mino_state_t *S, mino_env_t *env);
-void mino_install_multimethods(mino_state_t *S, mino_env_t *env);
-void mino_install_protocols(mino_state_t *S, mino_env_t *env);
-void mino_install_transducers(mino_state_t *S, mino_env_t *env);
+void mino_install_sandbox(mino_state_t *S, mino_env_t *env);
 
 /*
- * Install the full Clojure-core surface: floor + multimethods + protocols
- * + transducers + regex + bignum, then evaluate core.clj. Equivalent to
- * the existing mino_install_core which is kept as a backward-compat
- * alias; new embedder code should prefer this name. Does NOT install
- * I/O or process capabilities — see mino_install_all for "everything".
+ * Install every capability and every bundled stdlib namespace the
+ * standalone binary ships with. Equivalent to
+ * mino_install(S, env, MINO_CAP_ALL).
  */
-void mino_install_clojure_core(mino_state_t *S, mino_env_t *env);
+void mino_install_all(mino_state_t *S, mino_env_t *env);
 
-/*
- * Inspect installed capabilities. Bit set per MINO_CAP_*.
- */
+/* Inspect installed capabilities. Bit set per MINO_CAP_*. */
 unsigned int mino_capabilities(const mino_state_t *S);
 int          mino_capability_installed(const mino_state_t *S, unsigned int cap);
 
 /*
- * Enumerate the full capability registry. The returned array is
- * static, NULL-terminated, and ordered to match the install-tier
- * grouping used by the REPL's `:capabilities` view.
+ * Enumerate the full capability registry. The returned array is static,
+ * NULL-terminated, and ordered by install tier. Each entry names the
+ * capability, its bit, and a one-line UX summary. Use this to render a
+ * "supported capabilities" list to the host's user.
  */
 typedef struct {
-    const char  *name;       /* canonical label ("io", "regex", ...) */
-    unsigned int bit;        /* MINO_CAP_* */
-    const char  *install_fn; /* C entry point name ("mino_install_io") */
-    const char  *summary;    /* one-line UX description */
+    const char  *name;     /* canonical label ("io", "regex", ...) */
+    unsigned int bit;      /* MINO_CAP_* */
+    const char  *summary;  /* one-line UX description */
 } mino_capability_info_t;
 
 const mino_capability_info_t *mino_capability_list(void);

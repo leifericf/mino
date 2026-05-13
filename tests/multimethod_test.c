@@ -155,7 +155,7 @@ int main(void)
         fprintf(stderr, "setup failed\n");
         return 1;
     }
-    mino_install_core(S, env);
+    mino_install(S, env, MINO_CAP_DEFAULT);
 
     test_dispatch_by_keyword(S, env);
     test_methods_api(S, env);

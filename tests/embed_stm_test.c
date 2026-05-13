@@ -363,7 +363,7 @@ static void test_run_retry_under_contention(mino_state_t *S, mino_env_t *env)
 static void test_cross_state_ref_throws(mino_state_t *S, mino_env_t *env)
 {
     mino_state_t *S2     = mino_state_new();
-    mino_env_t   *env2   = mino_new(S2);
+    mino_env_t   *env2   = mino_env_new_default(S2);
     mino_val_t   *foreign_r = mino_tx_ref(S2, mino_int(S2, 0));
     const char   *err;
 
@@ -433,7 +433,7 @@ static void test_cross_state_ref_throws(mino_state_t *S, mino_env_t *env)
 static void test_cross_state_agent_throws(mino_state_t *S, mino_env_t *env)
 {
     mino_state_t *S2     = mino_state_new();
-    mino_env_t   *env2   = mino_new(S2);
+    mino_env_t   *env2   = mino_env_new_default(S2);
     mino_val_t   *foreign_a;
     const char   *err;
     static const char *const probes[] = {
@@ -497,7 +497,7 @@ static void test_cross_state_agent_throws(mino_state_t *S, mino_env_t *env)
 static void test_shutdown_agents_seals_state(void)
 {
     mino_state_t *S   = mino_state_new();
-    mino_env_t   *env = mino_new(S);
+    mino_env_t   *env = mino_env_new_default(S);
     mino_set_thread_limit(S, 2);
     mino_install_agent(S, env);
     {
@@ -538,7 +538,7 @@ static void test_shutdown_agents_seals_state(void)
 static void test_shutdown_agents_self_call_throws(void)
 {
     mino_state_t *S   = mino_state_new();
-    mino_env_t   *env = mino_new(S);
+    mino_env_t   *env = mino_env_new_default(S);
     mino_set_thread_limit(S, 2);
     mino_install_agent(S, env);
     {
@@ -582,7 +582,7 @@ static mino_val_t *prim_test_sleep(mino_state_t *S, mino_val_t *args,
 static void test_c_api_agents(void)
 {
     mino_state_t *S   = mino_state_new();
-    mino_env_t   *env = mino_new(S);
+    mino_env_t   *env = mino_env_new_default(S);
     mino_set_thread_limit(S, 4);
     mino_install_agent(S, env);
 
@@ -703,7 +703,7 @@ static void test_c_api_agents(void)
      * on S; must throw MST007 and return NULL. */
     {
         mino_state_t *S2 = mino_state_new();
-        mino_env_t   *env2 = mino_new(S2);
+        mino_env_t   *env2 = mino_env_new_default(S2);
         mino_val_t   *foreign;
         mino_set_thread_limit(S2, 2);
         mino_install_agent(S2, env2);
@@ -727,7 +727,7 @@ static void test_c_api_agents(void)
 int main(void)
 {
     mino_state_t *S   = mino_state_new();
-    mino_env_t   *env = mino_new(S);
+    mino_env_t   *env = mino_env_new_default(S);
 
     test_predicate_and_construction(S);
     test_run_basic(S, env);

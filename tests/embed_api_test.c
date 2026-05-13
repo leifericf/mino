@@ -149,7 +149,7 @@ static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
 int main(void)
 {
     mino_state_t *S = mino_state_new();
-    mino_env_t   *env = mino_new(S);
+    mino_env_t   *env = mino_env_new_default(S);
 
     test_version();
     test_args_parse_ok(S, env);

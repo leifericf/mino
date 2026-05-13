@@ -22,7 +22,7 @@
  * where <dot>c is shell glob for all C sources.
  */
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -62,7 +62,7 @@ static void *worker_main(void *arg)
     if (S == NULL) { ctx->failures++; return NULL; }
     env = mino_env_new(S);
     if (env == NULL) { ctx->failures++; mino_state_free(S); return NULL; }
-    mino_install_core(S, env);
+    mino_install(S, env, MINO_CAP_DEFAULT);
 
     /* Tighten the nursery so minors fire often under this workload. */
     if (mino_gc_set_param(S, MINO_GC_NURSERY_BYTES, 128u * 1024u) != 0) {

@@ -221,9 +221,10 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
                 "(capability '%s' disabled by host)",
                 data, cap->name);
             snprintf(note, sizeof(note),
-                "the host can enable this capability by calling %s "
-                "from C before mino_install_core",
-                cap->install_fn);
+                "the host can enable this capability by calling "
+                "mino_install(S, env, MINO_CAP_%s) from C before "
+                "the first eval",
+                cap->name);
 
             keys[0] = mino_keyword(S, "capability");
             vals[0] = mino_keyword(S, cap->name);
@@ -232,7 +233,7 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
             keys[2] = mino_keyword(S, "reason");
             vals[2] = mino_keyword(S, "not-installed");
             keys[3] = mino_keyword(S, "enable-via");
-            vals[3] = mino_string(S, cap->install_fn);
+            vals[3] = mino_string(S, note);
             data_map = mino_map(S, keys, vals, 4);
 
             set_eval_diag_with_data(S,
