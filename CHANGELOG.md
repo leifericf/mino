@@ -76,6 +76,27 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: Constructor-Sugar Form Now Reports A Clear Diagnostic
+
+`(ClassName. args...)` is JVM Clojure's shorthand for
+`(new ClassName args...)`. mino has no JVM class layer so the form
+is genuinely unsupported, but the diagnostic was the misleading
+`unbound symbol: ClassName.` -- which suggests the user typo'd a
+symbol reference, hiding what the form actually was.
+
+`eval_symbol` now detects the trailing-dot constructor pattern
+(name length > 1, ends in `.`, doesn't START with `.` so single-`.`
+and leading-dot method-call sugar pass through unchanged) and
+emits a dedicated message:
+
+  constructor sugar `AutoFlattenSeq.` is not supported on mino --
+  there is no JVM class layer; use `defrecord` and the generated
+  `->AutoFlattenSeq` positional ctor instead
+
+Constructing the trailing-dot name as a symbol VALUE
+(`(symbol "Foo.")`, `'Foo.`) is unchanged — the diagnostic only
+fires on symbol lookup in eval position.
+
 ### Fixed: Arity Mismatch Diagnostics Now Name The Callee And Count
 
 A fn or macro arity miss surfaced as the bare `macro arity mismatch` /

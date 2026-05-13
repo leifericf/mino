@@ -240,6 +240,27 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
                 "capability", "MNS002", msg, data_map, note);
             return NULL;
         }
+        /* Constructor sugar: `ClassName.` or `pkg.path.ClassName.`
+         * is JVM Clojure's shorthand for `(new ClassName args...)`.
+         * mino has no JVM class layer, so the form is genuinely
+         * unsupported -- but the bare "unbound symbol" message is
+         * misleading because the user wrote a constructor call, not
+         * a symbol reference. Detect the trailing dot (with at
+         * least one char before it so `.` itself and leading-dot
+         * forms like `.method` aren't caught) and surface a
+         * dedicated diagnostic pointing at the supported
+         * alternative. */
+        if (n > 1 && data[n - 1] == '.' && data[0] != '.') {
+            char msg[400];
+            snprintf(msg, sizeof(msg),
+                "constructor sugar `%s` is not supported on mino -- "
+                "there is no JVM class layer; use `defrecord` and the "
+                "generated `->%.*s` positional ctor instead",
+                data, (int)(n - 1), data);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                "name", "MNS004", msg);
+            return NULL;
+        }
         char msg[300];
         snprintf(msg, sizeof(msg), "unbound symbol: %s", data);
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "name", "MNS001", msg);

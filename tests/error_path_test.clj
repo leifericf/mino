@@ -75,3 +75,30 @@
     (is (some? err))
     (is (some? (re-find #"arity" err)))
     (is (some? (re-find #"arity-test-fn" err)))))
+
+(deftest constructor-sugar-diagnostic-names-the-form
+  ;; `(ClassName. args...)` is JVM Clojure's `(new ClassName args...)`
+  ;; shorthand. mino has no JVM class layer, but the diagnostic must
+  ;; name the constructor sugar specifically instead of surfacing the
+  ;; misleading "unbound symbol: ClassName." -- the user wrote a
+  ;; constructor call, not a symbol reference, and the message
+  ;; should reflect that and point at the supported alternative
+  ;; (defrecord + ->Name positional ctor).
+  (let [err (try (eval '(FooClass. 1 2 3)) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"FooClass\." err)))
+    (is (some? (re-find #"constructor" err)))
+    (is (some? (re-find #"defrecord" err))))
+  ;; Same for dotted-path constructor names.
+  (let [err (try (eval '(some.pkg.PersistentThing. 1)) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"constructor" err)))))
+
+(deftest constructor-sugar-symbol-value-still-constructible
+  ;; The diagnostic only fires when the trailing-dot name is being
+  ;; looked up. Constructing the symbol as a value -- e.g. via
+  ;; `(symbol "Foo.")` or `'Foo.` -- must still work.
+  (is (= "Foo." (str (symbol "Foo."))))
+  (is (= "Foo." (str (quote Foo.)))))
