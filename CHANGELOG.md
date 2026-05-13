@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Changed: `add-load-path!` Uses `memcpy` Now That The Length Is Known
+
+`prim_add_load_path!` in `src/prim/module.c` allocated
+`malloc(strlen(path) + 1)` and then ran `strcpy(dup, path)`. The
+length is already in hand at the malloc, so reusing it via
+`memcpy(dup, path, path_len + 1)` avoids a second pass over the
+string and removes a `strcpy` from the codebase. No behavior change.
+
 ### Changed: `mino_safepoint_poll` Is Now A `static inline` Function
 
 The safepoint-poll fast path lived as a function-style macro at the

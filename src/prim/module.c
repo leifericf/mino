@@ -1145,12 +1145,15 @@ mino_val_t *prim_add_load_path(mino_state_t *S, mino_val_t *args,
         S->extra_load_paths     = np;
         S->extra_load_paths_cap = new_cap;
     }
-    dup = (char *)malloc(strlen(path) + 1);
-    if (dup == NULL) {
-        return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
-            "out of memory in add-load-path!");
+    {
+        size_t path_len = strlen(path);
+        dup = (char *)malloc(path_len + 1);
+        if (dup == NULL) {
+            return prim_throw_classified(S, "eval/out-of-memory", "MOM001",
+                "out of memory in add-load-path!");
+        }
+        memcpy(dup, path, path_len + 1);
     }
-    strcpy(dup, path);
     S->extra_load_paths[S->extra_load_paths_len++] = dup;
     return mino_nil(S);
 }
