@@ -42,17 +42,41 @@ mino_val_t *mino_int(mino_state_t *S, long long n)
     S->bc_int_make_count++;
 #endif
     /* Inline-tag every int that fits in the 61-bit signed range. The
-     * boxed fallback below stays in place for the narrow band between
-     * MINO_INT_MAX and LLONG_MAX where the tag would lose precision. */
+     * fallback below handles the narrow band between MINO_INT_MAX and
+     * LLONG_MAX where the tag would lose precision. With MINO_CAP_BIGNUM
+     * installed, that overflow promotes to a MINO_BIGINT so callers can
+     * keep using the tower transparently; without it, the value is
+     * boxed as a MINO_INT carrying the full 64-bit signed integer. */
     if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
 #ifdef MINO_BC_PROFILE_COUNTS
         S->bc_int_alloc_avoided++;
 #endif
         return MINO_MAKE_INT(n);
     }
+    if (mino_capability_installed(S, MINO_CAP_BIGNUM)) {
+        return mino_bigint_from_ll(S, n);
+    }
     v = alloc_val(S, MINO_INT);
     v->as.i = n;
     return v;
+}
+
+mino_val_t *mino_int_wrap(mino_state_t *S, long long n)
+{
+#ifdef MINO_BC_PROFILE_COUNTS
+    S->bc_int_make_count++;
+#endif
+    if (n >= MINO_INT_MIN && n <= MINO_INT_MAX) {
+#ifdef MINO_BC_PROFILE_COUNTS
+        S->bc_int_alloc_avoided++;
+#endif
+        return MINO_MAKE_INT(n);
+    }
+    {
+        mino_val_t *v = alloc_val(S, MINO_INT);
+        v->as.i = n;
+        return v;
+    }
 }
 
 mino_val_t *mino_float(mino_state_t *S, double f)

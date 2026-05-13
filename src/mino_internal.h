@@ -339,6 +339,13 @@ mino_val_t *mino_chunked_cons(mino_state_t *S, mino_val_t *chunk,
                               mino_val_t *more);
 mino_val_t *mino_chunked_cons_advance(mino_state_t *S, const mino_val_t *cs);
 
+/* Wraparound int constructor: identical to mino_int when the value
+ * fits the 61-bit tag, but always boxes the overflow path as MINO_INT
+ * (never auto-promotes to MINO_BIGINT, regardless of MINO_CAP_BIGNUM).
+ * Used by the unchecked-* family in numeric.c so the documented
+ * two's-complement-wrap semantics produce an int, not a bigint. */
+mino_val_t *mino_int_wrap(mino_state_t *S, long long n);
+
 /* ------------------------------------------------------------------------- */
 /* Per-capability install functions (internal-only)                          */
 /* ------------------------------------------------------------------------- */

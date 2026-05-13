@@ -246,12 +246,17 @@ mino_val_t *mino_empty_list(mino_state_t *S);
 
 /* Create an integer value from a signed long long. Total over the full
  * long long range. Values in [-2^60, 2^60 - 1] return a tag-encoded
- * pointer (no allocation); values outside that band return a boxed
- * cell that still holds the full 64-bit signed integer. With
- * MINO_CAP_BIGNUM installed, runtime arithmetic that would overflow
- * long long promotes to MINO_BIGINT automatically; without BIGNUM,
- * arithmetic wraps modulo 2^64 and `mino_int` is the construction
- * primitive for the wrapped result. */
+ * pointer (no allocation). Values outside that band depend on the
+ * MINO_CAP_BIGNUM capability: with bignum installed, the result is a
+ * MINO_BIGINT carrying the same numeric value, so hosts that opt in
+ * to arbitrary-precision arithmetic see one int family that grows
+ * past 64 bits transparently; without bignum, the result is a boxed
+ * MINO_INT cell that still holds the full 64-bit signed integer.
+ *
+ * Inside mino's runtime, deterministic operations such as the reader,
+ * bitwise primitives, and the unchecked-* family never auto-promote;
+ * they keep producing MINO_INT (boxed when outside the tag range) so
+ * Clojure-style "long stays long" semantics are preserved. */
 mino_val_t *mino_int(mino_state_t *S, long long n);
 
 /* Create a floating-point value. */

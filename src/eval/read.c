@@ -834,7 +834,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
         && (buf[scan_start + 1] == 'x' || buf[scan_start + 1] == 'X')) {
         long long n = strtoll(buf, &endp, 16);
         if (endp == buf + len)
-            TRY_PARSE_RETURN(mino_int(S, n));
+            TRY_PARSE_RETURN(mino_int_wrap(S, n));
         looks_numeric = 0;
     }
 
@@ -863,7 +863,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                         {
                             long long n = strtoll(radix_buf, &endp, (int)base);
                             if (endp == radix_buf + radix_len)
-                                TRY_PARSE_RETURN(mino_int(S, sign * n));
+                                TRY_PARSE_RETURN(mino_int_wrap(S, sign * n));
                         }
                     }
                 }
@@ -988,7 +988,7 @@ static mino_val_t *try_parse_numeric(mino_state_t *S, const char *start,
                     mino_val_t *bi = mino_bigint_from_string_n(S, buf, len);
                     if (bi != NULL) TRY_PARSE_RETURN(bi);
                 }
-                TRY_PARSE_RETURN(mino_int(S, n));
+                TRY_PARSE_RETURN(mino_int_wrap(S, n));
             }
         }
     }

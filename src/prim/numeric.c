@@ -524,11 +524,15 @@ static int tower_advance(mino_state_t *S, tower_acc_t *acc, mino_val_t *a,
     return step;
 }
 
-/* Pack the final accumulator into a result val. */
+/* Pack the final accumulator into a result val. The TT_INT branch
+ * uses the deterministic boxing constructor: tower-internal overflow
+ * already promoted on demand, so a value that stays in the int tier
+ * must remain an int (boxed when outside the tag range), matching
+ * Clojure's "no silent bigint promotion" semantics. */
 static mino_val_t *tower_finish(mino_state_t *S, const tower_acc_t *acc)
 {
     switch (acc->tier) {
-    case TT_INT:    return mino_int(S, acc->iacc);
+    case TT_INT:    return mino_int_wrap(S, acc->iacc);
     case TT_FLOAT:  return mino_float(S, acc->dacc);
     default:        return acc->vacc;
     }
@@ -628,7 +632,7 @@ static mino_val_t *prim_inc_step(mino_state_t *S, mino_val_t *x,
                 return mino_bigint_add(S, lhs, one);
             }
         }
-        return mino_int(S, mino_val_int_get(x) + 1);
+        return mino_int_wrap(S, mino_val_int_get(x) + 1);
     }
     if (x != NULL && (mino_type_of(x) == MINO_FLOAT || mino_type_of(x) == MINO_FLOAT32)) {
         /* JVM Clojure's `(inc (float 1))` returns a Double; arithmetic
@@ -706,7 +710,7 @@ static mino_val_t *prim_dec_step(mino_state_t *S, mino_val_t *x,
                 return mino_bigint_sub(S, lhs, one);
             }
         }
-        return mino_int(S, mino_val_int_get(x) - 1);
+        return mino_int_wrap(S, mino_val_int_get(x) - 1);
     }
     if (x != NULL && (mino_type_of(x) == MINO_FLOAT || mino_type_of(x) == MINO_FLOAT32)) {
         return mino_float(S, x->as.f - 1.0);
@@ -1133,7 +1137,7 @@ mino_val_t *prim_unchecked_add(mino_state_t *S, mino_val_t *args, mino_env_t *en
     long long a, b;
     (void)env;
     if (!unchecked_two_int(S, args, "unchecked-add", &a, &b)) return NULL;
-    return mino_int(S, uwrap_add(a, b));
+    return mino_int_wrap(S, uwrap_add(a, b));
 }
 
 mino_val_t *prim_unchecked_sub(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1141,7 +1145,7 @@ mino_val_t *prim_unchecked_sub(mino_state_t *S, mino_val_t *args, mino_env_t *en
     long long a, b;
     (void)env;
     if (!unchecked_two_int(S, args, "unchecked-subtract", &a, &b)) return NULL;
-    return mino_int(S, uwrap_sub(a, b));
+    return mino_int_wrap(S, uwrap_sub(a, b));
 }
 
 mino_val_t *prim_unchecked_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1149,7 +1153,7 @@ mino_val_t *prim_unchecked_mul(mino_state_t *S, mino_val_t *args, mino_env_t *en
     long long a, b;
     (void)env;
     if (!unchecked_two_int(S, args, "unchecked-multiply", &a, &b)) return NULL;
-    return mino_int(S, uwrap_mul(a, b));
+    return mino_int_wrap(S, uwrap_mul(a, b));
 }
 
 mino_val_t *prim_unchecked_inc(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1162,7 +1166,7 @@ mino_val_t *prim_unchecked_inc(mino_state_t *S, mino_val_t *args, mino_env_t *en
     if (!unchecked_grab_long(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
             "unchecked-inc expects an int");
-    return mino_int(S, uwrap_add(x, 1));
+    return mino_int_wrap(S, uwrap_add(x, 1));
 }
 
 mino_val_t *prim_unchecked_dec(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1175,7 +1179,7 @@ mino_val_t *prim_unchecked_dec(mino_state_t *S, mino_val_t *args, mino_env_t *en
     if (!unchecked_grab_long(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
             "unchecked-dec expects an int");
-    return mino_int(S, uwrap_sub(x, 1));
+    return mino_int_wrap(S, uwrap_sub(x, 1));
 }
 
 mino_val_t *prim_unchecked_negate(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1188,7 +1192,7 @@ mino_val_t *prim_unchecked_negate(mino_state_t *S, mino_val_t *args, mino_env_t 
     if (!unchecked_grab_long(args->as.cons.car, &x))
         return prim_throw_classified(S, "eval/type", "MTY001",
             "unchecked-negate expects an int");
-    return mino_int(S, uwrap_sub(0, x));
+    return mino_int_wrap(S, uwrap_sub(0, x));
 }
 
 mino_val_t *prim_div(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1634,7 +1638,7 @@ mino_val_t *prim_bit_and(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "bit-and expects integers");
     }
-    return mino_int(S, a & b);
+    return mino_int_wrap(S, a & b);
 }
 
 mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1649,7 +1653,7 @@ mino_val_t *prim_bit_or(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "bit-or expects integers");
     }
-    return mino_int(S, a | b);
+    return mino_int_wrap(S, a | b);
 }
 
 mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1664,7 +1668,7 @@ mino_val_t *prim_bit_xor(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         !as_long(args->as.cons.cdr->as.cons.car, &b)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "bit-xor expects integers");
     }
-    return mino_int(S, a ^ b);
+    return mino_int_wrap(S, a ^ b);
 }
 
 mino_val_t *prim_bit_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1677,7 +1681,7 @@ mino_val_t *prim_bit_not(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (!as_long(args->as.cons.car, &a)) {
         return prim_throw_classified(S, "eval/type", "MTY001", "bit-not expects an integer");
     }
-    return mino_int(S, ~a);
+    return mino_int_wrap(S, ~a);
 }
 
 /* 64-bit shift amounts must live in [0, 63]; any other value is UB per
@@ -1708,8 +1712,9 @@ mino_val_t *prim_bit_shift_left(mino_state_t *S, mino_val_t *args, mino_env_t *e
     }
     /* Route the shift through unsigned so that (bit-shift-left 1 63)
      * yields the usual -9223372036854775808 wrap result without tripping
-     * signed-overflow UB. */
-    return mino_int(S, (long long)((unsigned long long)a << b));
+     * signed-overflow UB. The shift is defined to wrap, never promote,
+     * so build the result via the deterministic int constructor. */
+    return mino_int_wrap(S, (long long)((unsigned long long)a << b));
 }
 
 mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1731,7 +1736,7 @@ mino_val_t *prim_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *
     /* Signed right shift of a negative value is implementation-defined;
      * all our supported targets (GCC/Clang/MSVC on x86_64 and ARM64)
      * produce arithmetic shift, which is the Clojure-expected behavior. */
-    return mino_int(S, a >> b);
+    return mino_int_wrap(S, a >> b);
 }
 
 mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1750,7 +1755,7 @@ mino_val_t *prim_unsigned_bit_shift_right(mino_state_t *S, mino_val_t *args, min
         return prim_throw_classified(S, "eval/bounds", "MBD001",
             "unsigned-bit-shift-right shift amount must be in [0, 63]");
     }
-    return mino_int(S, (long long)((unsigned long long)a >> b));
+    return mino_int_wrap(S, (long long)((unsigned long long)a >> b));
 }
 
 /* ------------------------------------------------------------------------- */

@@ -36,6 +36,18 @@ instead of paying a malloc per walk. `mino_print_to_buf` for embedders
 without a `FILE *`. `mino_agent_deref` for parity with atom / volatile
 / ref deref.
 
+### Changed: `mino_int` Auto-Promotes To Bigint With Bignum
+
+`mino_int(S, n)` now checks `MINO_CAP_BIGNUM` for the tag-overflow
+path. With bignum installed, values outside the 61-bit tag range
+return a `MINO_BIGINT` instead of a boxed `MINO_INT`, so embedders
+that opt in to arbitrary-precision arithmetic get a single int family
+that grows past 64 bits transparently. Without bignum the boxed
+fallback stays in place and `mino_int` is total over `long long` as
+before. Runtime internals (reader, bit primitives, `unchecked-*`,
+tower-terminal coercion) keep Clojure-style "long stays long"
+semantics by routing through a private `mino_int_wrap` constructor.
+
 ### Changed: Data-Driven Capability Install
 
 `mino_install(S, env, caps)` takes a `MINO_CAP_*` bitmask and
