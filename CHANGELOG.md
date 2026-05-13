@@ -28,10 +28,13 @@ eval-family `_ex` matrix (`mino_eval_ex` / `mino_eval_string_ex` /
 `mino_load_file_ex`) matching the existing `mino_pcall` precedent.
 Collection builders (`mino_vector_builder_*` / `mino_map_builder_*` /
 `mino_set_builder_*`) wrapping transients with explicit names. A
-unified collection iterator (`mino_iter_new` / `_next` / `_free`) that
-walks vectors, maps, sets, lists, lazy seqs, and chunked seqs through
-one API. `mino_print_to_buf` for embedders without a `FILE *`.
-`mino_agent_deref` for parity with atom / volatile / ref deref.
+unified collection iterator (`mino_iter_init` / `_next` / `_done` plus
+`mino_iter_sizeof`) that walks vectors, maps, sets, lists, lazy seqs,
+and chunked seqs through one API. Storage is host-owned, so embedders
+can stack-allocate the iterator with `alloca(mino_iter_sizeof())`
+instead of paying a malloc per walk. `mino_print_to_buf` for embedders
+without a `FILE *`. `mino_agent_deref` for parity with atom / volatile
+/ ref deref.
 
 ### Changed: Data-Driven Capability Install
 
