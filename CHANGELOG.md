@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## v0.151.1 — Embedding API Hardening
+
+Five adversarial-test follow-ups on the v0.151.0 embedding-API revamp.
+Two NULL-input crashes in the public reader and string-eval entry
+points are gone, the iterator now walks sorted maps and sets, the
+protected-call `_ex` family delivers the raw thrown payload as
+documented, and `mino_to_int` accepts bigints so the bignum
+auto-promote round-trip closes.
 
 ### Fixed
 

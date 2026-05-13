@@ -28,7 +28,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 151
-#define MINO_VERSION_PATCH 0
+#define MINO_VERSION_PATCH 1
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
