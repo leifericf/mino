@@ -38,6 +38,10 @@ static inline char *fmt_ensure(mino_state_t *S, char *buf,
         }
         newbuf = (char *)realloc(buf, newcap);
         if (newbuf == NULL) {
+            /* realloc failure leaves `buf` valid; free it before the
+             * caller overwrites its variable with our NULL return.
+             * The size-overflow branch above already does the same. */
+            free(buf);
             set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001",
                           "out of memory");
             return NULL;

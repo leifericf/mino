@@ -33,3 +33,12 @@
   (testing "passing 0 disables fault injection"
     (set-fail-alloc-at! 0)
     (is (= 10 (count (vec (range 10)))))))
+
+(deftest fi-format-recovers
+  (testing "(format ...) under simulated OOM raises a catchable exception"
+    (is (= :caught
+           (try
+             (do (set-fail-alloc-at! 3)
+                 (format "%s %s %s" "alpha" "beta" "gamma")
+                 :not-caught)
+             (catch e :caught))))))

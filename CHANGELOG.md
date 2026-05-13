@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Fixed: `fmt_ensure` Leaked Its Input Buffer When `realloc` Failed
+
+`fmt_ensure` in `src/prim/string.c` is the growth helper for
+`(format ...)`. Callers use the canonical
+`buf = fmt_ensure(...); if (buf == NULL) return NULL;` pattern, which
+relies on the helper leaving no resources behind on failure. The
+realloc-failure branch returned `NULL` without freeing the still-valid
+input buffer -- so on OOM during a long format call, the partially
+built buffer was leaked. The sibling size-overflow branch a few lines
+above already does the right thing; this one was missed. The branch
+now frees the input before returning, matching the contract callers
+already assume. macOS ASan ships without LSan, so the leak is not
+directly observable from the project's test runner; correctness here
+is by static reading. A new `fi-format-recovers` contract test under
+`tests/fault_inject_test.clj` locks in that `(format ...)` under
+simulated OOM raises a catchable exception.
+
 ### Fixed: Stale Comment Claimed The Safepoint Yield Flag Was Never Set
 
 The block comment above `mino_safepoint_poll` in
