@@ -244,7 +244,14 @@ mino_val_t *mino_false(mino_state_t *S);
  * the type tag is MINO_EMPTY_LIST, not MINO_CONS. */
 mino_val_t *mino_empty_list(mino_state_t *S);
 
-/* Create an integer value. */
+/* Create an integer value from a signed long long. Total over the full
+ * long long range. Values in [-2^60, 2^60 - 1] return a tag-encoded
+ * pointer (no allocation); values outside that band return a boxed
+ * cell that still holds the full 64-bit signed integer. With
+ * MINO_CAP_BIGNUM installed, runtime arithmetic that would overflow
+ * long long promotes to MINO_BIGINT automatically; without BIGNUM,
+ * arithmetic wraps modulo 2^64 and `mino_int` is the construction
+ * primitive for the wrapped result. */
 mino_val_t *mino_int(mino_state_t *S, long long n);
 
 /* Create a floating-point value. */
@@ -307,6 +314,75 @@ mino_val_t *mino_map(mino_state_t *S, mino_val_t **keys, mino_val_t **vals,
 
 /* Create a persistent hash set from a C array of values. */
 mino_val_t *mino_set(mino_state_t *S, mino_val_t **items, size_t len);
+
+/* ------------------------------------------------------------------------- */
+/* Collection builders                                                       */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Builders are an embedder-friendly facade over transients. Use them
+ * when you produce elements one at a time from C: open a builder,
+ * push/put/add each element, finish to get the persistent value.
+ *
+ *   mino_vec_builder_t *b = mino_vector_builder_new(S);
+ *   for (size_t i = 0; i < n; i++) {
+ *       mino_vector_builder_push(b, mino_int(S, items[i]));
+ *   }
+ *   mino_val_t *v = mino_vector_builder_finish(b);
+ *
+ * The builder roots the in-flight collection across GC; _finish hands
+ * back the persistent result and releases the builder.
+ */
+typedef struct mino_vec_builder mino_vec_builder_t;
+typedef struct mino_map_builder mino_map_builder_t;
+typedef struct mino_set_builder mino_set_builder_t;
+
+mino_vec_builder_t *mino_vector_builder_new   (mino_state_t *S);
+void                mino_vector_builder_push  (mino_vec_builder_t *b,
+                                               mino_val_t *v);
+mino_val_t         *mino_vector_builder_finish(mino_vec_builder_t *b);
+
+mino_map_builder_t *mino_map_builder_new      (mino_state_t *S);
+void                mino_map_builder_put      (mino_map_builder_t *b,
+                                               mino_val_t *k, mino_val_t *v);
+mino_val_t         *mino_map_builder_finish   (mino_map_builder_t *b);
+
+mino_set_builder_t *mino_set_builder_new      (mino_state_t *S);
+void                mino_set_builder_add      (mino_set_builder_t *b,
+                                               mino_val_t *v);
+mino_val_t         *mino_set_builder_finish   (mino_set_builder_t *b);
+
+/* ------------------------------------------------------------------------- */
+/* Collection iterator                                                       */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * One iterator type walks every sequential / associative collection
+ * mino exposes: vectors, maps (hashed and sorted), sets (hashed and
+ * sorted), cons lists, the empty-list singleton, lazy seqs, and
+ * chunked seqs. Dispatch happens internally on each step.
+ *
+ * Usage:
+ *
+ *   mino_iter_t *it = mino_iter_new(S, coll);
+ *   mino_val_t *k, *v;
+ *   while (mino_iter_next(it, &k, &v)) {
+ *       // for vectors / sets / lists: k is the element, v is NULL
+ *       // for maps: k is the key, v is the value
+ *   }
+ *   mino_iter_free(it);
+ *
+ * The iterator roots `coll` for its lifetime so a GC fired mid-walk
+ * cannot reclaim the cells the walker borrows pointers into. Calling
+ * _next after it returned 0 keeps returning 0; calling it on a NULL
+ * iter is harmless.
+ */
+typedef struct mino_iter mino_iter_t;
+
+mino_iter_t *mino_iter_new (mino_state_t *S, mino_val_t *coll);
+int          mino_iter_next(mino_iter_t *it,
+                            mino_val_t **out_k, mino_val_t **out_v);
+void         mino_iter_free(mino_iter_t *it);
 
 /* Create a primitive function value from a C function pointer. */
 mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn);
@@ -687,6 +763,16 @@ void mino_println(mino_state_t *S, const mino_val_t *v);
 /* Print a value to the given FILE stream. */
 void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 
+/* Print a value's readable form into a sized buffer (NUL-terminated).
+ * Returns the number of bytes written excluding the trailing NUL, or
+ * -1 on error (NULL buf, zero capacity, or I/O failure). When the
+ * printed form is longer than n - 1 bytes, the output is truncated to
+ * fit and the function still returns the truncated byte count. Use
+ * this when the embedder routes output elsewhere than a FILE *
+ * (server response buffer, plugin host, IDE panel). */
+int  mino_print_to_buf(mino_state_t *S, const mino_val_t *v,
+                       char *buf, size_t n);
+
 /* ------------------------------------------------------------------------- */
 /* Reader                                                                    */
 /* ------------------------------------------------------------------------- */
@@ -713,6 +799,19 @@ const mino_diag_t *mino_last_diag(mino_state_t *S);
 /* Return the last error as a mino map with :mino/kind, :mino/code, etc.
  * Returns nil if no error occurred. The value is GC-owned and cached. */
 mino_val_t *mino_last_error_map(mino_state_t *S);
+
+/* Return the last error's classified kind (e.g. "eval/type", "eval/arity",
+ * "name", "reader") or NULL when no error is current. The returned
+ * pointer is valid until the next error or mino_clear_error call. */
+const char *mino_error_kind(mino_state_t *S);
+
+/* Return the last error's stable code (e.g. "MTY001", "MNS002") or NULL
+ * when no error is current. Lifetimes match mino_error_kind. */
+const char *mino_error_code(mino_state_t *S);
+
+/* Clear the last error and diagnostic. After this call mino_last_error,
+ * mino_error_kind, and mino_error_code all return NULL. */
+void mino_clear_error(mino_state_t *S);
 
 /* Diagnostic rendering modes. */
 #define MINO_DIAG_RENDER_COMPACT 0
@@ -814,6 +913,28 @@ mino_val_t *mino_eval_string(mino_state_t *S, const char *src,
  */
 mino_val_t *mino_load_file(mino_state_t *S, const char *path,
                            mino_env_t *env);
+
+/*
+ * Protected variants of mino_eval / mino_eval_string / mino_load_file.
+ * Return 0 on success (writing the result to *out) or -1 on error.
+ *
+ * Unlike the unsuffixed variants, the _ex form disambiguates "real nil
+ * result" from "error": a 0 return with *out == mino_nil() is genuine
+ * nil; a -1 return means a throw / OOM / parse failure was caught. If
+ * out_ex is non-NULL, on error *out_ex is set to the raw thrown payload
+ * (matching mino_pcall's contract). *out_ex is NULL on success or when
+ * out_ex is NULL.
+ *
+ * The _ex variants do NOT publish to mino_last_error on a caught throw;
+ * embedders that want a diagnostic must inspect *out_ex or call
+ * mino_last_error explicitly.
+ */
+int mino_eval_ex       (mino_state_t *S, mino_val_t *form, mino_env_t *env,
+                        mino_val_t **out, mino_val_t **out_ex);
+int mino_eval_string_ex(mino_state_t *S, const char *src, mino_env_t *env,
+                        mino_val_t **out, mino_val_t **out_ex);
+int mino_load_file_ex  (mino_state_t *S, const char *path, mino_env_t *env,
+                        mino_val_t **out, mino_val_t **out_ex);
 
 /*
  * Shorthand: bind a C function as a primitive in `env`.
@@ -1169,9 +1290,14 @@ int  mino_thread_count(mino_state_t *S);
 void mino_quiesce_threads(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
-/* Host thread pool, factory, stack-size knobs                               */
+/* Host thread pool, factory, stack-size knobs [MINO_UNSTABLE_THREADPOOL]    */
 /* ------------------------------------------------------------------------- */
 /*
+ * UNSTABLE: this section is provisional for the v1.0.0-alpha series. The
+ * pool ABI, factory callback shape, and stack-size knobs may change in
+ * patch releases. Symbols outside this section aim for source stability
+ * across alpha; symbols inside this block do not.
+ *
  * The default model is "spawn-per-future": each `(future ...)` calls
  * pthread_create / CreateThread and the resulting OS thread runs the
  * future body. Three knobs let embedders shape that:
@@ -1241,10 +1367,17 @@ void mino_set_thread_factory(mino_state_t *S,
 void mino_set_thread_stack_size(mino_state_t *S, size_t n);
 
 /* ------------------------------------------------------------------------- */
-/* Garbage collector control                                                 */
+/* Garbage collector control [MINO_UNSTABLE_GC]                              */
 /* ------------------------------------------------------------------------- */
 
 /*
+ * UNSTABLE: GC tuning, kind enum, phase constants, and the stats struct
+ * are provisional for v1.0.0-alpha. The collector is still evolving
+ * (generational + incremental layout, threshold heuristics) and this
+ * section will track those changes. Pin behavior through explicit
+ * mino_gc_collect calls at quiescent points; do not rely on tuning
+ * parameter ranges or the stats struct layout across releases.
+ *
  * Kinds of collection the host can request. Use at quiescent points such
  * as between REPL turns, after bulk import, or before long-idle periods.
  *
@@ -1328,10 +1461,16 @@ typedef struct {
 void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out);
 
 /* ------------------------------------------------------------------------- */
-/* Allocation profiler (opt-in, compile-time gated)                          */
+/* Allocation profiler [MINO_UNSTABLE_ALLOC_PROFILE]                         */
 /* ------------------------------------------------------------------------- */
 
 /*
+ * UNSTABLE: the allocation profiler is opt-in (compile-time gated on
+ * -DMINO_ALLOC_PROFILE=1) and its output format is in flux. The
+ * functions below are part of the public surface for parity with
+ * tooling that needs profile data, but their shape may change between
+ * alpha patch releases.
+ *
  * Reports 1 when the binary was built with -DMINO_ALLOC_PROFILE=1, else 0.
  * The recording paths and dump output are only meaningful in profile builds.
  */

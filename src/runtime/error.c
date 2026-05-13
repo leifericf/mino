@@ -24,6 +24,23 @@ mino_val_t *mino_last_error_map(mino_state_t *S)
     return diag_to_map(S, mino_current_ctx(S)->last_diag);
 }
 
+const char *mino_error_kind(mino_state_t *S)
+{
+    const mino_diag_t *d = mino_current_ctx(S)->last_diag;
+    return (d != NULL) ? d->kind : NULL;
+}
+
+const char *mino_error_code(mino_state_t *S)
+{
+    const mino_diag_t *d = mino_current_ctx(S)->last_diag;
+    return (d != NULL) ? d->code : NULL;
+}
+
+void mino_clear_error(mino_state_t *S)
+{
+    clear_error(S);
+}
+
 /* Install a fully-built diagnostic as the current error. Takes ownership
  * of d. Renders a compact form into error_buf for backward compat. */
 void set_diag(mino_state_t *S, mino_diag_t *d)

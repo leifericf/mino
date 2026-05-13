@@ -517,3 +517,25 @@ void mino_println(mino_state_t *S, const mino_val_t *v)
     fputc('\n', stdout);
 }
 
+int mino_print_to_buf(mino_state_t *S, const mino_val_t *v,
+                      char *buf, size_t n)
+{
+    FILE *out;
+    size_t written;
+    int rc = -1;
+    if (buf == NULL || n == 0) return -1;
+    out = tmpfile();
+    if (out == NULL) {
+        buf[0] = '\0';
+        return -1;
+    }
+    mino_print_to(S, out, v);
+    fflush(out);
+    rewind(out);
+    written = fread(buf, 1, n - 1, out);
+    buf[written] = '\0';
+    rc = (int)written;
+    fclose(out);
+    return rc;
+}
+

@@ -793,6 +793,94 @@ mino_val_t *mino_call(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_en
     return result;
 }
 
+/* Shared protected-call shim for the eval-family _ex entry points. Mirrors
+ * mino_pcall's setjmp/longjmp + lock-depth recovery, but invokes the
+ * non-protected eval primitive (mino_eval, mino_eval_string, mino_load_file)
+ * passed in via `body`. The body receives the void * payload — for
+ * mino_eval it carries the form, for the others the string/path — plus
+ * the env, and returns the eval result. On a thrown exception, *out_ex
+ * captures the raw thrown value and the function returns -1 without
+ * publishing to mino_last_error (matching mino_pcall's contract). */
+typedef mino_val_t *(*eval_body_fn)(mino_state_t *S, void *payload,
+                                    mino_env_t *env);
+
+static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
+                      mino_env_t *env, mino_val_t **out, mino_val_t **out_ex)
+{
+    int saved_try   = mino_current_ctx(S)->try_depth;
+    int saved_lock  = mino_current_ctx(S)->lock_depth;
+    mino_val_t *result;
+
+    if (out_ex != NULL) *out_ex = NULL;
+
+    if (saved_try >= MAX_TRY_DEPTH) {
+        if (out != NULL) *out = NULL;
+        return -1;
+    }
+
+    mino_current_ctx(S)->try_stack[saved_try].exception      = NULL;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ns       = S->current_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_ambient  = S->fn_ambient_ns;
+    mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->load_stack_len;
+    if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
+        mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+        S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
+        S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
+        load_stack_truncate(S,
+            mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
+        mino_current_ctx(S)->try_depth = saved_try;
+        while (mino_current_ctx(S)->lock_depth > saved_lock) {
+            mino_unlock(S);
+        }
+        if (out != NULL) *out = NULL;
+        if (out_ex != NULL) *out_ex = ex;
+        return -1;
+    }
+    mino_current_ctx(S)->try_depth++;
+
+    result = body(S, payload, env);
+    mino_current_ctx(S)->try_depth = saved_try;
+
+    if (out != NULL) *out = result;
+    return result == NULL ? -1 : 0;
+}
+
+static mino_val_t *eval_body_form(mino_state_t *S, void *payload,
+                                  mino_env_t *env)
+{
+    return mino_eval(S, (mino_val_t *)payload, env);
+}
+
+static mino_val_t *eval_body_string(mino_state_t *S, void *payload,
+                                    mino_env_t *env)
+{
+    return mino_eval_string(S, (const char *)payload, env);
+}
+
+static mino_val_t *eval_body_file(mino_state_t *S, void *payload,
+                                  mino_env_t *env)
+{
+    return mino_load_file(S, (const char *)payload, env);
+}
+
+int mino_eval_ex(mino_state_t *S, mino_val_t *form, mino_env_t *env,
+                 mino_val_t **out, mino_val_t **out_ex)
+{
+    return eval_pcall(S, eval_body_form, form, env, out, out_ex);
+}
+
+int mino_eval_string_ex(mino_state_t *S, const char *src, mino_env_t *env,
+                        mino_val_t **out, mino_val_t **out_ex)
+{
+    return eval_pcall(S, eval_body_string, (void *)src, env, out, out_ex);
+}
+
+int mino_load_file_ex(mino_state_t *S, const char *path, mino_env_t *env,
+                      mino_val_t **out, mino_val_t **out_ex)
+{
+    return eval_pcall(S, eval_body_file, (void *)path, env, out, out_ex);
+}
+
 int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *env,
                mino_val_t **out, mino_val_t **out_ex)
 {
