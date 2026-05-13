@@ -116,6 +116,27 @@ static uint32_t hash_uint32_bytes(uint32_t h, uint32_t x)
     return h;
 }
 
+/* XOR-fold per-entry hashes across a red-black tree. The same mixing
+ * scheme as the MINO_MAP / MINO_SET branches in hash_val, just walked
+ * via tree recursion instead of the insertion-order vector. Used so
+ * sorted-map / sorted-set hashes match their hash-map / hash-set
+ * cross-type-equal counterparts. */
+static uint32_t rb_xor_fold_entries(const mino_rb_node_t *n, int include_val)
+{
+    uint32_t acc;
+    uint32_t hk;
+    if (n == NULL) return 0;
+    acc = rb_xor_fold_entries(n->left, include_val);
+    hk  = hash_val(n->key);
+    if (include_val) {
+        uint32_t hv = hash_val(n->val);
+        hk ^= hv * 2654435761u;
+    }
+    acc ^= hk;
+    acc ^= rb_xor_fold_entries(n->right, include_val);
+    return acc;
+}
+
 /*
  * Hash function compatible with mino_eq:
  *   - Integral floats hash the same as the equivalent int so (= 1 1.0) ⇒ 1.
@@ -236,6 +257,23 @@ uint32_t hash_val(const mino_val_t *v)
         h = fnv_mix(h, 0x0d);
         h = hash_uint32_bytes(h, acc);
         ((mino_val_t *)v)->as.set.cached_hash = h;
+        return h;
+    }
+    case MINO_SORTED_MAP: {
+        /* Same tag and mixing as MINO_MAP so cross-type-equal maps
+         * hash equal. No cached_hash slot on the sorted variant, so
+         * recompute on demand -- sorted collections rarely appear as
+         * hash-map keys, which is the only path that calls this. */
+        uint32_t acc = rb_xor_fold_entries(v->as.sorted.root, 1);
+        h = fnv_mix(h, 0x0a);
+        h = hash_uint32_bytes(h, acc);
+        return h;
+    }
+    case MINO_SORTED_SET: {
+        /* Same tag and mixing as MINO_SET; see MINO_SORTED_MAP above. */
+        uint32_t acc = rb_xor_fold_entries(v->as.sorted.root, 0);
+        h = fnv_mix(h, 0x0d);
+        h = hash_uint32_bytes(h, acc);
         return h;
     }
     case MINO_HANDLE:

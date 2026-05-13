@@ -373,3 +373,41 @@
     (let [s (sorted-set)]
       (is (= 0 (count (disj s :missing))))
       (is (identical? s (disj s :missing))))))
+
+(deftest sorted-map-hash-honors-equality
+  (testing "two equal sorted-maps hash equal"
+    (let [sm1 (sorted-map :a 1 :b 2)
+          sm2 (sorted-map :a 1 :b 2)]
+      (is (= sm1 sm2))
+      (is (= (hash sm1) (hash sm2)))))
+  (testing "sorted-map and hash-map with same content hash equal"
+    (let [hm {:a 1 :b 2}
+          sm (sorted-map :a 1 :b 2)]
+      (is (= hm sm))
+      (is (= (hash hm) (hash sm)))))
+  (testing "sorted-map keys round-trip through HAMT-sized hash-map"
+    (let [sm-a   (sorted-map :a 1)
+          filler (zipmap (range 100) (range 100))
+          m      (assoc filler sm-a :A-val)]
+      (is (= :A-val (get m (sorted-map :a 1))))))
+  (testing "empty sorted-map hashes equal to empty hash-map"
+    (is (= (hash {}) (hash (sorted-map))))))
+
+(deftest sorted-set-hash-honors-equality
+  (testing "two equal sorted-sets hash equal"
+    (let [ss1 (sorted-set 1 2 3)
+          ss2 (sorted-set 1 2 3)]
+      (is (= ss1 ss2))
+      (is (= (hash ss1) (hash ss2)))))
+  (testing "sorted-set and hash-set with same content hash equal"
+    (let [hs #{1 2 3}
+          ss (sorted-set 1 2 3)]
+      (is (= hs ss))
+      (is (= (hash hs) (hash ss)))))
+  (testing "sorted-set element round-trips through HAMT-sized hash-map"
+    (let [ss-a   (sorted-set :a :b)
+          filler (zipmap (range 100) (range 100))
+          m      (assoc filler ss-a :found)]
+      (is (= :found (get m (sorted-set :a :b))))))
+  (testing "empty sorted-set hashes equal to empty hash-set"
+    (is (= (hash #{}) (hash (sorted-set))))))

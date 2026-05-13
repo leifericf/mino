@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed: `hash` On Sorted-Map / Sorted-Set Violated Equal-Implies-Equal-Hash
+
+`hash_val` in `src/collections/map.c` had no case for `MINO_SORTED_MAP`
+or `MINO_SORTED_SET`, so both fell through to the default branch and
+hashed by pointer identity. `mino_eq` already treated content-equal
+sorted and hash collections as equal -- so `(= {:a 1} (sorted-map :a 1))`
+was true while `(hash {:a 1})` and `(hash (sorted-map :a 1))` were not,
+and even two freshly built `(sorted-map :a 1)` instances had different
+hashes. The user-observable cascade was that a sorted-map used as a key
+in a HAMT-sized hash-map could not be looked up by an equal but distinct
+sorted-map instance: `(get m (sorted-map :a 1))` returned `nil` for an
+`m` that held the same entry under a different sorted-map pointer.
+
+`hash_val` now has cases for both sorted variants that walk the
+red-black tree and XOR-fold per-entry hashes with the same tag bytes
+and mixing scheme as the corresponding `MINO_MAP` / `MINO_SET` branches.
+The result is uncached (the `sorted` struct has no `cached_hash` slot,
+and sorted collections rarely appear as hash-map keys). Regression
+tests in `tests/collection_test.clj`
+(`sorted-map-hash-honors-equality`, `sorted-set-hash-honors-equality`)
+pin same-instance, cross-type, HAMT-key-lookup, and empty-collection
+parity.
+
 ### Fixed: `dissoc` / `disj` Of An Absent Key Corrupted Sorted-Collection Count
 
 `(dissoc sorted-map :missing)` and `(disj sorted-set :missing)` returned
