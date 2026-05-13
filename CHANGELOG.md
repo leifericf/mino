@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed: Stale Comment Claimed The Safepoint Yield Flag Was Never Set
+
+The block comment above `mino_safepoint_poll` in
+`src/runtime/internal.h` claimed that "nothing sets the flag, so park
+is unreachable on the live execution path." That stopped being true
+when `gc_request_stw` / `gc_release_stw` in `src/runtime/state.c` were
+wired up to flip `mino_current_ctx(S)->should_yield` around major
+collections. Anyone reading the safepoint protocol from the header
+was being told the wrong thing. The comment now describes the actual
+contract: the flag is set on the main ctx around major collections,
+the park slow path is reachable, and a future multi-worker variant
+would set the flag on peer ctxs instead of (or in addition to) the
+self-set.
+
 ### Fixed: `hash` On Sequential Collections Violated Equal-Implies-Equal-Hash
 
 `(= [0 1 2] (list 0 1 2) (seq [0 1 2]) (cons 0 (cons 1 (cons 2 nil))))`

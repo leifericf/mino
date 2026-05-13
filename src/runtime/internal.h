@@ -1145,9 +1145,14 @@ struct mino_future {
 /* is one predictably-not-taken branch; the slow path (mino_safepoint_park) */
 /* is in state.c and blocks until the collector signals release.            */
 /*                                                                           */
-/* Single-threaded today: nothing sets the flag, so park is unreachable on  */
-/* the live execution path. The macro is in the header so the branch       */
-/* inlines into every alloc / eval-impl-entry / loop-recur site.            */
+/* Single-threaded today: gc_request_stw / gc_release_stw flip the flag on */
+/* the main ctx around major collections. The mutator is also the         */
+/* collector, so the flag is set on a ctx that is already parked by       */
+/* definition (the request runs from within the same call stack); the     */
+/* flag write is a formal record and the park slow path is reachable      */
+/* only when a future multi-worker variant wires the flag onto a peer     */
+/* worker ctx. The macro is in the header so the branch inlines into     */
+/* every alloc / eval-impl-entry / loop-recur site.                       */
 /* ------------------------------------------------------------------------- */
 
 void mino_safepoint_park(mino_state_t *S);
