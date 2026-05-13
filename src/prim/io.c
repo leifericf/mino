@@ -278,19 +278,35 @@ static mino_val_t *print_args_to_out(mino_state_t *S, mino_val_t *args,
                 free(buf);
                 return NULL;
             }
-            if (len + formatted->as.s.len > cap) {
-                size_t nc = cap == 0 ? 64 : cap;
-                char  *nb;
-                while (nc < len + formatted->as.s.len) nc *= 2;
-                nb = (char *)realloc(buf, nc);
-                if (nb == NULL) {
+            {
+                size_t need;
+                if (!checked_add_sz(len, formatted->as.s.len, &need)) {
                     free(buf);
                     prim_throw_classified(S, "internal", "MIN001",
                         "print: out of memory");
                     return NULL;
                 }
-                buf = nb;
-                cap = nc;
+                if (need > cap) {
+                    size_t nc = cap == 0 ? 64 : cap;
+                    char  *nb;
+                    while (nc < need) {
+                        if (!checked_double_sz(nc, &nc)) {
+                            free(buf);
+                            prim_throw_classified(S, "internal", "MIN001",
+                                "print: out of memory");
+                            return NULL;
+                        }
+                    }
+                    nb = (char *)realloc(buf, nc);
+                    if (nb == NULL) {
+                        free(buf);
+                        prim_throw_classified(S, "internal", "MIN001",
+                            "print: out of memory");
+                        return NULL;
+                    }
+                    buf = nb;
+                    cap = nc;
+                }
             }
             memcpy(buf + len, formatted->as.s.data, formatted->as.s.len);
             len += formatted->as.s.len;

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed: Unchecked Format-Buffer Growth In `src/prim/io.c`
+
+The `pr`/`prn` readably-print path appended each formatted argument's
+bytes into a heap buffer using `len + formatted->as.s.len` and
+`nc *= 2` with no overflow guard. A pathological huge-value print
+could have wrapped either the size sum or the doubling loop and
+under-allocated the destination buffer. Both are now gated by
+`checked_add_sz` / `checked_double_sz`, with the existing
+`"print: out of memory"` diagnostic raised on overflow.
+
 ### Fixed: Unchecked Element-Array Sizing In `src/eval/read.c`
 
 The anonymous-fn (`#(...)`) expansion path in `normalize_percent`
