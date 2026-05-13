@@ -57,6 +57,20 @@ static mino_val_t *eval_qualified_symbol(mino_state_t *S, mino_env_t *env,
     v = mino_env_get(env, data);
     if (v != NULL) return v;
 
+    /* Host capability primitives ("host/new", "host/call", etc.) are
+     * installed under their literal slash-name in the clojure.core
+     * namespace env. The namespace resolver below treats "host" as a
+     * namespace alias, which it isn't, so it would throw before
+     * finding them. Probe clojure.core directly for the literal name
+     * before falling through to alias resolution. */
+    {
+        mino_env_t *core_env = ns_env_lookup(S, "clojure.core");
+        if (core_env != NULL) {
+            env_binding_t *b = env_find_here(core_env, data);
+            if (b != NULL) return b->val;
+        }
+    }
+
     if (ns_len >= sizeof(ns_buf)) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
             "syntax", "MSY001", "symbol name too long");
@@ -452,6 +466,18 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
     hname = head->as.s.data;
     hlen  = head->as.s.len;
 
+    /* Host primitives live under literal "host/<op>" names inside
+     * clojure.core. The interop special forms need to find them
+     * regardless of the caller's current namespace; do that by going
+     * straight to clojure.core rather than walking the alias table.
+     */
+#define HOST_PRIM_LOOKUP(_var, _name) do {                                    \
+        mino_env_t *_core = ns_env_lookup(S, "clojure.core");                 \
+        env_binding_t *_b =                                                   \
+            (_core != NULL) ? env_find_here(_core, (_name)) : NULL;           \
+        (_var) = (_b != NULL) ? _b->val : NULL;                               \
+    } while (0)
+
     /* (.method target args...) -> (host/call target :method args...)
      * (.-field target)         -> (host/get  target :field) */
     if (hname[0] == '.' && hlen > 1) {
@@ -474,7 +500,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
             target_val  = eval_value(S, target_form, env);
             if (target_val == NULL) { gc_unpin(1); *out = NULL; return 1; }
             gc_pin(target_val);
-            prim = mino_env_get(env, "host/get");
+            HOST_PRIM_LOOKUP(prim, "host/get");
             if (prim == NULL) {
                 gc_unpin(2);
                 set_eval_diag(S, form, "name", "MNS001", "host/get not bound");
@@ -512,7 +538,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 gc_unpin(2); *out = NULL; return 1;
             }
             gc_pin(evaled_rest);
-            prim = mino_env_get(env, "host/call");
+            HOST_PRIM_LOOKUP(prim, "host/call");
             if (prim == NULL) {
                 gc_unpin(3);
                 set_eval_diag(S, form, "name", "MNS001",
@@ -545,7 +571,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                 gc_unpin(1); *out = NULL; return 1;
             }
             gc_pin(evaled_rest);
-            prim = mino_env_get(env, "host/new");
+            HOST_PRIM_LOOKUP(prim, "host/new");
             if (prim == NULL) {
                 gc_unpin(2);
                 set_eval_diag(S, form, "name", "MNS001",
@@ -648,7 +674,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
                         gc_unpin(2); *out = NULL; return 1;
                     }
                     gc_pin(evaled_rest);
-                    prim = mino_env_get(env, "host/static-call");
+                    HOST_PRIM_LOOKUP(prim, "host/static-call");
                     if (prim == NULL) {
                         gc_unpin(3);
                         set_eval_diag(S, form, "name", "MNS001",
@@ -669,6 +695,7 @@ static int eval_try_host_syntax(mino_state_t *S, mino_val_t *form,
         }
     }
     return 0;
+#undef HOST_PRIM_LOOKUP
 }
 
 /*
