@@ -77,6 +77,27 @@
            (throw (ex-info "not found" {:code 404}))
            (catch e (ex-data e))))))
 
+(deftest ex-info-three-arg-attaches-cause
+  (testing "3-arg form returns an ex-info-shaped map"
+    (let [root (ex-info "root" {:r 1})
+          e    (ex-info "outer" {:o 2} root)]
+      (is (= "outer" (ex-message e)))
+      (is (= {:o 2} (ex-data e)))))
+  (testing "ex-cause returns the supplied cause"
+    (let [root (ex-info "root" {:r 1})
+          e    (ex-info "outer" {:o 2} root)]
+      (is (= root (ex-cause e)))
+      (is (= "root" (ex-message (ex-cause e))))
+      (is (= {:r 1} (ex-data (ex-cause e))))))
+  (testing "cause chains walk via repeated ex-cause"
+    (let [root (ex-info "root" {})
+          mid  (ex-info "mid" {} root)
+          top  (ex-info "top" {} mid)]
+      (is (= "top" (ex-message top)))
+      (is (= "mid" (ex-message (ex-cause top))))
+      (is (= "root" (ex-message (ex-cause (ex-cause top)))))
+      (is (nil? (ex-cause (ex-cause (ex-cause top))))))))
+
 (deftest ex-data-non-map
   (is (= nil (ex-data "not a map"))))
 

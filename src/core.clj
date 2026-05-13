@@ -1950,9 +1950,14 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ex-info
-  "Create an exception map with a message and data map."
-  [msg data]
-  {:message msg :data data})
+  "Create an exception map with a message and data map. The 3-arity
+  form additionally attaches a cause; ex-cause walks the chain via
+  metadata so the visible map structure stays the same as the
+  2-arity form."
+  ([msg data]
+   {:message msg :data data})
+  ([msg data cause]
+   (with-meta {:message msg :data data} {:cause cause})))
 
 (defn ex-data
   "Extract the data map from an exception. Handles diagnostic maps

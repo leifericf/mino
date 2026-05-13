@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed: `ex-info` Now Accepts A 3-Arity `(ex-info msg data cause)`
+
+`(ex-info "outer" {} (ex-info "root" {}))` -- a routine Clojure
+idiom for building error cause chains -- raised
+`fn 'ex-info' arity mismatch: got 3, expected 2`. The defn in
+`src/core.clj` only had the 2-arg form. The 3-arity now attaches
+the cause via metadata, which the existing `ex-cause` already
+walks; the visible map shape stays identical to the 2-arity form
+so the existing `ex-info-creates-map` and `ex-cause-from-data-or-meta`
+tests still pass unchanged. New regression tests in
+`tests/reader_macros_test.clj` (`ex-info-three-arg-attaches-cause`)
+pin `(ex-message e)`, `(ex-data e)`, and `(ex-cause e)` for the
+3-arity output, plus a 3-deep cause chain walk.
+
 ### Fixed: `(sh ...)` Routed `pclose`'s `-1` Sentinel Through `WIFEXITED`
 
 `prim_sh` in `src/prim/proc.c` jumped straight from `status =
