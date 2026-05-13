@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed: Unchecked Element-Array Sizing In `src/eval/read.c`
+
+The anonymous-fn (`#(...)`) expansion path in `normalize_percent`
+allocates a heap items buffer of `len * sizeof(*items)` when the vector
+overflows the 64-slot stack-fallback array. The multiplication had no
+overflow guard; for an attacker-controlled reader input large enough to
+wrap, the buffer would have been under-allocated and the subsequent
+fill loop would have written past it. The path now pre-computes the
+allocation size through `checked_mul_sz` and routes overflow into the
+existing reader OOM diagnostic.
+
 ### Fixed: Unchecked Growth Arithmetic In `env`, `state`, And `module`
 
 Several internal dynamic-growth paths computed `cap * 2`, `len + add + 1`,

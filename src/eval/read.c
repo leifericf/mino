@@ -1215,7 +1215,14 @@ static mino_val_t *normalize_percent(mino_state_t *S, mino_val_t *form)
         if (len <= 64) {
             items = stack_items;
         } else {
-            items = (mino_val_t **)malloc(len * sizeof(*items));
+            size_t alloc_sz;
+            if (!checked_mul_sz(len, sizeof(*items), &alloc_sz)) {
+                set_reader_diag(S, MRE004,
+                                "out of memory in anonymous fn expansion",
+                                S->reader_line, S->reader_col);
+                return NULL;
+            }
+            items = (mino_val_t **)malloc(alloc_sz);
             if (items == NULL) {
                 set_reader_diag(S, MRE004,
                                 "out of memory in anonymous fn expansion",
