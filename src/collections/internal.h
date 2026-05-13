@@ -19,7 +19,7 @@
 #ifndef COLLECTIONS_INTERNAL_H
 #define COLLECTIONS_INTERNAL_H
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stddef.h>
 #include <stdint.h>

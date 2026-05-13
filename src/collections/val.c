@@ -653,6 +653,87 @@ int mino_to_bool(const mino_val_t *v)
     return mino_is_truthy(v);
 }
 
+int mino_to_char(const mino_val_t *v, int *cp)
+{
+    if (v == NULL || !mino_val_char_p(v)) {
+        return 0;
+    }
+    if (cp != NULL) {
+        *cp = mino_val_char_get(v);
+    }
+    return 1;
+}
+
+int mino_to_keyword(const mino_val_t *v, const char **out, size_t *len)
+{
+    if (v == NULL || mino_type_of(v) != MINO_KEYWORD) {
+        return 0;
+    }
+    if (out != NULL) {
+        *out = v->as.s.data;
+    }
+    if (len != NULL) {
+        *len = v->as.s.len;
+    }
+    return 1;
+}
+
+int mino_to_symbol(const mino_val_t *v, const char **out, size_t *len)
+{
+    if (v == NULL || mino_type_of(v) != MINO_SYMBOL) {
+        return 0;
+    }
+    if (out != NULL) {
+        *out = v->as.s.data;
+    }
+    if (len != NULL) {
+        *len = v->as.s.len;
+    }
+    return 1;
+}
+
+mino_type_t mino_typeof(const mino_val_t *v)
+{
+    return mino_type_of(v);
+}
+
+/* Type-predicate grid. Each returns 1 iff v has the given effective
+ * type. Tag-aware: works for inline scalars (int, bool, char, nil)
+ * as well as boxed cells. NULL is treated as MINO_NIL. */
+
+int mino_is_bool(const mino_val_t *v)    { return mino_type_of(v) == MINO_BOOL; }
+int mino_is_int(const mino_val_t *v)     { return mino_type_of(v) == MINO_INT; }
+int mino_is_float(const mino_val_t *v)
+{
+    mino_type_t t = mino_type_of(v);
+    return t == MINO_FLOAT || t == MINO_FLOAT32;
+}
+int mino_is_char(const mino_val_t *v)    { return mino_type_of(v) == MINO_CHAR; }
+int mino_is_string(const mino_val_t *v)  { return mino_type_of(v) == MINO_STRING; }
+int mino_is_symbol(const mino_val_t *v)  { return mino_type_of(v) == MINO_SYMBOL; }
+int mino_is_keyword(const mino_val_t *v) { return mino_type_of(v) == MINO_KEYWORD; }
+int mino_is_vector(const mino_val_t *v)  { return mino_type_of(v) == MINO_VECTOR; }
+int mino_is_map(const mino_val_t *v)
+{
+    mino_type_t t = mino_type_of(v);
+    return t == MINO_MAP || t == MINO_SORTED_MAP;
+}
+int mino_is_set(const mino_val_t *v)
+{
+    mino_type_t t = mino_type_of(v);
+    return t == MINO_SET || t == MINO_SORTED_SET;
+}
+int mino_is_fn(const mino_val_t *v)      { return mino_type_of(v) == MINO_FN; }
+int mino_is_macro(const mino_val_t *v)   { return mino_type_of(v) == MINO_MACRO; }
+int mino_is_prim(const mino_val_t *v)    { return mino_type_of(v) == MINO_PRIM; }
+int mino_is_lazy(const mino_val_t *v)    { return mino_type_of(v) == MINO_LAZY; }
+int mino_is_var(const mino_val_t *v)     { return mino_type_of(v) == MINO_VAR; }
+int mino_is_bigint(const mino_val_t *v)  { return mino_type_of(v) == MINO_BIGINT; }
+int mino_is_ratio(const mino_val_t *v)   { return mino_type_of(v) == MINO_RATIO; }
+int mino_is_bigdec(const mino_val_t *v)  { return mino_type_of(v) == MINO_BIGDEC; }
+int mino_is_uuid(const mino_val_t *v)    { return mino_type_of(v) == MINO_UUID; }
+int mino_is_regex(const mino_val_t *v)   { return mino_type_of(v) == MINO_REGEX; }
+
 
 /* ------------------------------------------------------------------------- */
 /* Equality                                                                  */

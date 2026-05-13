@@ -31,7 +31,7 @@
 #  define _XOPEN_SOURCE 600
 #endif
 
-#include "mino.h"
+#include "mino_internal.h"
 #include "diag.h"
 
 #include "gc/internal.h"

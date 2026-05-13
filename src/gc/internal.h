@@ -20,7 +20,7 @@
 #ifndef GC_INTERNAL_H
 #define GC_INTERNAL_H
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stddef.h>
 #include <stdint.h>

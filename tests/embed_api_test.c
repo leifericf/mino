@@ -10,7 +10,7 @@
  * Run: ./embed_api_test
  */
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stdio.h>
 #include <string.h>

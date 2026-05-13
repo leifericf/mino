@@ -8,7 +8,7 @@
 #ifndef ASYNC_SCHEDULER_H
 #define ASYNC_SCHEDULER_H
 
-#include "mino.h"
+#include "mino_internal.h"
 
 /* Scheduler run-queue entry. */
 typedef struct sched_entry {

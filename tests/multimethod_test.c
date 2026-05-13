@@ -17,7 +17,7 @@
  * Exit 0 means every assertion passed; non-zero prints which failed.
  */
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>

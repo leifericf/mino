@@ -18,7 +18,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "mino.h"
+#include "mino_internal.h"
 
 /* 32-bit fixed-width instruction word. ABC form is op|A|B|C (8/8/8/8);
  * ABx form is op|A|Bx (8/8/16); AsBx is the signed variant of ABx

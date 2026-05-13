@@ -11,7 +11,7 @@
  * assertion that failed.
  */
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>

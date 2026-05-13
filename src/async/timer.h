@@ -10,7 +10,7 @@
 #ifndef ASYNC_TIMER_H
 #define ASYNC_TIMER_H
 
-#include "mino.h"
+#include "mino_internal.h"
 
 /* Timer queue entry. */
 typedef struct timer_entry {

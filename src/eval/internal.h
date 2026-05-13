@@ -22,7 +22,7 @@
 #ifndef EVAL_INTERNAL_H
 #define EVAL_INTERNAL_H
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <setjmp.h>
 #include <stdio.h>

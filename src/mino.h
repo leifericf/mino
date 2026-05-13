@@ -197,109 +197,17 @@ typedef enum {
                      * (default thread_limit == 1 means no agents). */
 } mino_type_t;
 
-typedef struct mino_val    mino_val_t;
-typedef struct mino_env    mino_env_t;
-typedef struct mino_future mino_future_t;
-typedef struct mino_state mino_state_t;
-typedef struct mino_ref   mino_ref_t;
-typedef struct mino_vec_node  mino_vec_node_t;   /* opaque to embedders */
-typedef struct mino_hamt_node mino_hamt_node_t;  /* opaque to embedders */
-typedef struct mino_rb_node   mino_rb_node_t;    /* opaque to embedders */
-struct mino_bc_fn;                               /* compiled-fn record, opaque */
+typedef struct mino_val    mino_val_t;   /* opaque */
+typedef struct mino_env    mino_env_t;   /* opaque */
+typedef struct mino_future mino_future_t;/* opaque */
+typedef struct mino_state  mino_state_t; /* opaque */
+typedef struct mino_ref    mino_ref_t;   /* opaque */
 
-/* ------------------------------------------------------------------------- */
-/* Pointer-tagged value representation                                       */
-/* ------------------------------------------------------------------------- */
-
-/*
- * A mino_val_t* is either a real heap pointer to struct mino_val or an
- * inline tagged scalar. The three low bits encode which.
- *
- *   tag 000 -> heap pointer (alloc guarantees 8-byte alignment; every
- *              alloc site asserts this in debug builds).
- *   tag 001 -> inline 61-bit signed int; payload is bits 63..3.
- *              Range MINO_INT_MIN .. MINO_INT_MAX
- *              (-2^60 .. 2^60 - 1, ~= +/-1.15e18).
- *   tag 010 -> reserved for inline BOOL.
- *   tag 011 -> reserved for inline NIL.
- *   tag 100 -> reserved for inline CHAR.
- *   tag 101..111 -> reserved.
- *
- * Stable execution ABI: frame layout, register window indexing,
- * call/tailcall handoff, and bailout-to-tree-walker contract are
- * unchanged by the tagged representation. Only the in-register /
- * in-memory layout of values changes. Prims with the
- * `mino_val_t *args` (cons spine) ABI keep that ABI; tagged values
- * flow through every slot identically.
- *
- * Portability:
- *   - 64-bit hosts only. mino does not support 32-bit targets.
- *   - MINO_INT_VAL decode relies on arithmetic right shift of signed
- *     integers, which C99 6.5.7p5 leaves implementation-defined for
- *     negative operands. Every supported toolchain (clang, gcc, msvc
- *     on x86_64 and arm64) implements it as sign-preserving. A port
- *     to a target with logical right shift will need a sign-extending
- *     decode instead.
- */
-
-#define MINO_TAG_BITS  3
-#define MINO_TAG_MASK  ((uintptr_t)0x7)
-
-#define MINO_TAG_PTR   ((uintptr_t)0x0)
-#define MINO_TAG_INT   ((uintptr_t)0x1)
-#define MINO_TAG_BOOL  ((uintptr_t)0x2)
-#define MINO_TAG_NIL   ((uintptr_t)0x3)
-#define MINO_TAG_CHAR  ((uintptr_t)0x4)
-
-#define MINO_TAG(v)    ((uintptr_t)(v) & MINO_TAG_MASK)
-
-/* Heap-pointer test: tag 000 *and* non-NULL. NULL is the runtime's
- * "no value" sentinel and must not be confused with a heap object. */
-#define MINO_IS_PTR(v) ((v) != NULL && MINO_TAG(v) == MINO_TAG_PTR)
-#define MINO_IS_INT(v) (MINO_TAG(v) == MINO_TAG_INT)
-
-/* 61-bit signed inline-int range. */
-#define MINO_INT_MAX   ((long long)((1ULL << 60) - 1))
-#define MINO_INT_MIN   (-((long long)(1LL << 60)))
-
-/* Encode a 61-bit signed integer as a tagged mino_val_t*. The caller
- * is responsible for range-checking; out-of-range values silently
- * wrap. Fast-lane handlers added with the arithmetic migration check
- * before encoding and fall back to boxed allocation on miss. */
-#define MINO_MAKE_INT(n) \
-    ((mino_val_t *)((uintptr_t)((uint64_t)(long long)(n) << MINO_TAG_BITS) \
-                    | MINO_TAG_INT))
-
-/* Decode the 61-bit signed payload. Sign-extends via arithmetic right
- * shift (see portability note above). */
-#define MINO_INT_VAL(v) (((long long)(intptr_t)(v)) >> MINO_TAG_BITS)
-
-/* Tag predicates for the remaining singletons / inline scalars. */
-#define MINO_IS_BOOL(v) (MINO_TAG(v) == MINO_TAG_BOOL)
-#define MINO_IS_NIL(v)  ((v) == NULL || MINO_TAG(v) == MINO_TAG_NIL)
-#define MINO_IS_CHAR(v) (MINO_TAG(v) == MINO_TAG_CHAR)
-
-/* Inline-BOOL encoding: one bit at offset 3 carries the truth value.
- * Two well-known constants exist (true / false); use the predicates
- * above for tests and MINO_BOOL_VAL to decode. */
-#define MINO_TRUE_PAYLOAD  ((uintptr_t)0x1)
-#define MINO_FALSE_PAYLOAD ((uintptr_t)0x0)
-#define MINO_MAKE_BOOL(b) \
-    ((mino_val_t *)(((b) ? MINO_TRUE_PAYLOAD : MINO_FALSE_PAYLOAD) << MINO_TAG_BITS \
-                    | MINO_TAG_BOOL))
-#define MINO_BOOL_VAL(v) \
-    ((int)(((uintptr_t)(v) >> MINO_TAG_BITS) & 0x1))
-
-/* Inline-NIL encoding: a single constant pointer. Distinct from
- * C NULL (which is also treated as nil throughout the runtime). */
-#define MINO_MAKE_NIL ((mino_val_t *)MINO_TAG_NIL)
-
-/* Inline-CHAR encoding: payload is the Unicode codepoint (21 bits used,
- * 61 reserved -- plenty of headroom). */
-#define MINO_MAKE_CHAR(cp) \
-    ((mino_val_t *)(((uintptr_t)(uint32_t)(cp) << MINO_TAG_BITS) | MINO_TAG_CHAR))
-#define MINO_CHAR_VAL(v) \
-    ((int)((uintptr_t)(v) >> MINO_TAG_BITS))
+/* Return the effective type of a value. Works for both heap-allocated
+ * cells and tagged scalars (int, bool, nil, char). NULL is treated as
+ * MINO_NIL. Use this to dispatch on type from C without reaching into
+ * the value's internal layout. */
+mino_type_t mino_typeof(const mino_val_t *v);
 
 typedef mino_val_t *(*mino_prim_fn)(mino_state_t *S, mino_val_t *args,
                                     mino_env_t *env);
@@ -316,266 +224,6 @@ typedef void (*mino_finalizer_fn)(void *ptr, const char *tag);
  * args is a cons list of evaluated arguments. */
 typedef mino_val_t *(*mino_host_fn)(mino_state_t *S, mino_val_t *target,
                                     mino_val_t *args, void *ctx);
-
-struct mino_val {
-    mino_type_t type;     /* value type tag */
-    mino_val_t *meta;     /* metadata map (NULL when absent) */
-    union {
-        int b;            /* MINO_BOOL: 0 or 1 */
-        long long i;      /* MINO_INT */
-        double f;         /* MINO_FLOAT or MINO_FLOAT32 (32-bit value
-                           * already narrowed via (double)(float)d at
-                           * construction so equality / hash / print
-                           * see the rounded value). */
-        int ch;           /* MINO_CHAR: Unicode codepoint (0..0x10FFFF) */
-        struct {          /* MINO_STRING, MINO_SYMBOL, MINO_KEYWORD */
-            char *data;   /* byte content (NUL-terminated) */
-            size_t len;   /* length in bytes (excluding NUL) */
-            uint32_t hash;/* FNV-1a of (data, len); 0 means "not cached"
-                           * — recompute on the spot. Populated by the
-                           * intern path; non-interned strings leave it
-                           * zero. Internal use only; do not set
-                           * externally. */
-        } s;
-        struct {          /* MINO_CONS */
-            mino_val_t *car;   /* first element */
-            mino_val_t *cdr;   /* rest of the list */
-            const char *file;  /* source file (NULL if unknown) */
-            int         line;  /* source line (0 if unknown) */
-            int         column;/* source column (0 if unknown) */
-            int         not_list; /* set when this cell came from a
-                                   * (cons x y) call: list? is false,
-                                   * peek/pop throw. List literals from
-                                   * the reader keep this 0. */
-        } cons;
-        struct {          /* MINO_VECTOR: persistent 32-way trie with tail */
-            mino_vec_node_t *root;     /* trie spine (NULL when len <= 32) */
-            mino_vec_node_t *tail;     /* partial leaf, 1..32 slots used */
-            unsigned         tail_len; /* number of valid slots in tail */
-            unsigned         shift;    /* height of root in multiples of 5 */
-            size_t           len;      /* visible element count */
-            size_t           offset;   /* first visible element (0 unless subvec) */
-            size_t           blen;     /* backing total (len+offset when no nesting) */
-            uint32_t         cached_hash; /* hash_val of this vec; 0 = uncomputed.
-                                           * Sound under immutability: once filled,
-                                           * stays correct because the contents
-                                           * never change. */
-        } vec;
-        struct {          /* MINO_MAP: flatmap (small) or HAMT (large) */
-            /* Two representations behind one shape:
-             *   - Flatmap (len <= MINO_FLATMAP_THRESHOLD): root == NULL,
-             *     val_order non-NULL, lookup is linear scan over key_order.
-             *   - HAMT (len > threshold OR promoted-and-stayed): root
-             *     non-NULL, val_order == NULL, lookup goes through hamt_get.
-             *   - Empty map: root == NULL, val_order == NULL, len == 0.
-             * Promotion is one-way: once HAMT, never demoted back to flat
-             * even if dissoc shrinks below the threshold. */
-            mino_hamt_node_t *root;      /* HAMT root, or NULL for flatmap/empty */
-            mino_val_t       *key_order; /* MINO_VECTOR of keys, insertion order */
-            mino_val_t       *val_order; /* MINO_VECTOR of vals (flatmap), or NULL */
-            size_t            len;       /* number of entries */
-            uint32_t          cached_hash; /* hash_val of this map; 0 = uncomputed. */
-        } map;
-        struct {          /* MINO_SET: HAMT with sentinel values */
-            mino_hamt_node_t *root;      /* HAMT root (NULL when len == 0) */
-            mino_val_t       *key_order; /* MINO_VECTOR of elements */
-            size_t            len;       /* number of elements */
-            uint32_t          cached_hash; /* hash_val of this set; 0 = uncomputed. */
-        } set;
-        struct {          /* MINO_SORTED_MAP / MINO_SORTED_SET: red-black tree */
-            mino_rb_node_t *root;       /* RB tree root (NULL when empty) */
-            mino_val_t     *comparator; /* NULL = natural order, fn = custom */
-            size_t          len;        /* number of entries */
-        } sorted;
-        struct {          /* MINO_PRIM */
-            const char *name;  /* primitive name */
-            mino_prim_fn  fn;  /* legacy cons-list ABI (NULL iff fn2 set) */
-            mino_prim_fn2 fn2; /* argv ABI; non-NULL takes precedence */
-        } prim;
-        struct {          /* MINO_FN: user-defined closure */
-            mino_val_t *params; /* parameter list or vector */
-            mino_val_t *body;   /* body forms */
-            mino_env_t *env;    /* captured lexical environment */
-            const char *defining_ns; /* ns at creation time (interned), or NULL */
-            /* Lazily-cached shape tag for the parameter list. 0 means
-             * not yet inspected; 1 means params is a plain-symbol vector
-             * with no destructure, no &-rest, no :as -- the bind path
-             * can skip the destructure dispatch entirely; -1 means the
-             * params need the full bind_params walk. Set by
-             * apply_callable on first call, never invalidated. */
-            int         shape;
-            /* Compiled bytecode for the fn body. NULL means "not yet
-             * compiled" or "compilation declined" -- the tree-walker
-             * is the fallback. Set lazily on first call by
-             * mino_bc_compile_fn; the compile attempt is a
-             * tri-state: NULL stays NULL on success when the form
-             * shape isn't compilable, points at a populated
-             * mino_bc_fn_t on success when it is. Never invalidated;
-             * redefinition of a fn produces a new MINO_FN with a
-             * fresh `bc` slot. */
-            const struct mino_bc_fn *bc;
-        } fn;
-        struct {          /* MINO_HANDLE: opaque host pointer + tag */
-            void       *ptr;   /* host-owned pointer */
-            const char *tag;   /* type tag (static or interned) */
-            void       (*finalizer)(void *ptr, const char *tag);
-                               /* called on GC (NULL if none) */
-        } handle;
-        struct {          /* MINO_ATOM: mutable reference cell */
-            mino_val_t *val;       /* current value */
-            mino_val_t *watches;   /* key -> callback fn, or NULL */
-            mino_val_t *validator; /* validation fn or NULL */
-        } atom;
-        struct {          /* MINO_VOLATILE: single-slot mutable cell */
-            mino_val_t *val;       /* current value */
-        } volatile_;
-        struct {          /* MINO_LAZY: deferred sequence */
-            mino_val_t *body;     /* unevaluated form list (NULL after force) */
-            mino_env_t *env;      /* captured environment (NULL after force) */
-            mino_val_t *cached;   /* realized cons/nil (valid after force) */
-            mino_val_t *(*c_thunk)(struct mino_state *, mino_val_t *);
-                                  /* optional C thunk; body is context if set */
-            int         realized; /* 0 = pending, 1 = forced */
-        } lazy;
-        struct {          /* MINO_CHUNK: fixed-cap value buffer */
-            mino_val_t **vals;    /* malloc-owned slot array, length cap */
-            unsigned     cap;     /* capacity (typically 32) */
-            unsigned     len;     /* number of populated slots */
-            int          sealed;  /* 0 = mutable buffer, 1 = sealed chunk */
-        } chunk;
-        struct {          /* MINO_CHUNKED_CONS: chunk + offset + more */
-            mino_val_t *chunk;    /* MINO_CHUNK; off < chunk.len at all times */
-            mino_val_t *more;     /* tail seq (nil/empty/cons/lazy/chunked) */
-            unsigned    off;      /* offset of this cell's first element */
-        } chunked_cons;
-        struct {          /* MINO_RECUR: carries rebind args for trampoline */
-            mino_val_t *args;  /* argument list for next iteration */
-        } recur;
-        struct {          /* MINO_TAIL_CALL: proper tail call trampoline */
-            mino_val_t *fn;    /* function to call */
-            mino_val_t *args;  /* argument list */
-        } tail_call;
-        struct {          /* MINO_REDUCED: early termination wrapper */
-            mino_val_t *val;   /* wrapped value */
-        } reduced;
-        struct {          /* MINO_VAR: first-class var */
-            const char *ns;        /* namespace (interned) */
-            const char *sym;       /* name (interned) */
-            mino_val_t *root;      /* root binding value */
-            int         dynamic;   /* 1 if ^:dynamic */
-            int         bound;     /* 0 if (def x) with no init; 1 once bound */
-            int         is_private; /* 1 if ^:private */
-            mino_val_t *watches;   /* MINO_MAP key->callback, or NULL */
-            mino_val_t *validator; /* validator fn, or NULL */
-            /* Monotonic version counter. Bumped on every var_set_root and
-             * dynamic rebind so the eval-side inline call cache can
-             * detect a stale entry without re-resolving. */
-            unsigned    version;
-        } var;
-        struct {          /* MINO_TRANSIENT: batch-mutation wrapper */
-            mino_val_t *current; /* current persistent value (vec/map/set) */
-            int         valid;   /* 0 after persistent!, 1 while mutable */
-        } transient;
-        struct {          /* MINO_BIGINT: arbitrary-precision integer */
-            void *mpz;    /* opaque mp_int; malloc-owned, freed at sweep */
-        } bigint;
-        struct {          /* MINO_RATIO: numerator/denominator bigints */
-            mino_val_t *num;   /* MINO_BIGINT */
-            mino_val_t *denom; /* MINO_BIGINT, always positive */
-        } ratio;
-        struct {          /* MINO_BIGDEC: unscaled bigint + decimal scale */
-            mino_val_t *unscaled; /* MINO_BIGINT */
-            int         scale;    /* value = unscaled * 10^-scale */
-        } bigdec;
-        struct {          /* MINO_TYPE: first-class record type */
-            const char *ns;      /* defining namespace (interned) */
-            const char *name;    /* unqualified type name (interned) */
-            mino_val_t *fields;  /* MINO_VECTOR of field-name keywords */
-        } record_type;
-        struct {          /* MINO_RECORD: record value */
-            mino_val_t  *type;   /* MINO_TYPE (never NULL) */
-            mino_val_t **vals;   /* malloc-owned; len == type's field count */
-            mino_val_t  *ext;    /* MINO_MAP for ext keys, or NULL */
-        } record;
-        struct {          /* MINO_FUTURE: host-thread future */
-            struct mino_future *impl; /* opaque; see runtime/host_threads.c */
-        } future;
-        struct {          /* MINO_UUID: RFC 4122 UUID (16 bytes inline) */
-            unsigned char bytes[16];
-        } uuid;
-        struct {          /* MINO_REGEX: pattern source */
-            mino_val_t *source;  /* MINO_STRING with pattern bytes */
-        } regex;
-        struct {          /* MINO_HOST_ARRAY: JVM-style host array */
-            mino_val_t **vals;        /* malloc-owned: vals[len] */
-            size_t       len;
-            unsigned char element_kind; /* host_array_kind_t enum below */
-        } host_array;
-        struct {          /* MINO_MAP_ENTRY: (k, v) from a map */
-            mino_val_t *k;
-            mino_val_t *v;
-        } map_entry;
-        struct {          /* MINO_TX_REF: STM ref */
-            mino_val_t    *val;       /* committed value */
-            mino_val_t    *watches;   /* MINO_MAP key->callback, or NULL */
-            mino_val_t    *validator; /* validator fn, or NULL */
-            uint64_t       version;   /* bumped on each commit; read-set
-                                       * validation compares to snapshot */
-            uint64_t       ref_id;    /* monotonic ID at construction */
-            mino_state_t  *owning_state; /* the state that allocated this
-                                          * ref. Used by the C API entries
-                                          * to throw MST007 if a host
-                                          * passes a ref from another
-                                          * state. Not traced -- the state
-                                          * itself outlives all its refs
-                                          * and is not a GC value. */
-        } tx_ref;
-        struct {          /* MINO_AGENT: async mutable cell + queue */
-            mino_val_t *val;          /* current state */
-            mino_val_t *watches;      /* MINO_MAP key->callback, or NULL */
-            mino_val_t *validator;    /* validator fn, or NULL */
-            mino_val_t *err;          /* last failed action's exception,
-                                       * or NULL. Set when the worker
-                                       * caught a throw; cleared by
-                                       * restart-agent. */
-            mino_val_t *err_handler;  /* on-error callback (fn agent ex)
-                                       * or NULL */
-            int         err_mode;     /* 0=:fail, 1=:continue */
-            int         in_flight;    /* count of actions queued + running
-                                       * for this agent. Read/write under
-                                       * S->agent_mu. await waiters block
-                                       * on S->agent_cv until this hits 0. */
-            uint64_t    agent_id;     /* monotonic identity at construction
-                                       * (mirrors tx_ref.ref_id) so the
-                                       * print form distinguishes two
-                                       * agents that hold the same value. */
-            mino_state_t *owning_state; /* the state that allocated this
-                                          * agent. Mirrors tx_ref's
-                                          * cross-state defense: every
-                                          * agent prim throws MST007 if
-                                          * it sees a value passed in
-                                          * from another state. Not
-                                          * traced -- the state outlives
-                                          * its agents and isn't a GC
-                                          * value. */
-        } agent;
-    } as;
-};
-
-/* MINO_HOST_ARRAY element kind tag — used for printing and zero-fill
- * semantics on (int-array n) etc. Pure-object arrays nil-fill; the
- * primitive-element variants fill with their type's zero value. */
-typedef enum {
-    HOST_ARRAY_OBJECT = 0,
-    HOST_ARRAY_INT,
-    HOST_ARRAY_LONG,
-    HOST_ARRAY_SHORT,
-    HOST_ARRAY_BYTE,
-    HOST_ARRAY_FLOAT,
-    HOST_ARRAY_DOUBLE,
-    HOST_ARRAY_CHAR,
-    HOST_ARRAY_BOOLEAN
-} host_array_kind_t;
 
 /* ------------------------------------------------------------------------- */
 /* Constructors                                                              */
@@ -866,44 +514,6 @@ typedef mino_val_t *(*mino_tx_body_fn)(mino_state_t *S, void *user,
 mino_val_t *mino_tx_run(mino_state_t *S, mino_tx_body_fn body,
                         void *user, mino_env_t *env);
 
-/* Create a host-style array of the given length, fill-initialized
- * according to the element kind: HOST_ARRAY_OBJECT fills with nil;
- * the primitive variants fill with their type's zero value (0 for
- * the integer / float kinds, false for boolean, NUL for char).
- * The vals[] storage is malloc-owned and freed during GC sweep. */
-mino_val_t *mino_host_array_new(mino_state_t *S, size_t len,
-                                host_array_kind_t kind);
-
-/* Create a host-style array from an existing collection (vec, list,
- * seq, set, ...). Element kind tags the array; the values are
- * copied as-is without coercion. */
-mino_val_t *mino_host_array_from_coll(mino_state_t *S, mino_val_t *coll,
-                                      host_array_kind_t kind);
-
-/* Create an empty chunk buffer with the given capacity. The returned
- * value is mutable until `mino_chunk_seal` is called; subsequent
- * `mino_chunk_append` calls fail once the buffer is sealed or full. */
-mino_val_t *mino_chunk_buffer(mino_state_t *S, unsigned cap);
-
-/* Append elem to a chunk buffer. Returns 1 on success, 0 if buf is
- * not a chunk, is sealed, or is full. */
-int         mino_chunk_append(mino_val_t *buf, mino_val_t *elem);
-
-/* Seal a chunk buffer so no further appends are accepted. Returns
- * the same value (now an immutable chunk). */
-mino_val_t *mino_chunk_seal(mino_val_t *buf);
-
-/* Construct a chunked-cons cell wrapping a sealed chunk and a tail
- * seq (`more` may be nil, empty-list, cons, lazy, or another
- * chunked-cons). Returns `more` directly when the chunk is empty. */
-mino_val_t *mino_chunked_cons(mino_state_t *S, mino_val_t *chunk,
-                              mino_val_t *more);
-
-/* Build a chunked-cons positioned one element past `cs`, sharing the
- * underlying chunk. Returns the cell's `more` pointer when the
- * advance would exceed the chunk's length. */
-mino_val_t *mino_chunked_cons_advance(mino_state_t *S, const mino_val_t *cs);
-
 /* ------------------------------------------------------------------------- */
 /* Record types                                                              */
 /* ------------------------------------------------------------------------- */
@@ -1007,17 +617,36 @@ size_t      mino_transient_count(const mino_val_t *t);
 /* Predicates and accessors                                                  */
 /* ------------------------------------------------------------------------- */
 
-/* Return 1 if v is nil, 0 otherwise. */
-int mino_is_nil(const mino_val_t *v);
-
-/* Return 1 if v is truthy (everything except nil and false). */
-int mino_is_truthy(const mino_val_t *v);
-
-/* Return 1 if v is a cons cell (list node), 0 otherwise. */
-int mino_is_cons(const mino_val_t *v);
-
-/* Return 1 if v is the canonical empty-list singleton `()`, 0 otherwise. */
+/* Type-predicate grid. Each returns 1 iff v has the given effective
+ * type, 0 otherwise. NULL is treated as MINO_NIL. The predicates
+ * are tag-aware: they work identically for inline scalars (int, bool,
+ * char, nil) and boxed cells. mino_is_float matches both MINO_FLOAT
+ * (double) and MINO_FLOAT32; mino_is_map / mino_is_set match the
+ * sorted and unsorted variants. */
+int mino_is_nil       (const mino_val_t *v);
+int mino_is_truthy    (const mino_val_t *v);
+int mino_is_bool      (const mino_val_t *v);
+int mino_is_int       (const mino_val_t *v);
+int mino_is_float     (const mino_val_t *v);
+int mino_is_char      (const mino_val_t *v);
+int mino_is_string    (const mino_val_t *v);
+int mino_is_symbol    (const mino_val_t *v);
+int mino_is_keyword   (const mino_val_t *v);
+int mino_is_cons      (const mino_val_t *v);
 int mino_is_empty_list(const mino_val_t *v);
+int mino_is_vector    (const mino_val_t *v);
+int mino_is_map       (const mino_val_t *v);
+int mino_is_set       (const mino_val_t *v);
+int mino_is_fn        (const mino_val_t *v);
+int mino_is_macro     (const mino_val_t *v);
+int mino_is_prim      (const mino_val_t *v);
+int mino_is_lazy      (const mino_val_t *v);
+int mino_is_var       (const mino_val_t *v);
+int mino_is_bigint    (const mino_val_t *v);
+int mino_is_ratio     (const mino_val_t *v);
+int mino_is_bigdec    (const mino_val_t *v);
+int mino_is_uuid      (const mino_val_t *v);
+int mino_is_regex     (const mino_val_t *v);
 
 /* Structural equality. Returns 1 if a and b are equal, 0 otherwise. */
 int mino_eq(const mino_val_t *a, const mino_val_t *b);
@@ -1032,11 +661,16 @@ mino_val_t *mino_cdr(const mino_val_t *v);
 size_t mino_length(const mino_val_t *list);
 
 /* Type-safe C extraction. Each returns 1 on success, 0 on type mismatch.
- * mino_to_bool uses truthiness (only nil and false are falsey). */
-int mino_to_int(const mino_val_t *v, long long *out);
-int mino_to_float(const mino_val_t *v, double *out);
-int mino_to_string(const mino_val_t *v, const char **out, size_t *len);
-int mino_to_bool(const mino_val_t *v);
+ * mino_to_bool uses truthiness (only nil and false are falsey). String,
+ * keyword, and symbol extractors write the interned byte pointer through
+ * `out` (NUL-terminated, mino-owned) and the byte length through `len`. */
+int mino_to_int    (const mino_val_t *v, long long *out);
+int mino_to_float  (const mino_val_t *v, double *out);
+int mino_to_bool   (const mino_val_t *v);
+int mino_to_char   (const mino_val_t *v, int *cp);
+int mino_to_string (const mino_val_t *v, const char **out, size_t *len);
+int mino_to_keyword(const mino_val_t *v, const char **out, size_t *len);
+int mino_to_symbol (const mino_val_t *v, const char **out, size_t *len);
 
 /* ------------------------------------------------------------------------- */
 /* Printer                                                                   */
@@ -1574,27 +1208,6 @@ void mino_set_limit(mino_state_t *S, int kind, size_t value);
  * running eval. The flag is cleared at the start of the next eval call.
  */
 void mino_interrupt(mino_state_t *S);
-
-/*
- * Fault injection: schedule a simulated OOM after the next `n` GC-managed
- * allocations. When the counter reaches zero, gc_alloc_typed behaves as
- * if calloc returned NULL. Pass 0 to disable. Intended for testing only.
- */
-void mino_set_fail_alloc_at(mino_state_t *S, long n);
-
-/*
- * Fault injection for raw (non-GC) allocation paths such as the clone
- * serialization buffer. After `n` raw allocation attempts the next one
- * returns NULL. Pass 0 to disable. Intended for testing only.
- */
-void mino_set_fail_raw_at(mino_state_t *S, long n);
-
-/*
- * Check and decrement the raw fault injection counter. Returns 1 if
- * the allocation should be failed (simulated OOM), 0 otherwise.
- * Internal helper exposed for clone.c; not intended for embedder use.
- */
-int mino_fi_should_fail_raw(mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* Host thread grant                                                         */

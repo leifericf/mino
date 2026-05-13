@@ -13,7 +13,7 @@
  * Run: ./embed_stm_test
  */
 
-#include "mino.h"
+#include "mino_internal.h"
 
 #include <stdio.h>
 #include <string.h>
