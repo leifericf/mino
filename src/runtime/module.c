@@ -31,7 +31,10 @@ int runtime_module_dotted_to_path(const char *name, size_t nlen,
 
 static char *dup_str(const char *s, size_t n)
 {
-    char *d = (char *)malloc(n + 1);
+    size_t alloc_sz;
+    char  *d;
+    if (!checked_add_sz(n, 1, &alloc_sz)) return NULL;
+    d = (char *)malloc(alloc_sz);
     if (d == NULL) return NULL;
     memcpy(d, s, n);
     d[n] = '\0';
@@ -69,9 +72,16 @@ int runtime_module_add_alias(mino_state_t *S,
     }
 
     if (S->ns_alias_len == S->ns_alias_cap) {
-        size_t new_cap = S->ns_alias_cap == 0 ? 8 : S->ns_alias_cap * 2;
-        ns_alias_t *nb = (ns_alias_t *)realloc(
-            S->ns_aliases, new_cap * sizeof(*nb));
+        size_t new_cap;
+        size_t alloc_sz;
+        ns_alias_t *nb;
+        if (S->ns_alias_cap == 0) {
+            new_cap = 8;
+        } else if (!checked_double_sz(S->ns_alias_cap, &new_cap)) {
+            return -1;
+        }
+        if (!checked_mul_sz(new_cap, sizeof(*nb), &alloc_sz)) return -1;
+        nb = (ns_alias_t *)realloc(S->ns_aliases, alloc_sz);
         if (nb == NULL) return -1;
         S->ns_aliases   = nb;
         S->ns_alias_cap = new_cap;

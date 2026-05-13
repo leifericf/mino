@@ -154,6 +154,14 @@ void  *gc_alloc_typed_inner(mino_state_t *S, unsigned char tag, size_t size);
 mino_val_t *alloc_val_inner(mino_state_t *S, mino_type_t type);
 char  *dup_n_inner(mino_state_t *S, const char *s, size_t len);
 
+/* Raise the standard OOM mino diagnostic by longjmp'ing into the active
+ * try frame (or abort if none). The same throw the GC allocator uses on
+ * its own NULL return; callers that detect allocation failure outside
+ * the GC path -- e.g. checked-size overflow before a raw malloc/realloc,
+ * or a non-GC heap returning NULL -- route through here so the failure
+ * shape is uniform. */
+void gc_oom_throw(mino_state_t *S, const char *msg);
+
 #ifdef MINO_ALLOC_PROFILE
 void mino_alloc_profile_record(const char *file, int line,
                                unsigned char tag, size_t size);

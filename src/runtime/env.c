@@ -78,11 +78,35 @@ static uint32_t env_hash_name(const char *name, size_t len)
 
 static void env_ht_rebuild(mino_state_t *S, mino_env_t *env)
 {
-    size_t new_cap = env->ht_cap == 0 ? 64 : env->ht_cap * 2;
+    size_t new_cap;
+    size_t target;
+    size_t alloc_sz;
     size_t *buckets;
     size_t i, mask;
-    while (new_cap < env->len * 2) new_cap *= 2;
-    buckets = (size_t *)gc_alloc_typed(S, GC_T_RAW, new_cap * sizeof(*buckets));
+    if (env->ht_cap == 0) {
+        new_cap = 64;
+    } else if (!checked_double_sz(env->ht_cap, &new_cap)) {
+        gc_oom_throw(S, "env table grow: size overflow");
+        return; /* unreachable */
+    }
+    /* Target is twice the live binding count; if `env->len * 2` would
+     * wrap, the table is bigger than addressable memory and we must
+     * fail rather than under-allocate. */
+    if (!checked_mul_sz(env->len, 2, &target)) {
+        gc_oom_throw(S, "env table grow: size overflow");
+        return; /* unreachable */
+    }
+    while (new_cap < target) {
+        if (!checked_double_sz(new_cap, &new_cap)) {
+            gc_oom_throw(S, "env table grow: size overflow");
+            return; /* unreachable */
+        }
+    }
+    if (!checked_mul_sz(new_cap, sizeof(*buckets), &alloc_sz)) {
+        gc_oom_throw(S, "env table grow: size overflow");
+        return; /* unreachable */
+    }
+    buckets = (size_t *)gc_alloc_typed(S, GC_T_RAW, alloc_sz);
     mask = new_cap - 1;
     for (i = 0; i < new_cap; i++) buckets[i] = SIZE_MAX;
     for (i = 0; i < env->len; i++) {
@@ -168,9 +192,20 @@ static void env_bind_impl(mino_state_t *S, mino_env_t *env,
         return;
     }
     if (env->len == env->cap) {
-        size_t         new_cap = env->cap == 0 ? 4 : env->cap * 2;
-        env_binding_t *nb      = (env_binding_t *)gc_alloc_typed(
-            S, GC_T_RAW, new_cap * sizeof(*nb));
+        size_t         new_cap;
+        size_t         alloc_sz;
+        env_binding_t *nb;
+        if (env->cap == 0) {
+            new_cap = 4;
+        } else if (!checked_double_sz(env->cap, &new_cap)) {
+            gc_oom_throw(S, "env bindings grow: size overflow");
+            return; /* unreachable */
+        }
+        if (!checked_mul_sz(new_cap, sizeof(*nb), &alloc_sz)) {
+            gc_oom_throw(S, "env bindings grow: size overflow");
+            return; /* unreachable */
+        }
+        nb = (env_binding_t *)gc_alloc_typed(S, GC_T_RAW, alloc_sz);
         if (env->bindings != NULL && env->len > 0) {
             memcpy(nb, env->bindings, env->len * sizeof(*nb));
         }

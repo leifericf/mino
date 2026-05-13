@@ -129,6 +129,33 @@ static inline int mino_val_char_get(const mino_val_t *v)
     return MINO_IS_CHAR(v) ? MINO_CHAR_VAL(v) : v->as.ch;
 }
 
+/* Checked size-arithmetic helpers used by dynamic-growth code paths.
+ * Each returns 1 on success (storing the result through `out`) and 0 on
+ * overflow (leaving `*out` untouched). Callers route the overflow case
+ * into the same OOM/diag path they already use for `realloc` failure.
+ * Inline so the compiler can fold them through the surrounding cap and
+ * length comparisons; static so each TU emits its own copy if needed. */
+static inline int checked_add_sz(size_t a, size_t b, size_t *out)
+{
+    if (a > SIZE_MAX - b) return 0;
+    *out = a + b;
+    return 1;
+}
+
+static inline int checked_mul_sz(size_t a, size_t b, size_t *out)
+{
+    if (b != 0 && a > SIZE_MAX / b) return 0;
+    *out = a * b;
+    return 1;
+}
+
+static inline int checked_double_sz(size_t cap, size_t *out)
+{
+    if (cap > SIZE_MAX / 2) return 0;
+    *out = cap * 2;
+    return 1;
+}
+
 /* ------------------------------------------------------------------------- */
 /* Runtime support types                                                     */
 /* ------------------------------------------------------------------------- */

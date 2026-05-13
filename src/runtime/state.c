@@ -1184,17 +1184,30 @@ int mino_repl_feed(mino_repl_t *repl, const char *line, mino_val_t **out)
 
     /* Append the line to the buffer. */
     add = (line != NULL) ? strlen(line) : 0;
-    if (repl->len + add + 1 > repl->cap) {
-        size_t new_cap = repl->cap == 0 ? 256 : repl->cap;
-        char  *nb;
-        while (new_cap < repl->len + add + 1) { new_cap *= 2; }
-        nb = (char *)realloc(repl->buf, new_cap);
-        if (nb == NULL) {
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "repl: out of memory");
+    {
+        size_t need;
+        if (!checked_add_sz(repl->len, add, &need)
+            || !checked_add_sz(need, 1, &need)) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "repl: input too large");
             return MINO_REPL_ERROR;
         }
-        repl->buf = nb;
-        repl->cap = new_cap;
+        if (need > repl->cap) {
+            size_t new_cap = repl->cap == 0 ? 256 : repl->cap;
+            char  *nb;
+            while (new_cap < need) {
+                if (!checked_double_sz(new_cap, &new_cap)) {
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "repl: input too large");
+                    return MINO_REPL_ERROR;
+                }
+            }
+            nb = (char *)realloc(repl->buf, new_cap);
+            if (nb == NULL) {
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "repl: out of memory");
+                return MINO_REPL_ERROR;
+            }
+            repl->buf = nb;
+            repl->cap = new_cap;
+        }
     }
     if (add > 0) {
         memcpy(repl->buf + repl->len, line, add);

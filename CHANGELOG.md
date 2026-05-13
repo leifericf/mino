@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fixed: Unchecked Growth Arithmetic In `env`, `state`, And `module`
+
+Several internal dynamic-growth paths computed `cap * 2`, `len + add + 1`,
+or `cap * sizeof(T)` directly with no `SIZE_MAX` guard. On wraparound
+the runtime would have under-allocated and silently corrupted the
+following memcpy or fill. A new trio of `static inline` helpers --
+`checked_add_sz`, `checked_mul_sz`, `checked_double_sz` -- in
+`src/runtime/internal.h` returns 1 on success / 0 on overflow; each
+caller routes the overflow case into the same OOM diagnostic path it
+already uses for `realloc` / `gc_alloc_typed` failure. To make the GC
+allocator's existing throw reachable from the non-GC paths,
+`gc_oom_throw` is no longer `static` and is declared in
+`src/gc/internal.h`.
+
+Guarded sites: `env_ht_rebuild` and `env_bind_impl` in
+`src/runtime/env.c`; `dup_str` and `runtime_module_add_alias` in
+`src/runtime/module.c`; the REPL line-append buffer growth in
+`mino_repl_eval` in `src/runtime/state.c`. The REPL site is the one
+input-controlled case (a host could feed a very large line into the
+REPL); the others guard wraparound classes that are extremely hard to
+reach in practice but were called out by the project's own runtime
+rules.
+
 ### Fixed: Nine More `realloc` Overwrite Leaks In `src/prim/string.c`
 
 `v0.149.1` swept the `fmt_ensure` helper but left nine sister sites

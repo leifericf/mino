@@ -221,8 +221,10 @@ static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
 }
 
 /* gc_oom_throw -- raise the standard OOM mino diagnostic by longjmp'ing
- * into the active try frame, or abort if no try frame exists. */
-static void gc_oom_throw(mino_state_t *S, const char *msg)
+ * into the active try frame, or abort if no try frame exists. Non-static
+ * so checked-size paths in env/module/etc. can reach the same throw when
+ * they detect overflow before the GC allocator gets a chance. */
+void gc_oom_throw(mino_state_t *S, const char *msg)
 {
     if (mino_current_ctx(S)->try_depth > 0) {
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
