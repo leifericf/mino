@@ -132,11 +132,16 @@ typedef struct {
  * Always increment gc_save_len so pin/unpin pairs stay balanced even
  * when the save array is full.  Only write the pointer when there is
  * space; beyond 64 the value is not pinned but the counter remains
- * correct, preventing underflow on the matching unpin.
+ * correct, preventing underflow on the matching unpin. The assert
+ * makes the overflow case loud in debug / sanitizer builds so the
+ * silent-loss path doesn't quietly drop liveness protection on a
+ * deeply-nested test; release builds keep the documented soft
+ * behavior so a runaway pin doesn't crash the host.
  * Require a local variable named `S` of type mino_state_t *. */
 #define GC_SAVE_MAX 64
 #define gc_pin(v) \
-    do { if (mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX) mino_current_ctx(S)->gc_save[mino_current_ctx(S)->gc_save_len] = (v); \
+    do { assert(mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX); \
+         if (mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX) mino_current_ctx(S)->gc_save[mino_current_ctx(S)->gc_save_len] = (v); \
          mino_current_ctx(S)->gc_save_len++; } while (0)
 #define gc_unpin(n) \
     do { assert(mino_current_ctx(S)->gc_save_len >= (n)); \

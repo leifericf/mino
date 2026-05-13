@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed: `gc_pin` Overflow Now Trips An Assert In Debug Builds
+
+`gc_pin` keeps its pin/unpin counter balanced even after the 64-slot
+save array fills up -- by design, so a runaway pin doesn't crash the
+host -- but the slots past 64 were dropped silently. A deeply-nested
+test that ever reached past 64 would lose liveness protection without
+any signal. The macro now begins with
+`assert(gc_save_len < GC_SAVE_MAX)`, which fires loudly in debug /
+sanitizer builds while release builds keep the documented soft-fail
+counter contract intact. The full mino test suite and the ASan binary
+run clean against the assert; no current path reaches the cap.
+
 ### Fixed: Unchecked Format-Buffer Growth In `src/prim/io.c`
 
 The `pr`/`prn` readably-print path appended each formatted argument's
