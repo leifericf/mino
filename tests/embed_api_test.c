@@ -146,6 +146,31 @@ static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
             "throw-uncaught: error does not mention unhandled exception");
 }
 
+/* NULL `src` to mino_eval_string and mino_eval_string_ex must surface
+ * a classified error, matching mino_load_file's NULL-arg behaviour. */
+static void test_eval_string_null_src(mino_state_t *S, mino_env_t *env)
+{
+    mino_val_t *out    = NULL;
+    mino_val_t *out_ex = NULL;
+    int         rc;
+
+    /* Public, non-_ex form: returns NULL + sets last_error. */
+    {
+        mino_val_t *r = mino_eval_string(S, NULL, env);
+        const char *err;
+        REQUIRE(r == NULL, "null-src: mino_eval_string returns NULL");
+        err = mino_last_error(S);
+        REQUIRE(err != NULL,
+                "null-src: mino_eval_string sets a last_error");
+    }
+
+    /* _ex form: rc == -1, out == NULL. */
+    rc = mino_eval_string_ex(S, NULL, env, &out, &out_ex);
+    REQUIRE(rc == -1, "null-src: mino_eval_string_ex returns -1");
+    REQUIRE(out == NULL,
+            "null-src: mino_eval_string_ex leaves out == NULL");
+}
+
 int main(void)
 {
     mino_state_t *S = mino_state_new();
@@ -157,6 +182,7 @@ int main(void)
     test_args_parse_type(S, env);
     test_throw_caught(S, env);
     test_throw_uncaught(S, env);
+    test_eval_string_null_src(S, env);
 
     mino_env_free(S, env);
     mino_state_free(S);

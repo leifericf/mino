@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `mino_eval_string` and `mino_eval_string_ex` no longer crash when
+  passed a NULL `src` (or NULL `env`). The public entry point now
+  validates its arguments up front and publishes an `MIN001` "NULL
+  argument" diagnostic, matching how `mino_load_file` already
+  handles the NULL-argument case.
+
 ## v0.151.0 — Embedding API Revamp And Stabilization
 
 The C embedding surface in `src/mino.h` gets a substantial cleanup.

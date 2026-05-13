@@ -705,6 +705,13 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
 mino_val_t *mino_eval_string(mino_state_t *S, const char *src, mino_env_t *env)
 {
     mino_val_t *v;
+    if (S == NULL) return NULL;
+    if (src == NULL || env == NULL) {
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001",
+                      "mino_eval_string: NULL argument");
+        return NULL;
+    }
     mino_lock(S);
     v = mino_eval_string_inner(S, src, env);
     mino_unlock(S);
