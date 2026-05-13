@@ -36,6 +36,18 @@ instead of paying a malloc per walk. `mino_print_to_buf` for embedders
 without a `FILE *`. `mino_agent_deref` for parity with atom / volatile
 / ref deref.
 
+### Fixed: Host Interop Resolves Across Namespaces
+
+`host/new`, `host/call`, `host/get`, and `host/static-call` are
+installed under literal slash-names in `clojure.core`; with the
+namespace-first model a user-namespace caller's env no longer chains
+to clojure.core, so the interop special forms (`(new Type ...)`,
+`(.method t ...)`, `(.-field t)`, `Type/static`) would fail to find
+their backing primitive. Both the tree-walker's
+`eval_try_host_syntax` and the BC compiler's dispatch now route host
+sugar through a direct clojure.core lookup. Plain qualified source
+like `(host/new :Foo)` also resolves from any namespace.
+
 ### Changed: `mino_int` Auto-Promotes To Bigint With Bignum
 
 `mino_int(S, n)` now checks `MINO_CAP_BIGNUM` for the tag-overflow
