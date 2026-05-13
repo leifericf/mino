@@ -216,6 +216,16 @@ mino_val_t *prim_sh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 #else
     status = pclose(fp);
 #endif
+    /* -1 means pclose / _pclose itself failed (e.g. wait was interrupted
+     * or the child was reaped elsewhere). The value is not a wait
+     * status, so WIFEXITED on it is undefined and would silently route
+     * nonsense back to the caller's :exit. Surface the teardown error
+     * instead. */
+    if (status == -1) {
+        free(out);
+        return prim_throw_classified(S, "io", "MIO001",
+                                     "sh: pclose failed");
+    }
 #ifndef _WIN32
     /* POSIX: extract exit code from wait status. */
     if (WIFEXITED(status)) status = WEXITSTATUS(status);

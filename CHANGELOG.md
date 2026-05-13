@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed: `(sh ...)` Routed `pclose`'s `-1` Sentinel Through `WIFEXITED`
+
+`prim_sh` in `src/prim/proc.c` jumped straight from `status =
+pclose(fp);` into `WIFEXITED(status)` without first guarding against
+the `-1` sentinel. `pclose` (and `_pclose` on Windows) returns `-1`
+when it could not obtain the subprocess's wait status -- an
+interrupted wait, a child that was reaped elsewhere, or any other
+underlying `waitpid` failure. POSIX does not define the result of
+`WIFEXITED(-1)`, and the macro produced nonsense values that flowed
+into the caller's `:exit` map entry. The teardown failure was
+silently dropped and the shell call appeared to have "succeeded" or
+"failed weirdly". The branch now detects the `-1` sentinel, frees
+the just-read stdout buffer, and raises an `io` / `MIO001` error so
+the caller sees the teardown failure. No mino-level regression test
+is feasible (forcing `pclose` failure from script isn't easy); the
+fix is by static reading and the existing `tests/proc_test.clj`
+happy paths stay green.
+
 ### Fixed: `(sh ...)` Leaked Its Working Buffer When `realloc` Failed
 
 Two sites in `src/prim/proc.c` used `buf = realloc(buf, cap);
