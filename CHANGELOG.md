@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Fixed: Nine More `realloc` Overwrite Leaks In `src/prim/string.c`
+
+`v0.149.1` swept the `fmt_ensure` helper but left nine sister sites
+across the other string builders -- `(prn ...)`, `(str ...)`, the
+sequence-`(str/join ...)` path, `(str-replace ...)`, and the
+default-branch printer fallback. Each one used
+`buf = (char *)realloc(buf, cap); if (buf == NULL) return NULL;`,
+which clobbers the still-valid `buf` with `NULL` on failure and leaks
+the partially-built buffer. The branches now take the canonical
+`newbuf = realloc(buf, ...); if (newbuf == NULL) { free(buf); ...
+return NULL; } buf = newbuf;` shape, matching the precedent in
+`src/prim/proc.c` that `v0.149.1` called out. Sites: `string.c:300,
+593, 666, 679, 846, 875, 942, 1026, 1047` (pre-edit line numbers).
+The BIGINT branch at line 875 already freed `digits` on failure --
+it now frees `buf` as well. macOS ASan ships without LSan, so the
+leak is not directly observable from the project's test runner;
+correctness here is by static reading. The existing
+`tests/fault_inject_test.clj` happy paths stay green.
+
 ## v0.149.1 — Hash Contract, Sorted-Collection Counts, Error-Path Metadata, And OOM Cleanup
 
 ### Fixed: Const-Qualifier Mismatch In Arity-Mismatch Diagnostic Helpers
