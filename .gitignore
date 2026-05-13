@@ -60,6 +60,7 @@ embed_multi_state
 embed_multi_state_asan
 embed_multi_state_tsan
 embed_stm_test
+embed_stm_dbg
 embed_caps_test
 embed_caps_test_asan
 embed_caps_test_tsan
