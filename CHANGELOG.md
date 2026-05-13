@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## v0.149.1 — Hash Contract, Sorted-Collection Counts, Error-Path Metadata, And OOM Cleanup
+
+### Fixed: Const-Qualifier Mismatch In Arity-Mismatch Diagnostic Helpers
+
+The recent arity-mismatch diagnostic helpers in `src/eval/bindings.c`,
+`src/eval/fn.c`, and `src/eval/bc/vm.c` copied
+`mino_current_ctx(S)->eval_current_form` into a non-const local. The
+field is `const mino_val_t *`; the assignment dropped the qualifier,
+which trips `-Werror` on the strict Makefile bootstrap build (Apple
+clang 17). The task-runner build path uses softer flags and didn't
+surface the warning. Receiving locals now match the declared type.
+
 ### Fixed: `catch` Dropped Metadata From The Thrown Value
 
 `(let [c (try (throw (with-meta (ex-info "x" {}) {:my :m})) (catch e e))]
