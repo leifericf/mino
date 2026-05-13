@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — Embedding API Revamp And Stabilization
+## v0.151.0 — Embedding API Revamp And Stabilization
 
 The C embedding surface in `src/mino.h` gets a substantial cleanup.
 The header trims to ~145 public functions (down from ~174), the body
