@@ -97,6 +97,19 @@ typedef enum {
     OP_EQ_IK,            /* "                                              */
     OP_GET_KW_MAP,       /* A=dst, B=map, C=kw                             */
     OP_NTH_VEC,          /* A=dst, B=vec, C=index                          */
+    /* Write-side fast lanes. Mirrors of OP_NTH_VEC / OP_GET_KW_MAP.
+     * OP_CONJ_VEC fires on `(conj v x)` when v is a vector at runtime;
+     * misses fall back to prim_conj so list / set / record / sorted-coll
+     * conj keep their full semantics. OP_ASSOC takes the 3-arg
+     * `(assoc coll k v)` shape: A=dst, B=base; the call-site allocates
+     * three consecutive regs for [coll, k, v] starting at base. Runtime
+     * dispatches to vec_assoc1 (when coll is a vector and k is an
+     * in-range int index) or mino_map_assoc1 (when coll is a map);
+     * anything else (sorted-map, transient, record, variadic forms)
+     * falls back to prim_assoc. The compiler only emits OP_ASSOC for
+     * arity-3 calls; longer forms keep the OP_CALL path. */
+    OP_CONJ_VEC,         /* A=dst, B=vec, C=item                           */
+    OP_ASSOC,            /* A=dst, B=base; coll/k/v at regs[B..B+2]        */
     /* Fused counted-loop opcodes. Emitted at the (loop ...) entry pc
      * when the body matches a shape the compiler can specialize:
      *   (loop [i 0] (if (zero? i) <exit> (recur (dec i))))

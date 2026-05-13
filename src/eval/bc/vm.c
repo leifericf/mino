@@ -854,6 +854,87 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_CONJ_VEC: {
+            /* Fast lane for (conj v x) on vectors. Misses fall back to
+             * prim_conj so list cons, set assoc, sorted-coll insert,
+             * record field-update, and the variadic forms keep their
+             * full Clojure-semantics path. The vec_conj1 helper returns
+             * a GC-owned new vector; nothing else in the fast path
+             * allocates, so no extra rooting is needed. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *item = regs[cc];
+            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+                mino_val_t *r = vec_conj1(S, coll, item);
+                if (r == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                regs[a] = r;
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, item, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_conj(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_ASSOC: {
+            /* Fast lane for the 3-arg (assoc coll k v) shape. The
+             * compiler arranges three consecutive registers starting
+             * at B for [coll, k, v]; A is the destination. Two fast
+             * paths fire: vector (when coll is MINO_VECTOR and k is
+             * a tagged int with 0 <= idx <= len; equality with len
+             * triggers the conj-style append that vec_assoc1
+             * handles transparently) and map (when coll is
+             * MINO_MAP). Any other shape -- sorted-map, record,
+             * transient, non-int vec key, out-of-range vec idx,
+             * variadic forms -- falls back to prim_assoc which
+             * raises the Clojure-correct diagnostic. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *k    = regs[b + 1];
+            mino_val_t *v    = regs[b + 2];
+            if (coll != NULL && k != NULL) {
+                int t = mino_type_of(coll);
+                if (t == MINO_VECTOR
+                    && MINO_IS_INT(k)) {
+                    long long idx = MINO_INT_VAL(k);
+                    if (idx >= 0 && (size_t)idx <= coll->as.vec.len) {
+                        mino_val_t *r = vec_assoc1(S, coll, (size_t)idx, v);
+                        if (r == NULL) { ok = 0; goto bc_done; }
+                        regs = S->bc_regs + base;
+                        regs[a] = r;
+                        break;
+                    }
+                }
+                if (t == MINO_MAP) {
+                    mino_val_t *r = mino_map_assoc1(S, coll, k, v);
+                    if (r == NULL) { ok = 0; goto bc_done; }
+                    regs = S->bc_regs + base;
+                    regs[a] = r;
+                    break;
+                }
+            }
+            /* Miss: cons args head-first and call prim_assoc. */
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, v, list);
+            list = mino_cons(S, k, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_assoc(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
         case OP_ADD_IK:
         case OP_SUB_IK:
         case OP_LT_IK:

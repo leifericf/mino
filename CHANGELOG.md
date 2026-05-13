@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.152.0 — Write-Side Fast Lanes In The Bytecode VM
+
+`(conj v x)` on vectors and `(assoc coll k v)` on vectors or maps
+now compile to dedicated bytecode opcodes instead of going through
+the generic `OP_CALL` path. The new opcodes mirror the read-side
+fast lanes shipped earlier for `(nth v i)` and `(get m :k)`: a
+type-guarded fast path inside `mino_bc_run` calls directly into
+`vec_conj1` / `vec_assoc1` / `mino_map_assoc1`, and any miss --
+list `conj`, set `conj`, sorted-coll, record, transient,
+variadic forms -- falls back to `prim_conj` / `prim_assoc` so the
+full Clojure-semantics path stays intact.
+
+User shadows defeat the fast lane the same way they defeat the
+existing read-side lanes: `head_is_canonical_pure_prim` checks
+that the symbol still resolves to the canonical C prim before the
+compiler emits the specialised opcode.
+
+What this leverages from Clojure: `conj` and `assoc` are
+referentially transparent over immutable collections, so the
+fast path is a pure value-to-value rewrite of the call-site;
+the IC-gen-based redefinition machinery means a later
+`(def conj ...)` invalidates compiled call-sites by re-compile,
+not by holding a stale fn pointer in any cached slot.
+
+Benchmark matrix on local Mac M-class, min-of-5, with the empty-
+thunk harness floor subtracted:
+
+| Benchmark    | v0.151.1 | v0.152.0      | Δ      |
+|--------------|----------|---------------|--------|
+| conj-vec     | 392 ns   | **260 ns**    | -34%   |
+| assoc-vec    | 451 ns   | **196 ns**    | -56%   |
+| assoc-small  | 623 ns   | **422 ns**    | -32%   |
+| fib-30       | 98.2 ms  | 98.0 ms       | flat   |
+| loop-recur-1M| 17.9 ms  | 17.9 ms       | flat   |
+| nth-vec      | 11 ns    | 7 ns          | flat   |
+| get-kw-map   | 22 ns    | 19 ns         | flat   |
+
+(The benchmarks where the ns/op is in the single digits sit
+below the harness floor; numbers there report noise, not signal.
+The matrix rows that move are the ones the new opcodes target.)
+
+### Added
+
+- `OP_CONJ_VEC`: ABC-form opcode (`A=dst`, `B=vec`, `C=item`)
+  emitted when the compiler sees `(conj v x)` and the head still
+  resolves to the canonical `conj` prim. Fast path requires
+  `coll` to be `MINO_VECTOR`; everything else falls back through
+  `prim_conj`.
+- `OP_ASSOC`: AB-form opcode (`A=dst`, `B=base`) emitted for the
+  arity-3 `(assoc coll k v)` shape. The compiler allocates three
+  consecutive registers starting at `base` for `[coll, k, v]`.
+  The runtime dispatches on collection type: vector with
+  in-range int key goes through `vec_assoc1`, map goes through
+  `mino_map_assoc1`, anything else falls back through
+  `prim_assoc`. The arity-3 gate is intentional -- the variadic
+  `(assoc m :a 1 :b 2 ...)` form keeps the `OP_CALL` path.
+
+Verification: 1 659 tests / 7 690 assertions green on release,
+ASan, UBSan.
+
 ## v0.151.1 — Embedding API Hardening
 
 Five adversarial-test follow-ups on the v0.151.0 embedding-API revamp.

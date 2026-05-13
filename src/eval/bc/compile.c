@@ -1850,6 +1850,13 @@ static const pure_prim_t PURE_PRIMS[] = {
      * OP_NTH_VEC / OP_GET_KW_MAP emission sites recognises them. */
     {"nth",     prim_nth,    2,  3},
     {"get",     prim_get,    2,  3},
+    /* Write-side collection ops. Their values (new collections) are
+     * not const-pool-representable, so fold_result_constable rejects
+     * them and try_fold_call never folds; the entries exist so the
+     * canonical-prim identity check at the OP_CONJ_VEC / OP_ASSOC
+     * emission sites recognises a non-shadowed call. */
+    {"conj",    prim_conj,   1, -1},
+    {"assoc",   prim_assoc,  3, -1},
     {NULL, NULL, 0, 0},
 };
 
@@ -2304,6 +2311,65 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 }
                 emit_abc(c, OP_GET_KW_MAP, (unsigned)dst,
                          (unsigned)coll_reg, (unsigned)key_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* Write-side fast lanes. (conj v x) -> OP_CONJ_VEC when arity
+         * is 2 (variadic conj falls through to OP_CALL). (assoc coll
+         * k v) -> OP_ASSOC when arity is 3; the runtime dispatches to
+         * vec_assoc1 / mino_map_assoc1 by collection type. Compile-
+         * time emission is unconditional within the arity gate; user
+         * shadows defeat us via head_is_canonical_pure_prim above,
+         * not here. */
+        if (strcmp(head->as.s.data, "conj") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                int coll_reg = compile_operand_inplace(c, a1);
+                if (coll_reg < 0) return -1;
+                int item_reg = compile_operand_inplace(c, a2);
+                if (item_reg < 0) return -1;
+                if (dst > 0xFF || coll_reg > 0xFF || item_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_CONJ_VEC, (unsigned)dst,
+                         (unsigned)coll_reg, (unsigned)item_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        if (strcmp(head->as.s.data, "assoc") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 3) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                mino_val_t *a3 = form->as.cons.cdr->as.cons.cdr
+                                     ->as.cons.cdr->as.cons.car;
+                /* OP_ASSOC needs three consecutive regs for coll, k,
+                 * v starting at `base`. Allocate them up front so
+                 * the slots can't be aliased by sub-expressions. */
+                int base_reg = alloc_reg(c);
+                if (base_reg < 0) return -1;
+                int k_reg = alloc_reg(c);
+                if (k_reg < 0) return -1;
+                int v_reg = alloc_reg(c);
+                if (v_reg < 0) return -1;
+                if (compile_expr(c, a1, base_reg, 0) < 0) return -1;
+                if (compile_expr(c, a2, k_reg, 0)    < 0) return -1;
+                if (compile_expr(c, a3, v_reg, 0)    < 0) return -1;
+                if (dst > 0xFF || base_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_ASSOC, (unsigned)dst,
+                         (unsigned)base_reg, 0);
                 c->next_reg = saved_next;
                 return 0;
             }
