@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v0.150.0 — Stabilization Cycle: Realloc Safety, Checked-Size Arithmetic, And Embed-Test Tagging Fixes
+
+Stabilization cycle landing the verified-real findings from a
+ship-readiness review. Highlights: nine more `realloc` overwrite
+leaks in `src/prim/string.c` follow the canonical temp-pointer
+pattern; a new `checked_add_sz` / `checked_mul_sz` /
+`checked_double_sz` helper trio guards growth arithmetic across
+`env`, `state`, `module`, `eval/read`, and `prim/io`; `gc_pin` now
+asserts on overflow in debug builds; `mino_safepoint_poll` becomes a
+`static inline`; `add-load-path!` swaps `strcpy` for `memcpy`; a
+stale TODO on the `dyn_snapshot` field is replaced with a description
+of what the field actually holds. `embed_stm_test` no longer crashes
+on small-integer agent values -- the test was reading the inline-
+tagged scalar as if it were a boxed pointer; six sites now route
+through the public `mino_to_int` API.
+
 ### Fixed: `embed_stm_test` Crashed Reading Inline-Tagged Ints
 
 `tests/embed_stm_test.c` accessed `a->as.agent.val->type` and
