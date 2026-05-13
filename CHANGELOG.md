@@ -76,6 +76,25 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: Arity Mismatch Diagnostics Now Name The Callee And Count
+
+A fn or macro arity miss surfaced as the bare `macro arity mismatch` /
+`no matching arity for 2 args` -- the callee wasn't named and (for the
+fixed-arity path) the expected count was missing. So an arity gap
+caused by a reader-conditional elision (e.g. `(defonce x #?(:clj v))`
+collapsing to `(defonce x)` on mino's dialect) showed up as the
+generic `macro arity mismatch` with no hint at which macro mismatched.
+
+The diagnostic now reads
+`macro `defonce` arity mismatch: got 1, expected 2`
+for the fixed-arity path and
+`no matching arity `m__am` for 2 args`
+for the multi-arity dispatch path. The callee name comes from the
+head symbol of the in-progress `(callee args...)` form so anonymous
+fns still report cleanly when their call site has no symbol. Both
+the tree-walker (`src/eval/bindings.c`, `src/eval/fn.c`) and the
+bytecode VM (`src/eval/bc/vm.c`) report the same shape.
+
 ### Fixed: `mino_state_free` No Longer Hangs On Workers Blocked On An Undelivered Promise
 
 A worker thunk that called `@undelivered-promise` parked in `cv_wait`

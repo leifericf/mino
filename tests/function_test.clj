@@ -70,11 +70,17 @@
   (testing "call with arity 0 raises"
     (is (thrown? (m__am))))
   (testing "call with arity 2 raises with the arity message"
-    (is (= "no matching arity for 2 args"
-           (try (m__am 1 2) (catch e (ex-message e))))))
+    (let [msg (try (m__am 1 2) (catch e (ex-message e)))]
+      (is (some? (re-find #"no matching arity" msg)))
+      (is (some? (re-find #"2 args" msg)))
+      (is (some? (re-find #"m__am" msg)))))
   (testing "fixed-arity single clause raises on wrong count"
     (defn s__am [a b] (+ a b))
-    (is (= "no matching arity for 0 args"
-           (try (s__am) (catch e (ex-message e)))))
-    (is (= "no matching arity for 3 args"
-           (try (s__am 1 2 3) (catch e (ex-message e)))))))
+    (let [msg0 (try (s__am) (catch e (ex-message e)))
+          msg3 (try (s__am 1 2 3) (catch e (ex-message e)))]
+      (is (some? (re-find #"no matching arity" msg0)))
+      (is (some? (re-find #"0 args" msg0)))
+      (is (some? (re-find #"s__am" msg0)))
+      (is (some? (re-find #"no matching arity" msg3)))
+      (is (some? (re-find #"3 args" msg3)))
+      (is (some? (re-find #"s__am" msg3))))))

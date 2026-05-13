@@ -54,3 +54,24 @@
           s (pr-str v)
           r (read-string s)]
       (is (= v r)))))
+
+(deftest arity-error-names-the-callee-and-counts
+  ;; A fn or macro arity mismatch must name the callee and the
+  ;; received-vs-expected counts so the call site is obvious from
+  ;; the diagnostic. Without this, a typo or reader-conditional
+  ;; elision (e.g. `(defonce x #?(:clj v))` collapsing to
+  ;; `(defonce x)` on a dialect that doesn't match the conditional)
+  ;; surfaces as the bare "macro arity mismatch" with no indication
+  ;; which macro mismatched.
+  (let [err (try (eval '(defonce only-name)) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"arity" err)))
+    (is (some? (re-find #"defonce" err))))
+  ;; Same for fns.
+  (let [_   (eval '(defn arity-test-fn [a b] (+ a b)))
+        err (try (eval '(arity-test-fn 1)) nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"arity" err)))
+    (is (some? (re-find #"arity-test-fn" err)))))

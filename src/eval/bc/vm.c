@@ -265,9 +265,23 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
          * tree-walker's dispatch_multi_arity raises so callers see
          * "no matching arity for N args" instead of a silent NULL
          * that propagates up as an "unhandled exception" with no
-         * message. */
-        char msg[96];
-        snprintf(msg, sizeof(msg), "no matching arity for %d args", argc);
+         * message. Name the callee when the in-progress form's head
+         * is a symbol so the user sees which fn / macro mismatched
+         * rather than a bare arity message. */
+        char        msg[256];
+        char        name_buf[128] = {0};
+        mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+        if (cur != NULL && mino_is_cons(cur)) {
+            mino_val_t *head = cur->as.cons.car;
+            if (head != NULL && mino_type_of(head) == MINO_SYMBOL
+                && head->as.s.len > 0
+                && head->as.s.len < sizeof(name_buf) - 4) {
+                snprintf(name_buf, sizeof(name_buf), " `%.*s`",
+                         (int)head->as.s.len, head->as.s.data);
+            }
+        }
+        snprintf(msg, sizeof(msg),
+                 "no matching arity%s for %d args", name_buf, argc);
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                       "eval/arity", "MAR002", msg);
         return NULL;

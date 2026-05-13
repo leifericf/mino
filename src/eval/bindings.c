@@ -392,6 +392,36 @@ int fn_params_simple_shape(mino_val_t *params)
     return 1;
 }
 
+/* Build the arity-mismatch diagnostic so the message names the
+ * callee and shows expected-vs-received counts. The callee name
+ * comes from the head of `eval_current_form` (the in-progress
+ * (callee args...) cons that triggered the call), so an arity
+ * miss against a referenced var surfaces as
+ *   "macro `defonce` arity mismatch: got 1, expected 2"
+ * instead of the bare "macro arity mismatch". The expected count
+ * is the params vector length; the got count is walked from the
+ * args list (capped at `received_so_far + remaining`). */
+static void emit_arity_mismatch(mino_state_t *S, const char *ctx,
+                                size_t expected, size_t received)
+{
+    char        msg[256];
+    char        name_buf[128] = {0};
+    mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+    if (cur != NULL && mino_is_cons(cur)) {
+        mino_val_t *head = cur->as.cons.car;
+        if (head != NULL && mino_type_of(head) == MINO_SYMBOL
+            && head->as.s.len > 0 && head->as.s.len < sizeof(name_buf) - 4) {
+            snprintf(name_buf, sizeof(name_buf), " `%.*s`",
+                     (int)head->as.s.len, head->as.s.data);
+        }
+    }
+    snprintf(msg, sizeof(msg),
+             "%s%s arity mismatch: got %zu, expected %zu",
+             ctx, name_buf, received, expected);
+    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                  "syntax", "MSY001", msg);
+}
+
 /* Fast lane for the simple plain-symbol shape: walk params/args in
  * parallel and bind each slot directly. Caller must have already
  * verified fn_params_simple_shape(params); this skips the dispatch
@@ -404,10 +434,7 @@ int bind_simple_params(mino_state_t *S, mino_env_t *env,
     for (i = 0; i < n; i++) {
         mino_val_t *sym;
         if (!mino_is_cons(args)) {
-            char msg[96];
-            snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                          "syntax", "MSY001", msg);
+            emit_arity_mismatch(S, ctx, n, i);
             return 0;
         }
         sym = vec_nth(params, i);
@@ -415,10 +442,10 @@ int bind_simple_params(mino_state_t *S, mino_env_t *env,
         args = args->as.cons.cdr;
     }
     if (mino_is_cons(args)) {
-        char msg[96];
-        snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                      "syntax", "MSY001", msg);
+        size_t extra = 0;
+        mino_val_t *cur = args;
+        while (mino_is_cons(cur)) { extra++; cur = cur->as.cons.cdr; }
+        emit_arity_mismatch(S, ctx, n, n + extra);
         return 0;
     }
     return 1;
@@ -431,6 +458,7 @@ int bind_simple_params(mino_state_t *S, mino_env_t *env,
 int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
                 mino_val_t *args, const char *ctx)
 {
+    size_t bound = 0;
     /* Vector params: delegate to vector destructuring. */
     if (params != NULL && mino_type_of(params) == MINO_VECTOR) {
         return bind_vec_destructure(S, env, params, args, ctx);
@@ -453,19 +481,28 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
             return bind_form(S, env, params->as.cons.car, args, ctx);
         }
         if (!mino_is_cons(args)) {
-            char msg[96];
-            snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-            set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", msg);
+            /* Walk the rest of params to compute expected. */
+            size_t expected = bound;
+            mino_val_t *p = params;
+            while (mino_is_cons(p)) {
+                mino_val_t *pname = p->as.cons.car;
+                if (sym_eq(pname, "&")) break;
+                expected++;
+                p = p->as.cons.cdr;
+            }
+            emit_arity_mismatch(S, ctx, expected, bound);
             return 0;
         }
         if (!bind_form(S, env, name, args->as.cons.car, ctx)) return 0;
         params = params->as.cons.cdr;
         args   = args->as.cons.cdr;
+        bound++;
     }
     if (mino_is_cons(args)) {
-        char msg[96];
-        snprintf(msg, sizeof(msg), "%s arity mismatch", ctx);
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "syntax", "MSY001", msg);
+        size_t extra = 0;
+        mino_val_t *cur = args;
+        while (mino_is_cons(cur)) { extra++; cur = cur->as.cons.cdr; }
+        emit_arity_mismatch(S, ctx, bound, bound + extra);
         return 0;
     }
     return 1;

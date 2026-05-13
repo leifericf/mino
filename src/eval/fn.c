@@ -226,9 +226,23 @@ static int dispatch_multi_arity(mino_state_t *S, mino_val_t *clauses,
     int         argc   = list_len(call_args);
     mino_val_t *clause = find_arity_clause(S, clauses, argc);
     if (clause == NULL) {
-        char msg[96];
-        snprintf(msg, sizeof(msg), "no matching arity for %d args%s",
-                 argc, ctx_suffix);
+        char        msg[256];
+        char        name_buf[128] = {0};
+        mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+        /* Name the callee from the in-progress (callee args...) cons
+         * so the user sees which fn / macro mismatched. */
+        if (cur != NULL && mino_is_cons(cur)) {
+            mino_val_t *head = cur->as.cons.car;
+            if (head != NULL && mino_type_of(head) == MINO_SYMBOL
+                && head->as.s.len > 0
+                && head->as.s.len < sizeof(name_buf) - 4) {
+                snprintf(name_buf, sizeof(name_buf), " `%.*s`",
+                         (int)head->as.s.len, head->as.s.data);
+            }
+        }
+        snprintf(msg, sizeof(msg),
+                 "no matching arity%s for %d args%s",
+                 name_buf, argc, ctx_suffix);
         set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                       "eval/arity", "MAR002", msg);
         return -1;
