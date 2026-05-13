@@ -183,15 +183,28 @@ static mino_val_t *eval_symbol(mino_state_t *S, mino_val_t *form, mino_env_t *en
      * `def` and the ns-form refer path bind the value directly so
      * this is usually a no-op, but `clojure.core/refer` (the
      * function) binds the source var to preserve its source
-     * namespace for syntax-quote and metadata. Without this unwrap,
-     * calling a referred fn like `(println ...)` after
-     * `(clojure.core/refer 'clojure.core)` surfaces as "not a
-     * function (got var)" because the symbol resolves to the var
-     * itself rather than the fn at its root. Lexical / dynamic
-     * bindings that happen to hold a var are left intact so
-     * `(let [v (resolve 'foo)] v)` still returns the var. */
-    if (from_ns_env && v != NULL && mino_type_of(v) == MINO_VAR
-        && v->as.var.bound) {
+     * namespace for syntax-quote and metadata, and `declare` binds
+     * an unbound var so subsequent symbol access surfaces the
+     * unbound state. Without this unwrap, calling a referred fn
+     * like `(println ...)` after `(clojure.core/refer
+     * 'clojure.core)` surfaces as "not a function (got var)"
+     * because the symbol resolves to the var itself rather than
+     * the fn at its root. Lexical / dynamic bindings that happen
+     * to hold a var are left intact so `(let [v (resolve 'foo)] v)`
+     * still returns the var. An unbound var (declared but not yet
+     * def'd) throws "Var is unbound" so a reference-before-def bug
+     * fails at the use site rather than propagating a silent nil. */
+    if (from_ns_env && v != NULL && mino_type_of(v) == MINO_VAR) {
+        if (!v->as.var.bound) {
+            char msg[300];
+            snprintf(msg, sizeof(msg),
+                "Var is unbound: %s/%s",
+                v->as.var.ns != NULL ? v->as.var.ns : "?",
+                v->as.var.sym != NULL ? v->as.var.sym : data);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                "name", "MNS003", msg);
+            return NULL;
+        }
         v = v->as.var.root;
     }
     if (v == NULL) {

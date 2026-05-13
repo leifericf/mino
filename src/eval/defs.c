@@ -664,9 +664,17 @@ mino_val_t *eval_declare(mino_state_t *S, mino_val_t *form,
         buf[n] = '\0';
         if (refer_collision_check(S, form, buf)) return NULL;
         /* Intern the var so a later def/declare doesn't look like a
-         * cross-namespace refer collision. */
-        var_intern(S, S->current_ns, buf);
-        env_bind(S, current_ns_env(S), buf, mino_nil(S));
+         * cross-namespace refer collision. Bind the VAR (not nil) into
+         * the namespace env so symbol resolution lands on the var --
+         * eval_symbol's auto-deref path then checks `bound` and throws
+         * "Var is unbound" on access until a `(def …)` publishes a
+         * root. Binding nil here would silently resolve to nil and
+         * mask the reference-before-def bug. */
+        {
+            mino_val_t *var = var_intern(S, S->current_ns, buf);
+            env_bind(S, current_ns_env(S), buf,
+                     var != NULL ? var : mino_nil(S));
+        }
         rest = rest->as.cons.cdr;
     }
     return mino_nil(S);

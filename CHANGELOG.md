@@ -76,6 +76,24 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: Forward-Declared Unbound Var Now Throws On Access
+
+`(declare x) x` returned `nil` silently on mino. JVM Clojure throws
+`Var #'…/x is unbound` so a reference-before-def bug fails at the use
+site instead of propagating a silent nil downstream. The internal
+`var->as.var.bound` flag was tracked accurately the whole time
+(`@#'x` already threw correctly), but symbol resolution didn't
+consult it: `declare` bound `nil` into the namespace env (instead of
+the var itself), so lookup saw a plain `nil` value and there was no
+var for the auto-deref path to check.
+
+`declare` now binds the var into the namespace env, and the
+`eval_symbol` auto-deref path (commit `f6730e4`) checks `bound`
+before unwrapping: an unbound var throws
+`Var is unbound: <ns>/<sym>`. A var explicitly `def`-d to nil is
+`bound=true` with `root=nil`, so it still reads as nil silently —
+the discriminator is the flag, not the value.
+
 ### Fixed: `ref` Now Accepts Option Keywords
 
 `(ref init :validator f :meta m :min-history n :max-history n)` is

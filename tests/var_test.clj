@@ -43,3 +43,30 @@
   (let [result (try (ic-unmap-call-site)
                     (catch __e :got-error))]
     (is (= :got-error result))))
+
+(declare unbound-fwd-var)
+
+(deftest unbound-declared-var-throws-on-symbol-access
+  ;; Matching JVM Clojure: an unbound declared var must fail loud at
+  ;; the use site instead of silently resolving to nil. Otherwise a
+  ;; reference-before-def bug propagates downstream as "value was nil"
+  ;; and only blows up far from where the actual mistake lives.
+  (let [err (try unbound-fwd-var nil
+                 (catch e (if (map? e) (:mino/message e) (str e))))]
+    (is (some? err))
+    (is (some? (re-find #"unbound" err)))
+    (is (some? (re-find #"unbound-fwd-var" err)))))
+
+(deftest def-to-nil-is-not-unbound
+  ;; A var explicitly `def`-d to nil is bound; reading it must return
+  ;; nil silently, not throw. The unbound discriminator is the var's
+  ;; `bound` flag, not the value at root.
+  (def explicit-nil-var nil)
+  (is (nil? explicit-nil-var))
+  ;; Subsequent reads stay silent.
+  (is (= [nil nil] [explicit-nil-var explicit-nil-var])))
+
+(deftest declare-then-def-clears-unbound
+  (declare def-after-declare)
+  (def def-after-declare :now-bound)
+  (is (= :now-bound def-after-declare)))
