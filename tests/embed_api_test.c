@@ -146,6 +146,24 @@ static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
             "throw-uncaught: error does not mention unhandled exception");
 }
 
+/* mino_read with NULL src must follow the EOF path: return NULL with
+ * no error and leave *end NULL (or unchanged), matching empty input. */
+static void test_read_null_src(mino_state_t *S)
+{
+    const char *end = NULL;
+    mino_val_t *v   = mino_read(S, NULL, &end);
+    REQUIRE(v == NULL, "null-src: mino_read returns NULL");
+    REQUIRE(mino_last_error(S) == NULL,
+            "null-src: mino_read sets no error (EOF parity)");
+    REQUIRE(end == NULL,
+            "null-src: mino_read writes NULL through end");
+
+    /* end == NULL must also be handled. */
+    v = mino_read(S, NULL, NULL);
+    REQUIRE(v == NULL,
+            "null-src + null-end: mino_read still returns NULL");
+}
+
 /* NULL `src` to mino_eval_string and mino_eval_string_ex must surface
  * a classified error, matching mino_load_file's NULL-arg behaviour. */
 static void test_eval_string_null_src(mino_state_t *S, mino_env_t *env)
@@ -183,6 +201,7 @@ int main(void)
     test_throw_caught(S, env);
     test_throw_uncaught(S, env);
     test_eval_string_null_src(S, env);
+    test_read_null_src(S);
 
     mino_env_free(S, env);
     mino_state_free(S);

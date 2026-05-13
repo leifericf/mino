@@ -2146,8 +2146,21 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
 mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
 {
     volatile char probe = 0;
-    const char   *p = src;
+    const char   *p;
     mino_val_t   *v;
+    if (S == NULL) {
+        if (end != NULL) *end = NULL;
+        return NULL;
+    }
+    if (src == NULL) {
+        /* Match the EOF / empty-input contract: NULL result, no error,
+         * `*end` left NULL so callers can rely on a single termination
+         * shape regardless of whether they passed "" or NULL. */
+        clear_error(S);
+        if (end != NULL) *end = NULL;
+        return NULL;
+    }
+    p = src;
     /* Record this frame as a host-level stack bottom so the collector's
      * conservative scan covers the reader's call chain in full. */
     gc_note_host_frame(S, (void *)&probe);

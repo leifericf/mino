@@ -9,6 +9,10 @@
   validates its arguments up front and publishes an `MIN001` "NULL
   argument" diagnostic, matching how `mino_load_file` already
   handles the NULL-argument case.
+- `mino_read` no longer crashes on a NULL `src`. It now follows the
+  EOF / empty-input contract: returns NULL with no error and writes
+  NULL through `*end`, so callers can rely on a single termination
+  shape regardless of whether they pass `""` or `NULL`.
 
 ## v0.151.0 — Embedding API Revamp And Stabilization
 
