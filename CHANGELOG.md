@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed: `(sh ...)` Leaked Its Working Buffer When `realloc` Failed
+
+Two sites in `src/prim/proc.c` used `buf = realloc(buf, cap);
+if (buf == NULL) return NULL;`. When `realloc` fails the C standard
+leaves the original `buf` valid, but the assignment clobbers the
+variable with `NULL` and the caller has no way to free the original.
+This affected the command-line build path (`build_command`, growing
+the escaped-arguments string) and the subprocess-stdout read path
+(`read_all`). Both now use a temporary `newbuf`, free `buf` on
+failure, and only assign on success -- matching the pattern already
+used at `prim_sh` line 190 for the `2>&1` realloc. macOS ASan ships
+without LSan, so the leak is not directly observable from the
+project's test runner; correctness here is by static reading.
+
 ### Fixed: `fmt_ensure` Leaked Its Input Buffer When `realloc` Failed
 
 `fmt_ensure` in `src/prim/string.c` is the growth helper for

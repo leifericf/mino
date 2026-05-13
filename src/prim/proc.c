@@ -116,8 +116,11 @@ static char *build_command(mino_state_t *S, mino_val_t *args)
                 free(buf); return NULL;
             }
             cap = cap * 2 + arglen * 4;
-            buf = (char *)realloc(buf, cap);
-            if (buf == NULL) return NULL;
+            {
+                char *newbuf = (char *)realloc(buf, cap);
+                if (newbuf == NULL) { free(buf); return NULL; }
+                buf = newbuf;
+            }
             new_pos = append_escaped(buf, pos, cap,
                                      arg->as.s.data, arg->as.s.len);
             if (new_pos == 0) { free(buf); return NULL; }
@@ -147,8 +150,11 @@ static char *read_all(FILE *fp, size_t *out_len)
                 if (cap > SIZE_MAX / 2) { free(buf); return NULL; }
                 cap *= 2;
             }
-            buf = (char *)realloc(buf, cap);
-            if (buf == NULL) return NULL;
+            {
+                char *newbuf = (char *)realloc(buf, cap);
+                if (newbuf == NULL) { free(buf); return NULL; }
+                buf = newbuf;
+            }
         }
         memcpy(buf + len, chunk, n);
         len += n;
