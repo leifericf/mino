@@ -18,12 +18,22 @@
 
 #include "runtime/internal.h"
 #include "eval/internal.h"
+#include "collections/internal.h"
+
+/* Sorted maps and sets walk an in-order red-black tree via a small
+ * fixed-size stack instead of materialising the keys vector. The RB
+ * tree's worst-case height for n entries is 2*log2(n+1); 64 covers
+ * trees with > 4 billion entries comfortably. */
+#define MINO_ITER_RB_STACK_DEPTH 64
 
 struct mino_iter {
     mino_state_t *S;
     mino_ref_t   *ref;        /* roots the collection across GC */
     mino_val_t   *cursor;     /* the cell currently being walked */
-    size_t        idx;        /* index into vector / key_order */
+    size_t        idx;        /* index into vector / chunk */
+    int           rb_top;     /* depth of rb_stack (0 = empty/uninit) */
+    int           rb_started; /* 1 once rb walk has been seeded */
+    const mino_rb_node_t *rb_stack[MINO_ITER_RB_STACK_DEPTH];
 };
 
 size_t mino_iter_sizeof(void)
@@ -34,10 +44,12 @@ size_t mino_iter_sizeof(void)
 void mino_iter_init(mino_state_t *S, mino_iter_t *it, mino_val_t *coll)
 {
     if (it == NULL) return;
-    it->S      = S;
-    it->ref    = (S != NULL) ? mino_ref(S, coll) : NULL;
-    it->cursor = coll;
-    it->idx    = 0;
+    it->S          = S;
+    it->ref        = (S != NULL) ? mino_ref(S, coll) : NULL;
+    it->cursor     = coll;
+    it->idx        = 0;
+    it->rb_top     = 0;
+    it->rb_started = 0;
 }
 
 void mino_iter_done(mino_iter_t *it)
@@ -88,8 +100,7 @@ int mino_iter_next(mino_iter_t *it, mino_val_t **out_k, mino_val_t **out_v)
         return 1;
     }
 
-    case MINO_MAP:
-    case MINO_SORTED_MAP: {
+    case MINO_MAP: {
         mino_val_t *ko = cur->as.map.key_order;
         if (ko == NULL || it->idx >= cur->as.map.len) {
             it->cursor = NULL; return 0;
@@ -103,14 +114,42 @@ int mino_iter_next(mino_iter_t *it, mino_val_t **out_k, mino_val_t **out_v)
         return 1;
     }
 
-    case MINO_SET:
-    case MINO_SORTED_SET: {
+    case MINO_SET: {
         mino_val_t *ko = cur->as.set.key_order;
         if (ko == NULL || it->idx >= cur->as.set.len) {
             it->cursor = NULL; return 0;
         }
         if (out_k != NULL) *out_k = vec_nth(ko, it->idx);
         it->idx++;
+        return 1;
+    }
+
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET: {
+        const mino_rb_node_t *node;
+        /* Seed the in-order walk on the first call: push the leftmost
+         * spine starting from the root. */
+        if (!it->rb_started) {
+            const mino_rb_node_t *n = cur->as.sorted.root;
+            it->rb_started = 1;
+            while (n != NULL && it->rb_top < MINO_ITER_RB_STACK_DEPTH) {
+                it->rb_stack[it->rb_top++] = n;
+                n = n->left;
+            }
+        }
+        if (it->rb_top == 0) { it->cursor = NULL; return 0; }
+        node = it->rb_stack[--it->rb_top];
+        if (out_k != NULL) *out_k = node->key;
+        if (out_v != NULL && kind == MINO_SORTED_MAP) *out_v = node->val;
+        /* Push the leftmost spine of the right subtree so the next
+         * call yields the next in-order node. */
+        {
+            const mino_rb_node_t *n = node->right;
+            while (n != NULL && it->rb_top < MINO_ITER_RB_STACK_DEPTH) {
+                it->rb_stack[it->rb_top++] = n;
+                n = n->left;
+            }
+        }
         return 1;
     }
 

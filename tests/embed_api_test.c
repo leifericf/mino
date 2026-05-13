@@ -146,6 +146,61 @@ static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
             "throw-uncaught: error does not mention unhandled exception");
 }
 
+/* mino_iter walks every k/v of a sorted-map (in sort order) and every
+ * element of a sorted-set, just like it does for hashed variants. */
+static void test_iter_sorted(mino_state_t *S, mino_env_t *env)
+{
+    size_t       isz = mino_iter_sizeof();
+    mino_iter_t *it  = (mino_iter_t *)malloc(isz);
+    mino_val_t  *k, *v;
+
+    /* sorted-map */
+    {
+        mino_val_t *sm = mino_eval_string(S,
+            "(sorted-map :a 1 :b 2 :c 3)", env);
+        long long sum = 0, n;
+        int       seen = 0;
+        REQUIRE(sm != NULL, "iter-sorted-map: construction");
+        mino_iter_init(S, it, sm);
+        while (mino_iter_next(it, &k, &v)) {
+            seen++;
+            if (mino_to_int(v, &n)) sum += n;
+        }
+        mino_iter_done(it);
+        REQUIRE(seen == 3, "iter-sorted-map: visits 3 entries");
+        REQUIRE(sum == 6,  "iter-sorted-map: visits values 1+2+3");
+    }
+
+    /* sorted-set */
+    {
+        mino_val_t *ss = mino_eval_string(S, "(sorted-set 1 2 3 4 5)", env);
+        long long sum = 0, n;
+        int       seen = 0;
+        REQUIRE(ss != NULL, "iter-sorted-set: construction");
+        mino_iter_init(S, it, ss);
+        while (mino_iter_next(it, &k, &v)) {
+            seen++;
+            if (mino_to_int(k, &n)) sum += n;
+        }
+        mino_iter_done(it);
+        REQUIRE(seen == 5,  "iter-sorted-set: visits 5 elements");
+        REQUIRE(sum == 15,  "iter-sorted-set: visits 1+2+3+4+5");
+    }
+
+    /* empty sorted-map */
+    {
+        mino_val_t *sm = mino_eval_string(S, "(sorted-map)", env);
+        int seen = 0;
+        REQUIRE(sm != NULL, "iter-sorted-map-empty: construction");
+        mino_iter_init(S, it, sm);
+        while (mino_iter_next(it, &k, &v)) seen++;
+        mino_iter_done(it);
+        REQUIRE(seen == 0, "iter-sorted-map-empty: visits nothing");
+    }
+
+    free(it);
+}
+
 /* mino_read with NULL src must follow the EOF path: return NULL with
  * no error and leave *end NULL (or unchanged), matching empty input. */
 static void test_read_null_src(mino_state_t *S)
@@ -202,6 +257,7 @@ int main(void)
     test_throw_uncaught(S, env);
     test_eval_string_null_src(S, env);
     test_read_null_src(S);
+    test_iter_sorted(S, env);
 
     mino_env_free(S, env);
     mino_state_free(S);

@@ -13,6 +13,13 @@
   EOF / empty-input contract: returns NULL with no error and writes
   NULL through `*end`, so callers can rely on a single termination
   shape regardless of whether they pass `""` or `NULL`.
+- `mino_iter_next` now visits every entry of a sorted-map and every
+  element of a sorted-set. Previously it dispatched both sorted
+  variants through the hashed-map / hashed-set branch and read fields
+  that don't exist on the rb-tree layout, so iteration terminated
+  immediately with zero entries observed. The walker now drives a
+  proper in-order red-black traversal with a small fixed-size stack
+  embedded in the iterator (covered by `mino_iter_sizeof`).
 
 ## v0.151.0 — Embedding API Revamp And Stabilization
 
