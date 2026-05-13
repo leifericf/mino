@@ -7,9 +7,13 @@
  * effective type at each step; embedders just call _next until it
  * returns 0.
  *
- * Lifecycle: mino_iter_new -> repeated mino_iter_next -> mino_iter_free.
+ * Lifecycle: the host owns the storage (allocates `mino_iter_sizeof()`
+ * bytes, typically on the C stack), then calls
+ *     mino_iter_init -> repeated mino_iter_next -> mino_iter_done.
  * The iterator roots its collection so a GC during iteration cannot
- * reclaim the cells the walker holds borrowed pointers into.
+ * reclaim the cells the walker holds borrowed pointers into. Storage
+ * does not move: the GC root is keyed by the iter's `ref` slot, which
+ * `mino_iter_done` releases.
  */
 
 #include "runtime/internal.h"
@@ -22,24 +26,28 @@ struct mino_iter {
     size_t        idx;        /* index into vector / key_order */
 };
 
-mino_iter_t *mino_iter_new(mino_state_t *S, mino_val_t *coll)
+size_t mino_iter_sizeof(void)
 {
-    mino_iter_t *it;
-    if (S == NULL) return NULL;
-    it = (mino_iter_t *)malloc(sizeof(*it));
-    if (it == NULL) return NULL;
-    it->S      = S;
-    it->ref    = mino_ref(S, coll);
-    it->cursor = coll;
-    it->idx    = 0;
-    return it;
+    return sizeof(struct mino_iter);
 }
 
-void mino_iter_free(mino_iter_t *it)
+void mino_iter_init(mino_state_t *S, mino_iter_t *it, mino_val_t *coll)
 {
     if (it == NULL) return;
-    if (it->ref != NULL) mino_unref(it->S, it->ref);
-    free(it);
+    it->S      = S;
+    it->ref    = (S != NULL) ? mino_ref(S, coll) : NULL;
+    it->cursor = coll;
+    it->idx    = 0;
+}
+
+void mino_iter_done(mino_iter_t *it)
+{
+    if (it == NULL) return;
+    if (it->ref != NULL) {
+        mino_unref(it->S, it->ref);
+        it->ref = NULL;
+    }
+    it->cursor = NULL;
 }
 
 int mino_iter_next(mino_iter_t *it, mino_val_t **out_k, mino_val_t **out_v)

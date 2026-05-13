@@ -362,27 +362,36 @@ mino_val_t         *mino_set_builder_finish   (mino_set_builder_t *b);
  * sorted), cons lists, the empty-list singleton, lazy seqs, and
  * chunked seqs. Dispatch happens internally on each step.
  *
+ * The iterator is opaque; the host allocates storage of
+ * `mino_iter_sizeof()` bytes (typically on the C stack via `alloca`
+ * or as a local struct) and passes a pointer into `mino_iter_init`.
+ *
  * Usage:
  *
- *   mino_iter_t *it = mino_iter_new(S, coll);
+ *   mino_iter_t *it = alloca(mino_iter_sizeof());
+ *   mino_iter_init(S, it, coll);
  *   mino_val_t *k, *v;
  *   while (mino_iter_next(it, &k, &v)) {
  *       // for vectors / sets / lists: k is the element, v is NULL
  *       // for maps: k is the key, v is the value
  *   }
- *   mino_iter_free(it);
+ *   mino_iter_done(it);
  *
- * The iterator roots `coll` for its lifetime so a GC fired mid-walk
- * cannot reclaim the cells the walker borrows pointers into. Calling
- * _next after it returned 0 keeps returning 0; calling it on a NULL
- * iter is harmless.
+ * `mino_iter_init` roots `coll` for the iterator's lifetime so a GC
+ * fired mid-walk cannot reclaim the cells the walker borrows pointers
+ * into. `mino_iter_done` releases that root and must always be called
+ * once, even if iteration ends early. Calling `_next` after it returns
+ * 0 keeps returning 0; calling `_next` or `_done` on a NULL iterator
+ * is harmless.
  */
 typedef struct mino_iter mino_iter_t;
 
-mino_iter_t *mino_iter_new (mino_state_t *S, mino_val_t *coll);
-int          mino_iter_next(mino_iter_t *it,
-                            mino_val_t **out_k, mino_val_t **out_v);
-void         mino_iter_free(mino_iter_t *it);
+size_t       mino_iter_sizeof(void);
+void         mino_iter_init  (mino_state_t *S, mino_iter_t *it,
+                              mino_val_t *coll);
+int          mino_iter_next  (mino_iter_t *it,
+                              mino_val_t **out_k, mino_val_t **out_v);
+void         mino_iter_done  (mino_iter_t *it);
 
 /* Create a primitive function value from a C function pointer. */
 mino_val_t *mino_prim(mino_state_t *S, const char *name, mino_prim_fn fn);
