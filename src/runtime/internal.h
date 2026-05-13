@@ -383,6 +383,14 @@ typedef struct mino_thread_ctx {
     try_frame_t     try_stack[MAX_TRY_DEPTH];
     int             try_depth;
 
+    /* Last raw user-thrown payload caught by an inner eval try frame
+     * (mino_eval_inner / mino_eval_string_inner). The inner publishes
+     * a diagnostic (which the surrounding pcall-style try frame catches
+     * as a string), but stashes the original payload here so the outer
+     * pcall can surface it through `*out_ex` per the documented contract.
+     * Cleared at the entry of every pcall-style frame and after consume. */
+    mino_val_t     *pending_user_ex;
+
     /* Bytecode-VM catch frames. Parallel to try_stack, recording the
      * BC-side state (handler pc, register window base, env at entry,
      * exception register) that a longjmp landing at OP_PUSHCATCH's

@@ -343,6 +343,9 @@ static void gc_mark_module_and_meta(mino_state_t *S)
     for (i = 0; i < mino_current_ctx(S)->try_depth; i++) {
         gc_mark_interior(S, mino_current_ctx(S)->try_stack[i].exception);
     }
+    /* The pending raw-payload stash from an inner-eval catch is only
+     * referenced from this slot until the outer pcall consumes it. */
+    gc_mark_interior(S, mino_current_ctx(S)->pending_user_ex);
     for (idx = 0; idx < S->module_cache_len; idx++) {
         gc_mark_interior(S, S->module_cache[idx].value);
     }

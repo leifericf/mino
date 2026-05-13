@@ -537,6 +537,13 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             /* Landed here from longjmp (OOM or uncaught throw). */
             mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+            /* Stash the raw user payload for an outer pcall-style frame
+             * so it can deliver the original cell via `*out_ex` even
+             * after the diagnostic publish below converts non-string
+             * payloads into a generic message. */
+            if (ex != NULL && mino_current_ctx(S)->pending_user_ex == NULL) {
+                mino_current_ctx(S)->pending_user_ex = ex;
+            }
             S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
             S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
             load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
@@ -639,6 +646,11 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].saved_load_len = S->load_stack_len;
         if (setjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth].buf) != 0) {
             mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+            /* Same payload-stash as in mino_eval_inner: outer pcall-style
+             * frames can recover the raw user payload via `*out_ex`. */
+            if (ex != NULL && mino_current_ctx(S)->pending_user_ex == NULL) {
+                mino_current_ctx(S)->pending_user_ex = ex;
+            }
             S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
             S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
             load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
@@ -819,6 +831,9 @@ static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
     mino_val_t *result;
 
     if (out_ex != NULL) *out_ex = NULL;
+    /* Reset the per-thread stash so a previous _ex / pcall call's
+     * leftover payload can't bleed into this one. */
+    mino_current_ctx(S)->pending_user_ex = NULL;
 
     if (saved_try >= MAX_TRY_DEPTH) {
         if (out != NULL) *out = NULL;
@@ -831,6 +846,13 @@ static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
     mino_current_ctx(S)->try_stack[saved_try].saved_load_len = S->load_stack_len;
     if (setjmp(mino_current_ctx(S)->try_stack[saved_try].buf) != 0) {
         mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+        /* Inner-eval try frames may have caught the original throw and
+         * re-thrown a stringified diagnostic here; prefer the raw
+         * payload if the inner stashed one. */
+        if (mino_current_ctx(S)->pending_user_ex != NULL) {
+            ex = mino_current_ctx(S)->pending_user_ex;
+        }
+        mino_current_ctx(S)->pending_user_ex = NULL;
         S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
         S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S,
@@ -847,6 +869,15 @@ static int eval_pcall(mino_state_t *S, eval_body_fn body, void *payload,
 
     result = body(S, payload, env);
     mino_current_ctx(S)->try_depth = saved_try;
+
+    /* Body may have returned NULL because an inner try frame caught
+     * the throw without re-bubbling it to our setjmp. In that case
+     * the inner stashed the raw payload for us. */
+    if (result == NULL && out_ex != NULL
+        && mino_current_ctx(S)->pending_user_ex != NULL) {
+        *out_ex = mino_current_ctx(S)->pending_user_ex;
+    }
+    mino_current_ctx(S)->pending_user_ex = NULL;
 
     if (out != NULL) *out = result;
     return result == NULL ? -1 : 0;
@@ -896,6 +927,9 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
     mino_val_t *result;
 
     if (out_ex != NULL) *out_ex = NULL;
+    /* Reset the per-thread stash so a previous _ex / pcall call's
+     * leftover payload can't bleed into this one. */
+    mino_current_ctx(S)->pending_user_ex = NULL;
 
     if (saved_try >= MAX_TRY_DEPTH) {
         if (out != NULL) *out = NULL;
@@ -931,6 +965,13 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
          * fully release state_lock, deadlocking await/deref. Unwind
          * here while we still hold the lock. */
         mino_val_t *ex = mino_current_ctx(S)->try_stack[saved_try].exception;
+        /* Inner-eval / nested pcall may have caught the original throw
+         * and re-thrown a stringified diagnostic here; prefer the raw
+         * payload if a stash is present. */
+        if (mino_current_ctx(S)->pending_user_ex != NULL) {
+            ex = mino_current_ctx(S)->pending_user_ex;
+        }
+        mino_current_ctx(S)->pending_user_ex = NULL;
         S->current_ns    = mino_current_ctx(S)->try_stack[saved_try].saved_ns;
         S->fn_ambient_ns = mino_current_ctx(S)->try_stack[saved_try].saved_ambient;
         load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
@@ -946,6 +987,12 @@ int mino_pcall(mino_state_t *S, mino_val_t *fn, mino_val_t *args, mino_env_t *en
 
     result = mino_call(S, fn, args, env);
     mino_current_ctx(S)->try_depth = saved_try;
+
+    if (result == NULL && out_ex != NULL
+        && mino_current_ctx(S)->pending_user_ex != NULL) {
+        *out_ex = mino_current_ctx(S)->pending_user_ex;
+    }
+    mino_current_ctx(S)->pending_user_ex = NULL;
 
     if (out != NULL) *out = result;
     return result == NULL ? -1 : 0;

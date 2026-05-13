@@ -146,6 +146,48 @@ static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
             "throw-uncaught: error does not mention unhandled exception");
 }
 
+/* The _ex eval family delivers the raw thrown payload through out_ex,
+ * matching the contract documented for mino_pcall. */
+static void test_eval_ex_out_ex_payload(mino_state_t *S, mino_env_t *env)
+{
+    mino_val_t *out, *out_ex;
+    int         rc;
+
+    /* Throw a keyword from script-side. */
+    out = NULL; out_ex = NULL;
+    rc = mino_eval_string_ex(S, "(throw :boom)", env, &out, &out_ex);
+    REQUIRE(rc == -1, "out_ex/keyword: rc == -1");
+    REQUIRE(out_ex != NULL, "out_ex/keyword: out_ex non-NULL");
+    REQUIRE(out_ex != NULL && mino_is_keyword(out_ex),
+            "out_ex/keyword: out_ex is a keyword");
+    if (out_ex != NULL && mino_is_keyword(out_ex)) {
+        const char *kw; size_t klen;
+        REQUIRE(mino_to_keyword(out_ex, &kw, &klen)
+                && klen == 4 && memcmp(kw, "boom", 4) == 0,
+                "out_ex/keyword: out_ex is :boom");
+    }
+
+    /* Throw an ex-info map. */
+    out = NULL; out_ex = NULL;
+    rc = mino_eval_string_ex(S,
+        "(throw (ex-info \"x\" {:k :v}))", env, &out, &out_ex);
+    REQUIRE(rc == -1, "out_ex/ex-info: rc == -1");
+    REQUIRE(out_ex != NULL && mino_is_map(out_ex),
+            "out_ex/ex-info: out_ex is a map (ex-data)");
+
+    /* mino_eval_ex with a pre-read throw form. */
+    {
+        mino_val_t *form = mino_read(S,
+            "(throw (ex-info \"y\" {:m 1}))", NULL);
+        out = NULL; out_ex = NULL;
+        REQUIRE(form != NULL, "out_ex/eval_ex: form parsed");
+        rc = mino_eval_ex(S, form, env, &out, &out_ex);
+        REQUIRE(rc == -1, "out_ex/eval_ex: rc == -1");
+        REQUIRE(out_ex != NULL && mino_is_map(out_ex),
+                "out_ex/eval_ex: out_ex is the ex-info map");
+    }
+}
+
 /* mino_iter walks every k/v of a sorted-map (in sort order) and every
  * element of a sorted-set, just like it does for hashed variants. */
 static void test_iter_sorted(mino_state_t *S, mino_env_t *env)
@@ -258,6 +300,7 @@ int main(void)
     test_eval_string_null_src(S, env);
     test_read_null_src(S);
     test_iter_sorted(S, env);
+    test_eval_ex_out_ex_payload(S, env);
 
     mino_env_free(S, env);
     mino_state_free(S);

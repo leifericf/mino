@@ -20,6 +20,14 @@
   immediately with zero entries observed. The walker now drives a
   proper in-order red-black traversal with a small fixed-size stack
   embedded in the iterator (covered by `mino_iter_sizeof`).
+- `mino_eval_ex`, `mino_eval_string_ex`, and `mino_load_file_ex` now
+  deliver the raw thrown payload through `*out_ex`, matching their
+  documented contract and the existing `mino_pcall` behaviour. The
+  inner eval try frame previously re-published non-string payloads as
+  a generic diagnostic message, so embedders saw a stringified diag
+  instead of the user's original keyword / map / `ex-info` value. The
+  raw payload is now stashed before the diagnostic publish and read
+  back from the protected-call shim.
 
 ## v0.151.0 — Embedding API Revamp And Stabilization
 
