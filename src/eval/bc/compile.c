@@ -496,6 +496,23 @@ static int is_special_form_name(const char *name)
     if (strcmp(name, "cond") == 0) return 1;
     if (strcmp(name, "new") == 0) return 1;
     if (strcmp(name, ".") == 0) return 1;
+    /* Host-syntax sugar: (.method target ...), (.-field target),
+     * TypeName/staticMethod. These rewrite to host/... primitive calls
+     * in eval_try_host_syntax, which only runs on the tree-walker
+     * path. Send them there so a BC-compiled fn body can use them. */
+    if (name[0] == '.' && name[1] != '\0') return 1;
+    {
+        const char *slash = strchr(name, '/');
+        if (slash != NULL && slash != name && slash[1] != '\0') {
+            /* Reject the bare division op `/` (one-char name) and
+             * already-namespaced symbols like clojure.core/+ where the
+             * head is a valid env binding; here we only steer host
+             * static-method calls to the tree-walker.  Heuristic:
+             * Capital-letter type names. */
+            const unsigned char c0 = (unsigned char)name[0];
+            if (c0 >= 'A' && c0 <= 'Z') return 1;
+        }
+    }
     return 0;
 }
 
