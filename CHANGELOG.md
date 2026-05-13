@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Changed: `mino_safepoint_poll` Is Now A `static inline` Function
+
+The safepoint-poll fast path lived as a function-style macro at the
+top of `src/runtime/internal.h`. Behaviorful macros are harder to
+step through under a debugger and don't get the same type-checking as
+real functions. The body is now a `static inline` taking `mino_state_t
+*S`, which inlines identically at every call site (`gc/driver.c`,
+`eval/special.c`, `eval/bindings.c`, `eval/fn.c`) and gives debuggers
+a real stack frame to break on. No behavior change.
+
 ### Fixed: `gc_pin` Overflow Now Trips An Assert In Debug Builds
 
 `gc_pin` keeps its pin/unpin counter balanced even after the 64-slot

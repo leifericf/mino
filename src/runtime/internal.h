@@ -1178,17 +1178,18 @@ struct mino_future {
 /* definition (the request runs from within the same call stack); the     */
 /* flag write is a formal record and the park slow path is reachable      */
 /* only when a future multi-worker variant wires the flag onto a peer     */
-/* worker ctx. The macro is in the header so the branch inlines into     */
+/* worker ctx. The inline is in the header so the branch inlines into    */
 /* every alloc / eval-impl-entry / loop-recur site.                       */
 /* ------------------------------------------------------------------------- */
 
 void mino_safepoint_park(mino_state_t *S);
 
-#define mino_safepoint_poll(S) do {                                       \
-    if (mino_current_ctx(S)->should_yield) {                               \
-        mino_safepoint_park(S);                                            \
-    }                                                                      \
-} while (0)
+static inline void mino_safepoint_poll(mino_state_t *S)
+{
+    if (mino_current_ctx(S)->should_yield) {
+        mino_safepoint_park(S);
+    }
+}
 
 /* GC-side STW driver: request all worker ctxs park before a major sweep,
  * then release them after. Single-threaded today these are O(1) on
