@@ -226,9 +226,9 @@ static int dispatch_multi_arity(mino_state_t *S, mino_val_t *clauses,
     int         argc   = list_len(call_args);
     mino_val_t *clause = find_arity_clause(S, clauses, argc);
     if (clause == NULL) {
-        char        msg[256];
-        char        name_buf[128] = {0};
-        mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+        char              msg[256];
+        char              name_buf[128] = {0};
+        const mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
         /* Name the callee from the in-progress (callee args...) cons
          * so the user sees which fn / macro mismatched. */
         if (cur != NULL && mino_is_cons(cur)) {

@@ -268,9 +268,9 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
          * message. Name the callee when the in-progress form's head
          * is a symbol so the user sees which fn / macro mismatched
          * rather than a bare arity message. */
-        char        msg[256];
-        char        name_buf[128] = {0};
-        mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+        char              msg[256];
+        char              name_buf[128] = {0};
+        const mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
         if (cur != NULL && mino_is_cons(cur)) {
             mino_val_t *head = cur->as.cons.car;
             if (head != NULL && mino_type_of(head) == MINO_SYMBOL

@@ -404,9 +404,9 @@ int fn_params_simple_shape(mino_val_t *params)
 static void emit_arity_mismatch(mino_state_t *S, const char *ctx,
                                 size_t expected, size_t received)
 {
-    char        msg[256];
-    char        name_buf[128] = {0};
-    mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
+    char              msg[256];
+    char              name_buf[128] = {0};
+    const mino_val_t *cur = mino_current_ctx(S)->eval_current_form;
     if (cur != NULL && mino_is_cons(cur)) {
         mino_val_t *head = cur->as.cons.car;
         if (head != NULL && mino_type_of(head) == MINO_SYMBOL
