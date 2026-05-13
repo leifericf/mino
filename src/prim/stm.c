@@ -210,13 +210,70 @@ mino_val_t *prim_ref_history_count(mino_state_t *S, mino_val_t *args,
 mino_val_t *prim_ref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *initial;
+    mino_val_t *opts;
+    mino_val_t *validator = NULL;
+    mino_val_t *meta      = NULL;
+    mino_val_t *ref;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+    if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "ref requires one argument");
+            "ref requires an initial value");
     }
     initial = args->as.cons.car;
-    return mino_tx_ref(S, initial);
+    /* Parse trailing :validator / :meta / :min-history / :max-history
+     * keyword pairs. Mirrors JVM Clojure's `ref` signature; mino's STM
+     * doesn't track history so the history options are accepted as
+     * no-ops for source compatibility. Unknown options are rejected
+     * (canon behaviour) so a typo doesn't silently install no
+     * validator. */
+    opts = args->as.cons.cdr;
+    while (mino_is_cons(opts)) {
+        mino_val_t *k = opts->as.cons.car;
+        mino_val_t *v;
+        if (k == NULL || mino_type_of(k) != MINO_KEYWORD) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "ref: option keys must be keywords");
+        }
+        if (!mino_is_cons(opts->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001",
+                "ref: option key without value");
+        }
+        v = opts->as.cons.cdr->as.cons.car;
+        if (k->as.s.len == 9 && memcmp(k->as.s.data, "validator", 9) == 0) {
+            if (v != NULL && mino_type_of(v) != MINO_NIL
+                && mino_type_of(v) != MINO_FN
+                && mino_type_of(v) != MINO_PRIM
+                && mino_type_of(v) != MINO_MACRO) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "ref: :validator must be a fn or nil");
+            }
+            validator = (v != NULL && mino_type_of(v) != MINO_NIL) ? v : NULL;
+        } else if (k->as.s.len == 4 && memcmp(k->as.s.data, "meta", 4) == 0) {
+            if (v != NULL && mino_type_of(v) != MINO_NIL
+                && mino_type_of(v) != MINO_MAP) {
+                return prim_throw_classified(S, "eval/type", "MTY001",
+                    "ref: :meta must be a map or nil");
+            }
+            meta = (v != NULL && mino_type_of(v) != MINO_NIL) ? v : NULL;
+        } else if ((k->as.s.len == 11
+                    && memcmp(k->as.s.data, "min-history", 11) == 0)
+                   || (k->as.s.len == 11
+                       && memcmp(k->as.s.data, "max-history", 11) == 0)) {
+            /* Accepted, no-op. mino's STM has no history. */
+        } else {
+            char msg[200];
+            snprintf(msg, sizeof(msg),
+                "ref: unknown option :%.*s",
+                (int)k->as.s.len, k->as.s.data);
+            return prim_throw_classified(S, "eval/arity", "MAR001", msg);
+        }
+        opts = opts->as.cons.cdr->as.cons.cdr;
+    }
+    ref = mino_tx_ref(S, initial);
+    if (ref == NULL) return NULL;
+    if (validator != NULL) ref->as.tx_ref.validator = validator;
+    if (meta != NULL)      ref->meta = meta;
+    return ref;
 }
 
 mino_val_t *prim_ref_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)

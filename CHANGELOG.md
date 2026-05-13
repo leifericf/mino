@@ -76,6 +76,28 @@ emitted `:/` back. The check now also verifies that there is content
 before the slash, so `:bar/` still reports `malformed keyword` while
 `:/` reads as the keyword whose name is `"/"`.
 
+### Fixed: `ref` Now Accepts Option Keywords
+
+`(ref init :validator f :meta m :min-history n :max-history n)` is
+the canon JVM Clojure signature. mino rejected every trailing arg
+with `ref requires one argument`, so library code that constructed
+refs with validators or metadata didn't load. The prim now parses
+the trailing keyword pairs and applies:
+
+- `:validator` installs a validator fn that runs on every commit
+  (already wired through the STM commit path; the constructor
+  populates the same `tx_ref.validator` slot `set-validator!` uses)
+- `:meta` populates the ref's metadata, readable via `(meta r)` and
+  mutable via `(alter-meta! r f)` (the `MINO_TX_REF` tag is now in
+  `meta_readable` so refs sit alongside atoms and agents for the
+  identity-tied-meta path)
+- `:min-history` / `:max-history` are accepted as no-ops; mino's STM
+  doesn't track ref history, but the options are honored for
+  source-level portability so portable code constructs without
+  changes
+- unknown options throw at construction (canon behavior — `:vaildator`
+  typos surface immediately rather than silently no-opping)
+
 ### Fixed: `binding` Now Rejects Non-Dynamic Vars
 
 JVM Clojure throws `Can't dynamically bind non-dynamic var` when a

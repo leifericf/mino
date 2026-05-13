@@ -304,3 +304,43 @@
     ;; Lock must be released: subsequent transaction completes.
     (dosync (alter r inc))
     (is (= 1 @r))))
+
+(deftest ref-accepts-validator-option
+  ;; `(ref init :validator fn)` installs the validator at construction.
+  ;; The next mutation runs the validator; a falsy return aborts the
+  ;; transaction with an IllegalStateException-style throw.
+  (let [r (ref 1 :validator pos?)]
+    (is (= 1 @r))
+    (is (= pos? (get-validator r)))
+    ;; A valid mutation succeeds.
+    (dosync (alter r inc))
+    (is (= 2 @r))
+    ;; An invalid mutation throws; ref stays at the last valid value.
+    (is (thrown? (dosync (ref-set r -1))))
+    (is (= 2 @r))))
+
+(deftest ref-accepts-meta-option
+  (let [r (ref 0 :meta {:doc "counter"})]
+    (is (= 0 @r))
+    (is (= {:doc "counter"} (meta r)))))
+
+(deftest ref-accepts-validator-and-meta-together
+  (let [r (ref 5 :validator pos? :meta {:tag :counter})]
+    (is (= 5 @r))
+    (is (= pos? (get-validator r)))
+    (is (= {:tag :counter} (meta r)))))
+
+(deftest ref-accepts-history-options-as-noop
+  ;; mino's STM doesn't track ref history; these options are accepted
+  ;; for source compatibility with JVM Clojure but have no observable
+  ;; effect.
+  (let [r (ref 0 :min-history 3 :max-history 10)]
+    (is (= 0 @r))))
+
+(deftest ref-rejects-unknown-options
+  ;; JVM Clojure throws on unknown options; match that posture so a
+  ;; typo like `:vaildator` doesn't silently no-op.
+  (is (thrown? (ref 0 :not-a-real-option 42))))
+
+(deftest ref-rejects-odd-trailing-args
+  (is (thrown? (ref 0 :validator))))

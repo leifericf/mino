@@ -22,12 +22,15 @@ static int supports_meta(mino_type_t t)
 
 /* Type tags whose meta can be READ via (meta x) and MUTATED in
  * place via alter-meta!. Includes everything supports_meta covers
- * plus the stateful types (atom / agent) -- alter-meta! does an
- * in-place mutation of obj->meta rather than copying the cell, so
- * it stays safe for stateful values, and (meta x) is read-only. */
+ * plus the stateful types (atom / agent / ref) -- alter-meta! does
+ * an in-place mutation of obj->meta rather than copying the cell,
+ * so it stays safe for identity-tied values, and (meta x) is
+ * read-only. The constructor form `(ref init :meta m)` populates
+ * the slot at construction; alter-meta! can mutate it later. */
 static int meta_readable(mino_type_t t)
 {
-    return supports_meta(t) || t == MINO_ATOM || t == MINO_AGENT;
+    return supports_meta(t) || t == MINO_ATOM || t == MINO_AGENT
+        || t == MINO_TX_REF;
 }
 
 /* Vars don't store an explicit meta map -- :ns and :name come from the
