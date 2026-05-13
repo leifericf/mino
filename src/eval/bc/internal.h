@@ -110,6 +110,13 @@ typedef enum {
      * arity-3 calls; longer forms keep the OP_CALL path. */
     OP_CONJ_VEC,         /* A=dst, B=vec, C=item                           */
     OP_ASSOC,            /* A=dst, B=base; coll/k/v at regs[B..B+2]        */
+    /* Read-side small-prim fast lanes. ABC form, A=dst, B=src_reg.
+     * Fast path requires MINO_VECTOR; misses fall back to the
+     * canonical prim so lazy seqs, chunked conses, strings, maps,
+     * sets, sorted-colls, and host arrays keep their full semantics. */
+    OP_FIRST_VEC,        /* A=dst, B=vec; nil on empty, vec[0] otherwise   */
+    OP_COUNT_VEC,        /* A=dst, B=vec; tagged-int .len                  */
+    OP_EMPTY_VEC,        /* A=dst, B=vec; true when .len==0, else false    */
     /* Fused counted-loop opcodes. Emitted at the (loop ...) entry pc
      * when the body matches a shape the compiler can specialize:
      *   (loop [i 0] (if (zero? i) <exit> (recur (dec i))))

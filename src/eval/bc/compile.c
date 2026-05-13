@@ -1857,6 +1857,14 @@ static const pure_prim_t PURE_PRIMS[] = {
      * emission sites recognises a non-shadowed call. */
     {"conj",    prim_conj,   1, -1},
     {"assoc",   prim_assoc,  3, -1},
+    /* Read-side seq prims used by the OP_FIRST_VEC / OP_COUNT_VEC /
+     * OP_EMPTY_VEC emission sites. count's result is an int -- can
+     * be folded for literal vec args; first / empty? on literal
+     * vectors fold too. fold_result_constable filters non-
+     * representable results. */
+    {"first",   prim_first,   1,  1},
+    {"count",   prim_count,   1,  1},
+    {"empty?",  prim_empty_p, 1,  1},
     {NULL, NULL, 0, 0},
 };
 
@@ -2311,6 +2319,39 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 }
                 emit_abc(c, OP_GET_KW_MAP, (unsigned)dst,
                          (unsigned)coll_reg, (unsigned)key_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* Read-side small-prim fast lanes. Single-arg shapes for
+         * `(first v)`, `(count v)`, `(empty? v)` -- the runtime
+         * checks for MINO_VECTOR and falls back to the canonical
+         * prim on anything else (lazy seqs, strings, maps, sets,
+         * sorted-colls, host-arrays). The emission gate is shared
+         * with the other write-side lanes below: head must be the
+         * non-shadowed canonical prim, validated by
+         * head_is_canonical_pure_prim above. */
+        if (strcmp(head->as.s.data, "first") == 0
+            || strcmp(head->as.s.data, "count") == 0
+            || strcmp(head->as.s.data, "empty?") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 1) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                int src_reg = compile_operand_inplace(c, a1);
+                if (src_reg < 0) return -1;
+                if (dst > 0xFF || src_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                mino_bc_op_t op;
+                switch (head->as.s.data[0]) {
+                case 'f': op = OP_FIRST_VEC; break;
+                case 'c': op = OP_COUNT_VEC; break;
+                default:  op = OP_EMPTY_VEC; break;   /* "empty?" */
+                }
+                emit_abc(c, op, (unsigned)dst, (unsigned)src_reg, 0);
                 c->next_reg = saved_next;
                 return 0;
             }

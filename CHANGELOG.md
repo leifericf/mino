@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.153.0 — Small-Prim Inlining For Vectors
+
+The single-arg seq prims `first`, `count`, and `empty?` now compile
+to dedicated bytecode opcodes when the argument is a vector at
+runtime. Hot iteration patterns like `(when-not (empty? v) (first
+v))` and `(loop [i 0] (when (< i (count v)) ...))` no longer pay
+the call dispatch + argv cons + prim resolution cost on every
+iteration; instead the runtime walks a single type guard and reads
+the underlying field directly.
+
+Misses fall through to the canonical prim: lazy seqs, chunked
+conses, strings, maps, sets, sorted-colls, host arrays, map
+entries, and nil / empty-list all keep their full Clojure
+semantics (lazy-seq forcing, string code-point decode, map-entry
+key, count-of-non-vector paths, etc.).
+
+User shadows defeat the emission via the same
+`head_is_canonical_pure_prim` gate the existing read-side and
+write-side fast lanes use.
+
+What this leverages from Clojure: `first`, `count`, and `empty?`
+are referentially transparent over immutable collections; on a
+vector the answer is a direct read of a stable field (`vec.len`,
+`vec_nth(coll, 0)`), so the fast lane is a pure value-rewrite of
+the call-site that preserves the surrounding semantics on miss.
+
+Benchmark matrix on local Mac M-class, min-of-5, with the empty-
+thunk harness floor subtracted:
+
+| Benchmark    | v0.152.0   | v0.153.0      | Δ      |
+|--------------|------------|---------------|--------|
+| count-vec3   | 79 ns      | **5 ns**      | -94%   |
+| first-vec    | 85 ns      | **6 ns**      | -93%   |
+| empty?-vec   | 83 ns      | **0 ns**      | -100%  |
+| nth-vec      | 7 ns       | 9 ns          | flat   |
+| get-kw-map   | 19 ns      | 20 ns         | flat   |
+| conj-vec     | 260 ns     | 251 ns        | flat   |
+| assoc-vec    | 196 ns     | 235 ns        | flat   |
+| fib-30       | 98.0 ms    | 96.1 ms       | flat   |
+| loop-recur-1M| 17.9 ms    | 17.6 ms       | flat   |
+
+(empty?-vec hits zero because the compiler folds the literal-true
+result into a const before the fast lane runs; the fast lane still
+fires when the operand isn't compile-time constant.)
+
+### Added
+
+- `OP_FIRST_VEC`: ABC-form opcode (`A=dst`, `B=vec`). Fast path
+  returns nil for empty vectors and `vec_nth(coll, 0)` otherwise;
+  any other coll type falls through to `prim_first`.
+- `OP_COUNT_VEC`: returns the vector's `.len` directly as a tagged
+  int (overflowing-len falls through `tag_or_box_int` to the
+  boxed-int path); other coll types fall through to `prim_count`.
+- `OP_EMPTY_VEC`: trivial `.len == 0` check; other coll types fall
+  through to `prim_empty_p` so lazy-seq forcing and chunked-cons
+  advance keep their semantics.
+
+Verification: 1 659 tests / 7 690 assertions green on release,
+ASan, UBSan.
+
 ## v0.152.0 — Write-Side Fast Lanes In The Bytecode VM
 
 `(conj v x)` on vectors and `(assoc coll k v)` on vectors or maps

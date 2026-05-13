@@ -854,6 +854,81 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_FIRST_VEC: {
+            /* Fast lane for (first v) on a vector. Empty vector
+             * returns nil; non-empty returns vec_nth(coll, 0). Any
+             * other type (lazy, chunked-cons, string, map, set,
+             * sorted-coll, host-array, map-entry, nil/empty-list)
+             * falls back through prim_first so the full semantics --
+             * lazy-seq force, string code-point decode, map-entry
+             * key, etc. -- stay intact. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+                regs[a] = coll->as.vec.len == 0
+                            ? mino_nil(S)
+                            : vec_nth(coll, 0);
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_first(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_COUNT_VEC: {
+            /* Fast lane for (count v) on a vector. Returns the
+             * vector's .len as a tagged int directly; tag_or_box_int
+             * handles the rare path where .len overflows the tagged
+             * range. Other coll types fall through to prim_count so
+             * lazy-seq walk, string code-point count, map / set / host
+             * array len read, etc. stay correct. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+                regs[a] = tag_or_box_int(S, (long long)coll->as.vec.len);
+                if (regs[a] == NULL) { ok = 0; goto bc_done; }
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_count(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_EMPTY_VEC: {
+            /* Fast lane for (empty? v) on a vector. Trivial check on
+             * .len; misses fall through to prim_empty_p so lazy-seq
+             * forcing, chunked-cons advance, and non-collection
+             * error reporting stay correct. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+                regs[a] = coll->as.vec.len == 0
+                            ? mino_true(S) : mino_false(S);
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_empty_p(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
         case OP_CONJ_VEC: {
             /* Fast lane for (conj v x) on vectors. Misses fall back to
              * prim_conj so list cons, set assoc, sorted-coll insert,
