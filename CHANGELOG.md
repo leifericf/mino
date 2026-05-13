@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed: Stale `TODO` On The `dyn_snapshot` Field
+
+The `mino_future_t::dyn_snapshot` field in `src/runtime/internal.h`
+was commented `/* TODO: dyn-var conveyance */`, but the conveyance had
+in fact been implemented in `src/runtime/host_threads.c`
+(snapshotting in `mino_future_spawn`, unpacking into a `dyn_frame` on
+the worker side, plus GC tracing in `gc/driver.c` and `gc/minor.c`).
+The comment now describes what the field actually holds.
+
 ### Changed: `add-load-path!` Uses `memcpy` Now That The Length Is Known
 
 `prim_add_load_path!` in `src/prim/module.c` allocated

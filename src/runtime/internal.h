@@ -1159,7 +1159,10 @@ struct mino_future {
 
     mino_val_t         *thunk;           /* zero-arg fn for the body */
     mino_val_t         *body_env;        /* env captured at spawn */
-    mino_val_t         *dyn_snapshot;    /* TODO: dyn-var conveyance */
+    /* Map of dyn-var bindings at spawn time; the worker unpacks this
+     * into a dyn_frame before invoking the thunk so the body sees the
+     * same binding context as the caller. */
+    mino_val_t         *dyn_snapshot;
 
     mino_future_t      *next_in_state;   /* S->future_list_head chain */
 };
