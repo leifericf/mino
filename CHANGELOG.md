@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Fixed: `embed_stm_test` Crashed Reading Inline-Tagged Ints
+
+`tests/embed_stm_test.c` accessed `a->as.agent.val->type` and
+`a->as.agent.val->as.i` directly across the `test_c_api_agents`
+block, and `args->as.cons.car->type` / `->as.i` inside the
+`prim_test_sleep` C-side primitive. When the agent's value was a
+small integer the runtime stored it inline-tagged rather than as a
+boxed pointer, so dereferencing the "pointer" landed on whatever
+address the tag bits encoded. Stripped binaries crashed with
+`EXC_BAD_ACCESS` at the encoded address (0x11 = decimal 17, which is
+the tag for the integer 2 -- the test's expected post-`inc` value).
+All six unsafe sites now route through `mino_to_int`, the same
+public API the rest of the test already uses for the cross-state
+agent check. No runtime change.
+
 ### Fixed: Stale `TODO` On The `dyn_snapshot` Field
 
 The `mino_future_t::dyn_snapshot` field in `src/runtime/internal.h`

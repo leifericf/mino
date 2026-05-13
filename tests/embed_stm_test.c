@@ -568,10 +568,8 @@ static mino_val_t *prim_test_sleep(mino_state_t *S, mino_val_t *args,
 {
     long long ms = 0;
     (void)env;
-    if (args != NULL && args->type == MINO_CONS
-        && args->as.cons.car != NULL
-        && args->as.cons.car->type == MINO_INT) {
-        ms = args->as.cons.car->as.i;
+    if (mino_is_cons(args)) {
+        (void)mino_to_int(args->as.cons.car, &ms);
     }
     test_sleep_ms(ms);
     return mino_nil(S);
@@ -603,10 +601,13 @@ static void test_c_api_agents(void)
         agents[0] = a; agents[1] = NULL;
         REQUIRE(mino_await(S, agents) != NULL,
                 "mino_await should return non-NULL on success");
-        REQUIRE(a->as.agent.val != NULL && a->as.agent.val->type == MINO_INT,
-                "agent value should be int after sends");
-        REQUIRE(a->as.agent.val->as.i == 2,
-                "agent should have value 2 after two inc sends");
+        {
+            long long n = 0;
+            REQUIRE(mino_to_int(a->as.agent.val, &n),
+                    "agent value should be int after sends");
+            REQUIRE(n == 2,
+                    "agent should have value 2 after two inc sends");
+        }
     }
 
     /* mino_send_off: separate pool, same eval-lock serialization. */
@@ -618,8 +619,11 @@ static void test_c_api_agents(void)
         agents[0] = a; agents[1] = NULL;
         REQUIRE(mino_await(S, agents) != NULL,
                 "mino_await across send-off should succeed");
-        REQUIRE(a->as.agent.val->as.i == 101,
-                "agent should have value 101 after one inc send-off");
+        {
+            long long n = 0;
+            REQUIRE(mino_to_int(a->as.agent.val, &n) && n == 101,
+                    "agent should have value 101 after one inc send-off");
+        }
     }
 
     /* mino_await_for trivial path: zero in-flight means it returns 1
@@ -657,10 +661,13 @@ static void test_c_api_agents(void)
          * deadline drains it. */
         REQUIRE(mino_await(S, agents) != NULL,
                 "mino_await must drain the action started above");
-        REQUIRE(a->as.agent.val != NULL && a->as.agent.val->type == MINO_INT,
-                "agent value should be int after the slow action runs");
-        REQUIRE(a->as.agent.val->as.i == 1,
-                "agent value should be 1 after one slow inc action");
+        {
+            long long n = 0;
+            REQUIRE(mino_to_int(a->as.agent.val, &n),
+                    "agent value should be int after the slow action runs");
+            REQUIRE(n == 1,
+                    "agent value should be 1 after one slow inc action");
+        }
     }
 
     /* mino_agent_error / mino_restart_agent: install a validator
@@ -685,8 +692,11 @@ static void test_c_api_agents(void)
                 "mino_restart_agent should clear the failure");
         REQUIRE(mino_agent_error(S, a) == NULL,
                 "agent_error should be NULL after restart");
-        REQUIRE(a->as.agent.val->as.i == 5,
-                "agent value should be reset to 5 after restart");
+        {
+            long long n = 0;
+            REQUIRE(mino_to_int(a->as.agent.val, &n) && n == 5,
+                    "agent value should be reset to 5 after restart");
+        }
     }
 
     /* Cross-state guard: pass an agent from S2 to mino_send running
