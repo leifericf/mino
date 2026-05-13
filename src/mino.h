@@ -447,6 +447,11 @@ mino_val_t *mino_agent(mino_state_t *S, mino_val_t *initial);
 /* Return 1 if v is an agent, 0 otherwise. NULL-safe. */
 int         mino_is_agent(const mino_val_t *v);
 
+/* Return the agent's current state value (the most-recently committed
+ * action result, or the initial value if no action has applied). Returns
+ * NULL if v is not an agent. Mirrors mino_atom_deref / mino_tx_ref_deref. */
+mino_val_t *mino_agent_deref(const mino_val_t *a);
+
 /* Enqueue (fn current-value arg1 arg2 ...) onto the agent's POOLED
  * run-queue and return the agent immediately. `extra_args` is a cons
  * list (or nil) holding the extra arguments after the agent's

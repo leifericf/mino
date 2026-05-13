@@ -1064,6 +1064,12 @@ mino_val_t *mino_atom_deref(const mino_val_t *a)
     return a->as.atom.val;
 }
 
+mino_val_t *mino_agent_deref(const mino_val_t *a)
+{
+    if (a == NULL || mino_type_of(a) != MINO_AGENT) return NULL;
+    return a->as.agent.val;
+}
+
 mino_val_t *mino_volatile(mino_state_t *S, mino_val_t *val)
 {
     mino_val_t *v = alloc_val(S, MINO_VOLATILE);
