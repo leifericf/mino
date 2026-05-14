@@ -115,6 +115,7 @@ typedef enum {
      * arity-3 calls; longer forms keep the OP_CALL path. */
     OP_CONJ_VEC,         /* A=dst, B=vec, C=item                           */
     OP_ASSOC,            /* A=dst, B=base; coll/k/v at regs[B..B+2]        */
+    OP_DISSOC,           /* A=dst, B=map, C=key; arity-2 dissoc fast lane  */
     /* Read-side small-prim fast lanes. ABC form, A=dst, B=src_reg.
      * Fast path requires MINO_VECTOR; misses fall back to the
      * canonical prim so lazy seqs, chunked conses, strings, maps,

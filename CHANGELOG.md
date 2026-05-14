@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.156.0 — Generic Get And Dissoc Fast Lanes
+
+Two map-side coverage extensions on top of v0.154.0's read-side fast
+lane. `(get coll k)` on a `MINO_MAP` now fires the fast lane for
+any hashable key, not just keywords -- string-keyed config maps,
+int-keyed lookup tables, and symbol-keyed env maps no longer fall
+through to `prim_get` for the lookup. `(dissoc m k)` gets a
+dedicated arity-2 opcode that mirrors `OP_ASSOC`'s shape: type-
+guards `MINO_MAP`, calls `mino_map_dissoc1` directly, falls back
+through `prim_dissoc` on anything else (sorted-map, transient,
+nil, non-map) to preserve full Clojure semantics.
+
+Record-side semantics are unchanged: declared fields are interned
+by keyword identity, so `(get record key)` still requires a
+keyword key to hit the slot-index path. Non-keyword keys on
+records fall through to `prim_get` which scans the optional ext-
+map -- same behaviour as before. Variadic `(dissoc m k1 k2 ...)`
+keeps the `OP_CALL` path so `prim_dissoc`'s loop handles the
+key list including absent-key short-circuits.
+
+What this leverages from Clojure: maps treat any hashable value
+uniformly as a key (the HAMT's hash + equality contract doesn't
+care about the key's runtime type), so the keyword-only outer
+guard the v0.154.0 code carried was a coverage limit, not a
+semantic constraint. Dissoc on a map is a structural rebuild, so
+the operation itself is the bottleneck; the fast lane saves the
+prim's outer arg validation and cons traffic.
+
+Benchmark matrix on local Mac M-class, min-of-5, with the empty-
+thunk harness floor subtracted:
+
+| Benchmark    | v0.155.0  | v0.156.0    | Δ     |
+|--------------|-----------|-------------|-------|
+| get-str-map  | 145 ns    | **28 ns**   | -81%  |
+| dissoc-map   | 1 183 ns  | **930 ns**  | -21%  |
+| get-kw-map   | 20 ns     | 21 ns       | flat  |
+
+### Added
+
+- `OP_GET_KW_MAP` extension: the map branch no longer requires
+  a keyword key. Any value flows through `mino_map_lookup`
+  directly. The record branch still keyword-guards before
+  attempting the field-index lookup.
+- `OP_DISSOC` opcode for arity-2 `(dissoc m k)`. ABC shape
+  with `A=dst, B=map_reg, C=key_reg`; misses fall through to
+  `prim_dissoc` via a freshly-built cons spine.
+- `dissoc` joins `conj` / `assoc` in `PURE_PRIMS[]` so the
+  canonical-prim identity check at the emission site recognises
+  a non-shadowed call.
+
+Verification: 1 659 tests / 7 690 assertions green on release,
+ASan, UBSan.
+
 ## v0.155.0 — Inline-Cached Call Sites
 
 Non-tail call sites whose head is a global symbol now compile to a

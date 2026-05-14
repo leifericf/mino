@@ -886,28 +886,29 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         }
 
         case OP_GET_KW_MAP: {
-            /* Fast lane for (get coll keyword) on maps and records.
-             * For MINO_MAP: single hash + HAMT lookup. For MINO_RECORD:
-             * walk the type's declared-fields vector for a name match,
-             * then fetch the value out of the record's slot array
-             * directly. Misses fall back to prim_get so non-map / non-
-             * record collections, non-keyword keys, 3-arg default
-             * forms, and records with an ext-map carrying the key
-             * keep their full semantics. */
+            /* Fast lane for (get coll k) on maps and records.
+             * For MINO_MAP: any hashable key (string, keyword, int,
+             * symbol, ...) routes through mino_map_lookup. For
+             * MINO_RECORD: declared-fields are interned by keyword
+             * identity, so the slot index lookup requires a keyword
+             * key; other key types fall through to prim_get which
+             * scans the optional ext-map. Misses fall back to prim_get
+             * so non-map / non-record collections, sorted-maps,
+             * 3-arg default forms, and records carrying the key in
+             * the ext-map keep their full semantics. */
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
             unsigned cc = C_OF(ins);
             mino_val_t *coll = regs[b];
             mino_val_t *key  = regs[cc];
-            if (coll != NULL && key != NULL
-                && mino_type_of(key) == MINO_KEYWORD) {
+            if (coll != NULL && key != NULL) {
                 int t = mino_type_of(coll);
                 if (t == MINO_MAP) {
                     mino_val_t *v = map_get_val(coll, key);
                     regs[a] = v == NULL ? mino_nil(S) : v;
                     break;
                 }
-                if (t == MINO_RECORD) {
+                if (t == MINO_RECORD && mino_type_of(key) == MINO_KEYWORD) {
                     int idx = record_field_index(coll, key);
                     if (idx >= 0) {
                         regs[a] = coll->as.record.vals[idx];
@@ -1080,6 +1081,37 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             list = mino_cons(S, coll, list);
             if (list == NULL) { ok = 0; goto bc_done; }
             mino_val_t *r = prim_assoc(S, list, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_DISSOC: {
+            /* Fast lane for the 2-arg (dissoc map k) shape. Compiles
+             * only for arity-2 forms; variadic (dissoc m k1 k2 ...)
+             * keeps OP_CALL so the prim's loop handles the key list
+             * including absent-key short-circuits. Type-guards MAP;
+             * sorted-map / transient / nil / non-map shapes fall back
+             * through prim_dissoc to keep the Clojure-correct error
+             * or no-op behaviour. */
+            unsigned a  = A_OF(ins);
+            unsigned b  = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *key  = regs[cc];
+            if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
+                mino_val_t *r = mino_map_dissoc1(S, coll, key);
+                if (r == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                regs[a] = r;
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, key, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto bc_done; }
+            mino_val_t *r = prim_dissoc(S, list, env);
             if (r == NULL) { ok = 0; goto bc_done; }
             regs = S->bc_regs + base;
             regs[a] = r;

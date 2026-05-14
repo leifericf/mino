@@ -1855,8 +1855,9 @@ static const pure_prim_t PURE_PRIMS[] = {
      * them and try_fold_call never folds; the entries exist so the
      * canonical-prim identity check at the OP_CONJ_VEC / OP_ASSOC
      * emission sites recognises a non-shadowed call. */
-    {"conj",    prim_conj,   1, -1},
-    {"assoc",   prim_assoc,  3, -1},
+    {"conj",    prim_conj,    1, -1},
+    {"assoc",   prim_assoc,   3, -1},
+    {"dissoc",  prim_dissoc,  1, -1},
     /* Read-side seq prims used by the OP_FIRST_VEC / OP_COUNT_VEC /
      * OP_EMPTY_VEC emission sites. count's result is an int -- can
      * be folded for literal vec args; first / empty? on literal
@@ -2411,6 +2412,31 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 }
                 emit_abc(c, OP_ASSOC, (unsigned)dst,
                          (unsigned)base_reg, 0);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* (dissoc m k) arity-2 fast lane on maps. Variadic forms
+         * (dissoc m k1 k2 ...) fall through to OP_CALL so prim_dissoc's
+         * loop handles them; the arity-2 case is the dominant shape
+         * in destructure-and-rewrite code and gets its own opcode. */
+        if (strcmp(head->as.s.data, "dissoc") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                int coll_reg = compile_operand_inplace(c, a1);
+                if (coll_reg < 0) return -1;
+                int key_reg = compile_operand_inplace(c, a2);
+                if (key_reg < 0) return -1;
+                if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_DISSOC, (unsigned)dst,
+                         (unsigned)coll_reg, (unsigned)key_reg);
                 c->next_reg = saved_next;
                 return 0;
             }
