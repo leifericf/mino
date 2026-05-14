@@ -1,5 +1,74 @@
 # Changelog
 
+## v0.161.0 — Chunked-source Walk + Canonical-prim Stage Recognition
+
+Two combined optimizations in `pipeline_walk` for the fused-pipeline
+path:
+
+1. **Chunked-source fast walk.** When the unwound source is (or
+   forces to) a `MINO_CHUNKED_CONS`, iterate the chunk's value
+   array directly instead of calling `seq_iter_val` and
+   `seq_iter_next` per element. The transition from chunked to
+   any other shape (cons tail, vector, etc.) falls through to the
+   existing `seq_iter` walk so non-chunked sources keep their
+   semantics.
+
+2. **Canonical-prim stage recognition.** Pre-resolve each MAP /
+   FILTER stage's callable at walk-entry: when it's a `MINO_PRIM`
+   whose argv-ABI `fn2` pointer is one of the canonical
+   `prim_inc_argv` / `prim_dec_argv` / `prim_odd_p_argv` /
+   `prim_even_p_argv` / `prim_pos_p_argv` / `prim_neg_p_argv` /
+   `prim_zero_p_argv` (covers `inc`, `dec`, `odd?`, `even?`,
+   `pos?`, `neg?`, `zero?`), inline the operation on tagged int
+   elements without going through `apply_callable_argv`. The
+   tagged-int fast path uses one shift + one compare + one make-
+   int per element; on overflow or non-int it falls back to
+   `apply_callable_argv` so Clojure's promotion semantics stay
+   correct. Var-deref upfront so a stage whose callable is a
+   `MINO_VAR` pointing at the prim still hits the fast path.
+
+A new pre-stage struct `fast_kinds[]` stores the resolved kind per
+stage. The per-element inner loop is unified across the chunked
+and seq-iter walks via `pipeline_apply_stages`, which uses the
+fast-kind classification when it fires and falls back to the
+existing apply path otherwise.
+
+The wins are largest on shapes where the stage callable IS one of
+the recognized canonicals -- the common `(map inc ...)` /
+`(filter odd? ...)` / `(map dec ...)` combinations:
+
+| Bench                            | baseline | v0.161.0 |    Δ |
+|----------------------------------|---------:|---------:|-----:|
+| reduce + map inc (range 1m)      |   91 ms  |   74 ms  | -19% |
+| reduce + filter odd? (range 1m)  |   95 ms  |   86 ms  |  -9% |
+| reduce + map dec . filter odd? . (range 1m) | n/a |  90 ms  | new |
+
+Falls short of the plan's 3-10x target because the per-iter floor
+in mino's bytecode VM (reduce_step's `apply_callable_argv(+, ...)`
+dominates after the stage inlining). Closing the rest requires
+inlining the reduce step's `+` too, which lands as part of a later
+PGO substantiation cycle (v0.163.0) and the OP_TAILCALL_CACHED
+follow-on.
+
+Non-canonical stages keep the existing `apply_callable_argv` path
+and pay one (cheap) function-pointer compare per stage at walk
+entry. Existing bench rows that don't go through pipeline_walk are
+unaffected: `(reduce + 0 (range 1m))` stays on `reduce_int_range`'s
+short-circuit path (270 µs).
+
+### Added
+
+- `pipeline_fast_callable` recognizer + the `PIPELINE_FAST_*` enum
+  in `src/prim/sequences.c`.
+- `pipeline_apply_stages` helper + the chunked-source fast walk
+  inside `pipeline_walk`.
+- `pipeline_apply_fast_map` (inc/dec tagged-int path with overflow
+  fallback) + `pipeline_test_fast_filter` (odd?/even?/pos?/neg?/
+  zero? tagged-int predicate path) inline-callable for canonical
+  prims.
+
+Verification: 1 659 tests / 7 690 assertions green.
+
 ## v0.160.0 — Builder-pattern Recur Fusion: Investigation, Deferred
 
 Spike of a compile-time transient rewrite for the canonical builder

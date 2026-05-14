@@ -796,12 +796,174 @@ static int try_unwind_pipeline(mino_val_t *coll,
 typedef int (*pipeline_step_fn)(mino_state_t *S, void *ctx,
                                 mino_val_t *elem, mino_env_t *env);
 
+/* Per-stage canonical-callable recognizer. The pipeline walker
+ * compares a MAP / FILTER stage's callable's argv-ABI fn pointer
+ * against the canonical install-time pointer for inc / dec /
+ * odd? / even? / pos? / neg? / zero?. On match, the inner loop
+ * inlines the operation without going through apply_callable_argv
+ * (which costs ~30-50 ns per call). On the bench
+ * (reduce + 0 (map inc (range 1m))) this saves the dominant per-
+ * element cost when stages[i] is the bench's `(map inc ...)`. */
+typedef enum {
+    PIPELINE_FAST_NONE = 0,
+    PIPELINE_FAST_INC,
+    PIPELINE_FAST_DEC,
+    PIPELINE_FAST_ODD_P,
+    PIPELINE_FAST_EVEN_P,
+    PIPELINE_FAST_POS_P,
+    PIPELINE_FAST_NEG_P,
+    PIPELINE_FAST_ZERO_P
+} pipeline_fast_kind_t;
+
+static pipeline_fast_kind_t pipeline_fast_callable(mino_val_t *callable)
+{
+    /* Var deref: the callable might be a MINO_VAR pointing to the
+     * canonical prim (e.g., when defprotocol's expanded body or
+     * lazy-map-1 receives an unresolved var-reference). */
+    if (callable != NULL && mino_type_of(callable) == MINO_VAR) {
+        callable = callable->as.var.root;
+    }
+    if (callable == NULL || mino_type_of(callable) != MINO_PRIM) {
+        return PIPELINE_FAST_NONE;
+    }
+    mino_prim_fn2 fn2 = callable->as.prim.fn2;
+    if (fn2 == NULL) return PIPELINE_FAST_NONE;
+    if (fn2 == prim_inc_argv)     return PIPELINE_FAST_INC;
+    if (fn2 == prim_dec_argv)     return PIPELINE_FAST_DEC;
+    if (fn2 == prim_odd_p_argv)   return PIPELINE_FAST_ODD_P;
+    if (fn2 == prim_even_p_argv)  return PIPELINE_FAST_EVEN_P;
+    if (fn2 == prim_pos_p_argv)   return PIPELINE_FAST_POS_P;
+    if (fn2 == prim_neg_p_argv)   return PIPELINE_FAST_NEG_P;
+    if (fn2 == prim_zero_p_argv)  return PIPELINE_FAST_ZERO_P;
+    return PIPELINE_FAST_NONE;
+}
+
+/* Inline-apply a canonical MAP-kind step on an integer element. The
+ * non-int and overflow paths bail to the slow apply_callable_argv
+ * path so Clojure's promotion semantics stay correct. Returns NULL on
+ * error (with the diag set by apply_callable_argv). */
+static mino_val_t *pipeline_apply_fast_map(mino_state_t *S,
+                                           pipeline_fast_kind_t k,
+                                           mino_val_t *callable,
+                                           mino_val_t *elem,
+                                           mino_env_t *env)
+{
+    if (MINO_IS_INT(elem)) {
+        long long v = MINO_INT_VAL(elem);
+        if (k == PIPELINE_FAST_INC && v < MINO_INT_MAX) {
+            return MINO_MAKE_INT(v + 1);
+        }
+        if (k == PIPELINE_FAST_DEC && v > -MINO_INT_MAX) {
+            /* Symmetric overflow check: dec's slow path matches +' semantics. */
+            return MINO_MAKE_INT(v - 1);
+        }
+    }
+    mino_val_t *argv1[1];
+    argv1[0] = elem;
+    return apply_callable_argv(S, callable, argv1, 1, env);
+}
+
+/* Inline-test a canonical FILTER-kind predicate on an int element.
+ * Returns 1 = truthy (passed), 0 = falsy (rejected), -1 = error +
+ * out_err set so the caller can propagate. Falls back to
+ * apply_callable_argv on non-int. */
+static int pipeline_test_fast_filter(mino_state_t *S,
+                                     pipeline_fast_kind_t k,
+                                     mino_val_t *callable,
+                                     mino_val_t *elem,
+                                     mino_env_t *env,
+                                     int *out_err)
+{
+    *out_err = 0;
+    if (MINO_IS_INT(elem)) {
+        long long v = MINO_INT_VAL(elem);
+        switch (k) {
+        case PIPELINE_FAST_ODD_P:  return (v & 1ll) != 0;
+        case PIPELINE_FAST_EVEN_P: return (v & 1ll) == 0;
+        case PIPELINE_FAST_POS_P:  return v > 0;
+        case PIPELINE_FAST_NEG_P:  return v < 0;
+        case PIPELINE_FAST_ZERO_P: return v == 0;
+        default: break;
+        }
+    }
+    mino_val_t *argv1[1];
+    argv1[0] = elem;
+    mino_val_t *r = apply_callable_argv(S, callable, argv1, 1, env);
+    if (r == NULL) { *out_err = 1; return -1; }
+    return mino_is_truthy_inline(r) ? 1 : 0;
+}
+
+/* Drive a single element through all stages. Shared by the chunked
+ * fast-path inner loop and the seq_iter fallback. fast_kinds[] is
+ * the pre-resolved canonical-op kind per stage (NONE for stages we
+ * have to apply_callable_argv normally). Returns:
+ *   0 = pass to step, continue
+ *   1 = skip element (filter rejected)
+ *   2 = take counter exhausted, return done after this element
+ *  -1 = error (diag set) */
+static int pipeline_apply_stages(mino_state_t *S,
+                                 pipeline_stage_t *stages,
+                                 pipeline_fast_kind_t *fast_kinds,
+                                 int n_stages,
+                                 mino_val_t **elem_io,
+                                 mino_env_t *env)
+{
+    mino_val_t *elem = *elem_io;
+    int take_exhausted = 0;
+    for (int i = n_stages - 1; i >= 0; i--) {
+        pipeline_stage_t *st = &stages[i];
+        if (st->kind == PIPELINE_STAGE_MAP) {
+            pipeline_fast_kind_t k = fast_kinds[i];
+            if (k != PIPELINE_FAST_NONE) {
+                elem = pipeline_apply_fast_map(S, k, st->callable,
+                                               elem, env);
+            } else {
+                mino_val_t *argv1[1];
+                argv1[0] = elem;
+                elem = apply_callable_argv(S, st->callable, argv1,
+                                           1, env);
+            }
+            if (elem == NULL) return -1;
+        } else if (st->kind == PIPELINE_STAGE_FILTER) {
+            pipeline_fast_kind_t k = fast_kinds[i];
+            int err = 0;
+            int pass;
+            if (k != PIPELINE_FAST_NONE) {
+                pass = pipeline_test_fast_filter(S, k, st->callable,
+                                                 elem, env, &err);
+            } else {
+                mino_val_t *argv1[1];
+                argv1[0] = elem;
+                mino_val_t *r = apply_callable_argv(S, st->callable,
+                                                    argv1, 1, env);
+                if (r == NULL) return -1;
+                pass = mino_is_truthy_inline(r) ? 1 : 0;
+            }
+            if (err) return -1;
+            if (!pass) return 1;
+        } else {
+            /* TAKE */
+            if (st->counter <= 0) return 2;
+            st->counter--;
+            if (st->counter == 0) take_exhausted = 1;
+        }
+    }
+    *elem_io = elem;
+    return take_exhausted ? 2 : 0;
+}
+
 /* Drive `src` element by element through stages[n_stages-1 .. 0]
  * (innermost-stage-first per element). For each element that passes
  * every stage, invoke step(S, ctx, elem, env). Caller pre-handled
  * the nil-source and empty-source cases. Returns 0 on normal
  * exhaustion, 1 on take-exhausted or step-requested stop, -1 on
- * error. */
+ * error. When `src` is (or resolves to) a chunked-cons, the walk
+ * iterates the chunk's value array directly instead of calling
+ * seq_iter_val / seq_iter_next per element. Combined with the
+ * canonical-callable fast path inside pipeline_apply_stages, the
+ * (map inc ...) / (filter odd? ...) / (map dec ...) shapes on a
+ * (range N) source run with one tagged-int op per element instead
+ * of an apply_callable_argv per stage per element. */
 static int pipeline_walk(mino_state_t *S,
                          mino_val_t *src,
                          pipeline_stage_t *stages,
@@ -810,49 +972,69 @@ static int pipeline_walk(mino_state_t *S,
                          void *ctx,
                          mino_env_t *env)
 {
-    seq_iter_t it;
     if (src == NULL || mino_type_of(src) == MINO_NIL
         || mino_type_of(src) == MINO_EMPTY_LIST) {
         return 0;
     }
+    pipeline_fast_kind_t fast_kinds[PIPELINE_MAX_STAGES];
+    for (int i = 0; i < n_stages; i++) {
+        if (stages[i].kind == PIPELINE_STAGE_MAP
+            || stages[i].kind == PIPELINE_STAGE_FILTER) {
+            fast_kinds[i] = pipeline_fast_callable(stages[i].callable);
+        } else {
+            fast_kinds[i] = PIPELINE_FAST_NONE;
+        }
+    }
+
+    /* Force outer LAZY once so we can examine the resolved shape. */
+    if (mino_type_of(src) == MINO_LAZY) {
+        src = lazy_force(S, src);
+        if (src == NULL) return -1;
+    }
+
+    /* Chunked-cons fast path: read chunk values directly, skip the
+     * seq_iter call per element. Falls into the seq_iter walk once
+     * the chunked chain transitions to a plain cons / vector / etc.
+     * suffix. */
+    while (src != NULL && mino_type_of(src) == MINO_CHUNKED_CONS) {
+        const mino_val_t *ch = src->as.chunked_cons.chunk;
+        unsigned          start = src->as.chunked_cons.off;
+        unsigned          end   = ch->as.chunk.len;
+        for (unsigned k = start; k < end; k++) {
+            mino_val_t *elem = ch->as.chunk.vals[k];
+            int rc = pipeline_apply_stages(S, stages, fast_kinds,
+                                           n_stages, &elem, env);
+            if (rc < 0) return -1;
+            if (rc == 1) continue;            /* filter rejected */
+            int srcc = step(S, ctx, elem, env);
+            if (srcc < 0) return -1;
+            if (srcc > 0) return 1;
+            if (rc == 2) return 1;            /* take exhausted */
+        }
+        mino_val_t *more = src->as.chunked_cons.more;
+        if (more != NULL && mino_type_of(more) == MINO_LAZY) {
+            more = lazy_force(S, more);
+            if (more == NULL) return -1;
+        }
+        src = more;
+    }
+    if (src == NULL || mino_type_of(src) == MINO_NIL
+        || mino_type_of(src) == MINO_EMPTY_LIST) {
+        return 0;
+    }
+
+    seq_iter_t it;
     seq_iter_init(S, &it, src);
     while (!seq_iter_done(&it)) {
         mino_val_t *elem = seq_iter_val(S, &it);
-        int         passed = 1;
-        int         take_exhausted = 0;
-        int         i;
-        for (i = n_stages - 1; i >= 0; i--) {
-            if (stages[i].kind == PIPELINE_STAGE_MAP) {
-                /* argv ABI: no per-element cons-spine traffic. The
-                 * callable's fn2 path (argv prims) or MINO_FN path
-                 * (bytecode fns) takes argv directly; only the
-                 * fn2==NULL prim fallback rebuilds a cons inside
-                 * apply_callable_argv. */
-                mino_val_t *argv1[1];
-                argv1[0] = elem;
-                elem = apply_callable_argv(
-                    S, stages[i].callable, argv1, 1, env);
-                if (elem == NULL) return -1;
-            } else if (stages[i].kind == PIPELINE_STAGE_FILTER) {
-                mino_val_t *argv1[1];
-                mino_val_t *r;
-                argv1[0] = elem;
-                r = apply_callable_argv(
-                    S, stages[i].callable, argv1, 1, env);
-                if (r == NULL) return -1;
-                if (!mino_is_truthy_inline(r)) { passed = 0; break; }
-            } else {
-                /* PIPELINE_STAGE_TAKE. */
-                if (stages[i].counter <= 0) return 1;
-                stages[i].counter--;
-                if (stages[i].counter == 0) take_exhausted = 1;
-            }
-        }
-        if (passed) {
-            int rc = step(S, ctx, elem, env);
-            if (rc < 0) return -1;
-            if (rc > 0) return 1;
-            if (take_exhausted) return 1;
+        int rc = pipeline_apply_stages(S, stages, fast_kinds,
+                                       n_stages, &elem, env);
+        if (rc < 0) return -1;
+        if (rc != 1) {
+            int srcc = step(S, ctx, elem, env);
+            if (srcc < 0) return -1;
+            if (srcc > 0) return 1;
+            if (rc == 2) return 1;
         }
         seq_iter_next(S, &it);
     }
