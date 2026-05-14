@@ -48,7 +48,14 @@ typedef struct {
 
 struct mino_vec_node {
     unsigned char is_leaf;
-    unsigned      count;
+    unsigned char count;
+    /* 2 bytes of padding here, then owner uses 4 bytes; together the
+     * pre-`slots` block stays at the original 8 bytes (count was
+     * `unsigned int` in the persistent-only layout). The transient-
+     * ownership marker is therefore *free* in struct size: every
+     * persistent-path clone / alloc copies the same 264 bytes as
+     * before. 0 = immutable; non-zero matches `transient.owner_id`. */
+    uint32_t      owner;
     void         *slots[MINO_VEC_WIDTH];
 };
 
@@ -133,6 +140,18 @@ mino_val_t *vec_subvec(mino_state_t *S, const mino_val_t *v,
                        size_t start, size_t end);                 /* GC-owned */
 mino_val_t *vec_from_array(mino_state_t *S, mino_val_t **items,
                            size_t len);                           /* GC-owned */
+
+/* Owned-edit conj / assoc / pop variants. The `owner` argument is the
+ * editing transient's monotonic ID (from S->transient_owner_next);
+ * nodes whose owner field matches are mutated in place, others are
+ * cloned once with `owner` stamped and then mutated in place by
+ * subsequent calls. Used by `conj!` / `assoc!` / `pop!` on transient
+ * wrappers around persistent vectors (`transient.c`). */
+mino_val_t *vec_conj1_owned(mino_state_t *S, mino_val_t *v,
+                            mino_val_t *item, uintptr_t owner);       /* GC-owned */
+mino_val_t *vec_assoc1_owned(mino_state_t *S, mino_val_t *v, size_t i,
+                             mino_val_t *item, uintptr_t owner);       /* GC-owned */
+mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner); /* GC-owned */
 
 /* ------------------------------------------------------------------------- */
 /* map.c: HAMT operations                                                    */

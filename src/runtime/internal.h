@@ -823,6 +823,17 @@ struct mino_state {
     } *ic_table;
     size_t          ic_cap;
     unsigned        ic_gen;
+    /* Monotonic owner-ID generator for transient batch mutators
+     * (src/collections/transient.c). Each new (transient ...) call
+     * pre-increments and reads this counter; vec nodes whose owner
+     * field equals the resulting ID are mutated in place by the
+     * matching transient. Using an ID rather than the transient
+     * mino_val_t pointer avoids the address-reuse hazard after a
+     * transient is GC'd. The vec node `owner` field is 32 bits, so
+     * the runtime caps mintable IDs at 2^32 - 1; transients past
+     * that cap (astronomically unlikely in a real process) fall
+     * back to the wrapper path. */
+    uint32_t        transient_owner_next;
     /* Open-addressing hash mirror keyed on the (interned-ns*, interned-name*)
      * pointer pair. var_intern / var_find / var_unintern hit this first;
      * the linear var_registry remains the source of truth (and the GC

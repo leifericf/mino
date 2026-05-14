@@ -378,6 +378,183 @@ static mino_vec_node_t *pop_tail(mino_state_t *S,
     }
 }
 
+/* Owned-edit helpers used by the transient `*_bang` mutators. Each
+ * accepts an `owner` pointer (the transient's mino_val_t address);
+ * nodes whose owner field matches are mutated in place, others are
+ * cloned with the owner stamped. On first mutation through a fresh
+ * transient, the inner nodes are owner=NULL (the persistent default)
+ * so the first walk clones them; subsequent walks against the same
+ * transient hit the in-place path.
+ *
+ * GC barrier discipline: in-place mutation may write a YOUNG slot
+ * value into an OLD owner-tagged node (the node has aged across a
+ * minor while the transient batch is still running). Every owned
+ * slot write therefore routes through gc_write_barrier so the remset
+ * picks up the OLD -> YOUNG edge. The barrier is a no-op for YOUNG
+ * containers, so freshly cloned (still-young) nodes pay no extra
+ * cost. */
+static void vnode_slot_set(mino_state_t *S, mino_vec_node_t *node,
+                            unsigned idx, void *val)
+{
+    gc_write_barrier(S, node, node->slots[idx], val);
+    node->slots[idx] = val;
+}
+static mino_vec_node_t *vnode_new_owned(mino_state_t *S, unsigned count,
+                                         int is_leaf, uintptr_t owner)
+{
+    mino_vec_node_t *n = (mino_vec_node_t *)gc_alloc_typed(
+        S, GC_T_VEC_NODE, sizeof(*n));
+    n->is_leaf = (unsigned char)(is_leaf ? 1 : 0);
+    n->count   = count;
+    n->owner   = owner;
+    return n;
+}
+
+static mino_vec_node_t *vnode_ensure_owned(mino_state_t *S,
+                                            mino_vec_node_t *node,
+                                            uintptr_t owner)
+{
+    mino_vec_node_t *n;
+    if (node != NULL && node->owner == owner) return node;
+    n = (mino_vec_node_t *)gc_alloc_typed(
+        S, GC_T_VEC_NODE, sizeof(*n));
+    if (node != NULL) memcpy(n, node, sizeof(*n));
+    n->owner = owner;
+    return n;
+}
+
+static mino_vec_node_t *new_path_owned(mino_state_t *S, unsigned shift,
+                                        mino_vec_node_t *leaf, uintptr_t owner);
+static mino_vec_node_t *push_tail_owned(mino_state_t *S,
+                                         mino_vec_node_t *node,
+                                         unsigned shift, size_t subindex,
+                                         mino_vec_node_t *leaf, uintptr_t owner);
+
+static mino_vec_node_t *new_path_owned(mino_state_t *S, unsigned shift,
+                                        mino_vec_node_t *leaf, uintptr_t owner)
+{
+    mino_vec_node_t *n;
+    if (shift == 0) return leaf;
+    n = vnode_new_owned(S, 1, 0, owner);
+    /* n is fresh YOUNG -- direct write; barrier is a no-op. */
+    n->slots[0] = new_path_owned(S, shift - MINO_VEC_B, leaf, owner);
+    return n;
+}
+
+static mino_vec_node_t *push_tail_owned(mino_state_t *S,
+                                         mino_vec_node_t *node,
+                                         unsigned shift, size_t subindex,
+                                         mino_vec_node_t *leaf, uintptr_t owner)
+{
+    unsigned         digit  = (unsigned)((subindex >> shift) & MINO_VEC_MASK);
+    mino_vec_node_t *edited = vnode_ensure_owned(S, node, owner);
+    if (shift == MINO_VEC_B) {
+        vnode_slot_set(S, edited, digit, leaf);
+    } else {
+        mino_vec_node_t *child     = (mino_vec_node_t *)node->slots[digit];
+        mino_vec_node_t *new_child =
+            (child == NULL)
+                ? new_path_owned(S, shift - MINO_VEC_B, leaf, owner)
+                : push_tail_owned(S, child, shift - MINO_VEC_B,
+                                  subindex, leaf, owner);
+        vnode_slot_set(S, edited, digit, new_child);
+    }
+    if (digit + 1u > edited->count) edited->count = digit + 1u;
+    return edited;
+}
+
+static mino_vec_node_t *trie_assoc_owned(mino_state_t *S,
+                                          mino_vec_node_t *node,
+                                          unsigned shift, size_t i,
+                                          mino_val_t *item, uintptr_t owner)
+{
+    mino_vec_node_t *edited = vnode_ensure_owned(S, node, owner);
+    if (shift == 0) {
+        vnode_slot_set(S, edited, (unsigned)(i & MINO_VEC_MASK), item);
+    } else {
+        unsigned digit = (unsigned)((i >> shift) & MINO_VEC_MASK);
+        mino_vec_node_t *new_child = trie_assoc_owned(S,
+            (mino_vec_node_t *)node->slots[digit],
+            shift - MINO_VEC_B, i, item, owner);
+        vnode_slot_set(S, edited, digit, new_child);
+    }
+    return edited;
+}
+
+/* Owned conj: like vec_conj1 but reuses owner-tagged tail and trie
+ * nodes in place. After the first conj! against a fresh transient
+ * the tail node is owner-tagged, so subsequent conj!'s within the
+ * same chunk-of-32 do a single slot write + count bump with no node
+ * allocation. */
+mino_val_t *vec_conj1_owned(mino_state_t *S, mino_val_t *v,
+                             mino_val_t *item, uintptr_t owner)
+{
+    mino_vec_node_t *new_tail;
+    mino_vec_node_t *new_root;
+    unsigned         new_shift;
+    size_t           trie_count;
+    if (v->as.vec.offset > 0) {
+        v = vec_materialize(S, v);
+    }
+    if (v->as.vec.tail_len < MINO_VEC_WIDTH) {
+        if (v->as.vec.tail == NULL) {
+            new_tail = vnode_new_owned(S, 1, 1, owner);
+            new_tail->slots[0] = item;
+        } else {
+            new_tail = vnode_ensure_owned(S, v->as.vec.tail, owner);
+            vnode_slot_set(S, new_tail, v->as.vec.tail_len, item);
+            new_tail->count = v->as.vec.tail_len + 1u;
+        }
+        return vec_assemble(S, v, v->as.vec.root, new_tail,
+                            v->as.vec.tail_len + 1u,
+                            v->as.vec.shift, v->as.vec.len + 1u);
+    }
+    new_tail = vnode_new_owned(S, 1, 1, owner);
+    new_tail->slots[0] = item;
+    trie_count = v->as.vec.len - v->as.vec.tail_len;
+    new_shift  = v->as.vec.shift;
+    if (v->as.vec.root == NULL) {
+        new_root  = v->as.vec.tail;
+        new_shift = 0;
+    } else if (trie_count == ((size_t)1u << (v->as.vec.shift + MINO_VEC_B))) {
+        mino_vec_node_t *grown = vnode_new_owned(S, 2, 0, owner);
+        /* grown is fresh YOUNG; no barrier needed. */
+        grown->slots[0] = v->as.vec.root;
+        grown->slots[1] = new_path_owned(S, v->as.vec.shift, v->as.vec.tail, owner);
+        new_root  = grown;
+        new_shift = v->as.vec.shift + MINO_VEC_B;
+    } else {
+        new_root = push_tail_owned(S, v->as.vec.root, v->as.vec.shift,
+                                    trie_count, v->as.vec.tail, owner);
+    }
+    return vec_assemble(S, v, new_root, new_tail, 1u, new_shift,
+                        v->as.vec.len + 1u);
+}
+
+/* Owned assoc. */
+mino_val_t *vec_assoc1_owned(mino_state_t *S, mino_val_t *v, size_t i,
+                              mino_val_t *item, uintptr_t owner)
+{
+    size_t trie_count;
+    if (v->as.vec.offset > 0) v = vec_materialize(S, v);
+    if (i == v->as.vec.len) return vec_conj1_owned(S, v, item, owner);
+    trie_count = v->as.vec.len - v->as.vec.tail_len;
+    if (i >= trie_count) {
+        mino_vec_node_t *new_tail = vnode_ensure_owned(S, v->as.vec.tail, owner);
+        vnode_slot_set(S, new_tail, (unsigned)(i - trie_count), item);
+        return vec_assemble(S, v, v->as.vec.root, new_tail,
+                            v->as.vec.tail_len, v->as.vec.shift, v->as.vec.len);
+    }
+    return vec_assemble(S, v,
+        trie_assoc_owned(S, v->as.vec.root, v->as.vec.shift, i, item, owner),
+        v->as.vec.tail, v->as.vec.tail_len, v->as.vec.shift, v->as.vec.len);
+}
+
+/* Owned pop. Mirrors vec_pop's structure but uses vnode_ensure_owned
+ * on the trie spine and tail so the in-place edits stay confined to
+ * the transient's owned nodes. */
+mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner);
+
 /* Remove the last element. Returns an empty vector when len == 1.
  * Caller must ensure len > 0. */
 mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v)
@@ -417,6 +594,83 @@ mino_val_t *vec_pop(mino_state_t *S, const mino_val_t *v)
             new_root = pop_tail(S, v->as.vec.root, v->as.vec.shift,
                                 trie_count, &new_leaf);
             /* Shrink height if root has only one child. */
+            if (new_root != NULL && new_root->count == 1
+                && new_shift > 0) {
+                new_root  = (mino_vec_node_t *)new_root->slots[0];
+                new_shift -= MINO_VEC_B;
+            }
+        }
+        return vec_assemble(S, v, new_root, new_leaf,
+                            new_leaf != NULL ? new_leaf->count : 0u,
+                            new_shift, new_len);
+    }
+}
+
+/* Owned variant of pop_tail. */
+static mino_vec_node_t *pop_tail_owned(mino_state_t *S,
+                                         mino_vec_node_t *node, unsigned shift,
+                                         size_t trie_count,
+                                         mino_vec_node_t **out_leaf,
+                                         uintptr_t owner)
+{
+    unsigned digit = (unsigned)(((trie_count - 1) >> shift) & MINO_VEC_MASK);
+    if (shift == MINO_VEC_B) {
+        *out_leaf = (mino_vec_node_t *)node->slots[digit];
+        if (digit == 0) return NULL;
+        {
+            mino_vec_node_t *edited = vnode_ensure_owned(S, node, owner);
+            vnode_slot_set(S, edited, digit, NULL);
+            edited->count = digit;
+            return edited;
+        }
+    }
+    {
+        mino_vec_node_t *child     = (mino_vec_node_t *)node->slots[digit];
+        mino_vec_node_t *new_child = pop_tail_owned(S, child,
+                                                     shift - MINO_VEC_B,
+                                                     trie_count, out_leaf,
+                                                     owner);
+        if (new_child == NULL && digit == 0) return NULL;
+        {
+            mino_vec_node_t *edited = vnode_ensure_owned(S, node, owner);
+            vnode_slot_set(S, edited, digit, new_child);
+            if (new_child == NULL) edited->count = digit;
+            return edited;
+        }
+    }
+}
+
+mino_val_t *vec_pop_owned(mino_state_t *S, mino_val_t *v, uintptr_t owner)
+{
+    size_t new_len;
+    if (v->as.vec.offset > 0) v = vec_materialize(S, v);
+    new_len = v->as.vec.len - 1;
+    if (new_len == 0) {
+        return vec_assemble(S, v, NULL, NULL, 0u, 0u, 0);
+    }
+    if (v->as.vec.tail_len > 1) {
+        mino_vec_node_t *new_tail = vnode_ensure_owned(S, v->as.vec.tail, owner);
+        vnode_slot_set(S, new_tail, v->as.vec.tail_len - 1u, NULL);
+        new_tail->count = v->as.vec.tail_len - 1u;
+        return vec_assemble(S, v, v->as.vec.root, new_tail,
+                            v->as.vec.tail_len - 1u,
+                            v->as.vec.shift, new_len);
+    }
+    if (v->as.vec.root == NULL) {
+        return vec_assemble(S, v, NULL, NULL, 0u, 0u, 0);
+    }
+    {
+        size_t           trie_count = v->as.vec.len - v->as.vec.tail_len;
+        mino_vec_node_t *new_leaf   = NULL;
+        mino_vec_node_t *new_root;
+        unsigned         new_shift  = v->as.vec.shift;
+        if (v->as.vec.shift == 0) {
+            new_leaf  = v->as.vec.root;
+            new_root  = NULL;
+            new_shift = 0;
+        } else {
+            new_root = pop_tail_owned(S, v->as.vec.root, v->as.vec.shift,
+                                       trie_count, &new_leaf, owner);
             if (new_root != NULL && new_root->count == 1
                 && new_shift > 0) {
                 new_root  = (mino_vec_node_t *)new_root->slots[0];

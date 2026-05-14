@@ -19,6 +19,7 @@
 
 #include "runtime/internal.h"
 #include "prim/internal.h"
+#include "collections/internal.h"  /* vec_conj1_owned / assoc1_owned / pop_owned */
 
 #include <stdio.h>
 
@@ -82,8 +83,20 @@ mino_val_t *mino_transient(mino_state_t *S, mino_val_t *coll)
             "transient!: expected a persistent vector, map, or set");
     }
     t = alloc_val(S, MINO_TRANSIENT);
-    t->as.transient.current = coll;
-    t->as.transient.valid   = 1;
+    t->as.transient.current  = coll;
+    t->as.transient.valid    = 1;
+    /* Mint a fresh monotonic owner ID. The pre-increment skips 0
+     * (reserved for "not owned by any transient"). On the rare
+     * 32-bit wraparound we leave owner_id at 0 so vec_*_owned's
+     * `node->owner == owner_id` check stays false-on-NULL and the
+     * transient falls back to a path-copy wrapper instead of
+     * spuriously claiming nodes whose IDs collided with a long-dead
+     * transient. */
+    if (S->transient_owner_next == 0xFFFFFFFFu) {
+        t->as.transient.owner_id = 0;
+    } else {
+        t->as.transient.owner_id = (uintptr_t)(++S->transient_owner_next);
+    }
     return t;
 }
 
@@ -155,7 +168,29 @@ mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
         return transient_error(S,
             "assoc!: transient must wrap a vector or map");
     }
-    /* Build (inner key val) and dispatch to the persistent op. */
+    /* Vector branch: owner-tagged in-place edit on tail / trie spine.
+     * owner_id == 0 means the 32-bit owner space has wrapped; we fall
+     * through to the wrapper-style path so the owner==0 mismatch
+     * never spuriously claims a persistent node. */
+    if (mino_type_of(inner) == MINO_VECTOR
+        && t->as.transient.owner_id != 0) {
+        if (!mino_val_int_p(key)) {
+            return transient_error(S,
+                "assoc!: vector key must be an integer index");
+        }
+        {
+            long long idx = mino_val_int_get(key);
+            if (idx < 0 || (size_t)idx > inner->as.vec.len) {
+                return transient_error(S, "assoc!: index out of range");
+            }
+            result = vec_assoc1_owned(S, inner, (size_t)idx, val, t->as.transient.owner_id);
+            if (result == NULL) return NULL;
+            transient_set_current(S, t, result);
+            return t;
+        }
+    }
+    /* Map branch: still wrapper-style until the map HAMT gains its own
+     * owner discipline in a follow-on cycle. */
     args = cons1(S, inner,
                  cons1(S, key, cons1(S, val, mino_nil(S))));
     result = prim_assoc(S, args, NULL);
@@ -179,6 +214,20 @@ mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
         return transient_error(S,
             "conj!: transient must wrap a vector, map, or set");
     }
+    /* Vector branch: owner-tagged tail / trie edit. The first conj!
+     * against a fresh transient clones the tail (owner mismatch);
+     * subsequent conj!'s within the same 32-slot chunk are a single
+     * slot write + count bump with no allocation. owner_id == 0
+     * means the 32-bit ID space wrapped; fall through to the
+     * wrapper path so owner==0 nodes are not spuriously claimed. */
+    if (mino_type_of(inner) == MINO_VECTOR
+        && t->as.transient.owner_id != 0) {
+        result = vec_conj1_owned(S, inner, val, t->as.transient.owner_id);
+        if (result == NULL) return NULL;
+        transient_set_current(S, t, result);
+        return t;
+    }
+    /* Map / set branches: still wrapper-style. */
     args = cons1(S, inner, cons1(S, val, mino_nil(S)));
     result = prim_conj(S, args, NULL);
     if (result == NULL) return NULL;
@@ -232,6 +281,19 @@ mino_val_t *mino_pop_bang(mino_state_t *S, mino_val_t *t)
     if (inner == NULL || mino_type_of(inner) != MINO_VECTOR) {
         return transient_error(S, "pop!: transient must wrap a vector");
     }
+    if (inner->as.vec.len == 0) {
+        return transient_error(S, "pop!: empty vector");
+    }
+    if (t->as.transient.owner_id != 0) {
+        result = vec_pop_owned(S, inner, t->as.transient.owner_id);
+        if (result == NULL) return NULL;
+        (void)args;
+        transient_set_current(S, t, result);
+        return t;
+    }
+    /* owner_id == 0 means the 32-bit ID space wrapped; fall back to
+     * the persistent wrapper path so owner==0 nodes are not
+     * spuriously claimed. */
     args = cons1(S, inner, mino_nil(S));
     result = prim_pop(S, args, NULL);
     if (result == NULL) return NULL;

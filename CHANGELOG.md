@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.165.0 — In-Place Transient Vector Mutation
+
+`(transient ...) / conj! / assoc! / pop! / persistent!` over vectors
+now mutate owner-tagged trie nodes in place rather than path-copying
+on every step. Each `(transient ...)` mints a monotonic owner ID;
+the vector's trie and tail nodes carry a 32-bit `owner` field that
+the mutators check before deciding to clone or edit. The first edit
+through a fresh transient clones the touched node (and stamps it
+with the transient's owner); every subsequent edit through the same
+transient hits the in-place fast lane.
+
+`mino_vec_node`'s layout is unchanged in size: the formerly 4-byte
+`unsigned count` field is split into `unsigned char count` plus a
+32-bit `owner`, with `count` capped well below 256 by
+`MINO_VEC_WIDTH=32`. The persistent code path (`vec_conj1` /
+`vec_assoc1` / `vec_pop`) clones the same number of bytes per node
+as before, so persistent-vector workloads stay within run-to-run
+noise of v0.164.0.
+
+GC barrier discipline: in-place writes through `vnode_slot_set`
+route through `gc_write_barrier`, so an OLD owner-tagged node that
+ages across a minor GC during a transient batch keeps its remset
+entry consistent when freshly-allocated YOUNG values are stored
+into its slots. Without this every long-running transient build
+would silently lose the second half of any element conjed after
+the node aged.
+
+### Measured impact (v0.163.0 → v0.165.0)
+
+Pipeline-fused vector consumers in `pipeline_consumers_bench.clj`:
+
+| Bench | v0.163.0 | v0.165.0 | Δ |
+|---|---:|---:|---:|
+| `into-vec-pipeline` | 589 µs | 152 µs | **-74%** |
+| `mapv-pipeline` | 623 µs | 191 µs | **-69%** |
+| `filterv-pipeline` | 82 µs | 77 µs | -6% |
+| `dorun-pipeline` | 78 µs | 79 µs | flat |
+
+Plain `(loop ... (conj! acc i))` over `(range 100k)` wrapped in
+`persistent!`: 113 ms (v0.163.0) → 89 ms (v0.165.0), **-21%**.
+Plain persistent `(conj v ...)` 1k loop is flat within noise.
+
+Item C (profile-driven type-feedback IC) was deferred per M3's
+finding that no current workload has hot non-statically-promotable
+arith sites; the v0.163.0 IC framework already covers the
+substantiating case (protocol dispatch).
+
+Matrix neutral elsewhere within 2% noise. ASan clean. 1659 tests,
+7690 assertions all green.
+
 ## v0.164.0 — Unboxed Int-Acc Reducer Fast Lane
 
 Adds an unboxed `long long` accumulator path to the canonical numeric
