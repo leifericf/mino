@@ -789,27 +789,31 @@ static int try_unwind_pipeline(mino_val_t *coll,
     return n;
 }
 
+/* Per-element callback contract for the generic pipeline walker.
+ * Return 0 to continue, 1 to stop early (success), -1 to abort with
+ * the diag already set. The walker drives elements through the
+ * unwound stages and invokes step() with each surviving element. */
+typedef int (*pipeline_step_fn)(mino_state_t *S, void *ctx,
+                                mino_val_t *elem, mino_env_t *env);
+
 /* Drive `src` element by element through stages[n_stages-1 .. 0]
- * (innermost-stage-first per element), accumulating with `fn` under
- * the reduce_step contract. has_init==0 means *acc_io is unset and
- * the first surviving element seeds it (2-arg reduce arity).
- *
- * Returns the final accumulator value, or NULL on error. The caller
- * pre-handled the nil-source and empty-source cases. */
-static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
-                                        mino_val_t *fn,
-                                        mino_val_t *acc,
-                                        int has_init,
-                                        mino_val_t *src,
-                                        pipeline_stage_t *stages,
-                                        int n_stages,
-                                        mino_env_t *env)
+ * (innermost-stage-first per element). For each element that passes
+ * every stage, invoke step(S, ctx, elem, env). Caller pre-handled
+ * the nil-source and empty-source cases. Returns 0 on normal
+ * exhaustion, 1 on take-exhausted or step-requested stop, -1 on
+ * error. */
+static int pipeline_walk(mino_state_t *S,
+                         mino_val_t *src,
+                         pipeline_stage_t *stages,
+                         int n_stages,
+                         pipeline_step_fn step,
+                         void *ctx,
+                         mino_env_t *env)
 {
     seq_iter_t it;
     if (src == NULL || mino_type_of(src) == MINO_NIL
         || mino_type_of(src) == MINO_EMPTY_LIST) {
-        if (has_init) return acc;
-        return apply_callable(S, fn, mino_nil(S), env);
+        return 0;
     }
     seq_iter_init(S, &it, src);
     while (!seq_iter_done(&it)) {
@@ -828,46 +832,71 @@ static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
                 argv1[0] = elem;
                 elem = apply_callable_argv(
                     S, stages[i].callable, argv1, 1, env);
-                if (elem == NULL) return NULL;
+                if (elem == NULL) return -1;
             } else if (stages[i].kind == PIPELINE_STAGE_FILTER) {
                 mino_val_t *argv1[1];
                 mino_val_t *r;
                 argv1[0] = elem;
                 r = apply_callable_argv(
                     S, stages[i].callable, argv1, 1, env);
-                if (r == NULL) return NULL;
+                if (r == NULL) return -1;
                 if (!mino_is_truthy_inline(r)) { passed = 0; break; }
             } else {
                 /* PIPELINE_STAGE_TAKE. */
-                if (stages[i].counter <= 0) {
-                    /* Counter already exhausted from a previous element;
-                     * short-circuit without consuming this one. */
-                    if (!has_init) {
-                        return apply_callable(S, fn, mino_nil(S), env);
-                    }
-                    return acc;
-                }
+                if (stages[i].counter <= 0) return 1;
                 stages[i].counter--;
                 if (stages[i].counter == 0) take_exhausted = 1;
             }
         }
         if (passed) {
-            if (!has_init) {
-                acc = elem;
-                has_init = 1;
-            } else {
-                int rc = reduce_step(S, fn, &acc, elem, env);
-                if (rc == -1) return NULL;
-                if (rc == 1)  return acc;
-            }
-            if (take_exhausted) return acc;
+            int rc = step(S, ctx, elem, env);
+            if (rc < 0) return -1;
+            if (rc > 0) return 1;
+            if (take_exhausted) return 1;
         }
         seq_iter_next(S, &it);
     }
-    if (!has_init) {
-        return apply_callable(S, fn, mino_nil(S), env);
+    return 0;
+}
+
+/* reduce-shaped step context + callback. Drives an accumulator
+ * through `fn` under the reduce_step contract; the walker handles
+ * the per-element stage application. has_init==0 means *acc is
+ * unset; the first surviving element seeds the accumulator
+ * (2-arg reduce arity). */
+typedef struct {
+    mino_val_t *fn;
+    mino_val_t *acc;
+    int         has_init;
+} reduce_pipeline_ctx_t;
+
+static int reduce_pipeline_step(mino_state_t *S, void *ctx_,
+                                mino_val_t *elem, mino_env_t *env)
+{
+    reduce_pipeline_ctx_t *ctx = (reduce_pipeline_ctx_t *)ctx_;
+    if (!ctx->has_init) {
+        ctx->acc      = elem;
+        ctx->has_init = 1;
+        return 0;
     }
-    return acc;
+    return reduce_step(S, ctx->fn, &ctx->acc, elem, env);
+}
+
+static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
+                                        mino_val_t *fn,
+                                        mino_val_t *acc,
+                                        int has_init,
+                                        mino_val_t *src,
+                                        pipeline_stage_t *stages,
+                                        int n_stages,
+                                        mino_env_t *env)
+{
+    reduce_pipeline_ctx_t ctx = { fn, acc, has_init };
+    int rc = pipeline_walk(S, src, stages, n_stages,
+                           reduce_pipeline_step, &ctx, env);
+    if (rc < 0) return NULL;
+    if (!ctx.has_init) return apply_callable(S, fn, mino_nil(S), env);
+    return ctx.acc;
 }
 
 /* True iff coll's outer LAZY is one of the recognised pipeline stages.
@@ -1041,15 +1070,37 @@ mino_val_t *prim_doall(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return coll;
 }
 
+/* Step fn for the no-accumulator consumers (dorun / doseq). The
+ * walker drives elements through stages; this step does nothing
+ * per element except propagate the continue signal. */
+static int discard_step(mino_state_t *S, void *ctx, mino_val_t *elem,
+                        mino_env_t *env)
+{
+    (void)S; (void)ctx; (void)elem; (void)env;
+    return 0;
+}
+
 mino_val_t *prim_dorun(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
-    (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "dorun requires 1 argument");
     }
     coll = args->as.cons.car;
+    if (coll_is_pipeline_head(coll)) {
+        pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+        mino_val_t      *src = NULL;
+        int ns = try_unwind_pipeline(
+            coll, stages, PIPELINE_MAX_STAGES, &src);
+        if (ns > 0) {
+            if (pipeline_walk(S, src, stages, ns, discard_step,
+                              NULL, env) < 0) {
+                return NULL;
+            }
+            return mino_nil(S);
+        }
+    }
     if (realize_seq(S, coll) == NULL) return NULL;
     return mino_nil(S);
 }
@@ -1132,6 +1183,25 @@ static mino_val_t **ptrarr_grow(mino_state_t *S, mino_val_t **old,
  * blanket gc_depth++ would pin every user-code allocation for the
  * duration of the mapv. Pinning the accumulator lets GC continue normally
  * inside the fn while still preserving what we've produced so far. */
+/* Transient-vector accumulator: the step fn for mapv / filterv /
+ * into[vec] fast paths. `t` is a MINO_TRANSIENT vector; the step
+ * conj-bangs each element and updates the slot to the returned
+ * transient (transients may relocate). */
+typedef struct {
+    mino_val_t *t;
+} tvec_ctx_t;
+
+static int tvec_conj_step(mino_state_t *S, void *ctx_,
+                          mino_val_t *elem, mino_env_t *env)
+{
+    tvec_ctx_t *ctx = (tvec_ctx_t *)ctx_;
+    (void)env;
+    mino_val_t *nt = mino_conj_bang(S, ctx->t, elem);
+    if (nt == NULL) return -1;
+    ctx->t = nt;
+    return 0;
+}
+
 mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn, *coll;
@@ -1149,6 +1219,28 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || mino_is_nil(coll)) {
         return mino_vector(S, NULL, 0);
+    }
+    /* Pipeline fast lane: when coll is a map/filter/take chain,
+     * unwind the stages, prepend mapv's own fn as the outermost
+     * map stage, and walk the bottom source through the fused
+     * pipeline into a transient vector. Skips the lazy-seq cells
+     * entirely. */
+    if (coll_is_pipeline_head(coll)) {
+        pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+        mino_val_t      *src = NULL;
+        int ns = try_unwind_pipeline(
+            coll, stages + 1, PIPELINE_MAX_STAGES - 1, &src);
+        if (ns > 0) {
+            stages[0].kind     = PIPELINE_STAGE_MAP;
+            stages[0].callable = fn;
+            stages[0].counter  = 0;
+            tvec_ctx_t ctx = { mino_transient(S, mino_vector(S, NULL, 0)) };
+            if (ctx.t == NULL) return NULL;
+            int rc = pipeline_walk(S, src, stages, ns + 1,
+                                   tvec_conj_step, &ctx, env);
+            if (rc < 0) return NULL;
+            return mino_persistent(S, ctx.t);
+        }
     }
     items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
                                           cap * sizeof(mino_val_t *));
@@ -1194,6 +1286,25 @@ mino_val_t *prim_filterv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     coll = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || mino_is_nil(coll)) {
         return mino_vector(S, NULL, 0);
+    }
+    /* Pipeline fast lane (see prim_mapv for the same shape): prepend
+     * filterv's predicate as the outermost filter stage. */
+    if (coll_is_pipeline_head(coll)) {
+        pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+        mino_val_t      *src = NULL;
+        int ns = try_unwind_pipeline(
+            coll, stages + 1, PIPELINE_MAX_STAGES - 1, &src);
+        if (ns > 0) {
+            stages[0].kind     = PIPELINE_STAGE_FILTER;
+            stages[0].callable = pred;
+            stages[0].counter  = 0;
+            tvec_ctx_t ctx = { mino_transient(S, mino_vector(S, NULL, 0)) };
+            if (ctx.t == NULL) return NULL;
+            int rc = pipeline_walk(S, src, stages, ns + 1,
+                                   tvec_conj_step, &ctx, env);
+            if (rc < 0) return NULL;
+            return mino_persistent(S, ctx.t);
+        }
     }
     items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
                                           cap * sizeof(mino_val_t *));
@@ -1250,6 +1361,24 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return out;
     }
     if (mino_type_of(to) == MINO_VECTOR) {
+        /* Pipeline fast lane: when `from` is a map/filter/take chain,
+         * walk the bottom source through the unwound stages and
+         * conj-bang each survivor into a transient copy of `to`. The
+         * lazy-seq cells never get realized. */
+        if (coll_is_pipeline_head(from)) {
+            pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+            mino_val_t      *src = NULL;
+            int ns = try_unwind_pipeline(
+                from, stages, PIPELINE_MAX_STAGES, &src);
+            if (ns > 0) {
+                tvec_ctx_t ctx = { mino_transient(S, to) };
+                if (ctx.t == NULL) return NULL;
+                int rc = pipeline_walk(S, src, stages, ns,
+                                       tvec_conj_step, &ctx, env);
+                if (rc < 0) return NULL;
+                return mino_persistent(S, ctx.t);
+            }
+        }
         mino_val_t *acc = to;
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {

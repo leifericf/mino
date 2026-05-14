@@ -1,5 +1,69 @@
 # Changelog
 
+## v0.159.0 — Pipeline Fusion For The Seq-consumer Surface
+
+Extends v0.157.0's reduce-pipeline fusion to the rest of the
+seq-consumer primitives: `into` (vector target), `mapv`,
+`filterv`, and `dorun`. When any of these is called against a
+chain of lazy map / filter / take (the shape `(->> coll
+(map ...) (filter ...) (take ...))`), the consumer now walks
+the bottom source once through the unwound stages and applies
+its own step inline — same machinery `prim_reduce` already
+used, with the per-element accumulator hook abstracted behind a
+callback.
+
+The refactor splits `reduce_pipeline_walk` into a generic
+`pipeline_walk(src, stages, n_stages, step_fn, ctx, env)` and
+keeps `reduce_pipeline_walk` as a thin wrapper. Each new
+consumer fast path prepends its own stage when relevant
+(`mapv` adds a MAP stage carrying its fn; `filterv` adds a
+FILTER stage carrying its predicate) and supplies a transient-
+vector step that conj-bangs survivors into the accumulator.
+`into` reuses the same step shape with the user-supplied target
+as the transient seed; `dorun` uses a no-op step and relies on
+the take-exhausted return code for early stop.
+
+Lazy-seq cells along the map / filter / take chain are not
+allocated at all — the same alloc win the reduce path already
+enjoyed. The pre-check `coll_is_pipeline_head` keeps the cost
+of "non-pipeline source" calls unchanged.
+
+| Bench             |   baseline |     v0.159.0 |    Δ |
+|-------------------|-----------:|-------------:|-----:|
+| into-vec-pipeline |  1 833 µs  |     601 µs   | -67% |
+| mapv-pipeline     |  1 610 µs  |     590 µs   | -63% |
+| filterv-pipeline  |  1 584 µs  |     100 µs   | -94% |
+| dorun-pipeline    |  1 503 µs  |     101 µs   | -93% |
+
+All four pipelines walk `(->> (range 10000) (map inc) (filter
+odd?) (take 1000))` into a fresh consumer per iter. The
+filterv / dorun deltas are the largest because their post-stage
+work is minimal: filterv with a predicate that rejects every
+survivor allocates nothing past the empty result vector, and
+dorun discards. The into / mapv deltas reflect the transient-
+vector accumulator carrying a real 1 000-element output but
+skipping the 3 000 intermediate lazy-seq cells.
+
+Out of scope this release: `prim_apply` over a fused seq (the
+apply ABI runs through a cons spine, harder to short-circuit
+without breaking apply's other shapes); `prim_into` map / set /
+sorted target paths (each uses its own conj semantics, not the
+transient-vector step). `transduce` / `doseq` live in
+`core.clj` and get the fusion transitively via `reduce`.
+
+### Added
+
+- `pipeline_walk` callback-shaped generic walker in
+  `src/prim/sequences.c`, plus `tvec_conj_step` /
+  `discard_step` / `reduce_pipeline_step` callbacks for the
+  three consumer shapes.
+- Pipeline pre-check + fast-path emission in `prim_into`
+  (vector target), `prim_mapv`, `prim_filterv`, `prim_dorun`.
+- `benchmarks/pipeline_consumers_bench.clj` in mino-bench with
+  the four new bench rows. Wired into `run_all.clj`.
+
+Verification: 1 659 tests / 7 690 assertions green.
+
 ## v0.158.0 — Protocol-keyed Inline Cache
 
 Cuts the cost of a direct protocol-method call site by roughly
