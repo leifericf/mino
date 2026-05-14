@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.176.0 — BigInt Fusion Bench
+
+Added `bigint_bench.clj` (`(reduce + 0N (range 1 1000))`,
+`(reduce *' 1 (range 1 1000))`, etc.) to mino-bench and wired
+it into the matrix runner.
+
+### Measurements
+
+| Bench | Per-op |
+|---|---:|
+| `(reduce + 0N (range 1 1000))` | 566 ns |
+| `(reduce *' 1 (range 1 1000))` | 1.11 us |
+| `(reduce + 0 (range 1 1000))` (int control) | 4.7 ns |
+
+Bigint paths are 120-235x slower per op than the int control.
+GC pressure (30% wall on add, 18% on mul) hints at a ~20-30%
+fusion win on the add chain.
+
+### Decision
+
+Defer fusion. The opportunity is real but narrow, and the
+implementation would need a transient-bignum substrate that no
+non-bignum code shares. The bench stays in the matrix so the
+question is re-evaluated automatically each cycle. Full writeup
+at `.local/post-v0.175.0-bigint.md`.
+
 ## v0.175.0 — Threaded Dispatch Probe
 
 Ran `MINO_BC_OP_COUNTS=1` against the v0.174.0 binary to
