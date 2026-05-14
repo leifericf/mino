@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.172.0 — Builder-Rewrite Coverage Probe
+
+Adds a build-flag-gated instrumentation pair to `compile.c` that
+counts every `loop` form's pass through `try_builder_rewrite` and
+classifies the misses by binding count and accumulator init. Built
+with `-DMINO_BUILDER_REWRITE_COUNTS=1` and the env var
+`MINO_BUILDER_REWRITE_DUMP=1`, a one-shot test run produces the
+table shown below. The production binary is unchanged: every
+counter and the form-dump helper live behind the `#ifdef`.
+
+### Findings on the v0.171.0 binary
+
+```
+hits=12  misses=43  coverage=21.8%
+```
+
+Misses break down as:
+
+| Misses | Bindings | Acc init    |
+|---:|---:|:---|
+| 21 | 4 | non-collection literal |
+|  9 | 2 | non-collection literal |
+|  6 | 4 | `[]` |
+|  3 | 6 | non-collection literal |
+|  2 | 6 | `[]` |
+|  2 | 4 | `#{}` |
+
+The 33 misses with a non-collection acc init are correctly
+declined; they are not builder-pattern loops. The 10 misses with a
+literal `[]` or `#{}` init are candidates whose finer-grained
+shape (test predicate, recur step, or acc-read placement) takes
+them off the rewriter's narrow path. The v0.166.1 safety patch
+makes widening these load-bearing: without source-attribution the
+audit cannot distinguish "rejected for correctness" from "rejected
+for narrowness." Decision: keep the matcher narrow. The full
+report lives at `.local/builder-rewrite-coverage.md`.
+
 ## v0.171.0 — User-Fn-Wrapping-Prim Recogniser
 
 `compile_fn_literal` now stamps a `wraps_prim` pointer on the fn

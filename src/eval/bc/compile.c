@@ -1670,6 +1670,79 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
     return new_persistent;
 }
 
+#ifdef MINO_BUILDER_REWRITE_COUNTS
+/* Instrumentation: count rewriter hits and misses across the
+ * compiled-source span and (when MINO_BUILDER_REWRITE_DUMP=1) print
+ * the first form-prefix of each miss so the reviewer can decide
+ * whether the matcher should widen. Dumps on program exit so a
+ * one-shot full test or bench run produces a coverage table.
+ * Built behind a flag so the production binary pays no overhead. */
+static struct {
+    unsigned long hits;
+    unsigned long misses;
+} mino_builder_rewrite_counts = {0, 0};
+
+static void mino_builder_rewrite_dump(void)
+{
+    fprintf(stderr,
+            "[builder-rewrite] hits=%lu misses=%lu coverage=%.1f%%\n",
+            mino_builder_rewrite_counts.hits,
+            mino_builder_rewrite_counts.misses,
+            mino_builder_rewrite_counts.hits + mino_builder_rewrite_counts.misses == 0
+                ? 0.0
+                : 100.0 * (double)mino_builder_rewrite_counts.hits
+                  / (double)(mino_builder_rewrite_counts.hits
+                             + mino_builder_rewrite_counts.misses));
+}
+
+static void mino_builder_rewrite_install(void)
+{
+    static int installed = 0;
+    if (!installed) {
+        atexit(mino_builder_rewrite_dump);
+        installed = 1;
+    }
+}
+
+static void mino_builder_rewrite_dump_miss(mino_state_t *S, mino_val_t *form)
+{
+    char buf[160];
+    size_t off = 0;
+    (void)S;
+    if (form == NULL || !mino_is_cons(form)) return;
+    /* Print the loop's bindings vector tag only; full forms would
+     * flood the log. The bindings vector tells the reviewer how many
+     * loop vars (and whether `acc []` is one of them). */
+    mino_val_t *args = form->as.cons.cdr;
+    if (mino_is_cons(args)
+        && args->as.cons.car != NULL
+        && mino_type_of(args->as.cons.car) == MINO_VECTOR) {
+        size_t blen = args->as.cons.car->as.vec.len;
+        off += snprintf(buf + off, sizeof(buf) - off,
+                        "  miss: %zu bindings", blen);
+        if (blen >= 2) {
+            mino_val_t *acc_init = vec_nth(args->as.cons.car, blen - 1);
+            if (acc_init != NULL) {
+                int t = mino_type_of(acc_init);
+                const char *tag = (t == MINO_VECTOR && acc_init->as.vec.len == 0)
+                    ? "[]"
+                    : (t == MINO_MAP && acc_init->as.map.len == 0)
+                    ? "{}"
+                    : (t == MINO_SET && acc_init->as.set.len == 0)
+                    ? "#{}"
+                    : "<other>";
+                off += snprintf(buf + off, sizeof(buf) - off,
+                                ", acc init=%s", tag);
+            }
+        }
+    } else {
+        off += snprintf(buf + off, sizeof(buf) - off,
+                        "  miss: <non-vector bindings>");
+    }
+    fprintf(stderr, "%s\n", buf);
+}
+#endif
+
 static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     /* Builder-pattern fast path: rewrite the canonical
@@ -1678,6 +1751,17 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
      * Falls through on miss. */
     {
         mino_val_t *rewritten = try_builder_rewrite(c->S, form);
+#ifdef MINO_BUILDER_REWRITE_COUNTS
+        mino_builder_rewrite_install();
+        if (rewritten != NULL) {
+            mino_builder_rewrite_counts.hits++;
+        } else {
+            mino_builder_rewrite_counts.misses++;
+            if (getenv("MINO_BUILDER_REWRITE_DUMP") != NULL) {
+                mino_builder_rewrite_dump_miss(c->S, form);
+            }
+        }
+#endif
         if (rewritten != NULL) {
             return compile_expr(c, rewritten, dst, tail);
         }
