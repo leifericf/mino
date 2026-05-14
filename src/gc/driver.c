@@ -415,6 +415,29 @@ static void gc_mark_child_push(mino_state_t *S, const void *p)
  * the mark stack. Used from gc_drain_mark_stack on any header popped
  * for tracing, and directly from the minor collector when seeding the
  * mark stack from remembered-set entries. */
+/* Walk a bc fn's IC slot array: push the buffer itself plus every
+ * embedded value pointer. The slot array is a GC_T_RAW POD buffer
+ * whose sym / cached / atom / cached_map / cached_type fields the
+ * GC can't see without an explicit walk; this helper centralises
+ * the slot-kind -> field mapping so the MINO_FN walker and the
+ * GC_T_BC_FN walker (called when a write barrier hits the bc
+ * record itself) can't drift. */
+static void gc_mark_bc_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc)
+{
+    int i;
+    if (bc == NULL || bc->ic_slots == NULL || bc->ic_slots_len <= 0) return;
+    gc_mark_child_push(S, bc->ic_slots);
+    for (i = 0; i < bc->ic_slots_len; i++) {
+        gc_mark_child_push(S, bc->ic_slots[i].sym);
+        gc_mark_child_push(S, bc->ic_slots[i].cached);
+        if (bc->ic_slots[i].kind == MINO_BC_IC_PROTOCOL) {
+            gc_mark_child_push(S, bc->ic_slots[i].atom);
+            gc_mark_child_push(S, bc->ic_slots[i].cached_map);
+            gc_mark_child_push(S, bc->ic_slots[i].cached_type);
+        }
+    }
+}
+
 void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
 {
     switch (h->type_tag) {
@@ -484,22 +507,11 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
                         gc_mark_child_push(S, bc->clauses[i].params_vec);
                     }
                 }
-                /* IC slots: a GC_T_RAW POD buffer whose embedded sym/
-                 * cached pointers the GC can't see without an explicit
-                 * walk. Push the buffer itself so the slot storage
-                 * stays live, then push each slot's value fields. */
-                if (bc->ic_slots != NULL && bc->ic_slots_len > 0) {
-                    gc_mark_child_push(S, bc->ic_slots);
-                    for (int i = 0; i < bc->ic_slots_len; i++) {
-                        gc_mark_child_push(S, bc->ic_slots[i].sym);
-                        gc_mark_child_push(S, bc->ic_slots[i].cached);
-                        if (bc->ic_slots[i].kind == MINO_BC_IC_PROTOCOL) {
-                            gc_mark_child_push(S, bc->ic_slots[i].atom);
-                            gc_mark_child_push(S, bc->ic_slots[i].cached_map);
-                            gc_mark_child_push(S, bc->ic_slots[i].cached_type);
-                        }
-                    }
-                }
+                /* IC slots: a GC_T_RAW POD buffer whose embedded value
+                 * pointers the GC can't see without an explicit walk.
+                 * gc_mark_bc_ic_slots is the single authority on the
+                 * slot-kind -> field mapping. */
+                gc_mark_bc_ic_slots(S, bc);
             }
             break;
         case MINO_ATOM:
@@ -684,19 +696,7 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         gc_mark_child_push(S, bc->code);
         gc_mark_child_push(S, bc->consts);
         gc_mark_child_push(S, bc->clauses);
-        if (bc->ic_slots != NULL && bc->ic_slots_len > 0) {
-            int i;
-            gc_mark_child_push(S, bc->ic_slots);
-            for (i = 0; i < bc->ic_slots_len; i++) {
-                gc_mark_child_push(S, bc->ic_slots[i].sym);
-                gc_mark_child_push(S, bc->ic_slots[i].cached);
-                if (bc->ic_slots[i].kind == MINO_BC_IC_PROTOCOL) {
-                    gc_mark_child_push(S, bc->ic_slots[i].atom);
-                    gc_mark_child_push(S, bc->ic_slots[i].cached_map);
-                    gc_mark_child_push(S, bc->ic_slots[i].cached_type);
-                }
-            }
-        }
+        gc_mark_bc_ic_slots(S, bc);
         break;
     }
     case GC_T_RAW:

@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.163.0 — IC Resolve Path Consolidation
+
+Pure refactor. Consolidates the three IC-cache consumers in the
+bytecode VM behind two shared resolve helpers:
+
+- `ic_resolve_global(state, bc, slot, env, dyn_active)` carries the
+  `dyn -> env -> cached -> resolve` cascade used by
+  `OP_GETGLOBAL_CACHED` and `OP_CALL_CACHED`. The write-barrier
+  refill, the `S->ic_gen` snapshot check, and the dyn-active gating
+  all live in one place. The two opcode handlers now read like
+  what they are: a slot lookup followed by either a `regs[a] = v`
+  store or an `apply_callable_argv` call.
+
+- `ic_resolve_protocol(state, bc, slot, first_arg)` carries the
+  protocol-method dispatch cache: atom deref, type-discriminator
+  computation, pointer-pair cache check, map_get_val miss path
+  with `:default` fallback, three-field write-barrier refill, and
+  the `MPR001` / `MPR002` diagnostics for the no-impl /
+  bad-table-shape paths. `OP_PROTOCOL_CALL_CACHED` and
+  `OP_PROTOCOL_TAILCALL_CACHED` share this helper; the tail
+  variant only diverges at the apply step.
+
+GC side: the IC-slot walk that used to live as a duplicated loop
+in both arms of `gc_trace_children` (the `MINO_FN` walker and the
+`GC_T_BC_FN` walker) is centralised in a static
+`gc_mark_bc_ic_slots(state, bc)` helper. The slot-kind -> field
+mapping (GLOBAL kind walks sym + cached; PROTOCOL kind also walks
+atom + cached_map + cached_type) lives in one function, so the
+two passes can't drift if a future IC kind adds a field.
+
+No behavior change, no new opcodes, no new IC kinds. The
+substantiation pays off when the next cycle adds a fourth IC
+consumer (e.g. a cached tail-call variant or a profile-driven
+specialisation) -- the new consumer plugs into the existing
+resolve / refill / GC-scan machinery instead of replicating any
+of it.
+
+Matrix neutral as a refactor gate. Run-to-run noise on macOS is
+~10% for the protocol benches; the readings below are the best of
+three runs to filter out runner noise:
+
+| Bench                          | v0.162.0 | v0.163.0 |    Δ |
+|--------------------------------|---------:|---------:|-----:|
+| empty fn call                  |  1588 ns |  1557 ns | flat |
+| identity fn call               |  1650 ns |  1610 ns | flat |
+| 3-arg fn call                  |  1716 ns |  1733 ns | flat |
+| let binding (5)                |  1632 ns |  1618 ns | flat |
+| fibonacci(20)                  |   820 µs |   809 µs | flat |
+| map + filter + reduce          |  8210 ns |  8130 ns | flat |
+| proto-mono-area                |  1994 ns |  2044 ns | flat |
+| proto-bi-area                  |  2725 ns |  2803 ns | flat |
+| proto-tri-area                 |  4998 ns |  5022 ns | flat |
+
 ## v0.162.0 — Hot/Cold Bytecode Handler Partition
 
 Splits the bytecode dispatch switch in `src/eval/bc/vm.c` along the

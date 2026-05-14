@@ -430,6 +430,124 @@ static mino_val_t *resolve_global(mino_state_t *S, mino_val_t *sym,
     return eval_impl(S, sym, env, 0);
 }
 
+/* Shared resolve path for the two GLOBAL-kind IC consumers
+ * (OP_GETGLOBAL_CACHED and OP_CALL_CACHED). Mirrors eval_symbol's
+ * shadowing order: dynamic binding -> lexical env -> cached var ->
+ * resolve. The cached lookup is gated on !dyn_active so a live
+ * `(binding [*x* ...] ...)` doesn't mask the dyn value with a stale
+ * cached var root. Returns the resolved value on hit, NULL on
+ * failure (the caller surfaces the error via bc_done).
+ *
+ * On a fresh resolve the slot is refilled under a write barrier so
+ * the slot array, which may be OLD after a minor cycle, keeps a
+ * correct remset entry for the freshly resolved YOUNG value. */
+static mino_val_t *ic_resolve_global(mino_state_t *S,
+                                      const mino_bc_fn_t *bc,
+                                      mino_bc_ic_slot_t *slot,
+                                      mino_env_t *env,
+                                      int dyn_active)
+{
+    if (dyn_active && slot->sym != NULL) {
+        mino_val_t *dyn_v = dyn_lookup(S, slot->sym->as.s.data);
+        if (dyn_v != NULL) return dyn_v;
+    }
+    if (env != NULL) {
+        mino_val_t *env_v = mino_env_get_sym(env, slot->sym);
+        if (env_v != NULL) return env_v;
+    }
+    if (!dyn_active
+        && slot->cached != NULL
+        && slot->gen == S->ic_gen) {
+        return slot->cached;
+    }
+    mino_val_t *v = resolve_global(S, slot->sym, env);
+    if (v == NULL) return NULL;
+    if (!dyn_active) {
+        gc_write_barrier(S, bc->ic_slots, slot->cached, v);
+        slot->cached = v;
+        slot->gen    = S->ic_gen;
+    }
+    return v;
+}
+
+/* Shared resolve path for the PROTOCOL-kind IC consumers
+ * (OP_PROTOCOL_CALL_CACHED and OP_PROTOCOL_TAILCALL_CACHED).
+ * Mirrors the protocol-method dispatch fast lane: deref the captured
+ * atom (one pointer load), compute the type discriminator for the
+ * first argument, and pointer-compare the pair against the cached
+ * (atom_map, type_disc) state. On a hit returns the cached impl
+ * directly; on a miss looks up the impl via map_get_val with a
+ * :default fallback, refills the IC under write barriers, and
+ * returns. NULL return means the user-visible error was already
+ * surfaced via prim_throw_classified (bad dispatch table shape, no
+ * impl for type) and the caller should goto bc_done. The atom-NULL
+ * / non-atom guard is the caller's responsibility (argn-and-shape
+ * validation belongs at the dispatch site). */
+static mino_val_t *ic_resolve_protocol(mino_state_t *S,
+                                        const mino_bc_fn_t *bc,
+                                        mino_bc_ic_slot_t *slot,
+                                        mino_val_t *first_arg)
+{
+    mino_val_t *atom_map = slot->atom->as.atom.val;
+    mino_val_t *type_disc;
+    if (first_arg != NULL
+        && mino_type_of(first_arg) == MINO_RECORD) {
+        type_disc = first_arg->as.record.type;
+    } else {
+        type_disc = bc_protocol_type_disc(S, first_arg);
+    }
+    if (slot->cached != NULL
+        && slot->cached_map == atom_map
+        && slot->cached_type == type_disc) {
+        return slot->cached;
+    }
+    if (atom_map == NULL || mino_type_of(atom_map) != MINO_MAP) {
+        char emsg[160];
+        const char *mname_s = slot->sym != NULL
+            ? slot->sym->as.s.data : "?";
+        snprintf(emsg, sizeof(emsg),
+                 "protocol dispatch table for %s is not a map",
+                 mname_s);
+        prim_throw_classified(S, "user", "MPR002", emsg);
+        return NULL;
+    }
+    mino_val_t *impl = map_get_val(atom_map, type_disc);
+    if (impl == NULL) {
+        mino_val_t *defkw = mino_keyword(S, "default");
+        impl = map_get_val(atom_map, defkw);
+    }
+    if (impl == NULL) {
+        char emsg[256];
+        const char *mname_s = slot->sym != NULL
+            ? slot->sym->as.s.data : "?";
+        const char *tname = "?";
+        if (type_disc != NULL) {
+            if (mino_type_of(type_disc) == MINO_KEYWORD
+                || mino_type_of(type_disc) == MINO_STRING) {
+                tname = type_disc->as.s.data;
+            } else if (mino_type_of(type_disc) == MINO_TYPE) {
+                tname = type_disc->as.record_type.name != NULL
+                    ? type_disc->as.record_type.name : "?";
+            }
+        }
+        snprintf(emsg, sizeof(emsg),
+                 "No implementation of method: %s for type: %s",
+                 mname_s, tname);
+        prim_throw_classified(S, "user", "MPR001", emsg);
+        return NULL;
+    }
+    gc_write_barrier(S, bc->ic_slots,
+                     slot->cached_map, atom_map);
+    slot->cached_map = atom_map;
+    gc_write_barrier(S, bc->ic_slots,
+                     slot->cached_type, type_disc);
+    slot->cached_type = type_disc;
+    gc_write_barrier(S, bc->ic_slots,
+                     slot->cached, impl);
+    slot->cached = impl;
+    return impl;
+}
+
 /* Cold-op handler. The E1 op-count profile shows 18 of 63 opcodes
  * carry ~99% of dispatches; the long tail (NOP, GETGLOBAL non-cached,
  * CALL non-cached, closure build, env push/pop/bind, try/throw/dyn
@@ -944,56 +1062,21 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         case OP_GETGLOBAL_CACHED: {
             /* Inline cache for global symbol resolution. The slot is
              * filled on first miss with (cached, gen=S->ic_gen) and
-             * re-read while the gen still matches. Bumps to ic_gen
-             * (def / ns-unmap / var_set_root / var_unintern) invalidate
-             * naturally. With dynamic bindings active the cache is
-             * skipped on miss so `(binding [*x* ...] ...)` doesn't
-             * mask the dyn-shadowed value with a stale var root.
-             *
-             * Closure free vars resolve through the env chain at
-             * runtime, but the bc record (and thus the IC slot array)
-             * is shared across all closures built from one template.
-             * Two closures of `(fn [i] (fn [] i))` therefore share the
-             * IC slot for `i`, even though each carries its own captured
-             * env where `i` is bound to a different value. Probe dyn
-             * and then env (matching eval_symbol's order) and use the
-             * found value directly without caching; the cache only
-             * fires for symbols that neither dyn nor env shadow. */
+             * re-read while the gen still matches; bumps to ic_gen
+             * (def / ns-unmap / var_set_root / var_unintern)
+             * invalidate naturally. The shared ic_resolve_global
+             * helper carries the dyn / env / cache / resolve cascade
+             * and the on-miss write-barrier refill; this case is the
+             * pure-read consumer (no apply afterwards) so any
+             * resolved value -- shadowed dyn, lexical env hit, or
+             * cached var -- is written to regs[a] uniformly. */
             unsigned a  = A_OF(ins);
             unsigned bx = Bx_OF(ins);
             if ((int)bx >= bc->ic_slots_len) { ok = 0; goto bc_done; }
             mino_bc_ic_slot_t *slot = &bc->ic_slots[bx];
             int dyn_active = (ctx->dyn_stack != NULL);
-            if (dyn_active) {
-                mino_val_t *dyn_v = dyn_lookup(S, slot->sym->as.s.data);
-                if (dyn_v != NULL) {
-                    regs[a] = dyn_v;
-                    break;
-                }
-            }
-            if (env != NULL) {
-                mino_val_t *env_v = mino_env_get_sym(env, slot->sym);
-                if (env_v != NULL) {
-                    regs[a] = env_v;
-                    break;
-                }
-            }
-            if (!dyn_active
-                && slot->cached != NULL
-                && slot->gen == S->ic_gen) {
-                regs[a] = slot->cached;
-                break;
-            }
-            mino_val_t *v = resolve_global(S, slot->sym, env);
+            mino_val_t *v = ic_resolve_global(S, bc, slot, env, dyn_active);
             if (v == NULL) { ok = 0; goto bc_done; }
-            if (!dyn_active) {
-                /* slot array may be OLD after a minor cycle; v may be
-                 * a freshly resolved var-root in YOUNG. The barrier
-                 * keeps the next minor's remset honest. */
-                gc_write_barrier(S, bc->ic_slots, slot->cached, v);
-                slot->cached = v;
-                slot->gen    = S->ic_gen;
-            }
             regs[a] = v;
             break;
         }
@@ -1016,17 +1099,15 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         case OP_CALL_CACHED: {
             /* Fused (resolve-global + call) for sites whose head is an
              * unqualified or qualified global symbol with no static
-             * local binding. The IC slot mirrors OP_GETGLOBAL_CACHED's
-             * discipline: hit when slot->gen matches S->ic_gen and the
-             * dyn stack is empty; miss falls through to resolve_global
-             * and refills the slot. dyn / env probes run first so
-             * `(binding [*x* ...] ...)` and closure captures still
-             * shadow even on a hot call site. Encoding: this word
-             * carries A=arg_base / B=argc / C=dst; the next word
-             * carries the slot index in Bx and is consumed by the
-             * pc++ below so the main dispatch never sees it. Args
-             * live at regs[A..A+B-1] -- no fn-reg shift since the
-             * callee comes from the slot, not a register. */
+             * local binding. Shares ic_resolve_global with the
+             * read-only OP_GETGLOBAL_CACHED consumer: same dyn / env /
+             * cache / resolve cascade, same write-barrier refill on
+             * miss. Two-word encoding: word-1 carries A=arg_base /
+             * B=argc / C=dst, word-2 carries the slot index in Bx
+             * and is consumed via pc++ below so the main dispatch
+             * never sees it. Args live at regs[A..A+B-1] -- no fn-reg
+             * shift since the callee comes from the slot, not a
+             * register. */
             unsigned a    = A_OF(ins);   /* arg_base */
             unsigned argn = B_OF(ins);   /* argc     */
             unsigned ret  = C_OF(ins);   /* dst      */
@@ -1037,34 +1118,10 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 ok = 0; goto bc_done;
             }
             mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
-
-            mino_val_t *callee = NULL;
             int dyn_active = (ctx->dyn_stack != NULL);
-            if (dyn_active && slot->sym != NULL) {
-                mino_val_t *dyn_v = dyn_lookup(S, slot->sym->as.s.data);
-                if (dyn_v != NULL) callee = dyn_v;
-            }
-            if (callee == NULL && env != NULL) {
-                mino_val_t *env_v = mino_env_get_sym(env, slot->sym);
-                if (env_v != NULL) callee = env_v;
-            }
-            if (callee == NULL) {
-                if (!dyn_active
-                    && slot->cached != NULL
-                    && slot->gen == S->ic_gen) {
-                    callee = slot->cached;
-                } else {
-                    callee = resolve_global(S, slot->sym, env);
-                    if (callee == NULL) { ok = 0; goto bc_done; }
-                    if (!dyn_active) {
-                        gc_write_barrier(S, bc->ic_slots,
-                                         slot->cached, callee);
-                        slot->cached = callee;
-                        slot->gen    = S->ic_gen;
-                    }
-                }
-            }
-
+            mino_val_t *callee = ic_resolve_global(S, bc, slot, env,
+                                                    dyn_active);
+            if (callee == NULL) { ok = 0; goto bc_done; }
             mino_val_t *r = apply_callable_argv(S, callee, regs + a,
                                                 (int)argn, env);
             if (r == NULL) { ok = 0; goto bc_done; }
@@ -1074,19 +1131,20 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
 
         case OP_PROTOCOL_CALL_CACHED:
         case OP_PROTOCOL_TAILCALL_CACHED: {
-            /* Protocol-method dispatch fast lane. The IC slot pins the
-             * dispatch atom captured at compile from the defprotocol
-             * macroexpansion; the hot path derefs that atom (one
-             * pointer load), pointer-compares the deref'd map against
-             * cached_map and pointer-compares (type first_arg) against
-             * cached_type, and on a double hit invokes the cached impl
-             * directly via apply_callable_argv. No protocol-dispatch
-             * trampoline; no symbol resolution; no map_get on the hot
-             * path. Miss path performs one map_get_val against the
-             * atom's map (with :default fallback) and refills all
-             * three IC fields under write barriers. Tail variant hands
-             * (impl, args) to the MINO_TAIL_CALL sentinel so the
-             * apply_callable trampoline absorbs the C-stack growth. */
+            /* Protocol-method dispatch fast lane. Shares
+             * ic_resolve_protocol with the tail variant: deref the
+             * captured atom (one pointer load), compute the
+             * type-discriminator for the first argument, pointer-
+             * compare against the cached (atom_map, type_disc) state,
+             * and on hit return the cached impl directly. On miss the
+             * helper performs map_get_val with a :default fallback,
+             * refills the IC under write barriers, or surfaces the
+             * MPR001 / MPR002 diagnostic for no-impl / bad-table
+             * shape. Tail variant invokes the impl directly via
+             * apply_callable_argv -- self-tail-recursive protocol
+             * methods grow the C stack linearly, a deliberate
+             * trade-off against the cons-spine build the
+             * MINO_TAIL_CALL sentinel path would otherwise pay. */
             int is_tail = (OP_OF(ins) == OP_PROTOCOL_TAILCALL_CACHED);
             unsigned a    = A_OF(ins);
             unsigned argn = B_OF(ins);
@@ -1102,86 +1160,8 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 || mino_type_of(slot->atom) != MINO_ATOM) {
                 ok = 0; goto bc_done;
             }
-
-            mino_val_t *first_arg = regs[a];
-            mino_val_t *atom_map  = slot->atom->as.atom.val;
-            mino_val_t *type_disc;
-            if (first_arg != NULL
-                && mino_type_of(first_arg) == MINO_RECORD) {
-                type_disc = first_arg->as.record.type;
-            } else {
-                type_disc = bc_protocol_type_disc(S, first_arg);
-            }
-
-            mino_val_t *impl;
-            if (slot->cached != NULL
-                && slot->cached_map == atom_map
-                && slot->cached_type == type_disc) {
-                impl = slot->cached;
-            } else {
-                if (atom_map == NULL
-                    || mino_type_of(atom_map) != MINO_MAP) {
-                    /* Dispatch atom holds something other than a map.
-                     * Either the user reset! it manually or defprotocol
-                     * was rebound. Bail loudly. */
-                    char emsg[160];
-                    const char *mname_s = slot->sym != NULL
-                        ? slot->sym->as.s.data : "?";
-                    snprintf(emsg, sizeof(emsg),
-                             "protocol dispatch table for %s is not a map",
-                             mname_s);
-                    prim_throw_classified(S, "user", "MPR002", emsg);
-                    ok = 0; goto bc_done;
-                }
-                impl = map_get_val(atom_map, type_disc);
-                if (impl == NULL) {
-                    mino_val_t *defkw = mino_keyword(S, "default");
-                    impl = map_get_val(atom_map, defkw);
-                }
-                if (impl == NULL) {
-                    char emsg[256];
-                    const char *mname_s = slot->sym != NULL
-                        ? slot->sym->as.s.data : "?";
-                    const char *tname = "?";
-                    if (type_disc != NULL) {
-                        if (mino_type_of(type_disc) == MINO_KEYWORD
-                            || mino_type_of(type_disc) == MINO_STRING) {
-                            tname = type_disc->as.s.data;
-                        } else if (mino_type_of(type_disc) == MINO_TYPE) {
-                            tname = type_disc->as.record_type.name
-                                != NULL
-                                ? type_disc->as.record_type.name : "?";
-                        }
-                    }
-                    snprintf(emsg, sizeof(emsg),
-                             "No implementation of method: %s for type: %s",
-                             mname_s, tname);
-                    prim_throw_classified(S, "user", "MPR001", emsg);
-                    ok = 0; goto bc_done;
-                }
-                gc_write_barrier(S, bc->ic_slots,
-                                 slot->cached_map, atom_map);
-                slot->cached_map = atom_map;
-                gc_write_barrier(S, bc->ic_slots,
-                                 slot->cached_type, type_disc);
-                slot->cached_type = type_disc;
-                gc_write_barrier(S, bc->ic_slots,
-                                 slot->cached, impl);
-                slot->cached = impl;
-            }
-
-            /* Direct argv dispatch in both tail and non-tail position.
-             * apply_callable_argv carries its own MINO_TAIL_CALL
-             * trampoline for the impl's body, so internal tail
-             * recursion inside the impl stays flat. The tail variant
-             * adds one C-stack frame per protocol call into a peer
-             * protocol method on a different type -- the cost of
-             * avoiding the per-iter cons-list build that the
-             * sentinel path otherwise pays. Self-tail-recursive
-             * protocol methods (a method that tail-calls the same
-             * protocol method on a different value) grow the C stack
-             * linearly here; that's an explicit trade-off in favour
-             * of the common-case throughput. */
+            mino_val_t *impl = ic_resolve_protocol(S, bc, slot, regs[a]);
+            if (impl == NULL) { ok = 0; goto bc_done; }
             mino_val_t *r = apply_callable_argv(S, impl, regs + a,
                                                 (int)argn, env);
             if (r == NULL) { ok = 0; goto bc_done; }
