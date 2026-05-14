@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.175.0 — Threaded Dispatch Probe
+
+Ran `MINO_BC_OP_COUNTS=1` against the v0.174.0 binary to
+substantiate the threaded-dispatch hypothesis. Findings: the top
+10 bytecode opcodes account for 97.2% of dispatches and the top
+4 alone (`OP_MOVE`, `OP_CALL_CACHED`, `OP_GETGLOBAL_CACHED`,
+`OP_TAILCALL`) carry 70.6%. The opcode distribution is the
+opposite shape (concentrated, not flat) of what threaded
+dispatch monetises; the branch predictor handles a 4-way-hot
+switch jump well.
+
+Decision: stay on the switch dispatch. Instrumentation is left
+in place behind `-DMINO_BC_OP_COUNTS=1` so a future workload
+shift can be re-evaluated. Full writeup at
+`.local/post-v0.174.0-threaded-dispatch.md`.
+
 ## v0.174.0 — Type-Feedback IC Probe Re-Run
 
 Re-ran the `MINO_CALL_SITE_SHAPES=1` instrumentation that M3 used
