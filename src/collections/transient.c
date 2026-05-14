@@ -237,7 +237,19 @@ mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
         transient_set_current(S, t, result);
         return t;
     }
-    /* Map / set branches: still wrapper-style. */
+    /* Set branch: owner-tagged HAMT + key_order. conj! on a map
+     * transient with a 2-element pair value falls through to
+     * mino_assoc_bang via the legacy prim_conj dispatch -- routing
+     * here would force a fast/slow split for that uncommon shape. */
+    if (mino_type_of(inner) == MINO_SET
+        && t->as.transient.owner_id != 0) {
+        result = set_conj1_owned(S, inner, val, t->as.transient.owner_id);
+        if (result == NULL) return NULL;
+        transient_set_current(S, t, result);
+        return t;
+    }
+    /* Map branch (conj! with a [k v] pair) and owner_id == 0 fallback:
+     * keep the wrapper-style dispatch. */
     args = cons1(S, inner, cons1(S, val, mino_nil(S)));
     result = prim_conj(S, args, NULL);
     if (result == NULL) return NULL;
@@ -280,6 +292,12 @@ mino_val_t *mino_disj_bang(mino_state_t *S, mino_val_t *t,
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_SET) {
         return transient_error(S, "disj!: transient must wrap a set");
+    }
+    if (t->as.transient.owner_id != 0) {
+        result = set_disj1_owned(S, inner, key, t->as.transient.owner_id);
+        if (result == NULL) return NULL;
+        transient_set_current(S, t, result);
+        return t;
     }
     args = cons1(S, inner, cons1(S, key, mino_nil(S)));
     result = prim_disj(S, args, NULL);

@@ -1548,6 +1548,70 @@ mino_val_t *set_conj1(mino_state_t *S, const mino_val_t *s, mino_val_t *elem)
     return v;
 }
 
+/* Owner-tagged set conj. Mirrors set_conj1 but routes the HAMT
+ * walk and the key_order conj through the owned variants so a
+ * transient batch reuses spine nodes and tail-chunk slots in place
+ * after the first touch. */
+mino_val_t *set_conj1_owned(mino_state_t *S, mino_val_t *s, mino_val_t *elem,
+                             uintptr_t owner)
+{
+    mino_val_t       *v;
+    mino_val_t       *sentinel;
+    hamt_entry_t     *e;
+    uint32_t          h;
+    int               replaced = 0;
+    mino_hamt_node_t *root;
+    if (s->as.set.len > 0
+        && hamt_get(s->as.set.root, elem, hash_val(elem), 0u) != NULL) {
+        return s;
+    }
+    v        = alloc_val(S, MINO_SET);
+    sentinel = mino_true(S);
+    e        = hamt_entry_new(S, elem, sentinel);
+    if (e == NULL) return NULL;
+    h        = hash_val(elem);
+    root     = hamt_assoc_owned(S, s->as.set.root, e, h, 0u, &replaced, owner);
+    if (root == NULL) return NULL;
+    v->as.set.root      = root;
+    v->meta             = s->meta;
+    if (replaced) {
+        v->as.set.key_order = s->as.set.key_order;
+        v->as.set.len       = s->as.set.len;
+    } else {
+        v->as.set.key_order = vec_conj1_owned(S, s->as.set.key_order, elem,
+                                                owner);
+        v->as.set.len       = s->as.set.len + 1;
+    }
+    return v;
+}
+
+/* Owner-tagged set disj. */
+mino_val_t *set_disj1_owned(mino_state_t *S, mino_val_t *s,
+                             const mino_val_t *elem, uintptr_t owner)
+{
+    mino_val_t       *v;
+    mino_hamt_node_t *root;
+    mino_val_t       *order;
+    int               removed = 0;
+    size_t            i;
+    if (s->as.set.len == 0) return s;
+    root = hamt_dissoc_owned(S, s->as.set.root, elem, hash_val(elem), 0u,
+                              &removed, owner);
+    if (!removed) return s;
+    order = mino_vector(S, NULL, 0);
+    for (i = 0; i < s->as.set.len; i++) {
+        mino_val_t *cur = vec_nth(s->as.set.key_order, i);
+        if (mino_eq(cur, elem)) continue;
+        order = vec_conj1_owned(S, order, cur, owner);
+    }
+    v = alloc_val(S, MINO_SET);
+    v->as.set.root      = root;
+    v->as.set.key_order = order;
+    v->as.set.len       = s->as.set.len - 1;
+    v->meta             = s->meta;
+    return v;
+}
+
 mino_val_t *prim_hash_set(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     size_t      n;

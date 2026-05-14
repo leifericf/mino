@@ -183,6 +183,43 @@
       (is (nil? (get out 0)))
       (is (= 50 (get out 50))))))
 
+;; In-place set conj!/disj! mirrors the map work via set_conj1_owned /
+;; set_disj1_owned. Same OLD-node -> YOUNG-slots barrier discipline
+;; applies, so the same mid-batch GC stress test guards against
+;; regressions.
+(deftest transient-set-large-batch
+  (let [t (transient #{})]
+    (dotimes [i 2000] (conj! t i))
+    (let [s (persistent! t)]
+      (is (= 2000 (count s)))
+      (is (contains? s 999))
+      (is (contains? s 1999))
+      (is (not (contains? s 2000))))))
+
+(deftest transient-set-survives-gc-yield
+  (let [t (transient #{})]
+    (dotimes [i 2000] (conj! t i))
+    (gc!)
+    (conj! t :tail)
+    (let [s (persistent! t)]
+      (is (= 2001 (count s)))
+      (is (contains? s 0))
+      (is (contains? s :tail)))))
+
+(deftest transient-set-disj-batch
+  (let [s (into #{} (range 100))
+        t (transient s)]
+    (dotimes [i 50] (disj! t i))
+    (let [out (persistent! t)]
+      (is (= 50 (count out)))
+      (is (not (contains? out 0)))
+      (is (contains? out 50)))))
+
+(deftest transient-into-set
+  (let [s (into #{} (range 1000))]
+    (is (= 1000 (count s)))
+    (is (contains? s 500))))
+
 ;; --- Builder-pattern compile-time rewrite safety ---
 ;;
 ;; The (loop [... acc []] (if <test> (recur ... (conj acc x)) acc)) shape

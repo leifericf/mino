@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.170.0 — In-Place Set Mutation And Set Into Fast Path
+
+Mirrors the v0.169.0 map work onto sets. `set_conj1_owned` and
+`set_disj1_owned` route through the owner-tagged HAMT walks added
+last release; the persistent path stays the default and is reached
+only when the transient's owner-id space has wrapped. `mino_conj_bang`
+on a `MINO_SET` transient and `mino_disj_bang` both dispatch to the
+owned variants when `owner_id != 0`.
+
+`prim_into` for `MINO_SET` destinations also picks up the transient
+fast path (`mino_transient` + `mino_conj_bang` + `mino_persistent`),
+with `gc_pin` on the wrapping transient for the same -O2 register-scan
+reason as the map branch.
+
+### Measured impact (v0.169.0 -> v0.170.0)
+
+| Bench | v0.169.0 | v0.170.0 | Delta |
+|---|---:|---:|---:|
+| `into #{} from 1000-vec`        | 1.02 ms | 0.41 ms | **-60% (2.52x)** |
+| `transient conj! 1000 elements` | 1.59 ms | 0.99 ms | -38% (1.59x) |
+| `into #{} (range 1000)`         | 1.23 ms | 0.95 ms | -22% (1.29x) |
+| `conj 1000 elements` (persistent) | 1.59 ms | 1.56 ms | flat |
+| `contains? on 1000-set`         | 1.67 us | 1.67 us | flat |
+| `disj from 100-set` (persistent)| 69 us   | 69 us   | flat |
+
+ASan clean. 1679 tests / 7826 assertions all green (4 new regression
+tests cover in-place set batch correctness, mid-batch GC survival,
+and `(into #{} ...)` equivalence).
+
 ## v0.169.0 — Hamt Owner Discipline And In-Place Map Mutation
 
 `assoc!`, `dissoc!`, and `(into {} ...)` on map transients now route

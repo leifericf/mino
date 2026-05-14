@@ -62,6 +62,16 @@ mino_val_t  *val_to_seq(mino_state_t *S, mino_val_t *v);
 mino_val_t  *set_conj1(mino_state_t *S, const mino_val_t *s,
                        mino_val_t *elem);
 
+/* Owner-tagged set conj/disj: mirror the persistent path but route
+ * the HAMT walk and the key_order conj through the owned variants so
+ * a transient batch reuses spine nodes and tail-chunk slots in place
+ * after the first touch. The persistent path stays the default;
+ * transient.c calls these only when `owner_id != 0`. */
+mino_val_t  *set_conj1_owned(mino_state_t *S, mino_val_t *s,
+                              mino_val_t *elem, uintptr_t owner);
+mino_val_t  *set_disj1_owned(mino_state_t *S, mino_val_t *s,
+                              const mino_val_t *elem, uintptr_t owner);
+
 /* print_str_to: write v to out; strings as raw bytes, others via printer. */
 void         print_str_to(mino_state_t *S, FILE *out, const mino_val_t *v);
 

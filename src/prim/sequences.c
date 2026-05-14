@@ -1985,12 +1985,23 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return acc;
     }
     if (mino_type_of(to) == MINO_SET) {
-        mino_val_t *acc = to;
+        /* Transient fast path: conj! each element onto an owner-tagged
+         * HAMT, then seal. The transient is pinned for the same -O2
+         * register-scan reason as the map branch above. */
+        mino_val_t *t = mino_transient(S, to);
+        mino_val_t *acc;
+        if (t == NULL) return NULL;
+        gc_pin(t);
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
-            acc = set_conj1(S, acc, seq_iter_val(S, &it));
+            if (mino_conj_bang(S, t, seq_iter_val(S, &it)) == NULL) {
+                gc_unpin(1);
+                return NULL;
+            }
             seq_iter_next(S, &it);
         }
+        acc = mino_persistent(S, t);
+        gc_unpin(1);
         return acc;
     }
     if (mino_type_of(to) == MINO_SORTED_MAP) {
