@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.157.1 — Per-opcode Dispatch Counter Build Flag
+
+Adds `MINO_BC_OP_COUNTS=1` build flag that wires a per-opcode
+dispatch counter into `vm.c` and dumps the totals to stderr at
+process exit. Useful for VM perf work — answers "which opcodes
+actually dominate the dispatch loop?" without resorting to
+sample-based profiling. The flag adds one branch + one increment
+per dispatch when set; production builds (no flag) are
+byte-identical.
+
+Build with the flag:
+
+```
+cc ... -DMINO_BC_OP_COUNTS=1 ... -o mino_opcounts ...
+./mino_opcounts your_script.clj 2> opcounts.txt
+```
+
+Output is sorted by frequency, includes percentage and cumulative
+percentage. Captured findings from this build informed the
+post-v0.157.0 VM perf plan (in `.local/`, gitignored): 18 of 63
+opcodes account for ~99% of dispatches across the microbench
+suite, which validates the hot/cold partition direction.
+
+### Added
+
+- `MINO_BC_OP_COUNTS=1` build flag and the supporting per-opcode
+  counter array in `src/eval/bc/vm.c`.
+- atexit-registered dump function that sorts by dispatch count
+  descending and prints per-op + cumulative percentages.
+
+Verification: 1 659 tests / 7 690 assertions green on release.
+
 ## v0.157.0 — Transducer Fusion For Reduce Pipelines
 
 `(reduce f init (->> src (map ...) (filter ...) (take ...)))` no

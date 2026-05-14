@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "mino.h"
@@ -27,6 +28,121 @@
 #include "prim/internal.h"          /* binary arith prim_* on bc fast-lane miss */
 
 extern mino_val_t *mino_nil(mino_state_t *S);
+
+#ifdef MINO_BC_OP_COUNTS
+/* Per-opcode dispatch counter, populated when the binary is built with
+ * -DMINO_BC_OP_COUNTS=1. Dumped to stderr at process exit. Used during
+ * VM design experiments to identify which opcodes dominate the
+ * dispatch loop (hot/cold partition decisions). Not for production. */
+static size_t g_op_counts[OP__COUNT];
+static int    g_op_counts_atexit_registered;
+
+static const char *op_count_name(unsigned op);
+
+static void op_counts_dump(void)
+{
+    size_t total = 0;
+    int    i;
+    /* Pack (idx, count) pairs so the sort preserves opcode identity. */
+    typedef struct { unsigned op; size_t count; } row_t;
+    row_t  rows[OP__COUNT];
+    for (i = 0; i < OP__COUNT; i++) {
+        rows[i].op = (unsigned)i;
+        rows[i].count = g_op_counts[i];
+        total += rows[i].count;
+    }
+    /* Sort by count descending. N is small (~63); bubble-sort fine. */
+    for (i = 0; i < OP__COUNT; i++) {
+        int j;
+        for (j = i + 1; j < OP__COUNT; j++) {
+            if (rows[j].count > rows[i].count) {
+                row_t t = rows[i]; rows[i] = rows[j]; rows[j] = t;
+            }
+        }
+    }
+    fprintf(stderr, "bc-op-counts: total dispatches = %zu\n", total);
+    if (total == 0) return;
+    size_t cumulative = 0;
+    for (i = 0; i < OP__COUNT; i++) {
+        if (rows[i].count == 0) break;
+        cumulative += rows[i].count;
+        fprintf(stderr, "  %-25s %12zu  %6.2f%%  cum=%6.2f%%\n",
+                op_count_name(rows[i].op), rows[i].count,
+                100.0 * (double)rows[i].count / (double)total,
+                100.0 * (double)cumulative / (double)total);
+    }
+}
+
+static const char *op_count_name(unsigned op)
+{
+    switch (op) {
+    case OP_NOP: return "OP_NOP";
+    case OP_MOVE: return "OP_MOVE";
+    case OP_LOAD_K: return "OP_LOAD_K";
+    case OP_GETGLOBAL: return "OP_GETGLOBAL";
+    case OP_SETGLOBAL: return "OP_SETGLOBAL";
+    case OP_JMP: return "OP_JMP";
+    case OP_JMPIFNOT: return "OP_JMPIFNOT";
+    case OP_CALL: return "OP_CALL";
+    case OP_TAILCALL: return "OP_TAILCALL";
+    case OP_RETURN: return "OP_RETURN";
+    case OP_CLOSURE: return "OP_CLOSURE";
+    case OP_BINOP_INT: return "OP_BINOP_INT";
+    case OP_PUSHCATCH: return "OP_PUSHCATCH";
+    case OP_POPCATCH: return "OP_POPCATCH";
+    case OP_THROW: return "OP_THROW";
+    case OP_PUSHDYN: return "OP_PUSHDYN";
+    case OP_POPDYN: return "OP_POPDYN";
+    case OP_MAKE_LAZY: return "OP_MAKE_LAZY";
+    case OP_GETGLOBAL_CACHED: return "OP_GETGLOBAL_CACHED";
+    case OP_CALL_CACHED: return "OP_CALL_CACHED";
+    case OP_ADD_II: return "OP_ADD_II";
+    case OP_SUB_II: return "OP_SUB_II";
+    case OP_MUL_II: return "OP_MUL_II";
+    case OP_LT_II: return "OP_LT_II";
+    case OP_LE_II: return "OP_LE_II";
+    case OP_GT_II: return "OP_GT_II";
+    case OP_GE_II: return "OP_GE_II";
+    case OP_EQ_II: return "OP_EQ_II";
+    case OP_INC_I: return "OP_INC_I";
+    case OP_DEC_I: return "OP_DEC_I";
+    case OP_ZERO_INT_P: return "OP_ZERO_INT_P";
+    case OP_MOD_II: return "OP_MOD_II";
+    case OP_QUOT_II: return "OP_QUOT_II";
+    case OP_REM_II: return "OP_REM_II";
+    case OP_BAND_II: return "OP_BAND_II";
+    case OP_BOR_II: return "OP_BOR_II";
+    case OP_BXOR_II: return "OP_BXOR_II";
+    case OP_SHL_II: return "OP_SHL_II";
+    case OP_SHR_II: return "OP_SHR_II";
+    case OP_USHR_II: return "OP_USHR_II";
+    case OP_POS_P_I: return "OP_POS_P_I";
+    case OP_NEG_P_I: return "OP_NEG_P_I";
+    case OP_EVEN_P_I: return "OP_EVEN_P_I";
+    case OP_ODD_P_I: return "OP_ODD_P_I";
+    case OP_BNOT_I: return "OP_BNOT_I";
+    case OP_ADD_IK: return "OP_ADD_IK";
+    case OP_SUB_IK: return "OP_SUB_IK";
+    case OP_LT_IK: return "OP_LT_IK";
+    case OP_LE_IK: return "OP_LE_IK";
+    case OP_EQ_IK: return "OP_EQ_IK";
+    case OP_GET_KW_MAP: return "OP_GET_KW_MAP";
+    case OP_NTH_VEC: return "OP_NTH_VEC";
+    case OP_CONJ_VEC: return "OP_CONJ_VEC";
+    case OP_ASSOC: return "OP_ASSOC";
+    case OP_DISSOC: return "OP_DISSOC";
+    case OP_FIRST_VEC: return "OP_FIRST_VEC";
+    case OP_COUNT_VEC: return "OP_COUNT_VEC";
+    case OP_EMPTY_VEC: return "OP_EMPTY_VEC";
+    case OP_LOOP_INT_DEC: return "OP_LOOP_INT_DEC";
+    case OP_LOOP_INT_DEC_INC: return "OP_LOOP_INT_DEC_INC";
+    case OP_PUSH_ENV: return "OP_PUSH_ENV";
+    case OP_POP_ENV: return "OP_POP_ENV";
+    case OP_ENV_BIND: return "OP_ENV_BIND";
+    default: return "OP_UNKNOWN";
+    }
+}
+#endif
 
 /* Grow S->bc_regs to hold an additional `n` slots and return the base
  * index of the new window. Returns (size_t)-1 on allocation failure. */
@@ -366,6 +482,13 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         regs = S->bc_regs + base;
         mino_bc_insn_t ins = code[pc++];
         unsigned op = OP_OF(ins);
+#ifdef MINO_BC_OP_COUNTS
+        if (!g_op_counts_atexit_registered) {
+            atexit(op_counts_dump);
+            g_op_counts_atexit_registered = 1;
+        }
+        if (op < OP__COUNT) g_op_counts[op]++;
+#endif
         switch (op) {
         case OP_NOP:
             break;
