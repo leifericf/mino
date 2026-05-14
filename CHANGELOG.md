@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.177.0 — Lazy-Cell Allocation Probe
+
+Re-ran `MINO_BC_OP_COUNTS` on `lazy_bench.clj` against the
+v0.176.0 binary.
+
+### Findings
+
+On the C-backed `(reduce + 0 (map inc (range 1000)))` path,
+`OP_MAKE_LAZY` is 0.73% of dispatch (one cell per chunk, then
+unwound by pipeline_walk). On the pure-mino `(lazy-seq ...)`
+recursion path, `OP_MAKE_LAZY` is 44.4% of dispatch and the
+workload runs 70x slower than the C-backed equivalent.
+
+The per-cell cost is dominated by the generic
+`memset(h, 0, sizeof(*h) + size)` (~96 bytes per cell) that
+`gc_alloc_typed_inner` does to keep freelist slots safe for the
+collector. A `MINO_LAZY`-specific freelist that knew the cell's
+fields could skip the memset and inline the field stores -- ~3x
+faster `OP_MAKE_LAZY`, mapping to ~25% wall-time win on the pure
+cohort.
+
+### Decision
+
+Defer. The win is workload-narrow (pure-mino lazy-seq path that
+idiomatic users replace with `map`/`filter`/`iterate`). The
+freelist-with-known-fields refactor moves to the JIT-cycle
+backlog; pre-JIT optimisations should target hot pipelines, which
+already bypass `MINO_LAZY` allocation. Full writeup at
+`.local/post-v0.176.0-lazy.md`.
+
 ## v0.176.0 — BigInt Fusion Bench
 
 Added `bigint_bench.clj` (`(reduce + 0N (range 1 1000))`,
