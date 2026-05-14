@@ -1,5 +1,60 @@
 # Changelog
 
+## v0.155.0 — Inline-Cached Call Sites
+
+Non-tail call sites whose head is a global symbol now compile to a
+new `OP_CALL_CACHED` opcode that fuses the name resolution and the
+dispatch into a single inline-cached step. The previous shape
+emitted `OP_GETGLOBAL_CACHED` to load the callee into a register
+and then `OP_CALL` to invoke it; the cached call collapses both
+into one opcode, drops the temporary fn-reg from the register
+window, and re-uses the same ic_slot discipline that already
+backs `OP_GETGLOBAL_CACHED` (per-site `(sym, cached, gen)` triple,
+global `S->ic_gen` invalidation on `def` / `alter-var-root` /
+`ns-unmap` / `var-unintern` / `OP_SETGLOBAL`).
+
+Dynamic bindings and closure captures still shadow even on a hot
+call site: the handler probes the dyn stack and the env chain
+before reading from the slot, so `(binding [*x* ...] (foo))` and
+the inner reference inside `(fn [foo] (foo x))` keep their full
+semantics. Tail-position calls continue to emit `OP_TAILCALL` so
+the trampoline keeps the C stack flat; a cached tail variant is a
+follow-up.
+
+What this leverages from Clojure: var rebinding is the only way a
+top-level callee resolution can change, and each rebinding path
+(`def`, `alter-var-root`, namespace unmap, var unintern) already
+bumps the IC generation. The cached pointer is therefore always
+the current var root for the duration of one IC generation, and
+the resolution that the previous `OP_GETGLOBAL_CACHED` performed
+to load the callee is exactly the resolution the call site needs.
+
+Benchmark matrix on local Mac M-class, min-of-5, with the empty-
+thunk harness floor subtracted:
+
+| Benchmark         | v0.154.0      | v0.155.0          | Δ      |
+|-------------------|---------------|-------------------|--------|
+| fib-30            | 97 630 000 ns | **85 044 000 ns** | -13%   |
+| loop-recur-1M     | 17 715 000 ns | **16 077 000 ns** | -9%    |
+| fn-call-identity  | 63 ns         | 60 ns             | flat   |
+| call-noop-1M      | 16 ns         | 14 ns             | flat   |
+
+### Added
+
+- `OP_CALL_CACHED` opcode with a two-word encoding: word-1
+  carries A=arg_base, B=argc, C=dst (args at regs[A..A+B-1] with
+  no fn-reg shift since the callee comes from the slot); word-2
+  carries the IC slot index in Bx and is consumed by the handler
+  via `code[pc++]` so the main dispatch never sees it as a
+  free-standing op.
+- Compile-time emission in `compile_call_impl` for non-tail
+  calls whose head is a symbol (qualified or unqualified) with no
+  static local binding. Other shapes (literal-keyword head, head
+  resolves to a local, tail position) keep their existing paths.
+
+Verification: 1 659 tests / 7 690 assertions green on release,
+ASan, UBSan.
+
 ## v0.154.0 — Record Fast Path And Keyword-As-Fn Inlining
 
 Two bytecode-VM tightenings around the most common record / map

@@ -2453,6 +2453,43 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
         return 0;
     }
 
+    /* Inline-cache fast lane for non-tail calls whose head is a global
+     * symbol with no static local binding. Skips the OP_GETGLOBAL_CACHED
+     * step entirely (callee resolution + caching fuses into the call
+     * opcode itself). Qualified symbols (foo/bar) are eligible -- the
+     * runtime's resolve_global handles both forms. Tail-position calls
+     * still emit OP_TAILCALL so the trampoline keeps the C stack flat;
+     * a cached tail variant is a separate follow-up. */
+    if (!tail
+        && head != NULL && mino_type_of(head) == MINO_SYMBOL
+        && find_local(c, head->as.s.data) < 0) {
+        int saved_next_c = c->next_reg;
+        int arg_base = c->next_reg;
+        for (int i = 0; i < argc; i++) {
+            if (alloc_reg(c) < 0) return -1;
+        }
+        cur = form->as.cons.cdr;
+        for (int i = 0; i < argc; i++) {
+            if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0) {
+                return -1;
+            }
+            cur = cur->as.cons.cdr;
+        }
+        int slot = alloc_ic_slot(c, head);
+        if (slot < 0) return -1;
+        if (arg_base > 0xFF || dst > 0xFF) { c->ok = 0; return -1; }
+        emit_abc(c, OP_CALL_CACHED,
+                 (unsigned)arg_base, (unsigned)argc, (unsigned)dst);
+        /* Second instruction word: carries the slot index in Bx so the
+         * handler can fetch it via code[pc++]. The main dispatch never
+         * sees this word -- OP_CALL_CACHED consumes it before the loop
+         * reads its next op. The op byte is OP_NOP so a stray decode
+         * (e.g., a bytecode dumper) is harmless. */
+        emit_abx(c, OP_NOP, 0, (unsigned)slot);
+        c->next_reg = saved_next_c;
+        return 0;
+    }
+
     /* Allocate consecutive regs: fn slot then argc arg slots. The OP_CALL
      * ABI requires args at A+1..A+argc. */
     int saved_next = c->next_reg;

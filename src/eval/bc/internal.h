@@ -48,14 +48,19 @@ typedef enum {
     OP_PUSHDYN,        /* A=var_k, B=val                                   */
     OP_POPDYN,         /* A=count                                          */
     OP_MAKE_LAZY,      /* A=dst, Bx=thunk const index                      */
-    /* Specialization opcodes. The intent was that the dispatch loop
-     * would rewrite generic OP_GETGLOBAL / OP_CALL / OP_BINOP_INT
-     * sites to these after observing stable runtime shapes; in
-     * practice the compiler emits the per-op int specializations
-     * directly when the head matches a known prim, so the
-     * _CACHED variants are reserved for future use. */
+    /* Specialization opcodes. OP_GETGLOBAL_CACHED + OP_CALL_CACHED
+     * implement the same inline-cache discipline at two granularities:
+     * GETGLOBAL_CACHED caches a name -> value resolution per ic_slot,
+     * CALL_CACHED fuses the resolution and the dispatch so a hot
+     * `(foo ...)` site keeps one slot lookup instead of two
+     * (GETGLOBAL_CACHED + OP_CALL). Encoding: word-1 is A=arg_base,
+     * B=argc, C=dst (args at regs[A..A+B-1], no fn-reg shift). Word-2
+     * carries the slot index in Bx; the handler consumes it via
+     * code[pc++] so the main dispatch never sees it as a free-standing
+     * op. Per-op int specializations (OP_ADD_II etc.) are still emitted
+     * directly at compile time. */
     OP_GETGLOBAL_CACHED, /* A=dst, Bx=ic slot index                        */
-    OP_CALL_CACHED,      /* A=fn, B=argc, C=ret_base; cached callable      */
+    OP_CALL_CACHED,      /* A=arg_base, B=argc, C=dst; word-2 carries slot */
     OP_ADD_II,           /* A=dst, B=lhs, C=rhs; int+int add              */
     OP_SUB_II,           /* "                                              */
     OP_MUL_II,           /* "                                              */

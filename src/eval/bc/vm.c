@@ -502,6 +502,65 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
+        case OP_CALL_CACHED: {
+            /* Fused (resolve-global + call) for sites whose head is an
+             * unqualified or qualified global symbol with no static
+             * local binding. The IC slot mirrors OP_GETGLOBAL_CACHED's
+             * discipline: hit when slot->gen matches S->ic_gen and the
+             * dyn stack is empty; miss falls through to resolve_global
+             * and refills the slot. dyn / env probes run first so
+             * `(binding [*x* ...] ...)` and closure captures still
+             * shadow even on a hot call site. Encoding: this word
+             * carries A=arg_base / B=argc / C=dst; the next word
+             * carries the slot index in Bx and is consumed by the
+             * pc++ below so the main dispatch never sees it. Args
+             * live at regs[A..A+B-1] -- no fn-reg shift since the
+             * callee comes from the slot, not a register. */
+            unsigned a    = A_OF(ins);   /* arg_base */
+            unsigned argn = B_OF(ins);   /* argc     */
+            unsigned ret  = C_OF(ins);   /* dst      */
+            if (pc >= bc->code_len) { ok = 0; goto bc_done; }
+            mino_bc_insn_t slot_word = code[pc++];
+            unsigned slot_idx = Bx_OF(slot_word);
+            if ((int)slot_idx >= bc->ic_slots_len) {
+                ok = 0; goto bc_done;
+            }
+            mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
+
+            mino_val_t *callee = NULL;
+            int dyn_active = (ctx->dyn_stack != NULL);
+            if (dyn_active && slot->sym != NULL) {
+                mino_val_t *dyn_v = dyn_lookup(S, slot->sym->as.s.data);
+                if (dyn_v != NULL) callee = dyn_v;
+            }
+            if (callee == NULL && env != NULL) {
+                mino_val_t *env_v = mino_env_get_sym(env, slot->sym);
+                if (env_v != NULL) callee = env_v;
+            }
+            if (callee == NULL) {
+                if (!dyn_active
+                    && slot->cached != NULL
+                    && slot->gen == S->ic_gen) {
+                    callee = slot->cached;
+                } else {
+                    callee = resolve_global(S, slot->sym, env);
+                    if (callee == NULL) { ok = 0; goto bc_done; }
+                    if (!dyn_active) {
+                        gc_write_barrier(S, bc->ic_slots,
+                                         slot->cached, callee);
+                        slot->cached = callee;
+                        slot->gen    = S->ic_gen;
+                    }
+                }
+            }
+
+            mino_val_t *r = apply_callable_argv(S, callee, regs + a,
+                                                (int)argn, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            S->bc_regs[base + ret] = r;
+            break;
+        }
+
         case OP_TAILCALL: {
             unsigned a    = A_OF(ins);
             unsigned argn = B_OF(ins);
