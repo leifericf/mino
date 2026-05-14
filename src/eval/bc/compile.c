@@ -1212,6 +1212,41 @@ static mino_val_t *list_from_array(mino_state_t *S, mino_val_t **items,
     return out;
 }
 
+/* Recursive symbol-occurrence walker. Returns 1 if `form`'s code tree
+ * dereferences a symbol named `name` anywhere. Quote-forms are data
+ * and don't dereference symbols. Used by the builder rewriter to
+ * reject loops that read the accumulator outside the recognized step,
+ * since under transient semantics those reads would diverge from the
+ * persistent shape the user wrote. */
+static int form_contains_symbol(mino_val_t *form, const char *name)
+{
+    if (form == NULL) return 0;
+    if (mino_type_of(form) == MINO_SYMBOL) {
+        return strcmp(form->as.s.data, name) == 0;
+    }
+    if (mino_type_of(form) == MINO_VECTOR) {
+        for (size_t i = 0; i < form->as.vec.len; i++) {
+            if (form_contains_symbol(vec_nth(form, i), name)) return 1;
+        }
+        return 0;
+    }
+    if (mino_is_cons(form)) {
+        mino_val_t *head = form->as.cons.car;
+        if (head != NULL && mino_type_of(head) == MINO_SYMBOL) {
+            if (sym_is(head, "quote") || sym_is(head, "quote*")) return 0;
+        }
+        while (mino_is_cons(form)) {
+            if (form_contains_symbol(form->as.cons.car, name)) return 1;
+            form = form->as.cons.cdr;
+        }
+        if (form != NULL && mino_type_of(form) == MINO_SYMBOL) {
+            return strcmp(form->as.s.data, name) == 0;
+        }
+        return 0;
+    }
+    return 0;
+}
+
 /* Walk `recur-args` looking for the position whose value is
  * (conj acc <x>) or (assoc acc <k> <v>) referencing `acc_sym`.
  * Returns the position index (0-based) on match, -1 otherwise.
@@ -1344,6 +1379,48 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
      * too in mino, but here we only rewrite the vector form for v1; a
      * later cycle can extend to map/set conj if M5 surfaces it. */
     if (step_kind == 0 && !is_empty_vec_literal(acc_init)) return NULL;
+    /* Safety: the rewrite reinterprets acc as a transient inside the
+     * loop body. The transient protocol covers `count` / `nth` / `get`
+     * but not `seq` / `reduce` / `=` / `contains?`. Any read of the
+     * accumulator outside the recognized step is a divergence risk.
+     * Conservative gate: reject if acc-sym is referenced in <test> at
+     * all, or in any recur-arg position outside the step. The bare-
+     * exit branch (already validated above) is the only place acc is
+     * read as a value, and it's read *after* the loop exits so the
+     * persistent-wrap promotes it back. */
+    {
+        const char *name = acc_sym->as.s.data;
+        if (form_contains_symbol(test, name)) return NULL;
+        {
+            mino_val_t *cur2 = recur_args;
+            int         pos2 = 0;
+            while (mino_is_cons(cur2)) {
+                mino_val_t *arg = cur2->as.cons.car;
+                if (pos2 == step_pos) {
+                    /* The step is structurally (conj acc <x>) or
+                     * (assoc acc <k> <v>). Skip the head and the acc
+                     * reference; the remaining args must not reference
+                     * acc either, or we'd read it through transient
+                     * semantics inside <x>/<k>/<v>. */
+                    mino_val_t *after_head = arg->as.cons.cdr;
+                    if (mino_is_cons(after_head)) {
+                        mino_val_t *after_acc = after_head->as.cons.cdr;
+                        while (mino_is_cons(after_acc)) {
+                            if (form_contains_symbol(
+                                    after_acc->as.cons.car, name)) {
+                                return NULL;
+                            }
+                            after_acc = after_acc->as.cons.cdr;
+                        }
+                    }
+                } else if (form_contains_symbol(arg, name)) {
+                    return NULL;
+                }
+                pos2++;
+                cur2 = cur2->as.cons.cdr;
+            }
+        }
+    }
     /* --- Build the rewritten form. ---
      * Strategy: clone the loop's binding vector, replacing the last
      * acc init with `(transient <init>)`, then construct the new

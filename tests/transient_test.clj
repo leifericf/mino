@@ -120,4 +120,105 @@
     (conj! t 3)
     (is (= [1 2 3] (persistent! t)))))
 
+;; --- Builder-pattern compile-time rewrite safety ---
+;;
+;; The (loop [... acc []] (if <test> (recur ... (conj acc x)) acc)) shape
+;; is rewritten to a transient-driven form at compile time. The rewrite
+;; is only safe when the loop body never reads the accumulator outside
+;; the bare-exit branch -- transient semantics do not cover seq/=/contains?
+;; in mino's model, and a rewrite that exposed those reads to a transient
+;; would silently diverge from the persistent value the user wrote.
+
+;; <test> reads acc through contains? -- must stay on the persistent path.
+(deftest builder-rewrite-test-uses-contains
+  (let [r (loop [i 0 acc []]
+            (if (and (< i 5) (not (contains? acc i)))
+              (recur (+ i 1) (conj acc i))
+              acc))]
+    (is (= [0 1 2 3 4] r))))
+
+;; <test> reads acc through = with a literal -- must stay on the
+;; persistent path (= against a transient is not a defined operation).
+(deftest builder-rewrite-test-uses-equals
+  (let [r (loop [i 0 acc []]
+            (if (= [] acc)
+              (recur (+ i 1) (conj acc i))
+              acc))]
+    (is (= [0] r))))
+
+;; <test> reads acc through peek/empty? -- must stay on the persistent path.
+(deftest builder-rewrite-test-uses-peek
+  (let [r (loop [i 0 acc []]
+            (if (and (< i 3) (or (empty? acc) (< (peek acc) 10)))
+              (recur (+ i 1) (conj acc i))
+              acc))]
+    (is (= [0 1 2] r))))
+
+;; A non-step recur arg that references acc -- must stay on the
+;; persistent path. Here the second binding's recur step computes
+;; (count acc), which would observe the transient under a rewrite.
+(deftest builder-rewrite-non-step-references-acc
+  (let [r (loop [i 0 n 0 acc []]
+            (if (< i 4)
+              (recur (+ i 1) (count acc) (conj acc i))
+              [n acc]))]
+    (is (= [3 [0 1 2 3]] r))))
+
+;; A step whose <x> sub-expression references acc -- must stay on the
+;; persistent path. Reading `(peek acc)` inside `<x>` would observe
+;; the transient.
+(deftest builder-rewrite-step-x-references-acc
+  (let [r (loop [i 0 acc [10]]
+            (if (< i 3)
+              (recur (+ i 1) (conj acc (+ i (peek acc))))
+              acc))]
+    (is (= [10 10 11 13] r))))
+
+;; Two acc-build steps in the same recur (would-be ambiguous) -- the
+;; find_acc_step recognizer picks the first match, so the second one's
+;; presence triggers the non-step guard.
+(deftest builder-rewrite-multiple-acc-steps
+  (let [r (loop [i 0 acc []]
+            (if (< i 2)
+              (recur (+ i 1) (-> acc (conj i) (conj (* i 10))))
+              acc))]
+    (is (= [0 0 1 10] r))))
+
+;; --- Regression: safe builder shapes still rewrite (and run correctly) ---
+
+;; The canonical vector-builder shape -- this is exactly what the
+;; v0.166.0 rewrite targets. The rewrite must still fire here.
+(deftest builder-rewrite-safe-vec-conj
+  (let [r (loop [i 0 acc []]
+            (if (< i 5)
+              (recur (+ i 1) (conj acc i))
+              acc))]
+    (is (= [0 1 2 3 4] r))))
+
+;; Map-builder shape with assoc -- the v0.166.0 sister rewrite.
+(deftest builder-rewrite-safe-map-assoc
+  (let [r (loop [i 0 acc {}]
+            (if (< i 4)
+              (recur (+ i 1) (assoc acc i (* i 10)))
+              acc))]
+    (is (= {0 0 1 10 2 20 3 30} r))))
+
+;; Then/else order reversed -- bare-acc as the then-branch, recur as
+;; the else-branch. Must still rewrite and produce the same answer.
+(deftest builder-rewrite-safe-reversed-branches
+  (let [r (loop [i 0 acc []]
+            (if (>= i 3)
+              acc
+              (recur (+ i 1) (conj acc i))))]
+    (is (= [0 1 2] r))))
+
+;; A non-step recur arg that does NOT reference acc -- must still
+;; rewrite. This is the dominant shape: index counter + builder.
+(deftest builder-rewrite-safe-counter
+  (let [r (loop [i 0 j 100 acc []]
+            (if (< i 3)
+              (recur (+ i 1) (- j 1) (conj acc i))
+              [j acc]))]
+    (is (= [97 [0 1 2]] r))))
+
 ;; (run-tests) -- called by tests/run.clj

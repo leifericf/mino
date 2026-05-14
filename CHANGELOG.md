@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.166.1 — Builder-Rewriter Safety Patch
+
+`try_builder_rewrite` (introduced in v0.166.0) now declines whenever
+the loop body reads the accumulator outside the bare-exit branch. The
+rewrite reinterprets `acc` as a transient inside the loop body; mino's
+transient protocol covers `count` / `nth` / `get` but not `seq` /
+`reduce` / `=` / `contains?` / `peek` / `empty?`. A rewrite that
+exposed any of those reads to a transient would either throw or
+silently diverge from the persistent value the user wrote.
+
+The conservative guard rejects when `acc-sym` appears anywhere in
+`<test>` and in any recur-arg position outside the recognized step
+(including in the step's own `<x>` / `<k>` / `<v>` sub-expressions).
+The bare-exit branch remains the only allowed acc read; the loop's
+result is the persistent wrap of the transient at exit.
+
+A real example exists in `src/core.clj`'s `tree-seq`-style helpers,
+which use the `(if (contains? result p) ...)` shape; the rewrite's
+exact-shape recognizer didn't fire on those today, but the gap was a
+foot-gun for any future Clojure code that lands on the recognizer's
+shape with an acc-touching `<test>`.
+
+10 new regression tests in `tests/transient_test.clj` cover six unsafe
+shapes (acc in `<test>` through `contains?` / `=` / `empty?`+`peek`;
+acc in a non-step recur arg through `count`; acc in the step's
+`<x>` through `peek`; two acc-build steps in one recur) plus four
+safe shapes (canonical vec-conj, map-assoc, reversed then/else order,
+counter-bound recur).
+
+Matrix neutral within 2%. ASan clean. 1669 tests, 7700 assertions all
+green.
+
 ## v0.166.0 — Builder-Pattern Compile-Time Rewrite
 
 `compile_loop` now recognises the canonical persistent-builder shape
