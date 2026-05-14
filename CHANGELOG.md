@@ -1,5 +1,75 @@
 # Changelog
 
+## v0.157.0 — Transducer Fusion For Reduce Pipelines
+
+`(reduce f init (->> src (map ...) (filter ...) (take ...)))` no
+longer materialises the intermediate lazy seqs. `prim_reduce` now
+inspects its `coll` argument; when the outer cell is one of the
+canonical `map` / `filter` / `take` LAZY thunks, it unwinds the
+chain by walking the thunk pointers, collects the stages, and
+walks the bottom source element by element while applying each
+stage inline. Cons cells from the map/filter/take stages are not
+allocated at all on the fused path.
+
+Per-element calls into a stage's fn / pred / counter route through
+`apply_callable_argv` instead of building a one-cell cons-spine
+per call. The five common numeric predicates (`zero?`, `pos?`,
+`neg?`, `odd?`, `even?`) gained argv-ABI variants so a `(filter
+odd? ...)` stage hits the cons-free fast path. `inc`, `dec`, `+`,
+and friends already had argv variants from previous cycles.
+
+Soundness is automatic. The unwinder only matches LAZY cells whose
+`c_thunk` pointer is the exact canonical `lazy_map1_thunk` /
+`lazy_filter_thunk` / `lazy_take_thunk`. A user-defined shadow of
+`map` / `filter` / `take` produces LAZY cells with different thunks
+(or no LAZY at all), the unwinder stops, and the regular slow path
+takes over. `reduced` short-circuit, exception propagation, and
+chunked-source forcing all re-use the existing `reduce_step` and
+`seq_iter` machinery — the fusion is structurally a different walk
+order over the same primitives, not a new semantic.
+
+What this leverages from Clojure: transducer-shaped pipelines are
+the canonical Clojure pattern for sequence processing precisely
+because the intermediate seqs are wasted work; the JVM Clojure
+core gets the same effect from `transduce` and `IReduceInit`. mino
+emits the lazy chain at construction time (matching seq-Clojure's
+implicit chain shape) but recognises it at consumption time inside
+reduce, so the user writes the natural `->>` form and pays the
+fused cost.
+
+Benchmark matrix on local Mac M-class, median of 5 full microbench
+passes (raw runs preserved in `.local/bench/v0_157_0_after_run*.txt`):
+
+| Benchmark      | v0.156.0     | v0.157.0     | Δ        |
+|----------------|--------------|--------------|----------|
+| pipeline-sum   | 93 520 ns    | **21 350 ns** | **-77%** |
+| fib-30         | 96 821 000 ns | 96 397 600 ns | flat   |
+| loop-recur-1M  | 18 574 500 ns | 18 565 000 ns | flat   |
+| dissoc-map     | 939 ns       | 880 ns        | -6% (noise) |
+
+Allocation profile for the same pipeline-sum driver (100 iters,
+`mino_prof` with `-DMINO_ALLOC_PROFILE=1`): total allocations
+dropped from 117 630 to 16 730 (-86%). Lazy-seq cells from the
+`map` / `filter` / `take` stages are gone; the remaining cons
+traffic is the chunked-cons walk through `(range 1000)`'s own
+backbone.
+
+### Added
+
+- `prim_reduce_pipeline`-style runtime fusion inside `prim_reduce`:
+  detect map/filter/take LAZY chains on the coll arg and walk them
+  in a single fused loop. Up to 8 stages supported per chain.
+- `lazy_thunk_is_map1` / `_filter` / `_take` accessor predicates
+  in `src/prim/lazy.c` so the static thunk pointers remain
+  encapsulated.
+- argv-ABI variants for the canonical numeric predicates:
+  `prim_zero_p_argv`, `prim_pos_p_argv`, `prim_neg_p_argv`,
+  `prim_odd_p_argv`, `prim_even_p_argv`. The install table picks
+  the argv path automatically when `fn2` is set in the entry.
+
+Verification: 1 659 tests / 7 690 assertions green on release,
+ASan, UBSan.
+
 ## v0.156.0 — Generic Get And Dissoc Fast Lanes
 
 Two map-side coverage extensions on top of v0.154.0's read-side fast

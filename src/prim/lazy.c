@@ -303,6 +303,7 @@ mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * vector would work too but this keeps alloc count low for the hot path.
  */
 static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx);
+static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx);
 
 /* Recognise a lazy seq created by prim_range. Used by prim_reduce's
  * int-range fast path to lift the iteration into a tight C loop
@@ -326,6 +327,37 @@ int lazy_is_int_range(const mino_val_t *coll, long long *start_out,
                      && mino_val_bool_get(ctx->as.cons.cdr->as.cons.cdr
                                           ->as.cons.cdr->as.cons.car) == 1);
     return 1;
+}
+
+/* Pipeline-stage thunk identification. Returns 1 iff `coll` is an
+ * unrealized LAZY whose thunk is exactly the named stage. Used by
+ * prim_reduce to fuse a (->> src (map ...) (filter ...) (take ...))
+ * chain into a single element-by-element walk over `src`, eliminating
+ * the per-stage lazy-cell allocations. A realized LAZY returns 0 — its
+ * body has been cleared and the cached value is just a regular cons /
+ * chunked-cons / nil. */
+int lazy_thunk_is_map1(const mino_val_t *coll)
+{
+    return coll != NULL
+        && mino_type_of(coll) == MINO_LAZY
+        && !coll->as.lazy.realized
+        && coll->as.lazy.c_thunk == lazy_map1_thunk;
+}
+
+int lazy_thunk_is_filter(const mino_val_t *coll)
+{
+    return coll != NULL
+        && mino_type_of(coll) == MINO_LAZY
+        && !coll->as.lazy.realized
+        && coll->as.lazy.c_thunk == lazy_filter_thunk;
+}
+
+int lazy_thunk_is_take(const mino_val_t *coll)
+{
+    return coll != NULL
+        && mino_type_of(coll) == MINO_LAZY
+        && !coll->as.lazy.realized
+        && coll->as.lazy.c_thunk == lazy_take_thunk;
 }
 
 static mino_val_t *range_make_lazy(mino_state_t *S, long long start,

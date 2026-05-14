@@ -215,6 +215,13 @@ mino_val_t *prim_range(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 int         lazy_is_int_range(const mino_val_t *coll, long long *start_out,
                               long long *end_out, long long *step_out,
                               int *infinite_out);
+/* Pipeline-stage detection: returns 1 iff `coll` is an unrealized
+ * LAZY whose thunk matches the named map/filter/take stage. Used by
+ * prim_reduce to recognise a `(->> src (map ...) (filter ...) (take ...))`
+ * chain and fuse it into a single walk over `src`. */
+int         lazy_thunk_is_map1  (const mino_val_t *coll);
+int         lazy_thunk_is_filter(const mino_val_t *coll);
+int         lazy_thunk_is_take  (const mino_val_t *coll);
 mino_val_t *prim_rangev(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lazy_map_1(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_lazy_filter(mino_state_t *S, mino_val_t *args, mino_env_t *env);
@@ -402,6 +409,16 @@ mino_val_t *prim_record_type_p_argv(mino_state_t *S, mino_val_t **argv, int argc
 mino_val_t *prim_record_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
 mino_val_t *prim_uuid_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
 mino_val_t *prim_regex_p_argv(mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+
+/* argv-ABI variants for numeric predicates. Their cons-ABI siblings
+ * stay in place; the install table picks the argv path automatically
+ * when fn2 is set in the def. Cuts the one-cell cons-spine cost of
+ * each predicate call out of the hot loop in (reduce + (filter pred ...)). */
+mino_val_t *prim_zero_p_argv (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_pos_p_argv  (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_neg_p_argv  (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_odd_p_argv  (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
+mino_val_t *prim_even_p_argv (mino_state_t *S, mino_val_t **argv, int argc, mino_env_t *env);
 
 /* regex.c */
 mino_val_t *prim_re_pattern(mino_state_t *S, mino_val_t *args, mino_env_t *env);

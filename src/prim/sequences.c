@@ -711,6 +711,174 @@ static mino_val_t *reduce_set_direct(mino_state_t *S, mino_val_t *fn,
     return reduce_vec_apply(S, fn, acc, has_init, s->as.set.key_order, env);
 }
 
+/* Transducer-shape fusion for reduce over a (->> src (map ...) (filter ...)
+ * (take ...)) chain. The chain is built bottom-up by the lazy-map-1 /
+ * lazy-filter / lazy-take primitives, each wrapping the previous in a
+ * fresh MINO_LAZY cell. When prim_reduce sees the outermost cell of
+ * such a chain, it can unwind the stages, walk the bottom source once,
+ * and apply the stages inline per element — eliminating the lazy-seq
+ * cells (the dominant cost: ~877 cons cells per pipeline iter in the
+ * baseline profile of (->> (range 1000) (map inc) (filter odd?)
+ * (take 100) (reduce + 0))).
+ *
+ * Soundness is automatic: the unwinder only matches LAZY cells with the
+ * exact thunk pointers from lazy.c. A user-defined shadow of `map` /
+ * `filter` / `take` produces LAZY cells with different thunks (or none
+ * at all), the unwinder stops, and the regular slow path takes over.
+ * Reduced short-circuit, exception propagation, and chunked-source
+ * forcing are all handled by the reused reduce_step / seq_iter
+ * machinery. */
+
+#define PIPELINE_MAX_STAGES 8
+
+typedef enum {
+    PIPELINE_STAGE_MAP,
+    PIPELINE_STAGE_FILTER,
+    PIPELINE_STAGE_TAKE
+} pipeline_stage_kind_t;
+
+typedef struct {
+    pipeline_stage_kind_t kind;
+    mino_val_t           *callable;   /* MAP/FILTER: stage fn. TAKE: NULL. */
+    long long             counter;    /* TAKE: remaining countdown. */
+} pipeline_stage_t;
+
+/* Try to unwind a chain of map/filter/take LAZY cells from `coll`,
+ * filling stages[] in outermost-first order. Returns the number of
+ * stages unwound; sets *src_out to the bottom non-stage value. Returns
+ * 0 (with *src_out == coll) when coll isn't a recognised pipeline. */
+static int try_unwind_pipeline(mino_val_t *coll,
+                               pipeline_stage_t *stages,
+                               int max_stages,
+                               mino_val_t **src_out)
+{
+    int n = 0;
+    while (n < max_stages && coll != NULL
+           && mino_type_of(coll) == MINO_LAZY
+           && !coll->as.lazy.realized) {
+        mino_val_t *body = coll->as.lazy.body;
+        if (body == NULL || !mino_is_cons(body)
+            || !mino_is_cons(body->as.cons.cdr)) {
+            break;
+        }
+        if (lazy_thunk_is_map1(coll)) {
+            stages[n].kind     = PIPELINE_STAGE_MAP;
+            stages[n].callable = body->as.cons.car;
+            stages[n].counter  = 0;
+            coll = body->as.cons.cdr->as.cons.car;
+            n++;
+        } else if (lazy_thunk_is_filter(coll)) {
+            stages[n].kind     = PIPELINE_STAGE_FILTER;
+            stages[n].callable = body->as.cons.car;
+            stages[n].counter  = 0;
+            coll = body->as.cons.cdr->as.cons.car;
+            n++;
+        } else if (lazy_thunk_is_take(coll)) {
+            long long m;
+            if (!mino_to_int(body->as.cons.car, &m) || m < 0) break;
+            stages[n].kind     = PIPELINE_STAGE_TAKE;
+            stages[n].callable = NULL;
+            stages[n].counter  = m;
+            coll = body->as.cons.cdr->as.cons.car;
+            n++;
+        } else {
+            break;
+        }
+    }
+    *src_out = coll;
+    return n;
+}
+
+/* Drive `src` element by element through stages[n_stages-1 .. 0]
+ * (innermost-stage-first per element), accumulating with `fn` under
+ * the reduce_step contract. has_init==0 means *acc_io is unset and
+ * the first surviving element seeds it (2-arg reduce arity).
+ *
+ * Returns the final accumulator value, or NULL on error. The caller
+ * pre-handled the nil-source and empty-source cases. */
+static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
+                                        mino_val_t *fn,
+                                        mino_val_t *acc,
+                                        int has_init,
+                                        mino_val_t *src,
+                                        pipeline_stage_t *stages,
+                                        int n_stages,
+                                        mino_env_t *env)
+{
+    seq_iter_t it;
+    if (src == NULL || mino_type_of(src) == MINO_NIL
+        || mino_type_of(src) == MINO_EMPTY_LIST) {
+        if (has_init) return acc;
+        return apply_callable(S, fn, mino_nil(S), env);
+    }
+    seq_iter_init(S, &it, src);
+    while (!seq_iter_done(&it)) {
+        mino_val_t *elem = seq_iter_val(S, &it);
+        int         passed = 1;
+        int         take_exhausted = 0;
+        int         i;
+        for (i = n_stages - 1; i >= 0; i--) {
+            if (stages[i].kind == PIPELINE_STAGE_MAP) {
+                /* argv ABI: no per-element cons-spine traffic. The
+                 * callable's fn2 path (argv prims) or MINO_FN path
+                 * (bytecode fns) takes argv directly; only the
+                 * fn2==NULL prim fallback rebuilds a cons inside
+                 * apply_callable_argv. */
+                mino_val_t *argv1[1];
+                argv1[0] = elem;
+                elem = apply_callable_argv(
+                    S, stages[i].callable, argv1, 1, env);
+                if (elem == NULL) return NULL;
+            } else if (stages[i].kind == PIPELINE_STAGE_FILTER) {
+                mino_val_t *argv1[1];
+                mino_val_t *r;
+                argv1[0] = elem;
+                r = apply_callable_argv(
+                    S, stages[i].callable, argv1, 1, env);
+                if (r == NULL) return NULL;
+                if (!mino_is_truthy_inline(r)) { passed = 0; break; }
+            } else {
+                /* PIPELINE_STAGE_TAKE. */
+                if (stages[i].counter <= 0) {
+                    /* Counter already exhausted from a previous element;
+                     * short-circuit without consuming this one. */
+                    if (!has_init) {
+                        return apply_callable(S, fn, mino_nil(S), env);
+                    }
+                    return acc;
+                }
+                stages[i].counter--;
+                if (stages[i].counter == 0) take_exhausted = 1;
+            }
+        }
+        if (passed) {
+            if (!has_init) {
+                acc = elem;
+                has_init = 1;
+            } else {
+                int rc = reduce_step(S, fn, &acc, elem, env);
+                if (rc == -1) return NULL;
+                if (rc == 1)  return acc;
+            }
+            if (take_exhausted) return acc;
+        }
+        seq_iter_next(S, &it);
+    }
+    if (!has_init) {
+        return apply_callable(S, fn, mino_nil(S), env);
+    }
+    return acc;
+}
+
+/* True iff coll's outer LAZY is one of the recognised pipeline stages.
+ * Cheap pre-check to gate the unwinder allocation-free. */
+static int coll_is_pipeline_head(const mino_val_t *coll)
+{
+    return lazy_thunk_is_map1(coll)
+        || lazy_thunk_is_filter(coll)
+        || lazy_thunk_is_take(coll);
+}
+
 mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn;
@@ -728,6 +896,16 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
             /* (reduce f nil) → (f) */
             return apply_callable(S, fn, mino_nil(S), env);
+        }
+        if (coll_is_pipeline_head(coll)) {
+            pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+            mino_val_t *src = NULL;
+            int ns = try_unwind_pipeline(
+                coll, stages, PIPELINE_MAX_STAGES, &src);
+            if (ns > 0) {
+                return reduce_pipeline_walk(
+                    S, fn, NULL, 0, src, stages, ns, env);
+            }
         }
         if (lazy_is_int_range(coll, &r_start, &r_end, &r_step, &r_inf)
             && !r_inf) {
@@ -754,6 +932,16 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         coll = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) {
             return acc;
+        }
+        if (coll_is_pipeline_head(coll)) {
+            pipeline_stage_t stages[PIPELINE_MAX_STAGES];
+            mino_val_t *src = NULL;
+            int ns = try_unwind_pipeline(
+                coll, stages, PIPELINE_MAX_STAGES, &src);
+            if (ns > 0) {
+                return reduce_pipeline_walk(
+                    S, fn, acc, 1, src, stages, ns, env);
+            }
         }
         if (lazy_is_int_range(coll, &r_start, &r_end, &r_step, &r_inf)
             && !r_inf) {

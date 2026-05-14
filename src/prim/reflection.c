@@ -488,17 +488,10 @@ mino_val_t *prim_empty_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
  * BigInt / Ratio / BigDec route through tower_to_double for the sign /
  * zero comparison. The double approximation preserves sign for any
  * finite value; (zero? 0N), (pos? 1N), (neg? -1.0M) etc. all work. */
-static mino_val_t *num_pred(mino_state_t *S, mino_val_t *args,
-                            const char *name, int (*cmp_int)(long long),
-                            int (*cmp_float)(double))
+static mino_val_t *num_pred_step(mino_state_t *S, mino_val_t *v,
+                                 const char *name, int (*cmp_int)(long long),
+                                 int (*cmp_float)(double))
 {
-    mino_val_t *v;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        char buf[96];
-        snprintf(buf, sizeof(buf), "%s requires one argument", name);
-        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
-    }
-    v = args->as.cons.car;
     if (v == NULL) goto type_err;
     if (mino_val_int_p(v))   return cmp_int(mino_val_int_get(v)) ? mino_true(S) : mino_false(S);
     if (mino_type_of(v) == MINO_FLOAT) return cmp_float(v->as.f) ? mino_true(S) : mino_false(S);
@@ -513,6 +506,18 @@ type_err:
         snprintf(buf, sizeof(buf), "%s requires a number", name);
         return prim_throw_classified(S, "eval/type", "MTY001", buf);
     }
+}
+
+static mino_val_t *num_pred(mino_state_t *S, mino_val_t *args,
+                            const char *name, int (*cmp_int)(long long),
+                            int (*cmp_float)(double))
+{
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "%s requires one argument", name);
+        return prim_throw_classified(S, "eval/arity", "MAR001", buf);
+    }
+    return num_pred_step(S, args->as.cons.car, name, cmp_int, cmp_float);
 }
 
 static int is_zero_i(long long n) { return n == 0; }
@@ -532,15 +537,30 @@ mino_val_t *prim_neg_p(mino_state_t *S, mino_val_t *args, mino_env_t *env) {
     (void)env; return num_pred(S, args, "neg?", is_neg_i, is_neg_f);
 }
 
-mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
-{
-    mino_val_t *v;
+mino_val_t *prim_zero_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                             mino_env_t *env) {
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001",
-            "odd? requires one argument");
-    }
-    v = args->as.cons.car;
+    if (argc != 1) return prim_throw_classified(
+        S, "eval/arity", "MAR001", "zero? requires one argument");
+    return num_pred_step(S, argv[0], "zero?", is_zero_i, is_zero_f);
+}
+mino_val_t *prim_pos_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                            mino_env_t *env) {
+    (void)env;
+    if (argc != 1) return prim_throw_classified(
+        S, "eval/arity", "MAR001", "pos? requires one argument");
+    return num_pred_step(S, argv[0], "pos?", is_pos_i, is_pos_f);
+}
+mino_val_t *prim_neg_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                            mino_env_t *env) {
+    (void)env;
+    if (argc != 1) return prim_throw_classified(
+        S, "eval/arity", "MAR001", "neg? requires one argument");
+    return num_pred_step(S, argv[0], "neg?", is_neg_i, is_neg_f);
+}
+
+static mino_val_t *odd_p_step(mino_state_t *S, mino_val_t *v)
+{
     if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "odd? requires an integer");
@@ -556,15 +576,27 @@ mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         "odd? requires an integer");
 }
 
-mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+mino_val_t *prim_odd_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
-    mino_val_t *v;
     (void)env;
     if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "even? requires one argument");
+            "odd? requires one argument");
     }
-    v = args->as.cons.car;
+    return odd_p_step(S, args->as.cons.car);
+}
+
+mino_val_t *prim_odd_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                            mino_env_t *env)
+{
+    (void)env;
+    if (argc != 1) return prim_throw_classified(
+        S, "eval/arity", "MAR001", "odd? requires one argument");
+    return odd_p_step(S, argv[0]);
+}
+
+static mino_val_t *even_p_step(mino_state_t *S, mino_val_t *v)
+{
     if (v == NULL) {
         return prim_throw_classified(S, "eval/type", "MTY001",
             "even? requires an integer");
@@ -578,6 +610,25 @@ mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     return prim_throw_classified(S, "eval/type", "MTY001",
         "even? requires an integer");
+}
+
+mino_val_t *prim_even_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "even? requires one argument");
+    }
+    return even_p_step(S, args->as.cons.car);
+}
+
+mino_val_t *prim_even_p_argv(mino_state_t *S, mino_val_t **argv, int argc,
+                             mino_env_t *env)
+{
+    (void)env;
+    if (argc != 1) return prim_throw_classified(
+        S, "eval/arity", "MAR001", "even? requires one argument");
+    return even_p_step(S, argv[0]);
 }
 
 mino_val_t *prim_macroexpand_1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
@@ -1284,15 +1335,15 @@ const mino_prim_def k_prims_reflection[] = {
     {"empty?",    prim_empty_p,
      "Returns true if coll has no items."},
     {"zero?",     prim_zero_p,
-     "Returns true if x is zero."},
+     "Returns true if x is zero.", prim_zero_p_argv},
     {"pos?",      prim_pos_p,
-     "Returns true if x is greater than zero."},
+     "Returns true if x is greater than zero.", prim_pos_p_argv},
     {"neg?",      prim_neg_p,
-     "Returns true if x is less than zero."},
+     "Returns true if x is less than zero.", prim_neg_p_argv},
     {"odd?",      prim_odd_p,
-     "Returns true if x is an odd integer."},
+     "Returns true if x is an odd integer.", prim_odd_p_argv},
     {"even?",     prim_even_p,
-     "Returns true if x is an even integer."},
+     "Returns true if x is an even integer.", prim_even_p_argv},
     {"name",      prim_name,
      "Returns the name string of a symbol, keyword, or string."},
     {"namespace", prim_namespace,
