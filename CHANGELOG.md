@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.174.0 — Type-Feedback IC Probe Re-Run
+
+Re-ran the `MINO_CALL_SITE_SHAPES=1` instrumentation that M3 used
+at v0.99 against the post-v0.173.0 binary on the test suite and
+the mino-bench arithmetic suites. Counts hot + 90%-monomorphic-int
+call sites that could in principle benefit from a speculative
+type-feedback inline cache.
+
+### Findings
+
+| Workload | Hot sites (>=10k calls) | Hot + mono-int (>=90%) |
+|---|---:|---:|
+| `tests/run.clj`              | 8 | 0 |
+| `reduce_int_bench`           | 1 | 0 |
+| `recur_shape_bench`          | 0 | 0 |
+| `protocol_bench`             | 4 | 1 (non-arith) |
+
+The lone mono-int site (`protocol_bench`) resolved to a non-arith
+prim. Every hot canonical-arith path in the matrix is already
+specialised out of the call site layer by `reduce_int_*`,
+`OP_LOOP_INT_LT[_INC]`, or the v0.173.0 range-direct pipeline.
+
+### Decision
+
+Defer the type-feedback IC. There are no workload-substantiated
+hot mono-int arith sites for the IC to monomorphise. The
+instrumentation stays behind `-DMINO_CALL_SITE_SHAPES=1` for
+future workloads. Full writeup at
+`.local/post-v0.173.0-ic-probe.md`.
+
 ## v0.173.0 — Range-Direct Pipeline_Walk
 
 `pipeline_walk` now recognises a bounded int-range source and
