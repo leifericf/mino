@@ -1,5 +1,63 @@
 # Changelog
 
+## v0.166.0 — Builder-Pattern Compile-Time Rewrite
+
+`compile_loop` now recognises the canonical persistent-builder shape
+and rewrites it to the transient form before emitting bytecode. The
+pattern:
+
+```clojure
+(loop [<v1> <v1-init> ... acc []]
+  (if <test>
+    (recur <step1> ... (conj acc <x>))
+    acc))
+```
+
+becomes:
+
+```clojure
+(persistent!
+  (loop [<v1> <v1-init> ... acc (transient [])]
+    (if <test>
+      (recur <step1> ... (conj! acc <x>))
+      acc)))
+```
+
+with sister forms covered (`assoc` builder step over `{}`; then/else
+branches in either order). The rewrite happens once, before
+emission, so all subsequent bytecode walks land on the transient
+variant.
+
+This pattern was investigated and deferred at v0.160.0 -- on the
+old wrapper transients the rewrite was 2.5x slower than the
+persistent baseline because `mino_conj_bang` round-tripped through
+`prim_conj`'s full path-copy. v0.165.0 supplied the in-place
+substrate; this release re-introduces the recogniser now that the
+substrate makes it pay off.
+
+### Measured impact (v0.163.0 → v0.166.0, defn-bound builder)
+
+| Bench | v0.163.0 | v0.166.0 | Δ |
+|---|---:|---:|---:|
+| `(loop ... (conj acc i))` N=1k | 893 µs | 228 µs | **-74%** |
+| `(loop ... (conj acc i))` N=10k | 9.18 ms | 2.58 ms | **-72%** |
+| `(loop ... (conj acc i))` N=100k | 92.0 ms | 26.8 ms | **-71%** |
+
+The rewritten form runs within run-to-run noise of a hand-written
+transient builder (`(persistent! (loop ... (conj! acc i)))`),
+confirming the rewrite produces the same shape the substrate's
+in-place mutation has been waiting for.
+
+Coverage: 17% of `(loop ...)` forms in `lib/` and `src/core.clj`
+match the recogniser (M2). The rewrite is currently disabled inside
+macroexpanded fn literals (e.g. the inner fn that `dotimes` expands
+to), since their compilation route bypasses `compile_loop`; that
+case is queued for a later cycle alongside the broader fn-literal
+BC-pass coverage work.
+
+Matrix neutral elsewhere within 2% noise. ASan clean. 1659 tests,
+7690 assertions all green.
+
 ## v0.165.0 — In-Place Transient Vector Mutation
 
 `(transient ...) / conj! / assoc! / pop! / persistent!` over vectors

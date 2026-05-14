@@ -1130,8 +1130,301 @@ static int try_compile_counted_loop(compiler_t *c,
     return 1;
 }
 
+/* ------------------------------------------------------------------- */
+/* Builder-pattern rewrite                                              */
+/* ------------------------------------------------------------------- */
+
+/* Pre-compile rewrite for the canonical persistent-builder loop:
+ *
+ *   (loop [<v1> <v1-init> ... acc <empty-literal>]
+ *     (if <test>
+ *       (recur ... (conj acc <x>))           ; one branch
+ *       acc))                                 ; other branch
+ *
+ * gets rewritten to
+ *
+ *   (persistent!
+ *     (loop [<v1> <v1-init> ... acc (transient <empty-literal>)]
+ *       (if <test>
+ *         (recur ... (conj! acc <x>))
+ *         acc)))
+ *
+ * Sister forms covered:
+ *   - (assoc acc <k> <v>) builder step (init must be `{}`)
+ *   - then/else swapped: acc as the recur branch's other half.
+ *
+ * Returns the rewritten form, or NULL when no match (caller falls
+ * through to the generic compile_loop). The substrate that makes
+ * this pay off is v0.165.0's owner-tagged in-place transient
+ * mutation; before that the rewritten form ran 2.5x slower than
+ * the persistent baseline (see v0.160.0 defer note). */
+
+static int is_symbol_named(const mino_val_t *v, const char *name)
+{
+    return v != NULL
+        && mino_type_of(v) == MINO_SYMBOL
+        && strcmp(v->as.s.data, name) == 0;
+}
+
+static int is_empty_vec_literal(const mino_val_t *v)
+{
+    return v != NULL
+        && mino_type_of(v) == MINO_VECTOR
+        && v->as.vec.len == 0;
+}
+
+static int is_empty_map_literal(const mino_val_t *v)
+{
+    return v != NULL
+        && mino_type_of(v) == MINO_MAP
+        && v->as.map.len == 0;
+}
+
+/* Match `(<head> <args>...)`. Returns the args cons cell when head
+ * is a symbol named `name`, NULL otherwise. */
+static mino_val_t *match_call(mino_val_t *form, const char *name)
+{
+    if (!mino_is_cons(form)) return NULL;
+    if (!is_symbol_named(form->as.cons.car, name)) return NULL;
+    return form->as.cons.cdr;
+}
+
+/* List length of a cons chain. */
+static size_t cons_count(const mino_val_t *list)
+{
+    size_t n = 0;
+    while (mino_is_cons(list)) {
+        n++;
+        list = list->as.cons.cdr;
+    }
+    return n;
+}
+
+/* Build a cons list from a NULL-terminated array of mino_val_t *. */
+static mino_val_t *list_from_array(mino_state_t *S, mino_val_t **items,
+                                     size_t n)
+{
+    mino_val_t *out = mino_nil(S);
+    size_t      i;
+    for (i = n; i > 0; i--) {
+        out = mino_cons(S, items[i - 1], out);
+    }
+    return out;
+}
+
+/* Walk `recur-args` looking for the position whose value is
+ * (conj acc <x>) or (assoc acc <k> <v>) referencing `acc_sym`.
+ * Returns the position index (0-based) on match, -1 otherwise.
+ * `*step_kind` is set to 0 for conj, 1 for assoc. */
+static int find_acc_step(mino_val_t *recur_args, mino_val_t *acc_sym,
+                          int *step_kind)
+{
+    int  pos = 0;
+    while (mino_is_cons(recur_args)) {
+        mino_val_t *arg = recur_args->as.cons.car;
+        mino_val_t *call_args;
+        if ((call_args = match_call(arg, "conj")) != NULL
+            && mino_is_cons(call_args)
+            && is_symbol_named(call_args->as.cons.car, acc_sym->as.s.data)) {
+            *step_kind = 0;
+            return pos;
+        }
+        if ((call_args = match_call(arg, "assoc")) != NULL
+            && mino_is_cons(call_args)
+            && is_symbol_named(call_args->as.cons.car, acc_sym->as.s.data)) {
+            *step_kind = 1;
+            return pos;
+        }
+        pos++;
+        recur_args = recur_args->as.cons.cdr;
+    }
+    return -1;
+}
+
+/* Replace `recur-args[step_pos]` with a rewritten (conj! ...) or
+ * (assoc! ...) call. Returns the new args list (cons chain). */
+static mino_val_t *rewrite_recur_args(mino_state_t *S,
+                                       mino_val_t *recur_args, int step_pos,
+                                       int step_kind)
+{
+    size_t       n = cons_count(recur_args);
+    mino_val_t **buf;
+    mino_val_t  *result;
+    size_t       i;
+    mino_val_t  *cur = recur_args;
+    if (n == 0) return recur_args;
+    buf = (mino_val_t **)malloc(n * sizeof(*buf));
+    if (buf == NULL) return NULL;
+    for (i = 0; i < n; i++) {
+        buf[i] = cur->as.cons.car;
+        cur    = cur->as.cons.cdr;
+    }
+    {
+        mino_val_t *step      = buf[step_pos];
+        mino_val_t *step_args = step->as.cons.cdr;  /* skip head sym */
+        mino_val_t *new_head  = mino_symbol(
+            S, step_kind == 0 ? "conj!" : "assoc!");
+        if (new_head == NULL) { free(buf); return NULL; }
+        buf[step_pos] = mino_cons(S, new_head, step_args);
+    }
+    result = list_from_array(S, buf, n);
+    free(buf);
+    return result;
+}
+
+static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
+{
+    mino_val_t *bindings;
+    mino_val_t *body;
+    mino_val_t *if_form;
+    mino_val_t *if_args;
+    mino_val_t *test;
+    mino_val_t *then_form;
+    mino_val_t *else_form;
+    mino_val_t *acc_sym;
+    mino_val_t *acc_init;
+    mino_val_t *recur_args;
+    mino_val_t *new_init;
+    mino_val_t *new_bindings;
+    mino_val_t *new_recur;
+    mino_val_t *new_if;
+    mino_val_t *new_loop;
+    mino_val_t *new_persistent;
+    int         step_kind = 0;
+    int         step_pos;
+    int         is_then_recur;
+    size_t      blen, i;
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) return NULL;
+    bindings = args->as.cons.car;
+    body     = args->as.cons.cdr;
+    if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) return NULL;
+    blen = bindings->as.vec.len;
+    if (blen < 2 || (blen & 1) != 0) return NULL;
+    /* Acc binding is the LAST pair. */
+    acc_sym  = vec_nth(bindings, blen - 2);
+    acc_init = vec_nth(bindings, blen - 1);
+    if (acc_sym == NULL || mino_type_of(acc_sym) != MINO_SYMBOL) return NULL;
+    if (!is_empty_vec_literal(acc_init) && !is_empty_map_literal(acc_init)) {
+        return NULL;
+    }
+    /* Body is exactly one form: (if <test> <then> <else>). */
+    if (!mino_is_cons(body) || mino_is_cons(body->as.cons.cdr)) return NULL;
+    if_form = body->as.cons.car;
+    if_args = match_call(if_form, "if");
+    if (if_args == NULL) return NULL;
+    if (!mino_is_cons(if_args)) return NULL;
+    test      = if_args->as.cons.car;
+    if (!mino_is_cons(if_args->as.cons.cdr)) return NULL;
+    then_form = if_args->as.cons.cdr->as.cons.car;
+    if (!mino_is_cons(if_args->as.cons.cdr->as.cons.cdr)) return NULL;
+    else_form = if_args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    /* Reject 3-clause when else is missing or there's a trailing arg. */
+    if (mino_is_cons(if_args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+        return NULL;
+    }
+    /* Identify which branch is the recur, which is the bare acc-sym. */
+    is_then_recur = -1;
+    if (is_symbol_named(else_form, acc_sym->as.s.data)
+        && match_call(then_form, "recur") != NULL) {
+        is_then_recur = 1;
+        recur_args    = match_call(then_form, "recur");
+    } else if (is_symbol_named(then_form, acc_sym->as.s.data)
+               && match_call(else_form, "recur") != NULL) {
+        is_then_recur = 0;
+        recur_args    = match_call(else_form, "recur");
+    } else {
+        return NULL;
+    }
+    step_pos = find_acc_step(recur_args, acc_sym, &step_kind);
+    if (step_pos < 0) return NULL;
+    /* assoc step only makes sense when init is `{}`. */
+    if (step_kind == 1 && !is_empty_map_literal(acc_init)) return NULL;
+    /* conj step matches `[]` (vector). `{}` and `#{}` are conj-able
+     * too in mino, but here we only rewrite the vector form for v1; a
+     * later cycle can extend to map/set conj if M5 surfaces it. */
+    if (step_kind == 0 && !is_empty_vec_literal(acc_init)) return NULL;
+    /* --- Build the rewritten form. ---
+     * Strategy: clone the loop's binding vector, replacing the last
+     * acc init with `(transient <init>)`, then construct the new
+     * `if` whose recur step calls `conj!` / `assoc!`, then wrap the
+     * whole loop in `(persistent! ...)`. */
+    {
+        mino_val_t *transient_sym = mino_symbol(S, "transient");
+        if (transient_sym == NULL) return NULL;
+        new_init = mino_cons(
+            S, transient_sym, mino_cons(S, acc_init, mino_nil(S)));
+    }
+    /* Build a fresh vector for bindings. */
+    {
+        mino_val_t **bind_items;
+        bind_items = (mino_val_t **)malloc(blen * sizeof(*bind_items));
+        if (bind_items == NULL) return NULL;
+        for (i = 0; i < blen - 1; i++) {
+            bind_items[i] = vec_nth(bindings, i);
+        }
+        bind_items[blen - 1] = new_init;
+        new_bindings = vec_from_array(S, bind_items, blen);
+        free(bind_items);
+        if (new_bindings == NULL) return NULL;
+    }
+    /* Rewrite the recur arglist. */
+    {
+        mino_val_t *recur_sym = mino_symbol(S, "recur");
+        mino_val_t *new_args  = rewrite_recur_args(
+            S, recur_args, step_pos, step_kind);
+        if (recur_sym == NULL || new_args == NULL) return NULL;
+        new_recur = mino_cons(S, recur_sym, new_args);
+    }
+    /* Reassemble the if. */
+    {
+        mino_val_t *if_sym = mino_symbol(S, "if");
+        if (if_sym == NULL) return NULL;
+        if (is_then_recur) {
+            new_if = mino_cons(
+                S, if_sym, mino_cons(
+                    S, test, mino_cons(
+                        S, new_recur, mino_cons(
+                            S, acc_sym, mino_nil(S)))));
+        } else {
+            new_if = mino_cons(
+                S, if_sym, mino_cons(
+                    S, test, mino_cons(
+                        S, acc_sym, mino_cons(
+                            S, new_recur, mino_nil(S)))));
+        }
+    }
+    /* Reassemble the loop. */
+    {
+        mino_val_t *loop_sym = mino_symbol(S, "loop");
+        if (loop_sym == NULL) return NULL;
+        new_loop = mino_cons(
+            S, loop_sym, mino_cons(
+                S, new_bindings, mino_cons(
+                    S, new_if, mino_nil(S))));
+    }
+    /* Wrap in (persistent! ...). */
+    {
+        mino_val_t *p_sym = mino_symbol(S, "persistent!");
+        if (p_sym == NULL) return NULL;
+        new_persistent = mino_cons(
+            S, p_sym, mino_cons(S, new_loop, mino_nil(S)));
+    }
+    return new_persistent;
+}
+
 static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
+    /* Builder-pattern fast path: rewrite the canonical
+     * (loop [... acc []] (if <t> (recur ... (conj acc x)) acc))
+     * into a transient-driven equivalent that mutates in place.
+     * Falls through on miss. */
+    {
+        mino_val_t *rewritten = try_builder_rewrite(c->S, form);
+        if (rewritten != NULL) {
+            return compile_expr(c, rewritten, dst, tail);
+        }
+    }
     /* (loop [b1 v1 ...] body) -- like let, but installs a recur target
      * at the loop entry pc and tracks the binding registers so (recur
      * v1' ...) can rebind and jump. Plain-symbol bindings only.
