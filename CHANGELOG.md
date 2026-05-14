@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.160.0 — Builder-pattern Recur Fusion: Investigation, Deferred
+
+Spike of a compile-time transient rewrite for the canonical builder
+loop:
+
+```clojure
+(loop [i 0 acc []]
+  (if <test>
+    (recur (inc i) (conj acc x))
+    acc))
+```
+
+The compiler would have recognized this exact shape and rewritten it
+to wrap `acc` in `transient` at entry, replace `conj` with `conj!`
+inside the recur step, and call `persistent!` at exit. The plan
+expected a 2-5x speedup on the bench `(build 1000)` from skipping
+per-iter persistent-vector path-copies.
+
+**Measurement shows a 2.5x slowdown, not a speedup.** Three thousand
+warm iters of `(build 1000)` on Apple M-class hardware:
+
+| Variant                | mean ns/op |
+|------------------------|-----------:|
+| baseline (no rewrite)  | 241 - 264  |
+| rewritten (transients) | 653 - 704  |
+
+The cause is that mino's transient implementation in
+`src/collections/transient.c` does not actually mutate in place. The
+transient wrapper holds a `current` slot that gets reassigned on
+every `conj!`, but `conj!` itself calls `prim_conj` on the inner
+persistent collection and writes the freshly path-copied result
+back. Each `conj!` does strictly more work than a plain `conj`:
+prim-call dispatch overhead + a transient slot write on top of the
+same persistent-vector allocation.
+
+A real in-place transient (mutable tail buffer for vectors, owner-
+tagged HAMT nodes for maps) is the prerequisite for this rewrite to
+pay off. That's a sizeable change to `vec.c` / `map.c` and deserves
+its own cycle. The recognizer + rewriter that this release would
+have shipped is documented in `.local/v0_160_0-finding.md` (gitignored)
+with a re-introduction checklist for the post-real-transients
+window.
+
+This release is docs-only -- no behavior change, no opcode change,
+no public API delta. The version bump keeps the cycle numbering
+aligned with the original plan (v0.158.0 protocol IC -> v0.159.0
+seq-fusion -> v0.160.0 [deferred] -> v0.161.0 chunked-seq).
+
+Verification: 1 659 tests / 7 690 assertions green.
+
 ## v0.159.0 — Pipeline Fusion For The Seq-consumer Surface
 
 Extends v0.157.0's reduce-pipeline fusion to the rest of the
