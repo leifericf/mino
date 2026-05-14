@@ -29,6 +29,118 @@
 
 extern mino_val_t *mino_nil(mino_state_t *S);
 
+#ifdef MINO_CALL_SITE_SHAPES
+/* Per-site tally of OP_CALL_CACHED hits keyed by (slot pointer, arg-
+ * type-pair). Populated when the binary is built with
+ * -DMINO_CALL_SITE_SHAPES=1. Dumped to stderr at exit. Used to gate
+ * the type-feedback IC item: counts sites that hit a canonical arith
+ * callee with stable monomorphic-int operand types. Not for production. */
+#define CALL_SHAPE_SITES_MAX 8192
+typedef struct {
+    const void *slot;          /* mino_bc_ic_slot_t * -- unique site key */
+    mino_prim_fn callee_fn;    /* resolved callee prim (NULL = not a prim) */
+    size_t       total;
+    size_t       monomorphic_int_pair;  /* both args tagged-int */
+    size_t       other_shapes;
+} call_shape_row_t;
+static call_shape_row_t g_call_shapes[CALL_SHAPE_SITES_MAX];
+static int              g_call_shapes_used;
+static int              g_call_shapes_atexit_done;
+static const char *call_shape_prim_name(mino_prim_fn fn);
+static void call_shapes_dump(void)
+{
+    int i, hot = 0, mono_hot = 0;
+    size_t hot_hits = 0, mono_hits = 0;
+    fprintf(stderr, "call-site-shapes: sites tracked = %d (cap=%d)\n",
+            g_call_shapes_used, CALL_SHAPE_SITES_MAX);
+    for (i = 0; i < g_call_shapes_used; i++) {
+        if (g_call_shapes[i].total >= 10000) {
+            hot++;
+            hot_hits += g_call_shapes[i].total;
+            if (g_call_shapes[i].callee_fn != NULL
+                && g_call_shapes[i].monomorphic_int_pair * 10
+                       >= g_call_shapes[i].total * 9) {
+                mono_hot++;
+                mono_hits += g_call_shapes[i].monomorphic_int_pair;
+            }
+        }
+    }
+    fprintf(stderr, "  hot sites (>=10k calls): %d, hits=%zu\n",
+            hot, hot_hits);
+    fprintf(stderr, "  hot+monomorphic-int-prim (>=90%% int pair) sites:"
+                    " %d, hits=%zu\n",
+            mono_hot, mono_hits);
+    /* Detail of top monomorphic-int sites */
+    if (mono_hot > 0) {
+        int printed = 0;
+        fprintf(stderr, "  top monomorphic-int sites:\n");
+        for (i = 0; i < g_call_shapes_used && printed < 20; i++) {
+            if (g_call_shapes[i].total >= 10000
+                && g_call_shapes[i].callee_fn != NULL
+                && g_call_shapes[i].monomorphic_int_pair * 10
+                       >= g_call_shapes[i].total * 9) {
+                fprintf(stderr,
+                        "    %p %-16s total=%zu mono=%zu (%.1f%%)\n",
+                        g_call_shapes[i].slot,
+                        call_shape_prim_name(g_call_shapes[i].callee_fn),
+                        g_call_shapes[i].total,
+                        g_call_shapes[i].monomorphic_int_pair,
+                        100.0
+                            * (double)g_call_shapes[i].monomorphic_int_pair
+                            / (double)g_call_shapes[i].total);
+                printed++;
+            }
+        }
+    }
+}
+static void call_shape_record(const void *slot_ptr, mino_val_t *callee,
+                              mino_val_t **argv, int argc)
+{
+    int i;
+    int idx = -1;
+    if (!g_call_shapes_atexit_done) {
+        atexit(call_shapes_dump);
+        g_call_shapes_atexit_done = 1;
+    }
+    for (i = 0; i < g_call_shapes_used; i++) {
+        if (g_call_shapes[i].slot == slot_ptr) { idx = i; break; }
+    }
+    if (idx < 0) {
+        if (g_call_shapes_used >= CALL_SHAPE_SITES_MAX) return;
+        idx = g_call_shapes_used++;
+        g_call_shapes[idx].slot = slot_ptr;
+        g_call_shapes[idx].callee_fn =
+            (callee != NULL && mino_type_of(callee) == MINO_PRIM)
+                ? callee->as.prim.fn
+                : NULL;
+        g_call_shapes[idx].total = 0;
+        g_call_shapes[idx].monomorphic_int_pair = 0;
+        g_call_shapes[idx].other_shapes = 0;
+    }
+    g_call_shapes[idx].total++;
+    if (argc == 2 && argv[0] != NULL && argv[1] != NULL
+        && mino_val_int_p(argv[0]) && mino_val_int_p(argv[1])) {
+        g_call_shapes[idx].monomorphic_int_pair++;
+    } else {
+        g_call_shapes[idx].other_shapes++;
+    }
+}
+static const char *call_shape_prim_name(mino_prim_fn fn)
+{
+    if (fn == NULL) return "(non-prim)";
+    if (fn == prim_add) return "prim_add";
+    if (fn == prim_sub) return "prim_sub";
+    if (fn == prim_mul) return "prim_mul";
+    if (fn == prim_addp) return "prim_addp";
+    if (fn == prim_subp) return "prim_subp";
+    if (fn == prim_mulp) return "prim_mulp";
+    if (fn == prim_bit_and) return "prim_bit_and";
+    if (fn == prim_bit_or)  return "prim_bit_or";
+    if (fn == prim_bit_xor) return "prim_bit_xor";
+    return "(other-prim)";
+}
+#endif
+
 #ifdef MINO_BC_OP_COUNTS
 /* Per-opcode dispatch counter, populated when the binary is built with
  * -DMINO_BC_OP_COUNTS=1. Dumped to stderr at process exit. Used during
@@ -1122,6 +1234,9 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             mino_val_t *callee = ic_resolve_global(S, bc, slot, env,
                                                     dyn_active);
             if (callee == NULL) { ok = 0; goto bc_done; }
+#ifdef MINO_CALL_SITE_SHAPES
+            call_shape_record(slot, callee, regs + a, (int)argn);
+#endif
             mino_val_t *r = apply_callable_argv(S, callee, regs + a,
                                                 (int)argn, env);
             if (r == NULL) { ok = 0; goto bc_done; }
