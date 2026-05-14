@@ -1024,46 +1024,34 @@ static int is_unary_call_of_local(compiler_t *c, mino_val_t *form,
     return head_is_canonical_pure_prim(c, h);
 }
 
-/* Detect (loop [...] (if (zero? bX) <exit> (recur step0 step1 ...)))
- * where each step is (inc bi) or (dec bi) self-referencing its own
- * binding and the tested binding is the decremented one. On match,
- * emit OP_LOOP_INT_DEC[_INC] and compile the exit branch in place of
- * the normal body. Returns 1 when the fused op was emitted, 0 to
- * fall through to the generic body compile. -1 propagates an error.
- *
- * What this leverages from Clojure: (loop ... (recur ...)) is a
- * stable, homoiconic recur form -- the compiler sees the exact shape
- * of the iteration step at compile time. Persistent bindings let the
- * step's value depend only on the same binding's prior value, never
- * on an aliased state from a parallel iteration. */
-static int try_compile_counted_loop(compiler_t *c,
-                                    mino_val_t *body,
-                                    mino_val_t *bindings,
-                                    int n_bindings,
-                                    loop_target_t *this_loop,
-                                    int dst, int tail)
+/* Find the binding index whose name matches the given symbol's name,
+ * or -1 if no match. */
+static int find_binding_idx(mino_val_t *bindings, int n_bindings,
+                            const char *name)
 {
-    if (n_bindings < 1 || n_bindings > 2) return 0;
-
-    mino_val_t *if_form = match_single_form(body, "if");
-    if (if_form == NULL) return 0;
-
-    /* (if cond then else?) -- need both branches. */
-    mino_val_t *iargs = if_form->as.cons.cdr;
-    if (!mino_is_cons(iargs)) return 0;
-    mino_val_t *cond_form = iargs->as.cons.car;
-    mino_val_t *r1 = iargs->as.cons.cdr;
-    if (!mino_is_cons(r1)) return 0;
-    mino_val_t *then_form = r1->as.cons.car;
-    mino_val_t *r2 = r1->as.cons.cdr;
-    if (!mino_is_cons(r2)) return 0;
-    mino_val_t *else_form = r2->as.cons.car;
-    if (r2->as.cons.cdr != NULL && mino_type_of(r2->as.cons.cdr) != MINO_NIL) {
-        if (mino_is_cons(r2->as.cons.cdr)) return 0;
+    for (int i = 0; i < n_bindings; i++) {
+        mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
+        if (bn != NULL && mino_type_of(bn) == MINO_SYMBOL
+            && strcmp(bn->as.s.data, name) == 0) {
+            return i;
+        }
     }
+    return -1;
+}
 
-    /* cond must be (zero? bX) where zero? still resolves to the
-     * canonical prim (no user shadow). */
+/* Match the backward-counted shape:
+ *   (if (zero? bX) <exit> (recur step0 step1 ...))
+ * where each step is (inc bi) / (dec bi) self-referencing its own
+ * binding and the tested binding is the decremented one.
+ * Emits OP_LOOP_INT_DEC[_INC] and compiles the exit branch in place.
+ * Returns 1 on emit, 0 on miss, -1 on error. */
+static int try_match_dec_shape(compiler_t *c,
+                               mino_val_t *cond_form,
+                               mino_val_t *then_form,
+                               mino_val_t *else_form,
+                               mino_val_t *bindings, int n_bindings,
+                               loop_target_t *this_loop, int dst, int tail)
+{
     if (!mino_is_cons(cond_form)) return 0;
     mino_val_t *ch = cond_form->as.cons.car;
     if (ch == NULL || mino_type_of(ch) != MINO_SYMBOL) return 0;
@@ -1073,22 +1061,15 @@ static int try_compile_counted_loop(compiler_t *c,
     if (!mino_is_cons(cargs)) return 0;
     mino_val_t *test_sym = cargs->as.cons.car;
     if (test_sym == NULL || mino_type_of(test_sym) != MINO_SYMBOL) return 0;
-    if (cargs->as.cons.cdr != NULL && mino_type_of(cargs->as.cons.cdr) != MINO_NIL) {
+    if (cargs->as.cons.cdr != NULL
+        && mino_type_of(cargs->as.cons.cdr) != MINO_NIL) {
         if (mino_is_cons(cargs->as.cons.cdr)) return 0;
     }
-    /* Find which binding the test symbol names. */
-    int test_idx = -1;
-    for (int i = 0; i < n_bindings; i++) {
-        mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
-        if (bn != NULL && mino_type_of(bn) == MINO_SYMBOL
-            && strcmp(bn->as.s.data, test_sym->as.s.data) == 0) {
-            test_idx = i;
-            break;
-        }
-    }
+    int test_idx = find_binding_idx(bindings, n_bindings,
+                                    test_sym->as.s.data);
     if (test_idx < 0) return 0;
 
-    /* else must be (recur step0 step1 ...) with one step per binding. */
+    /* else must be (recur step0 step1 ...). */
     if (!mino_is_cons(else_form)) return 0;
     mino_val_t *eh = else_form->as.cons.car;
     if (eh == NULL || mino_type_of(eh) != MINO_SYMBOL) return 0;
@@ -1124,10 +1105,209 @@ static int try_compile_counted_loop(compiler_t *c,
                  (unsigned)test_reg, (unsigned)inc_reg, 0);
     }
     if (!c->ok) return -1;
-    /* When test_reg falls through to 0, control reaches the exit
-     * branch. Compile it in the same dst/tail context as the body. */
     if (compile_expr(c, then_form, dst, tail) < 0) return -1;
     return 1;
+}
+
+/* Match an (cmp lhs rhs) comparison test form where cmp is a canonical
+ * ordering prim and one operand is a loop binding. On match, writes:
+ *   *counter_idx       = binding index of the counter side
+ *   *limit_form_out    = the form for the limit (the other operand)
+ *   *test_true_is_exit = 1 when (cmp lhs rhs) being true means exit
+ *                        (i.e., the test polarity is "while not done"),
+ *                        0 when test true means continue.
+ * Returns 1 on match, 0 on miss. Recognizes (< c L), (<= c L),
+ * (>= c L), (> c L), and their swapped-arg forms. */
+static int match_lt_test(compiler_t *c, mino_val_t *cond_form,
+                         mino_val_t *bindings, int n_bindings,
+                         int *counter_idx, mino_val_t **limit_form_out,
+                         int *test_true_is_exit)
+{
+    if (!mino_is_cons(cond_form)) return 0;
+    mino_val_t *h = cond_form->as.cons.car;
+    if (h == NULL || mino_type_of(h) != MINO_SYMBOL) return 0;
+
+    /* For each recognized ordering prim, encode the polarity:
+     *   counter on the LEFT, limit on the RIGHT, the C-level test
+     *   that drives the fused opcode's "continue" branch is
+     *   `counter < limit`. So:
+     *     (< c L)  -> continue iff c < L: test_true=continue, swap=0
+     *     (<= c L) -> continue iff c < L+1 -- cannot fuse precisely
+     *                 without representing the +1; reject for v1.
+     *     (>= c L) -> continue iff c < L: test_true=exit, swap=0
+     *     (> c L)  -> continue iff c < L+1 -- reject.
+     *     (> L c)  -> equivalent to (< c L): test_true=continue, swap=1
+     *     (<= L c) -> equivalent to (>= c L): test_true=exit, swap=1 */
+    int  swap_args         = 0;
+    int  matched           = 0;
+    int  test_true_is_exit_local = 0;
+    if (strcmp(h->as.s.data, "<") == 0) {
+        matched = 1; test_true_is_exit_local = 0; swap_args = 0;
+    } else if (strcmp(h->as.s.data, ">=") == 0) {
+        matched = 1; test_true_is_exit_local = 1; swap_args = 0;
+    } else if (strcmp(h->as.s.data, ">") == 0) {
+        /* (> L c) acts like (< c L) with operands swapped; we then
+         * detect on the swapped order. (> c L) on a fixed counter
+         * would need L+1 to express precisely, so we reject when the
+         * counter is on the LEFT below. */
+        matched = 1; test_true_is_exit_local = 0; swap_args = 1;
+    } else if (strcmp(h->as.s.data, "<=") == 0) {
+        /* Symmetric: (<= L c) acts like (>= c L) swapped. */
+        matched = 1; test_true_is_exit_local = 1; swap_args = 1;
+    }
+    if (!matched) return 0;
+    if (!head_is_canonical_pure_prim(c, h)) return 0;
+
+    mino_val_t *args = cond_form->as.cons.cdr;
+    if (!mino_is_cons(args)) return 0;
+    mino_val_t *arg1 = args->as.cons.car;
+    mino_val_t *args2 = args->as.cons.cdr;
+    if (!mino_is_cons(args2)) return 0;
+    mino_val_t *arg2 = args2->as.cons.car;
+    if (args2->as.cons.cdr != NULL
+        && mino_type_of(args2->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(args2->as.cons.cdr)) return 0;
+    }
+
+    /* Identify which side is the counter binding. */
+    mino_val_t *lhs = swap_args ? arg2 : arg1;
+    mino_val_t *rhs = swap_args ? arg1 : arg2;
+    if (lhs == NULL || mino_type_of(lhs) != MINO_SYMBOL) return 0;
+    int idx = find_binding_idx(bindings, n_bindings, lhs->as.s.data);
+    if (idx < 0) return 0;
+
+    /* The limit operand must not also be the same counter (and must
+     * be expressible as a value the compiler can place in a register --
+     * left to the caller via compile_expr on this form). */
+    *counter_idx        = idx;
+    *limit_form_out     = rhs;
+    *test_true_is_exit  = test_true_is_exit_local;
+    return 1;
+}
+
+/* Match the forward-counted shape:
+ *   (if (< c L) (recur (inc c) ...) <exit>)        ; test_true=continue
+ *   (if (>= c L) <exit> (recur (inc c) ...))       ; test_true=exit
+ * (and the > / <= / arg-swap rearrangements via match_lt_test).
+ * Two-binding form allowed when the second step is (inc carry).
+ * Emits OP_LOOP_INT_LT[_INC] and compiles the exit branch.
+ * Returns 1 on emit, 0 on miss, -1 on error. */
+static int try_match_lt_shape(compiler_t *c,
+                              mino_val_t *cond_form,
+                              mino_val_t *then_form,
+                              mino_val_t *else_form,
+                              mino_val_t *bindings, int n_bindings,
+                              loop_target_t *this_loop, int dst, int tail)
+{
+    int          counter_idx;
+    mino_val_t  *limit_form;
+    int          test_true_is_exit;
+    if (!match_lt_test(c, cond_form, bindings, n_bindings,
+                       &counter_idx, &limit_form, &test_true_is_exit)) {
+        return 0;
+    }
+
+    /* Resolve which branch holds the recur and which holds the exit. */
+    mino_val_t *recur_form;
+    mino_val_t *exit_form;
+    if (test_true_is_exit) {
+        exit_form  = then_form;
+        recur_form = else_form;
+    } else {
+        recur_form = then_form;
+        exit_form  = else_form;
+    }
+
+    /* recur_form must be (recur step0 step1 ...) with the counter
+     * binding's step = (inc counter_sym) and any other binding step
+     * = (inc itself). */
+    if (!mino_is_cons(recur_form)) return 0;
+    mino_val_t *rh = recur_form->as.cons.car;
+    if (rh == NULL || mino_type_of(rh) != MINO_SYMBOL) return 0;
+    if (strcmp(rh->as.s.data, "recur") != 0) return 0;
+    mino_val_t *steps = recur_form->as.cons.cdr;
+    for (int i = 0; i < n_bindings; i++) {
+        if (!mino_is_cons(steps)) return 0;
+        mino_val_t *step = steps->as.cons.car;
+        mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
+        if (bn == NULL || mino_type_of(bn) != MINO_SYMBOL) return 0;
+        const char *bname = bn->as.s.data;
+        if (!is_unary_call_of_local(c, step, "inc", bname)) return 0;
+        steps = steps->as.cons.cdr;
+    }
+    if (steps != NULL && mino_type_of(steps) != MINO_NIL) {
+        if (mino_is_cons(steps)) return 0;
+    }
+
+    /* Materialize the limit into a fresh register BEFORE the fused
+     * opcode emit. This runs once at loop setup. The limit register
+     * survives the loop because the fused opcode doesn't clobber it
+     * and no other emission inside the matched body writes to it. */
+    int limit_reg = alloc_reg(c);
+    if (limit_reg < 0) return -1;
+    if (compile_expr(c, limit_form, limit_reg, 0) < 0) return -1;
+
+    this_loop->entry_pc = (int)c->bc->code_len;
+    int counter_reg = this_loop->bind_regs[counter_idx];
+    if (n_bindings == 1) {
+        emit_abc(c, OP_LOOP_INT_LT,
+                 (unsigned)counter_reg, (unsigned)limit_reg, 0);
+    } else {
+        int carry_idx = 1 - counter_idx;
+        int carry_reg = this_loop->bind_regs[carry_idx];
+        emit_abc(c, OP_LOOP_INT_LT_INC,
+                 (unsigned)counter_reg, (unsigned)limit_reg,
+                 (unsigned)carry_reg);
+    }
+    if (!c->ok) return -1;
+    if (compile_expr(c, exit_form, dst, tail) < 0) return -1;
+    return 1;
+}
+
+/* Detect canonical counted-loop shapes and emit a fused opcode in
+ * place of the recur-driven body. Returns 1 when the fused op was
+ * emitted, 0 to fall through to the generic body compile. -1
+ * propagates an error.
+ *
+ * What this leverages from Clojure: (loop ... (recur ...)) is a
+ * stable, homoiconic recur form -- the compiler sees the exact shape
+ * of the iteration step at compile time. Persistent bindings let the
+ * step's value depend only on the same binding's prior value, never
+ * on an aliased state from a parallel iteration. */
+static int try_compile_counted_loop(compiler_t *c,
+                                    mino_val_t *body,
+                                    mino_val_t *bindings,
+                                    int n_bindings,
+                                    loop_target_t *this_loop,
+                                    int dst, int tail)
+{
+    if (n_bindings < 1 || n_bindings > 2) return 0;
+
+    mino_val_t *if_form = match_single_form(body, "if");
+    if (if_form == NULL) return 0;
+
+    /* (if cond then else?) -- need both branches. */
+    mino_val_t *iargs = if_form->as.cons.cdr;
+    if (!mino_is_cons(iargs)) return 0;
+    mino_val_t *cond_form = iargs->as.cons.car;
+    mino_val_t *r1 = iargs->as.cons.cdr;
+    if (!mino_is_cons(r1)) return 0;
+    mino_val_t *then_form = r1->as.cons.car;
+    mino_val_t *r2 = r1->as.cons.cdr;
+    if (!mino_is_cons(r2)) return 0;
+    mino_val_t *else_form = r2->as.cons.car;
+    if (r2->as.cons.cdr != NULL && mino_type_of(r2->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(r2->as.cons.cdr)) return 0;
+    }
+
+    int rc;
+    rc = try_match_dec_shape(c, cond_form, then_form, else_form,
+                             bindings, n_bindings, this_loop, dst, tail);
+    if (rc != 0) return rc;
+    rc = try_match_lt_shape(c, cond_form, then_form, else_form,
+                            bindings, n_bindings, this_loop, dst, tail);
+    if (rc != 0) return rc;
+    return 0;
 }
 
 /* ------------------------------------------------------------------- */

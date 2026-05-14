@@ -250,6 +250,8 @@ static const char *op_count_name(unsigned op)
     case OP_EMPTY_VEC: return "OP_EMPTY_VEC";
     case OP_LOOP_INT_DEC: return "OP_LOOP_INT_DEC";
     case OP_LOOP_INT_DEC_INC: return "OP_LOOP_INT_DEC_INC";
+    case OP_LOOP_INT_LT: return "OP_LOOP_INT_LT";
+    case OP_LOOP_INT_LT_INC: return "OP_LOOP_INT_LT_INC";
     case OP_PUSH_ENV: return "OP_PUSH_ENV";
     case OP_POP_ENV: return "OP_POP_ENV";
     case OP_ENV_BIND: return "OP_ENV_BIND";
@@ -1506,6 +1508,102 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 regs = S->bc_regs + base;
                 regs[a] = decv;
                 regs[b] = incv;
+                pc -= 1;
+                break;
+            }
+        }
+
+        case OP_LOOP_INT_LT: {
+            /* Forward-counted single-binding loop step:
+             *   if regs[A] < regs[B]: regs[A]++ and back-jump
+             *   else: fall through to the compiled exit branch.
+             * Hot path is the tagged-int in-range case. Cold paths
+             * (non-int operand, MAX_INT counter) delegate to prim_lt /
+             * prim_inc so the canonical diagnostic still fires. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *vc = regs[a];
+            mino_val_t *vl = regs[b];
+            if (vc != NULL && vl != NULL
+                && MINO_IS_INT(vc) && MINO_IS_INT(vl)) {
+                long long c_ = MINO_INT_VAL(vc);
+                long long l_ = MINO_INT_VAL(vl);
+                if (c_ >= l_) break;
+                if (c_ != MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(c_ + 1);
+                    pc -= 1;
+                    break;
+                }
+                /* MAX_INT: fall through to the prim_inc slow path so
+                 * the overflow throw fires. */
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[b], list);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *ltv = prim_lt(S, list, env);
+                if (ltv == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                if (!mino_is_truthy(ltv)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *incv = prim_inc(S, list2, env);
+                if (incv == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                regs[a] = incv;
+                pc -= 1;
+                break;
+            }
+        }
+
+        case OP_LOOP_INT_LT_INC: {
+            /* Forward-counted two-binding loop step: counter A < limit
+             * B, with carry C incremented in lockstep with A. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned c = C_OF(ins);
+            mino_val_t *vc = regs[a];
+            mino_val_t *vl = regs[b];
+            mino_val_t *vk = regs[c];
+            if (vc != NULL && vl != NULL && vk != NULL
+                && MINO_IS_INT(vc) && MINO_IS_INT(vl)
+                && MINO_IS_INT(vk)) {
+                long long c_ = MINO_INT_VAL(vc);
+                long long l_ = MINO_INT_VAL(vl);
+                if (c_ >= l_) break;
+                long long k_ = MINO_INT_VAL(vk);
+                if (c_ != MINO_INT_MAX && k_ != MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(c_ + 1);
+                    regs[c] = MINO_MAKE_INT(k_ + 1);
+                    pc -= 1;
+                    break;
+                }
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[b], list);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *ltv = prim_lt(S, list, env);
+                if (ltv == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                if (!mino_is_truthy(ltv)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *incv = prim_inc(S, list2, env);
+                if (incv == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                mino_val_t *list3 = mino_nil(S);
+                list3 = mino_cons(S, regs[c], list3);
+                if (list3 == NULL) { ok = 0; goto bc_done; }
+                mino_val_t *incv2 = prim_inc(S, list3, env);
+                if (incv2 == NULL) { ok = 0; goto bc_done; }
+                regs = S->bc_regs + base;
+                regs[a] = incv;
+                regs[c] = incv2;
                 pc -= 1;
                 break;
             }

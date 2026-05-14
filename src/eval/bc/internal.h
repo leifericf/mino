@@ -159,6 +159,17 @@ typedef enum {
      * tagged-int checks per iteration. */
     OP_LOOP_INT_DEC,     /* A=test_reg (decremented). One-binding form.  */
     OP_LOOP_INT_DEC_INC, /* A=test_reg (decremented), B=inc_reg (incremented). */
+    /* Forward-counted variants. Recognise the dominant Clojure-canon
+     * loop shape:
+     *   (loop [i 0] (if (< i N) (recur (inc i)) <exit>))
+     *   (loop [i 0 j 0] (if (< i N) (recur (inc i) (inc j)) <exit>))
+     * The op IS the loop entry; on each iteration it tests A < B (or
+     * an equivalent rearrangement), increments A (and optionally C),
+     * and back-jumps. On exit (test false) it falls through to the
+     * compiled exit branch. Slow paths delegate to prim_lt / prim_inc
+     * so the canonical diagnostic still fires on non-int / overflow. */
+    OP_LOOP_INT_LT,      /* A=counter, B=limit. One-binding form.       */
+    OP_LOOP_INT_LT_INC,  /* A=counter, B=limit, C=inc-carry. Two-binding. */
     /* Lexical-env management for compiled closures. OP_PUSH_ENV and
      * OP_POP_ENV bracket let scopes when the enclosing fn captures
      * (its body contains an inner fn literal); OP_ENV_BIND publishes

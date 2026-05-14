@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.167.0 — Forward-Counted Recur-Shape Fusion
+
+Two new fused-loop opcodes, `OP_LOOP_INT_LT` and `OP_LOOP_INT_LT_INC`,
+catch the forward-counted recur shape that the existing decrement-based
+matcher missed:
+
+```clojure
+(loop [i 0]       (if (>= i N) i (recur (inc i))))            ; 1-binding
+(loop [i 0 j 0]   (if (>= i N) j (recur (inc i) (inc j))))    ; 2-binding
+```
+
+`try_compile_counted_loop` now recognises `(< c L)`, `(<= L c)`,
+`(>= c L)`, and `(> L c)` test shapes in either then/else order with
+`(inc c)` step. The limit operand is materialised into a fresh register
+at loop setup so any literal or outer-scope binding can serve as the
+limit. The slow path delegates to `prim_lt` / `prim_inc` so the
+canonical diagnostic still fires on non-int and overflow.
+
+This closes the 0% coverage gap M5 surfaced: every bench loop today
+uses a 2- or 3-binding shape with `(< i N)` / `(<=)` / `(>= i N)`
+tests, none of which the prior `(zero? i)`/`(dec i)` matcher could
+take.
+
+### Measured impact (v0.166.1 → v0.167.0)
+
+`recur_shape_bench.clj` (mino-bench, new in this release):
+
+| Bench | v0.166.1 | v0.167.0 | Δ |
+|---|---:|---:|---:|
+| `loop-1b-ge 1k` | 13.16 µs | 2.58 µs | **-80%** |
+| `loop-1b-ge 10k` | 143.2 µs | 15.5 µs | **-89%** |
+| `loop-1b-lt 10k` | 132.5 µs | 21.4 µs | **-84%** |
+| `loop-1b-le 10k` | 128.5 µs | 20.2 µs | **-84%** |
+| `loop-1b-gt 10k` | 128.6 µs | 20.4 µs | **-84%** |
+| `loop-2b-ge 10k` | 163.1 µs | 19.7 µs | **-88%** |
+| `loop-2b-lt 10k` | 169.3 µs | 19.9 µs | **-88%** |
+
+`micro_bench.clj` rows whose `(loop [i 0] (if (>= i N) i (recur
+(inc i))))` shape now hits the fused opcode:
+
+| Bench | v0.166.1 | v0.167.0 | Δ |
+|---|---:|---:|---:|
+| `loop 1000 iters` | 13.62 µs | 3.61 µs | **-73%** |
+| `loop 10000 iters` | 131.1 µs | 14.0 µs | **-89%** |
+
+Indirect impact: `reduce + over 1000 ints` (whose vector-reduce
+inner uses a `(loop [i 0] (if (< i n) ... (recur (inc i) ...)))`
+shape inside `core.clj`) drops 12.96 µs → 6.61 µs (**-49%**).
+
+Matrix neutral elsewhere within 2%. ASan clean. 1669 tests, 7700
+assertions all green.
+
 ## v0.166.1 — Builder-Rewriter Safety Patch
 
 `try_builder_rewrite` (introduced in v0.166.0) now declines whenever
