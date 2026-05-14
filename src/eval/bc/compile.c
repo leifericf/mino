@@ -2148,6 +2148,8 @@ fail:
  * sentinel and the closure built from it falls back to the tree-walker
  * at apply_callable time. The outer fn can still compile -- decline of
  * an inner fn is local. */
+static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head);
+
 static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     (void)tail;
@@ -2203,6 +2205,48 @@ static int compile_fn_literal(compiler_t *c, mino_val_t *form, int dst, int tail
     mino_val_t *tmpl = make_fn(c->S, params, body, NULL);
     if (tmpl == NULL) { c->ok = 0; return -1; }
     tmpl->as.fn.defining_ns = c->defining_ns;
+
+    /* Wraps-prim recogniser: `(fn [x] (inc x))` and friends compile to
+     * a fn whose only behavior is to invoke a single primitive on a
+     * single argument. The pipeline fast lanes can skip apply_callable
+     * and route straight to the prim's specialised path; stamp the
+     * wrapped prim on the fn template so the runtime can detect this
+     * cheaply via `as.fn.wraps_prim`. The recogniser is intentionally
+     * narrow: single arity, single body form, no destructuring, no
+     * names, no closures over the param, no transformation of the arg. */
+    if (fn_name == NULL && params != NULL && body != NULL
+        && mino_type_of(params) == MINO_VECTOR
+        && params->as.vec.len == 1
+        && mino_is_cons(body)
+        && (body->as.cons.cdr == NULL
+            || mino_is_nil(body->as.cons.cdr)
+            || (mino_type_of(body->as.cons.cdr) == MINO_EMPTY_LIST))) {
+        mino_val_t *body_form = body->as.cons.car;
+        if (mino_is_cons(body_form)) {
+            mino_val_t *head = body_form->as.cons.car;
+            mino_val_t *tail = body_form->as.cons.cdr;
+            mino_val_t *param_sym = vec_nth(params, 0);
+            if (mino_is_cons(tail)
+                && (tail->as.cons.cdr == NULL
+                    || mino_is_nil(tail->as.cons.cdr)
+                    || (mino_type_of(tail->as.cons.cdr) == MINO_EMPTY_LIST))
+                && tail->as.cons.car != NULL
+                && mino_type_of(tail->as.cons.car) == MINO_SYMBOL
+                && param_sym != NULL
+                && mino_type_of(param_sym) == MINO_SYMBOL
+                && tail->as.cons.car->as.s.len == param_sym->as.s.len
+                && memcmp(tail->as.cons.car->as.s.data,
+                          param_sym->as.s.data,
+                          param_sym->as.s.len) == 0) {
+                mino_val_t *resolved = probe_head_value(c, head);
+                if (resolved != NULL && mino_type_of(resolved) == MINO_PRIM
+                    && resolved->as.prim.fn2 != NULL) {
+                    tmpl->as.fn.wraps_prim = resolved;
+                }
+            }
+        }
+    }
+
     /* Recurse: compile the inner. If decline, the template's bc gets
      * the declined sentinel and the closure falls back at call time.
      * Either result is fine for the outer's purposes. */

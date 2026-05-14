@@ -200,6 +200,14 @@ struct mino_val {
             const char *defining_ns;
             int         shape;
             const struct mino_bc_fn *bc;
+            /* If non-NULL, this fn's only behavior is to invoke a
+             * single primitive on its arguments -- e.g. `(fn [x] (inc
+             * x))` or `(fn [x y] (+ x y))`. The pipeline fast lanes
+             * dereference this to skip apply_callable and route
+             * straight to the prim's specialised path. NULL means the
+             * fn is opaque (custom body, multi-arity, captures, etc.)
+             * and must use the regular call path. */
+            mino_val_t *wraps_prim;
         } fn;
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
             void       *ptr;

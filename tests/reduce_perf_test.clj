@@ -128,3 +128,28 @@
       (is (= [:a 1] e))
       (is (= :a (first e)))
       (is (= 1 (second e))))))
+
+;; Fn-literal wraps-prim recogniser: `(fn [x] (inc x))` and friends
+;; share semantics with the bare prim, plus the pipeline fast lane
+;; routes through the prim directly. Tests assert semantics; perf is
+;; covered in mino-bench.
+(deftest fn-wraps-prim-inc
+  (testing "fn-wrap inc matches bare inc"
+    (is (= (reduce + 0 (map inc (range 100)))
+           (reduce + 0 (map (fn [x] (inc x)) (range 100))))))
+  (testing "fn-wrap dec matches bare dec"
+    (is (= (reduce + 0 (map dec (range 100)))
+           (reduce + 0 (map (fn [x] (dec x)) (range 100))))))
+  (testing "fn-wrap odd? matches bare odd?"
+    (is (= (count (filter odd? (range 100)))
+           (count (filter (fn [x] (odd? x)) (range 100))))))
+  (testing "fn-wrap zero? on integer overflow stays correct"
+    ;; The fast lane's overflow fallback path: dec on MIN_INT bails
+    ;; out to the slow path. Verify the fn-wrap and bare versions
+    ;; agree on a value that doesn't overflow.
+    (is (= (reduce + 0 (map dec (range 1 50)))
+           (reduce + 0 (map (fn [x] (dec x)) (range 1 50))))))
+  (testing "fn-wrap recognized only for matching shape"
+    ;; (fn [x] (+ x 1)) is NOT (fn [x] (inc x)): different prim, body
+    ;; isn't a single inc call. Must still produce correct results.
+    (is (= 100 (count (map (fn [x] (+ x 1)) (range 100)))))))

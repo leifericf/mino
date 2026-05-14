@@ -1149,6 +1149,15 @@ static pipeline_fast_kind_t pipeline_fast_callable(mino_val_t *callable)
         callable = callable->as.var.root;
     }
     if (callable == NULL) return PIPELINE_FAST_NONE;
+    /* User-fn-wrapping-prim recogniser. `(fn [x] (inc x))` compiles to
+     * a MINO_FN whose body invokes the canonical inc prim and nothing
+     * else; compile_fn_literal stamps `wraps_prim` with that prim, so
+     * the pipeline can skip apply_callable and route straight to the
+     * specialised inline path here. */
+    if (mino_type_of(callable) == MINO_FN
+        && callable->as.fn.wraps_prim != NULL) {
+        callable = callable->as.fn.wraps_prim;
+    }
     if (mino_type_of(callable) == MINO_KEYWORD) return PIPELINE_FAST_KW;
     if (mino_type_of(callable) != MINO_PRIM) return PIPELINE_FAST_NONE;
     mino_prim_fn2 fn2 = callable->as.prim.fn2;

@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.171.0 — User-Fn-Wrapping-Prim Recogniser
+
+`compile_fn_literal` now stamps a `wraps_prim` pointer on the fn
+template when the body is the canonical single-form, single-arg
+shape that just forwards to a primitive on its lone argument --
+`(fn [x] (inc x))`, `(fn [x] (odd? x))`, and friends. The shape is
+deliberately narrow: single arity, no destructuring, no closure
+over the param, body is exactly one call form, the call target is
+a bare symbol resolving to a MINO_PRIM, and the call's lone arg is
+the param symbol itself.
+
+`pipeline_fast_callable` (the pipeline_walk inner-loop callable
+recogniser) dereferences this field so the existing FAST_INC /
+FAST_DEC / FAST_ODD_P / FAST_EVEN_P / FAST_POS_P / FAST_NEG_P /
+FAST_ZERO_P inline paths kick in for fn-wrapped calls the same way
+they do for bare prim references. The fn keeps its identity for
+slow-path fallbacks (overflow, non-int) so behaviour matches the
+fn-wrap's actual body.
+
+### Measured impact (v0.170.0 -> v0.171.0)
+
+`(reduce + 0 (map (fn [x] (inc x)) (range 1000)))`:
+
+| Variant | v0.170.0 | v0.171.0 |
+|---|---:|---:|
+| `(map (fn [x] (inc x)) ...)` | ~60 us | ~52 us (-13%) |
+| `(map inc ...)` (bare)       | ~57 us | ~52 us (-9%, noise) |
+
+The wrap and bare cases now share the same inner-loop path. The
+absolute win is modest because the BC compiler already emits a
+tight `(inc x)` body for the wrap closure; the recogniser's value
+is closing the remaining `apply_callable` gap and matching bare
+performance for any future workload that traverses the same
+pipeline shape on a more-expensive prim.
+
+ASan clean. 1680 tests / 7831 assertions all green (5 new tests
+assert semantic parity between fn-wrap and bare prim across
+`map inc`, `map dec`, `filter odd?`, and a non-matching shape that
+must not fire the recogniser).
+
 ## v0.170.0 — In-Place Set Mutation And Set Into Fast Path
 
 Mirrors the v0.169.0 map work onto sets. `set_conj1_owned` and
