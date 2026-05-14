@@ -10,6 +10,68 @@
 #include "runtime/host_threads.h"
 #include "collections/internal.h"   /* make_fn */
 
+#ifdef MINO_REDUCE_STEP_COUNTS
+#include <stdio.h>
+#include <stdlib.h>
+
+/* Tally of reduce_step invocations bucketed by reducer prim identity.
+ * Populated when the binary is built with -DMINO_REDUCE_STEP_COUNTS=1.
+ * Dumped to stderr at process exit. Used to gate item A of the pre-JIT
+ * sweep: confirm canonical numeric reducers (+, *, etc.) dominate
+ * real-workload reduce_step traffic. Not for production. */
+static size_t g_rstep_add;
+static size_t g_rstep_mul;
+static size_t g_rstep_sub;
+static size_t g_rstep_band;
+static size_t g_rstep_bor;
+static size_t g_rstep_bxor;
+static size_t g_rstep_other_prim;
+static size_t g_rstep_user_fn;
+static int    g_rstep_atexit_done;
+
+static void rstep_counts_dump(void)
+{
+    size_t total = g_rstep_add + g_rstep_mul + g_rstep_sub
+                 + g_rstep_band + g_rstep_bor + g_rstep_bxor
+                 + g_rstep_other_prim + g_rstep_user_fn;
+    fprintf(stderr, "reduce-step-counts: total = %zu\n", total);
+    if (total == 0) return;
+#define ROW(name, c) \
+    fprintf(stderr, "  %-20s %12zu  %6.2f%%\n", (name), (c), \
+            100.0 * (double)(c) / (double)total)
+    ROW("prim_add",      g_rstep_add);
+    ROW("prim_mul",      g_rstep_mul);
+    ROW("prim_sub",      g_rstep_sub);
+    ROW("prim_bit_and",  g_rstep_band);
+    ROW("prim_bit_or",   g_rstep_bor);
+    ROW("prim_bit_xor",  g_rstep_bxor);
+    ROW("other_prim",    g_rstep_other_prim);
+    ROW("user_fn",       g_rstep_user_fn);
+#undef ROW
+}
+
+static void rstep_count(mino_val_t *fn)
+{
+    if (!g_rstep_atexit_done) {
+        atexit(rstep_counts_dump);
+        g_rstep_atexit_done = 1;
+    }
+    if (fn != NULL && mino_type_of(fn) == MINO_PRIM
+        && fn->as.prim.fn != NULL) {
+        mino_prim_fn p = fn->as.prim.fn;
+        if      (p == prim_add)     g_rstep_add++;
+        else if (p == prim_mul)     g_rstep_mul++;
+        else if (p == prim_sub)     g_rstep_sub++;
+        else if (p == prim_bit_and) g_rstep_band++;
+        else if (p == prim_bit_or)  g_rstep_bor++;
+        else if (p == prim_bit_xor) g_rstep_bxor++;
+        else                        g_rstep_other_prim++;
+    } else {
+        g_rstep_user_fn++;
+    }
+}
+#endif
+
 /* ------------------------------------------------------------------------- */
 /* seq and realized?                                                         */
 /* ------------------------------------------------------------------------- */
@@ -505,6 +567,9 @@ static int reduce_step(mino_state_t *S, mino_val_t *fn, mino_val_t **acc_io,
                        mino_val_t *elem, mino_env_t *env)
 {
     mino_val_t *acc = *acc_io;
+#ifdef MINO_REDUCE_STEP_COUNTS
+    rstep_count(fn);
+#endif
     if (fn != NULL && mino_type_of(fn) == MINO_PRIM
         && fn->as.prim.fn != NULL
         && acc != NULL && mino_val_int_p(acc)
