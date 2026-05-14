@@ -1136,7 +1136,8 @@ typedef enum {
     PIPELINE_FAST_EVEN_P,
     PIPELINE_FAST_POS_P,
     PIPELINE_FAST_NEG_P,
-    PIPELINE_FAST_ZERO_P
+    PIPELINE_FAST_ZERO_P,
+    PIPELINE_FAST_KW       /* keyword-as-fn: inline (get coll kw) per elem */
 } pipeline_fast_kind_t;
 
 static pipeline_fast_kind_t pipeline_fast_callable(mino_val_t *callable)
@@ -1147,9 +1148,9 @@ static pipeline_fast_kind_t pipeline_fast_callable(mino_val_t *callable)
     if (callable != NULL && mino_type_of(callable) == MINO_VAR) {
         callable = callable->as.var.root;
     }
-    if (callable == NULL || mino_type_of(callable) != MINO_PRIM) {
-        return PIPELINE_FAST_NONE;
-    }
+    if (callable == NULL) return PIPELINE_FAST_NONE;
+    if (mino_type_of(callable) == MINO_KEYWORD) return PIPELINE_FAST_KW;
+    if (mino_type_of(callable) != MINO_PRIM) return PIPELINE_FAST_NONE;
     mino_prim_fn2 fn2 = callable->as.prim.fn2;
     if (fn2 == NULL) return PIPELINE_FAST_NONE;
     if (fn2 == prim_inc_argv)     return PIPELINE_FAST_INC;
@@ -1182,6 +1183,31 @@ static mino_val_t *pipeline_apply_fast_map(mino_state_t *S,
             return MINO_MAKE_INT(v - 1);
         }
     }
+    /* Keyword-as-fn: (map :k coll) and (map :k records) routes here
+     * after the callable resolved to a MINO_KEYWORD. For records
+     * (declared fields and the ext-map) and maps we inline the
+     * lookup; other coll types (sorted-map, transient, nil, etc.)
+     * fall through so the keyword-as-fn diagnostic path stays
+     * intact. */
+    if (k == PIPELINE_FAST_KW && elem != NULL) {
+        int t = mino_type_of(elem);
+        if (t == MINO_RECORD) {
+            int idx = record_field_index(elem, callable);
+            if (idx >= 0) return elem->as.record.vals[idx];
+            if (elem->as.record.ext != NULL) {
+                mino_val_t *v = map_get_val(elem->as.record.ext, callable);
+                return v == NULL ? mino_nil(S) : v;
+            }
+            return mino_nil(S);
+        }
+        if (t == MINO_MAP) {
+            mino_val_t *v = map_get_val(elem, callable);
+            return v == NULL ? mino_nil(S) : v;
+        }
+        if (t == MINO_NIL) return mino_nil(S);
+        /* sorted-map / transient / other: fall through to keyword-as-
+         * fn dispatch in apply_callable_argv. */
+    }
     mino_val_t *argv1[1];
     argv1[0] = elem;
     return apply_callable_argv(S, callable, argv1, 1, env);
@@ -1209,6 +1235,30 @@ static int pipeline_test_fast_filter(mino_state_t *S,
         case PIPELINE_FAST_ZERO_P: return v == 0;
         default: break;
         }
+    }
+    /* Keyword-as-fn as a predicate: returns truthy iff the coll has
+     * the keyword bound to a truthy value. Mirrors the map fast lane
+     * above for the same coll-types. */
+    if (k == PIPELINE_FAST_KW && elem != NULL) {
+        int t = mino_type_of(elem);
+        if (t == MINO_RECORD) {
+            int idx = record_field_index(elem, callable);
+            if (idx >= 0) {
+                return mino_is_truthy_inline(elem->as.record.vals[idx])
+                    ? 1 : 0;
+            }
+            if (elem->as.record.ext != NULL) {
+                mino_val_t *v = map_get_val(elem->as.record.ext, callable);
+                return v != NULL && mino_is_truthy_inline(v) ? 1 : 0;
+            }
+            return 0;
+        }
+        if (t == MINO_MAP) {
+            mino_val_t *v = map_get_val(elem, callable);
+            return v != NULL && mino_is_truthy_inline(v) ? 1 : 0;
+        }
+        if (t == MINO_NIL) return 0;
+        /* sorted-map / transient / other: fall through. */
     }
     mino_val_t *argv1[1];
     argv1[0] = elem;

@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.168.0 — Keyword-As-Fn Pipeline Fast Lane
+
+`(map :k coll)` and `(filter :k coll)` previously went through
+`apply_callable_argv` per element, paying the keyword-as-fn dispatch
+cost on every record / map lookup. `pipeline_fast_callable` now
+recognises a `MINO_KEYWORD` callable as `PIPELINE_FAST_KW`, and the
+inline map / filter fast paths handle records (declared fields plus
+the ext-map fallback) and maps directly. The slow path stays in place
+for sorted-maps, transients, and any other coll-type that needs the
+full keyword-as-fn dispatch.
+
+`record_field_index` (val.c) also gains a pointer-equality first
+pass over the field vector. Keywords are interned, so identical
+keywords share pointer identity; this resolves the hot path in a
+single load+compare instead of the byte-string memcmp that the
+previous code did per field.
+
+### Measured impact (v0.167.0 → v0.168.0)
+
+`protocol_bench.clj`:
+
+| Bench | v0.167.0 | v0.168.0 | Δ |
+|---|---:|---:|---:|
+| `kw-fn-record-loop` | 20.94 µs | 8.51 µs | **-59%** |
+| `proto-mono-area`   | 1.85 µs  | 1.86 µs  | flat |
+| `proto-bi-area`     | 2.35 µs  | 2.37 µs  | flat |
+| `proto-tri-area`    | 40.95 µs | 40.01 µs | -2% |
+| `proto-reduce-sum`  | 1.07 ms  | 1.04 ms  | -3% |
+
+The protocol-dispatch rows are unaffected (they don't route through
+the pipeline `apply_callable_argv` path); the keyword-as-fn row drops
+2.5× because the per-element keyword dispatch is now inlined.
+
+Matrix neutral elsewhere within 2%. ASan clean. 1669 tests, 7700
+assertions all green.
+
 ## v0.167.0 — Forward-Counted Recur-Shape Fusion
 
 Two new fused-loop opcodes, `OP_LOOP_INT_LT` and `OP_LOOP_INT_LT_INC`,

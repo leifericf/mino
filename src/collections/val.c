@@ -524,10 +524,12 @@ mino_val_t *mino_record(mino_state_t *S, mino_val_t *type,
     return v;
 }
 
-/* Look up a declared field by index, by walking the type's fields
- * vector and comparing keyword names. Returns the index in [0, n)
- * or -1 if not found. Used by mino_record_field and the map-iso
- * primitives. */
+/* Look up a declared field by index. Keywords are interned, so the
+ * field vector's entries and the lookup key share pointer identity
+ * when they're the same keyword. The pointer check resolves the hot
+ * path; the byte comparison stays as a defensive fallback for any
+ * not-yet-interned shape that reaches here. Returns the index in
+ * [0, n) or -1 if not found. */
 int record_field_index(const mino_val_t *r, const mino_val_t *key)
 {
     mino_val_t *fields;
@@ -537,6 +539,10 @@ int record_field_index(const mino_val_t *r, const mino_val_t *key)
     fields = r->as.record.type->as.record_type.fields;
     if (fields == NULL) return -1;
     n = fields->as.vec.len;
+    for (i = 0; i < n; i++) {
+        mino_val_t *fk = vec_nth(fields, i);
+        if (fk == key) return (int)i;
+    }
     for (i = 0; i < n; i++) {
         mino_val_t *fk = vec_nth(fields, i);
         if (fk == NULL) continue;
