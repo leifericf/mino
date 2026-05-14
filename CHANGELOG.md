@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.173.0 — Range-Direct Pipeline_Walk
+
+`pipeline_walk` now recognises a bounded int-range source and
+drives the stages from an inline `for (cur; cur < end; cur += step)`
+loop. The range never has to be materialised into 32-int chunks
+via `range_thunk` -- each element is a tagged `MINO_MAKE_INT(cur)`
+with no allocation. Infinite ranges stay on the chunked path so
+`take` and friends can still terminate the walk.
+
+### Measured impact (v0.172.0 -> v0.173.0)
+
+| Workload | v0.172.0 | v0.173.0 | Delta |
+|---|---:|---:|---:|
+| `(reduce + (map inc (range 100k)))` | 4.12 ms | 0.81 ms | **5.09x** |
+| `into-vec-pipeline` (range 1k)      | 155 us  | 104 us  | 1.49x |
+| `mapv-pipeline` (range 1k)          | 188 us  | 112 us  | 1.68x |
+| `filterv-pipeline` (range 1k)       | 78 us   | 26 us   | 3.00x |
+| `dorun-pipeline` (range 1k)         | 78 us   | 22 us   | 3.55x |
+
+`reduce_int_range`, persistent map / set / vec, and protocol-
+dispatch benches all stable within 2% (the range-direct path
+only fires when an intermediate pipeline stage sits between range
+and consumer).
+
+The full profiling write-up lives at `.local/pipeline-walk-profile.md`.
+
+ASan clean. 1680 tests / 7831 assertions all green.
+
 ## v0.172.0 — Builder-Rewrite Coverage Probe
 
 Adds a build-flag-gated instrumentation pair to `compile.c` that

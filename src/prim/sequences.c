@@ -1369,6 +1369,35 @@ static int pipeline_walk(mino_state_t *S,
         }
     }
 
+    /* Int-range source fast path: drive the stages from an inline
+     * `for (cur = start; cur != end; cur += step)` loop instead of
+     * forcing range_thunk every 32 elements (which allocates a fresh
+     * 32-int chunk plus a chunked-cons cell per chunk). Bounded
+     * (non-infinite) ranges only; an infinite range stays on the
+     * chunked path so `take` and friends can terminate the walk. */
+    {
+        long long start = 0, end = 0, range_step = 0;
+        int       infinite = 0;
+        if (lazy_is_int_range(src, &start, &end, &range_step, &infinite)
+            && !infinite && range_step != 0) {
+            long long cur = start;
+            while ((range_step > 0) ? cur < end : cur > end) {
+                mino_val_t *elem = MINO_MAKE_INT(cur);
+                int rc = pipeline_apply_stages(S, stages, fast_kinds,
+                                               n_stages, &elem, env);
+                if (rc < 0) return -1;
+                if (rc != 1) {
+                    int srcc = step(S, ctx, elem, env);
+                    if (srcc < 0) return -1;
+                    if (srcc > 0) return 1;
+                    if (rc == 2) return 1;
+                }
+                cur += range_step;
+            }
+            return 0;
+        }
+    }
+
     /* Force outer LAZY once so we can examine the resolved shape. */
     if (mino_type_of(src) == MINO_LAZY) {
         src = lazy_force(S, src);
