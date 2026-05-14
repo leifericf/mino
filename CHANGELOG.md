@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.164.0 — Unboxed Int-Acc Reducer Fast Lane
+
+Adds an unboxed `long long` accumulator path to the canonical numeric
+reducers (`+`, `*`, `-`, `bit-and`, `bit-or`, `bit-xor`). When
+`(reduce <op> [init] coll)` is invoked with a tagged-int accumulator
+and the collection iterates tagged-int elements, the inner walker
+runs entirely in `long long` arithmetic, falling back to the generic
+`reduce_step` path on the first overflow or non-int element so the
+numeric tower stays Clojure-correct.
+
+The unboxed-acc machinery is plumbed through every walker entry
+point a `(reduce ...)` call can reach:
+
+- `reduce_int_range` — already specialised for `+`; now also covers
+  `*`, `-`, `bit-and`, `bit-or`, `bit-xor` via per-kind hoisted inner
+  loops so the switch is loop-invariant.
+- `reduce_vec_apply` / `reduce_vec_trie_walk` — vector and set
+  reduces (the latter routes through `key_order`'s vector spine).
+- `reduce_pipeline_walk` — fused `(reduce f (->> src (map ...)
+  (filter ...) (take ...)))` chains.
+- `prim_reduce`'s generic `seq_iter` fallback for cons / lazy /
+  custom collection shapes.
+
+Shared by a single `reduce_ctx_t` struct + `reduce_ctx_init` /
+`reduce_ctx_step` / `reduce_ctx_finalize` helpers. The `reduce_step`
+primitive is retained as the box-mode fallback so the numeric tower
+(BigInt promotion, float coercion, user reducers) is unchanged.
+
+### Measured impact (v0.163.0 → v0.164.0)
+
+| Bench | v0.163.0 | v0.164.0 | Δ |
+|---|---:|---:|---:|
+| `(reduce + vec-100k)` | 505 µs | 264 µs | **-48%** |
+| `(reduce + list-100k)` | 856 µs | 654 µs | **-24%** |
+| `(reduce + set-100k)` | 466 µs | 235 µs | **-49%** |
+| `(reduce + vec-1k)` | 10.6 µs | 9.1 µs | -14% |
+| `(reduce + (range 1m))` | 252 µs | 251 µs | flat (already optimal via `reduce_int_range`) |
+| `(reduce bit-or 0 vec-1k)` | 12.4 µs | 10.3 µs | -17% |
+| `(reduce + (map inc (range 100k)))` | 6.92 ms | 7.03 ms | flat (per-stage overhead dominates) |
+
+Pipeline-reduce rows stay near baseline because tagged-int boxing
+is already free in current mino — the per-stage `apply_callable`
+dispatch is the residual cost there, not the reducer-side box. The
+remaining pipeline-reduce ceiling is a separate cycle's target.
+
+Matrix neutral elsewhere within 2% noise. ASan clean. 1659 tests,
+7690 assertions all green.
+
 ## v0.163.0 — IC Resolve Path Consolidation
 
 Pure refactor. Consolidates the three IC-cache consumers in the

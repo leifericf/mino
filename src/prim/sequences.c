@@ -510,21 +510,216 @@ mino_val_t *prim_reduced_p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ? mino_true(S) : mino_false(S);
 }
 
+/* Reducer-kind tag for the inline int-acc fast lane shared across
+ * reduce_int_range, reduce_pipeline_walk, reduce_vec_direct, and the
+ * seq_iter fallback. NONE means "no canonical int reducer; bail to
+ * the generic apply_callable path". */
+typedef enum {
+    REDUCE_KIND_NONE = 0,
+    REDUCE_KIND_ADD,
+    REDUCE_KIND_MUL,
+    REDUCE_KIND_SUB,
+    REDUCE_KIND_BAND,
+    REDUCE_KIND_BOR,
+    REDUCE_KIND_BXOR
+} reduce_int_kind_t;
+
+static reduce_int_kind_t reduce_int_kind_from_fn(mino_val_t *fn)
+{
+    if (fn == NULL || mino_type_of(fn) != MINO_PRIM) return REDUCE_KIND_NONE;
+    mino_prim_fn p = fn->as.prim.fn;
+    if (p == NULL)              return REDUCE_KIND_NONE;
+    if (p == prim_add)          return REDUCE_KIND_ADD;
+    if (p == prim_mul)          return REDUCE_KIND_MUL;
+    if (p == prim_sub)          return REDUCE_KIND_SUB;
+    if (p == prim_bit_and)      return REDUCE_KIND_BAND;
+    if (p == prim_bit_or)       return REDUCE_KIND_BOR;
+    if (p == prim_bit_xor)      return REDUCE_KIND_BXOR;
+    return REDUCE_KIND_NONE;
+}
+
+/* Inline tagged-int reducer step. Returns 1 on success (acc updated),
+ * 0 on miss (overflow / non-int reducer-kind combination). Marked
+ * inline so leaf-loop callers (reduce_ctx_step) get the switch
+ * dispatch folded into their hot path. */
+static inline int reduce_step_int_acc(reduce_int_kind_t kind,
+                                       long long *acc_io, long long elem)
+{
+    long long r;
+    switch (kind) {
+    case REDUCE_KIND_ADD:
+#if defined(__GNUC__) || defined(__clang__)
+        if (__builtin_add_overflow(*acc_io, elem, &r)) return 0;
+        *acc_io = r;
+#else
+        *acc_io += elem;
+#endif
+        return 1;
+    case REDUCE_KIND_MUL:
+#if defined(__GNUC__) || defined(__clang__)
+        if (__builtin_mul_overflow(*acc_io, elem, &r)) return 0;
+        *acc_io = r;
+#else
+        *acc_io *= elem;
+#endif
+        return 1;
+    case REDUCE_KIND_SUB:
+#if defined(__GNUC__) || defined(__clang__)
+        if (__builtin_sub_overflow(*acc_io, elem, &r)) return 0;
+        *acc_io = r;
+#else
+        *acc_io -= elem;
+#endif
+        return 1;
+    case REDUCE_KIND_BAND: *acc_io &= elem; return 1;
+    case REDUCE_KIND_BOR:  *acc_io |= elem; return 1;
+    case REDUCE_KIND_BXOR: *acc_io ^= elem; return 1;
+    default:               return 0;
+    }
+}
+
+/* Specialised inner loops for reduce_int_range. The reducer kind is
+ * loop-invariant, so we hoist the switch out and let each kind run a
+ * tight `__builtin_*_overflow` / bitwise inner loop. Returns 0 = ok,
+ * -1 = overflow (caller bails to generic path). */
+static int reduce_int_range_add(long long start, long long end,
+                                long long step, long long *acc_io)
+{
+    long long i;
+    long long acc = *acc_io;
+    if (step > 0) {
+        for (i = start; i < end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_add_overflow(acc, i, &r)) return -1;
+            acc = r;
+#else
+            acc += i;
+#endif
+        }
+    } else {
+        for (i = start; i > end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_add_overflow(acc, i, &r)) return -1;
+            acc = r;
+#else
+            acc += i;
+#endif
+        }
+    }
+    *acc_io = acc;
+    return 0;
+}
+
+static int reduce_int_range_mul(long long start, long long end,
+                                long long step, long long *acc_io)
+{
+    long long i;
+    long long acc = *acc_io;
+    if (step > 0) {
+        for (i = start; i < end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_mul_overflow(acc, i, &r)) return -1;
+            acc = r;
+#else
+            acc *= i;
+#endif
+        }
+    } else {
+        for (i = start; i > end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_mul_overflow(acc, i, &r)) return -1;
+            acc = r;
+#else
+            acc *= i;
+#endif
+        }
+    }
+    *acc_io = acc;
+    return 0;
+}
+
+static int reduce_int_range_sub(long long start, long long end,
+                                long long step, long long *acc_io)
+{
+    long long i;
+    long long acc = *acc_io;
+    if (step > 0) {
+        for (i = start; i < end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_sub_overflow(acc, i, &r)) return -1;
+            acc = r;
+#else
+            acc -= i;
+#endif
+        }
+    } else {
+        for (i = start; i > end; i += step) {
+#if defined(__GNUC__) || defined(__clang__)
+            long long r;
+            if (__builtin_sub_overflow(acc, i, &r)) return -1;
+            acc = r;
+#else
+            acc -= i;
+#endif
+        }
+    }
+    *acc_io = acc;
+    return 0;
+}
+
+static int reduce_int_range_band(long long start, long long end,
+                                 long long step, long long *acc_io)
+{
+    long long i;
+    long long acc = *acc_io;
+    if (step > 0) for (i = start; i < end; i += step) acc &= i;
+    else          for (i = start; i > end; i += step) acc &= i;
+    *acc_io = acc;
+    return 0;
+}
+
+static int reduce_int_range_bor(long long start, long long end,
+                                long long step, long long *acc_io)
+{
+    long long i;
+    long long acc = *acc_io;
+    if (step > 0) for (i = start; i < end; i += step) acc |= i;
+    else          for (i = start; i > end; i += step) acc |= i;
+    *acc_io = acc;
+    return 0;
+}
+
+static int reduce_int_range_bxor(long long start, long long end,
+                                 long long step, long long *acc_io)
+{
+    long long i;
+    long long acc = *acc_io;
+    if (step > 0) for (i = start; i < end; i += step) acc ^= i;
+    else          for (i = start; i > end; i += step) acc ^= i;
+    *acc_io = acc;
+    return 0;
+}
+
 /* Numeric reducer fast path: (reduce <op> [init] (range start end step))
- * where <op> is one of the canonical arithmetic prims (currently +).
+ * where <op> is one of the canonical arithmetic prims (+, *, -, &, |, ^).
  * Walks the range as a tight integer loop, never materialising chunks
- * or boxing intermediates. Returns NULL on miss (overflow or
- * unsupported reducer); the caller falls through to the generic path. */
+ * or boxing intermediates. Returns NULL on miss (overflow / unsupported
+ * reducer / non-int init); the caller falls through to the generic
+ * path. */
 static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
                                      mino_val_t *init, int has_init,
                                      long long start, long long end,
                                      long long step)
 {
-    long long acc = 0;
-    long long i;
-    if (fn == NULL || mino_type_of(fn) != MINO_PRIM) return NULL;
-    if (fn->as.prim.fn != prim_add) return NULL;  /* extend later */
-    /* Compute element count; range is finite (caller already checked). */
+    long long          acc = 0;
+    int                rc  = 0;
+    reduce_int_kind_t  kind = reduce_int_kind_from_fn(fn);
+    if (kind == REDUCE_KIND_NONE) return NULL;
     if (step == 0) return NULL;
     if (has_init) {
         if (init == NULL || !mino_val_int_p(init)) return NULL;
@@ -536,27 +731,16 @@ static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
         acc   = start;
         start = start + step;
     }
-    if (step > 0) {
-        for (i = start; i < end; i += step) {
-#if defined(__GNUC__) || defined(__clang__)
-            long long r;
-            if (__builtin_add_overflow(acc, i, &r)) return NULL;
-            acc = r;
-#else
-            acc += i;
-#endif
-        }
-    } else {
-        for (i = start; i > end; i += step) {
-#if defined(__GNUC__) || defined(__clang__)
-            long long r;
-            if (__builtin_add_overflow(acc, i, &r)) return NULL;
-            acc = r;
-#else
-            acc += i;
-#endif
-        }
+    switch (kind) {
+    case REDUCE_KIND_ADD:  rc = reduce_int_range_add (start, end, step, &acc); break;
+    case REDUCE_KIND_MUL:  rc = reduce_int_range_mul (start, end, step, &acc); break;
+    case REDUCE_KIND_SUB:  rc = reduce_int_range_sub (start, end, step, &acc); break;
+    case REDUCE_KIND_BAND: rc = reduce_int_range_band(start, end, step, &acc); break;
+    case REDUCE_KIND_BOR:  rc = reduce_int_range_bor (start, end, step, &acc); break;
+    case REDUCE_KIND_BXOR: rc = reduce_int_range_bxor(start, end, step, &acc); break;
+    default:               return NULL;
     }
+    if (rc < 0) return NULL;
     return mino_int(S, acc);
 }
 
@@ -625,6 +809,82 @@ static int reduce_step(mino_state_t *S, mino_val_t *fn, mino_val_t **acc_io,
     return 0;
 }
 
+/* Unified reduce accumulator state. Carries two branches: an
+ * unboxed `acc_int` for the canonical numeric reducer fast lane
+ * (when `kind` is set and every element so far has been tagged-int
+ * with no overflow), and a boxed `acc` for the generic path. The
+ * first overflow / non-int element boxes acc_int into acc and the
+ * rest of the walk runs in boxed mode. Shared across the pipeline,
+ * vec/set/seq_iter reducer entry points. */
+typedef struct {
+    mino_val_t        *fn;
+    reduce_int_kind_t  kind;
+    long long          acc_int;
+    int                has_int_acc;
+    mino_val_t        *acc;
+    int                has_init;
+} reduce_ctx_t;
+
+static void reduce_ctx_init(reduce_ctx_t *ctx, mino_val_t *fn,
+                            mino_val_t *acc, int has_init)
+{
+    ctx->fn          = fn;
+    ctx->kind        = reduce_int_kind_from_fn(fn);
+    ctx->acc_int     = 0;
+    ctx->has_int_acc = 0;
+    ctx->acc         = acc;
+    ctx->has_init    = has_init;
+    if (has_init && ctx->kind != REDUCE_KIND_NONE
+        && acc != NULL && mino_val_int_p(acc)) {
+        ctx->has_int_acc = 1;
+        ctx->acc_int     = mino_val_int_get(acc);
+        ctx->acc         = NULL;
+    }
+}
+
+/* Apply `elem` to the accumulator under fn. Returns 0=continue,
+ * 1=stop (Reduced), -1=error. Stays on the unboxed fast lane until
+ * the first non-int element or arithmetic overflow boxes acc and
+ * falls through to reduce_step's generic path. */
+static int reduce_ctx_step(mino_state_t *S, reduce_ctx_t *ctx,
+                           mino_val_t *elem, mino_env_t *env)
+{
+    if (!ctx->has_init) {
+        ctx->has_init = 1;
+        if (ctx->kind != REDUCE_KIND_NONE && elem != NULL
+            && mino_val_int_p(elem)) {
+            ctx->has_int_acc = 1;
+            ctx->acc_int     = mino_val_int_get(elem);
+        } else {
+            ctx->acc = elem;
+        }
+        return 0;
+    }
+    if (ctx->has_int_acc && elem != NULL && mino_val_int_p(elem)) {
+        if (reduce_step_int_acc(ctx->kind, &ctx->acc_int,
+                                 mino_val_int_get(elem))) {
+            return 0;
+        }
+        /* overflow -- box and fall through to boxed path */
+    }
+    if (ctx->has_int_acc) {
+        ctx->acc         = mino_int(S, ctx->acc_int);
+        ctx->has_int_acc = 0;
+    }
+    return reduce_step(S, ctx->fn, &ctx->acc, elem, env);
+}
+
+static mino_val_t *reduce_ctx_finalize(mino_state_t *S,
+                                       reduce_ctx_t *ctx,
+                                       mino_env_t *env)
+{
+    if (!ctx->has_init) {
+        return apply_callable(S, ctx->fn, mino_nil(S), env);
+    }
+    if (ctx->has_int_acc) return mino_int(S, ctx->acc_int);
+    return ctx->acc;
+}
+
 /* Direct-walk fast path for (reduce fn coll [init]) over a persistent
  * map. Yields a MINO_MAP_ENTRY per pair (cheaper than the [k v] vector
  * pair seq_iter_val once produced) and skips the seq_iter switch
@@ -666,26 +926,27 @@ static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
 /* Recursive trie walker for vector reduce. `pos_io` tracks the
  * absolute backing position visited so far so subvec offset/len
  * windows can be honored without a separate offset-aware codepath.
- * Returns 0 = continue, 1 = stop (Reduced fired), -1 = error. */
-static int reduce_vec_trie_walk(mino_state_t *S, mino_val_t *fn,
-                                mino_val_t **acc_io, mino_env_t *env,
+ * The `ctx` carries the unboxed-acc fast lane plus the boxed
+ * fallback. Returns 0 = continue, 1 = stop (Reduced fired), -1 = error. */
+static int reduce_vec_trie_walk(mino_state_t *S, reduce_ctx_t *ctx,
+                                mino_env_t *env,
                                 const mino_vec_node_t *node, unsigned shift,
                                 size_t *pos_io, size_t start, size_t end)
 {
     unsigned i;
     if (shift == 0) {
-        /* Leaf: iterate the 32-slot block directly. The hot inner loop
-         * is the only path that allocates an inline-tagged int via
-         * reduce_step's int+int lane -- no per-step vec_nth, no
-         * seq_iter switch. */
+        /* Leaf: iterate the 32-slot block directly. When ctx carries
+         * a canonical-int reducer kind and every element is tagged-int,
+         * the inner loop stays in long-long arithmetic with no per-
+         * element heap allocation. */
         for (i = 0; i < node->count; i++) {
             size_t p = *pos_io;
             (*pos_io)++;
             if (p >= end) return 0;
             if (p < start) continue;
             {
-                int rc = reduce_step(S, fn, acc_io,
-                                     (mino_val_t *)node->slots[i], env);
+                int rc = reduce_ctx_step(S, ctx,
+                                         (mino_val_t *)node->slots[i], env);
                 if (rc != 0) return rc;
             }
         }
@@ -696,7 +957,7 @@ static int reduce_vec_trie_walk(mino_state_t *S, mino_val_t *fn,
         int rc;
         if (*pos_io >= end) return 0;
         if (child == NULL) continue;
-        rc = reduce_vec_trie_walk(S, fn, acc_io, env, child,
+        rc = reduce_vec_trie_walk(S, ctx, env, child,
                                   shift - MINO_VEC_B, pos_io, start, end);
         if (rc != 0) return rc;
     }
@@ -704,9 +965,9 @@ static int reduce_vec_trie_walk(mino_state_t *S, mino_val_t *fn,
 }
 
 /* Walk a vector (or, indirectly, a set's key_order vector) applying
- * reduce_step. Skips the seq_iter dispatch and the per-element
- * vec_nth's O(log32) trie navigation; one leaf pass visits each
- * element with a tight 32-slot inner loop. Honors offset (subvec)
+ * the unified reduce_ctx_step. Skips the seq_iter dispatch and the
+ * per-element vec_nth's O(log32) trie navigation; one leaf pass visits
+ * each element with a tight 32-slot inner loop. Honors offset (subvec)
  * by passing absolute backing positions into the walker. */
 static mino_val_t *reduce_vec_apply(mino_state_t *S, mino_val_t *fn,
                                     mino_val_t *acc, int has_init,
@@ -718,22 +979,20 @@ static mino_val_t *reduce_vec_apply(mino_state_t *S, mino_val_t *fn,
     size_t start      = offset;
     size_t end        = offset + n;
     size_t pos        = 0;
+    reduce_ctx_t ctx;
     if (n == 0) {
         if (has_init) return acc;
         return apply_callable(S, fn, mino_nil(S), env);
     }
-    if (!has_init) {
-        acc   = vec_nth(v, 0);
-        start = offset + 1;
-    }
+    reduce_ctx_init(&ctx, fn, acc, has_init);
     if (trie_count > 0 && v->as.vec.root != NULL && start < trie_count
         && end > 0) {
         size_t trie_end = end < trie_count ? end : trie_count;
-        int rc = reduce_vec_trie_walk(S, fn, &acc, env, v->as.vec.root,
+        int rc = reduce_vec_trie_walk(S, &ctx, env, v->as.vec.root,
                                       v->as.vec.shift, &pos, start,
                                       trie_end);
         if (rc == -1) return NULL;
-        if (rc == 1)  return acc;
+        if (rc == 1)  return reduce_ctx_finalize(S, &ctx, env);
     }
     /* Tail: first element sits at absolute position trie_count. */
     if (v->as.vec.tail_len > 0 && end > trie_count) {
@@ -743,15 +1002,15 @@ static mino_val_t *reduce_vec_apply(mino_state_t *S, mino_val_t *fn,
             if (p >= end) break;
             if (p < start) continue;
             {
-                int rc = reduce_step(S, fn, &acc,
-                                     (mino_val_t *)v->as.vec.tail->slots[i],
-                                     env);
+                int rc = reduce_ctx_step(S, &ctx,
+                                         (mino_val_t *)v->as.vec.tail->slots[i],
+                                         env);
                 if (rc == -1) return NULL;
-                if (rc == 1)  return acc;
+                if (rc == 1)  return reduce_ctx_finalize(S, &ctx, env);
             }
         }
     }
-    return acc;
+    return reduce_ctx_finalize(S, &ctx, env);
 }
 
 /* Direct-walk fast path for (reduce fn vec [init]). */
@@ -1106,27 +1365,11 @@ static int pipeline_walk(mino_state_t *S,
     return 0;
 }
 
-/* reduce-shaped step context + callback. Drives an accumulator
- * through `fn` under the reduce_step contract; the walker handles
- * the per-element stage application. has_init==0 means *acc is
- * unset; the first surviving element seeds the accumulator
- * (2-arg reduce arity). */
-typedef struct {
-    mino_val_t *fn;
-    mino_val_t *acc;
-    int         has_init;
-} reduce_pipeline_ctx_t;
-
+/* pipeline_walk's per-element callback shim around reduce_ctx_step. */
 static int reduce_pipeline_step(mino_state_t *S, void *ctx_,
                                 mino_val_t *elem, mino_env_t *env)
 {
-    reduce_pipeline_ctx_t *ctx = (reduce_pipeline_ctx_t *)ctx_;
-    if (!ctx->has_init) {
-        ctx->acc      = elem;
-        ctx->has_init = 1;
-        return 0;
-    }
-    return reduce_step(S, ctx->fn, &ctx->acc, elem, env);
+    return reduce_ctx_step(S, (reduce_ctx_t *)ctx_, elem, env);
 }
 
 static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
@@ -1138,12 +1381,13 @@ static mino_val_t *reduce_pipeline_walk(mino_state_t *S,
                                         int n_stages,
                                         mino_env_t *env)
 {
-    reduce_pipeline_ctx_t ctx = { fn, acc, has_init };
-    int rc = pipeline_walk(S, src, stages, n_stages,
-                           reduce_pipeline_step, &ctx, env);
+    reduce_ctx_t ctx;
+    int          rc;
+    reduce_ctx_init(&ctx, fn, acc, has_init);
+    rc = pipeline_walk(S, src, stages, n_stages,
+                       reduce_pipeline_step, &ctx, env);
     if (rc < 0) return NULL;
-    if (!ctx.has_init) return apply_callable(S, fn, mino_nil(S), env);
-    return ctx.acc;
+    return reduce_ctx_finalize(S, &ctx, env);
 }
 
 /* True iff coll's outer LAZY is one of the recognised pipeline stages.
@@ -1199,8 +1443,18 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         if (seq_iter_done(&it)) {
             return apply_callable(S, fn, mino_nil(S), env);
         }
-        acc = seq_iter_val(S, &it);
-        seq_iter_next(S, &it);
+        {
+            reduce_ctx_t ctx;
+            reduce_ctx_init(&ctx, fn, NULL, 0);
+            while (!seq_iter_done(&it)) {
+                mino_val_t *elem = seq_iter_val(S, &it);
+                int rc = reduce_ctx_step(S, &ctx, elem, env);
+                if (rc == -1) return NULL;
+                if (rc == 1)  return reduce_ctx_finalize(S, &ctx, env);
+                seq_iter_next(S, &it);
+            }
+            return reduce_ctx_finalize(S, &ctx, env);
+        }
     } else if (n == 3) {
         /* (reduce f init coll) */
         fn   = args->as.cons.car;
@@ -1235,16 +1489,23 @@ mino_val_t *prim_reduce(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     } else {
         return prim_throw_classified(S, "eval/arity", "MAR001", "reduce requires 2 or 3 arguments");
     }
-    /* Inner loop: reduce_step handles the int+int fast lane and the
-     * MINO_REDUCED early-exit; we just drive seq_iter. */
-    while (!seq_iter_done(&it)) {
-        mino_val_t *elem = seq_iter_val(S, &it);
-        int rc = reduce_step(S, fn, &acc, elem, env);
-        if (rc == -1) return NULL;
-        if (rc == 1)  return acc;
-        seq_iter_next(S, &it);
+    /* Inner loop: reduce_ctx_step keeps the accumulator unboxed when
+     * fn is a canonical numeric reducer and every element so far has
+     * been tagged-int (no overflow). The first miss falls through to
+     * reduce_step's generic int+int / apply_callable path so the
+     * numeric tower stays Clojure-correct. */
+    {
+        reduce_ctx_t ctx;
+        reduce_ctx_init(&ctx, fn, acc, 1);
+        while (!seq_iter_done(&it)) {
+            mino_val_t *elem = seq_iter_val(S, &it);
+            int rc = reduce_ctx_step(S, &ctx, elem, env);
+            if (rc == -1) return NULL;
+            if (rc == 1)  return reduce_ctx_finalize(S, &ctx, env);
+            seq_iter_next(S, &it);
+        }
+        return reduce_ctx_finalize(S, &ctx, env);
     }
-    return acc;
 }
 
 /* (set coll) — create a set from a collection. */
