@@ -184,11 +184,9 @@ static int ensure_code(compiler_t *c, size_t need)
     return 1;
 }
 
-/* Allocate a fresh IC slot for OP_GETGLOBAL_CACHED. Grows the slots
- * buffer geometrically (8 -> 16 -> 32 ...); writes the symbol the
- * slot stands for so the runtime miss path can re-resolve. Returns
- * the slot index (fits in 16-bit Bx) or -1 on overflow / OOM. */
-static int alloc_ic_slot(compiler_t *c, mino_val_t *sym)
+/* Grow the slot buffer if needed and return the index of a freshly
+ * zero-initialized slot. Callers fill kind / sym / atom / etc. */
+static int reserve_ic_slot(compiler_t *c)
 {
     if (c->bc->ic_slots_len >= 0xFFFF) { c->ok = 0; return -1; }
     if ((int)c->bc->ic_slots_len + 1 > c->bc->ic_slots_cap) {
@@ -201,19 +199,56 @@ static int alloc_ic_slot(compiler_t *c, mino_val_t *sym)
                    (size_t)c->bc->ic_slots_len * sizeof(*grown));
         }
         for (int i = c->bc->ic_slots_len; i < cap; i++) {
-            grown[i].sym = NULL;
-            grown[i].cached = NULL;
-            grown[i].gen = 0;
+            grown[i].sym         = NULL;
+            grown[i].cached      = NULL;
+            grown[i].gen         = 0;
+            grown[i].kind        = MINO_BC_IC_GLOBAL;
+            grown[i].atom        = NULL;
+            grown[i].cached_map  = NULL;
+            grown[i].cached_type = NULL;
         }
         gc_write_barrier(c->S, c->bc, c->bc->ic_slots, grown);
         c->bc->ic_slots = grown;
         c->bc->ic_slots_cap = cap;
     }
     int idx = c->bc->ic_slots_len++;
+    c->bc->ic_slots[idx].sym         = NULL;
+    c->bc->ic_slots[idx].cached      = NULL;
+    c->bc->ic_slots[idx].gen         = 0;
+    c->bc->ic_slots[idx].kind        = MINO_BC_IC_GLOBAL;
+    c->bc->ic_slots[idx].atom        = NULL;
+    c->bc->ic_slots[idx].cached_map  = NULL;
+    c->bc->ic_slots[idx].cached_type = NULL;
+    return idx;
+}
+
+/* Allocate a fresh IC slot for OP_GETGLOBAL_CACHED / OP_CALL_CACHED.
+ * Grows the slots buffer geometrically (8 -> 16 -> 32 ...); writes the
+ * symbol the slot stands for so the runtime miss path can re-resolve.
+ * Returns the slot index (fits in 16-bit Bx) or -1 on overflow / OOM. */
+static int alloc_ic_slot(compiler_t *c, mino_val_t *sym)
+{
+    int idx = reserve_ic_slot(c);
+    if (idx < 0) return -1;
     gc_write_barrier(c->S, c->bc->ic_slots, NULL, sym);
-    c->bc->ic_slots[idx].sym    = sym;
-    c->bc->ic_slots[idx].cached = NULL;
-    c->bc->ic_slots[idx].gen    = 0;
+    c->bc->ic_slots[idx].sym = sym;
+    return idx;
+}
+
+/* Allocate a fresh IC slot for OP_PROTOCOL_CALL_CACHED. `mname` is the
+ * method-name string (used in the no-impl diagnostic); `atom` is the
+ * dispatch atom, captured at compile time and pinned in the slot so the
+ * hot path can deref without symbol resolution. */
+static int alloc_protocol_ic_slot(compiler_t *c, mino_val_t *mname,
+                                  mino_val_t *atom)
+{
+    int idx = reserve_ic_slot(c);
+    if (idx < 0) return -1;
+    gc_write_barrier(c->S, c->bc->ic_slots, NULL, mname);
+    gc_write_barrier(c->S, c->bc->ic_slots, NULL, atom);
+    c->bc->ic_slots[idx].sym  = mname;
+    c->bc->ic_slots[idx].atom = atom;
+    c->bc->ic_slots[idx].kind = MINO_BC_IC_PROTOCOL;
     return idx;
 }
 
@@ -1759,6 +1794,54 @@ static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head)
     return NULL;
 }
 
+/* Protocol-method detection. defprotocol expands each method into a
+ * single-arity fn whose body is the one form
+ *   (protocol-dispatch <dispatch-atom-sym> "<mname>" & params).
+ * Recognize that exact shape; on match return 1 and fill *out_mname /
+ * *out_atom with the method-name string and the resolved dispatch
+ * atom. The fn body cons-spine is owned by the macroexpander and
+ * persists across calls, so the recognizer can scan it once at
+ * compile time without copying. */
+static int try_protocol_method(compiler_t *c, mino_val_t *head,
+                               mino_val_t **out_mname,
+                               mino_val_t **out_atom)
+{
+    mino_val_t *fnv = probe_head_value(c, head);
+    if (fnv == NULL || mino_type_of(fnv) != MINO_FN) return 0;
+    /* Single-arity only: defprotocol always emits a single-arity defn.
+     * params is the param vector; body is the body-form list. */
+    if (fnv->as.fn.params == NULL) return 0;
+    mino_val_t *body = fnv->as.fn.body;
+    if (!mino_is_cons(body)) return 0;
+    /* Exactly one body form: cdr is the tagged-nil terminator. */
+    mino_val_t *body_tail = body->as.cons.cdr;
+    if (body_tail != NULL && mino_type_of(body_tail) != MINO_NIL
+        && mino_type_of(body_tail) != MINO_EMPTY_LIST) {
+        return 0;
+    }
+    mino_val_t *form = body->as.cons.car;
+    if (!mino_is_cons(form)) return 0;
+    mino_val_t *call_head = form->as.cons.car;
+    if (call_head == NULL || mino_type_of(call_head) != MINO_SYMBOL) return 0;
+    /* Head is the bare symbol `protocol-dispatch` as emitted by the
+     * defprotocol macro. A user-side rebinding under a different name
+     * silently falls through to OP_CALL_CACHED -- correct, slower. */
+    if (strcmp(call_head->as.s.data, "protocol-dispatch") != 0) return 0;
+    mino_val_t *rest = form->as.cons.cdr;
+    if (!mino_is_cons(rest)) return 0;
+    mino_val_t *atom_sym = rest->as.cons.car;
+    if (atom_sym == NULL || mino_type_of(atom_sym) != MINO_SYMBOL) return 0;
+    mino_val_t *atom_val = probe_head_value(c, atom_sym);
+    if (atom_val == NULL || mino_type_of(atom_val) != MINO_ATOM) return 0;
+    mino_val_t *rest2 = rest->as.cons.cdr;
+    if (!mino_is_cons(rest2)) return 0;
+    mino_val_t *mname = rest2->as.cons.car;
+    if (mname == NULL || mino_type_of(mname) != MINO_STRING) return 0;
+    *out_mname = mname;
+    *out_atom  = atom_val;
+    return 1;
+}
+
 /* Macro-detection probe: does `head` resolve to a MINO_MACRO under the
  * same cascade the runtime would use at dispatch time? Used to gate
  * OP_CALL / OP_TAILCALL emission so macros stay on the tree-walker
@@ -2479,41 +2562,65 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
         return 0;
     }
 
-    /* Inline-cache fast lane for non-tail calls whose head is a global
-     * symbol with no static local binding. Skips the OP_GETGLOBAL_CACHED
-     * step entirely (callee resolution + caching fuses into the call
-     * opcode itself). Qualified symbols (foo/bar) are eligible -- the
-     * runtime's resolve_global handles both forms. Tail-position calls
-     * still emit OP_TAILCALL so the trampoline keeps the C stack flat;
-     * a cached tail variant is a separate follow-up. */
-    if (!tail
-        && head != NULL && mino_type_of(head) == MINO_SYMBOL
+    /* Inline-cache fast lane for calls whose head is a global symbol
+     * with no static local binding. Two-word encoding (ABC + slot
+     * index in word-2's Bx) shared by four opcodes:
+     *   non-tail head=fn          -> OP_CALL_CACHED
+     *   non-tail head=protocol fn -> OP_PROTOCOL_CALL_CACHED
+     *   tail     head=protocol fn -> OP_PROTOCOL_TAILCALL_CACHED
+     * Non-protocol tail calls fall through to the slow path's
+     * OP_TAILCALL emit (no cached tail-call variant for plain heads
+     * yet -- a follow-up). The non-protocol non-tail branch skips the
+     * OP_GETGLOBAL_CACHED step entirely (callee resolution + caching
+     * fuses into the call opcode itself). Qualified symbols (foo/bar)
+     * are eligible -- the runtime's resolve_global handles both
+     * forms. If the head resolves to a defprotocol-emitted dispatcher
+     * fn, the protocol-shaped IC slot pins the dispatch atom at
+     * compile time so the hot path skips the protocol-dispatch
+     * trampoline entirely. */
+    if (head != NULL && mino_type_of(head) == MINO_SYMBOL
         && find_local(c, head->as.s.data) < 0) {
-        int saved_next_c = c->next_reg;
-        int arg_base = c->next_reg;
-        for (int i = 0; i < argc; i++) {
-            if (alloc_reg(c) < 0) return -1;
-        }
-        cur = form->as.cons.cdr;
-        for (int i = 0; i < argc; i++) {
-            if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0) {
-                return -1;
+        mino_val_t *proto_mname = NULL;
+        mino_val_t *proto_atom  = NULL;
+        int is_proto = (argc >= 1)
+            && try_protocol_method(c, head, &proto_mname, &proto_atom);
+
+        if (!tail || is_proto) {
+            int saved_next_c = c->next_reg;
+            int arg_base = c->next_reg;
+            for (int i = 0; i < argc; i++) {
+                if (alloc_reg(c) < 0) return -1;
             }
-            cur = cur->as.cons.cdr;
+            cur = form->as.cons.cdr;
+            for (int i = 0; i < argc; i++) {
+                if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0) {
+                    return -1;
+                }
+                cur = cur->as.cons.cdr;
+            }
+            int slot;
+            mino_bc_op_t op;
+            if (is_proto) {
+                slot = alloc_protocol_ic_slot(c, proto_mname, proto_atom);
+                op   = tail ? OP_PROTOCOL_TAILCALL_CACHED
+                            : OP_PROTOCOL_CALL_CACHED;
+            } else {
+                slot = alloc_ic_slot(c, head);
+                op   = OP_CALL_CACHED;
+            }
+            if (slot < 0) return -1;
+            if (arg_base > 0xFF || dst > 0xFF) { c->ok = 0; return -1; }
+            emit_abc(c, op,
+                     (unsigned)arg_base, (unsigned)argc, (unsigned)dst);
+            /* Second instruction word: carries the slot index in Bx so the
+             * handler can fetch it via code[pc++]. The main dispatch never
+             * sees this word -- the handler consumes it before the loop
+             * reads its next op. The op byte is OP_NOP so a stray decode
+             * (e.g., a bytecode dumper) is harmless. */
+            emit_abx(c, OP_NOP, 0, (unsigned)slot);
+            c->next_reg = saved_next_c;
+            return 0;
         }
-        int slot = alloc_ic_slot(c, head);
-        if (slot < 0) return -1;
-        if (arg_base > 0xFF || dst > 0xFF) { c->ok = 0; return -1; }
-        emit_abc(c, OP_CALL_CACHED,
-                 (unsigned)arg_base, (unsigned)argc, (unsigned)dst);
-        /* Second instruction word: carries the slot index in Bx so the
-         * handler can fetch it via code[pc++]. The main dispatch never
-         * sees this word -- OP_CALL_CACHED consumes it before the loop
-         * reads its next op. The op byte is OP_NOP so a stray decode
-         * (e.g., a bytecode dumper) is harmless. */
-        emit_abx(c, OP_NOP, 0, (unsigned)slot);
-        c->next_reg = saved_next_c;
-        return 0;
     }
 
     /* Allocate consecutive regs: fn slot then argc arg slots. The OP_CALL

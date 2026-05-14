@@ -61,6 +61,26 @@ typedef enum {
      * directly at compile time. */
     OP_GETGLOBAL_CACHED, /* A=dst, Bx=ic slot index                        */
     OP_CALL_CACHED,      /* A=arg_base, B=argc, C=dst; word-2 carries slot */
+    /* Protocol-method dispatch fast lane. Same two-word encoding as
+     * OP_CALL_CACHED (ABC + slot index in word-2's Bx). At compile time,
+     * the head of `(area c)` is recognized as a protocol method when its
+     * resolved value is a fn whose body is the single form
+     * `(protocol-dispatch <dispatch-atom> "<mname>" & params)` (the
+     * macroexpansion of (defprotocol P (area [s])) in src/core.clj).
+     * The IC slot stores the dispatch atom pointer fixed at compile;
+     * the cached map/type/impl triple is filled on miss. The hot path
+     * derefs the atom and pointer-compares (atom_val == cached_map &&
+     * type_disc == cached_type); on hit it calls cached_impl directly
+     * via apply_callable_argv with no cons-spine and no intermediate
+     * dispatcher trampoline. */
+    OP_PROTOCOL_CALL_CACHED, /* A=arg_base, B=argc, C=dst; word-2 carries slot */
+    /* Tail-position twin. Same encoding (ABC + word-2 slot index),
+     * but the handler hands the resolved impl + arg slice to the
+     * MINO_TAIL_CALL sentinel so the apply_callable trampoline
+     * continues dispatching without growing the C stack. C is unused
+     * (the call's result never lands in a register; the trampoline
+     * returns it from the enclosing fn). */
+    OP_PROTOCOL_TAILCALL_CACHED, /* A=arg_base, B=argc; word-2 carries slot   */
     OP_ADD_II,           /* A=dst, B=lhs, C=rhs; int+int add              */
     OP_SUB_II,           /* "                                              */
     OP_MUL_II,           /* "                                              */
@@ -220,19 +240,37 @@ typedef enum {
  * matches the fn: the GC walks consts as a root via the parent fn's
  * mark pass. code is a GC_T_RAW buffer of uint32_t; consts is a
  * GC_T_PTRARR of mino_val_t pointers. */
-/* Inline-cache slot for OP_GETGLOBAL_CACHED. Per-fn array indexed by
- * the Bx field of the cached opcode. `sym` is the unqualified or
- * qualified MINO_SYMBOL whose resolution this slot stands for. `cached`
- * is the last resolved value (NULL = uninitialized / invalidated).
- * `gen` is the S->ic_gen snapshot at fill: when ic_gen advances (def /
- * ns-unmap / var_set_root / var_unintern) the cache misses on its
- * next read. The fn-value owns the slots array (one bc per fn-value),
- * so env stays constant across calls and does not need to be part of
- * the cache key. */
+/* Inline-cache slot for OP_GETGLOBAL_CACHED / OP_CALL_CACHED, repurposed
+ * for OP_PROTOCOL_CALL_CACHED through a `kind` discriminator. Per-fn
+ * array indexed by the Bx field of the cached opcode. For the GLOBAL
+ * kind: `sym` is the unqualified or qualified MINO_SYMBOL whose
+ * resolution this slot stands for, `cached` is the last resolved value
+ * (NULL = uninitialized / invalidated), and `gen` is the S->ic_gen
+ * snapshot at fill -- when ic_gen advances (def / ns-unmap /
+ * var_set_root / var_unintern) the cache misses on its next read. For
+ * the PROTOCOL kind: `atom` is the dispatch atom captured at compile
+ * time, `cached_map` is the @atom map pointer at fill, `cached_type`
+ * is the type-disc pointer (MINO_TYPE for records, interned keyword
+ * for built-ins), `cached` is the impl fn, `sym` is the method-name
+ * string used in the diagnostic on a missing impl, and `gen` is
+ * repurposed as the miss counter (megamorphic at >= 16 misses, after
+ * which the slot bails to the slow dispatcher). The fn-value owns the
+ * slots array (one bc per fn-value), so env stays constant across
+ * calls and does not need to be part of the cache key. */
+typedef enum {
+    MINO_BC_IC_GLOBAL   = 0,
+    MINO_BC_IC_PROTOCOL = 1
+} mino_bc_ic_kind_t;
+
 typedef struct mino_bc_ic_slot {
-    mino_val_t *sym;
-    mino_val_t *cached;
-    unsigned    gen;
+    mino_val_t   *sym;
+    mino_val_t   *cached;
+    unsigned      gen;
+    unsigned char kind;
+    /* PROTOCOL-only fields. Zero / NULL when kind == MINO_BC_IC_GLOBAL. */
+    mino_val_t   *atom;
+    mino_val_t   *cached_map;
+    mino_val_t   *cached_type;
 } mino_bc_ic_slot_t;
 
 /* One arity clause. Multi-arity fns carry an array of these, one per

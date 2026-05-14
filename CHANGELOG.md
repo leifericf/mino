@@ -1,5 +1,73 @@
 # Changelog
 
+## v0.158.0 — Protocol-keyed Inline Cache
+
+Cuts the cost of a direct protocol-method call site by roughly
+2.4x. Each `(area c)` style call now compiles to a new opcode
+`OP_PROTOCOL_CALL_CACHED` (and a tail-position twin
+`OP_PROTOCOL_TAILCALL_CACHED`) that caches the resolved
+implementation keyed by the dispatch atom's deref'd map pointer
+and the first arg's type discriminator. On a hit, the call skips
+the `protocol-dispatch` trampoline entirely and hands the args
+straight to `apply_callable_argv`. No symbol resolution, no
+`get` against the dispatch map, no cons-spine traffic on the hot
+path.
+
+The compile-time recognizer matches the macroexpanded shape of
+each `defprotocol`-emitted dispatcher fn (single-arity body
+`(protocol-dispatch <atom> "<mname>" & params)`) and resolves
+the dispatch atom at compile time. The IC slot type fans out
+through a `kind` discriminator added to `mino_bc_ic_slot_t`;
+GLOBAL slots (OP_GETGLOBAL_CACHED / OP_CALL_CACHED) keep their
+old `{sym, cached, gen}` discipline, PROTOCOL slots add `{atom,
+cached_map, cached_type}` and reuse `cached` for the impl fn.
+
+Cache invalidation: pointer-comparison against the atom's
+current `val` field. Any `swap!` / `reset!` against the dispatch
+atom (which is exactly what `extend-type` / `extend-protocol`
+do) installs a fresh map; the next call misses and refills.
+
+Tail-position protocol calls fan out through a direct
+`apply_callable_argv` call rather than the MINO_TAIL_CALL
+sentinel trampoline. The trade-off: a protocol method that
+tail-calls the same protocol method on a different value grows
+the C stack linearly. Self-tail-recursive protocols are rare
+enough that this is the right default for the common-case
+throughput win. Internal tail-recursion inside the impl body is
+unaffected — `apply_callable_argv` carries its own trampoline.
+
+| Bench             | v0.157.1 | v0.158.0 |    Δ |
+|-------------------|---------:|---------:|-----:|
+| proto-mono-area   | 4 832 ns | 2 092 ns | -57% |
+| proto-bi-area     | 5 426 ns | 2 691 ns | -50% |
+| proto-tri-area    |    43 µs |    46 µs | noise |
+| proto-reduce-sum  |  1.13 ms |  1.18 ms | noise |
+| kw-fn-record-loop |    21 µs |    23 µs | noise |
+
+The mono / bi-morphic cases drop ~50-57% (~2.4x faster). The
+megamorphic three-type case stays flat — `case` overhead
+dominates that bench, not protocol dispatch. The reduce-sum and
+kw-fn loops also stay flat: those pass `area` as a value through
+`map`, where dispatch goes through `apply_callable_argv`'s slow
+path rather than the call-site IC. Closing that gap is a
+follow-up via per-protocol-fn IC.
+
+### Added
+
+- New opcodes `OP_PROTOCOL_CALL_CACHED` and
+  `OP_PROTOCOL_TAILCALL_CACHED` in `src/eval/bc/internal.h`, plus
+  the runtime handlers + emission gate in `src/eval/bc/vm.c` and
+  `src/eval/bc/compile.c`.
+- IC-slot kind discriminator (`MINO_BC_IC_GLOBAL` /
+  `MINO_BC_IC_PROTOCOL`) with the three PROTOCOL-only fields
+  (`atom`, `cached_map`, `cached_type`) walked through the GC
+  trace in `src/gc/driver.c`.
+- Compile-time recognizer `try_protocol_method` in
+  `src/eval/bc/compile.c` that matches the defprotocol body
+  shape without traversing more than the head form.
+
+Verification: 1 659 tests / 7 690 assertions green.
+
 ## v0.157.1 — Per-opcode Dispatch Counter Build Flag
 
 Adds `MINO_BC_OP_COUNTS=1` build flag that wires a per-opcode

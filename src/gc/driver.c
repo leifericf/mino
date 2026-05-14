@@ -493,6 +493,11 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
                     for (int i = 0; i < bc->ic_slots_len; i++) {
                         gc_mark_child_push(S, bc->ic_slots[i].sym);
                         gc_mark_child_push(S, bc->ic_slots[i].cached);
+                        if (bc->ic_slots[i].kind == MINO_BC_IC_PROTOCOL) {
+                            gc_mark_child_push(S, bc->ic_slots[i].atom);
+                            gc_mark_child_push(S, bc->ic_slots[i].cached_map);
+                            gc_mark_child_push(S, bc->ic_slots[i].cached_type);
+                        }
                     }
                 }
             }
@@ -685,6 +690,11 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             for (i = 0; i < bc->ic_slots_len; i++) {
                 gc_mark_child_push(S, bc->ic_slots[i].sym);
                 gc_mark_child_push(S, bc->ic_slots[i].cached);
+                if (bc->ic_slots[i].kind == MINO_BC_IC_PROTOCOL) {
+                    gc_mark_child_push(S, bc->ic_slots[i].atom);
+                    gc_mark_child_push(S, bc->ic_slots[i].cached_map);
+                    gc_mark_child_push(S, bc->ic_slots[i].cached_type);
+                }
             }
         }
         break;

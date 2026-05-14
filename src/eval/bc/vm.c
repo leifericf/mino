@@ -96,6 +96,8 @@ static const char *op_count_name(unsigned op)
     case OP_MAKE_LAZY: return "OP_MAKE_LAZY";
     case OP_GETGLOBAL_CACHED: return "OP_GETGLOBAL_CACHED";
     case OP_CALL_CACHED: return "OP_CALL_CACHED";
+    case OP_PROTOCOL_CALL_CACHED: return "OP_PROTOCOL_CALL_CACHED";
+    case OP_PROTOCOL_TAILCALL_CACHED: return "OP_PROTOCOL_TAILCALL_CACHED";
     case OP_ADD_II: return "OP_ADD_II";
     case OP_SUB_II: return "OP_SUB_II";
     case OP_MUL_II: return "OP_MUL_II";
@@ -184,6 +186,80 @@ static void bc_pop_window(mino_state_t *S, size_t base)
         S->bc_top--;
         S->bc_regs[S->bc_top] = NULL;
     }
+}
+
+/* Type discriminator for the OP_PROTOCOL_CALL_CACHED hot path. Records
+ * return their MINO_TYPE pointer directly so the cache key stays a
+ * pure-pointer compare; non-records hash into the interned keyword
+ * table the way prim_type would. Mirrors prim_type's first-arg path
+ * but avoids the cons-spine + arity-check wrapper. */
+static mino_val_t *bc_protocol_type_disc(mino_state_t *S, mino_val_t *v)
+{
+    if (v == NULL) return mino_keyword(S, "nil");
+    if (mino_type_of(v) == MINO_RECORD) return v->as.record.type;
+    /* Honor :type metadata so user types tagged via (with-meta x
+     * {:type :foo}) dispatch to the :foo impl. Same precedence as
+     * prim_type. */
+    if (MINO_IS_PTR(v) && v->meta != NULL
+        && mino_type_of(v->meta) == MINO_MAP) {
+        mino_val_t *tk = mino_keyword(S, "type");
+        mino_val_t *tv = map_get_val(v->meta, tk);
+        if (tv != NULL) return tv;
+    }
+    switch (mino_type_of(v)) {
+    case MINO_NIL:        return mino_keyword(S, "nil");
+    case MINO_BOOL:       return mino_keyword(S, "bool");
+    case MINO_INT:        return mino_keyword(S, "int");
+    case MINO_FLOAT:      return mino_keyword(S, "float");
+    case MINO_FLOAT32:    return mino_keyword(S, "float32");
+    case MINO_CHAR:       return mino_keyword(S, "char");
+    case MINO_STRING:     return mino_keyword(S, "string");
+    case MINO_SYMBOL:     return mino_keyword(S, "symbol");
+    case MINO_KEYWORD:    return mino_keyword(S, "keyword");
+    case MINO_EMPTY_LIST: return mino_keyword(S, "list");
+    case MINO_CONS:       return mino_keyword(S, "list");
+    case MINO_VECTOR:     return mino_keyword(S, "vector");
+    case MINO_MAP:        return mino_keyword(S, "map");
+    case MINO_SET:        return mino_keyword(S, "set");
+    case MINO_SORTED_MAP: return mino_keyword(S, "sorted-map");
+    case MINO_SORTED_SET: return mino_keyword(S, "sorted-set");
+    case MINO_PRIM:       return mino_keyword(S, "fn");
+    case MINO_FN:         return mino_keyword(S, "fn");
+    case MINO_MACRO:      return mino_keyword(S, "macro");
+    case MINO_HANDLE:     return mino_keyword(S, "handle");
+    case MINO_ATOM:       return mino_keyword(S, "atom");
+    case MINO_VOLATILE:   return mino_keyword(S, "volatile");
+    case MINO_LAZY:       return mino_keyword(S, "lazy-seq");
+    case MINO_CHUNK:      return mino_keyword(S, "chunk");
+    case MINO_CHUNKED_CONS: return mino_keyword(S, "list");
+    case MINO_RECUR:      return mino_keyword(S, "recur");
+    case MINO_TAIL_CALL:  return mino_keyword(S, "tail-call");
+    case MINO_REDUCED:    return mino_keyword(S, "reduced");
+    case MINO_VAR:        return mino_keyword(S, "var");
+    case MINO_TRANSIENT:  return mino_keyword(S, "transient");
+    case MINO_BIGINT:     return mino_keyword(S, "bigint");
+    case MINO_RATIO:      return mino_keyword(S, "ratio");
+    case MINO_BIGDEC:     return mino_keyword(S, "bigdec");
+    case MINO_TYPE:       return mino_keyword(S, "record-type");
+    case MINO_RECORD:     return v->as.record.type; /* unreachable */
+    case MINO_FUTURE:     return mino_keyword(S, "future");
+    case MINO_UUID:       return mino_keyword(S, "uuid");
+    case MINO_REGEX:      return mino_keyword(S, "regex");
+    case MINO_HOST_ARRAY: {
+        static const char *kinds[] = {
+            "object-array", "int-array", "long-array", "short-array",
+            "byte-array",   "float-array", "double-array", "char-array",
+            "boolean-array"
+        };
+        unsigned k = v->as.host_array.element_kind;
+        if (k >= sizeof(kinds) / sizeof(kinds[0])) k = 0;
+        return mino_keyword(S, kinds[k]);
+    }
+    case MINO_MAP_ENTRY:  return mino_keyword(S, "map-entry");
+    case MINO_TX_REF:     return mino_keyword(S, "ref");
+    case MINO_AGENT:      return mino_keyword(S, "agent");
+    }
+    return mino_keyword(S, "unknown");
 }
 
 /* Build a cons list head-first from `argc` register slots starting at
@@ -680,6 +756,127 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             mino_val_t *r = apply_callable_argv(S, callee, regs + a,
                                                 (int)argn, env);
             if (r == NULL) { ok = 0; goto bc_done; }
+            S->bc_regs[base + ret] = r;
+            break;
+        }
+
+        case OP_PROTOCOL_CALL_CACHED:
+        case OP_PROTOCOL_TAILCALL_CACHED: {
+            /* Protocol-method dispatch fast lane. The IC slot pins the
+             * dispatch atom captured at compile from the defprotocol
+             * macroexpansion; the hot path derefs that atom (one
+             * pointer load), pointer-compares the deref'd map against
+             * cached_map and pointer-compares (type first_arg) against
+             * cached_type, and on a double hit invokes the cached impl
+             * directly via apply_callable_argv. No protocol-dispatch
+             * trampoline; no symbol resolution; no map_get on the hot
+             * path. Miss path performs one map_get_val against the
+             * atom's map (with :default fallback) and refills all
+             * three IC fields under write barriers. Tail variant hands
+             * (impl, args) to the MINO_TAIL_CALL sentinel so the
+             * apply_callable trampoline absorbs the C-stack growth. */
+            int is_tail = (OP_OF(ins) == OP_PROTOCOL_TAILCALL_CACHED);
+            unsigned a    = A_OF(ins);
+            unsigned argn = B_OF(ins);
+            unsigned ret  = C_OF(ins);
+            if (pc >= bc->code_len) { ok = 0; goto bc_done; }
+            mino_bc_insn_t slot_word = code[pc++];
+            unsigned slot_idx = Bx_OF(slot_word);
+            if ((int)slot_idx >= bc->ic_slots_len) {
+                ok = 0; goto bc_done;
+            }
+            mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
+            if (argn < 1 || slot->atom == NULL
+                || mino_type_of(slot->atom) != MINO_ATOM) {
+                ok = 0; goto bc_done;
+            }
+
+            mino_val_t *first_arg = regs[a];
+            mino_val_t *atom_map  = slot->atom->as.atom.val;
+            mino_val_t *type_disc;
+            if (first_arg != NULL
+                && mino_type_of(first_arg) == MINO_RECORD) {
+                type_disc = first_arg->as.record.type;
+            } else {
+                type_disc = bc_protocol_type_disc(S, first_arg);
+            }
+
+            mino_val_t *impl;
+            if (slot->cached != NULL
+                && slot->cached_map == atom_map
+                && slot->cached_type == type_disc) {
+                impl = slot->cached;
+            } else {
+                if (atom_map == NULL
+                    || mino_type_of(atom_map) != MINO_MAP) {
+                    /* Dispatch atom holds something other than a map.
+                     * Either the user reset! it manually or defprotocol
+                     * was rebound. Bail loudly. */
+                    char emsg[160];
+                    const char *mname_s = slot->sym != NULL
+                        ? slot->sym->as.s.data : "?";
+                    snprintf(emsg, sizeof(emsg),
+                             "protocol dispatch table for %s is not a map",
+                             mname_s);
+                    prim_throw_classified(S, "user", "MPR002", emsg);
+                    ok = 0; goto bc_done;
+                }
+                impl = map_get_val(atom_map, type_disc);
+                if (impl == NULL) {
+                    mino_val_t *defkw = mino_keyword(S, "default");
+                    impl = map_get_val(atom_map, defkw);
+                }
+                if (impl == NULL) {
+                    char emsg[256];
+                    const char *mname_s = slot->sym != NULL
+                        ? slot->sym->as.s.data : "?";
+                    const char *tname = "?";
+                    if (type_disc != NULL) {
+                        if (mino_type_of(type_disc) == MINO_KEYWORD
+                            || mino_type_of(type_disc) == MINO_STRING) {
+                            tname = type_disc->as.s.data;
+                        } else if (mino_type_of(type_disc) == MINO_TYPE) {
+                            tname = type_disc->as.record_type.name
+                                != NULL
+                                ? type_disc->as.record_type.name : "?";
+                        }
+                    }
+                    snprintf(emsg, sizeof(emsg),
+                             "No implementation of method: %s for type: %s",
+                             mname_s, tname);
+                    prim_throw_classified(S, "user", "MPR001", emsg);
+                    ok = 0; goto bc_done;
+                }
+                gc_write_barrier(S, bc->ic_slots,
+                                 slot->cached_map, atom_map);
+                slot->cached_map = atom_map;
+                gc_write_barrier(S, bc->ic_slots,
+                                 slot->cached_type, type_disc);
+                slot->cached_type = type_disc;
+                gc_write_barrier(S, bc->ic_slots,
+                                 slot->cached, impl);
+                slot->cached = impl;
+            }
+
+            /* Direct argv dispatch in both tail and non-tail position.
+             * apply_callable_argv carries its own MINO_TAIL_CALL
+             * trampoline for the impl's body, so internal tail
+             * recursion inside the impl stays flat. The tail variant
+             * adds one C-stack frame per protocol call into a peer
+             * protocol method on a different type -- the cost of
+             * avoiding the per-iter cons-list build that the
+             * sentinel path otherwise pays. Self-tail-recursive
+             * protocol methods (a method that tail-calls the same
+             * protocol method on a different value) grow the C stack
+             * linearly here; that's an explicit trade-off in favour
+             * of the common-case throughput. */
+            mino_val_t *r = apply_callable_argv(S, impl, regs + a,
+                                                (int)argn, env);
+            if (r == NULL) { ok = 0; goto bc_done; }
+            if (is_tail) {
+                retval = r;
+                goto bc_done;
+            }
             S->bc_regs[base + ret] = r;
             break;
         }
