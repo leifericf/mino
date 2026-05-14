@@ -430,6 +430,366 @@ static mino_val_t *resolve_global(mino_state_t *S, mino_val_t *sym,
     return eval_impl(S, sym, env, 0);
 }
 
+/* Cold-op handler. The E1 op-count profile shows 18 of 63 opcodes
+ * carry ~99% of dispatches; the long tail (NOP, GETGLOBAL non-cached,
+ * CALL non-cached, closure build, env push/pop/bind, try/throw/dyn
+ * frames, legacy BINOP_INT, infrequent vec ops) accounts for the
+ * remaining <1%. Splitting those out of the main dispatch switch
+ * keeps the hot dispatch's case ladder small enough for clang to lay
+ * out a tight jump table and keep the hot-op locals in registers
+ * across iterations. Each cold op pays more than a function call's
+ * worth of work (allocation, env mutation, exception unwind, longjmp
+ * setup), so the indirection amortizes for free.
+ *
+ * Contract: return 1 to continue the dispatch loop; return 0 to bail
+ * to bc_done. *env_p is mutated by OP_PUSH_ENV / OP_POP_ENV; *ok is
+ * cleared on error paths. The saved_* snapshots are read-only (used
+ * by OP_POPCATCH / OP_POPDYN bounds checks). OP_THROW longjmps when
+ * a try frame is live; that unwinds through this function's stack
+ * frame back to the setjmp in OP_PUSHCATCH inside mino_bc_run, which
+ * is well-defined because the jmp_buf lives on ctx->try_stack
+ * (heap-backed) and not in this frame's automatic storage. */
+static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
+                      size_t base, mino_thread_ctx_t *ctx,
+                      int saved_try_depth,
+                      int saved_bc_catch_depth,
+                      dyn_frame_t *saved_dyn_stack,
+                      mino_bc_insn_t ins, unsigned op,
+                      mino_env_t **env_p, int *ok)
+{
+    mino_env_t  *env  = *env_p;
+    mino_val_t **regs = S->bc_regs + base;
+
+    switch (op) {
+    case OP_NOP:
+        return 1;
+
+    case OP_GETGLOBAL: {
+        unsigned a  = A_OF(ins);
+        unsigned bx = Bx_OF(ins);
+        if (bx >= bc->consts_len) { *ok = 0; return 0; }
+        mino_val_t *sym = bc->consts[bx];
+        mino_val_t *v   = resolve_global(S, sym, env);
+        if (v == NULL) { *ok = 0; return 0; }
+        regs = S->bc_regs + base;
+        regs[a] = v;
+        return 1;
+    }
+
+    case OP_SETGLOBAL: {
+        unsigned a  = A_OF(ins);
+        unsigned bx = Bx_OF(ins);
+        if (bx >= bc->consts_len) { *ok = 0; return 0; }
+        mino_val_t *sym = bc->consts[bx];
+        if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+            *ok = 0; return 0;
+        }
+        mino_val_t *v   = regs[a];
+        mino_val_t *var = var_intern(S, S->current_ns, sym->as.s.data);
+        if (var == NULL) { *ok = 0; return 0; }
+        var_set_root(S, var, v);
+        S->ic_gen++;
+        regs = S->bc_regs + base;
+        regs[a] = v;
+        return 1;
+    }
+
+    case OP_CALL: {
+        unsigned a    = A_OF(ins);
+        unsigned argn = B_OF(ins);
+        unsigned ret  = C_OF(ins);
+        mino_val_t *callee = regs[a];
+        mino_val_t *r = apply_callable_argv(S, callee, regs + a + 1,
+                                            (int)argn, env);
+        if (r == NULL) { *ok = 0; return 0; }
+        S->bc_regs[base + ret] = r;
+        return 1;
+    }
+
+    case OP_CLOSURE: {
+        unsigned a  = A_OF(ins);
+        unsigned bx = Bx_OF(ins);
+        if (bx >= bc->consts_len) { *ok = 0; return 0; }
+        mino_val_t *child = bc->consts[bx];
+        if (child == NULL || mino_type_of(child) != MINO_FN) {
+            *ok = 0; return 0;
+        }
+        mino_val_t *closure = make_fn(S, child->as.fn.params,
+                                      child->as.fn.body, env);
+        if (closure == NULL) { *ok = 0; return 0; }
+        closure->as.fn.defining_ns = child->as.fn.defining_ns;
+        *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
+        closure->as.fn.shape = child->as.fn.shape;
+        regs = S->bc_regs + base;
+        regs[a] = closure;
+        return 1;
+    }
+
+    case OP_MAKE_LAZY: {
+        unsigned a  = A_OF(ins);
+        unsigned bx = Bx_OF(ins);
+        if (bx >= bc->consts_len) { *ok = 0; return 0; }
+        mino_val_t *body = bc->consts[bx];
+        mino_val_t *lz = alloc_val(S, MINO_LAZY);
+        if (lz == NULL) { *ok = 0; return 0; }
+        lz->as.lazy.body     = body;
+        lz->as.lazy.env      = env;
+        lz->as.lazy.cached   = NULL;
+        lz->as.lazy.realized = 0;
+        regs = S->bc_regs + base;
+        regs[a] = lz;
+        return 1;
+    }
+
+    case OP_PUSH_ENV: {
+        mino_env_t *child = env_child(S, env);
+        if (child == NULL) { *ok = 0; return 0; }
+        *env_p = child;
+        return 1;
+    }
+
+    case OP_POP_ENV: {
+        if (env == NULL || env->parent == NULL) {
+            *ok = 0; return 0;
+        }
+        *env_p = env->parent;
+        return 1;
+    }
+
+    case OP_ENV_BIND: {
+        unsigned a  = A_OF(ins);
+        unsigned bx = Bx_OF(ins);
+        if (bx >= bc->consts_len) { *ok = 0; return 0; }
+        mino_val_t *sym = bc->consts[bx];
+        if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+            *ok = 0; return 0;
+        }
+        env_bind_sym(S, env, sym, regs[a]);
+        return 1;
+    }
+
+    case OP_BINOP_INT: {
+        unsigned a = A_OF(ins);
+        unsigned b = B_OF(ins);
+        unsigned c = C_OF(ins);
+        unsigned subop = BINOP_OF(ins);
+        mino_val_t *r = binop_int_fast(S, regs[b], regs[c], subop);
+        if (r == NULL) { *ok = 0; return 0; }
+        regs[a] = r;
+        return 1;
+    }
+
+    case OP_POPCATCH: {
+        if (ctx->bc_catch_depth <= saved_bc_catch_depth
+            || ctx->try_depth <= saved_try_depth) {
+            *ok = 0; return 0;
+        }
+        ctx->bc_catch_depth--;
+        ctx->try_depth--;
+        return 1;
+    }
+
+    case OP_PUSHDYN: {
+        unsigned a  = A_OF(ins);
+        unsigned bx = Bx_OF(ins);
+        if (bx >= bc->consts_len) { *ok = 0; return 0; }
+        mino_val_t *names = bc->consts[bx];
+        if (names == NULL || mino_type_of(names) != MINO_VECTOR) {
+            *ok = 0; return 0;
+        }
+        size_t n = names->as.vec.len;
+        dyn_binding_t *bhead = NULL;
+        for (size_t i = 0; i < n; i++) {
+            mino_val_t *sym = vec_nth(names, i);
+            if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+                while (bhead != NULL) {
+                    dyn_binding_t *nxt = bhead->next;
+                    free(bhead); bhead = nxt;
+                }
+                *ok = 0; return 0;
+            }
+            dyn_binding_t *b = (dyn_binding_t *)malloc(sizeof(*b));
+            if (b == NULL) {
+                while (bhead != NULL) {
+                    dyn_binding_t *nxt = bhead->next;
+                    free(bhead); bhead = nxt;
+                }
+                *ok = 0; return 0;
+            }
+            b->name = sym->as.s.data;
+            b->val  = regs[a + (unsigned)i];
+            b->next = bhead;
+            bhead   = b;
+        }
+        dyn_frame_t *frame = (dyn_frame_t *)malloc(sizeof(*frame));
+        if (frame == NULL) {
+            while (bhead != NULL) {
+                dyn_binding_t *nxt = bhead->next;
+                free(bhead); bhead = nxt;
+            }
+            *ok = 0; return 0;
+        }
+        frame->bindings = bhead;
+        frame->prev     = ctx->dyn_stack;
+        ctx->dyn_stack  = frame;
+        return 1;
+    }
+
+    case OP_POPDYN: {
+        unsigned a = A_OF(ins);
+        if (a == 0) a = 1;
+        for (unsigned i = 0; i < a; i++) {
+            dyn_frame_t *f = ctx->dyn_stack;
+            if (f == NULL || f == saved_dyn_stack) {
+                *ok = 0; return 0;
+            }
+            ctx->dyn_stack = f->prev;
+            dyn_binding_list_free(f->bindings);
+            free(f);
+        }
+        return 1;
+    }
+
+    case OP_THROW: {
+        unsigned a = A_OF(ins);
+        mino_val_t *exc = regs[a];
+        if (ctx->try_depth > 0) {
+            ctx->try_stack[ctx->try_depth - 1].exception = exc;
+            longjmp(ctx->try_stack[ctx->try_depth - 1].buf, 1);
+            /* unreachable */
+        }
+        /* No enclosing try -- format as a fatal user error and bail
+         * through the standard error path. Mirror prim_throw's
+         * "unhandled exception: <value>" shape so the original
+         * thrown value survives in the diagnostic message. */
+        if (exc != NULL && mino_type_of(exc) == MINO_MAP) {
+            mino_val_t *msg  = map_get_val(exc,
+                mino_keyword(S, "mino/message"));
+            mino_val_t *kind = map_get_val(exc,
+                mino_keyword(S, "mino/kind"));
+            mino_val_t *code = map_get_val(exc,
+                mino_keyword(S, "mino/code"));
+            if (msg == NULL || mino_type_of(msg) != MINO_STRING) {
+                msg = map_get_val(exc, mino_keyword(S, "message"));
+            }
+            prim_throw_classified(S,
+                (kind != NULL && mino_type_of(kind) == MINO_KEYWORD)
+                    ? kind->as.s.data : "user",
+                (code != NULL && mino_type_of(code) == MINO_STRING)
+                    ? code->as.s.data : "MUS001",
+                (msg != NULL && mino_type_of(msg) == MINO_STRING)
+                    ? msg->as.s.data : "unhandled exception");
+        } else if (exc != NULL && mino_type_of(exc) == MINO_STRING) {
+            char msg[512];
+            snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
+                     (int)exc->as.s.len, exc->as.s.data);
+            prim_throw_classified(S, "user", "MUS001", msg);
+        } else {
+            prim_throw_classified(S, "user", "MUS001",
+                "unhandled exception");
+        }
+        *ok = 0;
+        return 0;
+    }
+
+    case OP_NTH_VEC: {
+        unsigned a = A_OF(ins);
+        unsigned b = B_OF(ins);
+        unsigned cc = C_OF(ins);
+        mino_val_t *coll = regs[b];
+        mino_val_t *idx_v = regs[cc];
+        if (coll != NULL && mino_type_of(coll) == MINO_VECTOR
+            && idx_v != NULL && MINO_IS_INT(idx_v)) {
+            long long idx = MINO_INT_VAL(idx_v);
+            if (idx >= 0 && (size_t)idx < coll->as.vec.len) {
+                regs[a] = vec_nth(coll, (size_t)idx);
+                return 1;
+            }
+        }
+        mino_val_t *list = mino_nil(S);
+        list = mino_cons(S, idx_v, list);
+        list = mino_cons(S, coll, list);
+        if (list == NULL) { *ok = 0; return 0; }
+        mino_val_t *r = prim_nth(S, list, env);
+        if (r == NULL) { *ok = 0; return 0; }
+        regs = S->bc_regs + base;
+        regs[a] = r;
+        return 1;
+    }
+
+    case OP_EMPTY_VEC: {
+        unsigned a = A_OF(ins);
+        unsigned b = B_OF(ins);
+        mino_val_t *coll = regs[b];
+        if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+            regs[a] = coll->as.vec.len == 0
+                        ? mino_true(S) : mino_false(S);
+            return 1;
+        }
+        mino_val_t *list = mino_nil(S);
+        list = mino_cons(S, coll, list);
+        if (list == NULL) { *ok = 0; return 0; }
+        mino_val_t *r = prim_empty_p(S, list, env);
+        if (r == NULL) { *ok = 0; return 0; }
+        regs = S->bc_regs + base;
+        regs[a] = r;
+        return 1;
+    }
+
+    case OP_CONJ_VEC: {
+        unsigned a = A_OF(ins);
+        unsigned b = B_OF(ins);
+        unsigned cc = C_OF(ins);
+        mino_val_t *coll = regs[b];
+        mino_val_t *item = regs[cc];
+        if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+            mino_val_t *r = vec_conj1(S, coll, item);
+            if (r == NULL) { *ok = 0; return 0; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            return 1;
+        }
+        mino_val_t *list = mino_nil(S);
+        list = mino_cons(S, item, list);
+        list = mino_cons(S, coll, list);
+        if (list == NULL) { *ok = 0; return 0; }
+        mino_val_t *r = prim_conj(S, list, env);
+        if (r == NULL) { *ok = 0; return 0; }
+        regs = S->bc_regs + base;
+        regs[a] = r;
+        return 1;
+    }
+
+    case OP_DISSOC: {
+        unsigned a  = A_OF(ins);
+        unsigned b  = B_OF(ins);
+        unsigned cc = C_OF(ins);
+        mino_val_t *coll = regs[b];
+        mino_val_t *key  = regs[cc];
+        if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
+            mino_val_t *r = mino_map_dissoc1(S, coll, key);
+            if (r == NULL) { *ok = 0; return 0; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            return 1;
+        }
+        mino_val_t *list = mino_nil(S);
+        list = mino_cons(S, key, list);
+        list = mino_cons(S, coll, list);
+        if (list == NULL) { *ok = 0; return 0; }
+        mino_val_t *r = prim_dissoc(S, list, env);
+        if (r == NULL) { *ok = 0; return 0; }
+        regs = S->bc_regs + base;
+        regs[a] = r;
+        return 1;
+    }
+
+    default:
+        *ok = 0;
+        return 0;
+    }
+}
+
 mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                         mino_val_t **argv, int argc, mino_env_t *env)
 {
@@ -566,9 +926,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         if (op < OP__COUNT) g_op_counts[op]++;
 #endif
         switch (op) {
-        case OP_NOP:
-            break;
-
         case OP_MOVE: {
             unsigned a = A_OF(ins);
             unsigned b = B_OF(ins);
@@ -581,17 +938,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             unsigned bx = Bx_OF(ins);
             if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
             regs[a] = bc->consts[bx];
-            break;
-        }
-
-        case OP_GETGLOBAL: {
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
-            mino_val_t *sym = bc->consts[bx];
-            mino_val_t *v   = resolve_global(S, sym, env);
-            if (v == NULL) { ok = 0; goto bc_done; }
-            regs[a] = v;
             break;
         }
 
@@ -652,24 +998,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
-        case OP_SETGLOBAL: {
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
-            mino_val_t *sym = bc->consts[bx];
-            if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
-                ok = 0;
-                goto bc_done;
-            }
-            mino_val_t *v   = regs[a];
-            mino_val_t *var = var_intern(S, S->current_ns, sym->as.s.data);
-            if (var == NULL) { ok = 0; goto bc_done; }
-            var_set_root(S, var, v);
-            S->ic_gen++;     /* invalidate cached call sites */
-            regs[a] = v;
-            break;
-        }
-
         case OP_JMP: {
             int off = sBx_OF(ins);
             pc = (size_t)((long)pc + off);
@@ -682,22 +1010,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             if (!mino_is_truthy_inline(regs[a])) {
                 pc = (size_t)((long)pc + off);
             }
-            break;
-        }
-
-        case OP_CALL: {
-            unsigned a    = A_OF(ins);
-            unsigned argn = B_OF(ins);
-            unsigned ret  = C_OF(ins);
-            mino_val_t *callee = regs[a];
-            /* argv ABI: hand the caller's register slice straight to
-             * apply_callable_argv. For PRIM-fn2 and bc-FN callees the
-             * cons-spine is never built; legacy callees fall back to a
-             * cons rebuild inside apply_callable_argv. */
-            mino_val_t *r = apply_callable_argv(S, callee, regs + a + 1,
-                                                (int)argn, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            S->bc_regs[base + ret] = r;
             break;
         }
 
@@ -905,76 +1217,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             goto bc_done;
         }
 
-        case OP_CLOSURE: {
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
-            mino_val_t *child = bc->consts[bx];
-            if (child == NULL || mino_type_of(child) != MINO_FN) {
-                ok = 0;
-                goto bc_done;
-            }
-            /* Build a fresh closure that captures the current env.
-             * The child fn template carries the params/body/bc; copy
-             * those over and rebind the env to the calling frame's
-             * lexical environment. */
-            mino_val_t *closure = make_fn(S, child->as.fn.params,
-                                          child->as.fn.body, env);
-            if (closure == NULL) { ok = 0; goto bc_done; }
-            closure->as.fn.defining_ns = child->as.fn.defining_ns;
-            /* Cast away const: the bc field is exposed as const for
-             * embedders, but the runtime owns it and shares it
-             * across closures of the same template. */
-            *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
-            closure->as.fn.shape = child->as.fn.shape;
-            regs[a] = closure;
-            break;
-        }
-
-        case OP_MAKE_LAZY: {
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
-            mino_val_t *body = bc->consts[bx];
-            mino_val_t *lz = alloc_val(S, MINO_LAZY);
-            if (lz == NULL) { ok = 0; goto bc_done; }
-            lz->as.lazy.body     = body;
-            lz->as.lazy.env      = env;
-            lz->as.lazy.cached   = NULL;
-            lz->as.lazy.realized = 0;
-            regs[a] = lz;
-            break;
-        }
-
-        case OP_PUSH_ENV: {
-            mino_env_t *child = env_child(S, env);
-            if (child == NULL) { ok = 0; goto bc_done; }
-            env = child;
-            break;
-        }
-
-        case OP_POP_ENV: {
-            if (env == NULL || env->parent == NULL) {
-                /* Can't happen if the compiler emits matched
-                 * PUSH/POP pairs around every let scope; defensive. */
-                ok = 0; goto bc_done;
-            }
-            env = env->parent;
-            break;
-        }
-
-        case OP_ENV_BIND: {
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
-            mino_val_t *sym = bc->consts[bx];
-            if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
-                ok = 0; goto bc_done;
-            }
-            env_bind_sym(S, env, sym, regs[a]);
-            break;
-        }
-
         case OP_ADD_II:
         case OP_SUB_II:
         case OP_MUL_II:
@@ -1174,37 +1416,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             }
         }
 
-        case OP_NTH_VEC: {
-            /* Fast lane for (nth vec int). Falls through to prim_nth on
-             * any type miss so the diagnostic (wrong type / out-of-
-             * range / lazy-seq stride) stays Clojure-correct. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            unsigned cc = C_OF(ins);
-            mino_val_t *coll = regs[b];
-            mino_val_t *idx_v = regs[cc];
-            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR
-                && idx_v != NULL && MINO_IS_INT(idx_v)) {
-                long long idx = MINO_INT_VAL(idx_v);
-                if (idx >= 0 && (size_t)idx < coll->as.vec.len) {
-                    regs[a] = vec_nth(coll, (size_t)idx);
-                    break;
-                }
-            }
-            /* Miss: cons the arg pair and call prim_nth so all of its
-             * lazy-seq / chunk / nil / negative-index / out-of-range /
-             * type-error paths fire exactly as the slow lane would. */
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, idx_v, list);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_nth(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
         case OP_GET_KW_MAP: {
             /* Fast lane for (get coll k) on maps and records.
              * For MINO_MAP: any hashable key (string, keyword, int,
@@ -1303,59 +1514,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
-        case OP_EMPTY_VEC: {
-            /* Fast lane for (empty? v) on a vector. Trivial check on
-             * .len; misses fall through to prim_empty_p so lazy-seq
-             * forcing, chunked-cons advance, and non-collection
-             * error reporting stay correct. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            mino_val_t *coll = regs[b];
-            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
-                regs[a] = coll->as.vec.len == 0
-                            ? mino_true(S) : mino_false(S);
-                break;
-            }
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_empty_p(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
-        case OP_CONJ_VEC: {
-            /* Fast lane for (conj v x) on vectors. Misses fall back to
-             * prim_conj so list cons, set assoc, sorted-coll insert,
-             * record field-update, and the variadic forms keep their
-             * full Clojure-semantics path. The vec_conj1 helper returns
-             * a GC-owned new vector; nothing else in the fast path
-             * allocates, so no extra rooting is needed. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            unsigned cc = C_OF(ins);
-            mino_val_t *coll = regs[b];
-            mino_val_t *item = regs[cc];
-            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
-                mino_val_t *r = vec_conj1(S, coll, item);
-                if (r == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                regs[a] = r;
-                break;
-            }
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, item, list);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_conj(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
         case OP_ASSOC: {
             /* Fast lane for the 3-arg (assoc coll k v) shape. The
              * compiler arranges three consecutive registers starting
@@ -1401,37 +1559,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             list = mino_cons(S, coll, list);
             if (list == NULL) { ok = 0; goto bc_done; }
             mino_val_t *r = prim_assoc(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
-        case OP_DISSOC: {
-            /* Fast lane for the 2-arg (dissoc map k) shape. Compiles
-             * only for arity-2 forms; variadic (dissoc m k1 k2 ...)
-             * keeps OP_CALL so the prim's loop handles the key list
-             * including absent-key short-circuits. Type-guards MAP;
-             * sorted-map / transient / nil / non-map shapes fall back
-             * through prim_dissoc to keep the Clojure-correct error
-             * or no-op behaviour. */
-            unsigned a  = A_OF(ins);
-            unsigned b  = B_OF(ins);
-            unsigned cc = C_OF(ins);
-            mino_val_t *coll = regs[b];
-            mino_val_t *key  = regs[cc];
-            if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
-                mino_val_t *r = mino_map_dissoc1(S, coll, key);
-                if (r == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                regs[a] = r;
-                break;
-            }
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, key, list);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_dissoc(S, list, env);
             if (r == NULL) { ok = 0; goto bc_done; }
             regs = S->bc_regs + base;
             regs[a] = r;
@@ -1502,23 +1629,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 if (r == NULL) { ok = 0; goto bc_done; }
                 regs = S->bc_regs + base;
             }
-            regs[a] = r;
-            break;
-        }
-
-        case OP_BINOP_INT: {
-            /* The original Phase-1 generic binop with its sub-op
-             * encoded in the low nibble of the instruction. The
-             * encoding collides with the op byte for non-zero sub-ops;
-             * the compiler now emits per-op specialised opcodes
-             * instead. The handler stays for any hand-written stream
-             * that uses sub-op zero (ADD). */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            unsigned c = C_OF(ins);
-            unsigned subop = BINOP_OF(ins);
-            mino_val_t *r = binop_int_fast(S, regs[b], regs[c], subop);
-            if (r == NULL) { ok = 0; goto bc_done; }
             regs[a] = r;
             break;
         }
@@ -1607,145 +1717,14 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             break;
         }
 
-        case OP_POPCATCH: {
-            if (ctx->bc_catch_depth <= saved_bc_catch_depth
-                || ctx->try_depth <= saved_try_depth) {
-                ok = 0; goto bc_done;
-            }
-            ctx->bc_catch_depth--;
-            ctx->try_depth--;
-            break;
-        }
-
-        case OP_PUSHDYN: {
-            /* A=base_reg, Bx=names_const_idx
-             *
-             * names_const is a MINO_VECTOR of plain symbols; the
-             * matching binding values live in regs[base..base+N).
-             * Allocates a dyn_frame_t and one dyn_binding_t per name
-             * via malloc -- same lifecycle as eval_binding so a
-             * throw-unwind walking dyn_stack frees them by the same
-             * path. */
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
-            mino_val_t *names = bc->consts[bx];
-            if (names == NULL || mino_type_of(names) != MINO_VECTOR) {
-                ok = 0; goto bc_done;
-            }
-            size_t n = names->as.vec.len;
-            dyn_binding_t *bhead = NULL;
-            for (size_t i = 0; i < n; i++) {
-                mino_val_t *sym = vec_nth(names, i);
-                if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
-                    while (bhead != NULL) {
-                        dyn_binding_t *nxt = bhead->next;
-                        free(bhead); bhead = nxt;
-                    }
-                    ok = 0; goto bc_done;
-                }
-                dyn_binding_t *b = (dyn_binding_t *)malloc(sizeof(*b));
-                if (b == NULL) {
-                    while (bhead != NULL) {
-                        dyn_binding_t *nxt = bhead->next;
-                        free(bhead); bhead = nxt;
-                    }
-                    ok = 0; goto bc_done;
-                }
-                b->name = sym->as.s.data;
-                b->val  = regs[a + (unsigned)i];
-                b->next = bhead;
-                bhead   = b;
-            }
-            dyn_frame_t *frame = (dyn_frame_t *)malloc(sizeof(*frame));
-            if (frame == NULL) {
-                while (bhead != NULL) {
-                    dyn_binding_t *nxt = bhead->next;
-                    free(bhead); bhead = nxt;
-                }
-                ok = 0; goto bc_done;
-            }
-            frame->bindings = bhead;
-            frame->prev     = ctx->dyn_stack;
-            ctx->dyn_stack  = frame;
-            break;
-        }
-
-        case OP_POPDYN: {
-            /* A=count: pop `count` frames off the dyn stack. The body
-             * has finished and matched its PUSHDYN(s); free each
-             * frame's bindings + frame itself. count is encoded so
-             * the compiler can collapse multiple POPDYNs into one in
-             * patterns like (binding [...] (binding [...] body)). */
-            unsigned a = A_OF(ins);
-            if (a == 0) a = 1;
-            for (unsigned i = 0; i < a; i++) {
-                dyn_frame_t *f = ctx->dyn_stack;
-                if (f == NULL || f == saved_dyn_stack) {
-                    ok = 0; goto bc_done;
-                }
-                ctx->dyn_stack = f->prev;
-                dyn_binding_list_free(f->bindings);
-                free(f);
-            }
-            break;
-        }
-
-        case OP_THROW: {
-            unsigned a = A_OF(ins);
-            mino_val_t *exc = regs[a];
-            if (ctx->try_depth > 0) {
-                ctx->try_stack[ctx->try_depth - 1].exception = exc;
-                longjmp(ctx->try_stack[ctx->try_depth - 1].buf, 1);
-                /* unreachable */
-            }
-            /* No enclosing try -- format as a fatal user error and bail
-             * through the standard error path. Mirror prim_throw's
-             * "unhandled exception: <value>" shape so the original
-             * thrown value survives in the diagnostic message (without
-             * it, a worker thunk's `(throw "msg")` would surface as
-             * the bare "unhandled exception" and the cause would be
-             * lost). Maps preserve their carried kind/code/message,
-             * matching what the tree-walker path in state.c does. */
-            if (exc != NULL && mino_type_of(exc) == MINO_MAP) {
-                /* Two map shapes survive an uncaught throw: an already-
-                 * normalized diagnostic carrying :mino/kind/:mino/code/
-                 * :mino/message (e.g. from a re-throw of a caught
-                 * value) and an ex-info-style {:message ... :data ...}
-                 * from user code. Probe both so the original message
-                 * survives in either case. */
-                mino_val_t *msg  = map_get_val(exc,
-                    mino_keyword(S, "mino/message"));
-                mino_val_t *kind = map_get_val(exc,
-                    mino_keyword(S, "mino/kind"));
-                mino_val_t *code = map_get_val(exc,
-                    mino_keyword(S, "mino/code"));
-                if (msg == NULL || mino_type_of(msg) != MINO_STRING) {
-                    msg = map_get_val(exc, mino_keyword(S, "message"));
-                }
-                prim_throw_classified(S,
-                    (kind != NULL && mino_type_of(kind) == MINO_KEYWORD)
-                        ? kind->as.s.data : "user",
-                    (code != NULL && mino_type_of(code) == MINO_STRING)
-                        ? code->as.s.data : "MUS001",
-                    (msg != NULL && mino_type_of(msg) == MINO_STRING)
-                        ? msg->as.s.data : "unhandled exception");
-            } else if (exc != NULL && mino_type_of(exc) == MINO_STRING) {
-                char msg[512];
-                snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
-                         (int)exc->as.s.len, exc->as.s.data);
-                prim_throw_classified(S, "user", "MUS001", msg);
-            } else {
-                prim_throw_classified(S, "user", "MUS001",
-                    "unhandled exception");
-            }
-            ok = 0;
-            goto bc_done;
-        }
-
         default:
-            ok = 0;
-            goto bc_done;
+            if (!bc_cold_op(S, bc, base, ctx,
+                            saved_try_depth, saved_bc_catch_depth,
+                            saved_dyn_stack,
+                            ins, op, &env, &ok)) {
+                goto bc_done;
+            }
+            break;
         }
     }
 

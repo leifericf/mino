@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.162.0 — Hot/Cold Bytecode Handler Partition
+
+Splits the bytecode dispatch switch in `src/eval/bc/vm.c` along the
+hot/cold opcode partition surfaced by the op-count profile (the long
+tail of ~18 opcodes accounts for <1% of dispatches across the bench
+matrix). Cold opcodes -- `OP_NOP`, `OP_GETGLOBAL` (the uncached
+variant), `OP_SETGLOBAL`, `OP_CALL` (the uncached variant),
+`OP_CLOSURE`, `OP_MAKE_LAZY`, `OP_PUSH_ENV` / `OP_POP_ENV` /
+`OP_ENV_BIND`, the legacy `OP_BINOP_INT`, `OP_POPCATCH`,
+`OP_PUSHDYN` / `OP_POPDYN`, `OP_THROW`, `OP_NTH_VEC`, `OP_EMPTY_VEC`,
+`OP_CONJ_VEC`, `OP_DISSOC` -- move out of the dispatch switch into
+a static `bc_cold_op` helper called from the `default:` arm. The
+hot opcodes (move, load-k, getglobal-cached, jmp/jmpifnot, call-
+cached, protocol-call-cached, the int fast lanes, the loop-fused
+ops, the read-side small-prim fast lanes, assoc, tailcall, return,
+pushcatch) stay inlined.
+
+`OP_PUSHCATCH` stays in the dispatch switch because its `setjmp`
+must execute in `mino_bc_run`'s stack frame so the matching
+`longjmp` from a thrown exception unwinds back to the right
+landing pad. The cold-handler `OP_THROW` longjmp still targets
+that buf safely -- the jmp_buf lives in `ctx->try_stack` (heap-
+backed), and the longjmp unwinds the cold-handler frame on its
+way to the setjmp in `mino_bc_run`.
+
+The refactor lets the main dispatch switch carry ~25 case labels
+instead of ~50, keeping clang's jump-table layout compact and the
+hot-op register allocation across iterations stable. Each cold
+opcode does enough per-invocation work (allocation, env mutation,
+exception unwind, longjmp setup) that the indirection cost
+amortizes for free, and the partition leaves room to add future
+hot opcodes (next cycle item: unified PGO substantiation) without
+bumping the dispatch switch back over clang's case-count tipping
+point that bit `OP_TAILCALL_CACHED` last cycle.
+
+Matrix neutral as a measurement gate; the small speedups land on
+shapes where the hot ops fit in fewer cache lines after the
+ladder shrinks:
+
+| Bench                          | baseline | v0.162.0 |    Δ |
+|--------------------------------|---------:|---------:|-----:|
+| empty fn call                  |  1664 ns |  1588 ns | -5%  |
+| identity fn call               |  1651 ns |  1650 ns |  0%  |
+| 3-arg fn call                  |  1770 ns |  1716 ns | -3%  |
+| let binding (5)                |  1776 ns |  1632 ns | -8%  |
+| fibonacci(20)                  |   817 µs |   820 µs |  0%  |
+| map + filter + reduce          |  8853 ns |  8210 ns | -7%  |
+| proto-mono-area                |  2092 ns |  1994 ns | -5%  |
+
+fib(20) stays flat -- it is dispatch-bound and the hot ops it uses
+are the same case labels they were in the unpartitioned switch.
+The other rows pick up a few percent from clang's tighter codegen
+on the smaller switch.
+
 ## v0.161.0 — Chunked-source Walk + Canonical-prim Stage Recognition
 
 Two combined optimizations in `pipeline_walk` for the fused-pipeline
