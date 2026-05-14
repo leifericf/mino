@@ -86,6 +86,14 @@ struct mino_hamt_node {
     uint32_t        subnode_mask;
     uint32_t        collision_hash;
     unsigned        collision_count;
+    /* Transient-ownership marker. 0 = persistent (immutable from any
+     * batch's perspective); non-zero matches `transient.owner_id` for
+     * the editing batch. Owned bitmap / collision walks mutate slot
+     * pointers (and bitmap / subnode_mask / collision_count) in place
+     * when the node's owner matches, and clone-then-stamp when not.
+     * gc_alloc_typed zero-inits so all persistent allocations land at
+     * owner = 0. */
+    uint32_t        owner;
     void          **slots;
 };
 
@@ -168,6 +176,30 @@ mino_hamt_node_t *hamt_assoc(mino_state_t *S, const mino_hamt_node_t *n,
 mino_val_t *hamt_get(const mino_hamt_node_t *n, const mino_val_t *key,
                      uint32_t hash, unsigned shift);              /* borrowed */
 mino_val_t *map_get_val(const mino_val_t *m, const mino_val_t *key); /* borrowed */
+
+/* Owned-edit assoc / dissoc variants for HAMT walks. Mirrors the
+ * vec_*_owned pattern: `owner` is the editing transient's monotonic
+ * ID; nodes whose owner field matches are mutated in place, others
+ * are cloned once with `owner` stamped and then mutated in place by
+ * subsequent calls. Caller is responsible for routing through these
+ * only when `transient.owner_id != 0`. */
+mino_hamt_node_t *hamt_assoc_owned(mino_state_t *S, mino_hamt_node_t *n,
+                                    hamt_entry_t *entry, uint32_t hash,
+                                    unsigned shift, int *replaced,
+                                    uintptr_t owner);                  /* GC-owned */
+mino_hamt_node_t *hamt_dissoc_owned(mino_state_t *S, mino_hamt_node_t *n,
+                                     const mino_val_t *key, uint32_t hash,
+                                     unsigned shift, int *removed,
+                                     uintptr_t owner);                 /* GC-owned, may be NULL when node empties */
+
+/* Owned-edit map / set mutators. The persistent path stays the
+ * default; transient.c calls these only when `owner_id != 0`. */
+mino_val_t *mino_map_assoc1_owned(mino_state_t *S, mino_val_t *m,
+                                   mino_val_t *key, mino_val_t *val,
+                                   uintptr_t owner);                   /* GC-owned */
+mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
+                                    mino_val_t *key,
+                                    uintptr_t owner);                  /* GC-owned */
 
 /* Unified persistent-map ops covering both flatmap (small) and HAMT
  * (large) representations. These are the entry points all map mutators

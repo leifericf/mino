@@ -430,6 +430,435 @@ static mino_hamt_node_t *hamt_collision_node(mino_state_t *S, uint32_t hash,
     return n;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Owned-edit HAMT walks                                                     */
+/* ------------------------------------------------------------------------- */
+/*
+ * Mirrors the vec_*_owned pattern. `owner` is the editing transient's
+ * monotonic ID; nodes whose `owner` field matches are mutated in place,
+ * others are cloned once with `owner` stamped and then mutated in place
+ * by subsequent calls.
+ *
+ * GC barrier discipline: a slots[] write may install an OLD -> YOUNG
+ * edge (the slots[] array has aged across a minor while the transient
+ * batch still holds the wrapping transient on the stack). Every slot
+ * mutation therefore routes through gc_write_barrier with the slots[]
+ * array as container (matches the `gc_valarr_set` convention in
+ * src/gc/barrier.c). When the slots[] array itself is reallocated we
+ * stamp the new array's stores via direct assignment -- the fresh
+ * YOUNG array makes the barrier a no-op for those writes.
+ */
+
+/* Write a single slot through the barrier so the remset captures any
+ * OLD-array -> YOUNG-target edge. The barrier is a no-op for YOUNG
+ * containers, so freshly cloned (still-young) slot arrays pay no
+ * extra cost. */
+static void hnode_slot_set(mino_state_t *S, void **slots, unsigned idx,
+                            void *val)
+{
+    gc_write_barrier(S, slots, slots[idx], val);
+    slots[idx] = val;
+}
+
+/* Install a fresh slots[] array onto an owner-tagged node. Routes
+ * through the barrier so a long batch that promoted the node to OLD
+ * across a mid-stride minor records the OLD-node -> YOUNG-slots edge
+ * in the remset. Without this the next minor would skip the node
+ * (OLD, not in remset), miss the YOUNG slots[] array entirely, and
+ * sweep it -- the subsequent iteration's `n->slots[phys]` would then
+ * read garbage. */
+static void hnode_slots_install(mino_state_t *S, mino_hamt_node_t *node,
+                                 void **slots)
+{
+    gc_write_barrier(S, node, node->slots, slots);
+    node->slots = slots;
+}
+
+/* Stamp `node` so it belongs to the editing transient. Returns the
+ * existing node when its owner already matches; otherwise clones the
+ * node, copies the slots[] array (so the clone can mutate without
+ * disturbing the persistent source), and stamps owner. */
+static mino_hamt_node_t *hnode_ensure_owned(mino_state_t *S,
+                                             const mino_hamt_node_t *node,
+                                             unsigned slot_count,
+                                             uintptr_t owner)
+{
+    mino_hamt_node_t *n;
+    void            **slots;
+    unsigned          k;
+    if (node != NULL && node->owner == (uint32_t)owner) {
+        return (mino_hamt_node_t *)node;
+    }
+    n = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE, sizeof(*n));
+    if (n == NULL) return NULL;
+    if (node != NULL) {
+        n->bitmap          = node->bitmap;
+        n->subnode_mask    = node->subnode_mask;
+        n->collision_hash  = node->collision_hash;
+        n->collision_count = node->collision_count;
+        if (slot_count > 0) {
+            slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                             slot_count * sizeof(*slots));
+            if (slots == NULL) return NULL;
+            for (k = 0; k < slot_count; k++) slots[k] = node->slots[k];
+            n->slots = slots;
+        } else {
+            n->slots = NULL;
+        }
+    }
+    n->owner = (uint32_t)owner;
+    return n;
+}
+
+/* Allocate a fresh slots[] array, copying `pop` entries from `src` and
+ * leaving the remainder NULL. Used when an insert grows the slot
+ * count; the fresh array is YOUNG so per-slot stores can skip the
+ * barrier. */
+static void **hnode_slots_grow(mino_state_t *S, void **src, unsigned pop,
+                                unsigned new_pop)
+{
+    void   **slots;
+    unsigned k;
+    slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                     new_pop * sizeof(*slots));
+    if (slots == NULL) return NULL;
+    for (k = 0; k < pop; k++) slots[k] = src[k];
+    return slots;
+}
+
+static mino_hamt_node_t *merge_entries_owned(mino_state_t *S,
+                                              hamt_entry_t *e1, uint32_t h1,
+                                              hamt_entry_t *e2, uint32_t h2,
+                                              unsigned shift, uintptr_t owner);
+
+/* hamt_assoc_owned: same semantics as hamt_assoc but mutates owner-
+ * tagged nodes in place. Returns the (possibly-new) subtree root for
+ * this level. Caller writes the result into the parent slot. */
+mino_hamt_node_t *hamt_assoc_owned(mino_state_t *S, mino_hamt_node_t *n,
+                                    hamt_entry_t *new_entry, uint32_t h,
+                                    unsigned shift, int *replaced,
+                                    uintptr_t owner)
+{
+    if (n == NULL) {
+        unsigned          i     = (unsigned)((h >> shift) & HAMT_MASK);
+        void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                           sizeof(*slots));
+        mino_hamt_node_t *fresh;
+        if (slots == NULL) return NULL;
+        slots[0] = new_entry;
+        fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
+                                                    sizeof(*fresh));
+        if (fresh == NULL) return NULL;
+        fresh->bitmap       = 1u << i;
+        fresh->subnode_mask = 0u;
+        fresh->slots        = slots;
+        fresh->owner        = (uint32_t)owner;
+        return fresh;
+    }
+    if (n->collision_count > 0) {
+        unsigned cc = n->collision_count;
+        if (h == n->collision_hash) {
+            unsigned j;
+            for (j = 0; j < cc; j++) {
+                hamt_entry_t *e = (hamt_entry_t *)n->slots[j];
+                if (mino_eq(e->key, new_entry->key)) {
+                    mino_hamt_node_t *ed = hnode_ensure_owned(S, n, cc, owner);
+                    if (ed == NULL) return NULL;
+                    hnode_slot_set(S, ed->slots, j, new_entry);
+                    *replaced = 1;
+                    return ed;
+                }
+            }
+            {
+                /* Append: grow slots[]. Even when owner matches we
+                 * have to allocate a wider array; reuse the node
+                 * struct in place to save its alloc. */
+                mino_hamt_node_t *ed;
+                void            **slots = hnode_slots_grow(S, n->slots, cc, cc + 1u);
+                if (slots == NULL) return NULL;
+                slots[cc] = new_entry;
+                ed = hnode_ensure_owned(S, n, 0u, owner);
+                if (ed == NULL) return NULL;
+                hnode_slots_install(S, ed, slots);
+                ed->collision_count = cc + 1u;
+                return ed;
+            }
+        }
+        {
+            /* Promote: wrap the collision bucket so it lives in one
+             * slot of a bitmap node at this level, then insert. */
+            unsigned ib = (unsigned)((n->collision_hash >> shift) & HAMT_MASK);
+            unsigned in = (unsigned)((h               >> shift) & HAMT_MASK);
+            if (ib == in) {
+                mino_hamt_node_t *sub = hamt_assoc_owned(S, n, new_entry, h,
+                                                          shift + HAMT_B,
+                                                          replaced, owner);
+                void            **slots;
+                mino_hamt_node_t *fresh;
+                if (sub == NULL) return NULL;
+                slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                 sizeof(*slots));
+                if (slots == NULL) return NULL;
+                slots[0] = sub;
+                fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
+                                                            sizeof(*fresh));
+                if (fresh == NULL) return NULL;
+                fresh->bitmap       = 1u << ib;
+                fresh->subnode_mask = 1u << ib;
+                fresh->slots        = slots;
+                fresh->owner        = (uint32_t)owner;
+                return fresh;
+            } else {
+                void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                                    2 * sizeof(*slots));
+                mino_hamt_node_t *fresh;
+                if (slots == NULL) return NULL;
+                if (ib < in) { slots[0] = (void *)n; slots[1] = new_entry; }
+                else         { slots[0] = new_entry; slots[1] = (void *)n; }
+                fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
+                                                            sizeof(*fresh));
+                if (fresh == NULL) return NULL;
+                fresh->bitmap       = (1u << ib) | (1u << in);
+                fresh->subnode_mask = 1u << ib;
+                fresh->slots        = slots;
+                fresh->owner        = (uint32_t)owner;
+                return fresh;
+            }
+        }
+    }
+    {
+        unsigned  i    = (unsigned)((h >> shift) & HAMT_MASK);
+        uint32_t  bit  = 1u << i;
+        unsigned  phys = popcount32(n->bitmap & (bit - 1u));
+        unsigned  pop  = popcount32(n->bitmap);
+        if ((n->bitmap & bit) == 0) {
+            /* Empty slot: grow slots[] by one. Reuse the node struct
+             * via hnode_ensure_owned so subsequent edits at this level
+             * keep the same node. */
+            mino_hamt_node_t *ed;
+            void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                                (pop + 1u) * sizeof(*slots));
+            unsigned k;
+            if (slots == NULL) return NULL;
+            for (k = 0; k < phys; k++) slots[k]     = n->slots[k];
+            slots[phys] = new_entry;
+            for (k = phys; k < pop; k++) slots[k + 1] = n->slots[k];
+            ed = hnode_ensure_owned(S, n, 0u, owner);
+            if (ed == NULL) return NULL;
+            hnode_slots_install(S, ed, slots);
+            ed->bitmap       = n->bitmap | bit;
+            ed->subnode_mask = n->subnode_mask;
+            return ed;
+        }
+        if (n->subnode_mask & bit) {
+            /* Child subtree: recurse, then update the slot in place
+             * (no slots[] resize required). */
+            mino_hamt_node_t *new_child = hamt_assoc_owned(S,
+                (mino_hamt_node_t *)n->slots[phys], new_entry, h,
+                shift + HAMT_B, replaced, owner);
+            mino_hamt_node_t *ed;
+            if (new_child == NULL) return NULL;
+            ed = hnode_ensure_owned(S, n, pop, owner);
+            if (ed == NULL) return NULL;
+            hnode_slot_set(S, ed->slots, phys, new_child);
+            return ed;
+        }
+        {
+            /* Leaf entry in slot. Same key → replace in place. Different
+             * key → split into a subtree and stamp subnode_mask. */
+            hamt_entry_t *existing = (hamt_entry_t *)n->slots[phys];
+            if (mino_eq(existing->key, new_entry->key)) {
+                mino_hamt_node_t *ed = hnode_ensure_owned(S, n, pop, owner);
+                if (ed == NULL) return NULL;
+                hnode_slot_set(S, ed->slots, phys, new_entry);
+                *replaced = 1;
+                return ed;
+            }
+            {
+                uint32_t          eh  = hash_val(existing->key);
+                mino_hamt_node_t *sub = merge_entries_owned(S, existing, eh,
+                                                             new_entry, h,
+                                                             shift + HAMT_B,
+                                                             owner);
+                mino_hamt_node_t *ed;
+                if (sub == NULL) return NULL;
+                ed = hnode_ensure_owned(S, n, pop, owner);
+                if (ed == NULL) return NULL;
+                hnode_slot_set(S, ed->slots, phys, sub);
+                ed->subnode_mask = n->subnode_mask | bit;
+                return ed;
+            }
+        }
+    }
+}
+
+static mino_hamt_node_t *merge_entries_owned(mino_state_t *S,
+                                              hamt_entry_t *e1, uint32_t h1,
+                                              hamt_entry_t *e2, uint32_t h2,
+                                              unsigned shift, uintptr_t owner)
+{
+    if (h1 == h2 || shift >= 32u) {
+        void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                            2 * sizeof(*slots));
+        mino_hamt_node_t *fresh;
+        if (slots == NULL) return NULL;
+        slots[0] = e1;
+        slots[1] = e2;
+        fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
+                                                    sizeof(*fresh));
+        if (fresh == NULL) return NULL;
+        fresh->collision_hash  = h1;
+        fresh->collision_count = 2u;
+        fresh->slots           = slots;
+        fresh->owner           = (uint32_t)owner;
+        return fresh;
+    }
+    {
+        unsigned i1 = (unsigned)((h1 >> shift) & HAMT_MASK);
+        unsigned i2 = (unsigned)((h2 >> shift) & HAMT_MASK);
+        if (i1 == i2) {
+            mino_hamt_node_t *child = merge_entries_owned(S, e1, h1, e2, h2,
+                                                            shift + HAMT_B,
+                                                            owner);
+            void            **slots;
+            mino_hamt_node_t *fresh;
+            if (child == NULL) return NULL;
+            slots = (void **)gc_alloc_typed(S, GC_T_PTRARR, sizeof(*slots));
+            if (slots == NULL) return NULL;
+            slots[0] = child;
+            fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
+                                                        sizeof(*fresh));
+            if (fresh == NULL) return NULL;
+            fresh->bitmap       = 1u << i1;
+            fresh->subnode_mask = 1u << i1;
+            fresh->slots        = slots;
+            fresh->owner        = (uint32_t)owner;
+            return fresh;
+        } else {
+            void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                                2 * sizeof(*slots));
+            mino_hamt_node_t *fresh;
+            if (slots == NULL) return NULL;
+            if (i1 < i2) { slots[0] = e1; slots[1] = e2; }
+            else         { slots[0] = e2; slots[1] = e1; }
+            fresh = (mino_hamt_node_t *)gc_alloc_typed(S, GC_T_HAMT_NODE,
+                                                        sizeof(*fresh));
+            if (fresh == NULL) return NULL;
+            fresh->bitmap       = (1u << i1) | (1u << i2);
+            fresh->subnode_mask = 0u;
+            fresh->slots        = slots;
+            fresh->owner        = (uint32_t)owner;
+            return fresh;
+        }
+    }
+}
+
+/* hamt_dissoc_owned: same semantics as the rebuild-from-key_order in
+ * mino_map_dissoc1, but walks the trie directly and reuses owner-
+ * tagged nodes in place. Returns the updated subtree root, NULL when
+ * the subtree empties (caller drops the parent slot accordingly), or
+ * `n` unchanged when the key is absent (with *removed left 0). */
+mino_hamt_node_t *hamt_dissoc_owned(mino_state_t *S, mino_hamt_node_t *n,
+                                     const mino_val_t *key, uint32_t h,
+                                     unsigned shift, int *removed,
+                                     uintptr_t owner)
+{
+    if (n == NULL) return NULL;
+    if (n->collision_count > 0) {
+        unsigned cc = n->collision_count;
+        unsigned j;
+        if (h != n->collision_hash) return n;
+        for (j = 0; j < cc; j++) {
+            hamt_entry_t *e = (hamt_entry_t *)n->slots[j];
+            if (mino_eq(e->key, key)) {
+                *removed = 1;
+                if (cc <= 1u) return NULL;
+                {
+                    /* Shrink: build a new slots[] without index j. */
+                    void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                                        (cc - 1u) * sizeof(*slots));
+                    mino_hamt_node_t *ed;
+                    unsigned k, w;
+                    if (slots == NULL) return NULL;
+                    for (k = 0, w = 0; k < cc; k++) {
+                        if (k == j) continue;
+                        slots[w++] = n->slots[k];
+                    }
+                    ed = hnode_ensure_owned(S, n, 0u, owner);
+                    if (ed == NULL) return NULL;
+                    hnode_slots_install(S, ed, slots);
+                    ed->collision_count = cc - 1u;
+                    return ed;
+                }
+            }
+        }
+        return n;
+    }
+    {
+        unsigned i    = (unsigned)((h >> shift) & HAMT_MASK);
+        uint32_t bit  = 1u << i;
+        unsigned phys = popcount32(n->bitmap & (bit - 1u));
+        unsigned pop  = popcount32(n->bitmap);
+        if ((n->bitmap & bit) == 0) return n;
+        if (n->subnode_mask & bit) {
+            mino_hamt_node_t *child = (mino_hamt_node_t *)n->slots[phys];
+            mino_hamt_node_t *new_child = hamt_dissoc_owned(S, child, key, h,
+                                                              shift + HAMT_B,
+                                                              removed, owner);
+            mino_hamt_node_t *ed;
+            if (!*removed) return n;
+            if (new_child != NULL) {
+                ed = hnode_ensure_owned(S, n, pop, owner);
+                if (ed == NULL) return NULL;
+                hnode_slot_set(S, ed->slots, phys, new_child);
+                return ed;
+            }
+            /* Child emptied: drop the slot. Shrink bitmap, subnode_mask,
+             * slots[] by one. */
+            if (pop == 1u) return NULL;
+            {
+                void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                                    (pop - 1u) * sizeof(*slots));
+                unsigned k, w;
+                if (slots == NULL) return NULL;
+                for (k = 0, w = 0; k < pop; k++) {
+                    if (k == phys) continue;
+                    slots[w++] = n->slots[k];
+                }
+                ed = hnode_ensure_owned(S, n, 0u, owner);
+                if (ed == NULL) return NULL;
+                hnode_slots_install(S, ed, slots);
+                ed->bitmap       = n->bitmap       & ~bit;
+                ed->subnode_mask = n->subnode_mask & ~bit;
+                return ed;
+            }
+        }
+        {
+            hamt_entry_t *e = (hamt_entry_t *)n->slots[phys];
+            if (!mino_eq(e->key, key)) return n;
+            *removed = 1;
+            if (pop == 1u) return NULL;
+            {
+                void            **slots = (void **)gc_alloc_typed(S, GC_T_PTRARR,
+                                                                    (pop - 1u) * sizeof(*slots));
+                mino_hamt_node_t *ed;
+                unsigned k, w;
+                if (slots == NULL) return NULL;
+                for (k = 0, w = 0; k < pop; k++) {
+                    if (k == phys) continue;
+                    slots[w++] = n->slots[k];
+                }
+                ed = hnode_ensure_owned(S, n, 0u, owner);
+                if (ed == NULL) return NULL;
+                hnode_slots_install(S, ed, slots);
+                ed->bitmap       = n->bitmap & ~bit;
+                ed->subnode_mask = n->subnode_mask;
+                return ed;
+            }
+        }
+    }
+}
+
 /*
  * merge_entries: build the smallest subtree that separates two leaf entries
  * whose hashes collide at `shift - HAMT_B` (the parent level). The returned
@@ -866,6 +1295,167 @@ mino_val_t *mino_map_dissoc1(mino_state_t *S, mino_val_t *m,
             if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
             root = hamt_assoc(S, root, e, hash_val(k), 0u, &replaced);
             if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+        }
+        out = alloc_val(S, MINO_MAP);
+        out->as.map.root      = root;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = NULL;
+        out->as.map.len       = old_len - 1;
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Owned-edit map mutators                                                   */
+/* ------------------------------------------------------------------------- */
+/*
+ * mino_map_assoc1_owned / mino_map_dissoc1_owned mirror the persistent
+ * mutators but route trie + companion-vector edits through the owner
+ * discipline so a long transient batch reuses nodes in place. The
+ * MINO_MAP value-head is still freshly allocated per call (matches the
+ * vec_assemble pattern); the saving comes from the trie and the
+ * key_order / val_order vectors.
+ */
+
+mino_val_t *mino_map_assoc1_owned(mino_state_t *S, mino_val_t *m,
+                                   mino_val_t *key, mino_val_t *val,
+                                   uintptr_t owner)
+{
+    mino_val_t *out;
+    if (m != NULL && m->as.map.len > 0) {
+        mino_val_t *existing = map_get_val(m, key);
+        if (existing != NULL && mino_eq(existing, val)) return m;
+    }
+    mino_current_ctx(S)->gc_depth++;
+    out = alloc_val(S, MINO_MAP);
+    if (m == NULL || m->as.map.len == 0) {
+        mino_val_t *ko = mino_vector(S, NULL, 0);
+        mino_val_t *vo = mino_vector(S, NULL, 0);
+        ko = vec_conj1_owned(S, ko, key, owner);
+        vo = vec_conj1_owned(S, vo, val, owner);
+        out->as.map.root      = NULL;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = vo;
+        out->as.map.len       = 1;
+        if (m != NULL) out->meta = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+    if (m->as.map.val_order != NULL) {
+        size_t      old_len = m->as.map.len;
+        size_t      i       = flat_find_index(m->as.map.key_order, key, old_len);
+        mino_val_t *ko, *vo;
+        if (i < old_len) {
+            ko = m->as.map.key_order;
+            vo = vec_assoc1_owned(S, m->as.map.val_order, i, val, owner);
+            out->as.map.root      = NULL;
+            out->as.map.key_order = ko;
+            out->as.map.val_order = vo;
+            out->as.map.len       = old_len;
+            out->meta             = m->meta;
+            mino_current_ctx(S)->gc_depth--;
+            return out;
+        }
+        if (old_len + 1 > MINO_FLATMAP_THRESHOLD) {
+            mino_hamt_node_t *root;
+            int               replaced = 0;
+            hamt_entry_t     *e;
+            ko = vec_conj1_owned(S, m->as.map.key_order, key, owner);
+            root = hamt_from_flat(S, m->as.map.key_order,
+                                   m->as.map.val_order, old_len);
+            if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+            e = hamt_entry_new(S, key, val);
+            if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+            root = hamt_assoc_owned(S, root, e, hash_val(key), 0u, &replaced, owner);
+            if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+            out->as.map.root      = root;
+            out->as.map.key_order = ko;
+            out->as.map.val_order = NULL;
+            out->as.map.len       = old_len + 1;
+            out->meta             = m->meta;
+            mino_current_ctx(S)->gc_depth--;
+            return out;
+        }
+        ko = vec_conj1_owned(S, m->as.map.key_order, key, owner);
+        vo = vec_conj1_owned(S, m->as.map.val_order, val, owner);
+        out->as.map.root      = NULL;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = vo;
+        out->as.map.len       = old_len + 1;
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+    {
+        hamt_entry_t     *e        = hamt_entry_new(S, key, val);
+        uint32_t          h        = hash_val(key);
+        int               replaced = 0;
+        mino_hamt_node_t *root;
+        mino_val_t       *ko       = m->as.map.key_order;
+        if (e == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+        root = hamt_assoc_owned(S, m->as.map.root, e, h, 0u, &replaced, owner);
+        if (root == NULL) { mino_current_ctx(S)->gc_depth--; return NULL; }
+        if (!replaced) ko = vec_conj1_owned(S, ko, key, owner);
+        out->as.map.root      = root;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = NULL;
+        out->as.map.len       = m->as.map.len + (replaced ? 0 : 1);
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+}
+
+mino_val_t *mino_map_dissoc1_owned(mino_state_t *S, mino_val_t *m,
+                                    mino_val_t *key, uintptr_t owner)
+{
+    mino_val_t *out;
+    if (m == NULL || m->as.map.len == 0) return m;
+    mino_current_ctx(S)->gc_depth++;
+    if (m->as.map.val_order != NULL) {
+        /* Flatmap dissoc: no vec_dissoc_at_owned exists, so rebuild
+         * the order vectors via vec_conj1_owned. Trie nodes still get
+         * owner-stamped on first touch. */
+        size_t old_len = m->as.map.len;
+        size_t idx     = flat_find_index(m->as.map.key_order, key, old_len);
+        size_t i;
+        mino_val_t *ko, *vo;
+        if (idx == old_len) { mino_current_ctx(S)->gc_depth--; return m; }
+        ko = mino_vector(S, NULL, 0);
+        vo = mino_vector(S, NULL, 0);
+        for (i = 0; i < old_len; i++) {
+            if (i == idx) continue;
+            ko = vec_conj1_owned(S, ko, vec_nth(m->as.map.key_order, i), owner);
+            vo = vec_conj1_owned(S, vo, vec_nth(m->as.map.val_order, i), owner);
+        }
+        out = alloc_val(S, MINO_MAP);
+        out->as.map.root      = NULL;
+        out->as.map.key_order = ko;
+        out->as.map.val_order = vo;
+        out->as.map.len       = old_len - 1;
+        out->meta             = m->meta;
+        mino_current_ctx(S)->gc_depth--;
+        return out;
+    }
+    {
+        size_t            old_len = m->as.map.len;
+        mino_val_t       *ko;
+        mino_hamt_node_t *root;
+        size_t            i;
+        int               removed = 0;
+        root = hamt_dissoc_owned(S, m->as.map.root, key, hash_val(key), 0u,
+                                  &removed, owner);
+        if (!removed) {
+            mino_current_ctx(S)->gc_depth--;
+            return m;
+        }
+        ko = mino_vector(S, NULL, 0);
+        for (i = 0; i < old_len; i++) {
+            mino_val_t *k = vec_nth(m->as.map.key_order, i);
+            if (mino_eq(k, key)) continue;
+            ko = vec_conj1_owned(S, ko, k, owner);
         }
         out = alloc_val(S, MINO_MAP);
         out->as.map.root      = root;

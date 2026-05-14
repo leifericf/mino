@@ -1946,11 +1946,21 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return acc;
     }
     if (mino_type_of(to) == MINO_MAP) {
-        mino_val_t *acc = to;
+        /* Transient fast path: assoc! each pair onto an owner-tagged
+         * HAMT, then seal with persistent!. The first batch element
+         * clones the spine once; subsequent elements reuse owner-
+         * matching slots in place. The transient is pinned across
+         * iterations -- at -O2 the local can live entirely in a
+         * callee-saved register, invisible to the conservative C-stack
+         * scan, so a long batch's mid-stride minor GC could otherwise
+         * sweep the wrapping transient. */
+        mino_val_t *t   = mino_transient(S, to);
+        mino_val_t *acc;
+        if (t == NULL) return NULL;
+        gc_pin(t);
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
             mino_val_t *item = seq_iter_val(S, &it);
-            mino_val_t *pair_args;
             mino_val_t *ek, *ev;
             if (item != NULL && mino_type_of(item) == MINO_VECTOR
                 && item->as.vec.len == 2) {
@@ -1960,13 +1970,18 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 ek = item->as.map_entry.k;
                 ev = item->as.map_entry.v;
             } else {
+                gc_unpin(1);
                 return prim_throw_classified(S, "eval/type", "MTY001",
                     "into map: each element must be a map entry or 2-element vector");
             }
-            pair_args = mino_cons(S, ek, mino_cons(S, ev, mino_nil(S)));
-            acc = prim_assoc(S, mino_cons(S, acc, pair_args), env);
+            if (mino_assoc_bang(S, t, ek, ev) == NULL) {
+                gc_unpin(1);
+                return NULL;
+            }
             seq_iter_next(S, &it);
         }
+        acc = mino_persistent(S, t);
+        gc_unpin(1);
         return acc;
     }
     if (mino_type_of(to) == MINO_SET) {

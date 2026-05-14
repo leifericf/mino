@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.169.0 — Hamt Owner Discipline And In-Place Map Mutation
+
+`assoc!`, `dissoc!`, and `(into {} ...)` on map transients now route
+through an owner-tagged HAMT walk. `mino_hamt_node_t` carries a 32-bit
+`owner` field (gc-zero-init keeps every persistent allocation at
+`owner = 0`); the new `hamt_assoc_owned` / `hamt_dissoc_owned` mirror
+the persistent walks but mutate owner-matching nodes in place,
+cloning-with-owner only on the first touch. The slot writes route
+through a barrier that records the OLD-node -> YOUNG-slots edge so a
+long batch's mid-stride minor never sweeps a freshly-installed
+slots array.
+
+`prim_into` for `MINO_MAP` destinations also routes through
+`mino_transient` / `mino_assoc_bang` / `mino_persistent` instead of
+calling `prim_assoc` per element. The transient is `gc_pin`'d across
+the loop so the conservative C-stack scan can't lose the wrapper to
+a register-only optimisation at -O2.
+
+### Measured impact (v0.168.0 -> v0.169.0)
+
+`map_bench.clj`:
+
+| Bench | v0.168.0 | v0.169.0 | Delta |
+|---|---:|---:|---:|
+| `into {} from 1000-pair vec`   | 1.45 ms | 0.45 ms | **-69% (3.24x)** |
+| `transient assoc! 1000 keys`   | 2.95 ms | 2.02 ms | -31% (1.46x) |
+| `assoc 100 keys` (persistent)  | 219 us  | 215 us  | flat |
+| `assoc 1000 keys` (persistent) | 2.63 ms | 2.70 ms | +3% noise |
+| `get on 100-key map`           | 1.69 us | 1.72 us | flat |
+| `dissoc from 100-key map`      | 72.5 us | 71.3 us | flat |
+
+Neighbor suites (`vec_bench`, `reduce_int_bench`,
+`pipeline_consumers_bench`, `protocol_bench`) within 2% of baseline.
+
+ASan clean. 1675 tests / 7814 assertions all green (6 new regression
+tests cover in-place batch correctness, the flatmap-to-HAMT
+promotion boundary, mid-batch GC survival, and `(into {} ...)`
+equivalence with the persistent path).
+
 ## v0.168.0 — Keyword-As-Fn Pipeline Fast Lane
 
 `(map :k coll)` and `(filter :k coll)` previously went through

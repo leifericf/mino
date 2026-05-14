@@ -120,6 +120,69 @@
     (conj! t 3)
     (is (= [1 2 3] (persistent! t)))))
 
+;; In-place map assoc! batches: the owner-tagged HAMT walk must produce
+;; the same value as the persistent path, across the flatmap-to-HAMT
+;; promotion (threshold = 8), and survive intervening GC.
+(deftest transient-map-large-batch
+  (let [n  100
+        t  (transient {})
+        _  (dotimes [i n] (assoc! t (keyword (str "k" i)) i))
+        m  (persistent! t)]
+    (is (= n (count m)))
+    (dotimes [i n]
+      (is (= i (get m (keyword (str "k" i))))))))
+
+(deftest transient-map-promotion-boundary
+  ;; Crosses the MINO_FLATMAP_THRESHOLD (8): flatmap -> HAMT promotion
+  ;; under the owner discipline must keep the order vectors consistent.
+  (let [t (transient {})]
+    (assoc! t :a 1) (assoc! t :b 2) (assoc! t :c 3) (assoc! t :d 4)
+    (assoc! t :e 5) (assoc! t :f 6) (assoc! t :g 7) (assoc! t :h 8)
+    (assoc! t :i 9) (assoc! t :j 10)
+    (let [m (persistent! t)]
+      (is (= 10 (count m)))
+      (is (= 5 (get m :e)))
+      (is (= 10 (get m :j))))))
+
+(deftest transient-map-survives-gc-yield
+  ;; The OLD-node -> YOUNG-slots[] edge installed by the owner-walk must
+  ;; route through the write barrier; without it a mid-stride minor GC
+  ;; would sweep the new slots[] array and the next assoc! would read
+  ;; garbage. Hammering with enough entries to provoke a minor GC.
+  (let [t (transient {})]
+    (dotimes [i 2000] (assoc! t i (* i 2)))
+    (gc!)
+    (assoc! t :tail 9999)
+    (let [m (persistent! t)]
+      (is (= 2001 (count m)))
+      (is (= 1998 (get m 999)))
+      (is (= 9999 (get m :tail))))))
+
+(deftest transient-map-overwrite
+  (let [t (transient {:a 1})]
+    (assoc! t :a 2)
+    (assoc! t :a 3)
+    (is (= {:a 3} (persistent! t)))))
+
+(deftest transient-map-into-via-bang
+  ;; into-map now routes through the transient batch path; verify
+  ;; equivalence with the persistent (assoc m k v) result.
+  (let [pairs (vec (map vector (range 1000) (range 1000)))
+        a     (into {} pairs)
+        b     (reduce (fn [acc [k v]] (assoc acc k v)) {} pairs)]
+    (is (= a b))
+    (is (= 1000 (count a)))
+    (is (= 500 (get a 500)))))
+
+(deftest transient-map-dissoc-batch
+  (let [m (into {} (map vector (range 100) (range 100)))
+        t (transient m)]
+    (dotimes [i 50] (dissoc! t i))
+    (let [out (persistent! t)]
+      (is (= 50 (count out)))
+      (is (nil? (get out 0)))
+      (is (= 50 (get out 50))))))
+
 ;; --- Builder-pattern compile-time rewrite safety ---
 ;;
 ;; The (loop [... acc []] (if <test> (recur ... (conj acc x)) acc)) shape

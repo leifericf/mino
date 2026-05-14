@@ -189,8 +189,18 @@ mino_val_t *mino_assoc_bang(mino_state_t *S, mino_val_t *t,
             return t;
         }
     }
-    /* Map branch: still wrapper-style until the map HAMT gains its own
-     * owner discipline in a follow-on cycle. */
+    /* Map branch: owner-tagged HAMT walk. The first assoc! against a
+     * fresh transient clones spine + slots arrays once; subsequent
+     * assoc!'s with owner-matching nodes mutate slot pointers in place
+     * (and key_order via vec_conj1_owned when the key is new).
+     * owner_id == 0 wraparound falls through to the persistent path. */
+    if (t->as.transient.owner_id != 0) {
+        result = mino_map_assoc1_owned(S, inner, key, val,
+                                         t->as.transient.owner_id);
+        if (result == NULL) return NULL;
+        transient_set_current(S, t, result);
+        return t;
+    }
     args = cons1(S, inner,
                  cons1(S, key, cons1(S, val, mino_nil(S))));
     result = prim_assoc(S, args, NULL);
@@ -245,6 +255,13 @@ mino_val_t *mino_dissoc_bang(mino_state_t *S, mino_val_t *t,
     inner = t->as.transient.current;
     if (inner == NULL || mino_type_of(inner) != MINO_MAP) {
         return transient_error(S, "dissoc!: transient must wrap a map");
+    }
+    if (t->as.transient.owner_id != 0) {
+        result = mino_map_dissoc1_owned(S, inner, key,
+                                          t->as.transient.owner_id);
+        if (result == NULL) return NULL;
+        transient_set_current(S, t, result);
+        return t;
     }
     args = cons1(S, inner, cons1(S, key, mino_nil(S)));
     result = prim_dissoc(S, args, NULL);
