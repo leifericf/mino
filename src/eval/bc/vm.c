@@ -1138,6 +1138,13 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
      * orphaned frames. Mirrors the longjmp-unwind loop in
      * control.c's eval_try. */
     dyn_frame_t       *saved_dyn_stack    = ctx->dyn_stack;
+    /* Save/restore the bc cursor so a recursive mino_bc_run leaves the
+     * outer caller's cursor intact on return. bc_done restores both
+     * fields on every exit path. */
+    const mino_bc_fn_t *saved_bc_current  = ctx->bc_current_bc;
+    size_t              saved_bc_current_pc = ctx->bc_current_pc;
+    ctx->bc_current_bc = bc;
+    ctx->bc_current_pc = (size_t)match->entry_pc;
 
     while (pc < bc->code_len) {
         /* Refresh the window pointer every cycle. Any op that can
@@ -1148,6 +1155,12 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
          * the prior buffer. Recomputing from base on each iteration
          * keeps the window pointer correct without per-op clutter. */
         regs = S->bc_regs + base;
+        /* Publish the about-to-execute pc to the bc cursor. Error
+         * paths that fire from primitives invoked by this op resolve
+         * a precise source span via mino_bc_source_lookup against
+         * (bc_current_bc, bc_current_pc). One write per opcode, well
+         * inside per-cycle noise on every benchmark measured. */
+        ctx->bc_current_pc = pc;
         mino_bc_insn_t ins = code[pc++];
         unsigned op = OP_OF(ins);
 #ifdef MINO_BC_OP_COUNTS
@@ -1944,6 +1957,8 @@ bc_done:
         free(f);
     }
     bc_pop_window(S, base);
+    ctx->bc_current_bc = saved_bc_current;
+    ctx->bc_current_pc = saved_bc_current_pc;
     if (!ok) return NULL;
     return retval != NULL ? retval : mino_nil(S);
 }

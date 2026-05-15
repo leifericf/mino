@@ -425,6 +425,18 @@ typedef struct mino_thread_ctx {
     int             call_depth;
     int             trace_added;
 
+    /* BC "where are we right now" cursor. mino_bc_run keeps these
+     * fields in sync with the dispatch loop's local bc / pc so error
+     * paths that fire without a useful S->eval_current_form (e.g., a
+     * stencil-internal fault from a future native tier) can resolve a
+     * precise source span via mino_bc_source_lookup. Stack discipline:
+     * each mino_bc_run frame snapshots its caller's values at entry
+     * and restores them on exit; the result is a one-deep cursor that
+     * always points at the innermost active BC frame (or NULL when no
+     * BC is on the C stack). */
+    const struct mino_bc_fn *bc_current_bc;
+    size_t                   bc_current_pc;
+
     /* GC save stack: transient roots pinned across allocations. */
     mino_val_t     *gc_save[64];
     int             gc_save_len;

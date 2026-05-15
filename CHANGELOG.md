@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.178.0 — Source-Map Scaffolding
+
+The bytecode VM gains a per-fn `(line, column)` side table indexed by
+pc, populated by the compiler from each form's cons metadata. The
+table is allocated `GC_T_RAW` and walked through the bc record's GC
+mark hook; the source file is stored once on the table and consulted
+through a new `mino_bc_source_lookup` accessor that callers outside
+the bc module can use to attribute diagnostics back to a precise
+source position.
+
+The bytecode dispatch loop publishes a current-pc cursor on the
+thread context (saved and restored around each `mino_bc_run` frame),
+so errors raised from primitives invoked by an opcode can resolve a
+precise source span when the surrounding eval frame's form has no
+line info. `set_eval_diag` falls back to the cursor when the explicit
+form is missing it; otherwise diagnostic behaviour is unchanged.
+
+The data structure is the foundation for the runtime PC ↔ source
+mapping that downstream tiers will lean on for stack traces inside
+native code regions.
+
 ## v0.177.0 — Lazy-Cell Allocation Probe
 
 Re-ran `MINO_BC_OP_COUNTS` on `lazy_bench.clj` against the

@@ -3,6 +3,7 @@
  */
 
 #include "runtime/internal.h"
+#include "eval/bc/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Error reporting                                                           */
@@ -139,6 +140,28 @@ void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
             span.line   = form->as.cons.line;
             span.column = form->as.cons.column;
             diag_set_span(d, span);
+        } else if (d != NULL && !d->has_primary_span) {
+            /* Form lacked source info -- fall back to the bc cursor.
+             * Resolves the precise pc that was executing when the
+             * diagnostic was raised, regardless of whether the bc
+             * frame's enclosing eval_current_form had been refreshed
+             * yet. Native tiers populate the same cursor so JIT'd
+             * errors inherit this attribution path. */
+            const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
+            size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
+            const char         *file   = NULL;
+            int                 line   = 0;
+            int                 column = 0;
+            if (cur_bc != NULL
+                && mino_bc_source_lookup(cur_bc, cur_pc,
+                                         &file, &line, &column)) {
+                mino_span_t span;
+                memset(&span, 0, sizeof(span));
+                span.file   = file;
+                span.line   = line;
+                span.column = column;
+                diag_set_span(d, span);
+            }
         }
         if (d != NULL && data != NULL) {
             diag_set_data(d, data);
