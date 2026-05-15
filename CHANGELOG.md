@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.225.0 — JIT Stencils For OP_NTH_VEC + OP_FIRST_VEC
+
+Opens the coverage cycle (cycle C). Adds two new stencils so the JIT
+no longer falls back to the interpreter on fns that use vector
+indexing or `first`. Both stencils are trampoline-only — the
+interpreter's vector fast lane lives in a new slow helper
+(`mino_jit_nth_vec_slow` / `mino_jit_first_vec_slow`) that mirrors
+the bc_run handlers' `MINO_VECTOR` + tagged-int checks before
+falling through to `prim_nth` / `prim_first`. Stencil sources stay
+hermetic; the helper carries the type-switch.
+
+### Why coverage rather than perf
+
+The dominant per-call cost in the interpreter's NTH_VEC / FIRST_VEC
+handlers is the type check and the `vec_nth` body itself, not the
+bc_run switch dispatch around them. The JIT version still calls the
+same fast lane via the slow helper, so the inline savings are
+minimal. The visible signal is JIT eligibility: fns that use
+vector indexing or first as a hot op now pass
+`mino_jit_classify_eligibility` and get JIT-compiled instead of
+running through the interpreter.
+
+### What landed
+
+  - `src/eval/bc/stencils/nth_vec.c`, `first_vec.c` (new).
+  - `mino_jit_nth_vec_slow`, `mino_jit_first_vec_slow` in
+    `src/eval/bc/jit/helpers.c`.
+  - Stencil registry entries in `lib/mino/tasks/builtin.clj` (both
+    `gen-stencils` and `check-stencil-registry` lists).
+  - Stencil descriptor entries in `entry.c::mino_jit_stencils[]`.
+  - Helper extern-fn registrations in `entry.c::g_extern_fns[]`.
+  - `stencils_arm64_darwin.h` regenerated.
+
+`release-gate` green; correctness verified via the full test suite
+(1737 tests / 7915 assertions).
+
 ## v0.224.0 — Perf-Pivot Cycle Close
 
 Closes the apply_callable_argv inlining cycle (v0.220 - v0.224). The

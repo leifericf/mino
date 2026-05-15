@@ -99,6 +99,64 @@ mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_NTH_VEC. Mirrors the interpreter's fast lane:
+ * if regs[b] is a vector and regs[c] is a tagged int in range, write
+ * vec_nth(coll, idx) into regs[a] without consing. Otherwise build a
+ * two-element cons spine and dispatch through prim_nth. The cons
+ * fallback handles lazy seqs, lists, maps-with-int-key, etc. */
+mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S, mino_val_t **regs,
+                                   unsigned a, unsigned b, unsigned c)
+{
+    ptrdiff_t   base  = regs - S->bc_regs;
+    mino_val_t *coll  = S->bc_regs[base + b];
+    mino_val_t *idx_v = S->bc_regs[base + c];
+    if (coll != NULL && mino_type_of(coll) == MINO_VECTOR
+        && idx_v != NULL && MINO_IS_INT(idx_v)) {
+        long long idx = MINO_INT_VAL(idx_v);
+        if (idx >= 0 && (size_t)idx < coll->as.vec.len) {
+            regs    = S->bc_regs + base;
+            regs[a] = vec_nth(coll, (size_t)idx);
+            return regs;
+        }
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, idx_v, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_nth(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* Slow path for OP_FIRST_VEC. Mirrors the interpreter's fast lane:
+ * if regs[b] is a vector, regs[a] := nil (empty) | vec_nth(coll, 0)
+ * (non-empty). Otherwise cons-and-prim_first for lazy seqs, lists,
+ * strings, maps, etc. */
+mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
+                                     unsigned a, unsigned b)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+        regs    = S->bc_regs + base;
+        regs[a] = coll->as.vec.len == 0 ? mino_nil(S) : vec_nth(coll, 0);
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_first(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Continue-marker stub. Fused-loop stencils emit a `b` instruction
  * referencing this symbol; the JIT runtime detects the BRANCH26 reloc
  * during emit_stencil and rewrites it to target the stencil instance's

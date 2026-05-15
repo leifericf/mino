@@ -219,6 +219,19 @@ extern mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
                                                    unsigned argc,
                                                    unsigned dst);
 
+/* OP_NTH_VEC slow helper. Inlined vector fast lane + cons-and-prim_nth
+ * fallback. */
+extern mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S,
+                                           mino_val_t **regs,
+                                           unsigned a, unsigned b,
+                                           unsigned c);
+
+/* OP_FIRST_VEC slow helper. Inlined vector fast lane + cons-and-prim_first
+ * fallback. */
+extern mino_val_t **mino_jit_first_vec_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a, unsigned b);
+
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
  * return value lands at regs[dst]. Routes through
