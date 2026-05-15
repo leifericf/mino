@@ -12,9 +12,9 @@
 #define MINO_TAGGED_INT_MAX \
     ((uintptr_t)((unsigned long long)0x7ffffffffffffff8ull) | (uintptr_t)1)
 
-mino_stencil_chain_t stencil_op_loop_int_lt_inc(mino_val_t **regs,
-                                                 mino_val_t **consts,
-                                                 mino_state_t *S)
+void stencil_op_loop_int_lt_inc(mino_val_t **regs,
+                                 mino_val_t **consts,
+                                 mino_state_t *S)
 {
     for (;;) {
         mino_val_t *vc = regs[IMM_A];
@@ -27,7 +27,7 @@ mino_stencil_chain_t stencil_op_loop_int_lt_inc(mino_val_t **regs,
             regs = mino_jit_loop_int_lt_inc_slow(S, regs,
                                                   IMM_A, IMM_B, IMM_C);
             if (regs == NULL) {
-                return (mino_stencil_chain_t){NULL, consts};
+                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
             }
             if (((uintptr_t)regs & 1) != 0) {
                 regs = (mino_val_t **)((uintptr_t)regs & ~(uintptr_t)1);
@@ -44,7 +44,7 @@ mino_stencil_chain_t stencil_op_loop_int_lt_inc(mino_val_t **regs,
             regs = mino_jit_loop_int_lt_inc_slow(S, regs,
                                                   IMM_A, IMM_B, IMM_C);
             if (regs == NULL) {
-                return (mino_stencil_chain_t){NULL, consts};
+                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
             }
             if (((uintptr_t)regs & 1) != 0) {
                 regs = (mino_val_t **)((uintptr_t)regs & ~(uintptr_t)1);

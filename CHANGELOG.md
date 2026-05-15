@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.233.0 — Stencil ABI Overhaul: musttail Chain Marker
+
+Replaces the ARM64-only chain mechanism with a portable
+musttail-call marker, making the stencil ABI host-agnostic. The
+old design leaned on three properties of AArch64 + AAPCS: 2-pointer
+struct return goes to (x0, x1), arg registers are also (x0, x1, x2),
+and `ret` plus `b` are both 4 bytes so a patcher can swap one for
+the other in place. None of these hold on x86_64 SysV, so the
+chain mechanism had to change before x86_64 stencils could ship.
+
+  - `src/eval/bc/stencils/abi.h`: `mino_stencil_chain_t` typedef
+    removed; the chain-return type is now plain `void`.
+    `MINO_STENCIL_CHAIN_RETURN(regs, consts, S)` lowers to
+    `__attribute__((musttail)) return mino_jit_chain_continue_marker(
+    regs, consts, S);`. New extern declaration for the marker.
+  - Every chained stencil source: return type changed from
+    `mino_stencil_chain_t` to `void`. `stencil_op_move` and
+    `stencil_op_load_k` had their signatures normalised to the
+    canonical `(regs, consts, S)` shape so musttail's strict
+    signature-match holds; each now ends with an explicit
+    `MINO_STENCIL_CHAIN_RETURN`.
+  - `stencil_op_loop_int_dec`, `stencil_op_loop_int_lt`, and
+    `stencil_op_loop_int_lt_inc` had their NULL-return paths
+    (`return (mino_stencil_chain_t){NULL, consts};`) replaced
+    with `MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);` so the
+    soft-NULL signal flows through the same chain branch.
+  - `src/eval/bc/jit/helpers.c`: new
+    `mino_jit_chain_continue_marker(regs, consts, S)` no-op stub.
+    The runtime never executes it; the linker keeps the symbol so
+    stencil .o files have something to reference, and the JIT
+    rewrites every call site before the region is set RX.
+  - `src/eval/bc/jit/internal.h`: new
+    `MINO_JIT_CHAIN_MARKER_NAME` constant, declaration added.
+  - `src/eval/bc/jit/emit.c`: new `SYM_SLOT_CHAIN` slot kind;
+    `inst_t` carries the stencil descriptor pointer so the
+    post-emit pass can walk each non-final stencil's reloc table.
+    Pass A no longer scans for `0xd65f03c0` ret instructions --
+    it walks the reloc table for each non-final stencil, finds
+    every `MINO_JIT_CHAIN_MARKER_NAME` relocation, and patches
+    the BRANCH26 to point at the next instance's `native_start`.
+    Inline fast paths that exit through multiple basic blocks
+    each emit their own chain reloc; the pass patches them all.
+  - `src/eval/bc/stencils/generated/stencils_arm64_darwin.h` and
+    `stencils_arm64_linux.h`: regenerated. Every non-final
+    stencil's symbol table now includes
+    `mino_jit_chain_continue_marker`; the trailing 4 bytes of each
+    non-final stencil's byte table changed from `0xc0 0x03 0x5f
+    0xd6` (ret) to `0x00 0x00 0x00 0x14` (a placeholder `b 0`
+    that carries the BRANCH26 reloc against the marker).
+
+This release deliberately collapses the originally-planned
+v0.233.0 (ABI overhaul) and v0.234.0 (emit.c chain pass) into a
+single tag because they form one cohesive build-green-keeping
+transition: the ABI change without the emit pass would leave the
+runtime unable to JIT, and the emit pass without the ABI change
+would have no chain marker relocs to find. Subsequent A2 work
+(x86_64 patcher, direct-emit, trampoline, arch dispatch,
+generated x86_64 Linux header) now lands cleanly on top because
+the chain mechanism is no longer arch-specific.
+
+`release-gate` green on ARM64 Darwin: 1737 tests / 7915 assertions,
+ASan suite clean, JIT parity stdout byte-identical.
+
 ## v0.232.0 — x86_64 ELF Reloc Map + Enum Mirror
 
 Opens cycle A2 (x86_64 portability). Adds the runtime-stable

@@ -13,7 +13,9 @@
 
 #include "abi.h"
 
-void stencil_op_load_k(mino_val_t **regs, mino_val_t **consts)
+void stencil_op_load_k(mino_val_t **regs, mino_val_t **consts,
+                       mino_state_t *S)
 {
     regs[IMM_A] = consts[IMM_BX];
+    MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
 }

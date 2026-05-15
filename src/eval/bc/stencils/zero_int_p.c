@@ -12,9 +12,9 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-mino_stencil_chain_t stencil_op_zero_int_p(mino_val_t **regs,
-                                            mino_val_t **consts,
-                                            mino_state_t *S)
+void stencil_op_zero_int_p(mino_val_t **regs,
+                            mino_val_t **consts,
+                            mino_state_t *S)
 {
     mino_val_t *v = regs[IMM_B];
     if (__builtin_expect(MINO_IS_INT(v), 1)) {

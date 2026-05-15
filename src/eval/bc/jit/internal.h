@@ -62,11 +62,19 @@
  * real bytecode opcode emitted by the compiler. */
 #define OP_FUSED_LOAD_K_RETURN ((unsigned)(OP__COUNT + 1))
 
-/* Continue-marker symbol name as the extractor records it (after the
- * Mach-O / ELF underscore stripping the tool does). Matched in
- * emit_stencil to redirect a stencil's back-jump branch at its own
- * self_start rather than route through the extern fn trampoline. */
-#define MINO_JIT_LOOP_MARKER_NAME "mino_jit_loop_continue_marker"
+/* Continue-marker symbol names as the extractor records them
+ * (after the Mach-O / ELF underscore stripping the tool does).
+ * Matched in emit_stencil to short-circuit the extern-fn lookup:
+ *
+ *   LOOP marker  -- fused-loop back-jump; emit redirects the
+ *                   branch to the stencil instance's own
+ *                   self_start.
+ *   CHAIN marker -- chain-continue tail-call; emit defers
+ *                   patching until the post-emit pass knows the
+ *                   next instance's native_start and rewrites
+ *                   every chain reloc to point there. */
+#define MINO_JIT_LOOP_MARKER_NAME  "mino_jit_loop_continue_marker"
+#define MINO_JIT_CHAIN_MARKER_NAME "mino_jit_chain_continue_marker"
 
 /* Direct-emit instruction sizes. */
 #define MINO_JIT_JMP_SIZE        4u
@@ -234,6 +242,9 @@ mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
                                            unsigned a, unsigned b,
                                            unsigned c);
 void         mino_jit_loop_continue_marker(void);
+void         mino_jit_chain_continue_marker(mino_val_t **regs,
+                                             mino_val_t **consts,
+                                             mino_state_t *S);
 
 #endif /* MINO_CPJIT_HOST */
 

@@ -40,33 +40,45 @@ typedef struct mino_state    mino_state_t;
 typedef struct mino_val      mino_val_t;
 typedef struct mino_bc_fn    mino_bc_fn_t;
 
-/* Chain-return type for non-final stencils. ARM64 AAPCS returns
- * structs of two 8-byte pointers in (x0, x1), so a stencil that
- * names this struct as its return type forces clang to spill
- * `consts` (x1 at entry) to a callee-saved register across any
- * helper call and reload it into x1 before the trailing ret.
+/* Chain mechanism for non-final stencils.
  *
- * The JIT patches that ret into `b <next>`, so the next stencil
- * sees x0=regs, x1=consts, x2=S — even when the current stencil
- * called into a helper that clobbered x1. The fused / OP_RETURN
- * (final) stencils keep their `mino_val_t *` scalar return; they
- * are not chained out of so x1 preservation is moot for them. */
-typedef struct {
-    mino_val_t **regs;
-    mino_val_t **consts;
-} mino_stencil_chain_t;
+ * Every non-final stencil ends each of its return paths with a
+ * `musttail` call to the extern chain-continue marker. clang lowers
+ * the musttail to an unconditional branch (BRANCH26 on ARM64, PC32
+ * jmp on x86_64) against the marker symbol; the linker emits one
+ * relocation per call site. The JIT's emit pass walks each
+ * non-final stencil's reloc table, finds every relocation against
+ * the chain marker, and patches the branch offset to point at the
+ * next stencil instance's start.
+ *
+ * Why a marker (and not the old struct-return + register-pin
+ * trick)? The previous design leaned on three AArch64-specific
+ * properties: (1) AAPCS returns 2-pointer structs in (x0, x1),
+ * (2) the first three args also live in (x0, x1, x2), so the
+ * previous stencil's return registers ARE the next stencil's arg
+ * registers, and (3) `ret` and `b` are both 4 bytes so a patcher
+ * can swap one for the other in place. None of those hold on
+ * x86_64 SysV; the marker design is arch-portable because every
+ * supported host has a sensible tail-call branch.
+ *
+ * `__attribute__((musttail))` forces clang to emit the call as a
+ * jump and reuse the caller's frame -- there is no epilogue or
+ * trailing ret. The marker's signature `(regs, consts, S)` is the
+ * canonical chain signature; every chained stencil takes (and
+ * passes through) the same three pointers so musttail's strict
+ * signature-match rule holds.
+ *
+ * The marker function exists only so the linker resolves the
+ * symbol; the runtime never executes it. The JIT rewrites every
+ * call site before the region is set RX. */
+extern void mino_jit_chain_continue_marker(mino_val_t **regs,
+                                           mino_val_t **consts,
+                                           mino_state_t *S);
 
-/* Chain-exit invariant: at the patched-`ret` boundary, x0=regs,
- * x1=consts, x2=S. The struct return enforces (x0, x1) via AAPCS;
- * the register-asm pin forces clang to materialise S in x2 right
- * before the ret. The AArch64 function epilogue itself touches
- * only x19/x20/x29/x30 and sp, so x2 carries through to the
- * patched chain branch unchanged. */
 #define MINO_STENCIL_CHAIN_RETURN(regs_, consts_, S_)                      \
     do {                                                                   \
-        register mino_state_t *_mino_s_in_x2 __asm__("x2") = (S_);         \
-        __asm__ volatile("" : : "r"(_mino_s_in_x2));                       \
-        return (mino_stencil_chain_t){(regs_), (consts_)};                 \
+        __attribute__((musttail))                                          \
+        return mino_jit_chain_continue_marker((regs_), (consts_), (S_));   \
     } while (0)
 
 /* Extern immediate slots. Their addresses encode the patchable operands.

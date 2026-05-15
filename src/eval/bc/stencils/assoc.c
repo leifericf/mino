@@ -17,9 +17,9 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-mino_stencil_chain_t stencil_op_assoc(mino_val_t **regs,
-                                       mino_val_t **consts,
-                                       mino_state_t *S)
+void stencil_op_assoc(mino_val_t **regs,
+                       mino_val_t **consts,
+                       mino_state_t *S)
 {
     regs = mino_jit_assoc_slow(S, regs,
                                (unsigned)IMM_A,

@@ -11,9 +11,9 @@
 #define MINO_TAGGED_INT_MIN \
     ((uintptr_t)((unsigned long long)0x8000000000000000ull) | (uintptr_t)1)
 
-mino_stencil_chain_t stencil_op_loop_int_dec(mino_val_t **regs,
-                                              mino_val_t **consts,
-                                              mino_state_t *S)
+void stencil_op_loop_int_dec(mino_val_t **regs,
+                              mino_val_t **consts,
+                              mino_state_t *S)
 {
     for (;;) {
         mino_val_t *v = regs[IMM_A];
@@ -30,7 +30,7 @@ mino_stencil_chain_t stencil_op_loop_int_dec(mino_val_t **regs,
         }
         regs = mino_jit_loop_int_dec_slow(S, regs, IMM_A);
         if (regs == NULL) {
-            return (mino_stencil_chain_t){NULL, consts};
+            MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
         }
         if (((uintptr_t)regs & 1) != 0) {
             regs = (mino_val_t **)((uintptr_t)regs & ~(uintptr_t)1);

@@ -30,9 +30,9 @@
 #include "abi.h"
 #include "runtime_layout.h"
 
-mino_stencil_chain_t stencil_op_call_cached(mino_val_t **regs,
-                                             mino_val_t **consts,
-                                             mino_state_t *S)
+void stencil_op_call_cached(mino_val_t **regs,
+                             mino_val_t **consts,
+                             mino_state_t *S)
 {
     mino_bc_ic_slot_t *slot = &MINO_JIT_BC_IC_SLOTS(IMM_BC)[(unsigned)IMM_BX2];
     mino_thread_ctx_t *ctx  = MINO_JIT_INVOKE_CTX(S);

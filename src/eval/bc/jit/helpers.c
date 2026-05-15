@@ -328,12 +328,33 @@ mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
-/* Continue-marker stub. Fused-loop stencils emit a `b` instruction
- * referencing this symbol; the JIT runtime detects the BRANCH26 reloc
- * during emit_stencil and rewrites it to target the stencil instance's
- * own start (the loop back-jump). The function body is never executed;
- * a no-op `ret` is enough to give the linker a valid definition. */
+/* Continue-marker stubs. Both functions exist only so the linker
+ * resolves the symbol references each stencil emits:
+ *
+ *   loop_continue_marker  -- fused-loop stencils emit a `b` against
+ *     this symbol (inline asm); the JIT runtime detects the BRANCH26
+ *     reloc during emit_stencil and rewrites it to target the
+ *     stencil instance's own start (the loop back-jump).
+ *
+ *   chain_continue_marker -- every non-final stencil ends each
+ *     return path with `__attribute__((musttail)) return
+ *     mino_jit_chain_continue_marker(regs, consts, S)`. clang
+ *     lowers the musttail to a `b` (ARM64) or `jmp` (x86_64); the
+ *     JIT's post-emit pass walks each non-final stencil's reloc
+ *     table, finds every relocation against this marker, and
+ *     patches the branch offset to point at the next stencil
+ *     instance's start.
+ *
+ * Neither function is ever executed by the JIT region; the bytes
+ * the linker emits for the no-op body just satisfy the symbol
+ * definition requirement. */
 void mino_jit_loop_continue_marker(void) { /* never called */ }
+void mino_jit_chain_continue_marker(mino_val_t **regs,
+                                    mino_val_t **consts,
+                                    mino_state_t *S)
+{
+    (void)regs; (void)consts; (void)S;
+}
 
 /* Slow path for the unary OP_INC_I / OP_DEC_I / OP_ZERO_INT_P stencils.
  * Builds a one-element cons spine and dispatches to the matching

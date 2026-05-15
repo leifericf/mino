@@ -16,12 +16,18 @@
  *             code section (or synthesise direct-emit instructions),
  *             allocate / fill pool slots, write trampolines, and
  *             patch every reloc against the resulting addresses.
- *   pass A  -- chain rewrite: rewrite every `ret` inside each
- *             non-final stencil's span into a `b <next>` chain branch.
- *             Inline fast paths often emit multiple `ret` instructions
- *             (lean exit + slow-path exit); patching only the first
- *             would leave the remaining `ret` short-circuiting out of
- *             the JIT region.
+ *   pass A  -- chain patch: every non-final stencil source ends
+ *             each of its return paths with `__attribute__((musttail))
+ *             return mino_jit_chain_continue_marker(regs, consts, S)`.
+ *             clang lowers each musttail into a single branch
+ *             instruction whose target field carries a relocation
+ *             against the marker symbol. This pass walks each
+ *             non-final stencil's reloc table, finds every
+ *             chain-marker relocation, and patches the branch
+ *             offset to point at the next instance's native_start.
+ *             Inline fast paths that exit through multiple basic
+ *             blocks each emit their own chain reloc; all of them
+ *             are patched to the same next-instance target.
  *   pass B  -- direct-emit target patching: resolve JMP / JMPIFNOT
  *             instances' branch offsets through the pc -> native-offset
  *             side table built during pass 2.
@@ -83,9 +89,14 @@ enum { MINO_JIT_MAX_SYMS_PER_STENCIL = 32 };
 typedef enum {
     SYM_SLOT_IMM    = 0,  /* pool slot (8-byte literal) */
     SYM_SLOT_FN     = 1,  /* 16-byte trampoline that bl's the helper */
-    SYM_SLOT_LOOP   = 2   /* fused-loop back-jump marker: patch BRANCH26
+    SYM_SLOT_LOOP   = 2,  /* fused-loop back-jump marker: patch BRANCH26
                              relocations against this symbol to the
                              stencil instance's own self_start. */
+    SYM_SLOT_CHAIN  = 3   /* chain-continue tail-call marker: emit
+                             defers patching; the post-emit chain pass
+                             rewrites every relocation against this
+                             symbol to point at the next stencil
+                             instance's native_start. */
 } sym_slot_kind_t;
 
 typedef struct {
@@ -100,9 +111,10 @@ typedef struct {
  * symbols) or a 16-byte trampoline (for extern helper-fn symbols)
  * per entry. Patches every reloc into the corresponding slot:
  * GOT_LOAD pairs land on pool slots, BRANCH26 lands on trampoline
- * slots. Returns the number of bytes consumed in the code section
- * (== st->size; the trailing `ret` is rewritten in a later pass).
- * Returns -1 on capacity overflow or unknown symbol. */
+ * slots, the chain-continue marker's BRANCH26 is left for the
+ * post-emit chain pass. Returns the number of bytes consumed in
+ * the code section (== st->size). Returns -1 on capacity overflow
+ * or unknown symbol. */
 static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
                          uint64_t *pool, size_t pool_pos, size_t pool_cap,
                          size_t *out_pool_pos,
@@ -138,6 +150,9 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
         } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0) {
             slots[s].kind        = SYM_SLOT_LOOP;
             slots[s].slot_offset = 0;
+        } else if (strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0) {
+            slots[s].kind        = SYM_SLOT_CHAIN;
+            slots[s].slot_offset = 0;
         } else {
             void *addr = mino_jit_lookup_extern_fn(name);
             if (addr == NULL) return -1;
@@ -170,6 +185,14 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
             uintptr_t target = code_base + pos;
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
             if (mino_jit_patch_branch26(insn_p, insn_addr, target) != 0) return -1;
+            break;
+        }
+        case SYM_SLOT_CHAIN: {
+            /* Defer: the next stencil's native_start isn't known
+             * during this per-instance emit; the post-emit chain
+             * pass patches every chain reloc once the layout walk
+             * has placed all instances. */
+            if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
             break;
         }
         case SYM_SLOT_IMM: {
@@ -244,9 +267,14 @@ typedef enum {
 } inst_kind_t;
 
 typedef struct {
-    size_t      native_start;  /* byte offset within the code region */
-    size_t      bc_pc;         /* bytecode pc the instance materialises */
-    inst_kind_t kind;
+    size_t                native_start;  /* byte offset within the code region */
+    size_t                bc_pc;         /* bytecode pc the instance materialises */
+    inst_kind_t           kind;
+    /* For stencil-driven instances: the descriptor whose bytes were
+     * memcpy'd at native_start. The chain pass walks
+     * st->relocs / st->symbols to locate every chain-marker
+     * relocation in the span. NULL for INST_JMP / INST_JMPIFNOT. */
+    const stencil_desc_t *st;
 } inst_t;
 
 int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
@@ -293,6 +321,10 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
                 /* The back-jump marker resolves to the stencil's own
                  * self_start at emit time -- no pool / trampoline
                  * slot needed. */
+            } else if (strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0) {
+                /* The chain-continue marker is patched by the
+                 * post-emit chain pass; like the loop marker, no
+                 * pool / trampoline slot is needed. */
             } else {
                 if (mino_jit_lookup_extern_fn(name) == NULL) return -1;
                 tramp_count++;
@@ -364,6 +396,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
             insts[n_inst].native_start = pos;
             insts[n_inst].bc_pc        = pc;
             insts[n_inst].kind         = INST_JMP;
+            insts[n_inst].st           = NULL;
             n_inst++;
             pos += MINO_JIT_JMP_SIZE;
             continue;
@@ -373,6 +406,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
             insts[n_inst].native_start = pos;
             insts[n_inst].bc_pc        = pc;
             insts[n_inst].kind         = INST_JMPIFNOT;
+            insts[n_inst].st           = NULL;
             n_inst++;
             pos += MINO_JIT_JMPIFNOT_SIZE;
             continue;
@@ -404,6 +438,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         insts[n_inst].bc_pc        = pc;
         insts[n_inst].kind         = st->is_final ? INST_STENCIL_FINAL
                                                   : INST_STENCIL_NONFINAL;
+        insts[n_inst].st           = st;
         n_inst++;
         pos       += (size_t)n;
         pool_pos   = new_pool_pos;
@@ -423,32 +458,57 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         }
     }
 
-    /* Pass A: rewrite every `ret` inside each non-final stencil's
-     * span into a `b <next_inst_start>` chain branch. Stencils whose
-     * fast path inlines a check without calling a helper (e.g., the
-     * inline OP_GETGLOBAL_CACHED hit path) end up with two basic
-     * blocks: the lean fast-path exit (no prologue) and the cold
-     * slow-path exit (with prologue). clang emits a `ret` at the
-     * end of each. Patching only the first would leave the
-     * remaining ret(s) as real returns that would short-circuit
-     * out of the JIT region. We walk the span and rewrite each
-     * encountered `ret` so every exit path chains to the next
-     * stencil. Direct-emit instances skip this pass -- they have no
-     * ret to patch. */
+    /* Pass A: patch each non-final stencil's chain-continue tail
+     * call(s) to branch into the next instance's native_start.
+     *
+     * Every non-final stencil source ends each of its return paths
+     * with `__attribute__((musttail)) return
+     * mino_jit_chain_continue_marker(regs, consts, S)`. clang
+     * lowers the musttail into a single branch instruction
+     * (BRANCH26 on ARM64) whose target field carries a relocation
+     * against the marker symbol; the extractor records one such
+     * relocation per call site. This pass walks each non-final
+     * stencil's reloc table, looks up the symbol name for each
+     * reloc, and -- for every chain-marker relocation -- patches
+     * the branch offset to point at the next instance's
+     * native_start.
+     *
+     * Stencils whose fast path inlines a check before deciding
+     * which slow helper to call produce multiple basic blocks
+     * (e.g., the OP_LOOP_INT_LT slow-path exit vs. its fall-
+     * through). Each block ends with its own musttail call, so
+     * each emits its own chain-marker relocation; the pass patches
+     * them all. Direct-emit instances (INST_JMP / INST_JMPIFNOT)
+     * skip this pass -- their target patching is Pass B's job. */
     for (size_t i = 0; i + 1 < n_inst; i++) {
         if (insts[i].kind != INST_STENCIL_NONFINAL) continue;
-        size_t    span_size = insts[i + 1].native_start - insts[i].native_start;
-        uintptr_t next_addr = code_base + insts[i + 1].native_start;
-        int       any       = 0;
-        for (size_t off = 0; off + 4 <= span_size; off += 4) {
-            uint32_t insn;
-            memcpy(&insn, code + insts[i].native_start + off, 4);
-            if (insn != 0xd65f03c0u) continue;
-            uintptr_t ret_addr =
-                code_base + insts[i].native_start + off;
-            uint32_t *insn_p   =
+        const stencil_desc_t *st = insts[i].st;
+        uintptr_t next_addr      = code_base + insts[i + 1].native_start;
+        int any                  = 0;
+        for (unsigned long r = 0; r < st->nrelocs; r++) {
+            unsigned int off  = st->relocs[r][0];
+            unsigned int kind = st->relocs[r][1];
+            unsigned int sym  = st->relocs[r][2];
+            if (sym >= st->nsymbols) {
+                free(insts);
+                free(pc_offsets);
+                munmap(region, total_size);
+                return -1;
+            }
+            if (strcmp(st->symbols[sym], MINO_JIT_CHAIN_MARKER_NAME) != 0) {
+                continue;
+            }
+            if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) {
+                free(insts);
+                free(pc_offsets);
+                munmap(region, total_size);
+                return -1;
+            }
+            uintptr_t insn_addr = code_base + insts[i].native_start + off;
+            uint32_t *insn_p    =
                 (uint32_t *)(code + insts[i].native_start + off);
-            if (mino_jit_patch_b_unconditional(insn_p, ret_addr, next_addr) != 0) {
+            if (mino_jit_patch_b_unconditional(insn_p, insn_addr,
+                                                next_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
                 munmap(region, total_size);

@@ -14,7 +14,8 @@
 
 #include "abi.h"
 
-void stencil_op_move(mino_val_t **regs)
+void stencil_op_move(mino_val_t **regs, mino_val_t **consts, mino_state_t *S)
 {
     regs[IMM_A] = regs[IMM_B];
+    MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
 }
