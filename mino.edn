@@ -28,6 +28,10 @@
                    :task mino.tasks.builtin/build-ubsan}
   build-tsan      {:doc  "Build mino_tsan with ThreadSanitizer"
                    :task mino.tasks.builtin/build-tsan}
+  build-nojit     {:doc  "Build mino_nojit with MINO_CPJIT disabled"
+                   :task mino.tasks.builtin/build-nojit}
+  test-jit-parity {:doc  "Build mino + mino_nojit; assert parity-test stdout matches byte-for-byte"
+                   :task mino.tasks.builtin/test-jit-parity}
   clean           {:doc  "Remove build artifacts"
                    :task mino.tasks.builtin/clean}
   test            {:doc  "Build and run the test suite"

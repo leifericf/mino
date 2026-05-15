@@ -16,6 +16,9 @@ bin/
 /mino_prof
 /mino_opcounts
 /mino_no_jit
+/mino_nojit
+jit-parity-jit.out
+jit-parity-nojit.out
 /data/
 src/core_mino.h
 src/lib_clojure_*.h

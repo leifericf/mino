@@ -289,6 +289,67 @@
   (build-sanitized "tsan" "mino_tsan"
                    ["-fsanitize=thread"]))
 
+(defn build-nojit
+  "Build mino_nojit with -DMINO_CPJIT=1 stripped. Every call goes
+   through the bytecode interpreter; the JIT pipeline compiles to a
+   no-op stub. Used by the test-jit-parity task to confirm the
+   inlined stencils produce results indistinguishable from the
+   interpreter's matching OP_*_II / OP_*_IK / OP_INC_I / etc.
+   handlers."
+  []
+  (gen-core-header)
+  (gen-stdlib-headers)
+  (let [nojit-cflags (filterv #(not= % "-DMINO_CPJIT=1") cflags)
+        args (into [cc]
+                   (concat nojit-cflags
+                           ldflags
+                           ["-o" "mino_nojit"]
+                           all-srcs
+                           libs))]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println "  nojit build -> mino_nojit")))
+
+(defn test-jit-parity
+  "Build ./mino and ./mino_nojit, run tests/jit_parity_test.clj
+   against each, and assert their stdout bytes are byte-identical.
+   The parity test pins ~40 literal-expected-value assertions
+   covering range boundaries, tag-miss, comparison identity, and
+   unary boundaries across the 16 inlined arith / cmp / unary
+   stencils. Any divergence in either binary's output -- a different
+   diagnostic, a different boxed-int representation, a missed
+   coercion -- surfaces in the diff. Uses `sh` (not `sh!`) so a
+   non-zero exit from the parity runner reports as a parity
+   failure rather than crashing the task."
+  []
+  (build)
+  (build-nojit)
+  (let [parity-test "tests/jit_parity_test.clj"
+        jit-result   (sh mino-bin    parity-test)
+        nojit-result (sh "./mino_nojit" parity-test)
+        jit-out      (get jit-result   :out)
+        nojit-out    (get nojit-result :out)
+        jit-exit     (get jit-result   :exit)
+        nojit-exit   (get nojit-result :exit)]
+    (cond
+      (and (= jit-out nojit-out) (= jit-exit nojit-exit) (= 0 jit-exit))
+      (do (println jit-out)
+          (println "  jit-parity: OK -- stdout byte-identical, both exit 0"))
+
+      :else
+      (do (spit "jit-parity-jit.out" jit-out)
+          (spit "jit-parity-nojit.out" nojit-out)
+          (println "  jit-parity: FAIL")
+          (println (str "    jit   exit=" jit-exit))
+          (println (str "    nojit exit=" nojit-exit))
+          (println "    wrote jit-parity-jit.out / jit-parity-nojit.out")
+          (println (get (sh "diff" "jit-parity-jit.out" "jit-parity-nojit.out")
+                        :out))
+          (throw (ex-info "jit-parity failure"
+                          {:status :differ
+                           :jit-exit jit-exit
+                           :nojit-exit nojit-exit}))))))
+
 (defn build-alloc-profile
   "Build mino_prof with -DMINO_ALLOC_PROFILE=1. Wraps every gc_alloc_typed
    call with a per-callsite recorder; expose the data with the

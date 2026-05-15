@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.217.0 — Boundary Parity Tests Between JIT And Interpreter
+
+Adds `tests/jit_parity_test.clj` (47 deftests) plus two task-runner
+entries that build `./mino` (JIT enabled) and `./mino_nojit`
+(`-DMINO_CPJIT=1` stripped) and assert their stdout bytes match
+byte-for-byte when running the parity test. Second of three
+post-cycle hygiene releases.
+
+### What the parity test pins
+
+Each of the 16 inlined arith / cmp / unary stencils now has at least
+one deftest exercising it through a hot wrapper fn warmed past
+`MINO_JIT_THRESHOLD`:
+
+  - **Range boundaries** for II / IK arith (ADD / SUB / MUL):
+    `MINO_INT_MAX`, `MINO_INT_MIN`, overflow-promotion paths.
+  - **Tag-miss for all 16 ops**: each handler called with a non-int
+    operand so the inline tag check fails and the stencil dispatches
+    to its `mino_jit_*_slow` helper.
+  - **Comparison-result identity** for the 8 cmp ops (`<` `<=` `>`
+    `>=` `=` in II, plus `<` `<=` `=` in IK).
+  - **Unary boundaries** for `INC_I` / `DEC_I` / `ZERO_INT_P`.
+
+Each assertion compares against a literal expected value; the
+binary stdout-diff catches anything the literal misses (different
+diagnostic strings, different boxed-int representations on
+overflow, divergent coercion).
+
+### Build / task additions
+
+  - **`build-nojit`** task -- produces `./mino_nojit` by filtering
+    `-DMINO_CPJIT=1` out of the runtime `CFLAGS`. The bytecode
+    interpreter handles every op; the JIT module compiles to its
+    no-op stubs.
+  - **`test-jit-parity`** task -- builds both binaries, runs the
+    parity test against each, asserts byte-identical stdout AND
+    both exit 0. Uses `sh` (not `sh!`) so a non-zero exit reports
+    as a parity failure rather than crashing the task; writes
+    `jit-parity-jit.out` and `jit-parity-nojit.out` plus a `diff`
+    summary when divergent.
+
+### Verification
+
+`./mino task test-jit-parity` exits 0 on a clean tree (47 tests /
+47 assertions on both binaries). Negative control verified by
+flipping `r = lhs + rhs` to `r = lhs - rhs` in
+`src/eval/bc/stencils/add_ii.c`, regenerating stencils, and
+re-running: parity fails with three assertion mismatches in
+`add-ii-normal` / `add-ii-max-overflow` / `add-ii-min-underflow`.
+Sabotage reverted.
+
+`./mino task test` (1735 tests / 7903 assertions) and ASan suite
+both green.
+
 ## v0.216.0 — Split jit.c Into Five Translation Units
 
 Refactor-only: `src/eval/bc/jit.c` (2012 lines) splits into a `jit/`
