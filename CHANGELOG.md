@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.181.0 — Diagnostic Source-Span Coverage
+
+Catchable diagnostics raised from inside the bytecode runtime now
+carry a `:mino/location` entry whenever the source position is known.
+The fallback chain mirrors the new bc cursor: the call form's cons
+metadata when it has a line, otherwise the bc fn's source map at the
+current pc. `prim_throw_classified` and `set_eval_diag_with_data`
+both build the same shape, so a `(try ... (catch e (ex-data e)))`
+binding observes a single consistent diagnostic schema regardless of
+which C code emitted the throw.
+
+`tests/bc_error_quality_test.clj` is the new regression-protective
+test class: it pins the location-carrying contract for arith type
+errors, divide-by-zero, unresolved-symbol, and user-throw sites.
+Future degradations to error attribution fail at the test layer
+instead of silently regressing the user-visible diagnostic surface.
+
 ## v0.180.0 — Var-Discipline Uniform Read Path
 
 The per-fn IC-slot array gains a stable C entry point,

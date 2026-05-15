@@ -8,6 +8,7 @@
  */
 
 #include "prim/internal.h"
+#include "eval/bc/internal.h"
 
 /* ------------------------------------------------------------------------- */
 /* Shared helpers                                                            */
@@ -38,20 +39,58 @@ mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
 {
     if (mino_current_ctx(S)->try_depth > 0) {
         /* Build a diagnostic map so catch normalization preserves the
-         * classification instead of wrapping it as :user/MUS001. */
-        mino_val_t *keys[5], *vals[5];
+         * classification instead of wrapping it as :user/MUS001.
+         * Attach :mino/location when a source span can be derived from
+         * either the call form or the bc cursor; the catch handler
+         * surfaces it as part of (ex-data). */
+        mino_val_t *keys[6], *vals[6];
         mino_val_t *ex;
-        keys[0] = mino_keyword(S, "mino/kind");
-        vals[0] = mino_keyword(S, kind);
-        keys[1] = mino_keyword(S, "mino/code");
-        vals[1] = mino_string(S, code);
-        keys[2] = mino_keyword(S, "mino/phase");
-        vals[2] = mino_keyword(S, "eval");
-        keys[3] = mino_keyword(S, "mino/message");
-        vals[3] = mino_string(S, msg);
-        keys[4] = mino_keyword(S, "mino/data");
-        vals[4] = mino_nil(S);
-        ex = mino_map(S, keys, vals, 5);
+        const char *loc_file = NULL;
+        int         loc_line = 0;
+        int         loc_col  = 0;
+        const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+        if (form != NULL && mino_is_cons(form)
+            && form->as.cons.file != NULL && form->as.cons.line > 0) {
+            loc_file = form->as.cons.file;
+            loc_line = form->as.cons.line;
+            loc_col  = form->as.cons.column;
+        } else {
+            const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
+            size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
+            if (cur_bc != NULL) {
+                (void)mino_bc_source_lookup(cur_bc, cur_pc,
+                                            &loc_file, &loc_line, &loc_col);
+            }
+        }
+        size_t n = 0;
+        keys[n] = mino_keyword(S, "mino/kind");
+        vals[n] = mino_keyword(S, kind);
+        n++;
+        keys[n] = mino_keyword(S, "mino/code");
+        vals[n] = mino_string(S, code);
+        n++;
+        keys[n] = mino_keyword(S, "mino/phase");
+        vals[n] = mino_keyword(S, "eval");
+        n++;
+        keys[n] = mino_keyword(S, "mino/message");
+        vals[n] = mino_string(S, msg);
+        n++;
+        keys[n] = mino_keyword(S, "mino/data");
+        vals[n] = mino_nil(S);
+        n++;
+        if (loc_file != NULL && loc_line > 0) {
+            mino_val_t *lkeys[3], *lvals[3];
+            lkeys[0] = mino_keyword(S, "file");
+            lvals[0] = mino_string(S, loc_file);
+            lkeys[1] = mino_keyword(S, "line");
+            lvals[1] = mino_int(S, loc_line);
+            lkeys[2] = mino_keyword(S, "column");
+            lvals[2] = mino_int(S, loc_col);
+            keys[n] = mino_keyword(S, "mino/location");
+            vals[n] = mino_map(S, lkeys, lvals, 3);
+            n++;
+        }
+        ex = mino_map(S, keys, vals, n);
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
         longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     }

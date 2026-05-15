@@ -123,10 +123,60 @@ void set_eval_diag_with_data(mino_state_t *S, const mino_val_t *form,
                              const char *msg, mino_val_t *data,
                              const char *note)
 {
-    /* Inside a try block, convert diagnostics to thrown exceptions so they
-     * are catchable by the surrounding catch clause. */
+    /* Inside a try block, convert diagnostics to thrown exceptions so
+     * they are catchable by the surrounding catch clause. Build a
+     * diagnostic map with classification, message, optional data, and
+     * a :mino/location span when the form or the bc cursor knows the
+     * source position. Mirrors the shape prim_throw_classified emits
+     * so catch handlers see one consistent diagnostic schema. */
     if (mino_current_ctx(S)->try_depth > 0) {
-        mino_val_t *ex = mino_string((mino_state_t *)S, msg);
+        const char *loc_file = NULL;
+        int         loc_line = 0;
+        int         loc_col  = 0;
+        if (form != NULL && mino_type_of(form) == MINO_CONS
+            && form->as.cons.file != NULL && form->as.cons.line > 0) {
+            loc_file = form->as.cons.file;
+            loc_line = form->as.cons.line;
+            loc_col  = form->as.cons.column;
+        } else {
+            const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
+            size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
+            if (cur_bc != NULL) {
+                (void)mino_bc_source_lookup(cur_bc, cur_pc,
+                                            &loc_file, &loc_line, &loc_col);
+            }
+        }
+        mino_val_t *keys[7], *vals[7];
+        size_t      n = 0;
+        keys[n] = mino_keyword(S, "mino/kind");
+        vals[n] = mino_keyword(S, kind);
+        n++;
+        keys[n] = mino_keyword(S, "mino/code");
+        vals[n] = mino_string(S, code);
+        n++;
+        keys[n] = mino_keyword(S, "mino/phase");
+        vals[n] = mino_keyword(S, "eval");
+        n++;
+        keys[n] = mino_keyword(S, "mino/message");
+        vals[n] = mino_string(S, msg);
+        n++;
+        keys[n] = mino_keyword(S, "mino/data");
+        vals[n] = data != NULL ? data : mino_nil(S);
+        n++;
+        if (loc_file != NULL && loc_line > 0) {
+            mino_val_t *lkeys[3], *lvals[3];
+            lkeys[0] = mino_keyword(S, "file");
+            lvals[0] = mino_string(S, loc_file);
+            lkeys[1] = mino_keyword(S, "line");
+            lvals[1] = mino_int(S, loc_line);
+            lkeys[2] = mino_keyword(S, "column");
+            lvals[2] = mino_int(S, loc_col);
+            keys[n] = mino_keyword(S, "mino/location");
+            vals[n] = mino_map(S, lkeys, lvals, 3);
+            n++;
+        }
+        mino_val_t *ex = mino_map(S, keys, vals, n);
+        (void)note;
         mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].exception = ex;
         longjmp(mino_current_ctx(S)->try_stack[mino_current_ctx(S)->try_depth - 1].buf, 1);
     }
