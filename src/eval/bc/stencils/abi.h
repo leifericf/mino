@@ -140,4 +140,34 @@ extern mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
 extern mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
                                        unsigned a, unsigned b, unsigned subop);
 
+/* Fused counted-loop step helpers. Each takes the loop's register
+ * indices, runs one iteration's slow path (prim_lt / prim_inc / etc.
+ * with cons-spine args), and returns the (possibly relocated) regs
+ * pointer. The low bit of the return tags the exit signal:
+ *
+ *   (ret_ptr & 1) == 0  -> loop continues; ret_ptr is the fresh regs base
+ *   (ret_ptr & 1) == 1  -> loop exits; (ret_ptr & ~1) is the regs base
+ *
+ * The low-bit tag is safe because regs always points to 8-byte-aligned
+ * storage. NULL is reserved for hard errors (e.g., a cons OOM that the
+ * caller propagates back up the JIT region as a NULL return). */
+extern mino_val_t **mino_jit_loop_int_lt_slow(mino_state_t *S,
+                                               mino_val_t **regs,
+                                               unsigned a, unsigned b);
+extern mino_val_t **mino_jit_loop_int_dec_slow(mino_state_t *S,
+                                                mino_val_t **regs,
+                                                unsigned a);
+extern mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S,
+                                                   mino_val_t **regs,
+                                                   unsigned a, unsigned b,
+                                                   unsigned c);
+
+/* The continue-marker symbol. Fused-loop stencils end their continue
+ * path with `__asm__("b _mino_jit_loop_continue_marker")`. The JIT
+ * scans for the BRANCH26 reloc against this name in each stencil
+ * instance and overwrites the branch offset to point at the stencil's
+ * own start (the back-jump destination). The function is never called
+ * directly; only its address-as-symbol matters. */
+extern void mino_jit_loop_continue_marker(void);
+
 #endif /* MINO_BC_STENCIL_ABI_H */

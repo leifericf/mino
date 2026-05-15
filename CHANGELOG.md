@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.201.0 — Fused Counted-Loop Stencils
+
+`src/eval/bc/stencils/{loop_int_lt,loop_int_dec,loop_int_lt_inc}.c`
+add stencils for the three fused counted-loop opcodes the bytecode
+compiler emits for common Clojure-canon loop shapes:
+
+  - `OP_LOOP_INT_LT`     — `(loop [i 0] (if (< i n) (recur (inc i)) ...))`
+  - `OP_LOOP_INT_DEC`    — `(loop [i n] (if (zero? i) ... (recur (dec i))))`
+  - `OP_LOOP_INT_LT_INC` — `(loop [i 0 k 0] (if (< i n) (recur (inc i) (inc k)) ...))`
+
+Each fused op IS the loop entry; the interpreter handles iteration
+by `pc -= 1` so the same instruction re-executes. The stencil
+mirrors this with a natural C `for (;;)` loop -- clang emits one
+prologue, one set of callee-saved spills, and a tight body with a
+single back-edge that re-runs without re-entering the prologue.
+Loop-exit edges use `MINO_STENCIL_CHAIN_RETURN`, which compiles to
+the function's natural ret; the JIT then patches that ret into the
+usual `b <next_stencil>` chain branch.
+
+Three slow helpers join the lineup in `jit.c`:
+
+  - `mino_jit_loop_int_lt_slow`     -- cons + prim_lt + prim_inc
+  - `mino_jit_loop_int_dec_slow`    -- cons + prim_zero_p + prim_dec
+  - `mino_jit_loop_int_lt_inc_slow` -- cons + prim_lt + prim_inc + prim_inc
+
+Each helper signals exit-vs-continue by tagging the low bit of the
+returned regs pointer (`(ret_ptr & 1) == 1` means "exit"). The
+caller masks the bit off before storing back. The low-bit tag is
+safe because regs always points to 8-byte-aligned storage.
+
+Fast paths inline the tagged-int range checks. `OP_LOOP_INT_LT`
+relies on the invariant `c < l ≤ MAX_INT`, so `c + 1` never overflows
+the inline range; `OP_LOOP_INT_DEC` skips the inline decrement when
+the counter equals `MIN_INT`; `OP_LOOP_INT_LT_INC` checks the carry
+operand for `MAX_INT` since `k` is unconstrained relative to the
+loop bound.
+
+A back-jump marker mechanism (`mino_jit_loop_continue_marker` plus
+`SYM_SLOT_LOOP`) is wired through `emit_stencil` for future
+stencils whose back-edge can't be expressed by a natural C `for`
+loop. None of the v0.201.0 stencils use it; the infrastructure is
+kept in place so a later release can target it without re-plumbing
+emit_stencil.
+
+Stencil set grows to 23 ops. Full test suite (1688 / 7854) passes.
+
 ## v0.200.0 — JIT Control Flow (OP_JMP / OP_JMPIFNOT) + Chain ABI Fix
 
 The JIT covers branches. `OP_JMP` and `OP_JMPIFNOT` get direct-emit

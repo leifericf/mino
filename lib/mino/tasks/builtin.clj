@@ -356,7 +356,10 @@
                    ["sub_ik.c"        "stencil_op_sub_ik"]
                    ["lt_ik.c"         "stencil_op_lt_ik"]
                    ["le_ik.c"         "stencil_op_le_ik"]
-                   ["eq_ik.c"         "stencil_op_eq_ik"]]]
+                   ["eq_ik.c"         "stencil_op_eq_ik"]
+                   ["loop_int_lt.c"     "stencil_op_loop_int_lt"]
+                   ["loop_int_dec.c"    "stencil_op_loop_int_dec"]
+                   ["loop_int_lt_inc.c" "stencil_op_loop_int_lt_inc"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto

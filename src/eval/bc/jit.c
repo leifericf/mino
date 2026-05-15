@@ -300,6 +300,27 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_eq_ik_symbols, stencil_op_eq_ik_nsymbols,
         stencil_op_eq_ik_relocs, stencil_op_eq_ik_nrelocs,
         0u
+    },
+    {
+        OP_LOOP_INT_LT,
+        stencil_op_loop_int_lt_bytes, stencil_op_loop_int_lt_size,
+        stencil_op_loop_int_lt_symbols, stencil_op_loop_int_lt_nsymbols,
+        stencil_op_loop_int_lt_relocs, stencil_op_loop_int_lt_nrelocs,
+        0u
+    },
+    {
+        OP_LOOP_INT_DEC,
+        stencil_op_loop_int_dec_bytes, stencil_op_loop_int_dec_size,
+        stencil_op_loop_int_dec_symbols, stencil_op_loop_int_dec_nsymbols,
+        stencil_op_loop_int_dec_relocs, stencil_op_loop_int_dec_nrelocs,
+        0u
+    },
+    {
+        OP_LOOP_INT_LT_INC,
+        stencil_op_loop_int_lt_inc_bytes, stencil_op_loop_int_lt_inc_size,
+        stencil_op_loop_int_lt_inc_symbols, stencil_op_loop_int_lt_inc_nsymbols,
+        stencil_op_loop_int_lt_inc_relocs, stencil_op_loop_int_lt_inc_nrelocs,
+        0u
     }
 };
 static const int g_stencils_count =
@@ -419,6 +440,13 @@ mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Continue-marker stub. Fused-loop stencils emit a `b` instruction
+ * referencing this symbol; the JIT runtime detects the BRANCH26 reloc
+ * during emit_stencil and rewrites it to target the stencil instance's
+ * own start (the loop back-jump). The function body is never executed;
+ * a no-op `ret` is enough to give the linker a valid definition. */
+void mino_jit_loop_continue_marker(void) { /* never called */ }
+
 /* Slow path for the unary OP_INC_I / OP_DEC_I / OP_ZERO_INT_P stencils.
  * Builds a one-element cons spine and dispatches to the matching
  * prim; mirrors the interpreter's unary handler. */
@@ -443,6 +471,116 @@ mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
+ * bit of a regs pointer to signal "loop exits" to the caller; the
+ * caller masks the bit off before dereferencing. */
+static mino_val_t **loop_tag_exit(mino_val_t **regs)
+{
+    return (mino_val_t **)((uintptr_t)regs | (uintptr_t)1);
+}
+
+/* Slow path for OP_LOOP_INT_LT. Mirrors the interpreter's
+ * cons + prim_lt + prim_inc dance. Returns:
+ *   - NULL on cons OOM (caller propagates).
+ *   - regs (low-bit-clear) if the loop should continue (back-jump):
+ *     the counter has been incremented through prim_inc and written
+ *     back to regs[a].
+ *   - regs | 1 if the loop should exit (fall through to next stencil). */
+mino_val_t **mino_jit_loop_int_lt_slow(mino_state_t *S, mino_val_t **regs,
+                                       unsigned a, unsigned b)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *ltv = prim_lt(S, list, NULL);
+    if (ltv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (!mino_is_truthy_inline(ltv)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *incv = prim_inc(S, list2, NULL);
+    if (incv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = incv;
+    return regs;  /* low-bit-clear: continue */
+}
+
+/* Slow path for OP_LOOP_INT_DEC. Mirrors the interpreter's
+ * cons + prim_zero_p + prim_dec dance. Same exit-signal convention as
+ * mino_jit_loop_int_lt_slow. */
+mino_val_t **mino_jit_loop_int_dec_slow(mino_state_t *S, mino_val_t **regs,
+                                        unsigned a)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *zp = prim_zero_p(S, list, NULL);
+    if (zp == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (mino_is_truthy_inline(zp)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *decv = prim_dec(S, list2, NULL);
+    if (decv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = decv;
+    return regs;
+}
+
+/* Slow path for OP_LOOP_INT_LT_INC. Mirrors the interpreter's
+ * cons + prim_lt + prim_inc + prim_inc dance for the two-binding
+ * counted-loop shape. Returns the same low-bit-tagged signal as the
+ * single-binding LT helper. */
+mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
+                                            unsigned a, unsigned b,
+                                            unsigned c)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *ltv = prim_lt(S, list, NULL);
+    if (ltv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (!mino_is_truthy_inline(ltv)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *incv = prim_inc(S, list2, NULL);
+    if (incv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    mino_val_t *list3 = mino_nil(S);
+    if (list3 == NULL) return NULL;
+    list3 = mino_cons(S, regs[c], list3);
+    if (list3 == NULL) return NULL;
+    mino_val_t *incv2 = prim_inc(S, list3, NULL);
+    if (incv2 == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = incv;
+    regs[c] = incv2;
+    return regs;
+}
+
 /* ----- Extern-symbol resolution table ------------------------------------ */
 
 /* Stencils call into a small fixed set of host helpers. Each entry
@@ -455,13 +593,22 @@ typedef struct {
 } extern_fn_t;
 
 static const extern_fn_t g_extern_fns[] = {
-    {"binop_int_fast",        (void *)(uintptr_t)binop_int_fast},
-    {"unop_int_fast",         (void *)(uintptr_t)unop_int_fast},
-    {"mino_jit_binop_slow",   (void *)(uintptr_t)mino_jit_binop_slow},
-    {"mino_jit_binop_k_slow", (void *)(uintptr_t)mino_jit_binop_k_slow},
-    {"mino_jit_unop_slow",    (void *)(uintptr_t)mino_jit_unop_slow},
+    {"binop_int_fast",              (void *)(uintptr_t)binop_int_fast},
+    {"unop_int_fast",               (void *)(uintptr_t)unop_int_fast},
+    {"mino_jit_binop_slow",         (void *)(uintptr_t)mino_jit_binop_slow},
+    {"mino_jit_binop_k_slow",       (void *)(uintptr_t)mino_jit_binop_k_slow},
+    {"mino_jit_unop_slow",          (void *)(uintptr_t)mino_jit_unop_slow},
+    {"mino_jit_loop_int_lt_slow",     (void *)(uintptr_t)mino_jit_loop_int_lt_slow},
+    {"mino_jit_loop_int_dec_slow",    (void *)(uintptr_t)mino_jit_loop_int_dec_slow},
+    {"mino_jit_loop_int_lt_inc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_inc_slow},
     {NULL, NULL}
 };
+
+/* Continue-marker symbol name as the extractor records it (after the
+ * Mach-O / ELF underscore stripping the tool does). Matched in
+ * emit_stencil to redirect a stencil's back-jump branch at its own
+ * self_start rather than route through the extern fn trampoline. */
+#define MINO_JIT_LOOP_MARKER_NAME "mino_jit_loop_continue_marker"
 
 static void *lookup_extern_fn(const char *name)
 {
@@ -689,10 +836,19 @@ void mino_jit_free_all(mino_state_t *S)
  * means raising both sides together. */
 enum { MINO_JIT_MAX_SYMS_PER_STENCIL = 32 };
 
+typedef enum {
+    SYM_SLOT_IMM    = 0,  /* pool slot (8-byte literal) */
+    SYM_SLOT_FN     = 1,  /* 16-byte trampoline that bl's the helper */
+    SYM_SLOT_LOOP   = 2   /* fused-loop back-jump marker: patch BRANCH26
+                             relocations against this symbol to the
+                             stencil instance's own self_start. */
+} sym_slot_kind_t;
+
 typedef struct {
-    int    is_fn;        /* 0 = IMM pool slot, 1 = FN trampoline slot */
-    size_t slot_offset;  /* pool[slot_offset] (IMM) or
-                          * tramp_buf + slot_offset (FN, byte-indexed). */
+    sym_slot_kind_t kind;
+    size_t          slot_offset;  /* pool[slot_offset] (IMM) or
+                                   * tramp_buf + slot_offset (FN). Unused
+                                   * for SYM_SLOT_LOOP. */
 } sym_slot_t;
 
 /* Place `st`'s body at `code + pos`. Walks the stencil's symbol
@@ -718,24 +874,28 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
     sym_slot_t slots[MINO_JIT_MAX_SYMS_PER_STENCIL];
     size_t new_pool_pos  = pool_pos;
     size_t new_tramp_pos = tramp_pos;
-    /* Walk the symbol table once: classify each entry as IMM or FN
-     * and allocate the corresponding slot. The extractor preserves
-     * the order each name was first encountered, so subsequent
-     * reloc-driven patches index slots[s] by sym_index directly. */
+    /* Walk the symbol table once: classify each entry as IMM, FN, or
+     * the fused-loop back-jump marker, and allocate the corresponding
+     * slot. The extractor preserves the order each name was first
+     * encountered, so subsequent reloc-driven patches index slots[s]
+     * by sym_index directly. */
     for (unsigned long s = 0; s < st->nsymbols; s++) {
         const char *name = st->symbols[s];
         int k = imm_kind_from_name(name);
         if (k >= 0) {
             if (new_pool_pos >= pool_cap) return -1;
-            slots[s].is_fn       = 0;
+            slots[s].kind        = SYM_SLOT_IMM;
             slots[s].slot_offset = new_pool_pos;
             pool[new_pool_pos]   = imm_value(insn, (imm_kind_t)k);
             new_pool_pos++;
+        } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0) {
+            slots[s].kind        = SYM_SLOT_LOOP;
+            slots[s].slot_offset = 0;
         } else {
             void *addr = lookup_extern_fn(name);
             if (addr == NULL) return -1;
             if (new_tramp_pos + MINO_JIT_TRAMPOLINE_SIZE > tramp_cap) return -1;
-            slots[s].is_fn       = 1;
+            slots[s].kind        = SYM_SLOT_FN;
             slots[s].slot_offset = new_tramp_pos;
             write_trampoline(tramp_buf + new_tramp_pos, (uintptr_t)addr);
             new_tramp_pos += MINO_JIT_TRAMPOLINE_SIZE;
@@ -750,11 +910,21 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
         if (sym >= st->nsymbols) return -1;
         uintptr_t   insn_addr = code_base + pos + off;
         uint32_t   *insn_p    = (uint32_t *)(code + pos + off);
-        if (slots[sym].is_fn) {
+        switch (slots[sym].kind) {
+        case SYM_SLOT_FN: {
             uintptr_t target = tramp_base + slots[sym].slot_offset;
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
             if (patch_branch26(insn_p, insn_addr, target) != 0) return -1;
-        } else {
+            break;
+        }
+        case SYM_SLOT_LOOP: {
+            /* Back-jump: target the stencil instance's own start. */
+            uintptr_t target = code_base + pos;
+            if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
+            if (patch_branch26(insn_p, insn_addr, target) != 0) return -1;
+            break;
+        }
+        case SYM_SLOT_IMM: {
             uintptr_t target = pool_base
                 + slots[sym].slot_offset * sizeof(uint64_t);
             switch (kind) {
@@ -769,6 +939,8 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
             default:
                 return -1;
             }
+            break;
+        }
         }
     }
     *out_pool_pos  = new_pool_pos;
@@ -870,6 +1042,10 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
             int k = imm_kind_from_name(name);
             if (k >= 0) {
                 pool_slots++;
+            } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0) {
+                /* The back-jump marker resolves to the stencil's own
+                 * self_start at emit time -- no pool / trampoline
+                 * slot needed. */
             } else {
                 if (lookup_extern_fn(name) == NULL) return -1;
                 tramp_count++;
