@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.218.0 — CI Guardrails For Stencil + Reloc Drift
+
+Closes the three-release post-cycle hygiene cluster. Adds three
+independent check tasks plus a composite `release-gate` that fails
+fast on the first non-OK step. The verbal "kept in sync" comments
+that used to live around the stencil registry and the reloc enum
+are now build-time contracts that fire on drift.
+
+### New tasks
+
+  - **`check-stencils-fresh` (G1)** -- runs `gen-stencils`, then
+    `git diff --exit-code` against
+    `src/eval/bc/stencils/generated/`. Non-zero on stale committed
+    byte tables. Fix: `./mino task gen-stencils && git add ...`.
+  - **`check-stencil-registry` (G2)** -- cross-checks the hardcoded
+    stencil list in `lib/mino/tasks/builtin.clj` against
+    `src/eval/bc/stencils/*.c`. Catches both directions: registry
+    entries that reference non-existent sources, and orphan source
+    files with no registry entry. Also pins
+    `stencil_op_<basename>` prefix shape. `__proto_`-prefixed
+    sources are skipped on both sides -- that prefix is reserved
+    for the op-fusion prototype branch's throwaway stencils.
+  - **`check-reloc-mirror` (G3)** -- parses
+    `MINO_STENCIL_RELOC_*` `#define`s from
+    `src/eval/bc/jit/internal.h` (runtime side) and
+    `tools/stencil_extract.c` (toolchain side), asserts the shared
+    keys agree on integer value; then runs
+    `tools/stencil_extract --selftest` for the extractor's own
+    internal consistency. Cross-file value mismatch fires
+    independent of either file's internal consistency.
+  - **`release-gate`** -- composite, fail-fast, in order:
+    1. `check-reloc-mirror`
+    2. `check-stencil-registry`
+    3. `check-stencils-fresh`
+    4. `test-suite`
+    5. `mino_asan` + suite
+    6. `test-jit-parity`
+
+### Verification
+
+`./mino task release-gate` exits 0 on a clean tree. Each guardrail
+verified individually under its negative control:
+
+  - **G1**: flipped `+` to `-` in `add_ii.c`; `check-stencils-fresh`
+    reports the generated header is stale.
+  - **G2**: added an orphan `fake_op.c` to `src/eval/bc/stencils/`;
+    `check-stencil-registry` reports the missing registry entry.
+  - **G3**: flipped `MINO_STENCIL_RELOC_ARM64_PAGE21` value in
+    `src/eval/bc/jit/internal.h`; `check-reloc-mirror` reports
+    `runtime=99 extractor=0`.
+
+All controls reverted and `release-gate` re-runs clean.
+
 ## v0.217.0 — Boundary Parity Tests Between JIT And Interpreter
 
 Adds `tests/jit_parity_test.clj` (47 deftests) plus two task-runner

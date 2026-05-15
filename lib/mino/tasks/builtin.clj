@@ -1,6 +1,7 @@
 (ns mino.tasks.builtin)
 
 (require '[clojure.string :as str])
+(require '[clojure.set    :as set])
 
 ;; Build configuration -- matches Makefile defaults.
 
@@ -349,6 +350,229 @@
                           {:status :differ
                            :jit-exit jit-exit
                            :nojit-exit nojit-exit}))))))
+
+;; ---- Release guardrails (G1 / G2 / G3 + composite release-gate) -----
+;;
+;; Three checks that fire before a tag-cutting commit lands. Each is
+;; an independent task; release-gate composes them with fail-fast +
+;; the standard test-suite / test-suite-asan / test-jit-parity steps
+;; so the gate has one human entry point and a single binary outcome.
+;;
+;; The verbal "kept in sync" comments these guardrails replace are
+;; still in the source for reader context, but the build-time
+;; contracts now live in code paths a human can re-invoke and a CI
+;; runner can hook.
+
+(defn check-stencils-fresh
+  "G1: re-run gen-stencils, then `git diff --exit-code` against the
+   generated stencil header directory. Non-zero exit on stale
+   committed bytes -- somebody edited a stencil source without
+   regenerating the byte table. Failure mode is recoverable: run
+   `./mino task gen-stencils`, commit the resulting diff."
+  []
+  (gen-stencils)
+  (let [d (sh "git" "diff" "--exit-code"
+              "--" "src/eval/bc/stencils/generated/")]
+    (when-not (= 0 (get d :exit))
+      (println (get d :out))
+      (throw (ex-info "check-stencils-fresh: generated header is stale"
+                      {:exit (get d :exit)
+                       :fix  "run `./mino task gen-stencils` and commit"}))))
+  (println "  check-stencils-fresh: OK"))
+
+(defn check-stencil-registry
+  "G2: cross-check the hardcoded stencil list in gen-stencils against
+   the actual *.c files under src/eval/bc/stencils/. Catches drift
+   in either direction:
+
+     - a new stencil source landed without an entry in the registry
+       (build still works for the existing entries but the new op
+       has no byte table on the next gen-stencils run),
+     - an entry references a source file that no longer exists
+       (gen-stencils fails opaquely mid-loop).
+
+   Also verifies each pair's symbol-name has the `stencil_op_<basename>`
+   prefix, where <basename> is the source file's stem. Sources whose
+   basename starts with `__proto_` are skipped on both sides -- that
+   prefix is reserved for the op-fusion prototype branch's throwaway
+   stencils."
+  []
+  (let [;; Mirror of the hardcoded list in gen-stencils. Kept in lock-
+        ;; step with that list -- this is the very drift G2 detects.
+        registry  [["return.c"           "stencil_op_return_arg0"]
+                   ["return.c"           "stencil_op_return_imm"]
+                   ["move.c"             "stencil_op_move"]
+                   ["load_k.c"           "stencil_op_load_k"]
+                   ["load_k_return.c"    "stencil_op_load_k_return"]
+                   ["add_ii.c"           "stencil_op_add_ii"]
+                   ["sub_ii.c"           "stencil_op_sub_ii"]
+                   ["mul_ii.c"           "stencil_op_mul_ii"]
+                   ["lt_ii.c"            "stencil_op_lt_ii"]
+                   ["le_ii.c"            "stencil_op_le_ii"]
+                   ["gt_ii.c"            "stencil_op_gt_ii"]
+                   ["ge_ii.c"            "stencil_op_ge_ii"]
+                   ["eq_ii.c"            "stencil_op_eq_ii"]
+                   ["inc_i.c"            "stencil_op_inc_i"]
+                   ["dec_i.c"            "stencil_op_dec_i"]
+                   ["zero_int_p.c"       "stencil_op_zero_int_p"]
+                   ["add_ik.c"           "stencil_op_add_ik"]
+                   ["sub_ik.c"           "stencil_op_sub_ik"]
+                   ["lt_ik.c"            "stencil_op_lt_ik"]
+                   ["le_ik.c"            "stencil_op_le_ik"]
+                   ["eq_ik.c"            "stencil_op_eq_ik"]
+                   ["loop_int_lt.c"      "stencil_op_loop_int_lt"]
+                   ["loop_int_dec.c"     "stencil_op_loop_int_dec"]
+                   ["loop_int_lt_inc.c"  "stencil_op_loop_int_lt_inc"]
+                   ["getglobal_cached.c" "stencil_op_getglobal_cached"]
+                   ["call_cached.c"      "stencil_op_call_cached"]
+                   ["call.c"             "stencil_op_call"]
+                   ["tailcall.c"         "stencil_op_tailcall"]
+                   ["closure.c"          "stencil_op_closure"]
+                   ["push_env.c"         "stencil_op_push_env"]
+                   ["pop_env.c"          "stencil_op_pop_env"]
+                   ["env_bind.c"         "stencil_op_env_bind"]]
+        stencil-dir "src/eval/bc/stencils"
+        disk-files  (->> (file-seq stencil-dir)
+                         (filterv #(str/ends-with? % ".c"))
+                         (mapv #(subs % (inc (count stencil-dir))))
+                         ;; Skip __proto_-prefixed sources (op-fusion
+                         ;; prototype slot).
+                         (filterv #(not (str/starts-with? % "__proto_")))
+                         set)
+        registry-files (set (map first registry))
+        missing-from-disk (sort (set/difference registry-files
+                                                       disk-files))
+        missing-from-reg  (sort (set/difference disk-files
+                                                       registry-files))
+        bad-prefix        (filterv (fn [[file sym]]
+                                     (let [base (subs file 0
+                                                      (- (count file) 2))]
+                                       (not (str/starts-with?
+                                              sym
+                                              (str "stencil_op_" base)))))
+                                   registry)]
+    (cond
+      (seq missing-from-disk)
+      (throw (ex-info (str "check-stencil-registry: registry references "
+                           "missing source files: " missing-from-disk)
+                      {:missing missing-from-disk}))
+
+      (seq missing-from-reg)
+      (throw (ex-info (str "check-stencil-registry: source files have "
+                           "no registry entry: " missing-from-reg)
+                      {:orphan missing-from-reg}))
+
+      (seq bad-prefix)
+      (throw (ex-info (str "check-stencil-registry: sym does not match "
+                           "stencil_op_<basename> prefix: " bad-prefix)
+                      {:offenders bad-prefix}))
+
+      :else
+      (println "  check-stencil-registry: OK"))))
+
+(defn- parse-reloc-defines
+  "Scan `path` for `#define MINO_STENCIL_RELOC_<NAME> <int>u` lines and
+   return a map of name -> int. The runtime / extractor each carry
+   their own copy of this enum; G3 cross-checks them by parsing
+   both and asserting the maps match.
+
+   Avoids regex captures with long literal prefixes -- the mino
+   regex engine declines to compile patterns with prefix runs
+   approaching the typical reloc-name length. Plain prefix-match
+   on whitespace-split tokens is straightforward and reliable."
+  [path]
+  (let [reloc-prefix "MINO_STENCIL_RELOC_"]
+    (reduce
+      (fn [acc line]
+        ;; str/split with #"\s+" on this build returns the input as a
+        ;; single token; split by literal " " then drop empty entries
+        ;; left between consecutive spaces.
+        (let [tokens (filterv #(not= "" %)
+                              (str/split (str/trim line) " "))]
+          (if (and (>= (count tokens) 3)
+                   (= (nth tokens 0) "#define")
+                   (str/starts-with? (nth tokens 1) reloc-prefix))
+            (let [name      (nth tokens 1)
+                  raw-value (nth tokens 2)
+                  trimmed   (if (str/ends-with? raw-value "u")
+                              (subs raw-value 0 (dec (count raw-value)))
+                              raw-value)]
+              (let [n (parse-long trimmed)]
+                (if (some? n) (assoc acc name n) acc)))
+            acc)))
+      {}
+      (str/split-lines (slurp path)))))
+
+(defn check-reloc-mirror
+  "G3: pin the MINO_STENCIL_RELOC_* enum mirror across the two files
+   that carry it (src/eval/bc/jit/internal.h on the runtime side,
+   tools/stencil_extract.c on the toolchain side), and run
+   tools/stencil_extract --selftest for the extractor's internal
+   consistency. The selftest catches drift within stencil_extract.c
+   between its enum values and reloc_arm64_kind_map; the cross-file
+   parse catches drift between the two enums independent of each
+   file's internal consistency. Promotes the verbal `kept in sync`
+   comment that lived in jit.c pre-v0.216 into a build-time
+   contract."
+  []
+  (build-stencil-extract)
+  (let [runtime-defs   (parse-reloc-defines "src/eval/bc/jit/internal.h")
+        extractor-defs (parse-reloc-defines "tools/stencil_extract.c")
+        ;; The extractor declares one extra symbol per non-ARM64 arch
+        ;; (e.g., MINO_STENCIL_RELOC_X86_64_*) the runtime side does
+        ;; not need to know until the corresponding stencil header
+        ;; lands. Compare only the shared keys.
+        shared-keys    (set/intersection (set (keys runtime-defs))
+                                         (set (keys extractor-defs)))
+        mismatches     (filterv (fn [k]
+                                  (not= (get runtime-defs k)
+                                        (get extractor-defs k)))
+                                shared-keys)
+        missing-rt     (sort (set/difference (set (keys extractor-defs))
+                                             shared-keys))
+        missing-tool   (sort (set/difference (set (keys runtime-defs))
+                                             shared-keys))]
+    (when (seq mismatches)
+      (doseq [k mismatches]
+        (println (str "    " k
+                      "  runtime=" (get runtime-defs k)
+                      "  extractor=" (get extractor-defs k))))
+      (throw (ex-info "check-reloc-mirror: MINO_STENCIL_RELOC_* value mismatch"
+                      {:mismatches mismatches})))
+    (when (seq missing-tool)
+      (throw (ex-info (str "check-reloc-mirror: runtime declares names "
+                           "the extractor does not: " missing-tool)
+                      {:missing-tool missing-tool}))))
+  (let [r (sh "./tools/stencil_extract" "--selftest")]
+    (when-not (= 0 (get r :exit))
+      (println (get r :out))
+      (throw (ex-info "check-reloc-mirror: stencil-extract selftest failed"
+                      {:exit (get r :exit)}))))
+  (println "  check-reloc-mirror: OK"))
+
+(defn release-gate
+  "Composite pre-tag gate. Fails fast on the first non-OK check;
+   the first failure is what the human reads, not a paragraph-long
+   run-all summary. Order:
+
+     1. check-reloc-mirror    -- G3, smallest scope
+     2. check-stencil-registry -- G2, no I/O
+     3. check-stencils-fresh   -- G1, runs gen-stencils
+     4. test-suite             -- bytecode + JIT path
+     5. test-suite-asan        -- same suite, sanitiser-built
+     6. test-jit-parity        -- byte-identical stdout vs no-JIT
+
+   Exits 0 on a clean tree. Negative controls live in the cycle's
+   .local/ status file -- this task is the positive control."
+  []
+  (check-reloc-mirror)
+  (check-stencil-registry)
+  (check-stencils-fresh)
+  (test-suite)
+  (build-asan)
+  (println (sh! "./mino_asan" "tests/run.clj"))
+  (test-jit-parity)
+  (println "  release-gate: OK"))
 
 (defn build-alloc-profile
   "Build mino_prof with -DMINO_ALLOC_PROFILE=1. Wraps every gc_alloc_typed

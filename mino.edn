@@ -32,6 +32,14 @@
                    :task mino.tasks.builtin/build-nojit}
   test-jit-parity {:doc  "Build mino + mino_nojit; assert parity-test stdout matches byte-for-byte"
                    :task mino.tasks.builtin/test-jit-parity}
+  check-stencils-fresh {:doc  "G1: gen-stencils + git-diff guardrail for stale committed bytes"
+                        :task mino.tasks.builtin/check-stencils-fresh}
+  check-stencil-registry {:doc  "G2: registry <-> on-disk *.c sources cross-check"
+                          :task mino.tasks.builtin/check-stencil-registry}
+  check-reloc-mirror {:doc  "G3: stencil_extract --selftest pins MINO_STENCIL_RELOC_* enum mirror"
+                      :task mino.tasks.builtin/check-reloc-mirror}
+  release-gate {:doc  "Composite pre-tag gate: G3 + G2 + G1 + tests + parity, fail-fast"
+                :task mino.tasks.builtin/release-gate}
   clean           {:doc  "Remove build artifacts"
                    :task mino.tasks.builtin/clean}
   test            {:doc  "Build and run the test suite"
