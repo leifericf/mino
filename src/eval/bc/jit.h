@@ -100,6 +100,19 @@ void mino_jit_free_all(struct mino_state *S);
  * trace formatting and debugger introspection. */
 long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off);
 
+/* Drop the runtime-visible JIT state for `fn` without unmapping the
+ * underlying region. The next call falls through to the interpreter;
+ * the fn's hot counter resets so a fresh compile is gated by the
+ * full threshold again. The mmap'd code and offset table stay owned
+ * by the state's jit_regions list and live until state teardown.
+ *
+ * This is the public deopt primitive. The runtime calls it on ic_gen
+ * mismatch from apply_callable. A future breakpoint mechanism, a
+ * profiler that wants to re-instrument a hot fn, or any other client
+ * that needs to take a JIT'd fn off the native path calls it too.
+ * Safe on a fn without a native region; reduces to a no-op. */
+void mino_jit_invalidate(struct mino_state *S, struct mino_val *fn);
+
 #else
 
 /* Stubs so callers in fn.c / state.c don't need to wrap their call
@@ -117,6 +130,12 @@ static inline struct mino_val *mino_jit_invoke(struct mino_state *S,
     (void)S; (void)bc; (void)regs; (void)consts; return NULL;
 }
 static inline void mino_jit_free_all(struct mino_state *S) { (void)S; }
+static inline long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned off) {
+    (void)bc; (void)off; return -1;
+}
+static inline void mino_jit_invalidate(struct mino_state *S, struct mino_val *fn) {
+    (void)S; (void)fn;
+}
 
 #endif /* MINO_CPJIT */
 

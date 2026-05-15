@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.188.0 — Public Deopt Primitive
+
+`mino_jit_invalidate(S, fn)` is the public deopt primitive: it
+drops the runtime-visible `native`, `native_size`, and
+`native_pc_offsets` pointers on a JIT'd fn and rewinds the hot
+counter so a re-warming attempt starts from zero. The backing
+mmap'd region and offset table stay owned by the state's
+jit_regions list and get reaped at state teardown.
+
+`apply_callable`'s ic_gen-mismatch path is refactored to call the
+new entry instead of poking the fields directly. Any future
+client that needs to take a JIT'd fn off the native path -- a
+breakpoint mechanism, a profiler re-instrumenting a hot fn,
+fault-injection tests -- now calls the same primitive. The stub
+defined when `MINO_CPJIT` is off keeps the call site
+unconditional in fn.c.
+
+mino doesn't yet expose breakpoint registration to user code; the
+plan's original scope (walk JIT'd fns on `set-bp`, invalidate
+those that cover the line) is gated on that mechanism arriving.
+This release ships the deopt half so the future bp work has the
+mechanism waiting.
+
 ## v0.187.0 — JIT Deopt-on-IC-Gen Mismatch Regression Suite
 
 `tests/bc_jit_deopt_test.clj` is the new regression-protective

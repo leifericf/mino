@@ -366,17 +366,12 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 /* Stale native code: ic_gen advanced (def / ns-unmap /
                  * var_set_root / var_unintern), so the JIT'd inline-
                  * cache state and global resolutions are no longer
-                 * trustworthy. Drop the runtime-visible pointers so
-                 * the next compile attempt sees a fresh slate; the
-                 * underlying region and offset table stay owned by
-                 * the state's jit_regions list and get reaped on
-                 * teardown. The hot_counter resets too so the next
-                 * compile is gated by the same threshold as the
-                 * original. */
-                bc_rec->native            = NULL;
-                bc_rec->native_size       = 0;
-                bc_rec->native_pc_offsets = NULL;
-                bc_rec->hot_counter       = 0;
+                 * trustworthy. The deopt primitive drops the
+                 * runtime-visible pointers and rewinds the hot
+                 * counter; the underlying region and offset table
+                 * stay owned by the state's jit_regions list and
+                 * get reaped on teardown. */
+                mino_jit_invalidate(S, fn);
             }
             if (bc_rec->native == NULL
                 && bc_rec->hot_counter < (unsigned)-1) {

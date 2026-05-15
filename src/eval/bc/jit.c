@@ -408,6 +408,24 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
     return f(regs, consts, S);
 }
 
+void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn_val)
+{
+    (void)S;
+    if (fn_val == NULL || mino_type_of(fn_val) != MINO_FN) return;
+    mino_bc_fn_t *bc = fn_val->as.fn.bc;
+    if (bc == NULL) return;
+    if (bc->native == NULL) return;
+    /* The mmap'd region and offset table stay owned by the state's
+     * jit_regions list -- they're reaped at state teardown. Dropping
+     * the runtime-visible pointers is the publication-visible deopt
+     * step; the hot counter rewinds so the next compile attempt is
+     * gated by the full threshold. */
+    bc->native            = NULL;
+    bc->native_size       = 0;
+    bc->native_pc_offsets = NULL;
+    bc->hot_counter       = 0;
+}
+
 /* Reverse-lookup: which bytecode pc owns the stencil that contains
  * `native_off` within bc->native? Used by stack-trace formatting to
  * attribute a native instruction back to its bytecode position (and
