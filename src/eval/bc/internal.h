@@ -440,6 +440,36 @@ int mino_bc_source_lookup(const mino_bc_fn_t *bc, size_t pc,
                           const char **out_file, int *out_line,
                           int *out_column);
 
+/* Var-discipline contract.
+ *
+ * Every reference from compiled bc to a top-level binding goes
+ * through one IC slot in this fn's ic_slots array, regardless of
+ * whether the surrounding handler runs in the interpreter or in a
+ * native stencil. The slot is the per-fn "vars table" entry; the Bx
+ * field of OP_GETGLOBAL_CACHED / OP_CALL_CACHED / OP_PROTOCOL_*
+ * indexes it. The runtime side guarantees:
+ *
+ *   - A single slot per syntactic var reference in the fn body.
+ *   - The slot's gen field tracks the S->ic_gen snapshot at fill;
+ *     def / ns-unmap / var_set_root / var_unintern bump ic_gen and
+ *     force the next read to re-resolve.
+ *   - The cached value is observed-consistent with the var's root at
+ *     the moment of re-resolve; readers never observe a torn
+ *     (sym, value, gen) triple.
+ *
+ * mino_bc_ic_global_load is the stable C entry point that a native
+ * tier dispatches into for the GLOBAL kind. It performs the same
+ * lookup + resolve cycle the OP_GETGLOBAL_CACHED handler does, and
+ * preserves the same ordering (dynamic > lexical > cache > resolve)
+ * a Clojure-shaped read expects. Native code can either call this
+ * directly (one C call per resolved global) or, once stencils are
+ * available, inline its body via a per-kind stencil. */
+mino_val_t *mino_bc_ic_global_load(mino_state_t *S,
+                                   mino_bc_fn_t *bc,
+                                   int slot_idx,
+                                   mino_env_t *env,
+                                   int dyn_active);
+
 /* Sentinel placed in MINO_FN.bc after a failed compile attempt so the
  * next call doesn't re-attempt compilation. apply_callable sees this
  * pointer and routes straight to the tree-walker. The fields are zero

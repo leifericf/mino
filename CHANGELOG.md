@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.180.0 — Var-Discipline Uniform Read Path
+
+The per-fn IC-slot array gains a stable C entry point,
+`mino_bc_ic_global_load`, that performs the same
+dynamic-then-lexical-then-cache-then-resolve lookup the
+`OP_GETGLOBAL_CACHED` handler does. Native tiers, profiling tooling,
+and embedders that need to read a fn's resolved globals can call it
+without going through the dispatch loop.
+
+The header now spells out the contract callers depend on: one slot
+per syntactic var reference; the gen field tracks the `S->ic_gen`
+snapshot; def / ns-unmap / var_set_root / var_unintern bump `ic_gen`
+and force re-resolve on the next read; the cached value is observed-
+consistent with the var's root at the moment of refill.
+
+No behavioural change in the interpreter; the existing
+`OP_GETGLOBAL_CACHED` path is unchanged. `ic_gen` invalidation tests
+continue to pass identically.
+
 ## v0.179.0 — Deopt Protocol Scaffolding
 
 `mino_bc_fn_t` gains four native-tier slots: `native` (head of the

@@ -584,6 +584,22 @@ static mino_val_t *ic_resolve_global(mino_state_t *S,
     return v;
 }
 
+/* Public entry point for the IC GLOBAL load: bounds-checks slot_idx
+ * and routes through ic_resolve_global. Native tiers and external
+ * tooling that wants to read a fn's resolved global without going
+ * through the interpreter dispatch loop call this directly. */
+mino_val_t *mino_bc_ic_global_load(mino_state_t *S,
+                                   mino_bc_fn_t *bc,
+                                   int slot_idx,
+                                   mino_env_t *env,
+                                   int dyn_active)
+{
+    if (bc == NULL || bc->ic_slots == NULL) return NULL;
+    if (slot_idx < 0 || slot_idx >= bc->ic_slots_len) return NULL;
+    return ic_resolve_global(S, bc, &bc->ic_slots[slot_idx],
+                             env, dyn_active);
+}
+
 /* Shared resolve path for the PROTOCOL-kind IC consumers
  * (OP_PROTOCOL_CALL_CACHED and OP_PROTOCOL_TAILCALL_CACHED).
  * Mirrors the protocol-method dispatch fast lane: deref the captured
