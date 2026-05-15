@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.198.0 — Comparison Stencils (LT / LE / GT / GE / EQ_II)
+
+`src/eval/bc/stencils/{lt,le,gt,ge,eq}_ii.c` extend the JIT's
+stencil set to cover `(< a b)`, `(<= a b)`, `(> a b)`, `(>= a b)`,
+and `(= a b)`. The shape mirrors v0.197.0's arith stencils: tagged-
+int fast lane via `binop_int_fast` with the matching BINOP_*
+subop, cons-spine fallback via `mino_jit_binop_slow` for the cold
+(non-int operand) path. The fast lane returns `mino_true` /
+`mino_false` sentinels without allocating; only mixed-type or
+non-numeric inputs hit the prim.
+
+`mino_jit_binop_slow` in `jit.c` grows five subop cases
+(`BINOP_LT` / `LE` / `GT` / `GE` / `EQ`) so the slow path routes
+to `prim_lt` / `prim_lte` / `prim_gt` / `prim_gte` / `prim_eq` --
+the same prims the interpreter's OP_*_II fallback uses.
+
+Fns whose bodies are `(fn [a b] (< a b))` and similar single-
+comparison shapes JIT-compile end-to-end; the full test suite
+plus ASan rebuild pass with `-DMINO_CPJIT=1`. Stencil set up to
+ten ops now: MOVE / LOAD_K / RETURN / fused LOAD_K-RETURN / three
+arith / five comparisons.
+
 ## v0.197.0 — Stencil Call ABI + ADD_II / SUB_II / MUL_II
 
 `src/eval/bc/stencils/{add_ii,sub_ii,mul_ii}.c` are the first JIT

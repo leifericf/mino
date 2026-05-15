@@ -199,6 +199,41 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_mul_ii_symbols, stencil_op_mul_ii_nsymbols,
         stencil_op_mul_ii_relocs, stencil_op_mul_ii_nrelocs,
         0u
+    },
+    {
+        OP_LT_II,
+        stencil_op_lt_ii_bytes, stencil_op_lt_ii_size,
+        stencil_op_lt_ii_symbols, stencil_op_lt_ii_nsymbols,
+        stencil_op_lt_ii_relocs, stencil_op_lt_ii_nrelocs,
+        0u
+    },
+    {
+        OP_LE_II,
+        stencil_op_le_ii_bytes, stencil_op_le_ii_size,
+        stencil_op_le_ii_symbols, stencil_op_le_ii_nsymbols,
+        stencil_op_le_ii_relocs, stencil_op_le_ii_nrelocs,
+        0u
+    },
+    {
+        OP_GT_II,
+        stencil_op_gt_ii_bytes, stencil_op_gt_ii_size,
+        stencil_op_gt_ii_symbols, stencil_op_gt_ii_nsymbols,
+        stencil_op_gt_ii_relocs, stencil_op_gt_ii_nrelocs,
+        0u
+    },
+    {
+        OP_GE_II,
+        stencil_op_ge_ii_bytes, stencil_op_ge_ii_size,
+        stencil_op_ge_ii_symbols, stencil_op_ge_ii_nsymbols,
+        stencil_op_ge_ii_relocs, stencil_op_ge_ii_nrelocs,
+        0u
+    },
+    {
+        OP_EQ_II,
+        stencil_op_eq_ii_bytes, stencil_op_eq_ii_size,
+        stencil_op_eq_ii_symbols, stencil_op_eq_ii_nsymbols,
+        stencil_op_eq_ii_relocs, stencil_op_eq_ii_nrelocs,
+        0u
     }
 };
 static const int g_stencils_count =
@@ -262,6 +297,11 @@ mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
     case BINOP_ADD: r = prim_add(S, list, NULL); break;
     case BINOP_SUB: r = prim_sub(S, list, NULL); break;
     case BINOP_MUL: r = prim_mul(S, list, NULL); break;
+    case BINOP_LT:  r = prim_lt (S, list, NULL); break;
+    case BINOP_LE:  r = prim_lte(S, list, NULL); break;
+    case BINOP_GT:  r = prim_gt (S, list, NULL); break;
+    case BINOP_GE:  r = prim_gte(S, list, NULL); break;
+    case BINOP_EQ:  r = prim_eq (S, list, NULL); break;
     default:        r = NULL;                    break;
     }
     if (r == NULL) return NULL;
