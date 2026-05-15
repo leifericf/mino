@@ -359,6 +359,7 @@ static void print_usage(FILE *out)
         "    -h, --help          Show this help and exit\n"
         "    -V, --version       Show version and exit\n"
         "    --jit=auto|off|on   JIT mode (default auto; overrides MINO_JIT env)\n"
+        "    --jit-threshold=N   Hot-call count before AUTO compiles (default 100)\n"
         "    --                  End of options; treat the rest as FILE\n"
         "\n"
         "SUBCOMMANDS:\n"
@@ -460,12 +461,14 @@ static int parse_cli_flags(int argc, char **argv,
                            int *out_first,
                            const char **out_eval,
                            int *out_dash_dash,
-                           const char **out_jit_mode)
+                           const char **out_jit_mode,
+                           const char **out_jit_threshold)
 {
     int i = 1;
     *out_eval = NULL;
     *out_dash_dash = 0;
     *out_jit_mode = NULL;
+    *out_jit_threshold = NULL;
     while (i < argc) {
         const char *a = argv[i];
         if (strcmp(a, "--") == 0) {
@@ -496,6 +499,11 @@ static int parse_cli_flags(int argc, char **argv,
         }
         if (strncmp(a, "--jit=", 6) == 0) {
             *out_jit_mode = a + 6;
+            i++;
+            continue;
+        }
+        if (strncmp(a, "--jit-threshold=", 16) == 0) {
+            *out_jit_threshold = a + 16;
             i++;
             continue;
         }
@@ -779,9 +787,10 @@ int main(int argc, char **argv)
     setvbuf(stderr, NULL, _IONBF, 0);
 #endif
 
-    const char *cli_jit_mode = NULL;
+    const char *cli_jit_mode      = NULL;
+    const char *cli_jit_threshold = NULL;
     parse_state = parse_cli_flags(argc, argv, &first, &eval_expr, &dash_dash,
-                                  &cli_jit_mode);
+                                  &cli_jit_mode, &cli_jit_threshold);
     if (parse_state == 1) return 0;
     if (parse_state == 2) return 2;
     /* --jit=auto|off|on rejects anything else loudly. */
@@ -800,6 +809,20 @@ int main(int argc, char **argv)
                     cli_jit_mode);
             return 2;
         }
+    }
+    unsigned cli_threshold = 0;
+    int cli_threshold_set = 0;
+    if (cli_jit_threshold != NULL) {
+        char *endp = NULL;
+        unsigned long v = strtoul(cli_jit_threshold, &endp, 10);
+        if (endp == NULL || *endp != '\0' || v < 1ul || v > 0xfffffffful) {
+            fprintf(stderr,
+                    "mino: --jit-threshold must be a positive integer "
+                    "(got '%s')\n", cli_jit_threshold);
+            return 2;
+        }
+        cli_threshold     = (unsigned)v;
+        cli_threshold_set = 1;
     }
 
     /* Companion-binary subcommands. Exec before runtime init so we don't
@@ -844,7 +867,8 @@ int main(int argc, char **argv)
     }
 
     S = mino_state_new();
-    if (cli_jit_set) mino_state_set_jit_mode(S, cli_jit);
+    if (cli_jit_set)       mino_state_set_jit_mode(S, cli_jit);
+    if (cli_threshold_set) mino_state_set_jit_hot_threshold(S, cli_threshold);
     install_crash_handler(S);
     mino_env_t   *env = mino_env_new(S);
     char *buf  = NULL;

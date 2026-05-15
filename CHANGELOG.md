@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.239.0 — JIT Threshold Tuning + Capability Query API
+
+Adds per-state hot-threshold tuning plus a public capability-query
+API so embedders can introspect what the runtime they linked
+against can actually do.
+
+  - `src/mino.h`: new `mino_state_set_jit_hot_threshold` /
+    `mino_state_jit_hot_threshold` setter and getter. Zero clamps
+    to 1 (intent is "ASAP", same gating as MINO_JIT_MODE_ON but
+    still in AUTO). New `mino_jit_capability_t` struct
+    `{available, mode, threshold, host_arch, host_os}` and
+    `mino_state_jit_capability` query function.
+  - `src/runtime/internal.h`: new `unsigned jit_hot_threshold`
+    field on `struct mino_state` (placed next to `jit_mode` so the
+    layout-static-assert in entry.c stays green).
+  - `src/runtime/state.c`: `state_init` reads
+    `MINO_JIT_HOT_THRESHOLD` env var (positive integer, falls back
+    to MINO_JIT_THRESHOLD on parse failure / non-positive value).
+    Implements the setter/getter and capability query.
+  - `src/eval/bc/jit.h`: new `MINO_CPJIT_HOST_DETECTED` macro
+    exposed alongside `MINO_JIT_THRESHOLD`. Mirrors the host
+    detection cascade in eval/bc/jit/internal.h so state.c can
+    branch on build-time host support without pulling in the
+    JIT-private header.
+  - `main.c`: new `--jit-threshold=N` CLI flag. Rejects non-positive
+    or unparseable values with a clear error message. Usage banner
+    updated.
+
+`release-gate` green; `--jit-threshold=5` cuts the warm-up window
+from 100 to 5 calls, observable through `MINO_CPJIT_STATS=1`.
+Capability query confirms `available=1`, `host_arch="arm64"`,
+`host_os="darwin"` on the ARM64 Darwin development host.
+
 ## v0.238.0 — Runtime JIT Mode (AUTO / OFF / ON)
 
 Adds per-state JIT mode control to the full `mino` binary. Three

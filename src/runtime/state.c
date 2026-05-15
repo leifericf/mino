@@ -93,6 +93,16 @@ static void state_init(mino_state_t *S)
              * var is a soft override, not a hard contract. */
         }
     }
+    {
+        const char *t = getenv("MINO_JIT_HOT_THRESHOLD");
+        if (t != NULL && t[0] != '\0') {
+            char *endp = NULL;
+            unsigned long v = strtoul(t, &endp, 10);
+            if (endp != NULL && *endp == '\0' && v >= 1u && v <= 0xfffffffful) {
+                S->jit_hot_threshold = (unsigned)v;
+            }
+        }
+    }
     S->gc_threshold            = 1u << 20;
     S->gc_nursery_bytes        = 1u << 20;  /* 1 MiB default */
     {
@@ -415,6 +425,53 @@ mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S)
 {
     if (S == NULL) return MINO_JIT_MODE_AUTO;
     return (mino_jit_mode_t)S->jit_mode;
+}
+
+void mino_state_set_jit_hot_threshold(mino_state_t *S, unsigned threshold)
+{
+    if (S == NULL) return;
+    /* Clamp 0 to 1: a zero threshold would let the existing
+     * "hot_counter >= thresh" check fire before the first
+     * increment, which is hostile. The intent of zero is "ASAP",
+     * which is the same as 1 in this gating scheme. */
+    S->jit_hot_threshold = threshold < 1u ? 1u : threshold;
+}
+
+unsigned mino_state_jit_hot_threshold(const mino_state_t *S)
+{
+    if (S == NULL) return MINO_JIT_THRESHOLD;
+    return S->jit_hot_threshold;
+}
+
+mino_jit_capability_t mino_state_jit_capability(const mino_state_t *S)
+{
+    mino_jit_capability_t cap;
+    cap.mode      = (S == NULL) ? MINO_JIT_MODE_AUTO
+                                : (mino_jit_mode_t)S->jit_mode;
+    cap.threshold = (S == NULL) ? MINO_JIT_THRESHOLD
+                                : S->jit_hot_threshold;
+#if defined(__aarch64__)
+    cap.host_arch = "arm64";
+#elif defined(__x86_64__)
+    cap.host_arch = "x86_64";
+#else
+    cap.host_arch = "unknown";
+#endif
+#if defined(__APPLE__)
+    cap.host_os = "darwin";
+#elif defined(__linux__)
+    cap.host_os = "linux";
+#elif defined(_WIN32)
+    cap.host_os = "windows";
+#else
+    cap.host_os = "unknown";
+#endif
+    /* `available` non-zero means this build has the JIT compiled in
+     * AND the host arch/OS is in the supported set. mino-lean (no
+     * MINO_CPJIT) and any build whose host detection in
+     * eval/bc/jit/internal.h didn't latch a stencil header return 0. */
+    cap.available = MINO_CPJIT_HOST_DETECTED ? 1 : 0;
+    return cap;
 }
 
 /* Tear down a state in the deterministic order each helper expects.

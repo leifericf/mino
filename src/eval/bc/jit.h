@@ -23,8 +23,30 @@
 
 /* Hot threshold: a fn warming past this count under the interpreter
  * triggers a single JIT compile attempt. The number is intentionally
- * conservative; subsequent releases tune it through measurement. */
+ * conservative; subsequent releases tune it through measurement.
+ * Embedders override per-state via mino_state_set_jit_hot_threshold. */
 #define MINO_JIT_THRESHOLD 100u
+
+/* MINO_CPJIT_HOST_DETECTED: 1 when this build was compiled with
+ * MINO_CPJIT AND the host arch / OS is supported by the JIT module.
+ * Mirrors the detection cascade in eval/bc/jit/internal.h; exposed
+ * here so non-JIT translation units (state.c, the capability query)
+ * can branch on the build-time host check without pulling in the
+ * full JIT private header. */
+#if defined(MINO_CPJIT) && (                                           \
+    (defined(__aarch64__) && defined(__APPLE__))                       \
+ || (defined(__aarch64__) && defined(__linux__)                        \
+        && defined(MINO_CPJIT_ARM64_LINUX))                            \
+ || (defined(__x86_64__) && defined(__linux__)                         \
+        && defined(MINO_CPJIT_X86_64_LINUX))                           \
+ || (defined(__x86_64__) && defined(__APPLE__)                         \
+        && defined(MINO_CPJIT_X86_64_DARWIN))                          \
+ || (defined(__x86_64__) && defined(_WIN32)                            \
+        && defined(MINO_CPJIT_X86_64_WINDOWS)))
+#define MINO_CPJIT_HOST_DETECTED 1
+#else
+#define MINO_CPJIT_HOST_DETECTED 0
+#endif
 
 /* Deopt model.
  *

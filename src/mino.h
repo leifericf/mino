@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 238
+#define MINO_VERSION_MINOR 239
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -891,6 +891,58 @@ typedef enum {
 
 void            mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode);
 mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S);
+
+/*
+ * JIT hot threshold (call count before AUTO mode triggers a compile).
+ * Defaults to a runtime-internal value (currently 100). Embedders
+ * tune it per-workload via this setter:
+ *
+ *   - Lower values JIT sooner (better steady-state throughput at
+ *     the cost of more upfront compile time and a larger native
+ *     footprint -- short-lived fns may compile then never run
+ *     again).
+ *   - Higher values delay JIT (less upfront work, but slower to
+ *     warm).
+ *
+ * A value of 0 is clamped to 1 (compile on first call -- the same
+ * behaviour as MINO_JIT_MODE_ON, but staying in AUTO so the OFF/ON
+ * gate still applies). The threshold is irrelevant when the mode
+ * is OFF (no compile happens regardless) or ON (compile fires on
+ * call 1).
+ *
+ * Initial value follows MINO_JIT_HOT_THRESHOLD env var (positive
+ * integer); unparseable / non-positive values fall back to the
+ * default. NULL state is a no-op.
+ */
+void     mino_state_set_jit_hot_threshold(mino_state_t *S, unsigned threshold);
+unsigned mino_state_jit_hot_threshold(const mino_state_t *S);
+
+/*
+ * JIT capability query. Returns a snapshot of the runtime's JIT
+ * configuration so embedders can inspect what they got -- useful
+ * for diagnostics, telemetry, and conditional embedding logic
+ * that wants to behave differently when JIT is unavailable.
+ *
+ *   available  -- non-zero when this build was compiled with JIT
+ *                 support AND the host arch / OS is one of the
+ *                 supported targets. Always 0 on mino-lean.
+ *   mode       -- the state's current mino_jit_mode_t.
+ *   threshold  -- the state's current hot threshold.
+ *   host_arch  -- "arm64" / "x86_64" / "unknown".
+ *   host_os    -- "darwin" / "linux" / "windows" / "unknown".
+ *
+ * The host_arch and host_os strings live in static storage; the
+ * caller does not free them.
+ */
+typedef struct {
+    int             available;
+    mino_jit_mode_t mode;
+    unsigned        threshold;
+    const char     *host_arch;
+    const char     *host_os;
+} mino_jit_capability_t;
+
+mino_jit_capability_t mino_state_jit_capability(const mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* Environment and evaluator                                                 */
