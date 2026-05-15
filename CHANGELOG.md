@@ -1,5 +1,81 @@
 # Changelog
 
+## v0.200.0 — JIT Control Flow (OP_JMP / OP_JMPIFNOT) + Chain ABI Fix
+
+The JIT covers branches. `OP_JMP` and `OP_JMPIFNOT` get direct-emit
+templates in `src/eval/bc/jit.c` -- 4 bytes (`b <target>`) and 20
+bytes (`ldr` / `cbz` / `sub` / `cmp` / `b.ls`) respectively. The
+target address is unknown at emit time; a target-patch pass after
+the layout walk resolves `pc_offsets[curr_pc + 1 + sBx]` for each
+branch and rewrites the `imm26` (B26) or `imm19` (CBZ / B.cond)
+encoding in place.
+
+`OP_JMPIFNOT` inlines the mino truthiness check:
+
+  ```
+  ldr  x9,  [x0, #(IMM_A * 8)]   ; v = regs[a]
+  cbz  x9,  <target>             ; NULL -> take
+  sub  x10, x9, #2
+  cmp  x10, #1                   ; unsigned <= covers v == 0x2 (false)
+  b.ls <target>                  ; and v == 0x3 (nil)
+  ; fall through (truthy)
+  ```
+
+The trick exploits that mino's nil-tagged sentinel is `0x3` and its
+false-tagged sentinel is `0x2`; subtracting 2 maps both to a
+contiguous `[0, 1]` range, so a single `b.ls` covers both. Every
+other tagged value (int, char, bool-true, heap-pointer) lies
+outside that range and falls through to the truthy branch.
+
+Counted loops now JIT-compile end-to-end. `(loop [i 0] (if (< i n)
+(recur (inc i)) ...))` shapes lower to a JIT'd body that uses
+`OP_INC_I`, `OP_LT_II`, `OP_JMPIFNOT`, and `OP_JMP` together; no
+hand-off back to the interpreter for the back-jump. A 100-iteration
+`(reduce + 0 (range 100))` style body compiles and produces the
+right result (4950).
+
+**Stencil chain-ABI fix.** Pre-v0.200.0 stencils that called a
+helper through `bl` left `x1` (consts) and `x2` (S) clobbered at
+the patched-`ret` boundary. A subsequent stencil expecting `x1` to
+still be the consts table (`OP_LOAD_K`, `OP_LOAD_K_RETURN`) or
+`x2` to still be the state (helper-calling stencils) would read
+garbage. The bug stayed latent until v0.200.0's branch ops chained
+`OP_ZERO_INT_P` -> `OP_JMPIFNOT` -> `OP_LOAD_K` and segfaulted on
+the first LOAD_K.
+
+The fix:
+
+- Non-final stencils now return `mino_stencil_chain_t` (a 16-byte
+  struct of `(regs, consts)`). AArch64 AAPCS returns 16-byte
+  structs in `(x0, x1)`, so clang spills `consts` to a callee-
+  saved register and restores it into `x1` just before the
+  trailing `ret`. The patched `b <next>` then chains with both
+  `x0` and `x1` live.
+- A `MINO_STENCIL_CHAIN_RETURN` macro uses the GCC named-register
+  extension (`register mino_state_t *_s asm("x2") = S;`) plus a
+  no-op `asm volatile("" : : "r"(_s))` to force clang to
+  materialise `S` in `x2` right before the ret. The AArch64
+  function epilogue itself only touches `x19` / `x20` / `x29` /
+  `x30` / `sp`, so `x2` carries through the ret unchanged.
+
+All 16 helper-calling stencils use the new macro: `add_ii` /
+`sub_ii` / `mul_ii` / `lt_ii` / `le_ii` / `gt_ii` / `ge_ii` /
+`eq_ii` / `inc_i` / `dec_i` / `zero_int_p` / `add_ik` / `sub_ik` /
+`lt_ik` / `le_ik` / `eq_ik`. The void-returning stencils (`move`,
+`load_k`) and the final stencils (`return_imm`, fused
+`load_k_return`) are unchanged: they neither call helpers nor
+chain.
+
+Eligibility now accepts `OP_JMP` / `OP_JMPIFNOT`; the
+`OP_LOAD_K` + `OP_RETURN` fusion is disabled when the body
+contains any branch op, because a mis-aimed jump landing on the
+RETURN-half of a fused atomic stencil would re-execute the
+LOAD_K. With branch-free bodies the fusion still fires.
+
+Full test suite (1688 / 7854) passes. Smoke runs exercise an
+`(if (zero? x) 1 2)` body, an `abs` form, and a counted-loop
+sum.
+
 ## v0.199.0 — Unary + Immediate-Arg Stencils
 
 `src/eval/bc/stencils/{inc_i,dec_i,zero_int_p}.c` cover the unary

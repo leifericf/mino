@@ -39,6 +39,35 @@
 typedef struct mino_state    mino_state_t;
 typedef struct mino_val      mino_val_t;
 
+/* Chain-return type for non-final stencils. ARM64 AAPCS returns
+ * structs of two 8-byte pointers in (x0, x1), so a stencil that
+ * names this struct as its return type forces clang to spill
+ * `consts` (x1 at entry) to a callee-saved register across any
+ * helper call and reload it into x1 before the trailing ret.
+ *
+ * The JIT patches that ret into `b <next>`, so the next stencil
+ * sees x0=regs, x1=consts, x2=S — even when the current stencil
+ * called into a helper that clobbered x1. The fused / OP_RETURN
+ * (final) stencils keep their `mino_val_t *` scalar return; they
+ * are not chained out of so x1 preservation is moot for them. */
+typedef struct {
+    mino_val_t **regs;
+    mino_val_t **consts;
+} mino_stencil_chain_t;
+
+/* Chain-exit invariant: at the patched-`ret` boundary, x0=regs,
+ * x1=consts, x2=S. The struct return enforces (x0, x1) via AAPCS;
+ * the register-asm pin forces clang to materialise S in x2 right
+ * before the ret. The AArch64 function epilogue itself touches
+ * only x19/x20/x29/x30 and sp, so x2 carries through to the
+ * patched chain branch unchanged. */
+#define MINO_STENCIL_CHAIN_RETURN(regs_, consts_, S_)                      \
+    do {                                                                   \
+        register mino_state_t *_mino_s_in_x2 __asm__("x2") = (S_);         \
+        __asm__ volatile("" : : "r"(_mino_s_in_x2));                       \
+        return (mino_stencil_chain_t){(regs_), (consts_)};                 \
+    } while (0)
+
 /* Extern immediate slots. Their addresses encode the patchable operands.
  * The linker emits one R_UNSIGNED / PAGE21+PAGEOFF12 relocation pair per
  * read site; the extractor records the offsets and the runtime overwrites
