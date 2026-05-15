@@ -157,6 +157,55 @@ mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_COUNT_VEC. Vector fast lane returns vec.len as a
+ * tagged int (or boxed for the rare overflow). Any other coll type
+ * (lazy seq, string, map, set, ...) falls through to prim_count. */
+mino_val_t **mino_jit_count_vec_slow(mino_state_t *S, mino_val_t **regs,
+                                     unsigned a, unsigned b)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+        mino_val_t *r = tag_or_box_int(S, (long long)coll->as.vec.len);
+        if (r == NULL) return NULL;
+        regs    = S->bc_regs + base;
+        regs[a] = r;
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_count(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* Slow path for OP_EMPTY_VEC. Vector fast lane returns true iff
+ * vec.len == 0. Other coll types fall through to prim_empty_p. */
+mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S, mino_val_t **regs,
+                                     unsigned a, unsigned b)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+        regs    = S->bc_regs + base;
+        regs[a] = coll->as.vec.len == 0 ? mino_true(S) : mino_false(S);
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_empty_p(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Continue-marker stub. Fused-loop stencils emit a `b` instruction
  * referencing this symbol; the JIT runtime detects the BRANCH26 reloc
  * during emit_stencil and rewrites it to target the stencil instance's

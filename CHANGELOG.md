@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.226.0 — JIT Stencils For OP_COUNT_VEC + OP_EMPTY_VEC
+
+Continues the coverage cycle. Two more trampoline stencils for the
+remaining single-arg vector predicates. Same shape as v0.225.0: the
+slow helper carries the vector fast lane (MINO_VECTOR + .len read /
+zero-test) and the prim_count / prim_empty_p fallback.
+
+  - `src/eval/bc/stencils/count_vec.c`, `empty_vec.c` (new).
+  - `mino_jit_count_vec_slow`, `mino_jit_empty_vec_slow` in
+    `src/eval/bc/jit/helpers.c`.
+  - Stencil registry + descriptor + extern-fn registrations updated.
+  - `stencils_arm64_darwin.h` regenerated.
+
+`release-gate` green.
+
 ## v0.225.0 — JIT Stencils For OP_NTH_VEC + OP_FIRST_VEC
 
 Opens the coverage cycle (cycle C). Adds two new stencils so the JIT

@@ -388,6 +388,20 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_first_vec_symbols, stencil_op_first_vec_nsymbols,
         stencil_op_first_vec_relocs, stencil_op_first_vec_nrelocs,
         0u
+    },
+    {
+        OP_COUNT_VEC,
+        stencil_op_count_vec_bytes, stencil_op_count_vec_size,
+        stencil_op_count_vec_symbols, stencil_op_count_vec_nsymbols,
+        stencil_op_count_vec_relocs, stencil_op_count_vec_nrelocs,
+        0u
+    },
+    {
+        OP_EMPTY_VEC,
+        stencil_op_empty_vec_bytes, stencil_op_empty_vec_size,
+        stencil_op_empty_vec_symbols, stencil_op_empty_vec_nsymbols,
+        stencil_op_empty_vec_relocs, stencil_op_empty_vec_nrelocs,
+        0u
     }
 };
 const int mino_jit_stencils_count =
@@ -504,6 +518,8 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_call_known_prim_slow",  (void *)(uintptr_t)mino_jit_call_known_prim_slow},
     {"mino_jit_nth_vec_slow",          (void *)(uintptr_t)mino_jit_nth_vec_slow},
     {"mino_jit_first_vec_slow",        (void *)(uintptr_t)mino_jit_first_vec_slow},
+    {"mino_jit_count_vec_slow",        (void *)(uintptr_t)mino_jit_count_vec_slow},
+    {"mino_jit_empty_vec_slow",        (void *)(uintptr_t)mino_jit_empty_vec_slow},
     {"mino_jit_call_slow",             (void *)(uintptr_t)mino_jit_call_slow},
     {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
     {"mino_jit_closure_slow",          (void *)(uintptr_t)mino_jit_closure_slow},

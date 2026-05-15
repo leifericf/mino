@@ -232,6 +232,18 @@ extern mino_val_t **mino_jit_first_vec_slow(mino_state_t *S,
                                              mino_val_t **regs,
                                              unsigned a, unsigned b);
 
+/* OP_COUNT_VEC slow helper. Tagged-int len fast lane on MINO_VECTOR,
+ * cons-and-prim_count fallback. */
+extern mino_val_t **mino_jit_count_vec_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a, unsigned b);
+
+/* OP_EMPTY_VEC slow helper. true/false fast lane on MINO_VECTOR by
+ * .len comparison, cons-and-prim_empty_p fallback. */
+extern mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a, unsigned b);
+
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
  * return value lands at regs[dst]. Routes through
