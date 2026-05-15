@@ -133,6 +133,13 @@ static uint64_t imm_value(mino_bc_insn_t insn, imm_kind_t k)
     return 0;
 }
 
+/* Pseudo-opcode for the fused LOAD_K + RETURN superinstruction. Sits
+ * above OP__COUNT so the find_stencil lookup never confuses it with
+ * a real bytecode opcode emitted by the compiler. The JIT-compile
+ * walk pattern-matches the source pair and selects this entry
+ * directly; the bytecode tier never sees it. */
+#define OP_FUSED_LOAD_K_RETURN ((unsigned)(OP__COUNT + 1))
+
 /* Stencil table. Ordered by frequency in measured workloads so the
  * linear scan in find_stencil tends to hit early; the cost is
  * marginal at <20 entries but the discipline keeps the table easy to
@@ -158,6 +165,13 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_return_imm_symbols, stencil_op_return_imm_nsymbols,
         stencil_op_return_imm_relocs, stencil_op_return_imm_nrelocs,
         0u  /* keep `ret` -- this is the function exit */
+    },
+    {
+        OP_FUSED_LOAD_K_RETURN,
+        stencil_op_load_k_return_bytes, stencil_op_load_k_return_size,
+        stencil_op_load_k_return_symbols, stencil_op_load_k_return_nsymbols,
+        stencil_op_load_k_return_relocs, stencil_op_load_k_return_nrelocs,
+        0u  /* keep `ret` -- fused stencil exits the fn */
     }
 };
 static const int g_stencils_count =
@@ -394,6 +408,40 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     for (size_t pc = 0; pc < bc->code_len; pc++) {
         pc_offsets[pc] = (unsigned)pos;
         unsigned op = OP_OF(bc->code[pc]);
+
+        /* Superinstruction fusion: OP_LOAD_K followed by OP_RETURN
+         * with matching A collapses into the fused stencil. Skips
+         * the intermediate regs[A] write -- consts[Bx] lands
+         * directly in x0 and the fn returns. The fused stencil
+         * uses Bx (the OP_LOAD_K's constant index) as its single
+         * immediate; OP_RETURN's A is implicit (we don't need to
+         * write back). */
+        if (op == OP_LOAD_K && pc + 1 < bc->code_len) {
+            mino_bc_insn_t cur  = bc->code[pc];
+            mino_bc_insn_t next = bc->code[pc + 1];
+            if (OP_OF(next) == OP_RETURN && A_OF(next) == A_OF(cur)) {
+                const stencil_desc_t *st =
+                    find_stencil(OP_FUSED_LOAD_K_RETURN);
+                size_t new_pool_pos = pool_pos;
+                long n = emit_stencil(code, pos, code_cap, pool, pool_pos,
+                                      pool_cap, &new_pool_pos, st, cur,
+                                      code_base, pool_base);
+                if (n < 0) {
+                    free(pc_offsets);
+                    munmap(region, total_size);
+                    return -1;
+                }
+                pos += (size_t)n;
+                pool_pos = new_pool_pos;
+                /* Both pcs map to the start of the fused chunk; the
+                 * fused stencil is atomic, so deopt mid-fusion is
+                 * not a representable state. */
+                pc_offsets[pc + 1] = pc_offsets[pc];
+                pc++;
+                continue;
+            }
+        }
+
         const stencil_desc_t *st = find_stencil(op);
         size_t new_pool_pos = pool_pos;
         long n = emit_stencil(code, pos, code_cap, pool, pool_pos, pool_cap,
@@ -444,10 +492,11 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
         if (trace != NULL && trace[0] != '\0' && trace[0] != '0') {
             fprintf(stderr,
                     "[cpjit] compiled bc (code_len=%zu, region=%p, "
-                    "layout=%s, total_size=%zu, pool_slots=%zu)\n",
+                    "layout=%s, total_size=%zu, code_used=%zu, "
+                    "pool_used=%zu)\n",
                     bc->code_len, region,
                     single_page ? "single-page" : "multi-page",
-                    total_size, pool_slots);
+                    total_size, pos, pool_pos);
         }
     }
     return 0;

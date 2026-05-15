@@ -336,10 +336,11 @@
         gen-dir   "src/eval/bc/stencils/generated"
         out-hdr   (str gen-dir "/stencils_" triple ".h")
         tmpdir    "/tmp/mino-stencils"
-        stencils  [["return.c"  "stencil_op_return_arg0"]
-                   ["return.c"  "stencil_op_return_imm"]
-                   ["move.c"    "stencil_op_move"]
-                   ["load_k.c"  "stencil_op_load_k"]]]
+        stencils  [["return.c"        "stencil_op_return_arg0"]
+                   ["return.c"        "stencil_op_return_imm"]
+                   ["move.c"          "stencil_op_move"]
+                   ["load_k.c"        "stencil_op_load_k"]
+                   ["load_k_return.c" "stencil_op_load_k_return"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto

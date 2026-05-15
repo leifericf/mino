@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.195.0 — Fused LOAD_K + RETURN Superinstruction
+
+`src/eval/bc/stencils/load_k_return.c` is the first fused
+superinstruction stencil. The pattern OP_LOAD_K (A=R, Bx=K)
+immediately followed by OP_RETURN A=R collapses into a single
+stencil that places `consts[Bx]` directly in `x0` (the AArch64
+return register) and exits. Skips the intermediate `regs[A]`
+write that two separate stencils would emit. Constant-returning
+fns -- `(fn [] 42)`, arity-stubs that wrap a literal -- hit
+this pattern.
+
+The JIT compile walk pattern-matches the source pair: when it
+sees OP_LOAD_K followed by OP_RETURN with matching A, it
+emits the fused stencil and advances pc by two. The fused
+stencil sits behind a pseudo-opcode (`OP_FUSED_LOAD_K_RETURN`,
+allocated above OP__COUNT) so the regular `find_stencil`
+lookup never confuses it with a real bytecode opcode emitted
+by the compiler. `native_pc_offsets[pc+1]` aliases the fused
+chunk's start since deopt mid-superinstruction is not a
+representable state.
+
+Effect: `(fn [] 42)`'s native code size drops from 40 bytes
+(LOAD_K stencil + RETURN_IMM stencil = 6 + 4 instructions) to
+16 bytes (fused stencil = 4 instructions); the literal pool
+shrinks from 3 slots to 1. The full test suite plus ASan build
+pass; nine fns still JIT-compile under `tests/run.clj`.
+
 ## v0.194.0 — Saturating Counter on JIT-Ineligible Fns
 
 The tier-selection branch in `apply_callable` now saturates a

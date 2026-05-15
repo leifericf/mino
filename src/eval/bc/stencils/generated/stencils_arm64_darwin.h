@@ -62,3 +62,17 @@ static const unsigned int stencil_op_load_k_relocs[4][4] = {
     {0, 4, 1, 0}
 };
 static const unsigned long stencil_op_load_k_nrelocs = 4;
+
+static const unsigned char stencil_op_load_k_return_bytes[16] = {
+    0x08, 0x00, 0x00, 0x90, 0x08, 0x01, 0x40, 0xf9, 0x20, 0x78, 0x68, 0xf8, 0xc0, 0x03, 0x5f, 0xd6
+};
+static const unsigned long stencil_op_load_k_return_size = 16;
+static const char *const stencil_op_load_k_return_symbols[1] = {
+    "MINO_STENCIL_IMM_BX"
+};
+static const unsigned long stencil_op_load_k_return_nsymbols = 1;
+static const unsigned int stencil_op_load_k_return_relocs[2][4] = {
+    {4, 5, 0, 0},
+    {0, 4, 0, 0}
+};
+static const unsigned long stencil_op_load_k_return_nrelocs = 2;
