@@ -1,5 +1,130 @@
 # Changelog
 
+## v0.215.0 — CPJIT Speedup Cycle Close
+
+Closes the speedup follow-on cycle that began at v0.210.0. The cycle
+took the coverage cycle's shape eligibility (v0.203.0-v0.209.0) and
+moved the per-op cost on hot paths from "bl into slow helper that
+does the work" to "inline the work, bl only on miss." Five releases
+shipped:
+
+  - v0.210.0  Stencil runtime-layout header (foundation, no-op)
+  - v0.211.0  Inline OP_GETGLOBAL_CACHED hit path
+  - v0.212.0  Inline INC_I / DEC_I / ZERO_INT_P fast lanes
+  - v0.213.0  Inline arith II + IK families (13 stencils)
+  - v0.214.0  Inline OP_CALL_CACHED resolve fast path
+
+The originally-planned v0.215.0 (self-recursive tail-call shortcut
+via a new OP_TAILCALL_SELF opcode) is deferred. Its surface widens
+the cycle from "JIT inlining" into "bytecode shape evolution" --
+the new opcode needs a compile.c-side recogniser plus an
+interpreter handler -- and the plan flagged the scope-creep risk
+explicitly. The remaining work, including the self-tail-call
+shortcut, moves to a future cycle on bytecode-shape evolution.
+
+### Speedup (median of three runs, JIT vs no-JIT'd baseline v0.210.0)
+
+`realistic_bench` -- the cycle's headline suite:
+
+  | Workload                          | v0.210.0   | v0.214.0   | Ratio |
+  |-----------------------------------|------------|------------|-------|
+  | fibonacci(25)                     | 7.75ms/op  | 6.53ms/op  | **1.19x** |
+  | map/filter/map/reduce over 50k    | 773us/op   | 730us/op   | 1.06x |
+  | build 5k int-map and sum          | 11.31ms/op | 11.37ms/op | 0.99x |
+  | bump 5k int-map values            | 20.21ms/op | 20.22ms/op | 1.00x |
+  | nested vectors 500x100            | 21.66ms/op | 21.4ms/op  | 1.01x |
+  | realize 10k of lazy range         | 6.80ms/op  | 6.7ms/op   | 1.02x |
+
+`jit_bench` leaf rows (one op per iter, dominated by wrapper-call
+overhead): all rows within run-to-run noise (0.97x - 1.02x).
+
+`tests/run.clj` wall-clock: 16.04s -> 16.03s, ratio ~1.00x.
+
+### Speedup gate evaluation
+
+The plan asked for:
+
+  - `jit_bench` eligible rows geomean >= 1.5x  -- **not hit**
+    (rows at ~1.0x; the per-iter work is too thin to expose the
+    inline savings)
+  - `realistic_bench` geomean >= 1.3x  -- **not hit** (geomean
+    ~1.04x; fib carries the suite at 1.19x, others flat)
+  - `tests/run.clj` wall-clock >= 1.2x  -- **not hit** (1.00x)
+  - No row in any suite below 0.95x  -- **hit** (lowest 0.99x)
+
+The cycle's strongest single row is fibonacci(25) at 1.19x, just
+below the gate's 1.2x floor.
+
+### Honest read on the shortfall
+
+The plan's hypothesis was that helper-call overhead was 30-50% of
+per-stencil cost. The measurement landed at "real but small": the
+inline checks save the `bl` plus prologue/epilogue, ~5-10ns per
+stencil, but the workloads' iter cost is dominated by either the
+unavoidable `apply_callable_argv` dispatch (call-heavy) or by code
+outside the JIT region (collection allocation in build/bump,
+HAMT walks in pipeline, lazy-cell allocation in lazy-range). The
+inline savings sit below the iter-cost floor on most rows.
+
+Fibonacci is the outlier because every iter is two
+`OP_CALL_CACHED` ops back-to-back with virtually no non-JIT work
+between them; the per-op savings stack visibly.
+
+The cycle nonetheless lands durable infrastructure that subsequent
+cycles can reuse:
+
+  - **Stencil-layer runtime-layout header** with offset constants
+    and accessor macros, verified at jit.c compile time against the
+    canonical struct layout. Future inlining work routes through
+    these without reopening the type-visibility question.
+  - **Multi-ret chain patching** in `mino_jit_compile`. Previously
+    the patcher rewrote only the first `ret` in a stencil's span;
+    any inlined fast path that didn't share a prologue with the
+    cold path would short-circuit out of the JIT region on miss.
+    Surfaced as a silent-assertion-drop bug in `clojure.test` the
+    moment v0.211 landed. The fixed patcher rewrites every `ret`,
+    unblocking arbitrary inline-fast-path patterns.
+  - **`S->jit_invoke_ctx` publication** in `mino_jit_invoke`. The
+    stencil layer reads `ctx->dyn_stack` via a single fixed-offset
+    load from S, dodging the Darwin TLVP relocations the
+    `stencil_extract` tool does not model. Same field will carry
+    other per-invocation context the JIT layer needs in subsequent
+    cycles.
+  - **`mino_jit_call_resolved_slow` helper** -- the smallest
+    viable post-resolve dispatch path. Reusable by any future
+    cached-call stencil that resolves the callee inline.
+
+### Cycle deliverables vs decisions deferred
+
+Shipped (5 releases). Deferred:
+
+  - **Self-recursive tail-call shortcut**: requires a new
+    `OP_TAILCALL_SELF` bytecode opcode + recogniser in compile.c +
+    interpreter handler. Out-of-cycle: bytecode-shape work belongs
+    to its own cycle.
+  - **`jit_bench` in `perf_gate.clj`**: not wired. The gate floor
+    here is below the row variance; pinning a gate that the
+    workload's own run-to-run noise can violate would just
+    flag false positives. Revisit after a cycle that delivers a
+    cleaner per-row signal.
+
+### Verification
+
+  - `make -j8` clean (release + ASan).
+  - 1688 tests / 7854 assertions pass under release + ASan.
+  - `gen-stencils` produces a clean `stencils_arm64_darwin.h`.
+  - Full bench matrix captured against v0.210.0 baseline; deltas
+    tabled above.
+
+### Next
+
+A bytecode-shape evolution cycle owns the deferred self-tail-call
+work and the remaining unknown-op long tail
+(`OP_GET_KW_MAP`, `OP_FIRST_VEC`, `OP_NTH_VEC`, `OP_MAKE_LAZY`,
+`OP_THROW`). The portability cycle (x86_64 / ARM64 Linux /
+Windows COFF) remains scheduled after the speedup-and-shape work
+settles.
+
 ## v0.214.0 — Inline OP_CALL_CACHED Resolve Fast Path
 
 The OP_CALL_CACHED stencil now inlines the IC-slot hit check (same
