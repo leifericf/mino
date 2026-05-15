@@ -355,6 +355,68 @@ mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Inline-cached-known-PRIM_ARGV complement. Stencil's inline path
+ * verified that slot->cached_callable_kind ==
+ * MINO_IC_CALLABLE_PRIM_ARGV, so the callee is a MINO_PRIM with
+ * fn2 set. Skips apply_callable_argv's dispatch switch and invokes
+ * the prim directly with the live regs slice as argv. Mirrors the
+ * apply_callable_argv PRIM-fast-path body including push_frame for
+ * stack-trace attribution. Defensive: if the cached value's shape
+ * has drifted (slot caches a stale Var, or the sym was redefined
+ * between resolves), the slot's gen check would already have fired;
+ * the type-of check here is the second line of defence. */
+mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
+                                           mino_val_t **regs,
+                                           mino_val_t *callee,
+                                           unsigned arg_base,
+                                           unsigned argc,
+                                           unsigned dst)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    if (callee != NULL && mino_type_of(callee) == MINO_VAR) {
+        if (!callee->as.var.bound || callee->as.var.root == NULL) {
+            goto fallback;
+        }
+        callee = callee->as.var.root;
+    }
+    if (callee == NULL || mino_type_of(callee) != MINO_PRIM
+        || callee->as.prim.fn2 == NULL) {
+        goto fallback;
+    }
+    {
+        const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+        const char *file = NULL;
+        int         line = 0;
+        int         col  = 0;
+        if (form != NULL && mino_type_of((mino_val_t *)form) == MINO_CONS) {
+            file = form->as.cons.file;
+            line = form->as.cons.line;
+            col  = form->as.cons.column;
+        }
+        push_frame(S, callee->as.prim.name, file, line, col);
+        {
+            mino_val_t *r = callee->as.prim.fn2(S,
+                S->bc_regs + base + arg_base, (int)argc, env);
+            if (r == NULL) return NULL; /* leave frame for trace */
+            pop_frame(S);
+            regs      = S->bc_regs + base;
+            regs[dst] = r;
+            return regs;
+        }
+    }
+fallback:
+    {
+        mino_val_t *r = apply_callable_argv(S, callee,
+            S->bc_regs + base + arg_base, (int)argc, env);
+        if (r == NULL) return NULL;
+        regs      = S->bc_regs + base;
+        regs[dst] = r;
+        return regs;
+    }
+}
+
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */

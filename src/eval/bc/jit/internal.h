@@ -190,6 +190,12 @@ mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S, mino_val_t **regs,
                                          mino_val_t *callee,
                                          unsigned arg_base, unsigned argc,
                                          unsigned dst);
+mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
+                                           mino_val_t **regs,
+                                           mino_val_t *callee,
+                                           unsigned arg_base,
+                                           unsigned argc,
+                                           unsigned dst);
 mino_val_t  *mino_jit_tailcall_slow(mino_state_t *S, mino_val_t **regs,
                                     unsigned fn_reg, unsigned argc);
 mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,

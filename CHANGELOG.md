@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.223.0 — PRIM_ARGV Fast Path In OP_CALL_CACHED
+
+Step 4 of the apply_callable_argv inlining cycle. Adds a third branch
+in `OP_CALL_CACHED`'s inline fast path: when the IC slot has
+classified the cached callable as `MINO_IC_CALLABLE_PRIM_ARGV`, the
+stencil routes to a new `mino_jit_call_known_prim_slow` helper that
+invokes the prim's fn2 directly without going through
+`apply_callable_argv`'s var-unwrap + type-of dispatch switch.
+
+Like v0.221 (the MINO_FN_BC_SINGLE branch), this is architectural
+parity with the cycle's plan. The measurable win is similar magnitude
+— a few branches saved per call out of a ~1 us total per-call cost
+on a tight `(dotimes [_ N] (f 0))` loop with `f = inc`. The bigger
+levers (mino_bc_run setup, dotimes / loop overhead, JIT region
+re-entry through `mino_jit_invoke`) are unaddressed and dominate.
+
+### What landed
+
+  - `mino_jit_call_known_prim_slow` in `src/eval/bc/jit/helpers.c`:
+    handles the Var-unwrap defensively, then calls `prim.fn2`
+    directly with `push_frame` for trace attribution. Bails to
+    `apply_callable_argv` if the cached value's shape has drifted.
+  - Registered in `entry.c::g_extern_fns[]`; declared in `abi.h`.
+  - `stencils/call_cached.c` now has a three-way branch in the IC
+    hot path: `MINO_FN_BC_SINGLE` → known-fn helper, `PRIM_ARGV` →
+    known-prim helper, else → `mino_jit_call_resolved_slow`.
+
+`stencils_arm64_darwin.h` regenerated (call_cached grew further to
+accommodate the third branch). `release-gate` green.
+
 ## v0.222.0 — Single-Clause Dispatch Fast Path In mino_bc_run
 
 Step 3 of the apply_callable_argv inlining cycle. Adds an early-out

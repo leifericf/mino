@@ -56,6 +56,16 @@ mino_stencil_chain_t stencil_op_call_cached(mino_val_t **regs,
                                                (unsigned)IMM_A,
                                                (unsigned)IMM_B,
                                                (unsigned)IMM_C);
+        } else if (slot->cached_callable_kind ==
+                   MINO_IC_CALLABLE_PRIM_ARGV) {
+            /* PRIM_ARGV path: callee is a MINO_PRIM with fn2 set.
+             * Skip apply_callable_argv's switch and call the prim
+             * directly via mino_jit_call_known_prim_slow. */
+            regs = mino_jit_call_known_prim_slow(S, regs,
+                                                 slot->cached,
+                                                 (unsigned)IMM_A,
+                                                 (unsigned)IMM_B,
+                                                 (unsigned)IMM_C);
         } else {
             regs = mino_jit_call_resolved_slow(S, regs,
                                                slot->cached,

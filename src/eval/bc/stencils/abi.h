@@ -207,6 +207,18 @@ extern mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S,
                                                  unsigned argc,
                                                  unsigned dst);
 
+/* Known-PRIM_ARGV complement: stencil's inline path verified the IC
+ * slot's cached_callable_kind is MINO_IC_CALLABLE_PRIM_ARGV, so the
+ * callee is a MINO_PRIM with fn2 set. Skips apply_callable_argv's
+ * dispatch switch and invokes the prim directly. Same regs / GC
+ * refresh contract as `mino_jit_call_resolved_slow`. */
+extern mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
+                                                   mino_val_t **regs,
+                                                   mino_val_t *callee,
+                                                   unsigned arg_base,
+                                                   unsigned argc,
+                                                   unsigned dst);
+
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
  * return value lands at regs[dst]. Routes through
