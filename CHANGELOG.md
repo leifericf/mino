@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.189.0 — JIT Default On with Host-Aware Stubs
+
+Both the bootstrap `Makefile` and `lib/mino/tasks/builtin.clj`
+ship `-DMINO_CPJIT=1` by default. Fresh checkouts and `./mino
+task build` invocations now build the JIT into the runtime
+without an extra flag flip.
+
+`src/eval/bc/jit.c` learns to be portable across hosts. The host
+is detected as `__aarch64__` && `__APPLE__` (the only triple with
+a generated stencils header today). When `MINO_CPJIT` is defined
+but the host doesn't have a stencil header, the file compiles a
+parallel set of public-API stubs whose only behaviour is to
+return failure / NULL -- the runtime falls through to the
+interpreter and the rest of the binary is unaffected. ARM64
+Linux, x86_64 Linux, and Windows headers extend this fence as
+the platform releases land.
+
+The runtime impact on the supported host (ARM64 Darwin): nine
+fns get JIT-compiled during a full `tests/run.clj` walk, ASan is
+clean, and all 1688 tests / 7854 assertions pass identically to
+the interpreter-only build. JIT'd fns today are the narrow
+shape covered by the MOVE / LOAD_K / RETURN stencils -- linear
+data-movement bodies. Wider coverage (arithmetic, control flow,
+calls, IC-cached globals) is deferred to dedicated stencil
+releases after the cycle's platform expansion.
+
 ## v0.188.0 — Public Deopt Primitive
 
 `mino_jit_invalidate(S, fn)` is the public deopt primitive: it

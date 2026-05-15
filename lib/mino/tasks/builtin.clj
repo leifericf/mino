@@ -11,6 +11,7 @@
        " -Isrc/diag -Isrc/vendor/imath"))
 (def ^:private cflags  (str/split (or (getenv "CFLAGS")
                                   (str "-std=c99 -Wall -Wpedantic -Wextra -O2 "
+                                       "-DMINO_CPJIT=1 "
                                        include-flags)) " "))
 (def ^:private ldflags (let [v (or (getenv "LDFLAGS") "")]
                          (if (= v "") [] (str/split v " "))))

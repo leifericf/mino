@@ -36,6 +36,18 @@
 #include "jit.h"
 
 #ifdef MINO_CPJIT
+/* Host detection: only ARM64 Darwin has a generated stencils header
+ * today. Other (arch, os) combinations get the API but every entry
+ * returns failure / NULL so the runtime falls through to the
+ * interpreter. The portability fence here keeps the source tree
+ * single-target while letting the cycle's later platform releases
+ * extend it without source restructuring. */
+#if defined(__aarch64__) && defined(__APPLE__)
+#define MINO_CPJIT_HOST 1
+#endif
+#endif
+
+#ifdef MINO_CPJIT_HOST
 
 #include <stddef.h>
 #include <stdint.h>
@@ -452,10 +464,53 @@ long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
     return -1;
 }
 
+#elif defined(MINO_CPJIT)
+
+/* MINO_CPJIT defined but not on a supported host. Provide stubs
+ * with the same signatures so the linker resolves them; every
+ * entry reports failure / no-op so the runtime keeps using the
+ * interpreter. The state's jit_regions list stays NULL.
+ *
+ * stdlib.h is the only dep -- the stubs reference NULL through
+ * `(void)0` casts to avoid pulling in the runtime headers. */
+#include <stddef.h>
+#include "../../mino.h"
+#include "../../mino_internal.h"
+
+int mino_jit_eligible(const mino_bc_fn_t *bc)
+{
+    (void)bc; return 0;
+}
+
+int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
+{
+    (void)S; (void)fn_val; return -1;
+}
+
+mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
+                            mino_val_t **regs, mino_val_t **consts)
+{
+    (void)S; (void)bc; (void)regs; (void)consts; return NULL;
+}
+
+void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn)
+{
+    (void)S; (void)fn;
+}
+
+long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
+{
+    (void)bc; (void)native_off; return -1;
+}
+
+void mino_jit_free_all(mino_state_t *S)
+{
+    /* Nothing tracked when the host is unsupported. */
+    (void)S;
+}
+
 #else /* !MINO_CPJIT */
 
-/* Even with the JIT off we still need a tear-down hook because the
- * state field is unconditional. The header's inline definition does
- * the right thing; this comment just documents the symmetry. */
+/* Header's inline stubs cover this case; nothing to compile. */
 
 #endif /* MINO_CPJIT */
