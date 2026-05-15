@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.240.0 — 4-Way JIT Parity (AUTO / ON / OFF / lean) + Cycle Close
+
+Closes cycle D. The parity test now exercises every JIT
+configuration the runtime exposes and asserts byte-identical
+stdout across all four:
+
+  - `./mino --jit=auto` (the default release-gate path)
+  - `./mino --jit=on`   (eager-compile every eligible fn)
+  - `./mino --jit=off`  (interpreter only, JIT pipeline gated out)
+  - `./mino-lean`       (the lean build, no JIT pipeline at all)
+
+Any divergence -- a JIT'd stencil whose output drifts from the
+interpreter, a runtime gating bug, an embed-API skew between the
+two binaries -- now surfaces in a localised diff against the
+AUTO baseline.
+
+  - `lib/mino/tasks/builtin.clj`: `test-jit-parity` rewritten to
+    drive four variants instead of two. The failure path writes
+    `jit-parity-<label>.out` per variant and diffs each non-matching
+    variant against the AUTO baseline.
+  - `.gitignore`: drops the obsolete `jit-parity-jit.out`; adds
+    `jit-parity-jit-{auto,on,off}.out` to match the new artifacts.
+
+Cycle D summary (v0.237.0 -- v0.240.0):
+
+  - Dual-binary build: `mino` (full) + `mino-lean` (no-JIT, ~4 %
+    smaller static footprint).
+  - Per-state runtime JIT mode: `AUTO` (default) / `OFF` / `ON`.
+    Each VM state has its own mode; CLI `--jit=` flag, `MINO_JIT`
+    env var, `mino_state_set_jit_mode` embed API.
+  - Per-state hot-threshold tuning. CLI `--jit-threshold=N`,
+    `MINO_JIT_HOT_THRESHOLD` env var,
+    `mino_state_set_jit_hot_threshold` embed API.
+  - Capability query: `mino_state_jit_capability` returns
+    `{available, mode, threshold, host_arch, host_os}`.
+  - 4-way CI parity (`./mino --jit=auto|on|off` + `./mino-lean`)
+    confirming stdout byte-identical across all configurations.
+
+End-to-end portability (cycles A1-A4) lands underneath: ARM64
+Darwin, ARM64 Linux, x86_64 Linux, x86_64 Darwin, and x86_64
+Windows all have on-disk byte tables plus the runtime patcher and
+memory-API wrappers they need to compile and run.
+
+`release-gate` green: 1737 tests / 7915 assertions, ASan clean,
+4-way JIT parity stdout byte-identical.
+
 ## v0.239.0 — JIT Threshold Tuning + Capability Query API
 
 Adds per-state hot-threshold tuning plus a public capability-query

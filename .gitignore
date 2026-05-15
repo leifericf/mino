@@ -16,7 +16,9 @@ bin/
 /mino_prof
 /mino_opcounts
 /mino-lean
-jit-parity-jit.out
+jit-parity-jit-auto.out
+jit-parity-jit-on.out
+jit-parity-jit-off.out
 jit-parity-lean.out
 /data/
 src/core_mino.h

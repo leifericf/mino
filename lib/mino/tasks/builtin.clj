@@ -313,45 +313,75 @@
     (apply sh! args)
     (println "  lean build -> mino-lean")))
 
+(defn- run-parity-variant [bin-args label parity-test]
+  (let [result (apply sh (concat bin-args [parity-test]))]
+    {:label label
+     :out   (get result :out)
+     :exit  (get result :exit)}))
+
 (defn test-jit-parity
   "Build ./mino and ./mino-lean, run tests/jit_parity_test.clj
-   against each, and assert their stdout bytes are byte-identical.
-   The parity test pins ~40 literal-expected-value assertions
-   covering range boundaries, tag-miss, comparison identity, and
-   unary boundaries across the 16 inlined arith / cmp / unary
-   stencils. Any divergence in either binary's output -- a different
-   diagnostic, a different boxed-int representation, a missed
-   coercion -- surfaces in the diff. Uses `sh` (not `sh!`) so a
-   non-zero exit from the parity runner reports as a parity
-   failure rather than crashing the task."
+   against four variants -- AUTO / ON / OFF on the full binary plus
+   the lean binary -- and assert every variant's stdout bytes are
+   byte-identical. The parity test pins ~40 literal-expected-value
+   assertions covering range boundaries, tag-miss, comparison
+   identity, and unary boundaries across the 16 inlined arith /
+   cmp / unary stencils. Any divergence in either binary's output
+   -- a different diagnostic, a different boxed-int representation,
+   a missed coercion -- surfaces in the diff.
+
+   The four variants are explicit so a regression in any mode is
+   localised: AUTO is the warm-then-JIT path that release-gate
+   exercises, ON forces eager compile (catches a JIT'd stencil
+   that diverges from the interpreter), OFF inhibits compilation
+   entirely (catches a runtime gating bug), and the lean binary
+   has no JIT path at all (catches an embed-API drift between
+   the two builds).
+
+   Uses `sh` (not `sh!`) so a non-zero exit from any runner reports
+   as a parity failure rather than crashing the task."
   []
   (build)
   (build-lean)
   (let [parity-test "tests/jit_parity_test.clj"
-        jit-result  (sh mino-bin     parity-test)
-        lean-result (sh "./mino-lean" parity-test)
-        jit-out     (get jit-result  :out)
-        lean-out    (get lean-result :out)
-        jit-exit    (get jit-result  :exit)
-        lean-exit   (get lean-result :exit)]
+        variants    [(run-parity-variant [mino-bin "--jit=auto"]
+                                          "jit-auto"  parity-test)
+                     (run-parity-variant [mino-bin "--jit=on"]
+                                          "jit-on"    parity-test)
+                     (run-parity-variant [mino-bin "--jit=off"]
+                                          "jit-off"   parity-test)
+                     (run-parity-variant ["./mino-lean"]
+                                          "lean"      parity-test)]
+        baseline   (first variants)
+        all-match? (every? (fn [v]
+                             (and (= (:out v)  (:out  baseline))
+                                  (= (:exit v) (:exit baseline))
+                                  (= 0 (:exit v))))
+                           variants)]
     (cond
-      (and (= jit-out lean-out) (= jit-exit lean-exit) (= 0 jit-exit))
-      (do (println jit-out)
-          (println "  jit-parity: OK -- stdout byte-identical, both exit 0"))
+      all-match?
+      (do (println (:out baseline))
+          (println (str "  jit-parity: OK -- stdout byte-identical across "
+                        "jit-auto / jit-on / jit-off / lean, all exit 0")))
 
       :else
-      (do (spit "jit-parity-jit.out"  jit-out)
-          (spit "jit-parity-lean.out" lean-out)
+      (do (doseq [v variants]
+            (spit (str "jit-parity-" (:label v) ".out") (:out v)))
           (println "  jit-parity: FAIL")
-          (println (str "    jit  exit=" jit-exit))
-          (println (str "    lean exit=" lean-exit))
-          (println "    wrote jit-parity-jit.out / jit-parity-lean.out")
-          (println (get (sh "diff" "jit-parity-jit.out" "jit-parity-lean.out")
-                        :out))
+          (doseq [v variants]
+            (println (str "    " (:label v) " exit=" (:exit v))))
+          (println "    wrote jit-parity-<label>.out per variant")
+          (doseq [v (rest variants)]
+            (when (not= (:out v) (:out baseline))
+              (println (str "  --- diff " (:label baseline)
+                            " vs " (:label v) " ---"))
+              (println (get (sh "diff"
+                                 (str "jit-parity-" (:label baseline) ".out")
+                                 (str "jit-parity-" (:label v) ".out"))
+                            :out))))
           (throw (ex-info "jit-parity failure"
-                          {:status :differ
-                           :jit-exit  jit-exit
-                           :lean-exit lean-exit}))))))
+                          {:status   :differ
+                           :variants (mapv (juxt :label :exit) variants)}))))))
 
 ;; ---- Release guardrails (G1 / G2 / G3 + composite release-gate) -----
 ;;
