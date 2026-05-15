@@ -68,6 +68,31 @@ static void state_init(mino_state_t *S)
     memset(S, 0, sizeof(*S));
     /* main_ctx is the embedder thread's view; spawned worker threads
      * install their own ctx via TLS at thread entry. */
+    /* JIT mode + hot threshold. Read MINO_JIT env var (auto / off /
+     * on case-insensitive) for the initial mode, default AUTO. The
+     * threshold seed is the compile-time MINO_JIT_THRESHOLD; embedders
+     * change it with mino_state_set_jit_hot_threshold. The fields live
+     * here unconditionally even in mino-lean (MINO_CPJIT off) so the
+     * struct offset and public-API ABI stay identical across builds. */
+    S->jit_mode          = (int)MINO_JIT_MODE_AUTO;
+    S->jit_hot_threshold = MINO_JIT_THRESHOLD;
+    {
+        const char *m = getenv("MINO_JIT");
+        if (m != NULL && m[0] != '\0') {
+            if ((m[0]|0x20) == 'o' && (m[1]|0x20) == 'n' && m[2] == '\0') {
+                S->jit_mode = (int)MINO_JIT_MODE_ON;
+            } else if ((m[0]|0x20) == 'o' && (m[1]|0x20) == 'f'
+                       && (m[2]|0x20) == 'f' && m[3] == '\0') {
+                S->jit_mode = (int)MINO_JIT_MODE_OFF;
+            } else if ((m[0]|0x20) == 'a' && (m[1]|0x20) == 'u'
+                       && (m[2]|0x20) == 't' && (m[3]|0x20) == 'o'
+                       && m[4] == '\0') {
+                S->jit_mode = (int)MINO_JIT_MODE_AUTO;
+            }
+            /* Unknown values silently fall through to AUTO; the env
+             * var is a soft override, not a hard contract. */
+        }
+    }
     S->gc_threshold            = 1u << 20;
     S->gc_nursery_bytes        = 1u << 20;  /* 1 MiB default */
     {
@@ -366,6 +391,30 @@ static void state_free_heap(mino_state_t *S)
         }
         free(h);
     }
+}
+
+/* Public JIT mode control. The fields live on mino_state directly
+ * (state.jit_mode and state.jit_hot_threshold). Both APIs are no-ops
+ * on a NULL state -- consistent with the rest of the embed surface --
+ * and validate the mode enum range so a stray int doesn't end up
+ * triggering AUTO-class behaviour with an OFF caller. */
+void mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode)
+{
+    if (S == NULL) return;
+    switch (mode) {
+    case MINO_JIT_MODE_AUTO:
+    case MINO_JIT_MODE_OFF:
+    case MINO_JIT_MODE_ON:
+        S->jit_mode = (int)mode;
+        return;
+    }
+    /* Unknown enum value: leave the current mode untouched. */
+}
+
+mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S)
+{
+    if (S == NULL) return MINO_JIT_MODE_AUTO;
+    return (mino_jit_mode_t)S->jit_mode;
 }
 
 /* Tear down a state in the deterministic order each helper expects.

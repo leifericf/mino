@@ -374,9 +374,16 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 mino_jit_invalidate(S, fn);
             }
             if (bc_rec->native == NULL
-                && bc_rec->hot_counter < (unsigned)-1) {
+                && bc_rec->hot_counter < (unsigned)-1
+                && S->jit_mode != (int)MINO_JIT_MODE_OFF) {
                 bc_rec->hot_counter++;
-                if (bc_rec->hot_counter == MINO_JIT_THRESHOLD) {
+                /* MODE_ON -> compile on first call (threshold = 1).
+                 * MODE_AUTO -> per-state hot threshold (defaults to
+                 * MINO_JIT_THRESHOLD; tunable via the public
+                 * mino_state_set_jit_hot_threshold API). */
+                unsigned thresh = (S->jit_mode == (int)MINO_JIT_MODE_ON)
+                    ? 1u : S->jit_hot_threshold;
+                if (bc_rec->hot_counter >= thresh) {
                     /* One compile attempt per crossing. On success
                      * native becomes non-NULL and subsequent calls
                      * route to it. On failure (ineligible shape,
@@ -695,9 +702,12 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
         mino_jit_invalidate(S, fn);
     }
     if (bc_rec->native == NULL
-        && bc_rec->hot_counter < (unsigned)-1) {
+        && bc_rec->hot_counter < (unsigned)-1
+        && S->jit_mode != (int)MINO_JIT_MODE_OFF) {
         bc_rec->hot_counter++;
-        if (bc_rec->hot_counter == MINO_JIT_THRESHOLD) {
+        unsigned thresh = (S->jit_mode == (int)MINO_JIT_MODE_ON)
+            ? 1u : S->jit_hot_threshold;
+        if (bc_rec->hot_counter >= thresh) {
             if (mino_jit_compile(S, fn) < 0) {
                 bc_rec->hot_counter = (unsigned)-1;
             }

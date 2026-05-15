@@ -358,6 +358,7 @@ static void print_usage(FILE *out)
         "    -e, --eval EXPR     Evaluate EXPR and print the result\n"
         "    -h, --help          Show this help and exit\n"
         "    -V, --version       Show version and exit\n"
+        "    --jit=auto|off|on   JIT mode (default auto; overrides MINO_JIT env)\n"
         "    --                  End of options; treat the rest as FILE\n"
         "\n"
         "SUBCOMMANDS:\n"
@@ -458,11 +459,13 @@ static int run_eval_expr(mino_state_t *S, mino_env_t *env, const char *expr)
 static int parse_cli_flags(int argc, char **argv,
                            int *out_first,
                            const char **out_eval,
-                           int *out_dash_dash)
+                           int *out_dash_dash,
+                           const char **out_jit_mode)
 {
     int i = 1;
     *out_eval = NULL;
     *out_dash_dash = 0;
+    *out_jit_mode = NULL;
     while (i < argc) {
         const char *a = argv[i];
         if (strcmp(a, "--") == 0) {
@@ -489,6 +492,11 @@ static int parse_cli_flags(int argc, char **argv,
             }
             *out_eval = argv[i + 1];
             i += 2;
+            continue;
+        }
+        if (strncmp(a, "--jit=", 6) == 0) {
+            *out_jit_mode = a + 6;
+            i++;
             continue;
         }
         fprintf(stderr,
@@ -771,9 +779,28 @@ int main(int argc, char **argv)
     setvbuf(stderr, NULL, _IONBF, 0);
 #endif
 
-    parse_state = parse_cli_flags(argc, argv, &first, &eval_expr, &dash_dash);
+    const char *cli_jit_mode = NULL;
+    parse_state = parse_cli_flags(argc, argv, &first, &eval_expr, &dash_dash,
+                                  &cli_jit_mode);
     if (parse_state == 1) return 0;
     if (parse_state == 2) return 2;
+    /* --jit=auto|off|on rejects anything else loudly. */
+    mino_jit_mode_t cli_jit = MINO_JIT_MODE_AUTO;
+    int cli_jit_set = 0;
+    if (cli_jit_mode != NULL) {
+        if (strcmp(cli_jit_mode, "auto") == 0) {
+            cli_jit = MINO_JIT_MODE_AUTO; cli_jit_set = 1;
+        } else if (strcmp(cli_jit_mode, "off") == 0) {
+            cli_jit = MINO_JIT_MODE_OFF;  cli_jit_set = 1;
+        } else if (strcmp(cli_jit_mode, "on") == 0) {
+            cli_jit = MINO_JIT_MODE_ON;   cli_jit_set = 1;
+        } else {
+            fprintf(stderr,
+                    "mino: --jit value must be auto, off, or on (got '%s')\n",
+                    cli_jit_mode);
+            return 2;
+        }
+    }
 
     /* Companion-binary subcommands. Exec before runtime init so we don't
      * pay for an interpreter we're about to discard. */
@@ -817,6 +844,7 @@ int main(int argc, char **argv)
     }
 
     S = mino_state_new();
+    if (cli_jit_set) mino_state_set_jit_mode(S, cli_jit);
     install_crash_handler(S);
     mino_env_t   *env = mino_env_new(S);
     char *buf  = NULL;

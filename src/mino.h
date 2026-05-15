@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 237
+#define MINO_VERSION_MINOR 238
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -860,6 +860,37 @@ mino_state_t *mino_state_new(void);
  * created within this state become invalid.
  */
 void mino_state_free(mino_state_t *S);
+
+/*
+ * JIT mode control (per-state).
+ *
+ *   AUTO  -- default. Eligible fns JIT after warming past the runtime's
+ *            hot threshold (currently 100 calls; tune with
+ *            mino_state_set_jit_hot_threshold). Cold fns stay on the
+ *            interpreter.
+ *   OFF   -- never JIT. The interpreter handles every call. Useful for
+ *            embedding hosts that need predictable cold-start latency,
+ *            deterministic resource usage, or that ship a security
+ *            policy banning W^X violations.
+ *   ON    -- JIT every eligible fn on its first call (no threshold).
+ *            Useful for benchmarking or when the embedder knows ahead
+ *            of time that JIT'd execution is wanted everywhere.
+ *
+ * mino-lean (the no-JIT distributable) ignores the mode and behaves
+ * as if OFF; the call exists in both builds so embedders can write
+ * portable initialisation code.
+ *
+ * Initial mode on state_new follows MINO_JIT env var (auto / off / on
+ * case-insensitive), defaulting to AUTO.
+ */
+typedef enum {
+    MINO_JIT_MODE_AUTO = 0,
+    MINO_JIT_MODE_OFF  = 1,
+    MINO_JIT_MODE_ON   = 2
+} mino_jit_mode_t;
+
+void            mino_state_set_jit_mode(mino_state_t *S, mino_jit_mode_t mode);
+mino_jit_mode_t mino_state_jit_mode(const mino_state_t *S);
 
 /* ------------------------------------------------------------------------- */
 /* Environment and evaluator                                                 */

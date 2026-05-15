@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.238.0 — Runtime JIT Mode (AUTO / OFF / ON)
+
+Adds per-state JIT mode control to the full `mino` binary. Three
+modes:
+
+  - `AUTO`  (default) -- JIT eligible fns after warming past the
+    per-state hot threshold (currently 100 calls).
+  - `OFF`   -- never JIT. Useful for embedding hosts that need
+    predictable cold-start latency or that ship a W^X security
+    policy.
+  - `ON`    -- JIT every eligible fn on its first call (no
+    threshold). Useful for benchmarking and for hosts that know
+    ahead of time JIT'd execution is wanted everywhere.
+
+Each VM state has its own mode, so a single embedding process can
+mix `OFF`, `AUTO`, and `ON` runtimes per workload.
+
+  - `src/mino.h`: new public `mino_jit_mode_t` enum
+    (AUTO=0 / OFF=1 / ON=2) and `mino_state_set_jit_mode` /
+    `mino_state_jit_mode` setter and getter. Both are no-ops on a
+    NULL state; setter validates the enum range so a stray int
+    doesn't slip through.
+  - `src/runtime/internal.h`: new `int jit_mode` field on
+    `struct mino_state`. Placed after `jit_invoke_ctx` so the
+    runtime-layout offsets the stencil bytes depend on don't shift
+    (the layout-static-assert in entry.c stays green).
+  - `src/runtime/state.c`: `state_init` reads `MINO_JIT` env var
+    (`auto` / `off` / `on`, case-insensitive) for the initial
+    mode; unknown values fall back to AUTO. Setter + getter
+    implementations land here.
+  - `src/eval/fn.c`: both JIT trigger sites (the argv-by-cons
+    apply path and the bytecode apply path) gate on
+    `S->jit_mode != OFF`. AUTO uses the per-state hot threshold;
+    ON uses threshold 1.
+  - `main.c`: new `--jit=auto|off|on` CLI flag. Rejects unknown
+    values with a clear error message. CLI overrides the env var
+    when both are set. Usage banner updated.
+
+`release-gate` green: 1737 tests / 7915 assertions, ASan clean,
+JIT parity byte-identical. `--jit=on` compiles 40 fns on a trivial
+expression vs the AUTO default's 1; `--jit=off` keeps the JIT
+stats counters at zero through the whole evaluation.
+
 ## v0.237.0 — Dual-Binary Build: mino + mino-lean
 
 Opens cycle D. The pre-existing `mino_nojit` build is renamed to

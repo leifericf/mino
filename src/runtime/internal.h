@@ -910,6 +910,19 @@ struct mino_state {
      * active JIT region. */
     struct mino_thread_ctx *jit_invoke_ctx;
 
+    /* Per-state JIT mode: AUTO (default) / OFF / ON. Threaded
+     * through the fn.c JIT trigger so a single embedded runtime can
+     * disable JIT for one VM and leave it enabled for another in
+     * the same process. See mino.h::mino_jit_mode_t. Placed after
+     * jit_invoke_ctx so the runtime_layout.h offset constants the
+     * stencil bytes depend on do not shift. */
+    int             jit_mode;
+    /* Per-state hot threshold (call count before AUTO triggers a
+     * compile). Defaults to MINO_JIT_THRESHOLD; overridable via
+     * mino_state_set_jit_hot_threshold so embedders can soften /
+     * tighten the warm-up window per workload. */
+    unsigned        jit_hot_threshold;
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;
