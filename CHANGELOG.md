@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.230.0 — ELF Parser In Stencil Extractor
+
+Opens cycle A1 (ARM64 Linux portability). The stencil extractor
+now parses 64-bit ELF object files alongside its existing Mach-O
+path, enabling stencil generation on Linux hosts.
+
+  - `tools/stencil_extract.c`: new `elf64_ehdr_t / elf64_shdr_t /
+    elf64_sym_t / elf64_rela_t` typedefs; `elf_open` walks the
+    section table to locate `.text` + `.symtab` + `.rela.text`;
+    `elf_list_symbols / elf_find_symbol / elf_extract_relocs`
+    mirror their Mach-O counterparts.
+  - `reloc_arm64_elf_kind_map` maps `R_AARCH64_*` constants to the
+    runtime-stable `MINO_STENCIL_RELOC_*` enum -- covers ABS64,
+    CALL26 / JUMP26 (branch26), ADR_PREL_PG_HI21 (page21),
+    ADD_ABS_LO12_NC / LDST64_ABS_LO12_NC (pageoff12),
+    ADR_GOT_PAGE (got_load_page21),
+    LD64_GOT_LO12_NC (got_load_pageoff12).
+  - Format-agnostic `write_stencil_header` extracted from
+    `emit_stencil_header` so both Mach-O and ELF paths funnel
+    through the same on-disk shape.
+  - Extractor dispatch in `main()` sniffs the file magic and
+    routes to either parser. The COFF placeholder remains for
+    the Windows cycle.
+  - `--selftest` extended to cover ELF struct sizes,
+    `elf64_r_sym / elf64_r_type` decode, and every entry of
+    the AArch64 kind map.
+
+Runtime side unchanged -- ARM64 codegen, patchers, and direct-emit
+templates are arch-shared with Darwin and reuse without
+modification on ARM64 Linux. The generated header
+`stencils_arm64_linux.h` lands in v0.231.0 after building on an
+ARM64 Linux host.
+
+`release-gate` green on Darwin.
+
 ## v0.229.0 — JIT Stencil For OP_ASSOC + Cycle C Close
 
 Closes the second coverage cycle. The 3-arg `(assoc coll k v)`

@@ -10,10 +10,11 @@
  * memory and patches the recorded reloc offsets with the bytecode's
  * actual operand values.
  *
- * This first cut handles 64-bit Mach-O (Darwin arm64 and Darwin
- * x86_64) and emits the stencil header in a format the JIT can
- * #include directly. ELF and COFF parsers land in the platform
- * releases.
+ * This cut handles 64-bit Mach-O (Darwin arm64 and Darwin x86_64)
+ * and 64-bit ELF (Linux arm64) and emits the stencil header in a
+ * format the JIT can #include directly. The x86_64 ELF parser
+ * shares the ELF code path and only adds a reloc-kind table.
+ * COFF parsing lands in the Windows platform release.
  *
  * Build: cc -std=c99 -O2 -Wall -Wpedantic -o tools/stencil_extract
  *         tools/stencil_extract.c
@@ -195,6 +196,105 @@ typedef struct {
 #define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12 5u
 
 static int reloc_arm64_kind_map(uint32_t macho_kind, uint32_t length);
+
+/* ------------------------------------------------------------------------- */
+/* ELF64 type definitions and constants (shared by selftest + parser)        */
+/* ------------------------------------------------------------------------- */
+
+/* Section header types from the ELF spec (subset used by the extractor). */
+#define SHT_NULL      0u
+#define SHT_PROGBITS  1u
+#define SHT_SYMTAB    2u
+#define SHT_STRTAB    3u
+#define SHT_RELA      4u
+#define SHT_NOBITS    8u
+#define SHT_REL       9u
+
+/* ELF machine values relevant to the stencils. */
+#define EM_X86_64   62u
+#define EM_AARCH64  183u
+
+/* ELF identification indexes + class. The extractor only handles 64-bit
+ * little-endian. */
+#define EI_CLASS    4
+#define EI_DATA     5
+#define ELFCLASS64  2
+#define ELFDATA2LSB 1
+
+/* Symbol info packing -- the low nibble is the type, the high nibble is
+ * the binding. */
+#define ELF64_ST_TYPE(info) ((unsigned)((info) & 0xfu))
+#define ELF64_ST_BIND(info) ((unsigned)(((info) >> 4) & 0xfu))
+#define STT_FUNC 2u
+#define STB_GLOBAL 1u
+
+/* Reloc info packing -- top 32 bits hold the symbol index, low 32 bits
+ * hold the type. The accessors below extract each. */
+static uint32_t elf64_r_sym(uint64_t info)  { return (uint32_t)(info >> 32); }
+static uint32_t elf64_r_type(uint64_t info) { return (uint32_t)(info & 0xffffffffu); }
+
+typedef struct {
+    uint8_t  e_ident[16];
+    uint16_t e_type;
+    uint16_t e_machine;
+    uint32_t e_version;
+    uint64_t e_entry;
+    uint64_t e_phoff;
+    uint64_t e_shoff;
+    uint32_t e_flags;
+    uint16_t e_ehsize;
+    uint16_t e_phentsize;
+    uint16_t e_phnum;
+    uint16_t e_shentsize;
+    uint16_t e_shnum;
+    uint16_t e_shstrndx;
+} elf64_ehdr_t;
+
+typedef struct {
+    uint32_t sh_name;
+    uint32_t sh_type;
+    uint64_t sh_flags;
+    uint64_t sh_addr;
+    uint64_t sh_offset;
+    uint64_t sh_size;
+    uint32_t sh_link;
+    uint32_t sh_info;
+    uint64_t sh_addralign;
+    uint64_t sh_entsize;
+} elf64_shdr_t;
+
+typedef struct {
+    uint32_t st_name;
+    uint8_t  st_info;
+    uint8_t  st_other;
+    uint16_t st_shndx;
+    uint64_t st_value;
+    uint64_t st_size;
+} elf64_sym_t;
+
+typedef struct {
+    uint64_t r_offset;
+    uint64_t r_info;
+    int64_t  r_addend;
+} elf64_rela_t;
+
+/* Map an AArch64 ELF reloc type to the runtime-stable
+ * MINO_STENCIL_RELOC_*. Returns -1 for unsupported kinds so the build
+ * fails loudly rather than silently dropping a patch site. */
+static int reloc_arm64_elf_kind_map(uint32_t r_type)
+{
+    switch (r_type) {
+    case R_AARCH64_ABS64:               return (int)MINO_STENCIL_RELOC_ABS64;
+    case R_AARCH64_CALL26:
+    case R_AARCH64_JUMP26:              return (int)MINO_STENCIL_RELOC_ARM64_BRANCH26;
+    case R_AARCH64_ADR_PREL_PG_HI21:    return (int)MINO_STENCIL_RELOC_ARM64_PAGE21;
+    case R_AARCH64_ADD_ABS_LO12_NC:
+    case R_AARCH64_LDST64_ABS_LO12_NC:  return (int)MINO_STENCIL_RELOC_ARM64_PAGEOFF12;
+    case R_AARCH64_ADR_GOT_PAGE:        return (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21;
+    case R_AARCH64_LD64_GOT_LO12_NC:    return (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12;
+    default: return -1;
+    }
+}
 
 /* ------------------------------------------------------------------------- */
 /* File buffer                                                               */
@@ -481,6 +581,73 @@ static int selftest(void)
     if (reloc_arm64_kind_map(0xff, 3) != -1) {
         fprintf(stderr, "selftest: kind_map should reject unknown\n"); failed++;
     }
+    /* ELF struct layouts: the ELF64 ABI fixes these exactly. A
+     * mismatch means the compiler reordered or padded the structs. */
+    if (sizeof(elf64_ehdr_t) != 64) {
+        fprintf(stderr, "selftest: elf64_ehdr_t size %zu != 64\n",
+                sizeof(elf64_ehdr_t));
+        failed++;
+    }
+    if (sizeof(elf64_shdr_t) != 64) {
+        fprintf(stderr, "selftest: elf64_shdr_t size %zu != 64\n",
+                sizeof(elf64_shdr_t));
+        failed++;
+    }
+    if (sizeof(elf64_sym_t) != 24) {
+        fprintf(stderr, "selftest: elf64_sym_t size %zu != 24\n",
+                sizeof(elf64_sym_t));
+        failed++;
+    }
+    if (sizeof(elf64_rela_t) != 24) {
+        fprintf(stderr, "selftest: elf64_rela_t size %zu != 24\n",
+                sizeof(elf64_rela_t));
+        failed++;
+    }
+    /* ELF reloc info decode: sym in high 32, type in low 32. */
+    uint64_t r_info_probe = ((uint64_t)0xdeadbeefu << 32) | (uint64_t)R_AARCH64_CALL26;
+    if (elf64_r_sym(r_info_probe) != 0xdeadbeefu) {
+        fprintf(stderr, "selftest: elf64_r_sym decode wrong\n"); failed++;
+    }
+    if (elf64_r_type(r_info_probe) != R_AARCH64_CALL26) {
+        fprintf(stderr, "selftest: elf64_r_type decode wrong\n"); failed++;
+    }
+    /* ELF AArch64 reloc-kind map: every recorded constant maps to a
+     * runtime-stable MINO_STENCIL_RELOC_*, and unknown rejects. */
+    if (reloc_arm64_elf_kind_map(R_AARCH64_ABS64) !=
+        (int)MINO_STENCIL_RELOC_ABS64) {
+        fprintf(stderr, "selftest: elf kind_map ABS64 wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(R_AARCH64_CALL26) !=
+        (int)MINO_STENCIL_RELOC_ARM64_BRANCH26) {
+        fprintf(stderr, "selftest: elf kind_map CALL26 wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(R_AARCH64_JUMP26) !=
+        (int)MINO_STENCIL_RELOC_ARM64_BRANCH26) {
+        fprintf(stderr, "selftest: elf kind_map JUMP26 wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(R_AARCH64_ADR_PREL_PG_HI21) !=
+        (int)MINO_STENCIL_RELOC_ARM64_PAGE21) {
+        fprintf(stderr, "selftest: elf kind_map ADR_PREL_PG_HI21 wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(R_AARCH64_ADD_ABS_LO12_NC) !=
+        (int)MINO_STENCIL_RELOC_ARM64_PAGEOFF12) {
+        fprintf(stderr, "selftest: elf kind_map ADD_ABS_LO12_NC wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(R_AARCH64_LDST64_ABS_LO12_NC) !=
+        (int)MINO_STENCIL_RELOC_ARM64_PAGEOFF12) {
+        fprintf(stderr, "selftest: elf kind_map LDST64_ABS_LO12_NC wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(R_AARCH64_ADR_GOT_PAGE) !=
+        (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21) {
+        fprintf(stderr, "selftest: elf kind_map ADR_GOT_PAGE wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(R_AARCH64_LD64_GOT_LO12_NC) !=
+        (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12) {
+        fprintf(stderr, "selftest: elf kind_map LD64_GOT_LO12_NC wrong\n"); failed++;
+    }
+    if (reloc_arm64_elf_kind_map(0xffffffffu) != -1) {
+        fprintf(stderr, "selftest: elf kind_map should reject unknown\n"); failed++;
+    }
     if (failed > 0) return 1;
     printf("stencil_extract selftest: OK\n");
     return 0;
@@ -607,9 +774,274 @@ static int extract_relocs(const macho_view_t *v, uint64_t offset, uint64_t size,
     return 0;
 }
 
-static int emit_stencil_header(const macho_view_t *v, const char *symbol,
-                               uint64_t offset, uint64_t size,
-                               const char *out_path, int append)
+/* ------------------------------------------------------------------------- */
+/* ELF64 parser                                                              */
+/* ------------------------------------------------------------------------- */
+
+typedef struct {
+    const mblob_t      *blob;
+    const elf64_ehdr_t *hdr;
+    const elf64_shdr_t *shdrs;       /* section header array              */
+    const char         *shstrtab;    /* section-header string table       */
+    uint16_t            text_shndx;  /* index of .text in shdrs           */
+    const elf64_shdr_t *text_section;
+    const elf64_shdr_t *symtab_section;
+    const elf64_shdr_t *strtab_section;
+    const elf64_shdr_t *rela_text_section;  /* .rela.text (NULL on miss)  */
+} elf_view_t;
+
+static int elf_open(const mblob_t *blob, elf_view_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (blob->len < sizeof(elf64_ehdr_t)) {
+        fprintf(stderr, "stencil_extract: file too small for ELF64 header\n");
+        return -1;
+    }
+    const elf64_ehdr_t *hdr = (const elf64_ehdr_t *)blob->data;
+    if (hdr->e_ident[0] != ELF_MAGIC_BYTE_0
+        || hdr->e_ident[1] != ELF_MAGIC_BYTE_1
+        || hdr->e_ident[2] != ELF_MAGIC_BYTE_2
+        || hdr->e_ident[3] != ELF_MAGIC_BYTE_3) {
+        fprintf(stderr, "stencil_extract: not an ELF object\n");
+        return -1;
+    }
+    if (hdr->e_ident[EI_CLASS] != ELFCLASS64) {
+        fprintf(stderr, "stencil_extract: ELF class %u not supported (need 64-bit)\n",
+                hdr->e_ident[EI_CLASS]);
+        return -1;
+    }
+    if (hdr->e_ident[EI_DATA] != ELFDATA2LSB) {
+        fprintf(stderr, "stencil_extract: ELF data %u not supported (need LSB)\n",
+                hdr->e_ident[EI_DATA]);
+        return -1;
+    }
+    if (hdr->e_shentsize != sizeof(elf64_shdr_t)) {
+        fprintf(stderr, "stencil_extract: unexpected ELF shentsize %u (want %zu)\n",
+                hdr->e_shentsize, sizeof(elf64_shdr_t));
+        return -1;
+    }
+    if (hdr->e_shoff == 0 || hdr->e_shnum == 0) {
+        fprintf(stderr, "stencil_extract: ELF has no section table\n");
+        return -1;
+    }
+    size_t shdrs_end = (size_t)hdr->e_shoff
+        + (size_t)hdr->e_shnum * sizeof(elf64_shdr_t);
+    if (shdrs_end > blob->len) {
+        fprintf(stderr, "stencil_extract: ELF section table out of range\n");
+        return -1;
+    }
+    const elf64_shdr_t *shdrs = (const elf64_shdr_t *)(blob->data + hdr->e_shoff);
+    if (hdr->e_shstrndx >= hdr->e_shnum) {
+        fprintf(stderr, "stencil_extract: ELF shstrndx %u out of range\n",
+                hdr->e_shstrndx);
+        return -1;
+    }
+    const elf64_shdr_t *shstr = &shdrs[hdr->e_shstrndx];
+    if ((size_t)shstr->sh_offset + (size_t)shstr->sh_size > blob->len) {
+        fprintf(stderr, "stencil_extract: ELF shstrtab out of range\n");
+        return -1;
+    }
+    const char *shstrtab = (const char *)(blob->data + shstr->sh_offset);
+    out->blob     = blob;
+    out->hdr      = hdr;
+    out->shdrs    = shdrs;
+    out->shstrtab = shstrtab;
+    /* Walk sections. .text is SHT_PROGBITS named ".text"; .symtab is the
+     * unique SHT_SYMTAB section; .rela.text is the SHT_RELA section whose
+     * sh_info points at the .text section index. */
+    for (uint16_t i = 0; i < hdr->e_shnum; i++) {
+        const elf64_shdr_t *sh = &shdrs[i];
+        if (sh->sh_name >= shstr->sh_size) continue;
+        const char *name = shstrtab + sh->sh_name;
+        if (sh->sh_type == SHT_PROGBITS && strcmp(name, ".text") == 0) {
+            out->text_section = sh;
+            out->text_shndx   = i;
+        } else if (sh->sh_type == SHT_SYMTAB) {
+            out->symtab_section = sh;
+        }
+    }
+    if (out->text_section == NULL) {
+        fprintf(stderr, "stencil_extract: ELF has no .text section\n");
+        return -1;
+    }
+    if (out->symtab_section == NULL) {
+        fprintf(stderr, "stencil_extract: ELF has no symbol table\n");
+        return -1;
+    }
+    if (out->symtab_section->sh_link >= hdr->e_shnum) {
+        fprintf(stderr, "stencil_extract: ELF symtab sh_link out of range\n");
+        return -1;
+    }
+    out->strtab_section = &shdrs[out->symtab_section->sh_link];
+    /* Second pass: find .rela.text by sh_info matching text section index. */
+    for (uint16_t i = 0; i < hdr->e_shnum; i++) {
+        const elf64_shdr_t *sh = &shdrs[i];
+        if (sh->sh_type != SHT_RELA) continue;
+        if (sh->sh_info == out->text_shndx) {
+            out->rela_text_section = sh;
+            break;
+        }
+    }
+    /* .rel.text without addends -- ARM64 / x86_64 use RELA so reject. */
+    for (uint16_t i = 0; i < hdr->e_shnum; i++) {
+        const elf64_shdr_t *sh = &shdrs[i];
+        if (sh->sh_type != SHT_REL) continue;
+        if (sh->sh_info == out->text_shndx) {
+            fprintf(stderr, "stencil_extract: ELF .rel.text without addends "
+                    "is not supported; rebuild with RELA-emitting toolchain\n");
+            return -1;
+        }
+    }
+    if ((size_t)out->text_section->sh_offset + (size_t)out->text_section->sh_size
+        > blob->len) {
+        fprintf(stderr, "stencil_extract: ELF .text bytes out of range\n");
+        return -1;
+    }
+    if ((size_t)out->strtab_section->sh_offset
+        + (size_t)out->strtab_section->sh_size > blob->len) {
+        fprintf(stderr, "stencil_extract: ELF strtab out of range\n");
+        return -1;
+    }
+    return 0;
+}
+
+static const char *elf_strtab(const elf_view_t *v) {
+    return (const char *)(v->blob->data + v->strtab_section->sh_offset);
+}
+
+static const elf64_sym_t *elf_symtab(const elf_view_t *v) {
+    if ((size_t)v->symtab_section->sh_offset
+        + (size_t)v->symtab_section->sh_size > v->blob->len) return NULL;
+    return (const elf64_sym_t *)(v->blob->data + v->symtab_section->sh_offset);
+}
+
+static uint64_t elf_symtab_nsyms(const elf_view_t *v) {
+    return v->symtab_section->sh_size / sizeof(elf64_sym_t);
+}
+
+static int elf_list_symbols(const elf_view_t *v)
+{
+    const char        *strtab = elf_strtab(v);
+    const elf64_sym_t *syms   = elf_symtab(v);
+    if (syms == NULL) {
+        fprintf(stderr, "stencil_extract: ELF symbol table out of range\n");
+        return -1;
+    }
+    uint64_t n = elf_symtab_nsyms(v);
+    for (uint64_t i = 0; i < n; i++) {
+        const elf64_sym_t *s = &syms[i];
+        if (s->st_shndx != v->text_shndx) continue;
+        if (ELF64_ST_TYPE(s->st_info) != STT_FUNC) continue;
+        const char *name = strtab + s->st_name;
+        printf("  %-32s 0x%08" PRIx64 "  (size=%" PRIu64 " bind=%u)\n",
+               name, s->st_value, s->st_size, ELF64_ST_BIND(s->st_info));
+    }
+    return 0;
+}
+
+static int elf_find_symbol(const elf_view_t *v, const char *name,
+                           uint64_t *out_offset, uint64_t *out_size)
+{
+    const char        *strtab = elf_strtab(v);
+    const elf64_sym_t *syms   = elf_symtab(v);
+    if (syms == NULL) return -1;
+    uint64_t n = elf_symtab_nsyms(v);
+    for (uint64_t i = 0; i < n; i++) {
+        const elf64_sym_t *s = &syms[i];
+        if (s->st_shndx != v->text_shndx) continue;
+        if (ELF64_ST_TYPE(s->st_info) != STT_FUNC) continue;
+        const char *en = strtab + s->st_name;
+        if (strcmp(en, name) == 0) {
+            *out_offset = s->st_value;
+            *out_size   = s->st_size;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int elf_extract_relocs(const elf_view_t *v, uint64_t offset, uint64_t size,
+                              stencil_reloc_t *out, int out_cap, int *out_count,
+                              const char **sym_table, int *sym_count, int sym_cap)
+{
+    *out_count = 0;
+    if (v->rela_text_section == NULL) return 0;  /* no relocs at all */
+    const elf64_shdr_t *rs = v->rela_text_section;
+    if (rs->sh_entsize != sizeof(elf64_rela_t)) {
+        fprintf(stderr,
+                "stencil_extract: ELF .rela.text entsize %" PRIu64
+                " unexpected\n", rs->sh_entsize);
+        return -1;
+    }
+    if ((size_t)rs->sh_offset + (size_t)rs->sh_size > v->blob->len) {
+        fprintf(stderr, "stencil_extract: ELF rela table out of range\n");
+        return -1;
+    }
+    if (v->hdr->e_machine != EM_AARCH64) {
+        fprintf(stderr,
+                "stencil_extract: ELF e_machine %u not supported "
+                "(this release wires AArch64 only)\n",
+                v->hdr->e_machine);
+        return -1;
+    }
+    const elf64_rela_t *relas =
+        (const elf64_rela_t *)(v->blob->data + rs->sh_offset);
+    uint64_t n_relas = rs->sh_size / sizeof(elf64_rela_t);
+    const char        *strtab = elf_strtab(v);
+    const elf64_sym_t *syms   = elf_symtab(v);
+    if (syms == NULL) return -1;
+    uint64_t n_syms = elf_symtab_nsyms(v);
+    for (uint64_t i = 0; i < n_relas; i++) {
+        const elf64_rela_t *r = &relas[i];
+        if (r->r_offset < offset || r->r_offset >= offset + size) continue;
+        uint32_t snum  = elf64_r_sym(r->r_info);
+        uint32_t rtype = elf64_r_type(r->r_info);
+        if (snum >= n_syms) {
+            fprintf(stderr, "stencil_extract: ELF reloc sym %u out of range\n",
+                    snum);
+            return -1;
+        }
+        int mapped = reloc_arm64_elf_kind_map(rtype);
+        if (mapped < 0) {
+            fprintf(stderr,
+                    "stencil_extract: unsupported ELF AArch64 reloc %u "
+                    "at offset 0x%" PRIx64 "\n",
+                    rtype, r->r_offset);
+            return -1;
+        }
+        const elf64_sym_t *s = &syms[snum];
+        const char *name = strtab + s->st_name;
+        /* ELF strtab carries the source-level name without the Mach-O
+         * leading underscore. The downstream resolver expects the
+         * source-level form, so pass it through verbatim. */
+        int sym_idx = sym_table_intern(name, sym_table, sym_count, sym_cap);
+        if (sym_idx < 0) {
+            fprintf(stderr, "stencil_extract: too many distinct symbols\n");
+            return -1;
+        }
+        if (*out_count >= out_cap) {
+            fprintf(stderr, "stencil_extract: too many relocations per stencil\n");
+            return -1;
+        }
+        out[*out_count].offset    = (uint32_t)(r->r_offset - offset);
+        out[*out_count].kind      = (uint32_t)mapped;
+        out[*out_count].sym_index = (uint32_t)sym_idx;
+        /* ELF carries explicit addends in RELA entries. */
+        out[*out_count].addend    = (int32_t)r->r_addend;
+        (*out_count)++;
+    }
+    return 0;
+}
+
+/* Format-agnostic header writer. Takes already-extracted body bytes +
+ * relocs + symbol list and emits the C arrays the JIT runtime consumes.
+ * Both the Mach-O and ELF parsers funnel into this so the on-disk shape
+ * stays single-source. */
+static int write_stencil_header(const char *symbol,
+                                const uint8_t *body, uint64_t size,
+                                const stencil_reloc_t *relocs, int nrelocs,
+                                const char *const *syms, int nsyms,
+                                const char *out_path, int append)
 {
     FILE *out = (out_path != NULL && strcmp(out_path, "-") != 0)
         ? fopen(out_path, append ? "a" : "w") : stdout;
@@ -618,19 +1050,6 @@ static int emit_stencil_header(const macho_view_t *v, const char *symbol,
                 out_path);
         return -1;
     }
-    /* Extract relocations before writing anything so a parse failure
-     * doesn't leave a half-built header on disk. */
-    enum { MAX_RELOCS = 64, MAX_SYMS = 32 };
-    stencil_reloc_t relocs[MAX_RELOCS];
-    const char     *syms[MAX_SYMS];
-    int             nrelocs = 0, nsyms = 0;
-    if (extract_relocs(v, offset, size, relocs, MAX_RELOCS, &nrelocs,
-                       syms, &nsyms, MAX_SYMS) != 0) {
-        if (out != stdout) fclose(out);
-        return -1;
-    }
-    const uint8_t *text = v->blob->data + v->text_section->offset;
-    const uint8_t *body = text + offset;
     if (!append) {
         fprintf(out, "/* Generated by tools/stencil_extract. Do not edit. */\n\n");
     } else {
@@ -684,6 +1103,43 @@ static int emit_stencil_header(const macho_view_t *v, const char *symbol,
     return 0;
 }
 
+/* Mach-O entry point: extract relocs from the Mach-O view then funnel
+ * through the format-agnostic writer. */
+static int emit_stencil_header(const macho_view_t *v, const char *symbol,
+                               uint64_t offset, uint64_t size,
+                               const char *out_path, int append)
+{
+    enum { MAX_RELOCS = 64, MAX_SYMS = 32 };
+    stencil_reloc_t relocs[MAX_RELOCS];
+    const char     *syms[MAX_SYMS];
+    int             nrelocs = 0, nsyms = 0;
+    if (extract_relocs(v, offset, size, relocs, MAX_RELOCS, &nrelocs,
+                       syms, &nsyms, MAX_SYMS) != 0) return -1;
+    const uint8_t *text = v->blob->data + v->text_section->offset;
+    const uint8_t *body = text + offset;
+    return write_stencil_header(symbol, body, size, relocs, nrelocs,
+                                syms, nsyms, out_path, append);
+}
+
+/* ELF entry point: parallel shape to emit_stencil_header. The ELF
+ * symbol table records the body size directly in st_size; for Mach-O
+ * the size was derived by scanning the next symbol's address. */
+static int elf_emit_stencil_header(const elf_view_t *v, const char *symbol,
+                                   uint64_t offset, uint64_t size,
+                                   const char *out_path, int append)
+{
+    enum { MAX_RELOCS = 64, MAX_SYMS = 32 };
+    stencil_reloc_t relocs[MAX_RELOCS];
+    const char     *syms[MAX_SYMS];
+    int             nrelocs = 0, nsyms = 0;
+    if (elf_extract_relocs(v, offset, size, relocs, MAX_RELOCS, &nrelocs,
+                           syms, &nsyms, MAX_SYMS) != 0) return -1;
+    const uint8_t *text = v->blob->data + v->text_section->sh_offset;
+    const uint8_t *body = text + offset;
+    return write_stencil_header(symbol, body, size, relocs, nrelocs,
+                                syms, nsyms, out_path, append);
+}
+
 /* ------------------------------------------------------------------------- */
 /* main                                                                      */
 /* ------------------------------------------------------------------------- */
@@ -711,25 +1167,18 @@ int main(int argc, char **argv)
     mblob_t blob;
     if (read_file(argv[argi], &blob) != 0) return 1;
     /* Sniff the object file format. Mach-O 64 starts with 0xfeedfacf
-     * (little-endian magic); ELF starts with 0x7f 'E' 'L' 'F'. The
-     * Mach-O path is fully wired today; the ELF path returns a
-     * placeholder error so the ARM64 Linux platform release can
-     * extend it without changing the dispatch surface. */
-    if (blob.len >= 4
-        && blob.data[0] == ELF_MAGIC_BYTE_0
-        && blob.data[1] == ELF_MAGIC_BYTE_1
-        && blob.data[2] == ELF_MAGIC_BYTE_2
-        && blob.data[3] == ELF_MAGIC_BYTE_3) {
-        fprintf(stderr,
-                "stencil_extract: ELF object detected; the ELF parser "
-                "lands in the ARM64 Linux platform release. Rebuild "
-                "after that release on a Linux host to regenerate "
-                "src/eval/bc/stencils/generated/stencils_arm64_linux.h.\n");
-        blob_free(&blob);
-        return 3;
-    }
+     * (little-endian magic); ELF starts with 0x7f 'E' 'L' 'F'. COFF
+     * amd64 starts with the 2-byte machine ID 0x8664. The Mach-O and
+     * ELF parsers are fully wired; the COFF path returns a
+     * placeholder error until the Windows platform release lands the
+     * parser + VirtualAlloc adapter. */
+    int is_elf = (blob.len >= 4
+                  && blob.data[0] == ELF_MAGIC_BYTE_0
+                  && blob.data[1] == ELF_MAGIC_BYTE_1
+                  && blob.data[2] == ELF_MAGIC_BYTE_2
+                  && blob.data[3] == ELF_MAGIC_BYTE_3);
     /* COFF amd64: little-endian machine ID is the first 2 bytes. */
-    if (blob.len >= 2
+    if (!is_elf && blob.len >= 2
         && blob.data[0] == (COFF_MACHINE_AMD64 & 0xff)
         && blob.data[1] == ((COFF_MACHINE_AMD64 >> 8) & 0xff)) {
         fprintf(stderr,
@@ -741,36 +1190,62 @@ int main(int argc, char **argv)
         blob_free(&blob);
         return 3;
     }
-    macho_view_t v;
-    if (macho_open(&blob, &v) != 0) { blob_free(&blob); return 1; }
     int rc = 0;
-    if (strcmp(argv[argi + 1], "--list") == 0) {
-        printf("symbols in __TEXT,__text (size=%" PRIu64 ", offset=0x%" PRIx64 "):\n",
-               v.text_section->size, (uint64_t)v.text_section->offset);
-        rc = macho_list_symbols(&v);
-    } else if (argc >= argi + 3) {
-        const char *symbol = argv[argi + 1];
-        const char *out    = argv[argi + 2];
-        /* Mach-O linkers prefix C function names with an underscore.
-         * Try the literal name first; on miss prepend `_` so users can
-         * pass the source-level name. */
-        uint64_t off, sz;
-        if (macho_find_symbol(&v, symbol, &off, &sz) != 0) {
-            char buf[256];
-            snprintf(buf, sizeof(buf), "_%s", symbol);
-            if (macho_find_symbol(&v, buf, &off, &sz) != 0) {
+    if (is_elf) {
+        elf_view_t v;
+        if (elf_open(&blob, &v) != 0) { blob_free(&blob); return 1; }
+        if (strcmp(argv[argi + 1], "--list") == 0) {
+            printf("symbols in .text (size=%" PRIu64 ", offset=0x%" PRIx64 "):\n",
+                   v.text_section->sh_size, (uint64_t)v.text_section->sh_offset);
+            rc = elf_list_symbols(&v);
+        } else if (argc >= argi + 3) {
+            const char *symbol = argv[argi + 1];
+            const char *out    = argv[argi + 2];
+            /* ELF symtab carries the source-level name verbatim; no
+             * leading-underscore stripping needed. */
+            uint64_t off, sz;
+            if (elf_find_symbol(&v, symbol, &off, &sz) != 0) {
                 fprintf(stderr, "stencil_extract: symbol '%s' not found\n",
                         symbol);
                 rc = 1;
             } else {
+                rc = elf_emit_stencil_header(&v, symbol, off, sz, out, append);
+            }
+        } else {
+            usage();
+            rc = 2;
+        }
+    } else {
+        macho_view_t v;
+        if (macho_open(&blob, &v) != 0) { blob_free(&blob); return 1; }
+        if (strcmp(argv[argi + 1], "--list") == 0) {
+            printf("symbols in __TEXT,__text (size=%" PRIu64 ", offset=0x%" PRIx64 "):\n",
+                   v.text_section->size, (uint64_t)v.text_section->offset);
+            rc = macho_list_symbols(&v);
+        } else if (argc >= argi + 3) {
+            const char *symbol = argv[argi + 1];
+            const char *out    = argv[argi + 2];
+            /* Mach-O linkers prefix C function names with an underscore.
+             * Try the literal name first; on miss prepend `_` so users
+             * can pass the source-level name. */
+            uint64_t off, sz;
+            if (macho_find_symbol(&v, symbol, &off, &sz) != 0) {
+                char buf[256];
+                snprintf(buf, sizeof(buf), "_%s", symbol);
+                if (macho_find_symbol(&v, buf, &off, &sz) != 0) {
+                    fprintf(stderr, "stencil_extract: symbol '%s' not found\n",
+                            symbol);
+                    rc = 1;
+                } else {
+                    rc = emit_stencil_header(&v, symbol, off, sz, out, append);
+                }
+            } else {
                 rc = emit_stencil_header(&v, symbol, off, sz, out, append);
             }
         } else {
-            rc = emit_stencil_header(&v, symbol, off, sz, out, append);
+            usage();
+            rc = 2;
         }
-    } else {
-        usage();
-        rc = 2;
     }
     blob_free(&blob);
     return rc;
