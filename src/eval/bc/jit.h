@@ -27,12 +27,17 @@
 #define MINO_JIT_THRESHOLD 100u
 
 /* One JIT'd code region. Carried in a per-state linked list so
- * mino_state_free can munmap every page on teardown. The structure
- * lives in jit.c when MINO_CPJIT is defined; the type stays declared
- * here unconditionally so mino_state_t's pointer field is well-typed. */
+ * mino_state_free can munmap every page on teardown. The aux_ptr
+ * slot holds any malloc'd auxiliary data the JIT compile attached
+ * to the region (currently the per-pc native-offset side table);
+ * the free path calls `free(aux_ptr)` before munmap'ing `ptr`.
+ * The structure lives in jit.c when MINO_CPJIT is defined; the type
+ * stays declared here unconditionally so mino_state_t's pointer
+ * field is well-typed. */
 struct mino_jit_region {
     void                   *ptr;
     size_t                  size;
+    void                   *aux_ptr;
     struct mino_jit_region *next;
 };
 
@@ -63,6 +68,12 @@ struct mino_val *mino_jit_invoke(struct mino_state *S,
 /* Tear down every region in the state's jit_regions list. Called from
  * mino_state_free. */
 void mino_jit_free_all(struct mino_state *S);
+
+/* Reverse-lookup: which bytecode pc owns the stencil whose bytes cover
+ * `native_off` in bc->native? Returns -1 when the offset is out of
+ * range or the fn has no offset table. Cold path; intended for stack
+ * trace formatting and debugger introspection. */
+long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off);
 
 #else
 

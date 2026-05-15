@@ -382,6 +382,18 @@ typedef struct mino_bc_fn {
     unsigned         native_gen;
     size_t           native_size;
     unsigned         hot_counter;
+    /* Per-pc → native byte offset map. native_pc_offsets[i] gives the
+     * offset (in bytes from `native`) at which the i-th bytecode
+     * instruction's stencil begins. Allocated by the JIT compile path
+     * alongside the native region; length matches code_len; NULL when
+     * the fn is not JIT'd. Used by stack-trace formatting to attribute
+     * a faulting native PC back to a bytecode position, and by the
+     * deopt path to find the bytecode entry-point that corresponds
+     * to a native code address. Allocated with malloc -- the JIT
+     * compile is the sole writer and the lifetime tracks bc->native
+     * (freed at deopt or at state teardown via the jit_regions
+     * walk). */
+    unsigned        *native_pc_offsets;
 } mino_bc_fn_t;
 
 /* Stencil ABI boundary invariant.

@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.186.0 — Per-PC Native-Offset Side Table
+
+`mino_bc_fn_t` grows a `native_pc_offsets` field that the JIT
+compile path populates as it lays out the stencil sequence:
+`native_pc_offsets[i]` is the byte offset of the i-th bytecode
+instruction's stencil within `bc->native`. The table is the
+foundation for two later releases: ic-gen deopt needs a way to
+reconstruct the bytecode resume pc when invalidating a partially-
+executed JIT region, and breakpoint deopt needs to know which
+stencil bytes cover a given bytecode position.
+
+`mino_jit_offset_to_pc(bc, native_off)` is the reverse lookup --
+given a native byte offset, returns the bytecode pc whose stencil
+contains it (or -1 when the offset is out of range). Cold path;
+intended for stack-trace formatting and debugger introspection.
+
+The table is allocated alongside the mmap'd region and tracked in
+the state's `jit_regions` linked list (as `aux_ptr`), so
+`mino_state_free` reaps the malloc'd table during teardown
+together with the executable region. The deopt cleanup path drops
+its runtime-visible pointer and resets `hot_counter` to 0; the
+backing table stays owned by jit_regions until process exit.
+
+Stack-trace consumers stay on the bytecode source map (via
+`bc_current_pc` and `mino_bc_source_lookup`); the JIT'd code today
+doesn't update `bc_current_pc` per stencil. Wiring stack frames to
+go through `mino_jit_offset_to_pc` lands when more complex
+stencils (those that can throw or transfer control) start needing
+fine-grained per-pc attribution.
+
 ## v0.185.0 — Runtime JIT Compile Path
 
 `src/eval/bc/jit.c` materialises bc-compiled fns into mmap'd RX

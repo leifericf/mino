@@ -201,14 +201,15 @@ static void patch_pageoff12_ldr64(uint32_t *insn, uintptr_t target)
 
 /* ----- region book-keeping ------------------------------------------------ */
 
-static int region_track(mino_state_t *S, void *ptr, size_t size)
+static int region_track(mino_state_t *S, void *ptr, size_t size, void *aux_ptr)
 {
     struct mino_jit_region *node =
         (struct mino_jit_region *)malloc(sizeof(*node));
     if (node == NULL) return -1;
-    node->ptr  = ptr;
-    node->size = size;
-    node->next = S->jit_regions;
+    node->ptr     = ptr;
+    node->size    = size;
+    node->aux_ptr = aux_ptr;
+    node->next    = S->jit_regions;
     S->jit_regions = node;
     return 0;
 }
@@ -218,7 +219,8 @@ void mino_jit_free_all(mino_state_t *S)
     struct mino_jit_region *node = S->jit_regions;
     while (node != NULL) {
         struct mino_jit_region *next = node->next;
-        if (node->ptr != NULL) munmap(node->ptr, node->size);
+        if (node->aux_ptr != NULL) free(node->aux_ptr);
+        if (node->ptr     != NULL) munmap(node->ptr, node->size);
         free(node);
         node = next;
     }
@@ -317,6 +319,16 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
                         MAP_PRIVATE | MAP_ANON, -1, 0);
     if (region == MAP_FAILED) return -1;
 
+    /* Per-pc → native offset side table. Sized to code_len; written
+     * during the layout walk below. Held in a malloc'd buffer because
+     * the JIT module is the only writer and the GC's value-pointer
+     * scan would otherwise treat the integer slots as live edges. */
+    unsigned *pc_offsets = (unsigned *)malloc(bc->code_len * sizeof(unsigned));
+    if (pc_offsets == NULL) {
+        munmap(region, total_size);
+        return -1;
+    }
+
     unsigned char *code = (unsigned char *)region;
     uint64_t      *pool = (uint64_t *)((unsigned char *)region
                                         + code_pages * page);
@@ -328,6 +340,7 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     size_t pos = 0;
     size_t pool_pos = 0;
     for (size_t pc = 0; pc < bc->code_len; pc++) {
+        pc_offsets[pc] = (unsigned)pos;
         unsigned op = OP_OF(bc->code[pc]);
         const stencil_desc_t *st = find_stencil(op);
         size_t new_pool_pos = pool_pos;
@@ -335,6 +348,7 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
                               &new_pool_pos,
                               st, bc->code[pc], code_base, pool_base);
         if (n < 0) {
+            free(pc_offsets);
             munmap(region, total_size);
             return -1;
         }
@@ -356,14 +370,19 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
         return -1;
     }
 
-    if (region_track(S, region, total_size) != 0) {
+    if (region_track(S, region, total_size, pc_offsets) != 0) {
+        free(pc_offsets);
         munmap(region, total_size);
         return -1;
     }
 
-    bc->native      = region;
-    bc->native_size = total_size;
-    bc->native_gen  = S->ic_gen;
+    bc->native            = region;
+    bc->native_size       = total_size;
+    bc->native_gen        = S->ic_gen;
+    /* The offsets table is owned by the jit_regions node so a prior
+     * compile's table is still reachable through the list. Pointing
+     * bc here to the fresh table is the visible-to-runtime atomic. */
+    bc->native_pc_offsets = pc_offsets;
     /* Optional diagnostic: emit a stderr line on each compile when
      * `MINO_CPJIT_TRACE` is set in the environment. The check fires
      * once per compile, off the hot path. Used by the v0.185.0
@@ -387,6 +406,32 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
                                      mino_state_t *);
     native_t f = (native_t)bc->native;
     return f(regs, consts, S);
+}
+
+/* Reverse-lookup: which bytecode pc owns the stencil that contains
+ * `native_off` within bc->native? Used by stack-trace formatting to
+ * attribute a native instruction back to its bytecode position (and
+ * thus, through source_map, to a source line / column). Returns -1
+ * when the offset is out of range or the fn has no offset table. */
+long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)
+{
+    if (bc == NULL || bc->native_pc_offsets == NULL) return -1;
+    if (bc->code_len == 0) return -1;
+    /* Linear scan suffices: code_len is typically <100 for hot fns,
+     * and this helper runs only on the cold error / introspection
+     * path. A binary search becomes interesting once large bodies are
+     * JIT-eligible. */
+    for (size_t i = 0; i + 1 < bc->code_len; i++) {
+        if (native_off >= bc->native_pc_offsets[i]
+            && native_off <  bc->native_pc_offsets[i + 1]) {
+            return (long)i;
+        }
+    }
+    if (native_off >= bc->native_pc_offsets[bc->code_len - 1]
+        && native_off <  bc->native_size) {
+        return (long)(bc->code_len - 1);
+    }
+    return -1;
 }
 
 #else /* !MINO_CPJIT */
