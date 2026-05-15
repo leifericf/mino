@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.206.0 — OP_CALL Uncached + OP_TAILCALL Stencils
+
+Closes the call story for the cycle's eligibility set. Adds the
+remaining two call-class stencils:
+
+  - `OP_CALL` -- non-final, uncached path. Reads the callee out
+    of regs[A], hands argv at regs[A+1..A+B] to
+    `apply_callable_argv`, stores the return value at regs[C].
+    Compiled for sites where the head isn't a statically-known
+    global (head is itself an expression, a local fn-value, an
+    inline lambda, etc.).
+
+  - `OP_TAILCALL` -- FINAL stencil. Builds the args cons list
+    head-first, publishes (callee, args) on
+    `S->tail_call_sentinel`, returns the sentinel pointer. The
+    stencil's natural ret hands it back to mino_bc_run, whose
+    caller (apply_callable's trampoline) re-dispatches without
+    growing the C stack. Marking the stencil FINAL keeps the ret
+    in place; subsequent stencils after this pc in the same JIT
+    region are dead code that never runs.
+
+Both helpers read env from `jit_invoke_env` (the publish point
+v0.204.0 established), so callable-side env-dependent paths
+(closures, dynamic resolution against the call frame's binding)
+keep working.
+
+Eligibility-tracer comparison across the cycle so far
+(`MINO_CPJIT_STATS=1`):
+
+  | Workload             | v0.202.0 | v0.205.0 | v0.206.0 |
+  |----------------------|----------|----------|----------|
+  | tests/run.clj  attempts |  ~1     |    69    |   121    |
+  | tests/run.clj  eligible |  ~100%  |   26.1%  |   68.6%  |
+  | jit_bench.clj  attempts |   39    |    39    |    39    |
+  | jit_bench.clj  eligible |  43.6%  |   43.6%  |   94.9%  |
+
+(The v0.202.0 tests/run.clj number is dwarfed by the v0.202.0 →
+v0.203.0 ABI fix that wired the bc-call ABI's warming path
+through `mino_jit_compile`; until that landed the runtime barely
+attempted any compiles outside top-level invocations.)
+
+`jit_bench` reaches 95% eligibility -- the cycle's "real mino
+code can JIT" goal is essentially hit for the bench workload.
+The remaining blockers on tests/run.clj split across:
+
+  - 15 fns blocked by `captures` (closures -- v0.208.0)
+  -  7 fns blocked by `n-clauses != 1` (multi-arity -- v0.207.0)
+  -  2 fns blocked by `has-rest` (variadic -- v0.207.0)
+  - 14 fns blocked by various unstencilised body ops
+    (`OP_NTH_VEC`, `OP_ASSOC`, `OP_COUNT_VEC`, etc.) -- these are
+    follow-on stencil work outside this cycle.
+
+Full test suite (1688 / 7854) passes; ASan rebuild + tests pass.
+
 ## v0.205.0 — OP_CALL_CACHED Stencil + Two-Word Op Handling
 
 Adds the JIT stencil for `OP_CALL_CACHED`, the fused

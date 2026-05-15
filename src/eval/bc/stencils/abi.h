@@ -182,6 +182,28 @@ extern mino_val_t **mino_jit_call_cached_slow(mino_state_t *S,
                                                mino_bc_fn_t *bc,
                                                unsigned slot_idx);
 
+/* OP_CALL slow helper -- uncached path. Callee comes from
+ * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
+ * return value lands at regs[dst]. Routes through
+ * `apply_callable_argv` so every callable kind reaches its correct
+ * entry. */
+extern mino_val_t **mino_jit_call_slow(mino_state_t *S,
+                                        mino_val_t **regs,
+                                        unsigned fn_reg,
+                                        unsigned argc,
+                                        unsigned dst);
+
+/* OP_TAILCALL slow helper -- builds the args cons list, publishes
+ * (callee, args) on the state's tail-call sentinel, and returns
+ * `&S->tail_call_sentinel`. The stencil ferries the sentinel back
+ * to mino_bc_run via its natural fn ret; mino_bc_run's caller
+ * (apply_callable's trampoline loop) picks up the new (fn, args)
+ * without growing the C stack. Returns NULL on cons OOM. */
+extern mino_val_t *mino_jit_tailcall_slow(mino_state_t *S,
+                                           mino_val_t **regs,
+                                           unsigned fn_reg,
+                                           unsigned argc);
+
 /* Fused counted-loop step helpers. Each takes the loop's register
  * indices, runs one iteration's slow path (prim_lt / prim_inc / etc.
  * with cons-spine args), and returns the (possibly relocated) regs

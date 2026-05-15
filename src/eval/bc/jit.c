@@ -370,6 +370,22 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_call_cached_symbols, stencil_op_call_cached_nsymbols,
         stencil_op_call_cached_relocs, stencil_op_call_cached_nrelocs,
         0u
+    },
+    {
+        OP_CALL,
+        stencil_op_call_bytes, stencil_op_call_size,
+        stencil_op_call_symbols, stencil_op_call_nsymbols,
+        stencil_op_call_relocs, stencil_op_call_nrelocs,
+        0u
+    },
+    {
+        OP_TAILCALL,
+        stencil_op_tailcall_bytes, stencil_op_tailcall_size,
+        stencil_op_tailcall_symbols, stencil_op_tailcall_nsymbols,
+        stencil_op_tailcall_relocs, stencil_op_tailcall_nrelocs,
+        1u  /* FINAL: returns the tail-call sentinel; ret stays as the
+             * fn's natural exit so subsequent stencils after this pc
+             * are dead. */
     }
 };
 static const int g_stencils_count =
@@ -759,6 +775,52 @@ mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
     return regs;
 }
 
+/* OP_CALL slow helper -- uncached call site. Reads the callee from
+ * regs[fn_reg], invokes `apply_callable_argv` with argv at
+ * regs[fn_reg + 1..fn_reg + argc], stores the result at regs[dst].
+ * env reaches the callable via the same `jit_invoke_env` publish
+ * point the cached variants use. */
+mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
+                                unsigned fn_reg, unsigned argc, unsigned dst)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_val_t        *callee = S->bc_regs[base + fn_reg];
+    mino_val_t        *r = apply_callable_argv(S, callee,
+                                                S->bc_regs + base + fn_reg + 1,
+                                                (int)argc, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+}
+
+/* OP_TAILCALL slow helper. Builds the args cons list head-first
+ * from regs[fn_reg + 1..fn_reg + argc] and publishes (callee, args)
+ * on `S->tail_call_sentinel`. Returns the sentinel pointer so the
+ * stencil's natural ret hands it back as the JIT region's return
+ * value; the trampoline in apply_callable picks up the new
+ * (fn, args) without growing the C stack. */
+mino_val_t *mino_jit_tailcall_slow(mino_state_t *S, mino_val_t **regs,
+                                    unsigned fn_reg, unsigned argc)
+{
+    ptrdiff_t   base   = regs - S->bc_regs;
+    mino_val_t *callee = S->bc_regs[base + fn_reg];
+    mino_val_t *args   = mino_nil(S);
+    if (args == NULL) return NULL;
+    for (int i = (int)argc - 1; i >= 0; i--) {
+        mino_val_t *cell = mino_cons(S,
+                                     S->bc_regs[base + fn_reg + 1 + i],
+                                     args);
+        if (cell == NULL) return NULL;
+        args = cell;
+    }
+    S->tail_call_sentinel.as.tail_call.fn   = callee;
+    S->tail_call_sentinel.as.tail_call.args = args;
+    return &S->tail_call_sentinel;
+}
+
 /* OP_CALL_CACHED slow helper. Resolves the callee through the same
  * IC cascade as the read-only OP_GETGLOBAL_CACHED variant, then
  * dispatches via `apply_callable_argv` so all callable kinds (PRIM
@@ -923,6 +985,8 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_loop_int_lt_inc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_inc_slow},
     {"mino_jit_getglobal_cached_slow", (void *)(uintptr_t)mino_jit_getglobal_cached_slow},
     {"mino_jit_call_cached_slow",      (void *)(uintptr_t)mino_jit_call_cached_slow},
+    {"mino_jit_call_slow",             (void *)(uintptr_t)mino_jit_call_slow},
+    {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
     {NULL, NULL}
 };
 

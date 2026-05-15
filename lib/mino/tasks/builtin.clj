@@ -361,7 +361,9 @@
                    ["loop_int_dec.c"    "stencil_op_loop_int_dec"]
                    ["loop_int_lt_inc.c" "stencil_op_loop_int_lt_inc"]
                    ["getglobal_cached.c" "stencil_op_getglobal_cached"]
-                   ["call_cached.c"      "stencil_op_call_cached"]]]
+                   ["call_cached.c"      "stencil_op_call_cached"]
+                   ["call.c"             "stencil_op_call"]
+                   ["tailcall.c"         "stencil_op_tailcall"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto
