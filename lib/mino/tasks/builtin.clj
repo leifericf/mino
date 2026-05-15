@@ -321,6 +321,35 @@
   (build-stencil-extract)
   (println (sh! "./tools/stencil_extract" "--selftest")))
 
+(defn gen-stencils
+  "Compile every stencil source under src/eval/bc/stencils/ to an
+   intermediate .o file and dispatch the extractor to write the byte
+   tables into src/eval/bc/stencils/generated/<arch>_<os>.h. The
+   runtime build includes the generated header; regenerate after
+   touching any stencil source or after a toolchain change that
+   would shift the emitted code."
+  []
+  (build-stencil-extract)
+  (let [;; arch/os naming mirrors what platform releases extend.
+        triple    "arm64_darwin"
+        gen-dir   "src/eval/bc/stencils/generated"
+        out-hdr   (str gen-dir "/stencils_" triple ".h")
+        tmpdir    "/tmp/mino-stencils"
+        stencils  [["return.c" "stencil_op_return_arg0"]]]
+    (sh! "mkdir" "-p" gen-dir)
+    (sh! "mkdir" "-p" tmpdir)
+    ;; First stencil produces the file (truncating); subsequent
+    ;; stencils append. The extractor itself writes the header
+    ;; preamble + bytes block per invocation, so concatenation
+    ;; works because the generated chunks remain valid C in any
+    ;; aggregation order.
+    (doseq [[file sym] stencils]
+      (let [src (str "src/eval/bc/stencils/" file)
+            obj (str tmpdir "/" file ".o")]
+        (sh! cc "-std=c99" "-O2" "-fno-builtin" "-c" src "-o" obj)
+        (sh! "./tools/stencil_extract" obj sym out-hdr)))
+    (println (str "  stencils -> " out-hdr))))
+
 (defn test-suite
   "Run the test suite."
   []

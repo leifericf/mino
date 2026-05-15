@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.183.0 — First Stencil Source
+
+`src/eval/bc/stencils/return.c` is the first stencil source in the
+copy-and-patch pipeline: a minimal C function that returns the value
+at `arg0[0]`. The compiled body is two arm64 instructions
+(`ldr x0, [x0]; ret`) — load and return — and gives the build
+pipeline a real-world payload to chew on while the immediate-patching
+infrastructure is still landing.
+
+`./mino task gen-stencils` is the regeneration target. It rebuilds
+`tools/stencil_extract`, compiles every `.c` under
+`src/eval/bc/stencils/` to an intermediate `.o`, then dispatches the
+extractor to write the byte tables into
+`src/eval/bc/stencils/generated/stencils_arm64_darwin.h`.
+
+The header is checked in (mino developers regenerate when stencil
+sources change; embedders rebuild without the extractor toolchain).
+The runtime build is still unchanged — nothing in the mino binary
+consumes the header yet — but every other piece of the build flow is
+exercised end-to-end.
+
 ## v0.182.0 — Stencil Extractor Tool
 
 `tools/stencil_extract.c` is the build-time utility that turns an

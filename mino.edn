@@ -50,4 +50,6 @@
   build-stencil-extract {:doc  "Build tools/stencil_extract"
                          :task mino.tasks.builtin/build-stencil-extract}
   test-stencil-extract  {:doc  "Run stencil-extract selftest"
-                         :task mino.tasks.builtin/test-stencil-extract}}}
+                         :task mino.tasks.builtin/test-stencil-extract}
+  gen-stencils          {:doc  "Regenerate stencil byte-tables header"
+                         :task mino.tasks.builtin/gen-stencils}}}
