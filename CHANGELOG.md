@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.228.0 — JIT Stencil For OP_CONJ_VEC
+
+Continues the coverage cycle. The (conj v x) fast-lane stencil now
+trampolines through `mino_jit_conj_vec_slow`. Vector case allocates
+via `vec_conj1` (and refreshes regs base after the possible relocation);
+other coll types fall through to prim_conj for lists / sorted-colls /
+sets / maps / transients.
+
+`release-gate` green.
+
 ## v0.227.0 — JIT Stencil For OP_GET_KW_MAP
 
 Continues the coverage cycle. Adds the (get coll k) fast-lane

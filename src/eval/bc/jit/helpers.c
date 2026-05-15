@@ -157,6 +157,36 @@ mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_CONJ_VEC. MINO_VECTOR fast lane via vec_conj1
+ * (allocates -- regs base may relocate); other coll types fall
+ * through to prim_conj which handles lists, sorted-colls, sets,
+ * maps, transients, etc. */
+mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S, mino_val_t **regs,
+                                    unsigned a, unsigned b, unsigned c)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *item = S->bc_regs[base + c];
+    if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+        mino_val_t *r = vec_conj1(S, coll, item);
+        if (r == NULL) return NULL;
+        regs    = S->bc_regs + base;
+        regs[a] = r;
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, item, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_conj(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Slow path for OP_GET_KW_MAP. Mirrors the interpreter handler:
  * MINO_MAP fast lane via map_get_val; MINO_RECORD + MINO_KEYWORD
  * fast lane via record_field_index; everything else

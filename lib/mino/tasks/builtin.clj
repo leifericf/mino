@@ -435,7 +435,8 @@
                    ["first_vec.c"        "stencil_op_first_vec"]
                    ["count_vec.c"        "stencil_op_count_vec"]
                    ["empty_vec.c"        "stencil_op_empty_vec"]
-                   ["get_kw_map.c"       "stencil_op_get_kw_map"]]
+                   ["get_kw_map.c"       "stencil_op_get_kw_map"]
+                   ["conj_vec.c"         "stencil_op_conj_vec"]]
         stencil-dir "src/eval/bc/stencils"
         disk-files  (->> (file-seq stencil-dir)
                          (filterv #(str/ends-with? % ".c"))
@@ -647,7 +648,8 @@
                    ["first_vec.c"        "stencil_op_first_vec"]
                    ["count_vec.c"        "stencil_op_count_vec"]
                    ["empty_vec.c"        "stencil_op_empty_vec"]
-                   ["get_kw_map.c"       "stencil_op_get_kw_map"]]]
+                   ["get_kw_map.c"       "stencil_op_get_kw_map"]
+                   ["conj_vec.c"         "stencil_op_conj_vec"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto

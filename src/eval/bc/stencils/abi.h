@@ -253,6 +253,14 @@ extern mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S,
                                               unsigned a, unsigned b,
                                               unsigned c);
 
+/* OP_CONJ_VEC slow helper. MINO_VECTOR fast lane via vec_conj1
+ * (allocates -- regs base may relocate); cons-and-prim_conj fallback
+ * for lists, sets, sorted-colls, etc. */
+extern mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S,
+                                            mino_val_t **regs,
+                                            unsigned a, unsigned b,
+                                            unsigned c);
+
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
  * return value lands at regs[dst]. Routes through

@@ -206,6 +206,8 @@ mino_val_t **mino_jit_empty_vec_slow(mino_state_t *S, mino_val_t **regs,
                                      unsigned a, unsigned b);
 mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
                                       unsigned a, unsigned b, unsigned c);
+mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S, mino_val_t **regs,
+                                    unsigned a, unsigned b, unsigned c);
 mino_val_t  *mino_jit_tailcall_slow(mino_state_t *S, mino_val_t **regs,
                                     unsigned fn_reg, unsigned argc);
 mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
