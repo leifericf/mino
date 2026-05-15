@@ -335,11 +335,29 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     if (page_l <= 0) return -1;
     size_t page = (size_t)page_l;
     size_t pool_bytes = pool_slots * sizeof(uint64_t);
-    size_t code_pages = (code_size + page - 1) / page;
-    if (code_pages == 0) code_pages = 1;
-    size_t pool_pages = (pool_bytes + page - 1) / page;
-    if (pool_pages == 0) pool_pages = 1;
-    size_t total_size = (code_pages + pool_pages) * page;
+    /* Single-page layout for small fns: code occupies the start, the
+     * literal pool sits at an 8-byte-aligned offset right after.
+     * Adrp's page-relative addressing works because both halves live
+     * on the same 4 KB page (page diff = 0; ldr's 12-bit page offset
+     * reaches anywhere within). For fns that don't fit in one page,
+     * fall back to the multi-page layout where code and pool occupy
+     * separate page ranges. The single-page path halves per-fn
+     * memory consumption for typical small fns (the OP_MOVE +
+     * OP_RETURN smoke shape goes from 8 KB to 4 KB resident). */
+    size_t pool_offset_in_single = (code_size + 7u) & ~(size_t)7u;
+    int    single_page  = (pool_offset_in_single + pool_bytes <= page);
+    size_t code_pages, pool_pages, total_size;
+    if (single_page) {
+        code_pages = 1;
+        pool_pages = 0;
+        total_size = page;
+    } else {
+        code_pages = (code_size + page - 1) / page;
+        if (code_pages == 0) code_pages = 1;
+        pool_pages = (pool_bytes + page - 1) / page;
+        if (pool_pages == 0) pool_pages = 1;
+        total_size = (code_pages + pool_pages) * page;
+    }
 
     void *region = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -356,10 +374,18 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     }
 
     unsigned char *code = (unsigned char *)region;
-    uint64_t      *pool = (uint64_t *)((unsigned char *)region
-                                        + code_pages * page);
-    size_t         code_cap = code_pages * page;
-    size_t         pool_cap = (pool_pages * page) / sizeof(uint64_t);
+    uint64_t      *pool;
+    size_t         code_cap;
+    size_t         pool_cap;
+    if (single_page) {
+        pool     = (uint64_t *)((unsigned char *)region + pool_offset_in_single);
+        code_cap = pool_offset_in_single;  /* code must fit before the pool */
+        pool_cap = (page - pool_offset_in_single) / sizeof(uint64_t);
+    } else {
+        pool     = (uint64_t *)((unsigned char *)region + code_pages * page);
+        code_cap = code_pages * page;
+        pool_cap = (pool_pages * page) / sizeof(uint64_t);
+    }
     uintptr_t      code_base = (uintptr_t)code;
     uintptr_t      pool_base = (uintptr_t)pool;
 
@@ -387,7 +413,7 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
      * coherent only after explicit maintenance; clang's builtin
      * issues `dc cvau` + `dsb ish` + `ic ivau` + `dsb ish` + `isb`
      * the way the architecture requires. */
-    __builtin___clear_cache((char *)region, (char *)region + code_pages * page);
+    __builtin___clear_cache((char *)region, (char *)region + total_size);
 
     /* Switch the whole region to RX. The literal pool is read-only at
      * this point too -- the patcher already populated it. */
@@ -418,8 +444,10 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
         if (trace != NULL && trace[0] != '\0' && trace[0] != '0') {
             fprintf(stderr,
                     "[cpjit] compiled bc (code_len=%zu, region=%p, "
-                    "code_pages=%zu, pool_slots=%zu)\n",
-                    bc->code_len, region, code_pages, pool_slots);
+                    "layout=%s, total_size=%zu, pool_slots=%zu)\n",
+                    bc->code_len, region,
+                    single_page ? "single-page" : "multi-page",
+                    total_size, pool_slots);
         }
     }
     return 0;

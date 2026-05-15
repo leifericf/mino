@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.193.0 — Single-Page JIT Layout for Small Fns
+
+The JIT compile path now detects when a fn's code plus literal
+pool fits in one host page and lays them out together in a single
+mmap'd region; only fns that overflow a page fall back to the
+multi-page layout (separate code and pool ranges).
+
+Adrp's page-relative addressing handles both layouts uniformly:
+in the single-page case both halves live on the same 4 KB /
+16 KB host page so the page diff is zero, and ldr's 12-bit
+page-offset field reaches the pool slots that sit 8-byte aligned
+right after the code. The patcher math doesn't change.
+
+Effect on the smoke shape `(fn [x] x)` on a 16 KB-page host: per-
+fn resident memory drops from 32 KB (two pages: one code + one
+pool) to 16 KB (single page). The full test suite plus ASan
+build pass identically.
+
+The full multi-fn-per-page allocator (where many small JIT'd fns
+share one page and each chunk's pool sits inside the same page
+as its code) needs a write-protect-toggle mechanism the runtime
+doesn't yet have; it lands in a later release. The single-page
+layout is the practical first step that gives most of the win
+for typical small fns without the toggle complexity.
+
 ## v0.192.0 — Windows COFF Detection Scaffolding
 
 `tools/stencil_extract.c` learns to sniff a COFF amd64 object
