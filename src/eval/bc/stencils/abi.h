@@ -38,6 +38,7 @@
  * the bytes the compiler emits never depend on the runtime layout. */
 typedef struct mino_state    mino_state_t;
 typedef struct mino_val      mino_val_t;
+typedef struct mino_bc_fn    mino_bc_fn_t;
 
 /* Chain-return type for non-final stencils. ARM64 AAPCS returns
  * structs of two 8-byte pointers in (x0, x1), so a stencil that
@@ -84,6 +85,11 @@ extern char MINO_STENCIL_IMM_C[];
 extern char MINO_STENCIL_IMM_BX[];
 extern char MINO_STENCIL_IMM_SBX[];
 extern char MINO_STENCIL_IMM_KIMM[];
+/* Per-fn bc pointer. The JIT compile pipeline writes the address of
+ * the bc that owns this stencil instance; stencils that need to
+ * reach the fn's ic_slots, consts, or other per-fn state read it as
+ * a `mino_bc_fn_t *`. */
+extern char MINO_STENCIL_IMM_BC[];
 
 #define IMM_A    ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_A)
 #define IMM_B    ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_B)
@@ -91,6 +97,7 @@ extern char MINO_STENCIL_IMM_KIMM[];
 #define IMM_BX   ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_BX)
 #define IMM_SBX  ((long)(intptr_t)MINO_STENCIL_IMM_SBX)
 #define IMM_KIMM ((mino_val_t *)(uintptr_t)MINO_STENCIL_IMM_KIMM)
+#define IMM_BC   ((mino_bc_fn_t *)(uintptr_t)MINO_STENCIL_IMM_BC)
 
 /* Sub-op constants the BINOP_INT family shares with the bytecode VM.
  * Kept in numeric sync with mino_bc_binop_t in src/eval/bc/internal.h;
@@ -139,6 +146,20 @@ extern mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
                                           mino_val_t *kimm, unsigned subop);
 extern mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
                                        unsigned a, unsigned b, unsigned subop);
+
+/* OP_GETGLOBAL_CACHED slow helper. Resolves the bc's ic-slot at index
+ * `slot_idx` through the shared `ic_resolve_global` cascade (dyn
+ * binding -> lexical env -> cached var -> resolve), refills the slot
+ * on a miss under the GC write barrier, and stores the resolved value
+ * into regs[a]. env is passed NULL by the JIT path; JIT-eligible fns
+ * have `captures == 0` so their bodies never read env-bound names
+ * inside ic_resolve_global's env-lookup branch. Returns the (possibly
+ * relocated) regs base on success or NULL on resolve failure. */
+extern mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
+                                                    mino_val_t **regs,
+                                                    unsigned a,
+                                                    mino_bc_fn_t *bc,
+                                                    unsigned slot_idx);
 
 /* Fused counted-loop step helpers. Each takes the loop's register
  * indices, runs one iteration's slow path (prim_lt / prim_inc / etc.

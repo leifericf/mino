@@ -119,7 +119,12 @@ typedef enum {
      * The OP_*_IK stencils read the slot and pass it straight to
      * binop_int_fast / mino_jit_binop_k_slow, so the value the JIT
      * writes into the pool is the already-tagged integer pointer. */
-    IMM_KIND_KIMM = 5
+    IMM_KIND_KIMM = 5,
+    /* The bc pointer of the fn this stencil belongs to. Filled at JIT
+     * compile time from the compile_inner walk's `bc`. Stencils that
+     * need to reach into per-fn state (ic_slots, consts via bc, etc.)
+     * read the pool slot as a `mino_bc_fn_t *`. */
+    IMM_KIND_BC   = 6
 } imm_kind_t;
 
 static int imm_kind_from_name(const char *sym)
@@ -130,10 +135,12 @@ static int imm_kind_from_name(const char *sym)
     if (strcmp(sym, "MINO_STENCIL_IMM_BX")   == 0) return IMM_KIND_BX;
     if (strcmp(sym, "MINO_STENCIL_IMM_SBX")  == 0) return IMM_KIND_SBX;
     if (strcmp(sym, "MINO_STENCIL_IMM_KIMM") == 0) return IMM_KIND_KIMM;
+    if (strcmp(sym, "MINO_STENCIL_IMM_BC")   == 0) return IMM_KIND_BC;
     return -1;
 }
 
-static uint64_t imm_value(mino_bc_insn_t insn, imm_kind_t k)
+static uint64_t imm_value(mino_bc_insn_t insn, imm_kind_t k,
+                          const mino_bc_fn_t *bc)
 {
     switch (k) {
     case IMM_KIND_A:    return (uint64_t)A_OF(insn);
@@ -145,6 +152,7 @@ static uint64_t imm_value(mino_bc_insn_t insn, imm_kind_t k)
         long long lit = (long long)(int8_t)C_OF(insn);
         return (uint64_t)(uintptr_t)MINO_MAKE_INT(lit);
     }
+    case IMM_KIND_BC:   return (uint64_t)(uintptr_t)bc;
     }
     return 0;
 }
@@ -323,6 +331,13 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_loop_int_lt_inc_symbols, stencil_op_loop_int_lt_inc_nsymbols,
         stencil_op_loop_int_lt_inc_relocs, stencil_op_loop_int_lt_inc_nrelocs,
         0u
+    },
+    {
+        OP_GETGLOBAL_CACHED,
+        stencil_op_getglobal_cached_bytes, stencil_op_getglobal_cached_size,
+        stencil_op_getglobal_cached_symbols, stencil_op_getglobal_cached_nsymbols,
+        stencil_op_getglobal_cached_relocs, stencil_op_getglobal_cached_nrelocs,
+        0u
     }
 };
 static const int g_stencils_count =
@@ -388,7 +403,9 @@ static cpjit_reason_t classify_eligibility(const mino_bc_fn_t *bc,
 {
     if (bc == NULL || bc->code == NULL) return CPJIT_REASON_NULL_BC;
     if (bc->captures)            return CPJIT_REASON_CAPTURES;
-    if (bc->ic_slots_len > 0)    return CPJIT_REASON_IC_SLOTS;
+    /* ic_slots_len > 0 no longer blocks: OP_GETGLOBAL_CACHED has a
+     * stencil. PROTOCOL-kind slots are still rejected via their
+     * unstencilised ops (OP_PROTOCOL_*_CACHED) in the loop below. */
     if (bc->n_clauses != 1)      return CPJIT_REASON_N_CLAUSES;
     if (bc->n_clauses == 1 && bc->clauses != NULL && bc->clauses[0].has_rest) {
         return CPJIT_REASON_HAS_REST;  /* variadic dispatch not stencilised */
@@ -670,6 +687,41 @@ mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* OP_GETGLOBAL_CACHED slow helper. Routes through the public
+ * `mino_bc_ic_global_load`, which mirrors the interpreter's handler
+ * exactly: bounds-check the slot index, run the dyn-then-env-then-
+ * cached-then-resolve cascade, refill the slot under the GC write
+ * barrier on a fresh resolve. env is passed NULL by the JIT path --
+ * JIT-eligible fns have `captures == 0`, so their bodies never bind
+ * names through env. dyn_active is read from the current thread ctx
+ * so a live `(binding ...)` form shadows the cached var the same way
+ * the interpreter does.
+ *
+ * GC-safe regs base refresh: bc_regs may relocate if the resolve path
+ * triggers an allocation (cons / write-barrier / map_get cascade). */
+mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
+                                            mino_val_t **regs,
+                                            unsigned a,
+                                            mino_bc_fn_t *bc,
+                                            unsigned slot_idx)
+{
+    ptrdiff_t          base       = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx        = mino_current_ctx(S);
+    int                dyn_active = (ctx->dyn_stack != NULL);
+    /* env: published by mino_jit_invoke from the bc_run frame's env
+     * parameter. Captured-local symbol references compile to
+     * OP_GETGLOBAL_CACHED slots whose resolution path runs through
+     * env first; without env, those slots would fail to resolve and
+     * surface as spurious "unbound symbol" diagnostics. */
+    mino_env_t *env = ctx->jit_invoke_env;
+    mino_val_t *v   = mino_bc_ic_global_load(S, bc, (int)slot_idx,
+                                             env, dyn_active);
+    if (v == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = v;
+    return regs;
+}
+
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */
@@ -800,6 +852,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_loop_int_lt_slow",     (void *)(uintptr_t)mino_jit_loop_int_lt_slow},
     {"mino_jit_loop_int_dec_slow",    (void *)(uintptr_t)mino_jit_loop_int_dec_slow},
     {"mino_jit_loop_int_lt_inc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_inc_slow},
+    {"mino_jit_getglobal_cached_slow", (void *)(uintptr_t)mino_jit_getglobal_cached_slow},
     {NULL, NULL}
 };
 
@@ -1065,6 +1118,7 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
                          size_t tramp_pos, size_t tramp_cap,
                          size_t *out_tramp_pos,
                          const stencil_desc_t *st, mino_bc_insn_t insn,
+                         const mino_bc_fn_t *bc,
                          uintptr_t code_base, uintptr_t pool_base,
                          uintptr_t tramp_base)
 {
@@ -1085,7 +1139,7 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
             if (new_pool_pos >= pool_cap) return -1;
             slots[s].kind        = SYM_SLOT_IMM;
             slots[s].slot_offset = new_pool_pos;
-            pool[new_pool_pos]   = imm_value(insn, (imm_kind_t)k);
+            pool[new_pool_pos]   = imm_value(insn, (imm_kind_t)k, bc);
             new_pool_pos++;
         } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0) {
             slots[s].kind        = SYM_SLOT_LOOP;
@@ -1334,7 +1388,7 @@ static int compile_inner(mino_state_t *S, mino_val_t *fn_val)
         long n = emit_stencil(code, pos, code_size,
                               pool, pool_pos, pool_slots, &new_pool_pos,
                               tramp_buf, tramp_pos, tramp_bytes, &new_tramp_pos,
-                              st, bc->code[pc],
+                              st, bc->code[pc], bc,
                               code_base, pool_base, tramp_base);
         if (n < 0) {
             free(insts);
@@ -1505,12 +1559,22 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
 }
 
 mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
-                            mino_val_t **regs, mino_val_t **consts)
+                            mino_val_t **regs, mino_val_t **consts,
+                            mino_env_t *env)
 {
     typedef mino_val_t *(*native_t)(mino_val_t **, mino_val_t **,
                                      mino_state_t *);
     native_t f = (native_t)bc->native;
-    return f(regs, consts, S);
+    /* Publish env on the current thread ctx so slow helpers running
+     * from inside the JIT region can read it. Save / restore around
+     * the call to support re-entry from a nested JIT'd callee in a
+     * later release. */
+    mino_thread_ctx_t *ctx       = mino_current_ctx(S);
+    mino_env_t        *saved_env = ctx->jit_invoke_env;
+    ctx->jit_invoke_env = env;
+    mino_val_t *r = f(regs, consts, S);
+    ctx->jit_invoke_env = saved_env;
+    return r;
 }
 
 void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn_val)

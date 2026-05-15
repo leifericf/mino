@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.204.0 — OP_GETGLOBAL_CACHED Stencil
+
+Adds the JIT stencil for `OP_GETGLOBAL_CACHED` and drops the
+`ic_slots_len > 0` blocker from the eligibility check. Fns that
+read global vars (effectively every defn with `(inc ...)` /
+`(< ...)` / `(map ...)` / call to any name in `clojure.core`) now
+walk past the ic-slot gate; whether they then become JIT-eligible
+depends on what other ops their body uses.
+
+The stencil routes through a new slow helper
+`mino_jit_getglobal_cached_slow` that calls
+`mino_bc_ic_global_load` -- the same entry point the interpreter
+uses for its `OP_GETGLOBAL_CACHED` handler. The cascade is
+identical: active dyn binding wins, then env lookup, then the
+cached var if its gen still matches `S->ic_gen`, then a fresh
+resolve under the GC write barrier.
+
+The slow helper needs `env` for the env-lookup branch (captured
+locals reach their values through it). The JIT invoke ABI is
+extended to carry `env` from the `mino_bc_run` frame into a
+transient `jit_invoke_env` field on the current thread ctx; the
+slow helper reads it back at use. Without this thread-local
+publish, inner fns that reference outer-fn locals would surface as
+spurious "unbound symbol" diagnostics -- the
+`gc-closure-churn` test caught exactly that path on the first run
+of this release.
+
+A new `IMM_KIND_BC` immediate kind carries the `mino_bc_fn_t *`
+into the stencil's literal pool. The compile-time JIT walk writes
+the bc pointer at the pool slot the stencil reads via `IMM_BC`,
+so the slow helper sees the right bc without needing to look it
+up from thread state.
+
+Eligibility-tracer comparison (`MINO_CPJIT_STATS=1`,
+`tests/run.clj`):
+
+  | Reason            | v0.203.0 | v0.204.0 |
+  |-------------------|----------|----------|
+  | ok                |       13 |       14 |
+  | captures          |       15 |       15 |
+  | ic-slots          |       32 |        0 |
+  | n-clauses         |        0 |        7 |
+  | has-rest          |        0 |        2 |
+  | unknown-op        |        9 |       31 |
+
+The drop in ic-slots reveals the next priority: most ic-slot fns
+also have unstencilised call ops, so they shift to `unknown-op`
+(blocked on `OP_CALL` / `OP_TAILCALL` / `OP_CALL_CACHED`) rather
+than becoming eligible. Closing the call story (v0.205-206) is
+the next unlock.
+
+Full test suite (1688 / 7854) passes; ASan rebuild + tests pass.
+
 ## v0.203.0 — JIT Introspection + Eligibility Tracer
 
 Adds an opt-in observability layer over the CPJIT compile pipeline.

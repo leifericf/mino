@@ -88,7 +88,8 @@ int mino_jit_compile(struct mino_state *S, struct mino_val *fn);
 struct mino_val *mino_jit_invoke(struct mino_state *S,
                                   struct mino_bc_fn *bc,
                                   struct mino_val **regs,
-                                  struct mino_val **consts);
+                                  struct mino_val **consts,
+                                  struct mino_env *env);
 
 /* Tear down every region in the state's jit_regions list. Called from
  * mino_state_free. */

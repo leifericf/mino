@@ -448,6 +448,16 @@ typedef struct mino_thread_ctx {
     /* Dynamic binding stack head. */
     dyn_frame_t    *dyn_stack;
 
+    /* Active JIT invoke env. Set by mino_jit_invoke from the
+     * mino_bc_run frame's `env` parameter so slow helpers (e.g.,
+     * mino_jit_getglobal_cached_slow) can resolve captured-local
+     * symbols through the same env-then-cache cascade the interpreter
+     * uses. NULL when no JIT region is active. Saved / restored by
+     * mino_jit_invoke around its call so nested JIT regions
+     * (`call_cached` chains in later releases) keep the correct env
+     * across re-entry. */
+    struct mino_env *jit_invoke_env;
+
     /* This thread's recursive depth on S->state_lock.
      * mino_lock increments, mino_unlock decrements; mino_yield_lock
      * saves the depth and unlocks down to zero, mino_resume_lock

@@ -1174,7 +1174,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
      * since the page was emitted. */
     if (bc->native != NULL && bc->native_gen == S->ic_gen) {
         retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc, regs,
-                                 (mino_val_t **)bc->consts);
+                                 (mino_val_t **)bc->consts, env);
         ok = (retval != NULL);
         goto bc_done;
     }
