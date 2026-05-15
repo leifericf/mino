@@ -40,7 +40,8 @@ endif
 
 BIN = mino$(EXE)
 
-SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/diag/*.c \
+SRCS = $(wildcard src/eval/*.c src/eval/bc/*.c src/eval/bc/jit/*.c \
+                  src/diag/*.c \
                   src/runtime/*.c src/gc/*.c src/public/*.c \
                   src/collections/*.c src/prim/*.c src/interop/*.c \
                   src/regex/*.c src/async/*.c src/vendor/imath/*.c) main.c

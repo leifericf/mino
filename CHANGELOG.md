@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.216.0 — Split jit.c Into Five Translation Units
+
+Refactor-only: `src/eval/bc/jit.c` (2012 lines) splits into a `jit/`
+subdirectory of five one-word-named files plus one private header,
+matching the existing convention used under `src/gc/` and
+`src/collections/`. No behaviour change. The first of three post-cycle
+hygiene releases that retire structural debts surfaced by the
+CPJIT-speedup cycle's external review.
+
+New layout:
+
+  - `src/eval/bc/jit/entry.c` -- host detection, layout asserts,
+    stencil descriptor table, eligibility classifier, extern-helper
+    resolution, public entry points (`mino_jit_compile`,
+    `mino_jit_invoke`, `mino_jit_invalidate`, `mino_jit_offset_to_pc`).
+  - `src/eval/bc/jit/stats.c` -- `MINO_CPJIT_STATS=1` attribution sink.
+  - `src/eval/bc/jit/helpers.c` -- the `mino_jit_*_slow` cold helpers
+    that stencils dispatch into on a fast-path miss.
+  - `src/eval/bc/jit/patcher.c` -- ARM64 instruction patchers
+    (adrp / pageoff12 / branch26 / imm19) plus direct-emit byte
+    templates and the trampoline writer.
+  - `src/eval/bc/jit/emit.c` -- region book-keeping
+    (`mino_jit_free_all`), per-instance `emit_stencil`, and the
+    top-level `mino_jit_compile_inner` two-pass copy-and-patch walk.
+  - `src/eval/bc/jit/internal.h` -- private interface shared between
+    the five TUs.
+
+### Verification
+
+JIT'd region bytes for `fib(25)` are byte-identical pre- and
+post-split under `MINO_CPJIT_TRACE=2` (only the mmap base address
+varies between runs of either binary, as expected). Test suite (1688
+tests / 7854 assertions) and ASan suite both green.
+
+### Seams the split opens
+
+The five-file shape isolates the seams the next two cycles will pull
+on. `patcher.c` will gain non-ARM64 patchers (x86_64, ARM64 Linux)
+without touching the emit pipeline; `stats.c` can be quietly omitted
+from a `-DMINO_CPJIT_NO_STATS` build; `internal.h` carries the cross-TU
+contract that the v0.218 stencil-registry guardrail will check.
+
 ## v0.215.0 — CPJIT Speedup Cycle Close
 
 Closes the speedup follow-on cycle that began at v0.210.0. The cycle

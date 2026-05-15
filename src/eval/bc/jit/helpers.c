@@ -1,0 +1,444 @@
+/*
+ * src/eval/bc/jit/helpers.c -- cold helpers stencils call into.
+ *
+ * Every helper here mirrors a specific interpreter op's slow path
+ * (cons-spine + prim dispatch + regs refresh after possible GC) so
+ * the JIT region falls through to the same Clojure-correct
+ * semantics whenever the inline fast path declines (tag miss,
+ * overflow, IC miss). The contract every helper honours:
+ *
+ *   - input regs is the live register-window base on entry.
+ *   - the helper may alloc / call prims / trigger GC, so it
+ *     re-derives the regs base from `S->bc_regs + (regs - S->bc_regs)`
+ *     before any store-through-regs.
+ *   - return value is the (possibly relocated) regs base on success,
+ *     NULL on hard failure that the stencil's caller propagates back
+ *     up the JIT region as a NULL return.
+ *
+ * The address of each helper is exported to stencil-side machine code
+ * through the extern-fn table in entry.c.
+ */
+
+#include "internal.h"
+
+#ifdef MINO_CPJIT_HOST
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "../../../prim/internal.h"
+
+/* Slow path for the arith stencils. Mirrors the interpreter's OP_*_II
+ * fallback: build a two-element cons list rooted in the bytecode
+ * register window, dispatch to the matching numeric prim, and store
+ * the result through the (possibly relocated) regs base before
+ * returning that base to the caller. Returns NULL only when the prim
+ * itself returns NULL -- in practice prims raise through longjmp on
+ * type errors, so the NULL return is the defensive case the stencil's
+ * caller propagates back up the JIT region. */
+mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
+                                 unsigned a, unsigned b, unsigned c,
+                                 unsigned subop)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    /* Read regs[b] / regs[c] through the freshly-rebased pointer at
+     * every step: a GC inside mino_cons can reallocate bc_regs and
+     * leave the C local stale. The base offset stays valid. */
+    list = mino_cons(S, S->bc_regs[base + c], list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    mino_val_t *r;
+    switch (subop) {
+    case BINOP_ADD: r = prim_add(S, list, NULL); break;
+    case BINOP_SUB: r = prim_sub(S, list, NULL); break;
+    case BINOP_MUL: r = prim_mul(S, list, NULL); break;
+    case BINOP_LT:  r = prim_lt (S, list, NULL); break;
+    case BINOP_LE:  r = prim_lte(S, list, NULL); break;
+    case BINOP_GT:  r = prim_gt (S, list, NULL); break;
+    case BINOP_GE:  r = prim_gte(S, list, NULL); break;
+    case BINOP_EQ:  r = prim_eq (S, list, NULL); break;
+    default:        r = NULL;                    break;
+    }
+    if (r == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* Slow path for the OP_*_IK stencils. The rhs is the pre-tagged
+ * immediate (carried in a stencil pool slot), so the helper conses it
+ * directly onto the spine -- there is no register-window read for it.
+ * The lhs still comes through regs[b]; the result lands in regs[a]
+ * after any GC-driven base relocation. */
+mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
+                                   unsigned a, unsigned b,
+                                   mino_val_t *kimm, unsigned subop)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, kimm, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    mino_val_t *r;
+    switch (subop) {
+    case BINOP_ADD: r = prim_add(S, list, NULL); break;
+    case BINOP_SUB: r = prim_sub(S, list, NULL); break;
+    case BINOP_LT:  r = prim_lt (S, list, NULL); break;
+    case BINOP_LE:  r = prim_lte(S, list, NULL); break;
+    case BINOP_EQ:  r = prim_eq (S, list, NULL); break;
+    default:        r = NULL;                    break;
+    }
+    if (r == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* Continue-marker stub. Fused-loop stencils emit a `b` instruction
+ * referencing this symbol; the JIT runtime detects the BRANCH26 reloc
+ * during emit_stencil and rewrites it to target the stencil instance's
+ * own start (the loop back-jump). The function body is never executed;
+ * a no-op `ret` is enough to give the linker a valid definition. */
+void mino_jit_loop_continue_marker(void) { /* never called */ }
+
+/* Slow path for the unary OP_INC_I / OP_DEC_I / OP_ZERO_INT_P stencils.
+ * Builds a one-element cons spine and dispatches to the matching
+ * prim; mirrors the interpreter's unary handler. */
+mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
+                                unsigned a, unsigned b, unsigned subop)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    mino_val_t *r;
+    switch (subop) {
+    case UNOP_INC:    r = prim_inc   (S, list, NULL); break;
+    case UNOP_DEC:    r = prim_dec   (S, list, NULL); break;
+    case UNOP_ZERO_P: r = prim_zero_p(S, list, NULL); break;
+    default:          r = NULL;                       break;
+    }
+    if (r == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* OP_GETGLOBAL_CACHED slow helper. Routes through the public
+ * `mino_bc_ic_global_load`, which mirrors the interpreter's handler
+ * exactly: bounds-check the slot index, run the dyn-then-env-then-
+ * cached-then-resolve cascade, refill the slot under the GC write
+ * barrier on a fresh resolve. env is passed NULL by the JIT path --
+ * JIT-eligible fns have `captures == 0`, so their bodies never bind
+ * names through env. dyn_active is read from the current thread ctx
+ * so a live `(binding ...)` form shadows the cached var the same way
+ * the interpreter does.
+ *
+ * GC-safe regs base refresh: bc_regs may relocate if the resolve path
+ * triggers an allocation (cons / write-barrier / map_get cascade). */
+mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
+                                            mino_val_t **regs,
+                                            unsigned a,
+                                            mino_bc_fn_t *bc,
+                                            unsigned slot_idx)
+{
+    ptrdiff_t          base       = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx        = mino_current_ctx(S);
+    int                dyn_active = (ctx->dyn_stack != NULL);
+    /* env: published by mino_jit_invoke from the bc_run frame's env
+     * parameter. Captured-local symbol references compile to
+     * OP_GETGLOBAL_CACHED slots whose resolution path runs through
+     * env first; without env, those slots would fail to resolve and
+     * surface as spurious "unbound symbol" diagnostics. */
+    mino_env_t *env = ctx->jit_invoke_env;
+    mino_val_t *v   = mino_bc_ic_global_load(S, bc, (int)slot_idx,
+                                             env, dyn_active);
+    if (v == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = v;
+    return regs;
+}
+
+/* OP_CALL slow helper -- uncached call site. Reads the callee from
+ * regs[fn_reg], invokes `apply_callable_argv` with argv at
+ * regs[fn_reg + 1..fn_reg + argc], stores the result at regs[dst].
+ * env reaches the callable via the same `jit_invoke_env` publish
+ * point the cached variants use. */
+mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
+                                unsigned fn_reg, unsigned argc, unsigned dst)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_val_t        *callee = S->bc_regs[base + fn_reg];
+    mino_val_t        *r = apply_callable_argv(S, callee,
+                                                S->bc_regs + base + fn_reg + 1,
+                                                (int)argc, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+}
+
+/* OP_CLOSURE slow helper. Reads the child fn from bc->consts[bx],
+ * builds a fresh closure value over the current jit_invoke_env, and
+ * stores it at regs[a]. Mirrors the interpreter's OP_CLOSURE
+ * handler. */
+mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
+                                    unsigned a, mino_bc_fn_t *bc, unsigned bx)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    if (bx >= bc->consts_len) return NULL;
+    mino_val_t *child = bc->consts[bx];
+    if (child == NULL || mino_type_of(child) != MINO_FN) return NULL;
+    mino_val_t *closure = make_fn(S, child->as.fn.params,
+                                   child->as.fn.body,
+                                   ctx->jit_invoke_env);
+    if (closure == NULL) return NULL;
+    closure->as.fn.defining_ns = child->as.fn.defining_ns;
+    *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
+    closure->as.fn.shape = child->as.fn.shape;
+    regs    = S->bc_regs + base;
+    regs[a] = closure;
+    return regs;
+}
+
+/* OP_PUSH_ENV slow helper. Extends the JIT-invoke env with a fresh
+ * child frame; subsequent OP_ENV_BIND helpers bind into it and
+ * resolve-cascade lookups walk through it before reaching the
+ * caller-supplied env. */
+mino_val_t **mino_jit_push_env_slow(mino_state_t *S, mino_val_t **regs)
+{
+    mino_thread_ctx_t *ctx   = mino_current_ctx(S);
+    mino_env_t        *child = env_child(S, ctx->jit_invoke_env);
+    if (child == NULL) return NULL;
+    ctx->jit_invoke_env = child;
+    return regs;
+}
+
+/* OP_POP_ENV slow helper. Walks the JIT-invoke env up one frame.
+ * NULL parent (already at the root) is a malformed bc; surface as a
+ * slow-path failure rather than corrupting the chain. */
+mino_val_t **mino_jit_pop_env_slow(mino_state_t *S, mino_val_t **regs)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    mino_env_t        *env = ctx->jit_invoke_env;
+    if (env == NULL || env->parent == NULL) return NULL;
+    ctx->jit_invoke_env = env->parent;
+    return regs;
+}
+
+/* OP_ENV_BIND slow helper. Publishes regs[a] under the symbol at
+ * bc->consts[bx] into the current JIT-invoke env. Mirrors the
+ * interpreter's OP_ENV_BIND so inner fn literals captured at
+ * OP_CLOSURE time pick up the same names the interpreter would. */
+mino_val_t **mino_jit_env_bind_slow(mino_state_t *S, mino_val_t **regs,
+                                     unsigned a, mino_bc_fn_t *bc,
+                                     unsigned bx)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    if (bx >= bc->consts_len) return NULL;
+    mino_val_t *sym = bc->consts[bx];
+    if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) return NULL;
+    env_bind_sym(S, ctx->jit_invoke_env, sym, S->bc_regs[base + a]);
+    return regs;
+}
+
+/* OP_TAILCALL slow helper. Builds the args cons list head-first
+ * from regs[fn_reg + 1..fn_reg + argc] and publishes (callee, args)
+ * on `S->tail_call_sentinel`. Returns the sentinel pointer so the
+ * stencil's natural ret hands it back as the JIT region's return
+ * value; the trampoline in apply_callable picks up the new
+ * (fn, args) without growing the C stack. */
+mino_val_t *mino_jit_tailcall_slow(mino_state_t *S, mino_val_t **regs,
+                                    unsigned fn_reg, unsigned argc)
+{
+    ptrdiff_t   base   = regs - S->bc_regs;
+    mino_val_t *callee = S->bc_regs[base + fn_reg];
+    mino_val_t *args   = mino_nil(S);
+    if (args == NULL) return NULL;
+    for (int i = (int)argc - 1; i >= 0; i--) {
+        mino_val_t *cell = mino_cons(S,
+                                     S->bc_regs[base + fn_reg + 1 + i],
+                                     args);
+        if (cell == NULL) return NULL;
+        args = cell;
+    }
+    S->tail_call_sentinel.as.tail_call.fn   = callee;
+    S->tail_call_sentinel.as.tail_call.args = args;
+    return &S->tail_call_sentinel;
+}
+
+/* OP_CALL_CACHED slow helper. Resolves the callee through the same
+ * IC cascade as the read-only OP_GETGLOBAL_CACHED variant, then
+ * dispatches via `apply_callable_argv` so all callable kinds (PRIM
+ * argv, FN bc, FN tree-walker, multi-arity dispatch, etc.) reach
+ * their correct entry. The argv slice is taken straight from the
+ * bytecode register window at regs[arg_base..arg_base + argc - 1];
+ * `apply_callable_argv` reads from this slice without writing back,
+ * so the live regs base is stable for the duration of the call's
+ * argv reads (any GC inside the callee may relocate the window
+ * afterwards, which is why the helper refreshes from S on return). */
+mino_val_t **mino_jit_call_cached_slow(mino_state_t *S, mino_val_t **regs,
+                                       unsigned arg_base, unsigned argc,
+                                       unsigned dst,
+                                       mino_bc_fn_t *bc, unsigned slot_idx)
+{
+    ptrdiff_t          base       = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx        = mino_current_ctx(S);
+    int                dyn_active = (ctx->dyn_stack != NULL);
+    mino_env_t        *env        = ctx->jit_invoke_env;
+    mino_val_t        *callee     = mino_bc_ic_global_load(S, bc,
+                                                            (int)slot_idx,
+                                                            env, dyn_active);
+    if (callee == NULL) return NULL;
+    mino_val_t *r = apply_callable_argv(S, callee,
+                                        S->bc_regs + base + arg_base,
+                                        (int)argc, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+}
+
+/* Inlined-resolve fast complement of mino_jit_call_cached_slow. The
+ * stencil's inline path verified the IC slot is hot (cached !=NULL,
+ * gen match, no dyn binding active), so it hands the resolved callee
+ * to this helper directly and skips the second IC lookup. Same
+ * dispatch + regs-refresh contract as the cached_slow path. */
+mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S, mino_val_t **regs,
+                                          mino_val_t *callee,
+                                          unsigned arg_base, unsigned argc,
+                                          unsigned dst)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_val_t *r = apply_callable_argv(S, callee,
+                                        S->bc_regs + base + arg_base,
+                                        (int)argc, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+}
+
+/* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
+ * bit of a regs pointer to signal "loop exits" to the caller; the
+ * caller masks the bit off before dereferencing. */
+static mino_val_t **loop_tag_exit(mino_val_t **regs)
+{
+    return (mino_val_t **)((uintptr_t)regs | (uintptr_t)1);
+}
+
+/* Slow path for OP_LOOP_INT_LT. Mirrors the interpreter's
+ * cons + prim_lt + prim_inc dance. Returns:
+ *   - NULL on cons OOM (caller propagates).
+ *   - regs (low-bit-clear) if the loop should continue (back-jump):
+ *     the counter has been incremented through prim_inc and written
+ *     back to regs[a].
+ *   - regs | 1 if the loop should exit (fall through to next stencil). */
+mino_val_t **mino_jit_loop_int_lt_slow(mino_state_t *S, mino_val_t **regs,
+                                       unsigned a, unsigned b)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *ltv = prim_lt(S, list, NULL);
+    if (ltv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (!mino_is_truthy_inline(ltv)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *incv = prim_inc(S, list2, NULL);
+    if (incv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = incv;
+    return regs;  /* low-bit-clear: continue */
+}
+
+/* Slow path for OP_LOOP_INT_DEC. Mirrors the interpreter's
+ * cons + prim_zero_p + prim_dec dance. Same exit-signal convention as
+ * mino_jit_loop_int_lt_slow. */
+mino_val_t **mino_jit_loop_int_dec_slow(mino_state_t *S, mino_val_t **regs,
+                                        unsigned a)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *zp = prim_zero_p(S, list, NULL);
+    if (zp == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (mino_is_truthy_inline(zp)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *decv = prim_dec(S, list2, NULL);
+    if (decv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = decv;
+    return regs;
+}
+
+/* Slow path for OP_LOOP_INT_LT_INC. Mirrors the interpreter's
+ * cons + prim_lt + prim_inc + prim_inc dance for the two-binding
+ * counted-loop shape. Returns the same low-bit-tagged signal as the
+ * single-binding LT helper. */
+mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
+                                            unsigned a, unsigned b,
+                                            unsigned c)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *ltv = prim_lt(S, list, NULL);
+    if (ltv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (!mino_is_truthy_inline(ltv)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *incv = prim_inc(S, list2, NULL);
+    if (incv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    mino_val_t *list3 = mino_nil(S);
+    if (list3 == NULL) return NULL;
+    list3 = mino_cons(S, regs[c], list3);
+    if (list3 == NULL) return NULL;
+    mino_val_t *incv2 = prim_inc(S, list3, NULL);
+    if (incv2 == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = incv;
+    regs[c] = incv2;
+    return regs;
+}
+
+#endif /* MINO_CPJIT_HOST */
