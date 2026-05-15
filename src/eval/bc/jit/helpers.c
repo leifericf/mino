@@ -157,6 +157,50 @@ mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_GET_KW_MAP. Mirrors the interpreter handler:
+ * MINO_MAP fast lane via map_get_val; MINO_RECORD + MINO_KEYWORD
+ * fast lane via record_field_index; everything else
+ * (3-arg-default get, sorted-map, transient, set, vector, etc.)
+ * falls through to prim_get's full semantics. */
+mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
+                                      unsigned a, unsigned b, unsigned c)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *key  = S->bc_regs[base + c];
+    if (coll != NULL && key != NULL) {
+        int t = mino_type_of(coll);
+        if (t == MINO_MAP) {
+            mino_val_t *v = map_get_val(coll, key);
+            regs    = S->bc_regs + base;
+            regs[a] = v == NULL ? mino_nil(S) : v;
+            return regs;
+        }
+        if (t == MINO_RECORD && mino_type_of(key) == MINO_KEYWORD) {
+            int idx = record_field_index(coll, key);
+            if (idx >= 0) {
+                regs    = S->bc_regs + base;
+                regs[a] = coll->as.record.vals[idx];
+                return regs;
+            }
+            /* Keyword not a declared field: fall through to prim_get
+             * which consults the optional ext-map and returns nil for
+             * an absent key. */
+        }
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, key, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_get(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Slow path for OP_COUNT_VEC. Vector fast lane returns vec.len as a
  * tagged int (or boxed for the rare overflow). Any other coll type
  * (lazy seq, string, map, set, ...) falls through to prim_count. */

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.227.0 — JIT Stencil For OP_GET_KW_MAP
+
+Continues the coverage cycle. Adds the (get coll k) fast-lane
+stencil. Trampoline into `mino_jit_get_kw_map_slow` which mirrors
+the bc_run handler: MINO_MAP via `map_get_val`, MINO_RECORD +
+MINO_KEYWORD via `record_field_index`, anything else (sorted-map,
+transient, 3-arg-default, ext-map miss) routes through prim_get.
+
+`release-gate` green.
+
 ## v0.226.0 — JIT Stencils For OP_COUNT_VEC + OP_EMPTY_VEC
 
 Continues the coverage cycle. Two more trampoline stencils for the

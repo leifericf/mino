@@ -402,6 +402,13 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_empty_vec_symbols, stencil_op_empty_vec_nsymbols,
         stencil_op_empty_vec_relocs, stencil_op_empty_vec_nrelocs,
         0u
+    },
+    {
+        OP_GET_KW_MAP,
+        stencil_op_get_kw_map_bytes, stencil_op_get_kw_map_size,
+        stencil_op_get_kw_map_symbols, stencil_op_get_kw_map_nsymbols,
+        stencil_op_get_kw_map_relocs, stencil_op_get_kw_map_nrelocs,
+        0u
     }
 };
 const int mino_jit_stencils_count =
@@ -520,6 +527,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_first_vec_slow",        (void *)(uintptr_t)mino_jit_first_vec_slow},
     {"mino_jit_count_vec_slow",        (void *)(uintptr_t)mino_jit_count_vec_slow},
     {"mino_jit_empty_vec_slow",        (void *)(uintptr_t)mino_jit_empty_vec_slow},
+    {"mino_jit_get_kw_map_slow",       (void *)(uintptr_t)mino_jit_get_kw_map_slow},
     {"mino_jit_call_slow",             (void *)(uintptr_t)mino_jit_call_slow},
     {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
     {"mino_jit_closure_slow",          (void *)(uintptr_t)mino_jit_closure_slow},
