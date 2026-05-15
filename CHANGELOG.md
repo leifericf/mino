@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.224.0 — Perf-Pivot Cycle Close
+
+Closes the apply_callable_argv inlining cycle (v0.220 - v0.224). The
+architectural changes are in place: the IC slot carries classified
+callable shape, `OP_CALL_CACHED` branches three ways on that shape,
+the bc-fn invocation core is factored, and `mino_bc_run`'s arity
+dispatch peels the single-clause case.
+
+The cycle's plan gate (`fib(25) 1.30x` after v0.222.0) is **not
+met**. Measured medians sit within run-to-run noise across the four
+releases. Status report + root-cause analysis in
+`.local/cpjit-perf-pivot-cycle-status.md`.
+
+Direction for the next perf cycle: cache `bc->native` directly in
+the IC slot, inline `bc_push_window` + arg copy in the stencil, and
+push callable-kind dispatch into a per-slot function pointer.
+Substantial enough to merit its own cycle; status doc names the
+concrete levers.
+
 ## v0.223.0 — PRIM_ARGV Fast Path In OP_CALL_CACHED
 
 Step 4 of the apply_callable_argv inlining cycle. Adds a third branch
