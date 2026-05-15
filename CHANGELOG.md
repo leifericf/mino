@@ -1,5 +1,108 @@
 # Changelog
 
+## v0.209.0 — CPJIT Coverage Cycle Close
+
+Closes the seven-release CPJIT coverage cycle. The cycle's headline
+deliverable was eligibility coverage -- moving the JIT from "leaf
+fns with recognized ops" to "calls + globals + closures +
+multi-arity all work" -- with measurement infrastructure that
+survives the cycle. The infrastructure landed; the eligibility
+coverage hit the plan's ≥80% target. The speedup gate the plan
+also called for did not.
+
+### Eligibility coverage (the headline)
+
+`MINO_CPJIT_STATS=1` on `tests/run.clj`:
+
+  | Release   | attempts | eligible | top blocker         |
+  |-----------|----------|----------|---------------------|
+  | v0.202.0  |       1  |   100%   | (only top-level)    |
+  | v0.203.0  |     69   |    18.8% | ic-slots (46%)      |
+  | v0.204.0  |     69   |    20.3% | unknown-op (45%)    |
+  | v0.205.0  |     69   |    26.1% | OP_TAILCALL (20%)   |
+  | v0.206.0  |    121   |    68.6% | captures (12%)      |
+  | v0.207.0  |    126   |    76.2% | captures (12%)      |
+  | v0.208.0  |    143   |    83.9% | unknown-op (long tail) |
+
+`MINO_CPJIT_STATS=1` on `jit_bench`:
+
+  | Release   | attempts | eligible |
+  |-----------|----------|----------|
+  | v0.202.0  |     ~17  |    ~44%  |
+  | v0.208.0  |      39  |    94.9% |
+
+The 23 fns still rejected at cycle end are all blocked by
+unstencilised body ops in their bodies (`OP_GET_KW_MAP` x6,
+`OP_FIRST_VEC` / `OP_COUNT_VEC` / `OP_EMPTY_VEC` x2-3 each,
+`OP_MAKE_LAZY` x6, `OP_THROW` x1, etc.). The closure / call /
+global eligibility set is fully covered; what remains is a long
+tail of small read- and write-side stencils, scheduled outside
+this cycle.
+
+### Raw speedup (JIT vs no-JIT, v0.208.0 binary)
+
+`jit_bench` counted-loop bodies (arm64 / Darwin, single-shot):
+
+  | Workload         | JIT     | no-JIT  | Speedup |
+  |------------------|---------|---------|---------|
+  | sum-to 100       |  3.31us |  3.44us |  1.04x  |
+  | sum-to 1000      | 18.65us | 19.27us |  1.03x  |
+  | count-to 1000    |  3.59us |  3.57us |  0.99x  |
+  | countdown 1000   |  2.22us |  2.40us |  1.08x  |
+  | lockstep 1000    |  3.90us |  3.92us |  1.01x  |
+  | abs -5           |  1.69us |  1.73us |  1.02x  |
+  | (+ x 3) x 1M     |  1.71us |  1.63us |  0.95x  |
+
+`realistic_bench`:
+
+  | Workload                | JIT     | no-JIT  | Speedup |
+  |-------------------------|---------|---------|---------|
+  | fibonacci(25)           |  7.43ms |  8.88ms |  1.20x  |
+  | map/filter/map/reduce   | 704us   | 757us   |  1.08x  |
+  | realize 10k lazy range  |  6.39ms |  6.60ms |  1.03x  |
+  | nested vectors 500x100  | 20.56ms | 21.17ms |  1.03x  |
+  | bump 5k int-map values  | 18.66ms | 18.79ms |  1.01x  |
+  | build 5k int-map + sum  | 11.17ms | 10.43ms |  0.93x  |
+
+Test suite wall-clock (best of 3 runs):
+
+  | Run    | JIT    | no-JIT |
+  |--------|--------|--------|
+  | best   | 14.77s | 14.91s |
+  | avg    | 14.88s | 14.97s |
+
+The plan's targets (`jit_bench` geomean ≥1.5x, no row <0.95x,
+test suite ≥1.2x) are not met. The cycle's slow-helper-routed
+stencils call into mostly the same prim / IC / dispatch paths the
+interpreter takes inline; clang's chain-ABI register dance plus
+the per-stencil `bl` overhead consume the savings that come from
+skipping the bytecode-dispatch fetch + switch. The cycle's
+expected unlock -- shape coverage -- is real and large. The
+speedup unlock the plan also predicted needs a follow-on cycle
+that moves the cached-fast-paths inline (slot.gen comparison
+inside the stencil bytes, callee-bc comparison for self-recursive
+tail-calls, etc.).
+
+### Cycle decisions / deferrals
+
+- `jit_bench` is not added to `mino-bench/perf_gate.clj`. The
+  per-row deltas are within run-to-run noise on this hardware,
+  so a strict gate would flag noise without catching regressions.
+  A future cycle that ships a measurable speedup adds the gate
+  alongside the data.
+
+- LOOP_INT_LT redo (the v0.202.0 deferral) stays deferred. The
+  cycle's measurement shows no new evidence that justifies the
+  direct-emit work; counted-loop wins come from the existing
+  fused stencils landed in v0.201.0 and the cycle's broader
+  eligibility coverage.
+
+- ARM64 Darwin only. Windows + x86_64 + ARM64 Linux remain a
+  separate portability cycle, scheduled after the speedup-focused
+  follow-on cycle settles the design.
+
+Full test suite (1688 / 7854) passes; ASan rebuild + tests pass.
+
 ## v0.208.0 — Closure / Env Stencils
 
 Drops the `captures` blocker by stencilising the four env-related
