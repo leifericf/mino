@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.210.0 — JIT Stencil-Layer Runtime-Layout Header
+
+Foundation release. Lands `src/eval/bc/stencils/runtime_layout.h`, a
+curated stencil-side view of the runtime struct fields the JIT's
+inline fast paths will read in subsequent releases.
+
+Stencil .c sources compile standalone with `-fno-builtin
+-fno-optimize-sibling-calls` and no -I path beyond `stencils/`, so
+they cannot reach `mino.h`, `mino_internal.h`, `runtime/internal.h`,
+or `eval/bc/internal.h` directly. Today every cached / arith /
+call stencil routes through a slow helper via `bl`; the helper
+contains the same fast-path-then-resolve logic the interpreter runs
+inline, so the JIT pays for the `bl` and the chain-ABI dance while
+matching (rather than beating) the interpreter's per-op cost on hit
+paths.
+
+The follow-on releases on this branch move the IC-slot check,
+tagged-int arith, and call-resolve fast paths inline inside the
+stencil bytes; on hit the stencil never `bl`s. That requires
+visibility into `mino_state_t::ic_gen`, `mino_state_t::bc_regs`,
+`mino_thread_ctx_t::dyn_stack`, and `mino_bc_fn_t::ic_slots` from
+within stencil sources. The new header provides that visibility
+without dragging the canonical headers into the hermetic stencil
+compilation unit.
+
+Mechanism:
+
+  - Forward-declared struct tags + selectively-gated typedefs (each
+    gated by the canonical header's `MINO_H` / `RUNTIME_INTERNAL_H` /
+    `MINO_EVAL_BC_INTERNAL_H` include guard) so this header is also
+    includable from runtime translation units that already see the
+    canonical definitions.
+  - The IC slot struct is mirrored field-for-field; tagged-int macros
+    (`MINO_TAG_INT`, `MINO_INT_VAL`, `MINO_MAKE_INT`, `MINO_INT_MAX`,
+    etc.) are re-exported.
+  - Layout-anchor offset constants (`MINO_JIT_LAYOUT_OFFSET_*`) and
+    accessor macros (`MINO_JIT_STATE_IC_GEN`, `MINO_JIT_CTX_DYN_STACK`,
+    `MINO_JIT_BC_IC_SLOTS`, `MINO_JIT_CURRENT_CTX`) for fields the
+    stencils will read.
+  - `mino_tls_ctx` re-declared so the inlined `MINO_JIT_CURRENT_CTX`
+    macro can do TLS load + main_ctx fallback without a bl.
+  - `src/eval/bc/jit.c` (which sees both the canonical typedefs and
+    the new header) fires C99-compatible build-time asserts against
+    `offsetof(<real struct>, <field>)`, so any field reorder in
+    `runtime/internal.h` or `eval/bc/internal.h` surfaces as a
+    compile error in jit.c rather than a stencil mis-read at
+    runtime.
+
+No stencil .c source consumes `runtime_layout.h` at this release.
+Re-running `gen-stencils` produces a byte-identical
+`stencils_arm64_darwin.h` against v0.209.0. Behavioural no-op.
+
+### Verification
+
+  - `make -j8` clean.
+  - 1688 tests / 7854 assertions pass under both release and ASan.
+  - `git diff src/eval/bc/stencils/generated/stencils_arm64_darwin.h`
+    against v0.209.0 is empty after `gen-stencils`.
+
+### Next
+
+v0.211.0 inlines the OP_GETGLOBAL_CACHED hit path through the new
+accessor macros. That is the first release that should show a
+measurable speedup on hot-loop fns reading globals; today's helper
+`bl` becomes a load + compare + branch.
+
 ## v0.209.0 — CPJIT Coverage Cycle Close
 
 Closes the seven-release CPJIT coverage cycle. The cycle's headline

@@ -75,7 +75,64 @@
 #include "../../mino_internal.h"
 #include "../../prim/internal.h"
 #include "internal.h"
+#include "stencils/runtime_layout.h"
 #include MINO_CPJIT_STENCILS_HEADER
+
+/* Stencil-layer runtime layout cross-check.
+ *
+ * stencils/runtime_layout.h exposes a curated view of the runtime
+ * struct offsets the JIT's inline fast paths read, gated so the
+ * canonical typedefs from the headers above still win in this
+ * translation unit. The asserts below run on the dual-visibility
+ * compile: each MINO_JIT_LAYOUT_OFFSET_* constant is compared to
+ * `offsetof(<real struct>, <field>)`, so any field reorder in
+ * runtime/internal.h or eval/bc/internal.h fires a compile error
+ * here rather than corrupting a stencil read at runtime. Update both
+ * sides together: bump the constant in runtime_layout.h, update the
+ * matching assert here, regenerate the stencil byte tables.
+ *
+ * C99-compatible assert form: typedef of a negative-sized array on
+ * mismatch. `_Static_assert` is C11; the runtime CFLAGS pin -std=c99
+ * with -Wpedantic, so the keyword form would force the compiler to
+ * emit a -Wc11-extensions diagnostic that the -Werror knob turns
+ * into a hard error. */
+#define MINO_JIT_LAYOUT_CAT_(a, b)         a##b
+#define MINO_JIT_LAYOUT_CAT(a, b)          MINO_JIT_LAYOUT_CAT_(a, b)
+#define MINO_JIT_LAYOUT_ASSERT(cond, tag)                                  \
+    typedef char MINO_JIT_LAYOUT_CAT(                                      \
+        mino_jit_layout_assert_##tag##_, __LINE__)[(cond) ? 1 : -1]
+
+MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN ==
+                           offsetof(struct mino_state, ic_gen),
+                       state_ic_gen);
+MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS ==
+                           offsetof(struct mino_state, bc_regs),
+                       state_bc_regs);
+MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_MAIN_CTX ==
+                           offsetof(struct mino_state, main_ctx),
+                       state_main_ctx);
+MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK ==
+                           offsetof(struct mino_thread_ctx, dyn_stack),
+                       ctx_dyn_stack);
+MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS ==
+                           offsetof(struct mino_bc_fn, ic_slots),
+                       bc_ic_slots);
+MINO_JIT_LAYOUT_ASSERT(sizeof(mino_bc_ic_slot_t) == 48,
+                       ic_slot_size);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, sym) == 0,
+                       ic_slot_sym);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, cached) == 8,
+                       ic_slot_cached);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, gen) == 16,
+                       ic_slot_gen);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, kind) == 20,
+                       ic_slot_kind);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, atom) == 24,
+                       ic_slot_atom);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, cached_map) == 32,
+                       ic_slot_cached_map);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, cached_type) == 40,
+                       ic_slot_cached_type);
 
 /* Reloc kind enum mirror -- kept in sync with the values
  * tools/stencil_extract.c writes into <sym>_relocs tables. Header
