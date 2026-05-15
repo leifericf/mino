@@ -40,6 +40,30 @@
 #define LC_SEGMENT_64 0x19u
 #define LC_SYMTAB     0x02u
 
+/* ELF64 magic: ELF (0x7f) "E" "L" "F" in the first four bytes. The
+ * extractor sniffs the first four bytes to pick a parser; the full
+ * ELF parsing pipeline (sections walk, symtab, rela tables, ARM64
+ * reloc-kind mapping) lands in the platform release that runs the
+ * build on an ARM64 Linux host. The constants below are the
+ * load-bearing identifiers the sniffing path consults. */
+#define ELF_MAGIC_BYTE_0  0x7fu
+#define ELF_MAGIC_BYTE_1  'E'
+#define ELF_MAGIC_BYTE_2  'L'
+#define ELF_MAGIC_BYTE_3  'F'
+
+/* ARM64 ELF reloc kinds the JIT patcher consumes. The numeric values
+ * come from `<elf.h>` and the AArch64 ELF ABI. Mapping to the
+ * runtime-stable `MINO_STENCIL_RELOC_*` enum lives below alongside
+ * the Mach-O mapping; both feed the same patcher. */
+#define R_AARCH64_ABS64               257u
+#define R_AARCH64_CALL26              283u
+#define R_AARCH64_JUMP26              282u
+#define R_AARCH64_ADR_PREL_PG_HI21    275u
+#define R_AARCH64_ADD_ABS_LO12_NC     277u
+#define R_AARCH64_LDST64_ABS_LO12_NC  286u
+#define R_AARCH64_ADR_GOT_PAGE        311u
+#define R_AARCH64_LD64_GOT_LO12_NC    312u
+
 /* N_TYPE mask bits in nlist_64.n_type. Only N_EXT and N_SECT matter for
  * stencil symbol lookup: the linker emits the stencil function as an
  * extern N_SECT-bound symbol, and the relocations reference imm
@@ -664,6 +688,24 @@ int main(int argc, char **argv)
     if (argc < argi + 2) { usage(); return 2; }
     mblob_t blob;
     if (read_file(argv[argi], &blob) != 0) return 1;
+    /* Sniff the object file format. Mach-O 64 starts with 0xfeedfacf
+     * (little-endian magic); ELF starts with 0x7f 'E' 'L' 'F'. The
+     * Mach-O path is fully wired today; the ELF path returns a
+     * placeholder error so the ARM64 Linux platform release can
+     * extend it without changing the dispatch surface. */
+    if (blob.len >= 4
+        && blob.data[0] == ELF_MAGIC_BYTE_0
+        && blob.data[1] == ELF_MAGIC_BYTE_1
+        && blob.data[2] == ELF_MAGIC_BYTE_2
+        && blob.data[3] == ELF_MAGIC_BYTE_3) {
+        fprintf(stderr,
+                "stencil_extract: ELF object detected; the ELF parser "
+                "lands in the ARM64 Linux platform release. Rebuild "
+                "after that release on a Linux host to regenerate "
+                "src/eval/bc/stencils/generated/stencils_arm64_linux.h.\n");
+        blob_free(&blob);
+        return 3;
+    }
     macho_view_t v;
     if (macho_open(&blob, &v) != 0) { blob_free(&blob); return 1; }
     int rc = 0;

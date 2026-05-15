@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.190.0 — ARM64 Linux Infrastructure Scaffolding
+
+`tools/stencil_extract.c` learns to sniff an object file's magic
+bytes before dispatching to a parser. Mach-O 64 keeps its existing
+path; ELF objects (`0x7f` `'E'` `'L'` `'F'`) are detected and the
+tool emits a placeholder error pointing at the platform release
+that finishes the wiring. The ARM64 ELF reloc-kind constants
+(`R_AARCH64_ABS64`, `R_AARCH64_CALL26`, `R_AARCH64_JUMP26`,
+`R_AARCH64_ADR_PREL_PG_HI21`, `R_AARCH64_ADD_ABS_LO12_NC`,
+`R_AARCH64_LDST64_ABS_LO12_NC`, `R_AARCH64_ADR_GOT_PAGE`,
+`R_AARCH64_LD64_GOT_LO12_NC`) are declared so the eventual ELF
+parser drops straight into the existing `MINO_STENCIL_RELOC_*`
+mapping path.
+
+`src/eval/bc/jit.c` host detection grows an ARM64 Linux branch
+behind `MINO_CPJIT_ARM64_LINUX`. The stencils header path is
+indirected through a `MINO_CPJIT_STENCILS_HEADER` macro so the
+file structure no longer hard-codes the Darwin path. When the
+ARM64 Linux header is generated and the macro defined, the full
+pipeline compiles in without a source-level reshuffle.
+
+Actual ARM64 Linux header generation needs the build to run on
+an ARM64 Linux host (the host C compiler emits the host's object
+format, and no portable cross-compiler is bundled). The
+infrastructure carries the load until that build runs; embedders
+on ARM64 Linux land on the stub path today and get the JIT once
+their build produces the generated header.
+
 ## v0.189.0 — JIT Default On with Host-Aware Stubs
 
 Both the bootstrap `Makefile` and `lib/mino/tasks/builtin.clj`

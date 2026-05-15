@@ -36,14 +36,22 @@
 #include "jit.h"
 
 #ifdef MINO_CPJIT
-/* Host detection: only ARM64 Darwin has a generated stencils header
- * today. Other (arch, os) combinations get the API but every entry
- * returns failure / NULL so the runtime falls through to the
- * interpreter. The portability fence here keeps the source tree
- * single-target while letting the cycle's later platform releases
- * extend it without source restructuring. */
+/* Host detection: each (arch, os) pair we ship stencils for sets
+ * MINO_CPJIT_HOST and the corresponding STENCILS_HEADER_PATH so the
+ * full pipeline compiles in. Other combinations get the public API
+ * (stub branch below) where every entry returns failure / NULL so
+ * the runtime falls through to the interpreter.
+ *
+ * Today only ARM64 Darwin has a generated header. ARM64 Linux is
+ * detected here so jit.c is one source change away from full
+ * support once the ELF reloc extractor lands and the platform's
+ * generated header is committed. */
 #if defined(__aarch64__) && defined(__APPLE__)
 #define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_STENCILS_HEADER "stencils/generated/stencils_arm64_darwin.h"
+#elif defined(__aarch64__) && defined(__linux__) && defined(MINO_CPJIT_ARM64_LINUX)
+#define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_STENCILS_HEADER "stencils/generated/stencils_arm64_linux.h"
 #endif
 #endif
 
@@ -59,7 +67,7 @@
 
 #include "../../mino.h"
 #include "../../mino_internal.h"
-#include "stencils/generated/stencils_arm64_darwin.h"
+#include MINO_CPJIT_STENCILS_HEADER
 
 /* Reloc kind enum mirror -- kept in sync with the values
  * tools/stencil_extract.c writes into <sym>_relocs tables. Header
