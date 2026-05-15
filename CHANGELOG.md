@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.202.0 — CPJIT Stencil Cycle Close + Perf Measurement
+
+Drops `OP_LOOP_INT_LT` from the active stencil descriptor table
+(`g_stencils[] in src/eval/bc/jit.c`). Bench measurement against
+the interpreter's inline fast path showed a 17% regression on the
+canonical `count-loop` shape: the interpreter's
+`if (vc != NULL && MINO_IS_INT(vc) && vc < vl) { ... }` chain plus
+its tight dispatch loop edges out the stencil's chain-ABI overhead
+plus literal-pool reads. Per [[measure-before-after]], the
+regression isn't shipped.
+
+The stencil source stays under `src/eval/bc/stencils/loop_int_lt.c`
+so a future cycle can revisit. The other two fused-loop stencils
+(`OP_LOOP_INT_DEC`, `OP_LOOP_INT_LT_INC`) remain active -- both
+ship measurable wins.
+
+Cycle measurement (`(nano-time)`-based, n=1000 inner iters,
+10k outer calls; arm64 / Darwin):
+
+  | Workload         | JIT      | no-JIT   | Speedup |
+  |------------------|----------|----------|---------|
+  | sum-loop 1000    |  8666 ns | 18063 ns | 2.08x   |
+  | dec-loop 1000    |  1737 ns |  2877 ns | 1.66x   |
+  | lockstep 1000    |  3290 ns |  3510 ns | 1.07x   |
+  | count-loop 1000  |  3149 ns |  3032 ns | 0.96x   |
+  | abs-fn -5        |  1524 ns |  1529 ns | 1.00x   |
+  | add-3 5          |  1611 ns |  1632 ns | 1.01x   |
+
+The cycle's headline target -- 2-3x on a counted loop -- is hit on
+`sum-loop` (a two-binding accumulator loop that compiles to unfused
+INC_I / LT_II / JMPIFNOT / JMP stencils, all of which the v0.196.0
+- v0.200.0 work added). `dec-loop`, which compiles to the fused
+`OP_LOOP_INT_DEC`, sees a clean 1.66x via the v0.201.0 stencil.
+`count-loop` remains at interpreter speed, the deliberate outcome
+described above. Pure-arith functions (`abs-fn`, `add-3`) sit at
+noise: their bodies were already JIT-eligible before the cycle and
+the JIT region's call-edge cost dominates the iteration delta.
+
+Cycle stencil set after v0.202.0: 22 ops active (MOVE, LOAD_K,
+RETURN, fused LOAD_K-RETURN, 3 arith II, 5 comparison II, 3 unary,
+5 IK forms, 2 fused-loop) plus 2 direct-emit branch ops
+(OP_JMP, OP_JMPIFNOT).
+
+Full test suite (1688 / 7854) passes; ASan rebuild + tests pass.
+
 ## v0.201.0 — Fused Counted-Loop Stencils
 
 `src/eval/bc/stencils/{loop_int_lt,loop_int_dec,loop_int_lt_inc}.c`

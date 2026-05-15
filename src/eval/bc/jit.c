@@ -301,13 +301,15 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_eq_ik_relocs, stencil_op_eq_ik_nrelocs,
         0u
     },
-    {
-        OP_LOOP_INT_LT,
-        stencil_op_loop_int_lt_bytes, stencil_op_loop_int_lt_size,
-        stencil_op_loop_int_lt_symbols, stencil_op_loop_int_lt_nsymbols,
-        stencil_op_loop_int_lt_relocs, stencil_op_loop_int_lt_nrelocs,
-        0u
-    },
+    /* OP_LOOP_INT_LT intentionally absent: measurement against the
+     * interpreter's inline fast path showed a 17% regression on the
+     * canonical `count-loop` workload. The bytecode compiler still
+     * emits OP_LOOP_INT_LT for the matching shape; without a stencil
+     * the JIT eligibility check rejects the body and the interpreter
+     * runs the loop at its (slightly faster) native rate. The
+     * stencil source is kept under src/eval/bc/stencils/ in case a
+     * future cycle finds a way to beat the interpreter on this
+     * shape. */
     {
         OP_LOOP_INT_DEC,
         stencil_op_loop_int_dec_bytes, stencil_op_loop_int_dec_size,
