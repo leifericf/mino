@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.232.0 — x86_64 ELF Reloc Map + Enum Mirror
+
+Opens cycle A2 (x86_64 portability). Adds the runtime-stable
+`MINO_STENCIL_RELOC_X86_64_*` enum entries (ABS64=6, PC32=7,
+GOTPCREL=8) on both the runtime side (`src/eval/bc/jit/internal.h`)
+and the extractor side (`tools/stencil_extract.c`), and wires the
+ELF x86_64 reloc-kind map.
+
+  - `reloc_x86_64_elf_kind_map` covers `R_X86_64_64` (ABS64),
+    `R_X86_64_PC32` and `R_X86_64_PLT32` (both collapse to PC32 --
+    the linker-only PLT indirection doesn't apply once stencils
+    are flattened into the JIT region), and `R_X86_64_GOTPCREL` /
+    `R_X86_64_REX_GOTPCRELX` (collapse to GOTPCREL -- REX is a
+    peephole hint, not a different patcher instruction).
+  - `elf_extract_relocs` now dispatches on `e_machine` to pick the
+    right kind map. AArch64 and x86_64 ELF objects both parse
+    cleanly; unrecognised machines still error out.
+  - `--selftest` extended to cover every x86_64 entry and the
+    unknown-rejects path.
+  - G3 `check-reloc-mirror` automatically picks up the three new
+    shared keys -- the gate already compares the intersection of
+    runtime-declared and extractor-declared `MINO_STENCIL_RELOC_*`
+    names. Verified by a synthetic x86_64 ELF smoke test that
+    extracted a stencil with a PC32 call site (addend=-4 for the
+    rip-points-to-next-instruction convention) and a GOTPCREL
+    global-load.
+
+x86_64 patcher functions, direct-emit templates, trampoline
+encoding, and arch dispatch in `emit.c` land in v0.233.0;
+generated `stencils_x86_64_linux.h` follows in that release.
+
+`release-gate` green.
+
 ## v0.231.0 — Generated stencils_arm64_linux.h Committed
 
 Closes cycle A1. The byte tables for every stencil are now

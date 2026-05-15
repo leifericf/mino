@@ -43,13 +43,19 @@
 
 /* Reloc kind enum mirror -- kept in sync with the values
  * tools/stencil_extract.c writes into <sym>_relocs tables. Header
- * changes there force a change here. */
+ * changes there force a change here. The x86_64 entries are
+ * declared here so the G3 mirror gate pins their numeric values
+ * even before the x86_64 patchers ship; the patcher functions land
+ * in the x86_64 platform release. */
 #define MINO_STENCIL_RELOC_ARM64_PAGE21              0u
 #define MINO_STENCIL_RELOC_ARM64_PAGEOFF12           1u
 #define MINO_STENCIL_RELOC_ARM64_BRANCH26            2u
 #define MINO_STENCIL_RELOC_ABS64                     3u
 #define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21     4u
 #define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12  5u
+#define MINO_STENCIL_RELOC_X86_64_ABS64              6u
+#define MINO_STENCIL_RELOC_X86_64_PC32               7u
+#define MINO_STENCIL_RELOC_X86_64_GOTPCREL           8u
 
 /* Pseudo-opcode for the fused LOAD_K + RETURN superinstruction. Sits
  * above OP__COUNT so the find-stencil lookup never confuses it with a

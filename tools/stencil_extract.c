@@ -194,8 +194,12 @@ typedef struct {
 #define MINO_STENCIL_RELOC_ABS64                  3u
 #define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21    4u
 #define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12 5u
+#define MINO_STENCIL_RELOC_X86_64_ABS64             6u
+#define MINO_STENCIL_RELOC_X86_64_PC32              7u
+#define MINO_STENCIL_RELOC_X86_64_GOTPCREL          8u
 
 static int reloc_arm64_kind_map(uint32_t macho_kind, uint32_t length);
+static int reloc_x86_64_elf_kind_map(uint32_t r_type);
 
 /* ------------------------------------------------------------------------- */
 /* ELF64 type definitions and constants (shared by selftest + parser)        */
@@ -292,6 +296,25 @@ static int reloc_arm64_elf_kind_map(uint32_t r_type)
     case R_AARCH64_LDST64_ABS_LO12_NC:  return (int)MINO_STENCIL_RELOC_ARM64_PAGEOFF12;
     case R_AARCH64_ADR_GOT_PAGE:        return (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21;
     case R_AARCH64_LD64_GOT_LO12_NC:    return (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12;
+    default: return -1;
+    }
+}
+
+/* Map an x86_64 ELF reloc type to the runtime-stable
+ * MINO_STENCIL_RELOC_X86_64_*. PLT32 collapses to PC32 because the
+ * runtime patcher writes both as 32-bit pc-relative; the linker-only
+ * PLT indirection doesn't apply once the stencils are flattened into
+ * the JIT region. REX_GOTPCRELX collapses to GOTPCREL for the same
+ * reason -- it's a peephole hint to the linker, not a different
+ * patcher instruction. */
+static int reloc_x86_64_elf_kind_map(uint32_t r_type)
+{
+    switch (r_type) {
+    case R_X86_64_64:               return (int)MINO_STENCIL_RELOC_X86_64_ABS64;
+    case R_X86_64_PC32:
+    case R_X86_64_PLT32:            return (int)MINO_STENCIL_RELOC_X86_64_PC32;
+    case R_X86_64_GOTPCREL:
+    case R_X86_64_REX_GOTPCRELX:    return (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL;
     default: return -1;
     }
 }
@@ -648,6 +671,31 @@ static int selftest(void)
     if (reloc_arm64_elf_kind_map(0xffffffffu) != -1) {
         fprintf(stderr, "selftest: elf kind_map should reject unknown\n"); failed++;
     }
+    /* x86_64 ELF reloc-kind map: ABS64, PC32 (covers PLT32),
+     * GOTPCREL (covers REX_GOTPCRELX), unknown rejects. */
+    if (reloc_x86_64_elf_kind_map(R_X86_64_64) !=
+        (int)MINO_STENCIL_RELOC_X86_64_ABS64) {
+        fprintf(stderr, "selftest: x86_64 kind_map ABS64 wrong\n"); failed++;
+    }
+    if (reloc_x86_64_elf_kind_map(R_X86_64_PC32) !=
+        (int)MINO_STENCIL_RELOC_X86_64_PC32) {
+        fprintf(stderr, "selftest: x86_64 kind_map PC32 wrong\n"); failed++;
+    }
+    if (reloc_x86_64_elf_kind_map(R_X86_64_PLT32) !=
+        (int)MINO_STENCIL_RELOC_X86_64_PC32) {
+        fprintf(stderr, "selftest: x86_64 kind_map PLT32 wrong\n"); failed++;
+    }
+    if (reloc_x86_64_elf_kind_map(R_X86_64_GOTPCREL) !=
+        (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL) {
+        fprintf(stderr, "selftest: x86_64 kind_map GOTPCREL wrong\n"); failed++;
+    }
+    if (reloc_x86_64_elf_kind_map(R_X86_64_REX_GOTPCRELX) !=
+        (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL) {
+        fprintf(stderr, "selftest: x86_64 kind_map REX_GOTPCRELX wrong\n"); failed++;
+    }
+    if (reloc_x86_64_elf_kind_map(0xffffffffu) != -1) {
+        fprintf(stderr, "selftest: x86_64 kind_map should reject unknown\n"); failed++;
+    }
     if (failed > 0) return 1;
     printf("stencil_extract selftest: OK\n");
     return 0;
@@ -977,10 +1025,11 @@ static int elf_extract_relocs(const elf_view_t *v, uint64_t offset, uint64_t siz
         fprintf(stderr, "stencil_extract: ELF rela table out of range\n");
         return -1;
     }
-    if (v->hdr->e_machine != EM_AARCH64) {
+    if (v->hdr->e_machine != EM_AARCH64
+        && v->hdr->e_machine != EM_X86_64) {
         fprintf(stderr,
                 "stencil_extract: ELF e_machine %u not supported "
-                "(this release wires AArch64 only)\n",
+                "(AArch64 + x86_64 wired today)\n",
                 v->hdr->e_machine);
         return -1;
     }
@@ -1001,12 +1050,16 @@ static int elf_extract_relocs(const elf_view_t *v, uint64_t offset, uint64_t siz
                     snum);
             return -1;
         }
-        int mapped = reloc_arm64_elf_kind_map(rtype);
+        int mapped = (v->hdr->e_machine == EM_AARCH64)
+            ? reloc_arm64_elf_kind_map(rtype)
+            : reloc_x86_64_elf_kind_map(rtype);
         if (mapped < 0) {
+            const char *arch = (v->hdr->e_machine == EM_AARCH64) ? "AArch64"
+                                                                  : "x86_64";
             fprintf(stderr,
-                    "stencil_extract: unsupported ELF AArch64 reloc %u "
+                    "stencil_extract: unsupported ELF %s reloc %u "
                     "at offset 0x%" PRIx64 "\n",
-                    rtype, r->r_offset);
+                    arch, rtype, r->r_offset);
             return -1;
         }
         const elf64_sym_t *s = &syms[snum];
