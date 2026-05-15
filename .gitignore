@@ -75,3 +75,4 @@ examples/embed_gc_stress
 examples/embed_gc_stress_asan
 examples/embed_multi_tenant_threads
 tests/embed_api_test
+tools/stencil_extract

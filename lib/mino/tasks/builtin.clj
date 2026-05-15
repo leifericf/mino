@@ -302,6 +302,25 @@
     (apply sh! args)
     (println (str "  alloc-profile build -> mino_prof"))))
 
+(defn build-stencil-extract
+  "Build tools/stencil_extract: the copy-and-patch stencil extractor
+   used by the native tier build pipeline. Parses Mach-O .o files and
+   emits a C header with the extracted function bytes."
+  []
+  (let [args [cc "-std=c99" "-O2" "-Wall" "-Wpedantic"
+              "-o" "tools/stencil_extract"
+              "tools/stencil_extract.c"]]
+    (println (str "  " (str/join " " args)))
+    (apply sh! args)
+    (println "  stencil-extract build -> tools/stencil_extract")))
+
+(defn test-stencil-extract
+  "Run the stencil-extract self-test. Verifies that the Mach-O struct
+   layouts match the documented file format on the host."
+  []
+  (build-stencil-extract)
+  (println (sh! "./tools/stencil_extract" "--selftest")))
+
 (defn test-suite
   "Run the test suite."
   []

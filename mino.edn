@@ -46,4 +46,8 @@
                    :deps [build]
                    :task mino.tasks.builtin/test-embed}
   qa-arch         {:doc  "Architecture quality gates"
-                   :task mino.tasks.builtin/qa-arch}}}
+                   :task mino.tasks.builtin/qa-arch}
+  build-stencil-extract {:doc  "Build tools/stencil_extract"
+                         :task mino.tasks.builtin/build-stencil-extract}
+  test-stencil-extract  {:doc  "Run stencil-extract selftest"
+                         :task mino.tasks.builtin/test-stencil-extract}}}

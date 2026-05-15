@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.182.0 — Stencil Extractor Tool
+
+`tools/stencil_extract.c` is the build-time utility that turns an
+object file produced by the host C compiler into the byte tables the
+runtime JIT memcpy's into RWX memory. The first cut handles 64-bit
+Mach-O (Darwin arm64 and Darwin x86_64); ELF and COFF support land
+with the corresponding platform releases. The tool exposes two modes
+beyond its `--selftest` smoke check: `<obj> --list` enumerates the
+defined symbols in `__TEXT,__text`, and `<obj> <symbol> <out>` emits
+a self-contained C header with the function bytes and size.
+
+`./mino task build-stencil-extract` compiles the tool, and
+`./mino task test-stencil-extract` chains the build with the
+selftest. The selftest verifies that the Mach-O header / segment /
+section / nlist / reloc struct sizes match the documented file
+format on the host, which is the load-bearing check the parser
+depends on.
+
+The runtime build is unchanged in this release; the tool exists but
+nothing in the mino binary consumes its output yet. The first
+stencil source plus its generated header lands next.
+
 ## v0.181.0 — Diagnostic Source-Span Coverage
 
 Catchable diagnostics raised from inside the bytecode runtime now
