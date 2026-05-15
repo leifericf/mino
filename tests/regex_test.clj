@@ -82,3 +82,20 @@
     (is (= "hello" (re-matches "[a-z]+" "hello"))))
   (testing "mixed fails"
     (is (= nil (re-matches "[a-z]+" "hello123")))))
+
+;; Regression: re_compile used to silently truncate patterns past 30
+;; tokens, which produced `MCT001 invalid regex pattern` on any input
+;; (the truncated pattern always had an unclosed capture group).
+;; v0.219.0 bumped MAX_REGEXP_OBJECTS / MAX_CHAR_CLASS_LEN and turned
+;; overflow into an explicit compile failure.
+(deftest re-find-long-pattern-with-capture
+  (testing "long literal prefix + capture group + quantifier"
+    (is (= ["#define MINO_STENCIL_RELOC_FOO 42"
+            "MINO_STENCIL_RELOC_FOO" "42"]
+           (re-find
+            #"#define\s+(MINO_STENCIL_RELOC_[A-Z_0-9]+)\s+(\d+)u?"
+            "#define MINO_STENCIL_RELOC_FOO 42u"))))
+  (testing "same pattern on non-matching input returns nil (not MCT001)"
+    (is (nil? (re-find
+               #"#define\s+(MINO_STENCIL_RELOC_[A-Z_0-9]+)\s+(\d+)u?"
+               "/*")))))

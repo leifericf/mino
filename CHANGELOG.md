@@ -1,5 +1,63 @@
 # Changelog
 
+## v0.219.0 — Regex Engine + str/split With Regex Separators
+
+Two runtime defects surfaced while wiring G3's reloc parser in
+v0.218.0 (both logged in `.local/BUGS.md`). Fixes shipped together so
+the next refactor cycle can use canonical regex forms without the
+workaround layer that v0.218.0 had to wrap around them.
+
+### Regex compile no longer truncates silently
+
+`re_compile` (`src/regex/re.c`) carried tinyregex-c's original
+fixed-size limits of 30 compiled objects and a 40-byte character-class
+buffer. Patterns past the object limit were silently truncated; when
+truncation landed inside an open capture group, the post-loop
+group-balance check rejected the partial compile and `re-find`
+surfaced `MCT001 invalid regex pattern` on any input. The smallest
+reproducer in the wild was
+`#"#define\s+(MINO_STENCIL_RELOC_[A-Z_0-9]+)\s+(\d+)u?"`, which
+overflowed because each literal character takes one slot.
+
+Two changes:
+
+  - `MAX_REGEXP_OBJECTS` 30 -> 256 and `MAX_CHAR_CLASS_LEN` 40 -> 256.
+    Per-pattern heap footprint goes from ~520 bytes to ~4.3 KB, which
+    is bounded and freed by `re_free` after each match.
+  - Overflow is now an explicit compile failure: if the compile loop
+    exits with input remaining, `re_compile` returns NULL instead of
+    falling through to the group-balance check. Callers (`re-find`,
+    `re-matches`, `clojure.string/split`) translate NULL to
+    `MCT001 invalid regex pattern`, which is the same diagnostic
+    callers already handle for malformed patterns.
+
+Regression test: `tests/regex_test.clj`
+`re-find-long-pattern-with-capture`.
+
+### `clojure.string/split` now honours regex separators
+
+`prim_split` (`src/prim/string.c`) used to treat a regex separator's
+source string as a literal substring, so `#"\s+"` never matched any
+whitespace in the input and split returned the whole string as a
+one-element vector. The TODO comment in the previous source said as
+much.
+
+The regex path now compiles the pattern via `re_compile` and walks
+match sites using `re_matchp`, emitting the substring before each
+match. Zero-width matches advance by one codepoint to avoid an
+infinite loop on patterns like `#"a*"`. Trailing empty pieces are
+stripped when `limit <= 0`, matching JVM Clojure's default
+`String.split(re, 0)` behaviour. The string-separator path is
+unchanged.
+
+Regression test: `tests/string_test.clj` `split-with-regex`.
+
+### Workaround revert
+
+`parse-reloc-defines` in `lib/mino/tasks/builtin.clj` (introduced in
+v0.218.0 to dodge both bugs) is back to its canonical regex form. G3
+`check-reloc-mirror` continues to pass.
+
 ## v0.218.0 — CI Guardrails For Stencil + Reloc Drift
 
 Closes the three-release post-cycle hygiene cluster. Adds three

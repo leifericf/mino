@@ -96,3 +96,16 @@
   (is (= '(+ 1 2) (read-string "(+ 1 2)")))
   (is (= :foo (read-string ":foo")))
   (is (= nil (read-string ""))))
+
+;; Regression: split with a regex separator used to treat the regex
+;; source as a literal substring, so `#"\s+"` never matched whitespace
+;; in inputs like "x y" and split returned the whole input as a
+;; single-element vector. v0.219.0 routes regex separators through
+;; the actual regex engine.
+(deftest split-with-regex
+  (is (= ["a" "b" "c"]      (split "a    b    c"  #"\s+")))
+  (is (= ["x" "y"]          (split "x y"          #"\s+")))
+  (is (= ["" "ab" "cd"]     (split "  ab cd"      #"\s+")))
+  (is (= ["a" "b" "c" "d"]  (split "a,b,c,d"      #",")))
+  (is (= ["a" "b,c,d"]      (split "a,b,c,d"      #"," 2)))
+  (is (= ["ab" "cd"]        (split "ab cd"        #" +"))))

@@ -474,32 +474,14 @@
   "Scan `path` for `#define MINO_STENCIL_RELOC_<NAME> <int>u` lines and
    return a map of name -> int. The runtime / extractor each carry
    their own copy of this enum; G3 cross-checks them by parsing
-   both and asserting the maps match.
-
-   Avoids regex captures with long literal prefixes -- the mino
-   regex engine declines to compile patterns with prefix runs
-   approaching the typical reloc-name length. Plain prefix-match
-   on whitespace-split tokens is straightforward and reliable."
+   both and asserting the maps match."
   [path]
-  (let [reloc-prefix "MINO_STENCIL_RELOC_"]
+  (let [pat #"#define\s+(MINO_STENCIL_RELOC_[A-Z_0-9]+)\s+(\d+)u?"]
     (reduce
       (fn [acc line]
-        ;; str/split with #"\s+" on this build returns the input as a
-        ;; single token; split by literal " " then drop empty entries
-        ;; left between consecutive spaces.
-        (let [tokens (filterv #(not= "" %)
-                              (str/split (str/trim line) " "))]
-          (if (and (>= (count tokens) 3)
-                   (= (nth tokens 0) "#define")
-                   (str/starts-with? (nth tokens 1) reloc-prefix))
-            (let [name      (nth tokens 1)
-                  raw-value (nth tokens 2)
-                  trimmed   (if (str/ends-with? raw-value "u")
-                              (subs raw-value 0 (dec (count raw-value)))
-                              raw-value)]
-              (let [n (parse-long trimmed)]
-                (if (some? n) (assoc acc name n) acc)))
-            acc)))
+        (if-let [m (re-find pat line)]
+          (assoc acc (nth m 1) (parse-long (nth m 2)))
+          acc))
       {}
       (str/split-lines (slurp path)))))
 

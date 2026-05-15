@@ -45,8 +45,8 @@
 
 /* Definitions: */
 
-#define MAX_REGEXP_OBJECTS      30    /* Max number of regex symbols in expression. */
-#define MAX_CHAR_CLASS_LEN      40    /* Max length of character-class buffer in.   */
+#define MAX_REGEXP_OBJECTS      256   /* Max number of regex symbols in expression. */
+#define MAX_CHAR_CLASS_LEN      256   /* Max length of character-class buffer in.   */
 
 
 enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE /* , BRANCH */ };
@@ -352,6 +352,14 @@ re_t re_compile(const char* pattern)
 
     i += 1;
     j += 1;
+  }
+  if (pattern[i] != '\0')
+  {
+    /* Pattern overflowed MAX_REGEXP_OBJECTS. Report as invalid rather
+     * than silently truncating; otherwise re_matchp would walk a
+     * partial compile and either misbehave or fail the group-balance
+     * check below depending on where truncation lands. */
+    free(re_compiled); return 0;
   }
   if (group_stack_depth != 0)
   {

@@ -5,6 +5,7 @@
  */
 
 #include "prim/internal.h"
+#include "regex/re.h"
 
 /* Grow `buf` so that `len + extra + 1` bytes fit. Returns the (possibly
  * realloc'd) buffer, or NULL if allocation failed (in which case an
@@ -470,13 +471,66 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(sep_val) == MINO_REGEX
         && sep_val->as.regex.source != NULL
         && mino_type_of(sep_val->as.regex.source) == MINO_STRING) {
-        /* Regex separators currently use the raw source as a literal
-         * substring -- works for fixed-string patterns like #","
-         * which is what every callsite in the test suites uses today.
-         * If a future test exercises a metacharacter separator, route
-         * through re_compile + re_matchp_groups to walk match sites. */
-        sep     = sep_val->as.regex.source->as.s.data;
-        sep_len = sep_val->as.regex.source->as.s.len;
+        /* Regex separators: walk the compiled pattern across the input,
+         * emitting the substring between each match site. Follows
+         * Clojure's String.split(re, limit) semantics — limit > 0 caps
+         * the result and the final piece absorbs the rest of the input;
+         * limit <= 0 strips trailing empty pieces (only the limit == 0
+         * case strips by JVM convention, but mino has historically
+         * conflated 0 and negative for the literal-string path, so the
+         * regex path matches that). */
+        const char *pat_src = sep_val->as.regex.source->as.s.data;
+        re_t        compiled = re_compile(pat_src);
+        size_t      pos = 0;
+        if (compiled == NULL) {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                "split: invalid regex pattern");
+        }
+        for (;;) {
+            int  mlen = 0;
+            int  idx;
+            if (pos > slen) break;
+            idx = re_matchp(compiled, s + pos, &mlen);
+            if (len == cap) {
+                size_t new_cap = cap == 0 ? 8 : cap * 2;
+                mino_val_t **nb = (mino_val_t **)gc_alloc_typed(S,
+                    GC_T_VALARR, new_cap * sizeof(*nb));
+                if (buf != NULL && len > 0) memcpy(nb, buf, len * sizeof(*nb));
+                buf = nb;
+                cap = new_cap;
+            }
+            if (limit > 0 && (long long)len + 1 == limit) {
+                buf[len++] = mino_string_n(S, s + pos,
+                                           (size_t)(slen - pos));
+                break;
+            }
+            if (idx < 0) {
+                buf[len++] = mino_string_n(S, s + pos,
+                                           (size_t)(slen - pos));
+                break;
+            }
+            buf[len++] = mino_string_n(S, s + pos, (size_t)idx);
+            /* Zero-width match: advance by one character so we don't
+             * loop forever on patterns like #"a*". */
+            if (mlen <= 0) {
+                if (pos + (size_t)idx >= slen) break;
+                pos += (size_t)idx + 1;
+            } else {
+                pos += (size_t)idx + (size_t)mlen;
+            }
+        }
+        re_free(compiled);
+        /* Trim trailing empty pieces unless limit > 0 (matches JVM
+         * Clojure default split-with-limit-0 behaviour). */
+        if (limit <= 0) {
+            while (len > 0
+                   && buf[len - 1] != NULL
+                   && mino_type_of(buf[len - 1]) == MINO_STRING
+                   && buf[len - 1]->as.s.len == 0) {
+                len--;
+            }
+        }
+        return mino_vector(S, buf, len);
     } else {
         sep     = sep_val->as.s.data;
         sep_len = sep_val->as.s.len;
