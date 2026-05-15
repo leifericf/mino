@@ -64,7 +64,7 @@ extern mino_val_t *mino_nil(mino_state_t *S);
 
 /* Sentinel for failed compiles. apply_callable checks against this
  * pointer to skip the retry on subsequent calls. */
-const mino_bc_fn_t mino_bc_declined = {0};
+mino_bc_fn_t mino_bc_declined = {0};
 
 /* Look up the source position recorded for a given pc. Returns 1 with
  * out_file / out_line / out_column filled in if a meaningful position

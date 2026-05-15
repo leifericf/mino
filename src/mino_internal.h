@@ -199,7 +199,7 @@ struct mino_val {
             mino_env_t *env;
             const char *defining_ns;
             int         shape;
-            const struct mino_bc_fn *bc;
+            struct mino_bc_fn *bc;
             /* If non-NULL, this fn's only behavior is to invoke a
              * single primitive on its arguments -- e.g. `(fn [x] (inc
              * x))` or `(fn [x y] (+ x y))`. The pipeline fast lanes

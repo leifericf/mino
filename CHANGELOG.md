@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.179.0 — Deopt Protocol Scaffolding
+
+`mino_bc_fn_t` gains four native-tier slots: `native` (head of the
+mmap'd page that will carry compiled stencils), `native_size`, an
+`native_gen` snapshot of `S->ic_gen` at compile time, and a
+`hot_counter` of interpreter invocations. All start at NULL/0 and
+nothing in the compile path writes them yet; the dispatch site in
+`apply_callable` carries the tier-selection branch (native / counter
+/ interpreter) so the runtime layer that wires JIT'd code in can drop
+the missing arm in.
+
+The bc cell sentinel changes from `const`-qualified to plain
+mutability so the new `hot_counter` slot is writable through the
+single `fn->as.fn.bc` pointer; the sentinel itself stays read-only by
+discipline (no code path mutates it).
+
+Stencil ABI invariant is documented in `eval/bc/internal.h`: every
+opcode boundary keeps `(S, regs, pc, env, consts, vars)` in the same
+machine-level state across interpreter handlers and native stencils.
+The contract is the load-bearing piece behind deopt and tracing
+readiness; stencils that drift from it would not survive the boundary
+without per-handler fixup code.
+
 ## v0.178.0 — Source-Map Scaffolding
 
 The bytecode VM gains a per-fn `(line, column)` side table indexed by

@@ -366,7 +366,52 @@ typedef struct mino_bc_fn {
     int              ic_slots_cap;
     mino_bc_source_map_t source_map; /* per-pc source positions; len
                                       * matches code_len when present */
+    /* Native-tier slots. Populated by the runtime's copy-and-patch
+     * compile path when the fn warms past JIT_THRESHOLD; the dispatch
+     * site reads them through the tier-selection branch in
+     * apply_callable. native is the head of an mmap'd page carrying
+     * the patched stencil sequence; native_size is the page length
+     * (for unmap on deopt); native_gen is the S->ic_gen snapshot at
+     * the time the page was compiled (mismatches force a deopt back
+     * to the interpreter on the next call). hot_counter accumulates
+     * invocations under the interpreter; reaching JIT_THRESHOLD
+     * triggers a compile attempt. All four start at NULL/0 for a
+     * freshly compiled bc record; nothing in the bc compile path
+     * writes them. */
+    void            *native;
+    unsigned         native_gen;
+    size_t           native_size;
+    unsigned         hot_counter;
 } mino_bc_fn_t;
+
+/* Stencil ABI boundary invariant.
+ *
+ * Every opcode handler (interpreter switch arm OR native-tier stencil)
+ * begins and ends with the same machine-level live state:
+ *
+ *   S        the mino state pointer
+ *   regs     the register window base for the active fn
+ *   pc       the bytecode pc of the next opcode (i.e., one past the
+ *            one whose handler is about to exit, or the entry pc for a
+ *            handler about to begin)
+ *   env      the captured lexical environment chain
+ *   consts   the active fn's const pool base
+ *   vars     the per-namespace var-table base used by GETGLOBAL_CACHED
+ *
+ * The invariant has two consumers:
+ *   1. Deopt: the native tier can hand control back to the interpreter
+ *      at any opcode boundary by branching with the matching live
+ *      state. No native-only register layout is allowed across the
+ *      boundary; what the interpreter sees on entry to a switch arm
+ *      is exactly what a stencil produced on exit.
+ *   2. Tracing-readiness: a future trace recorder consumes the live
+ *      state on entry to each opcode to reconstruct the operand stack
+ *      it observed; the contract is what makes deopt-from-mid-trace
+ *      possible without a separate state-mapping table per opcode.
+ *
+ * Concretely, the implication for stencils: they MUST NOT carry data
+ * across the boundary in machine registers that the interpreter does
+ * not also keep in regs/pc/env/consts/vars at the same point. */
 
 /* Compile / run status. Returned from mino_bc_compile_fn and consulted
  * by apply_callable to decide between the bc dispatch and the
@@ -398,8 +443,10 @@ int mino_bc_source_lookup(const mino_bc_fn_t *bc, size_t pc,
 /* Sentinel placed in MINO_FN.bc after a failed compile attempt so the
  * next call doesn't re-attempt compilation. apply_callable sees this
  * pointer and routes straight to the tree-walker. The fields are zero
- * (code == NULL, code_len == 0, consts == NULL, ...). */
-extern const mino_bc_fn_t mino_bc_declined;
+ * (code == NULL, code_len == 0, consts == NULL, ...). Non-const so the
+ * fn->as.fn.bc slot stays a single pointer type; nothing in the
+ * runtime actually writes through this sentinel. */
+extern mino_bc_fn_t mino_bc_declined;
 
 /* Debug knob: set non-zero (e.g., via the MINO_BC_REQUIRE env var or a
  * future Clojure-level setter) to abort on any tree-walker fallback.

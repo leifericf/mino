@@ -354,6 +354,20 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
         mino_bc_check_require(S, fn);
         if (mino_type_of(fn) == MINO_FN && MINO_BC_RUNNABLE(fn)) {
+            /* Tier selection for the interpreter / native split. The
+             * native arm enters JIT'd code if the fn has been compiled
+             * and the ic_gen snapshot still matches. The counter arm
+             * accumulates calls so the threshold-driven compile path
+             * has data to act on. The interpreter arm is the fall-
+             * through. native always NULL today; the increment is the
+             * load-bearing piece of this scaffolding. */
+            mino_bc_fn_t *bc_rec = fn->as.fn.bc;
+            if (bc_rec->native != NULL && bc_rec->native_gen == S->ic_gen) {
+                /* Native fast path: handed to the CPJIT runtime when
+                 * its compile flow is wired. */
+            } else if (bc_rec->hot_counter < (unsigned)-1) {
+                bc_rec->hot_counter++;
+            }
             /* argv ABI: walk the cons spine into a stack scratch array.
              * The slots are kept alive across any GC the body triggers
              * because the conservative stack scan covers this frame
