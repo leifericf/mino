@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.184.0 — Stencil Immediate ABI and Relocation Pipeline
+
+`src/eval/bc/stencils/abi.h` defines the copy-and-patch stencil
+immediate ABI: extern char-array symbols `MINO_STENCIL_IMM_A`,
+`MINO_STENCIL_IMM_B`, `MINO_STENCIL_IMM_C`, `MINO_STENCIL_IMM_BX`, and
+`MINO_STENCIL_IMM_SBX`. Stencil sources access the operand fields of
+the bytecode instruction word as the addresses of those symbols
+(`IMM_A`, `IMM_B`, ... macros), and the compiler emits one
+relocation pair per read site. The JIT patches those relocations
+when materialising a stencil instance for a specific bytecode op.
+
+`tools/stencil_extract` learns to walk the Mach-O section
+relocation table. Each reloc whose offset lies inside the stencil
+function body is recorded as a `(offset, kind, sym_index, addend)`
+quadruple in the emitted header, alongside a de-duplicated symbol
+table. The runtime in subsequent releases consumes that data
+through a stable enum (`MINO_STENCIL_RELOC_ARM64_*` /
+`MINO_STENCIL_RELOC_ABS64`) so the generated header is decoupled
+from the consumer's reloc-kind layout. The extractor now also
+accepts `--append` so multiple stencils can co-exist in a single
+generated header.
+
+Three new stencils ship in `src/eval/bc/stencils/`:
+
+- `move.c` — `OP_MOVE` (regs[A] = regs[B]), two immediates.
+- `load_k.c` — `OP_LOAD_K` (regs[A] = consts[Bx]), two immediates.
+- `return.c` — adds `stencil_op_return_imm` alongside the legacy
+  no-immediate `stencil_op_return_arg0` smoke stencil.
+
+`src/eval/bc/stencils/generated/stencils_arm64_darwin.h` regenerates
+to include byte tables, symbol lists, and reloc tables for all four
+stencils. The runtime build is still unchanged — the header is
+consumed in the next release where the runtime JIT compile path
+lands. Arithmetic, control-flow, and call-shape stencils need the
+runtime ABI to be settled before they make sense to author; they
+land alongside the runtime in subsequent releases.
+
+The extractor selftest grows reloc-field decode coverage: it packs
+known values into `r_info`, runs each accessor (`reloc_symbolnum`,
+`reloc_pcrel`, `reloc_length`, `reloc_extern`, `reloc_type`), and
+checks the host-stable `reloc_arm64_kind_map` answers correctly for
+the supported reloc kinds plus rejects unknown kinds.
+
 ## v0.183.0 — First Stencil Source
 
 `src/eval/bc/stencils/return.c` is the first stencil source in the

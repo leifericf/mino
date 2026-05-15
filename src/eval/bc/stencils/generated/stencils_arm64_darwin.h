@@ -4,3 +4,61 @@ static const unsigned char stencil_op_return_arg0_bytes[8] = {
     0x00, 0x00, 0x40, 0xf9, 0xc0, 0x03, 0x5f, 0xd6 
 };
 static const unsigned long stencil_op_return_arg0_size = 8;
+static const char *const stencil_op_return_arg0_symbols[1] = {
+    0
+};
+static const unsigned long stencil_op_return_arg0_nsymbols = 0;
+static const unsigned int stencil_op_return_arg0_relocs[1][4] = {
+    {0, 0, 0, 0}
+};
+static const unsigned long stencil_op_return_arg0_nrelocs = 0;
+
+static const unsigned char stencil_op_return_imm_bytes[16] = {
+    0x08, 0x00, 0x00, 0x90, 0x08, 0x01, 0x40, 0xf9, 0x00, 0x78, 0x68, 0xf8, 0xc0, 0x03, 0x5f, 0xd6
+};
+static const unsigned long stencil_op_return_imm_size = 16;
+static const char *const stencil_op_return_imm_symbols[1] = {
+    "MINO_STENCIL_IMM_A"
+};
+static const unsigned long stencil_op_return_imm_nsymbols = 1;
+static const unsigned int stencil_op_return_imm_relocs[2][4] = {
+    {4, 5, 0, 0},
+    {0, 4, 0, 0}
+};
+static const unsigned long stencil_op_return_imm_nrelocs = 2;
+
+static const unsigned char stencil_op_move_bytes[28] = {
+    0x08, 0x00, 0x00, 0x90, 0x08, 0x01, 0x40, 0xf9, 0x08, 0x78, 0x68, 0xf8, 0x09, 0x00, 0x00, 0x90,
+    0x29, 0x01, 0x40, 0xf9, 0x08, 0x78, 0x29, 0xf8, 0xc0, 0x03, 0x5f, 0xd6 
+};
+static const unsigned long stencil_op_move_size = 28;
+static const char *const stencil_op_move_symbols[2] = {
+    "MINO_STENCIL_IMM_A",
+    "MINO_STENCIL_IMM_B"
+};
+static const unsigned long stencil_op_move_nsymbols = 2;
+static const unsigned int stencil_op_move_relocs[4][4] = {
+    {16, 5, 0, 0},
+    {12, 4, 0, 0},
+    {4, 5, 1, 0},
+    {0, 4, 1, 0}
+};
+static const unsigned long stencil_op_move_nrelocs = 4;
+
+static const unsigned char stencil_op_load_k_bytes[28] = {
+    0x08, 0x00, 0x00, 0x90, 0x08, 0x01, 0x40, 0xf9, 0x28, 0x78, 0x68, 0xf8, 0x09, 0x00, 0x00, 0x90,
+    0x29, 0x01, 0x40, 0xf9, 0x08, 0x78, 0x29, 0xf8, 0xc0, 0x03, 0x5f, 0xd6 
+};
+static const unsigned long stencil_op_load_k_size = 28;
+static const char *const stencil_op_load_k_symbols[2] = {
+    "MINO_STENCIL_IMM_A",
+    "MINO_STENCIL_IMM_BX"
+};
+static const unsigned long stencil_op_load_k_nsymbols = 2;
+static const unsigned int stencil_op_load_k_relocs[4][4] = {
+    {16, 5, 0, 0},
+    {12, 4, 0, 0},
+    {4, 5, 1, 0},
+    {0, 4, 1, 0}
+};
+static const unsigned long stencil_op_load_k_nrelocs = 4;

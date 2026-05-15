@@ -118,6 +118,38 @@ typedef struct {
     uint32_t r_info;
 } macho_reloc_info_t;
 
+/* ARM64 Mach-O reloc kinds the JIT patcher recognises. The numeric
+ * values come from the Mach-O ABI documentation; the same constants
+ * appear in the Apple cctools `<mach-o/arm64/reloc.h>` header. The
+ * subset listed here is the only one the stencils generate today; new
+ * kinds get added as new stencil shapes surface. */
+#define ARM64_RELOC_UNSIGNED         0u  /* absolute 8 / 4 / 2-byte slot   */
+#define ARM64_RELOC_BRANCH26         2u  /* b / bl with 26-bit imm26       */
+#define ARM64_RELOC_PAGE21           3u  /* adrp page21 immediate          */
+#define ARM64_RELOC_PAGEOFF12        4u  /* add / ldr / str page12 imm     */
+#define ARM64_RELOC_GOT_LOAD_PAGE21    5u  /* adrp for GOT-indirect access */
+#define ARM64_RELOC_GOT_LOAD_PAGEOFF12 6u  /* ldr  for GOT-indirect access */
+
+/* x86_64 Mach-O reloc kinds (subset used by the JIT). */
+#define X86_64_RELOC_UNSIGNED  0u
+#define X86_64_RELOC_BRANCH    2u
+#define X86_64_RELOC_GOT_LOAD  3u
+#define X86_64_RELOC_GOT       4u
+
+/* Host enum encoded as a small integer the runtime can switch on. The
+ * generated header references these by name so a runtime header change
+ * doesn't require regenerating every stencil. Mach-O ARM64 kinds map
+ * 1:1 to MINO_STENCIL_RELOC_ARM64_*; other archs add new entries when
+ * their parsers land. */
+#define MINO_STENCIL_RELOC_ARM64_PAGE21           0u
+#define MINO_STENCIL_RELOC_ARM64_PAGEOFF12        1u
+#define MINO_STENCIL_RELOC_ARM64_BRANCH26         2u
+#define MINO_STENCIL_RELOC_ABS64                  3u
+#define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21    4u
+#define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12 5u
+
+static int reloc_arm64_kind_map(uint32_t macho_kind, uint32_t length);
+
 /* ------------------------------------------------------------------------- */
 /* File buffer                                                               */
 /* ------------------------------------------------------------------------- */
@@ -236,6 +268,32 @@ static const macho_nlist_64_t *macho_nlist(const macho_view_t *v)
     return (const macho_nlist_64_t *)(v->blob->data + v->symtab->symoff);
 }
 
+/* Reloc accessors: the Mach-O packs r_info as a 32-bit little-endian
+ * field with this layout (bit 0 = LSB):
+ *   [0..23]  r_symbolnum  (24 bits) -- index into the symtab when
+ *                                       r_extern is 1, section number
+ *                                       otherwise
+ *   [24]     r_pcrel      (1 bit)   -- pc-relative addressing
+ *   [25..26] r_length     (2 bits)  -- 0=byte 1=word 2=long 3=quad
+ *   [27]     r_extern     (1 bit)   -- symbolnum is a symtab index
+ *   [28..31] r_type       (4 bits)  -- kind: PAGE21, PAGEOFF12, etc.
+ * Helpers extract each field so the emission code reads cleanly. */
+static uint32_t reloc_symbolnum(const macho_reloc_info_t *r) {
+    return r->r_info & 0xffffffu;
+}
+static uint32_t reloc_pcrel(const macho_reloc_info_t *r) {
+    return (r->r_info >> 24) & 0x1u;
+}
+static uint32_t reloc_length(const macho_reloc_info_t *r) {
+    return (r->r_info >> 25) & 0x3u;
+}
+static uint32_t reloc_extern(const macho_reloc_info_t *r) {
+    return (r->r_info >> 27) & 0x1u;
+}
+static uint32_t reloc_type(const macho_reloc_info_t *r) {
+    return (r->r_info >> 28) & 0xfu;
+}
+
 /* List all N_SECT external symbols defined in __text. */
 static int macho_list_symbols(const macho_view_t *v)
 {
@@ -340,6 +398,43 @@ static int selftest(void)
                 sizeof(macho_reloc_info_t));
         failed++;
     }
+    /* Reloc bit-field accessors: pack a known r_info and confirm the
+     * helpers decode each slot independently. The reference value
+     * encodes symbolnum=0x123456, pcrel=1, length=2, extern=1,
+     * type=ARM64_RELOC_PAGE21. */
+    macho_reloc_info_t probe;
+    probe.r_address = 0;
+    probe.r_info = 0x123456u
+        | (1u << 24)
+        | (2u << 25)
+        | (1u << 27)
+        | (ARM64_RELOC_PAGE21 << 28);
+    if (reloc_symbolnum(&probe) != 0x123456u) {
+        fprintf(stderr, "selftest: reloc_symbolnum decode wrong\n"); failed++;
+    }
+    if (reloc_pcrel(&probe) != 1u) {
+        fprintf(stderr, "selftest: reloc_pcrel decode wrong\n"); failed++;
+    }
+    if (reloc_length(&probe) != 2u) {
+        fprintf(stderr, "selftest: reloc_length decode wrong\n"); failed++;
+    }
+    if (reloc_extern(&probe) != 1u) {
+        fprintf(stderr, "selftest: reloc_extern decode wrong\n"); failed++;
+    }
+    if (reloc_type(&probe) != ARM64_RELOC_PAGE21) {
+        fprintf(stderr, "selftest: reloc_type decode wrong\n"); failed++;
+    }
+    if (reloc_arm64_kind_map(ARM64_RELOC_PAGE21, 2) !=
+        (int)MINO_STENCIL_RELOC_ARM64_PAGE21) {
+        fprintf(stderr, "selftest: kind_map PAGE21 wrong\n"); failed++;
+    }
+    if (reloc_arm64_kind_map(ARM64_RELOC_UNSIGNED, 3) !=
+        (int)MINO_STENCIL_RELOC_ABS64) {
+        fprintf(stderr, "selftest: kind_map UNSIGNED-quad wrong\n"); failed++;
+    }
+    if (reloc_arm64_kind_map(0xff, 3) != -1) {
+        fprintf(stderr, "selftest: kind_map should reject unknown\n"); failed++;
+    }
     if (failed > 0) return 1;
     printf("stencil_extract selftest: OK\n");
     return 0;
@@ -349,20 +444,152 @@ static int selftest(void)
 /* Header emission                                                           */
 /* ------------------------------------------------------------------------- */
 
+/* Stencil-extracted reloc, normalised to a host-format the JIT runtime
+ * consumes. Per stencil we filter only the relocations that fall inside
+ * the function body and emit them keyed by a stable kind enum that the
+ * runtime maps to a patcher. */
+typedef struct {
+    uint32_t offset;       /* byte offset within the stencil body         */
+    uint32_t kind;         /* MINO_STENCIL_RELOC_* in the host enum       */
+    uint32_t sym_index;    /* index into the per-stencil symbol table     */
+    int32_t  addend;       /* added to the symbol value before patching   */
+} stencil_reloc_t;
+
+/* Find or insert a symbol-table index. Returns the slot index. The
+ * caller pre-allocates an array large enough for the worst case (one
+ * symbol per reloc). */
+static int sym_table_intern(const char *name,
+                            const char **table, int *count, int cap)
+{
+    for (int i = 0; i < *count; i++) {
+        if (strcmp(table[i], name) == 0) return i;
+    }
+    if (*count >= cap) return -1;
+    table[*count] = name;
+    return (*count)++;
+}
+
+/* Map an ARM64 Mach-O reloc kind to a runtime-stable MINO_STENCIL_RELOC_*.
+ * Returns -1 when the kind is unsupported -- the build fails loudly
+ * rather than silently dropping the reloc, since a missed patch means
+ * the JIT'd code reads garbage at runtime. */
+static int reloc_arm64_kind_map(uint32_t macho_kind, uint32_t length)
+{
+    switch (macho_kind) {
+    case ARM64_RELOC_PAGE21:
+        return (int)MINO_STENCIL_RELOC_ARM64_PAGE21;
+    case ARM64_RELOC_PAGEOFF12:
+        return (int)MINO_STENCIL_RELOC_ARM64_PAGEOFF12;
+    case ARM64_RELOC_BRANCH26:
+        return (int)MINO_STENCIL_RELOC_ARM64_BRANCH26;
+    case ARM64_RELOC_UNSIGNED:
+        if (length == 3u) return (int)MINO_STENCIL_RELOC_ABS64;
+        return -1;
+    case ARM64_RELOC_GOT_LOAD_PAGE21:
+        return (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21;
+    case ARM64_RELOC_GOT_LOAD_PAGEOFF12:
+        return (int)MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12;
+    default: return -1;
+    }
+}
+
+/* Extract section relocations that fall inside the function body. The
+ * Mach-O relocation table is per-section; for an .o file each reloc's
+ * r_address is relative to the section's start. We translate that to
+ * an offset relative to the function start by subtracting `offset`. */
+static int extract_relocs(const macho_view_t *v, uint64_t offset, uint64_t size,
+                          stencil_reloc_t *out, int out_cap, int *out_count,
+                          const char **sym_table, int *sym_count, int sym_cap)
+{
+    *out_count = 0;
+    const macho_section_64_t *sect = v->text_section;
+    if (sect->nreloc == 0) return 0;
+    if (v->blob->len < (size_t)sect->reloff
+        + (size_t)sect->nreloc * sizeof(macho_reloc_info_t)) {
+        fprintf(stderr, "stencil_extract: reloc table out of range\n");
+        return -1;
+    }
+    const macho_reloc_info_t *relocs =
+        (const macho_reloc_info_t *)(v->blob->data + sect->reloff);
+    const char             *strtab = macho_strtab(v);
+    const macho_nlist_64_t *nl     = macho_nlist(v);
+    if (strtab == NULL || nl == NULL) return -1;
+    for (uint32_t i = 0; i < sect->nreloc; i++) {
+        const macho_reloc_info_t *r = &relocs[i];
+        int32_t addr = r->r_address;
+        if (addr < (int32_t)offset || addr >= (int32_t)(offset + size)) continue;
+        uint32_t kind  = reloc_type(r);
+        uint32_t len   = reloc_length(r);
+        uint32_t ext   = reloc_extern(r);
+        uint32_t snum  = reloc_symbolnum(r);
+        int mapped = reloc_arm64_kind_map(kind, len);
+        if (mapped < 0) {
+            fprintf(stderr,
+                    "stencil_extract: unsupported reloc kind %u (length=%u) "
+                    "at offset 0x%x\n", kind, len, (unsigned)addr);
+            return -1;
+        }
+        if (!ext) {
+            fprintf(stderr,
+                    "stencil_extract: non-extern relocation at offset 0x%x "
+                    "-- stencils must reference extern symbols only\n",
+                    (unsigned)addr);
+            return -1;
+        }
+        if (snum >= v->symtab->nsyms) {
+            fprintf(stderr, "stencil_extract: reloc symbol index %u out of range\n",
+                    snum);
+            return -1;
+        }
+        const char *name = strtab + nl[snum].n_strx;
+        if (*name == '_') name++;  /* strip leader underscore */
+        int sym_idx = sym_table_intern(name, sym_table, sym_count, sym_cap);
+        if (sym_idx < 0) {
+            fprintf(stderr, "stencil_extract: too many distinct symbols\n");
+            return -1;
+        }
+        if (*out_count >= out_cap) {
+            fprintf(stderr, "stencil_extract: too many relocations per stencil\n");
+            return -1;
+        }
+        out[*out_count].offset    = (uint32_t)(addr - (int32_t)offset);
+        out[*out_count].kind      = (uint32_t)mapped;
+        out[*out_count].sym_index = (uint32_t)sym_idx;
+        out[*out_count].addend    = 0;  /* Mach-O ARM64 uses implicit addends */
+        (*out_count)++;
+    }
+    return 0;
+}
+
 static int emit_stencil_header(const macho_view_t *v, const char *symbol,
                                uint64_t offset, uint64_t size,
-                               const char *out_path)
+                               const char *out_path, int append)
 {
     FILE *out = (out_path != NULL && strcmp(out_path, "-") != 0)
-        ? fopen(out_path, "w") : stdout;
+        ? fopen(out_path, append ? "a" : "w") : stdout;
     if (out == NULL) {
         fprintf(stderr, "stencil_extract: cannot open '%s' for write\n",
                 out_path);
         return -1;
     }
+    /* Extract relocations before writing anything so a parse failure
+     * doesn't leave a half-built header on disk. */
+    enum { MAX_RELOCS = 64, MAX_SYMS = 32 };
+    stencil_reloc_t relocs[MAX_RELOCS];
+    const char     *syms[MAX_SYMS];
+    int             nrelocs = 0, nsyms = 0;
+    if (extract_relocs(v, offset, size, relocs, MAX_RELOCS, &nrelocs,
+                       syms, &nsyms, MAX_SYMS) != 0) {
+        if (out != stdout) fclose(out);
+        return -1;
+    }
     const uint8_t *text = v->blob->data + v->text_section->offset;
     const uint8_t *body = text + offset;
-    fprintf(out, "/* Generated by tools/stencil_extract. Do not edit. */\n\n");
+    if (!append) {
+        fprintf(out, "/* Generated by tools/stencil_extract. Do not edit. */\n\n");
+    } else {
+        fprintf(out, "\n");
+    }
     fprintf(out, "static const unsigned char %s_bytes[%" PRIu64 "] = {\n",
             symbol, size);
     for (uint64_t i = 0; i < size; i++) {
@@ -376,8 +603,37 @@ static int emit_stencil_header(const macho_view_t *v, const char *symbol,
     fprintf(out, "};\n");
     fprintf(out, "static const unsigned long %s_size = %" PRIu64 ";\n",
             symbol, size);
-    /* Reloc emission lands in v0.183.0 where we have a stencil source
-     * with extern immediates the compiler emits relocations against. */
+    /* Symbol table for this stencil: each reloc references a symbol by
+     * its index in this table. */
+    fprintf(out, "static const char *const %s_symbols[%d] = {\n",
+            symbol, nsyms == 0 ? 1 : nsyms);
+    if (nsyms == 0) {
+        fprintf(out, "    0\n");
+    } else {
+        for (int i = 0; i < nsyms; i++) {
+            fprintf(out, "    \"%s\"%s\n", syms[i], i + 1 < nsyms ? "," : "");
+        }
+    }
+    fprintf(out, "};\n");
+    fprintf(out, "static const unsigned long %s_nsymbols = %d;\n",
+            symbol, nsyms);
+    /* Reloc table emitted as quadruples (offset, kind, sym_index,
+     * addend). Empty when the stencil takes no immediates. */
+    fprintf(out, "static const unsigned int %s_relocs[%d][4] = {\n",
+            symbol, nrelocs == 0 ? 1 : nrelocs);
+    if (nrelocs == 0) {
+        fprintf(out, "    {0, 0, 0, 0}\n");
+    } else {
+        for (int i = 0; i < nrelocs; i++) {
+            fprintf(out, "    {%u, %u, %u, %d}%s\n",
+                    relocs[i].offset, relocs[i].kind,
+                    relocs[i].sym_index, relocs[i].addend,
+                    i + 1 < nrelocs ? "," : "");
+        }
+    }
+    fprintf(out, "};\n");
+    fprintf(out, "static const unsigned long %s_nrelocs = %d;\n",
+            symbol, nrelocs);
     if (out != stdout) fclose(out);
     return 0;
 }
@@ -392,26 +648,32 @@ static void usage(void)
             "usage:\n"
             "  stencil_extract --selftest\n"
             "  stencil_extract <obj> --list\n"
-            "  stencil_extract <obj> <symbol> <out-header>\n");
+            "  stencil_extract [--append] <obj> <symbol> <out-header>\n");
 }
 
 int main(int argc, char **argv)
 {
     if (argc < 2) { usage(); return 2; }
     if (strcmp(argv[1], "--selftest") == 0) return selftest();
-    if (argc < 3) { usage(); return 2; }
+    int append = 0;
+    int argi = 1;
+    if (argc > argi && strcmp(argv[argi], "--append") == 0) {
+        append = 1;
+        argi++;
+    }
+    if (argc < argi + 2) { usage(); return 2; }
     mblob_t blob;
-    if (read_file(argv[1], &blob) != 0) return 1;
+    if (read_file(argv[argi], &blob) != 0) return 1;
     macho_view_t v;
     if (macho_open(&blob, &v) != 0) { blob_free(&blob); return 1; }
     int rc = 0;
-    if (strcmp(argv[2], "--list") == 0) {
+    if (strcmp(argv[argi + 1], "--list") == 0) {
         printf("symbols in __TEXT,__text (size=%" PRIu64 ", offset=0x%" PRIx64 "):\n",
                v.text_section->size, (uint64_t)v.text_section->offset);
         rc = macho_list_symbols(&v);
-    } else if (argc >= 4) {
-        const char *symbol = argv[2];
-        const char *out    = argv[3];
+    } else if (argc >= argi + 3) {
+        const char *symbol = argv[argi + 1];
+        const char *out    = argv[argi + 2];
         /* Mach-O linkers prefix C function names with an underscore.
          * Try the literal name first; on miss prepend `_` so users can
          * pass the source-level name. */
@@ -424,10 +686,10 @@ int main(int argc, char **argv)
                         symbol);
                 rc = 1;
             } else {
-                rc = emit_stencil_header(&v, symbol, off, sz, out);
+                rc = emit_stencil_header(&v, symbol, off, sz, out, append);
             }
         } else {
-            rc = emit_stencil_header(&v, symbol, off, sz, out);
+            rc = emit_stencil_header(&v, symbol, off, sz, out, append);
         }
     } else {
         usage();

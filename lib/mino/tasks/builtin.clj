@@ -335,19 +335,27 @@
         gen-dir   "src/eval/bc/stencils/generated"
         out-hdr   (str gen-dir "/stencils_" triple ".h")
         tmpdir    "/tmp/mino-stencils"
-        stencils  [["return.c" "stencil_op_return_arg0"]]]
+        stencils  [["return.c"  "stencil_op_return_arg0"]
+                   ["return.c"  "stencil_op_return_imm"]
+                   ["move.c"    "stencil_op_move"]
+                   ["load_k.c"  "stencil_op_load_k"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
-    ;; First stencil produces the file (truncating); subsequent
-    ;; stencils append. The extractor itself writes the header
-    ;; preamble + bytes block per invocation, so concatenation
-    ;; works because the generated chunks remain valid C in any
-    ;; aggregation order.
-    (doseq [[file sym] stencils]
-      (let [src (str "src/eval/bc/stencils/" file)
-            obj (str tmpdir "/" file ".o")]
-        (sh! cc "-std=c99" "-O2" "-fno-builtin" "-c" src "-o" obj)
-        (sh! "./tools/stencil_extract" obj sym out-hdr)))
+    ;; First stencil writes the preamble; subsequent ones append onto
+    ;; the same header file. The compiler dedup-compiles each source
+    ;; once per distinct file path.
+    (loop [[[file sym] & rest] stencils
+           first? true
+           compiled #{}]
+      (when file
+        (let [src (str "src/eval/bc/stencils/" file)
+              obj (str tmpdir "/" file ".o")]
+          (when-not (compiled file)
+            (sh! cc "-std=c99" "-O2" "-fno-builtin" "-c" src "-o" obj))
+          (if first?
+            (sh! "./tools/stencil_extract" obj sym out-hdr)
+            (sh! "./tools/stencil_extract" "--append" obj sym out-hdr))
+          (recur rest false (conj compiled file)))))
     (println (str "  stencils -> " out-hdr))))
 
 (defn test-suite
