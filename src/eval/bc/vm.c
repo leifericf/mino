@@ -402,7 +402,7 @@ static mino_val_t *args_from_regs(mino_state_t *S, mino_val_t **regs,
  * would lose precision (in practice unreachable from the +/-/inc/dec
  * fast lanes: their operands are both already in 61-bit range and the
  * overflow check prior to encoding caught LLONG_MAX-class wraps). */
-static inline mino_val_t *tag_or_box_int(mino_state_t *S, long long r)
+mino_val_t *tag_or_box_int(mino_state_t *S, long long r)
 {
 #ifdef MINO_BC_PROFILE_COUNTS
     S->bc_int_make_count++;
@@ -423,8 +423,8 @@ static inline mino_val_t *tag_or_box_int(mino_state_t *S, long long r)
  * and MINO_INT_VAL inline decode. The boxed-int slow path falls
  * through to the prim via the same NULL-return-bails-to-fallback
  * contract the binop lane uses. */
-static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
-                                 unsigned subop)
+mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
+                          unsigned subop)
 {
     long long a, r;
     if (!MINO_IS_INT(v)) return NULL;
@@ -469,8 +469,8 @@ static mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
  * __builtin_*_overflow intrinsics; the encoded result rides through
  * tag_or_box_int. Returns NULL on a tag miss or overflow so the
  * dispatcher bails to the cons-spine prim. */
-static mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
-                                  mino_val_t *rhs, unsigned subop)
+mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
+                           mino_val_t *rhs, unsigned subop)
 {
     long long a, b, r;
     if (!MINO_IS_INT(lhs) || !MINO_IS_INT(rhs)) return NULL;

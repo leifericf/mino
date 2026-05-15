@@ -439,6 +439,17 @@ int mino_bc_compile_fn(struct mino_state *S, mino_val_t *fn);
 mino_val_t *mino_bc_run(struct mino_state *S, mino_val_t *fn,
                         mino_val_t **argv, int argc, mino_env_t *env);
 
+/* Tagged-int fast lanes. Externalised so JIT stencils can BL into them
+ * the same way the interpreter dispatch does. The contract is "return
+ * NULL on a tag miss or arithmetic overflow; the caller falls back to
+ * the cons-spine prim with the same operands". tag_or_box_int encodes
+ * a checked 61-bit signed long into a tagged or boxed mino_int. */
+mino_val_t *binop_int_fast(struct mino_state *S, mino_val_t *lhs,
+                           mino_val_t *rhs, unsigned subop);
+mino_val_t *unop_int_fast(struct mino_state *S, mino_val_t *v,
+                          unsigned subop);
+mino_val_t *tag_or_box_int(struct mino_state *S, long long r);
+
 /* GC hook: walk a single mino_bc_fn_t's consts and child fns. Called from
  * gc_mark_runtime_globals (indirectly via the MINO_FN walker) and from
  * the closure-build path so a partially-constructed bc fn stays rooted

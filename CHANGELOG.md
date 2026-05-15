@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.196.0 — Externalise Int-Arith Fast-Path Helpers
+
+`binop_int_fast`, `unop_int_fast`, and `tag_or_box_int` lose their
+`static` linkage in `src/eval/bc/vm.c` and gain extern declarations
+in `src/eval/bc/internal.h`. The three helpers are the tagged-int
+fast lanes the bytecode dispatcher uses for the `OP_*_II` /
+`OP_INC_I` / `OP_DEC_I` / `OP_BINOP_INT` families; promoting them to
+TU-public symbols lets upcoming JIT stencils call them via a direct
+BL instruction the same way the interpreter dispatch does. No
+semantics change, no rename, no new code path: just storage
+extension for the call ABI work that lands next.
+
+The `BINOP_*` and `UNOP_*` enums in `internal.h` were already
+public; only the function-symbol storage moves. The full test suite
+and ASan build pass identically. Bench harness across the three
+suites stays within run-to-run noise of v0.195.0.
+
 ## v0.195.0 — Fused LOAD_K + RETURN Superinstruction
 
 `src/eval/bc/stencils/load_k_return.c` is the first fused
