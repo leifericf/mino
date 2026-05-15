@@ -70,4 +70,6 @@
   gen-stencils-x86-64-linux {:doc  "Cross-compile stencils for x86_64 Linux"
                              :task mino.tasks.builtin/gen-stencils-x86-64-linux}
   gen-stencils-x86-64-darwin {:doc  "Cross-compile stencils for x86_64 Darwin"
-                              :task mino.tasks.builtin/gen-stencils-x86-64-darwin}}}
+                              :task mino.tasks.builtin/gen-stencils-x86-64-darwin}
+  gen-stencils-x86-64-windows {:doc  "Cross-compile stencils for x86_64 Windows (COFF)"
+                               :task mino.tasks.builtin/gen-stencils-x86-64-windows}}}

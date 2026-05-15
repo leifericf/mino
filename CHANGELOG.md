@@ -1,5 +1,66 @@
 # Changelog
 
+## v0.236.0 — COFF Parser + VirtualAlloc Swap + Generated x86_64 Windows Header
+
+Closes cycle A4. The extractor now parses PE/COFF amd64 object
+files alongside Mach-O and ELF; the runtime swaps
+`mmap / mprotect / munmap` for `VirtualAlloc / VirtualProtect /
+VirtualFree` under `_WIN32`; a cross-compiled
+`stencils_x86_64_windows.h` is checked in. With cycles A2 and A3
+already delivering the runtime x86_64 patcher set and the Mach-O
+x86_64 reloc path, Windows x86_64 builds now have a complete
+JIT-eligible toolchain. End-to-end verification needs a Windows
+x86_64 host (deferred); ARM64 Darwin builds stay byte-identical.
+
+  - `tools/stencil_extract.c`:
+    - New `IMAGE_FILE_HEADER` / `IMAGE_SECTION_HEADER` types plus
+      raw-byte accessors for the 18-byte `IMAGE_SYMBOL` and 10-byte
+      `IMAGE_RELOCATION` entries (the COFF spec packs these to
+      odd sizes; struct layout would be non-portable).
+    - New `coff_view_t`, `coff_open`, `coff_list_symbols`,
+      `coff_find_symbol` (derives function size by scanning the
+      next .text symbol -- COFF doesn't record size in the
+      IMAGE_SYMBOL entry), and `coff_extract_relocs`.
+    - New `reloc_x86_64_coff_kind_map`: covers `IMAGE_REL_AMD64_REL32`
+      (PC32, addend -4), `IMAGE_REL_AMD64_REL32_1` (PC32, addend -5),
+      and `IMAGE_REL_AMD64_ADDR64` (ABS64, addend 0). Unknown kinds
+      reject so the build fails loudly.
+    - `main()` dispatches between Mach-O / ELF / COFF based on the
+      first few bytes; the placeholder error that pinned the COFF
+      path is now replaced with a fully wired extractor.
+    - `--selftest` extended to cover every COFF reloc entry plus
+      the unknown-rejects path.
+  - `src/eval/bc/jit/emit.c`:
+    - New `jit_region_alloc / make_rx / free / page_size` host
+      abstractions. POSIX uses the existing `mmap / mprotect /
+      munmap / sysconf(_SC_PAGESIZE)` calls; `_WIN32` uses
+      `VirtualAlloc(MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)` +
+      `VirtualProtect(PAGE_EXECUTE_READ)` +
+      `VirtualFree(MEM_RELEASE)` + `GetSystemInfo`.
+    - Every call site swapped to the wrapper. The compile pipeline
+      and the region-tracking teardown both go through
+      `jit_region_free` so a Windows build never executes a stray
+      `munmap`.
+  - `src/eval/bc/jit/internal.h`: `MINO_CPJIT_X86_64_WINDOWS`
+    detection (already scaffolded in cycle A2) now wires
+    `stencils_x86_64_windows.h`.
+  - `lib/mino/tasks/builtin.clj`: new `gen-stencils-x86-64-windows`
+    task. Cross-compiles every stencil via
+    `clang --target=x86_64-pc-windows-msvc -mno-red-zone`.
+  - `mino.edn`: registers the new task.
+  - `src/eval/bc/stencils/generated/stencils_x86_64_windows.h` (new):
+    cross-compiled byte tables for all 39 stencils. Every non-final
+    stencil's symbol table includes `mino_jit_chain_continue_marker`;
+    reloc kinds are PC32 (COFF doesn't have a GOT, so extern var
+    reads are direct rip-relative and map to PC32 alongside the
+    call/jmp/musttail PC32s).
+
+`release-gate` green on ARM64 Darwin (1737 tests / 7915 assertions,
+ASan clean, JIT parity byte-identical). Cycles A1-A4 are now
+complete: ARM64 Darwin, ARM64 Linux, x86_64 Linux, x86_64 Darwin,
+and x86_64 Windows all have on-disk byte tables plus the runtime
+patcher and memory-API wrappers they need.
+
 ## v0.235.0 — Mach-O x86_64 in Extractor + Generated x86_64 Darwin Header
 
 Lands the cycle A3 work: Mach-O x86_64 reloc-kind mapping in the

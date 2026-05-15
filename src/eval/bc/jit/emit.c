@@ -48,8 +48,59 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Host RWX region API. POSIX uses mmap / mprotect / munmap; Windows
+ * uses VirtualAlloc / VirtualProtect / VirtualFree. The wrappers
+ * below give the rest of this file a uniform allocate/protect/free
+ * surface and a uniform `MAP_FAILED` sentinel so the size-pass +
+ * commit-pass logic doesn't fork on host. */
+#ifdef _WIN32
+#include <windows.h>
+static void *jit_region_alloc(size_t size)
+{
+    return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE,
+                        PAGE_READWRITE);
+}
+static int jit_region_make_rx(void *p, size_t size)
+{
+    DWORD old;
+    return VirtualProtect(p, size, PAGE_EXECUTE_READ, &old) ? 0 : -1;
+}
+static void jit_region_free(void *p, size_t size)
+{
+    (void)size;  /* MEM_RELEASE expects size = 0 paired with original ptr */
+    VirtualFree(p, 0, MEM_RELEASE);
+}
+static long jit_region_page_size(void)
+{
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (long)si.dwPageSize;
+}
+#define MINO_JIT_REGION_ALLOC_FAILED  NULL
+#else
 #include <sys/mman.h>
 #include <unistd.h>
+static void *jit_region_alloc(size_t size)
+{
+    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANON, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+static int jit_region_make_rx(void *p, size_t size)
+{
+    return mprotect(p, size, PROT_READ | PROT_EXEC);
+}
+static void jit_region_free(void *p, size_t size)
+{
+    munmap(p, size);
+}
+static long jit_region_page_size(void)
+{
+    return sysconf(_SC_PAGESIZE);
+}
+#define MINO_JIT_REGION_ALLOC_FAILED  NULL
+#endif
 
 /* ----- region book-keeping ------------------------------------------------ */
 
@@ -72,7 +123,7 @@ void mino_jit_free_all(mino_state_t *S)
     while (node != NULL) {
         struct mino_jit_region *next = node->next;
         if (node->aux_ptr != NULL) free(node->aux_ptr);
-        if (node->ptr     != NULL) munmap(node->ptr, node->size);
+        if (node->ptr     != NULL) jit_region_free(node->ptr, node->size);
         free(node);
         node = next;
     }
@@ -391,14 +442,13 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
     size_t need_bytes      = pool_offset + pool_bytes;
     if (need_bytes == 0) need_bytes = 1;  /* mmap with size 0 is an error */
 
-    long page_l = sysconf(_SC_PAGESIZE);
+    long page_l = jit_region_page_size();
     if (page_l <= 0) return -1;
     size_t page       = (size_t)page_l;
     size_t total_size = (need_bytes + page - 1) & ~(page - 1);
 
-    void *region = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
-                        MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (region == MAP_FAILED) return -1;
+    void *region = jit_region_alloc(total_size);
+    if (region == MINO_JIT_REGION_ALLOC_FAILED) return -1;
 
     /* Per-pc → native offset side table. Sized to code_len; written
      * during the layout walk below. Held in a malloc'd buffer because
@@ -406,7 +456,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
      * scan would otherwise treat the integer slots as live edges. */
     unsigned *pc_offsets = (unsigned *)malloc(bc->code_len * sizeof(unsigned));
     if (pc_offsets == NULL) {
-        munmap(region, total_size);
+        jit_region_free(region, total_size);
         return -1;
     }
 
@@ -416,7 +466,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
     inst_t *insts = (inst_t *)malloc(bc->code_len * sizeof(*insts));
     if (insts == NULL) {
         free(pc_offsets);
-        munmap(region, total_size);
+        jit_region_free(region, total_size);
         return -1;
     }
     size_t n_inst = 0;
@@ -474,7 +524,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         if (n < 0) {
             free(insts);
             free(pc_offsets);
-            munmap(region, total_size);
+            jit_region_free(region, total_size);
             return -1;
         }
         insts[n_inst].native_start = pos;
@@ -535,7 +585,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
             if (sym >= st->nsymbols) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
             if (strcmp(st->symbols[sym], MINO_JIT_CHAIN_MARKER_NAME) != 0) {
@@ -547,21 +597,21 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
             if (mino_jit_patch_b_unconditional((uint32_t *)insn_p, insn_addr,
                                                 next_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
 #elif defined(MINO_CPJIT_HOST_X86_64)
             if (kind != MINO_STENCIL_RELOC_X86_64_PC32) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
             /* The musttail call landed as `e9 <rel32>` (5 bytes).
@@ -573,7 +623,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
                                           next_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
 #endif
@@ -582,7 +632,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         if (!any) {
             free(insts);
             free(pc_offsets);
-            munmap(region, total_size);
+            jit_region_free(region, total_size);
             return -1;
         }
     }
@@ -601,7 +651,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         if (target_pc < 0 || (size_t)target_pc >= bc->code_len) {
             free(insts);
             free(pc_offsets);
-            munmap(region, total_size);
+            jit_region_free(region, total_size);
             return -1;
         }
         uintptr_t target_addr = code_base + pc_offsets[target_pc];
@@ -613,7 +663,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
                                                 insn_addr, target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
 #elif defined(MINO_CPJIT_HOST_X86_64)
@@ -621,7 +671,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
                                          target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
 #endif
@@ -638,7 +688,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
              || mino_jit_patch_imm19(bls_p, base_a + 16, target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
 #elif defined(MINO_CPJIT_HOST_X86_64)
@@ -652,7 +702,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
                                          target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                munmap(region, total_size);
+                jit_region_free(region, total_size);
                 return -1;
             }
 #endif
@@ -669,14 +719,14 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
 
     /* Switch the whole region to RX. The literal pool is read-only at
      * this point too -- the patcher already populated it. */
-    if (mprotect(region, total_size, PROT_READ | PROT_EXEC) != 0) {
-        munmap(region, total_size);
+    if (jit_region_make_rx(region, total_size) != 0) {
+        jit_region_free(region, total_size);
         return -1;
     }
 
     if (region_track(S, region, total_size, pc_offsets) != 0) {
         free(pc_offsets);
-        munmap(region, total_size);
+        jit_region_free(region, total_size);
         return -1;
     }
 

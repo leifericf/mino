@@ -727,6 +727,18 @@
   (gen-stencils-for "x86_64_darwin" "clang"
                     ["--target=x86_64-apple-darwin" "-mno-red-zone"]))
 
+(defn gen-stencils-x86-64-windows
+  "Cross-compile every stencil to x86_64-pc-windows-msvc (the COFF
+   target) using clang's built-in cross-target support and write
+   stencils_x86_64_windows.h. -mno-red-zone matches the Windows x64
+   ABI which has no red zone. The output header is checked into
+   source so native Windows builds pick it up without needing to
+   regenerate."
+  []
+  (build-stencil-extract)
+  (gen-stencils-for "x86_64_windows" "clang"
+                    ["--target=x86_64-pc-windows-msvc" "-mno-red-zone"]))
+
 (defn test-suite
   "Run the test suite."
   []
