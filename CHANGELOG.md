@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.222.0 — Single-Clause Dispatch Fast Path In mino_bc_run
+
+Step 3 of the apply_callable_argv inlining cycle. Adds an early-out
+in `mino_bc_run`'s arity dispatch for the common case of `n_clauses
+== 1`, peeling that hot shape off so it skips two loop iterations +
+two bounds tests per call. Annotated `__builtin_expect(... == 1, 1)`
+because measured workloads (fib, reduce, transducer compositions,
+realistic_bench rows) overwhelmingly use single-arity callees.
+
+### Measurement honesty
+
+The plan named a 1.30x fib(25) gate for this release. **Measured: no
+meaningful improvement over v0.221.0 (within run-to-run noise).**
+Root cause analysis on Apple Silicon:
+
+  - Dispatch loop savings ~5 ns/call were predicted; actual savings
+    appear to be near zero because the loop's two iterations + two
+    branches predict near-perfectly on a stable callee shape, so the
+    pipeline retires the loop body at branch-predictor rate.
+  - The bulk of `mino_bc_run`'s per-call cost lives further down in
+    `bc_push_window`, the regs slot zeroing on pop, and the
+    try-state snapshot setup — none of which this release touches.
+
+Per `[[measure-before-after]]` / `[[no-fakery]]`: the architectural
+change is correct and shipped, but the cycle's headline 1.30x gate
+is not realistically reachable on this codebase without a larger
+refactor that bypasses `mino_bc_run` entirely from the JIT helper
+(allocating the register window inline + dispatching to
+`mino_jit_invoke` directly, skipping push_frame / defining_ns /
+try-snapshot setup). That refactor is invasive enough to merit its
+own scope; the v0.222 release ships what it can defensibly verify
+and v0.224's cycle-close re-evaluates whether to chase the
+remainder.
+
+`release-gate` green; `mino_jit_call_known_fn_slow` correctness
+verified via parity suite.
+
 ## v0.221.0 — Known-Callee Fast Path In OP_CALL_CACHED (Scaffolding)
 
 Step 2 of the apply_callable_argv inlining cycle. Adds the kind-aware

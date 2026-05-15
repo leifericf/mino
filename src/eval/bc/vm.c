@@ -1104,16 +1104,30 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     /* Select a clause whose arity matches argc. Prefer fixed-arity
      * matches over variadic ones (Clojure semantics: the most-specific
      * clause wins). If two clauses share the same min arity we pick
-     * the first in source order. */
+     * the first in source order.
+     *
+     * Single-clause fast path: the vast majority of fns have one
+     * clause, so peel that case off here. Saves two pointer
+     * dereferences + two branches per call vs walking the
+     * generic loop. Hot for recursion-heavy workloads like fib. */
     const mino_bc_clause_t *match = NULL;
-    for (int i = 0; i < bc->n_clauses; i++) {
-        const mino_bc_clause_t *cl = &bc->clauses[i];
-        if (!cl->has_rest && cl->n_params == argc) { match = cl; break; }
-    }
-    if (match == NULL) {
+    if (__builtin_expect(bc->n_clauses == 1, 1)) {
+        const mino_bc_clause_t *cl = &bc->clauses[0];
+        if (!cl->has_rest && cl->n_params == argc) {
+            match = cl;
+        } else if (cl->has_rest && argc >= cl->n_params) {
+            match = cl;
+        }
+    } else {
         for (int i = 0; i < bc->n_clauses; i++) {
             const mino_bc_clause_t *cl = &bc->clauses[i];
-            if (cl->has_rest && argc >= cl->n_params) { match = cl; break; }
+            if (!cl->has_rest && cl->n_params == argc) { match = cl; break; }
+        }
+        if (match == NULL) {
+            for (int i = 0; i < bc->n_clauses; i++) {
+                const mino_bc_clause_t *cl = &bc->clauses[i];
+                if (cl->has_rest && argc >= cl->n_params) { match = cl; break; }
+            }
         }
     }
     if (match == NULL) {
