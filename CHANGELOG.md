@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.220.0 — IC Slot Callable-Shape Cache (Setup)
+
+Step 1 of the apply_callable_argv inlining cycle. The IC slot
+(`src/eval/bc/internal.h::mino_bc_ic_slot_t`) grew three new fields
+populated on each cache fill, in preparation for the v0.221+
+`OP_CALL_CACHED` fast-path branch that will skip the
+`apply_callable_argv` dispatch switch on observed-stable callees.
+
+  - `cached_callable_kind` (1 byte): one of `MINO_IC_CALLABLE_NONE` /
+    `_PRIM_ARGV` / `_MINO_FN_BC_SINGLE` / `_MINO_FN_BC_MULTI` /
+    `_OTHER`. Set in `ic_resolve_global` (`src/eval/bc/vm.c`) by a
+    new `classify_callable_kind` helper that walks one var-deref and
+    inspects the value's type + arity-clause shape.
+  - `cached_fn_has_rest` (1 byte) and `cached_fn_n_params` (2 bytes):
+    populated for `MINO_FN_BC_SINGLE`; zero otherwise.
+
+Struct size grew 48 -> 56 bytes (existing offsets unchanged; the
+three new fields fit either in pre-existing padding after `kind` or
+after the trailing `cached_type` pointer). The JIT layout asserts in
+`src/eval/bc/jit/entry.c` pin every offset including the new ones,
+and the `runtime_layout.h` mirror tracks the same struct.
+
+Stencil bytes for `OP_GETGLOBAL_CACHED` and `OP_CALL_CACHED`
+regenerated (`stencils_arm64_darwin.h`) because the per-slot stride
+folded into the index multiplication changed.
+
+**No behaviour change in this release.** The fields are filled on
+every IC fill but no reader consumes them yet. `release-gate` green.
+
 ## v0.219.0 — Regex Engine + str/split With Regex Separators
 
 Two runtime defects surfaced while wiring G3's reloc parser in

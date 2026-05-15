@@ -73,7 +73,7 @@ MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK ==
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS ==
                            offsetof(struct mino_bc_fn, ic_slots),
                        bc_ic_slots);
-MINO_JIT_LAYOUT_ASSERT(sizeof(mino_bc_ic_slot_t) == 48,
+MINO_JIT_LAYOUT_ASSERT(sizeof(mino_bc_ic_slot_t) == 56,
                        ic_slot_size);
 MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, sym) == 0,
                        ic_slot_sym);
@@ -83,12 +83,21 @@ MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, gen) == 16,
                        ic_slot_gen);
 MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, kind) == 20,
                        ic_slot_kind);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t,
+                                cached_callable_kind) == 21,
+                       ic_slot_cached_callable_kind);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t,
+                                cached_fn_has_rest) == 22,
+                       ic_slot_cached_fn_has_rest);
 MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, atom) == 24,
                        ic_slot_atom);
 MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, cached_map) == 32,
                        ic_slot_cached_map);
 MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, cached_type) == 40,
                        ic_slot_cached_type);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t,
+                                cached_fn_n_params) == 48,
+                       ic_slot_cached_fn_n_params);
 
 int mino_jit_imm_kind_from_name(const char *sym)
 {

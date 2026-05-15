@@ -102,11 +102,26 @@ typedef struct mino_bc_ic_slot {
     mino_val_t   *cached;
     unsigned      gen;
     unsigned char kind;
+    /* GLOBAL-kind callable-shape fields (see internal.h for the
+     * authoritative layout note). */
+    unsigned char cached_callable_kind;
+    unsigned char cached_fn_has_rest;
+    unsigned char _pad_ic0;
     /* PROTOCOL-only fields. Zero / NULL when kind == MINO_BC_IC_GLOBAL. */
     mino_val_t   *atom;
     mino_val_t   *cached_map;
     mino_val_t   *cached_type;
+    unsigned short cached_fn_n_params;
 } mino_bc_ic_slot_t;
+
+/* Stable tags matching mino_ic_callable_kind_t. Defined as #defines
+ * so they can be referenced from stencil sources without pulling in
+ * the full bc internal header. */
+#define MINO_IC_CALLABLE_NONE              0
+#define MINO_IC_CALLABLE_PRIM_ARGV         1
+#define MINO_IC_CALLABLE_MINO_FN_BC_SINGLE 2
+#define MINO_IC_CALLABLE_MINO_FN_BC_MULTI  3
+#define MINO_IC_CALLABLE_OTHER             4
 #endif
 
 /* === Tagged-int encoding =========================================== */

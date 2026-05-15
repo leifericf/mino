@@ -299,11 +299,32 @@ typedef struct mino_bc_ic_slot {
     mino_val_t   *cached;
     unsigned      gen;
     unsigned char kind;
+    /* GLOBAL-kind callable-shape fields. Populated lazily by
+     * call_cached.c's fill path the first time the slot resolves
+     * something callable; consulted by the JIT fast path to choose
+     * which slow helper to call into without re-walking
+     * apply_callable_argv's dispatch switch on every hit. Zero when
+     * the slot hasn't seen a callable yet or kind == PROTOCOL. */
+    unsigned char cached_callable_kind;
+    unsigned char cached_fn_has_rest;
+    unsigned char _pad_ic0;
     /* PROTOCOL-only fields. Zero / NULL when kind == MINO_BC_IC_GLOBAL. */
     mino_val_t   *atom;
     mino_val_t   *cached_map;
     mino_val_t   *cached_type;
+    unsigned short cached_fn_n_params;
 } mino_bc_ic_slot_t;
+
+/* Callable-shape tags used by cached_callable_kind. Values are
+ * stable across builds so the JIT stencil source can compare against
+ * them as literals. */
+typedef enum {
+    MINO_IC_CALLABLE_NONE                 = 0,
+    MINO_IC_CALLABLE_PRIM_ARGV            = 1,
+    MINO_IC_CALLABLE_MINO_FN_BC_SINGLE    = 2,
+    MINO_IC_CALLABLE_MINO_FN_BC_MULTI     = 3,
+    MINO_IC_CALLABLE_OTHER                = 4
+} mino_ic_callable_kind_t;
 
 /* One arity clause. Multi-arity fns carry an array of these, one per
  * (params body...) clause; single-arity fns degenerate to a one-entry

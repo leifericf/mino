@@ -545,6 +545,54 @@ static mino_val_t *resolve_global(mino_state_t *S, mino_val_t *sym,
     return eval_impl(S, sym, env, 0);
 }
 
+/* Classify a resolved callable's shape for the IC slot's cached_*
+ * fields. Walks one var-deref but no further; if the value isn't
+ * something that can be called (or is a tree-walker fn whose bc has
+ * declined or hasn't been compiled yet), returns CALLABLE_OTHER and
+ * leaves *out_has_rest / *out_n_params at zero. Conservative on
+ * purpose: the v0.221 fast path only fires on SINGLE/PRIM_ARGV, and
+ * a misclassification toward OTHER costs one fallback dispatch
+ * whereas a misclassification toward SINGLE/PRIM_ARGV would skip
+ * the dispatch switch for the wrong callable. */
+static unsigned char classify_callable_kind(mino_val_t *v,
+                                            unsigned char *out_has_rest,
+                                            unsigned short *out_n_params)
+{
+    *out_has_rest = 0;
+    *out_n_params = 0;
+    if (v == NULL) return MINO_IC_CALLABLE_NONE;
+    /* Var unwrap (apply_callable_argv mirrors this). */
+    if (mino_type_of(v) == MINO_VAR) {
+        if (!v->as.var.bound || v->as.var.root == NULL) {
+            return MINO_IC_CALLABLE_NONE;
+        }
+        v = v->as.var.root;
+    }
+    if (mino_type_of(v) == MINO_PRIM) {
+        if (v->as.prim.fn2 != NULL) return MINO_IC_CALLABLE_PRIM_ARGV;
+        return MINO_IC_CALLABLE_OTHER;
+    }
+    if (mino_type_of(v) == MINO_FN) {
+        mino_bc_fn_t *bc = v->as.fn.bc;
+        if (bc == NULL || bc == &mino_bc_declined) {
+            return MINO_IC_CALLABLE_OTHER;
+        }
+        if (bc->clauses == NULL || bc->n_clauses <= 0) {
+            return MINO_IC_CALLABLE_OTHER;
+        }
+        if (bc->n_clauses == 1) {
+            *out_has_rest = (unsigned char)(bc->clauses[0].has_rest ? 1 : 0);
+            if (bc->clauses[0].n_params >= 0
+                && bc->clauses[0].n_params <= 0xFFFF) {
+                *out_n_params = (unsigned short)bc->clauses[0].n_params;
+            }
+            return MINO_IC_CALLABLE_MINO_FN_BC_SINGLE;
+        }
+        return MINO_IC_CALLABLE_MINO_FN_BC_MULTI;
+    }
+    return MINO_IC_CALLABLE_OTHER;
+}
+
 /* Shared resolve path for the two GLOBAL-kind IC consumers
  * (OP_GETGLOBAL_CACHED and OP_CALL_CACHED). Mirrors eval_symbol's
  * shadowing order: dynamic binding -> lexical env -> cached var ->
@@ -578,9 +626,16 @@ static mino_val_t *ic_resolve_global(mino_state_t *S,
     mino_val_t *v = resolve_global(S, slot->sym, env);
     if (v == NULL) return NULL;
     if (!dyn_active) {
+        unsigned char  has_rest = 0;
+        unsigned short n_params = 0;
+        unsigned char  kind     = classify_callable_kind(v, &has_rest,
+                                                         &n_params);
         gc_write_barrier(S, bc->ic_slots, slot->cached, v);
-        slot->cached = v;
-        slot->gen    = S->ic_gen;
+        slot->cached               = v;
+        slot->gen                  = S->ic_gen;
+        slot->cached_callable_kind = kind;
+        slot->cached_fn_has_rest   = has_rest;
+        slot->cached_fn_n_params   = n_params;
     }
     return v;
 }
