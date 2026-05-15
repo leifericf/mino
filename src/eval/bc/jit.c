@@ -110,31 +110,41 @@ typedef struct {
  * `MINO_STENCIL_IMM_*` symbols; the runtime resolves each occurrence
  * to a bytecode-operand decode (A / B / C / Bx / sBx). */
 typedef enum {
-    IMM_KIND_A   = 0,
-    IMM_KIND_B   = 1,
-    IMM_KIND_C   = 2,
-    IMM_KIND_BX  = 3,
-    IMM_KIND_SBX = 4
+    IMM_KIND_A    = 0,
+    IMM_KIND_B    = 1,
+    IMM_KIND_C    = 2,
+    IMM_KIND_BX   = 3,
+    IMM_KIND_SBX  = 4,
+    /* Signed 8-bit C field re-tagged as a mino_val_t* via MINO_MAKE_INT.
+     * The OP_*_IK stencils read the slot and pass it straight to
+     * binop_int_fast / mino_jit_binop_k_slow, so the value the JIT
+     * writes into the pool is the already-tagged integer pointer. */
+    IMM_KIND_KIMM = 5
 } imm_kind_t;
 
 static int imm_kind_from_name(const char *sym)
 {
-    if (strcmp(sym, "MINO_STENCIL_IMM_A")   == 0) return IMM_KIND_A;
-    if (strcmp(sym, "MINO_STENCIL_IMM_B")   == 0) return IMM_KIND_B;
-    if (strcmp(sym, "MINO_STENCIL_IMM_C")   == 0) return IMM_KIND_C;
-    if (strcmp(sym, "MINO_STENCIL_IMM_BX")  == 0) return IMM_KIND_BX;
-    if (strcmp(sym, "MINO_STENCIL_IMM_SBX") == 0) return IMM_KIND_SBX;
+    if (strcmp(sym, "MINO_STENCIL_IMM_A")    == 0) return IMM_KIND_A;
+    if (strcmp(sym, "MINO_STENCIL_IMM_B")    == 0) return IMM_KIND_B;
+    if (strcmp(sym, "MINO_STENCIL_IMM_C")    == 0) return IMM_KIND_C;
+    if (strcmp(sym, "MINO_STENCIL_IMM_BX")   == 0) return IMM_KIND_BX;
+    if (strcmp(sym, "MINO_STENCIL_IMM_SBX")  == 0) return IMM_KIND_SBX;
+    if (strcmp(sym, "MINO_STENCIL_IMM_KIMM") == 0) return IMM_KIND_KIMM;
     return -1;
 }
 
 static uint64_t imm_value(mino_bc_insn_t insn, imm_kind_t k)
 {
     switch (k) {
-    case IMM_KIND_A:   return (uint64_t)A_OF(insn);
-    case IMM_KIND_B:   return (uint64_t)B_OF(insn);
-    case IMM_KIND_C:   return (uint64_t)C_OF(insn);
-    case IMM_KIND_BX:  return (uint64_t)Bx_OF(insn);
-    case IMM_KIND_SBX: return (uint64_t)(int64_t)sBx_OF(insn);
+    case IMM_KIND_A:    return (uint64_t)A_OF(insn);
+    case IMM_KIND_B:    return (uint64_t)B_OF(insn);
+    case IMM_KIND_C:    return (uint64_t)C_OF(insn);
+    case IMM_KIND_BX:   return (uint64_t)Bx_OF(insn);
+    case IMM_KIND_SBX:  return (uint64_t)(int64_t)sBx_OF(insn);
+    case IMM_KIND_KIMM: {
+        long long lit = (long long)(int8_t)C_OF(insn);
+        return (uint64_t)(uintptr_t)MINO_MAKE_INT(lit);
+    }
     }
     return 0;
 }
@@ -234,6 +244,62 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_eq_ii_symbols, stencil_op_eq_ii_nsymbols,
         stencil_op_eq_ii_relocs, stencil_op_eq_ii_nrelocs,
         0u
+    },
+    {
+        OP_INC_I,
+        stencil_op_inc_i_bytes, stencil_op_inc_i_size,
+        stencil_op_inc_i_symbols, stencil_op_inc_i_nsymbols,
+        stencil_op_inc_i_relocs, stencil_op_inc_i_nrelocs,
+        0u
+    },
+    {
+        OP_DEC_I,
+        stencil_op_dec_i_bytes, stencil_op_dec_i_size,
+        stencil_op_dec_i_symbols, stencil_op_dec_i_nsymbols,
+        stencil_op_dec_i_relocs, stencil_op_dec_i_nrelocs,
+        0u
+    },
+    {
+        OP_ZERO_INT_P,
+        stencil_op_zero_int_p_bytes, stencil_op_zero_int_p_size,
+        stencil_op_zero_int_p_symbols, stencil_op_zero_int_p_nsymbols,
+        stencil_op_zero_int_p_relocs, stencil_op_zero_int_p_nrelocs,
+        0u
+    },
+    {
+        OP_ADD_IK,
+        stencil_op_add_ik_bytes, stencil_op_add_ik_size,
+        stencil_op_add_ik_symbols, stencil_op_add_ik_nsymbols,
+        stencil_op_add_ik_relocs, stencil_op_add_ik_nrelocs,
+        0u
+    },
+    {
+        OP_SUB_IK,
+        stencil_op_sub_ik_bytes, stencil_op_sub_ik_size,
+        stencil_op_sub_ik_symbols, stencil_op_sub_ik_nsymbols,
+        stencil_op_sub_ik_relocs, stencil_op_sub_ik_nrelocs,
+        0u
+    },
+    {
+        OP_LT_IK,
+        stencil_op_lt_ik_bytes, stencil_op_lt_ik_size,
+        stencil_op_lt_ik_symbols, stencil_op_lt_ik_nsymbols,
+        stencil_op_lt_ik_relocs, stencil_op_lt_ik_nrelocs,
+        0u
+    },
+    {
+        OP_LE_IK,
+        stencil_op_le_ik_bytes, stencil_op_le_ik_size,
+        stencil_op_le_ik_symbols, stencil_op_le_ik_nsymbols,
+        stencil_op_le_ik_relocs, stencil_op_le_ik_nrelocs,
+        0u
+    },
+    {
+        OP_EQ_IK,
+        stencil_op_eq_ik_bytes, stencil_op_eq_ik_size,
+        stencil_op_eq_ik_symbols, stencil_op_eq_ik_nsymbols,
+        stencil_op_eq_ik_relocs, stencil_op_eq_ik_nrelocs,
+        0u
     }
 };
 static const int g_stencils_count =
@@ -310,6 +376,61 @@ mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for the OP_*_IK stencils. The rhs is the pre-tagged
+ * immediate (carried in a stencil pool slot), so the helper conses it
+ * directly onto the spine -- there is no register-window read for it.
+ * The lhs still comes through regs[b]; the result lands in regs[a]
+ * after any GC-driven base relocation. */
+mino_val_t **mino_jit_binop_k_slow(mino_state_t *S, mino_val_t **regs,
+                                   unsigned a, unsigned b,
+                                   mino_val_t *kimm, unsigned subop)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, kimm, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    mino_val_t *r;
+    switch (subop) {
+    case BINOP_ADD: r = prim_add(S, list, NULL); break;
+    case BINOP_SUB: r = prim_sub(S, list, NULL); break;
+    case BINOP_LT:  r = prim_lt (S, list, NULL); break;
+    case BINOP_LE:  r = prim_lte(S, list, NULL); break;
+    case BINOP_EQ:  r = prim_eq (S, list, NULL); break;
+    default:        r = NULL;                    break;
+    }
+    if (r == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* Slow path for the unary OP_INC_I / OP_DEC_I / OP_ZERO_INT_P stencils.
+ * Builds a one-element cons spine and dispatches to the matching
+ * prim; mirrors the interpreter's unary handler. */
+mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
+                                unsigned a, unsigned b, unsigned subop)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    mino_val_t *r;
+    switch (subop) {
+    case UNOP_INC:    r = prim_inc   (S, list, NULL); break;
+    case UNOP_DEC:    r = prim_dec   (S, list, NULL); break;
+    case UNOP_ZERO_P: r = prim_zero_p(S, list, NULL); break;
+    default:          r = NULL;                       break;
+    }
+    if (r == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* ----- Extern-symbol resolution table ------------------------------------ */
 
 /* Stencils call into a small fixed set of host helpers. Each entry
@@ -322,8 +443,11 @@ typedef struct {
 } extern_fn_t;
 
 static const extern_fn_t g_extern_fns[] = {
-    {"binop_int_fast",      (void *)(uintptr_t)binop_int_fast},
-    {"mino_jit_binop_slow", (void *)(uintptr_t)mino_jit_binop_slow},
+    {"binop_int_fast",        (void *)(uintptr_t)binop_int_fast},
+    {"unop_int_fast",         (void *)(uintptr_t)unop_int_fast},
+    {"mino_jit_binop_slow",   (void *)(uintptr_t)mino_jit_binop_slow},
+    {"mino_jit_binop_k_slow", (void *)(uintptr_t)mino_jit_binop_k_slow},
+    {"mino_jit_unop_slow",    (void *)(uintptr_t)mino_jit_unop_slow},
     {NULL, NULL}
 };
 

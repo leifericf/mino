@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.199.0 — Unary + Immediate-Arg Stencils
+
+`src/eval/bc/stencils/{inc_i,dec_i,zero_int_p}.c` cover the unary
+int-arith ops (`(inc x)`, `(dec x)`, `(zero? x)`), and
+`src/eval/bc/stencils/{add_ik,sub_ik,lt_ik,le_ik,eq_ik}.c` cover the
+immediate-rhs variants (`(+ x N)`, `(- x N)`, `(< x N)`, `(<= x N)`,
+`(= x N)` where N is a signed 8-bit literal baked into the bytecode
+word). With these eight stencils landed the JIT covers all the
+single-instruction shapes the bytecode VM emits for counted-loop
+bodies, so a `(loop [i 0] (if (< i N) (recur (inc i)) ...))` body
+now JIT-compiles to native instructions end-to-end below the
+back-jump.
+
+`jit.c` grows two new cold helpers:
+
+- `mino_jit_unop_slow(S, regs, a, b, subop)` builds a one-element
+  cons spine and dispatches to `prim_inc` / `prim_dec` /
+  `prim_zero_p` -- the same prims the interpreter's OP_*_I fallback
+  uses. The helper mirrors `mino_jit_binop_slow`'s regs-base refresh
+  so a GC during the cons or prim call returns the relocated window
+  pointer to the chain.
+
+- `mino_jit_binop_k_slow(S, regs, a, b, kimm, subop)` is the
+  immediate-rhs sibling of `mino_jit_binop_slow`. The pre-tagged
+  literal arrives as a `mino_val_t*` (no register-window read),
+  conses directly onto the spine, and dispatches to the matching
+  prim. The slow path covers the same five subops the fast lane
+  handles: `BINOP_ADD` / `SUB` / `LT` / `LE` / `EQ`.
+
+A new `IMM_KIND_KIMM` joins the stencil-immediate enum in `jit.c`.
+The JIT writes `(uint64_t)(uintptr_t)MINO_MAKE_INT((int8_t)C_OF(insn))`
+into the pool slot at materialisation time so the stencil reads it
+as a tagged `mino_val_t*` and hands it to `binop_int_fast` exactly
+the way the II form passes `regs[c]`. The ABI extension is a single
+new extern name (`MINO_STENCIL_IMM_KIMM`) plus an `IMM_KIMM` macro
+in `abi.h`; no changes to the existing IMM_A / B / C / Bx / sBx
+slots.
+
+The extern-fn table gains three entries
+(`unop_int_fast`, `mino_jit_binop_k_slow`, `mino_jit_unop_slow`)
+and the stencil descriptor table gains eight entries
+(`OP_INC_I` / `OP_DEC_I` / `OP_ZERO_INT_P` / `OP_ADD_IK` /
+`OP_SUB_IK` / `OP_LT_IK` / `OP_LE_IK` / `OP_EQ_IK`). Stencil set up
+to 20 ops now. Full test suite (1688 / 7854) passes; smoke runs
+exercise inc / dec / zero? on the JIT path, ADD_IK / SUB_IK with
+positive and negative immediates, LT_IK / LE_IK / EQ_IK against
+truthy and falsy comparisons, and the slow path through both
+bigint overflow (`(inc 1152921504606846975)`) and double tag-miss
+(`(+ x 7)` on a 1.5 input).
+
 ## v0.198.0 — Comparison Stencils (LT / LE / GT / GE / EQ_II)
 
 `src/eval/bc/stencils/{lt,le,gt,ge,eq}_ii.c` extend the JIT's

@@ -348,7 +348,15 @@
                    ["le_ii.c"         "stencil_op_le_ii"]
                    ["gt_ii.c"         "stencil_op_gt_ii"]
                    ["ge_ii.c"         "stencil_op_ge_ii"]
-                   ["eq_ii.c"         "stencil_op_eq_ii"]]]
+                   ["eq_ii.c"         "stencil_op_eq_ii"]
+                   ["inc_i.c"         "stencil_op_inc_i"]
+                   ["dec_i.c"         "stencil_op_dec_i"]
+                   ["zero_int_p.c"    "stencil_op_zero_int_p"]
+                   ["add_ik.c"        "stencil_op_add_ik"]
+                   ["sub_ik.c"        "stencil_op_sub_ik"]
+                   ["lt_ik.c"         "stencil_op_lt_ik"]
+                   ["le_ik.c"         "stencil_op_le_ik"]
+                   ["eq_ik.c"         "stencil_op_eq_ik"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto
