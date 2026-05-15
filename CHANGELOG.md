@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.229.0 — JIT Stencil For OP_ASSOC + Cycle C Close
+
+Closes the second coverage cycle. The 3-arg `(assoc coll k v)`
+fast-lane stencil rounds out the seven hot vector / map ops named
+in the post-CPJIT-hygiene audit.
+
+The triple [coll, k, v] sits at `regs[B..B+2]`; the slow helper
+routes:
+  - MINO_VECTOR + tagged-int key in range (or len-equal for the
+    append case) → `vec_assoc1`.
+  - MINO_MAP key → `mino_map_assoc1`.
+  - Otherwise → `prim_assoc` (sorted-map, record, transient,
+    non-int vec key, idx out of range, variadic forms).
+
+Cycle close status doc at
+`.local/cpjit-coverage-c-cycle-status.md`. Tier 2-5 ops (extended
+arith, reserve opcodes, OP_LOOP_INT_LT) remain explicitly out of
+scope; the next cycle is A1 (ARM64 Linux portability).
+
 ## v0.228.0 — JIT Stencil For OP_CONJ_VEC
 
 Continues the coverage cycle. The (conj v x) fast-lane stencil now

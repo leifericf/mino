@@ -261,6 +261,13 @@ extern mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S,
                                             unsigned a, unsigned b,
                                             unsigned c);
 
+/* OP_ASSOC slow helper. 3-arg shape: [coll, k, v] sits at regs[b..b+2].
+ * MINO_VECTOR+int-key fast lane via vec_assoc1; MINO_MAP fast lane
+ * via mino_map_assoc1; falls through to prim_assoc otherwise. */
+extern mino_val_t **mino_jit_assoc_slow(mino_state_t *S,
+                                         mino_val_t **regs,
+                                         unsigned a, unsigned b);
+
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
  * return value lands at regs[dst]. Routes through

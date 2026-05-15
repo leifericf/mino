@@ -157,6 +157,54 @@ mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_ASSOC. Mirrors the interpreter's 3-arg shape
+ * with the [coll, k, v] triple sitting at regs[b..b+2] and the dst at
+ * regs[a]. MINO_VECTOR + tagged-int k (in-range or len-equal for
+ * append) routes to vec_assoc1; MINO_MAP k routes to mino_map_assoc1.
+ * Other shapes (sorted-map, record, transient, non-int vec key, idx
+ * out of range, variadic forms) fall through to prim_assoc. */
+mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
+                                 unsigned a, unsigned b)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *k    = S->bc_regs[base + b + 1];
+    mino_val_t *v    = S->bc_regs[base + b + 2];
+    if (coll != NULL && k != NULL) {
+        int t = mino_type_of(coll);
+        if (t == MINO_VECTOR && MINO_IS_INT(k)) {
+            long long idx = MINO_INT_VAL(k);
+            if (idx >= 0 && (size_t)idx <= coll->as.vec.len) {
+                mino_val_t *r = vec_assoc1(S, coll, (size_t)idx, v);
+                if (r == NULL) return NULL;
+                regs    = S->bc_regs + base;
+                regs[a] = r;
+                return regs;
+            }
+        }
+        if (t == MINO_MAP) {
+            mino_val_t *r = mino_map_assoc1(S, coll, k, v);
+            if (r == NULL) return NULL;
+            regs    = S->bc_regs + base;
+            regs[a] = r;
+            return regs;
+        }
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, v, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, k, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_assoc(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Slow path for OP_CONJ_VEC. MINO_VECTOR fast lane via vec_conj1
  * (allocates -- regs base may relocate); other coll types fall
  * through to prim_conj which handles lists, sorted-colls, sets,
