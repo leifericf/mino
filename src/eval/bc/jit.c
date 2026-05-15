@@ -108,9 +108,9 @@ MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN ==
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS ==
                            offsetof(struct mino_state, bc_regs),
                        state_bc_regs);
-MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_MAIN_CTX ==
-                           offsetof(struct mino_state, main_ctx),
-                       state_main_ctx);
+MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ==
+                           offsetof(struct mino_state, jit_invoke_ctx),
+                       state_jit_invoke_ctx);
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK ==
                            offsetof(struct mino_thread_ctx, dyn_stack),
                        ctx_dyn_stack);
@@ -1312,21 +1312,6 @@ static void emit_jmpifnot_bytes(unsigned char *code, size_t pos,
     memcpy(code + pos + 16, &bls,  4);
 }
 
-/* Locate the first `ret` (encoded as 0xd65f03c0) within the stencil
- * bytes. The compiler-emitted layout for our stencils places exactly
- * one ret at the natural function exit; cold blocks merge back into
- * the epilogue via an intra-stencil branch before the ret. Returns
- * the offset of the ret or -1 when none is found. */
-static long find_first_ret(const unsigned char *bytes, unsigned long size)
-{
-    for (unsigned long i = 0; i + 4 <= size; i += 4) {
-        uint32_t insn;
-        memcpy(&insn, bytes + i, 4);
-        if (insn == 0xd65f03c0u) return (long)i;
-    }
-    return -1;
-}
-
 /* Each BRANCH26 reloc in a stencil bl-calls a 16-byte trampoline
  * whose body loads an absolute target address from an embedded
  * literal pool and branches to it. The trampoline is self-contained:
@@ -1725,27 +1710,40 @@ static int compile_inner(mino_state_t *S, mino_val_t *fn_val)
         }
     }
 
-    /* Pass A: rewrite each non-final stencil's trailing `ret` into a
-     * `b <next_inst_start>` chain branch. clang lays the cold blocks
-     * out after the natural exit; the first ret in the byte stream
-     * is always the success-path exit. Direct-emit instances skip
-     * this pass -- they have no ret to patch. */
+    /* Pass A: rewrite every `ret` inside each non-final stencil's
+     * span into a `b <next_inst_start>` chain branch. Stencils whose
+     * fast path inlines a check without calling a helper (e.g., the
+     * inline OP_GETGLOBAL_CACHED hit path) end up with two basic
+     * blocks: the lean fast-path exit (no prologue) and the cold
+     * slow-path exit (with prologue). clang emits a `ret` at the
+     * end of each. Patching only the first would leave the
+     * remaining ret(s) as real returns that would short-circuit
+     * out of the JIT region. We walk the span and rewrite each
+     * encountered `ret` so every exit path chains to the next
+     * stencil. Direct-emit instances skip this pass -- they have no
+     * ret to patch. */
     for (size_t i = 0; i + 1 < n_inst; i++) {
         if (insts[i].kind != INST_STENCIL_NONFINAL) continue;
-        size_t span_size = insts[i + 1].native_start - insts[i].native_start;
-        long   ret_off   = find_first_ret(code + insts[i].native_start,
-                                          span_size);
-        if (ret_off < 0) {
-            free(insts);
-            free(pc_offsets);
-            munmap(region, total_size);
-            return -1;
-        }
-        uintptr_t ret_addr  = code_base + insts[i].native_start + (size_t)ret_off;
+        size_t    span_size = insts[i + 1].native_start - insts[i].native_start;
         uintptr_t next_addr = code_base + insts[i + 1].native_start;
-        uint32_t *insn_p    =
-            (uint32_t *)(code + insts[i].native_start + (size_t)ret_off);
-        if (patch_b_unconditional(insn_p, ret_addr, next_addr) != 0) {
+        int       any       = 0;
+        for (size_t off = 0; off + 4 <= span_size; off += 4) {
+            uint32_t insn;
+            memcpy(&insn, code + insts[i].native_start + off, 4);
+            if (insn != 0xd65f03c0u) continue;
+            uintptr_t ret_addr =
+                code_base + insts[i].native_start + off;
+            uint32_t *insn_p   =
+                (uint32_t *)(code + insts[i].native_start + off);
+            if (patch_b_unconditional(insn_p, ret_addr, next_addr) != 0) {
+                free(insts);
+                free(pc_offsets);
+                munmap(region, total_size);
+                return -1;
+            }
+            any = 1;
+        }
+        if (!any) {
             free(insts);
             free(pc_offsets);
             munmap(region, total_size);
@@ -1881,10 +1879,16 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
      * from inside the JIT region can read it. Save / restore around
      * the call to support re-entry from a nested JIT'd callee in a
      * later release. */
-    mino_thread_ctx_t *ctx       = mino_current_ctx(S);
-    mino_env_t        *saved_env = ctx->jit_invoke_env;
+    mino_thread_ctx_t *ctx        = mino_current_ctx(S);
+    mino_env_t        *saved_env  = ctx->jit_invoke_env;
+    mino_thread_ctx_t *saved_ctx  = S->jit_invoke_ctx;
     ctx->jit_invoke_env = env;
+    /* Publish ctx on S so stencil-emitted code can reach
+     * `ctx->dyn_stack` via a fixed offset from S without touching
+     * the Darwin __thread machinery the extractor doesn't model. */
+    S->jit_invoke_ctx = ctx;
     mino_val_t *r = f(regs, consts, S);
+    S->jit_invoke_ctx = saved_ctx;
     ctx->jit_invoke_env = saved_env;
     return r;
 }

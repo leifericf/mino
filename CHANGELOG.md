@@ -1,5 +1,98 @@
 # Changelog
 
+## v0.211.0 — Inline OP_GETGLOBAL_CACHED Hit Path
+
+First release that consumes `runtime_layout.h`. The OP_GETGLOBAL_CACHED
+stencil now reads the IC slot, verifies cached / gen / dyn_stack
+inline, and writes the cached value to regs[A] without `bl`-ing into
+the slow helper. On miss (slot unfilled, gen stale, or dyn binding
+active) the stencil falls through to `mino_jit_getglobal_cached_slow`
+which runs the same full resolve cascade the interpreter does.
+
+### Three pieces had to land together
+
+1. **Published `ctx` on `mino_state_t::jit_invoke_ctx`.** Darwin's
+   `__thread` access compiles to a TLVP-class relocation
+   (`ARM64_RELOC_TLVP_LOAD_PAGE21` / `_PAGEOFF12`) that the
+   `stencil_extract` tool does not model. To let the inline fast
+   path read `ctx->dyn_stack` without a TLS round-trip,
+   `mino_jit_invoke` now publishes the calling thread's ctx on the
+   state struct before jumping into the JIT region and restores it
+   on return. The stencil reaches the ctx via a single fixed-offset
+   load from S. Save / restore supports nested JIT entry.
+
+2. **Patch every `ret` in a non-final stencil's span, not just the
+   first.** Inlining the hit path produced two basic blocks: a lean
+   fast-path exit (no prologue, immediate `ret`) and a cold slow-path
+   exit (with prologue + helper bl, ending in its own `ret`). The
+   previous chain-patcher walked to the first `ret` and rewrote it
+   to a `b <next>`; the slow path's `ret` survived and short-circuited
+   out of the JIT region whenever a cache miss hit. The patcher now
+   walks the full span and rewrites every `ret` to chain. Surface
+   silently broke any test whose hot fn read a dyn-bound global
+   (every `clojure.test` `assert-pass!` invocation, for example) --
+   the fast path bailed correctly, the slow helper resolved
+   correctly, but the second `ret` returned mid-stencil before the
+   rest of the fn body ran.
+
+3. **`runtime_layout.h` typedef gating widened.** Stencil .c sources
+   include `abi.h` (which typedefs `mino_val_t`, `mino_state_t`,
+   `mino_bc_fn_t`) and now also `runtime_layout.h`. The
+   redefinition-of-typedef warning under `-std=c99 -Wpedantic` would
+   trip on the second declaration; the gating guards now also
+   recognise `MINO_BC_STENCIL_ABI_H`.
+
+### Measurement
+
+`jit_bench` and `realistic_bench` deltas vs v0.210.0 baseline,
+median of three runs on the same hardware (ARM64 Darwin):
+
+  | Workload                           | v0.210.0  | v0.211.0  | Ratio |
+  |------------------------------------|-----------|-----------|-------|
+  | jit_bench (id 7) x 1M              | 1.52us/op | 1.56us/op | 0.97x |
+  | jit_bench (add 1 2) x 1M           | 1.90us/op | 1.86us/op | 1.02x |
+  | jit_bench (mul 2 3) x 1M           | 1.74us/op | 1.83us/op | 0.95x |
+  | jit_bench (sum-to 1000) x 1K       | 19.4us/op | 19.7us/op | 0.98x |
+  | realistic_bench map/filter/m/r     | 782us/op  | 819us/op  | 0.95x |
+
+Honest read: every row is within run-to-run noise. The mechanism
+lands but the per-row inline-savings on these workloads is below
+the measurement floor.
+
+The reason is that each bench has at most one or two
+OP_GETGLOBAL_CACHED ops on the hot path (one in the wrapper, one
+inside the inner fn's body); each saves about a `bl` plus a
+prologue / epilogue pair, roughly 5-10ns. With the workload itself
+costing 1-20us per iter, the saved fraction is sub-1%. The win
+compounds over subsequent releases: v0.212.0 inlines the unary
+fast lanes (INC_I / DEC_I / ZERO_INT_P), v0.213.0 inlines the II /
+IK arith and comparison families, v0.214.0 inlines OP_CALL_CACHED's
+resolve step. Together a single JIT region's stencil chain ends
+up doing five-to-ten inline checks per iter, and the iter cost
+floor shifts visibly.
+
+### Verification
+
+  - `make -j8` clean (release + ASan).
+  - 1688 tests / 7854 assertions pass under release and ASan. Both
+    suites turned out to be the surface that exposed the
+    short-circuit bug: pre-fix, the suite ran but `assert-pass!`'s
+    JIT'd body returned mid-region on every dyn-bound read,
+    silently dropping the assertion counters; post-fix, both come
+    back green.
+  - `gen-stencils` produces a clean `stencils_arm64_darwin.h`.
+
+### Next
+
+v0.212.0 inlines the unary tagged-int fast lanes (`INC_I`,
+`DEC_I`, `ZERO_INT_P`). Each is a single tag check + arithmetic +
+overflow check + tag-encoded store. The plan's risk gate at the
+v0.211 + v0.212 checkpoint: if neither release shows >= 1.2x on a
+real-workload row, pause and re-profile. v0.211.0 in isolation
+landed below that line. The mechanism is sound; the question for
+v0.212.0 is whether the unary tag-check inline crosses the
+measurement floor.
+
 ## v0.210.0 — JIT Stencil-Layer Runtime-Layout Header
 
 Foundation release. Lands `src/eval/bc/stencils/runtime_layout.h`, a

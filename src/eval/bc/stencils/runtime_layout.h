@@ -53,7 +53,10 @@ extern "C" {
 /* Forward struct tags. Used unconditionally by the accessor macros
  * below; the matching typedefs are introduced selectively so callers
  * that already see the canonical typedefs don't get a duplicate
- * declaration. */
+ * declaration. The MINO_BC_STENCIL_ABI_H guard catches the stencil-
+ * layer case (where abi.h has already typedef'd `mino_val_t`,
+ * `mino_state_t`, and `mino_bc_fn_t`) without dragging in the full
+ * runtime headers. */
 struct mino_val;
 struct mino_state;
 struct mino_thread_ctx;
@@ -64,7 +67,7 @@ struct mino_bc_ic_slot;
 
 /* === Public typedefs (mino.h-equivalent) ============================ */
 
-#ifndef MINO_H
+#if !defined(MINO_H) && !defined(MINO_BC_STENCIL_ABI_H)
 typedef struct mino_val   mino_val_t;
 typedef struct mino_state mino_state_t;
 typedef struct mino_env   mino_env_t;
@@ -79,8 +82,11 @@ typedef struct dyn_frame       dyn_frame_t;
 
 /* === Bytecode-internal typedefs (eval/bc/internal.h-equivalent) ==== */
 
-#ifndef MINO_EVAL_BC_INTERNAL_H
+#if !defined(MINO_EVAL_BC_INTERNAL_H) && !defined(MINO_BC_STENCIL_ABI_H)
 typedef struct mino_bc_fn mino_bc_fn_t;
+#endif
+
+#ifndef MINO_EVAL_BC_INTERNAL_H
 
 /* IC slot mirror. Field set, ordering, and trailing PROTOCOL-only
  * fields all match `struct mino_bc_ic_slot` in
@@ -102,21 +108,6 @@ typedef struct mino_bc_ic_slot {
     mino_val_t   *cached_type;
 } mino_bc_ic_slot_t;
 #endif
-
-/* === TLS ctx slot ================================================== */
-
-/* Set at worker-thread entry to the freshly-allocated ctx; NULL on
- * the embedder's main thread (which uses S->main_ctx). An extern
- * redeclaration of a __thread variable with the same type is legal
- * C99, so this declaration coexists with the one in
- * src/runtime/internal.h. */
-extern
-#if defined(_WIN32) && defined(_MSC_VER)
-__declspec(thread)
-#else
-__thread
-#endif
-struct mino_thread_ctx *mino_tls_ctx;
 
 /* === Tagged-int encoding =========================================== */
 
@@ -152,11 +143,11 @@ struct mino_thread_ctx *mino_tls_ctx;
  * compile error before any stencil could mis-read. Change one
  * number here only after updating the corresponding _Static_assert
  * in jit.c and re-running gen-stencils. */
-#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN    ((size_t)47824)
-#define MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS   ((size_t)47856)
-#define MINO_JIT_LAYOUT_OFFSET_STATE_MAIN_CTX  ((size_t)0)
-#define MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK   ((size_t)25712)
-#define MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS     ((size_t)72)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN         ((size_t)47824)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS        ((size_t)47856)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ((size_t)47904)
+#define MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK        ((size_t)25712)
+#define MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS          ((size_t)72)
 
 /* === Field accessors =============================================== */
 
@@ -179,13 +170,15 @@ struct mino_thread_ctx *mino_tls_ctx;
     (*(struct mino_bc_ic_slot **)((char *)(bc)                              \
                                   + MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS))
 
-/* Resolve the active per-thread ctx -- TLS load with `main_ctx`
- * fallback. Mirrors `mino_current_ctx` in src/runtime/internal.h. */
-#define MINO_JIT_CURRENT_CTX(S)                                             \
-    (mino_tls_ctx != NULL                                                   \
-     ? mino_tls_ctx                                                         \
-     : (struct mino_thread_ctx *)((char *)(S)                               \
-                                  + MINO_JIT_LAYOUT_OFFSET_STATE_MAIN_CTX))
+/* Resolve the active per-thread ctx. `mino_jit_invoke` publishes the
+ * calling thread's ctx into `S->jit_invoke_ctx` before jumping into
+ * the JIT region and restores it on return, so stencils reach the
+ * ctx through a single fixed-offset load from S -- no Darwin TLVP
+ * relocation in the stencil bytes (the stencil_extract tool does not
+ * model TLV-class relocations). NULL outside an active JIT region. */
+#define MINO_JIT_INVOKE_CTX(S)                                              \
+    (*(struct mino_thread_ctx **)((char *)(S)                               \
+                                  + MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX))
 
 #ifdef __cplusplus
 }

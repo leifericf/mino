@@ -897,6 +897,19 @@ struct mino_state {
      * pointer slot. */
     struct mino_jit_region *jit_regions;
 
+    /* Active JIT-invoke ctx. Published by mino_jit_invoke before it
+     * jumps into the native region and restored on return. Lets
+     * stencil-emitted code reach the calling thread's ctx (for
+     * `dyn_stack`, `jit_invoke_env`, etc.) via a single fixed-offset
+     * load from S, with no Darwin TLVP relocation in the stencil
+     * bytes -- the stencil_extract tool does not handle TLV-class
+     * relocations today, so the inline TLS sequence
+     * `mino_current_ctx(S)` would emit can't survive the
+     * copy-and-patch round-trip. Save / restore around the call
+     * supports re-entry from a nested JIT'd callee. NULL outside an
+     * active JIT region. */
+    struct mino_thread_ctx *jit_invoke_ctx;
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;
