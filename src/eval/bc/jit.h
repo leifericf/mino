@@ -26,6 +26,31 @@
  * conservative; subsequent releases tune it through measurement. */
 #define MINO_JIT_THRESHOLD 100u
 
+/* Deopt model.
+ *
+ * A JIT'd region's `native_gen` is the `S->ic_gen` snapshot at the
+ * time the region was emitted. Anything that bumps `ic_gen`
+ * (def / ns-unmap / var_set_root / var_unintern) renders the
+ * region's globally-cached resolutions stale; the dispatch path
+ * in apply_callable detects the mismatch on the next invocation
+ * and drops the runtime-visible `native` and `native_pc_offsets`
+ * pointers so the call falls through to the interpreter. The
+ * backing buffers stay owned by the state's jit_regions list until
+ * `mino_state_free` reaps them at teardown.
+ *
+ * The hot counter resets to zero on deopt; the fn must warm to
+ * `MINO_JIT_THRESHOLD` again before another compile attempt fires.
+ * This is the steady-state pressure-relief valve for code that
+ * pingpongs between definitions.
+ *
+ * Mid-execution invalidation (ic_gen bumped while a JIT'd fn is
+ * still running on a stack frame) is not yet handled and is moot
+ * for v0.187.0 because the only stencils that exist
+ * (MOVE / LOAD_K / RETURN) cannot call back into mino-land and
+ * therefore cannot observe a mid-frame `def`. When stencils that
+ * call into user code arrive, each safe-point inside them will
+ * snapshot ic_gen and bail to the interpreter on mismatch. */
+
 /* One JIT'd code region. Carried in a per-state linked list so
  * mino_state_free can munmap every page on teardown. The aux_ptr
  * slot holds any malloc'd auxiliary data the JIT compile attached

@@ -62,6 +62,7 @@
 (require "tests/error_path_test")
 (require "tests/bc_try_catch_test")
 (require "tests/bc_error_quality_test")
+(require "tests/bc_jit_deopt_test")
 (require "tests/bc_binding_test")
 (require "tests/bc_destructure_test")
 (require "tests/bc_closure_test")

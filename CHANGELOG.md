@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.187.0 — JIT Deopt-on-IC-Gen Mismatch Regression Suite
+
+`tests/bc_jit_deopt_test.clj` is the new regression-protective
+test class for the deopt contract: identical results before and
+after redefinition for a JIT'd fn, with batched defs, with const
+fn bodies, and across many warm/cool cycles. The dispatch-entry
+mismatch check that drops the runtime-visible native pointer (and
+resets the hot counter so the next compile is gated by the full
+threshold again) was already in place from v0.185.0; this release
+pins the externally-observable contract so a regression to that
+path fails at the test layer.
+
+`src/eval/bc/jit.h` grows a Deopt-model docs block alongside
+`MINO_JIT_THRESHOLD` documenting the dispatch-entry check and the
+not-yet-relevant mid-execution invalidation case (no stencil
+currently emitted can call back into mino-land where it could
+observe a mid-frame def).
+
+The test class runs in the default suite as well as under
+`-DMINO_CPJIT=1`; the deopt branch lives outside the build flag so
+the contract is identical with or without JIT'd execution.
+
 ## v0.186.0 — Per-PC Native-Offset Side Table
 
 `mino_bc_fn_t` grows a `native_pc_offsets` field that the JIT
