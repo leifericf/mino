@@ -85,7 +85,8 @@
 #define R_X86_64_PC32         2u   /* 32-bit pc-relative             */
 #define R_X86_64_PLT32        4u   /* 32-bit PLT call                */
 #define R_X86_64_GOTPCREL     9u   /* GOT entry, RIP-relative        */
-#define R_X86_64_REX_GOTPCRELX 42u /* optimised GOT lookup, RIP-rel  */
+#define R_X86_64_GOTPCRELX    41u  /* relaxed GOT lookup, RIP-rel    */
+#define R_X86_64_REX_GOTPCRELX 42u /* relaxed GOT lookup w/ REX, RIP-rel */
 
 /* N_TYPE mask bits in nlist_64.n_type. Only N_EXT and N_SECT matter for
  * stencil symbol lookup: the linker emits the stencil function as an
@@ -314,6 +315,7 @@ static int reloc_x86_64_elf_kind_map(uint32_t r_type)
     case R_X86_64_PC32:
     case R_X86_64_PLT32:            return (int)MINO_STENCIL_RELOC_X86_64_PC32;
     case R_X86_64_GOTPCREL:
+    case R_X86_64_GOTPCRELX:
     case R_X86_64_REX_GOTPCRELX:    return (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL;
     default: return -1;
     }
@@ -672,7 +674,7 @@ static int selftest(void)
         fprintf(stderr, "selftest: elf kind_map should reject unknown\n"); failed++;
     }
     /* x86_64 ELF reloc-kind map: ABS64, PC32 (covers PLT32),
-     * GOTPCREL (covers REX_GOTPCRELX), unknown rejects. */
+     * GOTPCREL (covers GOTPCRELX and REX_GOTPCRELX), unknown rejects. */
     if (reloc_x86_64_elf_kind_map(R_X86_64_64) !=
         (int)MINO_STENCIL_RELOC_X86_64_ABS64) {
         fprintf(stderr, "selftest: x86_64 kind_map ABS64 wrong\n"); failed++;
@@ -688,6 +690,10 @@ static int selftest(void)
     if (reloc_x86_64_elf_kind_map(R_X86_64_GOTPCREL) !=
         (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL) {
         fprintf(stderr, "selftest: x86_64 kind_map GOTPCREL wrong\n"); failed++;
+    }
+    if (reloc_x86_64_elf_kind_map(R_X86_64_GOTPCRELX) !=
+        (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL) {
+        fprintf(stderr, "selftest: x86_64 kind_map GOTPCRELX wrong\n"); failed++;
     }
     if (reloc_x86_64_elf_kind_map(R_X86_64_REX_GOTPCRELX) !=
         (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL) {

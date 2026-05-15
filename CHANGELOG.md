@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.234.0 — x86_64 Patcher + Direct-emit + Trampoline + Arch Dispatch
+
+Lands the second half of cycle A2: x86_64 patcher functions, direct-emit
+byte templates, trampoline encoding, arch dispatch in `emit.c`, and a
+cross-compiled `stencils_x86_64_linux.h`. With v0.233.0's musttail
+chain mechanism, the runtime side now compiles cleanly on x86_64 hosts
+when configured with `-DMINO_CPJIT_X86_64_LINUX=1`. End-to-end
+verification needs an x86_64 Linux host (deferred to the platform CI
+step); ARM64 Darwin builds stay byte-identical.
+
+  - `src/eval/bc/jit/internal.h`: new `MINO_CPJIT_HOST_ARM64` /
+    `MINO_CPJIT_HOST_X86_64` macros set alongside the existing
+    `MINO_CPJIT_HOST` guard. Arch-conditional `MINO_JIT_JMP_SIZE`,
+    `MINO_JIT_JMPIFNOT_SIZE`, and `MINO_JIT_TRAMPOLINE_SIZE`. New
+    x86_64 patcher signatures (`patch_abs64`, `patch_pc32`,
+    `patch_gotpcrel`, `patch_jmp32_to`, `patch_jcc32_to`).
+    Windows x86_64 host detection scaffolded behind
+    `MINO_CPJIT_X86_64_WINDOWS` for cycle A4.
+  - `src/eval/bc/jit/patcher.c`: gate changed from `MINO_CPJIT_HOST`
+    to `MINO_CPJIT_HOST_ARM64`. No body changes; the file now opts
+    out cleanly on non-ARM64 builds.
+  - `src/eval/bc/jit/patcher_x86_64.c` (new): all x86_64 patchers
+    plus direct-emit OP_JMP / OP_JMPIFNOT byte templates (30-byte
+    JMPIFNOT covers NULL + nil/false-tagged via `mov rax, [rdi+disp];
+    test rax, rax; je <taken>; sub rax, 2; cmp rax, 1; jbe <taken>`)
+    plus the 12-byte `movabs rax, target; jmp rax` trampoline writer.
+  - `src/eval/bc/jit/emit.c`: per-reloc-kind switch now dispatches on
+    arch. ARM64 cases continue calling `patch_branch26 / patch_adrp /
+    patch_pageoff12_ldr64 / patch_imm19`; x86_64 cases call
+    `patch_pc32 / patch_gotpcrel / patch_abs64 / patch_jmp32_to /
+    patch_jcc32_to`. Reloc addend is now passed through; ARM64
+    patchers ignore it, x86_64 patchers use ELF's S+A-P arithmetic.
+    The chain pass handles the 5-byte `e9 rel32` encoding by backing
+    up one byte from the reloc offset to land on the opcode before
+    calling `patch_jmp32_to`.
+  - `tools/stencil_extract.c`: x86_64 ELF reloc map extended to cover
+    `R_X86_64_GOTPCRELX` (41) alongside `_REX_GOTPCRELX` (42) -- both
+    collapse to MINO_STENCIL_RELOC_X86_64_GOTPCREL. clang emits
+    GOTPCRELX for `MINO_STENCIL_IMM_*` reads under default codegen,
+    so this entry was load-bearing for the cross-compile. Selftest
+    extended.
+  - `lib/mino/tasks/builtin.clj`: new `gen-stencils-x86-64-linux`
+    task. Cross-compiles every stencil source via
+    `clang --target=x86_64-linux-gnu -mno-red-zone` and emits
+    `stencils_x86_64_linux.h`. Added `patcher_x86_64.c` to
+    `lib-srcs` so the mino-lean (no-JIT) build picks it up too.
+  - `mino.edn`: registers the new gen-stencils task.
+  - `src/eval/bc/stencils/generated/stencils_x86_64_linux.h` (new):
+    cross-compiled byte tables for all 39 stencils. PC32 + GOTPCREL
+    reloc kinds; every non-final stencil's symbol table contains
+    `mino_jit_chain_continue_marker`.
+
+`release-gate` green on ARM64 Darwin. The x86_64 Linux build path
+is now code-complete; running it end-to-end needs a Linux x86_64
+host with the cross-compiled header.
+
 ## v0.233.0 — Stencil ABI Overhaul: musttail Chain Marker
 
 Replaces the ARM64-only chain mechanism with a portable

@@ -29,6 +29,7 @@
    "src/eval/bc/vm.c" "src/eval/bc/compile.c"
    "src/eval/bc/jit/entry.c" "src/eval/bc/jit/stats.c"
    "src/eval/bc/jit/helpers.c" "src/eval/bc/jit/patcher.c"
+   "src/eval/bc/jit/patcher_x86_64.c"
    "src/eval/bc/jit/emit.c"
    "src/runtime/state.c" "src/runtime/var.c"
    "src/runtime/error.c" "src/runtime/env.c"
@@ -700,6 +701,18 @@
   []
   (build-stencil-extract)
   (gen-stencils-for "arm64_linux" "clang" ["--target=aarch64-linux-gnu"]))
+
+(defn gen-stencils-x86-64-linux
+  "Cross-compile every stencil to x86_64-linux-gnu using clang's
+   built-in cross-target support and write stencils_x86_64_linux.h.
+   Adds -mno-red-zone alongside the standard stencil flags so the
+   JIT region doesn't end up reading aliased red-zone slots when a
+   helper call returns. The output header is checked into source so
+   native Linux builds pick it up without needing to regenerate."
+  []
+  (build-stencil-extract)
+  (gen-stencils-for "x86_64_linux" "clang"
+                    ["--target=x86_64-linux-gnu" "-mno-red-zone"]))
 
 (defn test-suite
   "Run the test suite."

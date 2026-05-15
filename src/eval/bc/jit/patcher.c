@@ -2,6 +2,12 @@
  * src/eval/bc/jit/patcher.c -- ARM64 instruction patchers + direct-emit
  * byte templates.
  *
+ * Only compiled when the host is ARM64. The x86_64 counterparts live in
+ * patcher_x86_64.c with the same set of public signatures (where they
+ * still make sense for the arch); emit.c picks between them through
+ * the `MINO_CPJIT_HOST_*` macros and the per-reloc-kind dispatch in
+ * the per-instance emit walk.
+ *
  * The compile pipeline in emit.c writes raw stencil bytes into the JIT
  * region; this file then rewrites the address-dependent fields:
  *
@@ -31,7 +37,7 @@
 
 #include "internal.h"
 
-#ifdef MINO_CPJIT_HOST
+#ifdef MINO_CPJIT_HOST_ARM64
 
 #include <stddef.h>
 #include <stdint.h>
@@ -193,4 +199,4 @@ void mino_jit_write_trampoline(unsigned char *slot, uintptr_t target_addr)
     memcpy(slot + 8,  &target_addr,      8);
 }
 
-#endif /* MINO_CPJIT_HOST */
+#endif /* MINO_CPJIT_HOST_ARM64 */

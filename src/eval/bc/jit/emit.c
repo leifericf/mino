@@ -166,25 +166,43 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
     }
     memcpy(code + pos, st->bytes, st->size);
     for (unsigned long r = 0; r < st->nrelocs; r++) {
-        unsigned int off  = st->relocs[r][0];
-        unsigned int kind = st->relocs[r][1];
-        unsigned int sym  = st->relocs[r][2];
+        unsigned int  off    = st->relocs[r][0];
+        unsigned int  kind   = st->relocs[r][1];
+        unsigned int  sym    = st->relocs[r][2];
+        int32_t       addend = (int32_t)st->relocs[r][3];
+        (void)addend;  /* ARM64 patchers don't read addend. */
         if (off >= st->size) return -1;
         if (sym >= st->nsymbols) return -1;
-        uintptr_t   insn_addr = code_base + pos + off;
-        uint32_t   *insn_p    = (uint32_t *)(code + pos + off);
+        uintptr_t      insn_addr = code_base + pos + off;
+        unsigned char *insn_p    = code + pos + off;
         switch (slots[sym].kind) {
         case SYM_SLOT_FN: {
             uintptr_t target = tramp_base + slots[sym].slot_offset;
+#if defined(MINO_CPJIT_HOST_ARM64)
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
-            if (mino_jit_patch_branch26(insn_p, insn_addr, target) != 0) return -1;
+            if (mino_jit_patch_branch26((uint32_t *)insn_p, insn_addr,
+                                         target) != 0) return -1;
+#elif defined(MINO_CPJIT_HOST_X86_64)
+            if (kind != MINO_STENCIL_RELOC_X86_64_PC32) return -1;
+            if (mino_jit_patch_pc32(insn_p, insn_addr, target, addend) != 0) {
+                return -1;
+            }
+#endif
             break;
         }
         case SYM_SLOT_LOOP: {
             /* Back-jump: target the stencil instance's own start. */
             uintptr_t target = code_base + pos;
+#if defined(MINO_CPJIT_HOST_ARM64)
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
-            if (mino_jit_patch_branch26(insn_p, insn_addr, target) != 0) return -1;
+            if (mino_jit_patch_branch26((uint32_t *)insn_p, insn_addr,
+                                         target) != 0) return -1;
+#elif defined(MINO_CPJIT_HOST_X86_64)
+            if (kind != MINO_STENCIL_RELOC_X86_64_PC32) return -1;
+            if (mino_jit_patch_pc32(insn_p, insn_addr, target, addend) != 0) {
+                return -1;
+            }
+#endif
             break;
         }
         case SYM_SLOT_CHAIN: {
@@ -192,21 +210,46 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
              * during this per-instance emit; the post-emit chain
              * pass patches every chain reloc once the layout walk
              * has placed all instances. */
+#if defined(MINO_CPJIT_HOST_ARM64)
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
+#elif defined(MINO_CPJIT_HOST_X86_64)
+            if (kind != MINO_STENCIL_RELOC_X86_64_PC32) return -1;
+#endif
             break;
         }
         case SYM_SLOT_IMM: {
             uintptr_t target = pool_base
                 + slots[sym].slot_offset * sizeof(uint64_t);
             switch (kind) {
+#if defined(MINO_CPJIT_HOST_ARM64)
             case MINO_STENCIL_RELOC_ARM64_PAGE21:
             case MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21:
-                mino_jit_patch_adrp(insn_p, insn_addr, target);
+                mino_jit_patch_adrp((uint32_t *)insn_p, insn_addr, target);
                 break;
             case MINO_STENCIL_RELOC_ARM64_PAGEOFF12:
             case MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12:
-                mino_jit_patch_pageoff12_ldr64(insn_p, target);
+                mino_jit_patch_pageoff12_ldr64((uint32_t *)insn_p, target);
                 break;
+#elif defined(MINO_CPJIT_HOST_X86_64)
+            case MINO_STENCIL_RELOC_X86_64_GOTPCREL:
+                if (mino_jit_patch_gotpcrel(insn_p, insn_addr, target,
+                                             addend) != 0) return -1;
+                break;
+            case MINO_STENCIL_RELOC_X86_64_PC32:
+                /* clang sometimes inlines extern var reads as a
+                 * rip-relative read instead of the GOT indirection
+                 * (-fno-pic codegen on small/medium models). The
+                 * patcher still produces a valid rel32 to the pool
+                 * slot. */
+                if (mino_jit_patch_pc32(insn_p, insn_addr, target,
+                                         addend) != 0) return -1;
+                break;
+            case MINO_STENCIL_RELOC_X86_64_ABS64:
+                if (mino_jit_patch_abs64(insn_p, target, addend) != 0) {
+                    return -1;
+                }
+                break;
+#endif
             default:
                 return -1;
             }
@@ -498,22 +541,42 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
             if (strcmp(st->symbols[sym], MINO_JIT_CHAIN_MARKER_NAME) != 0) {
                 continue;
             }
+            uintptr_t      insn_addr = code_base + insts[i].native_start + off;
+            unsigned char *insn_p    = code + insts[i].native_start + off;
+#if defined(MINO_CPJIT_HOST_ARM64)
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) {
                 free(insts);
                 free(pc_offsets);
                 munmap(region, total_size);
                 return -1;
             }
-            uintptr_t insn_addr = code_base + insts[i].native_start + off;
-            uint32_t *insn_p    =
-                (uint32_t *)(code + insts[i].native_start + off);
-            if (mino_jit_patch_b_unconditional(insn_p, insn_addr,
+            if (mino_jit_patch_b_unconditional((uint32_t *)insn_p, insn_addr,
                                                 next_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
                 munmap(region, total_size);
                 return -1;
             }
+#elif defined(MINO_CPJIT_HOST_X86_64)
+            if (kind != MINO_STENCIL_RELOC_X86_64_PC32) {
+                free(insts);
+                free(pc_offsets);
+                munmap(region, total_size);
+                return -1;
+            }
+            /* The musttail call landed as `e9 <rel32>` (5 bytes).
+             * The reloc offset points at the rel32 field; back up
+             * one byte to land on the opcode so patch_jmp32_to can
+             * rewrite the rel32 in place. */
+            if (mino_jit_patch_jmp32_to(insn_p - 1,
+                                          insn_addr - 1,
+                                          next_addr) != 0) {
+                free(insts);
+                free(pc_offsets);
+                munmap(region, total_size);
+                return -1;
+            }
+#endif
             any = 1;
         }
         if (!any) {
@@ -543,20 +606,32 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         }
         uintptr_t target_addr = code_base + pc_offsets[target_pc];
         if (insts[i].kind == INST_JMP) {
-            uintptr_t insn_addr = code_base + insts[i].native_start;
-            uint32_t *insn_p    = (uint32_t *)(code + insts[i].native_start);
-            if (mino_jit_patch_b_unconditional(insn_p, insn_addr, target_addr) != 0) {
+            uintptr_t      insn_addr = code_base + insts[i].native_start;
+            unsigned char *insn_p    = code + insts[i].native_start;
+#if defined(MINO_CPJIT_HOST_ARM64)
+            if (mino_jit_patch_b_unconditional((uint32_t *)insn_p,
+                                                insn_addr, target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
                 munmap(region, total_size);
                 return -1;
             }
+#elif defined(MINO_CPJIT_HOST_X86_64)
+            if (mino_jit_patch_jmp32_to(insn_p, insn_addr,
+                                         target_addr) != 0) {
+                free(insts);
+                free(pc_offsets);
+                munmap(region, total_size);
+                return -1;
+            }
+#endif
         } else { /* INST_JMPIFNOT */
+            unsigned char *base_p = code + insts[i].native_start;
+            uintptr_t      base_a = code_base + insts[i].native_start;
+#if defined(MINO_CPJIT_HOST_ARM64)
             /* Two conditional branches share the same target. The CBZ
              * at offset +4 catches NULL; the B.LS at offset +16
              * catches the (v - 2) <= 1 nil / false range. */
-            unsigned char *base_p = code + insts[i].native_start;
-            uintptr_t      base_a = code_base + insts[i].native_start;
             uint32_t *cbz_p = (uint32_t *)(base_p + 4);
             uint32_t *bls_p = (uint32_t *)(base_p + 16);
             if (mino_jit_patch_imm19(cbz_p, base_a + 4,  target_addr) != 0
@@ -566,6 +641,21 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
                 munmap(region, total_size);
                 return -1;
             }
+#elif defined(MINO_CPJIT_HOST_X86_64)
+            /* Two conditional branches share the same target. The JE
+             * at offset +10 catches NULL; the JBE at offset +24
+             * catches the (v - 2) <= 1 nil / false range. Both use
+             * a 6-byte `0f 8X <rel32>` encoding. */
+            if (mino_jit_patch_jcc32_to(base_p + 10, base_a + 10,
+                                         target_addr) != 0
+             || mino_jit_patch_jcc32_to(base_p + 24, base_a + 24,
+                                         target_addr) != 0) {
+                free(insts);
+                free(pc_offsets);
+                munmap(region, total_size);
+                return -1;
+            }
+#endif
         }
     }
     free(insts);

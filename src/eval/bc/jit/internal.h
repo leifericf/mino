@@ -19,16 +19,24 @@
 #ifdef MINO_CPJIT
 #if defined(__aarch64__) && defined(__APPLE__)
 #define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_HOST_ARM64 1
 #define MINO_CPJIT_STENCILS_HEADER "../stencils/generated/stencils_arm64_darwin.h"
 #elif defined(__aarch64__) && defined(__linux__) && defined(MINO_CPJIT_ARM64_LINUX)
 #define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_HOST_ARM64 1
 #define MINO_CPJIT_STENCILS_HEADER "../stencils/generated/stencils_arm64_linux.h"
 #elif defined(__x86_64__) && defined(__linux__) && defined(MINO_CPJIT_X86_64_LINUX)
 #define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_HOST_X86_64 1
 #define MINO_CPJIT_STENCILS_HEADER "../stencils/generated/stencils_x86_64_linux.h"
 #elif defined(__x86_64__) && defined(__APPLE__) && defined(MINO_CPJIT_X86_64_DARWIN)
 #define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_HOST_X86_64 1
 #define MINO_CPJIT_STENCILS_HEADER "../stencils/generated/stencils_x86_64_darwin.h"
+#elif defined(__x86_64__) && defined(_WIN32) && defined(MINO_CPJIT_X86_64_WINDOWS)
+#define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_HOST_X86_64 1
+#define MINO_CPJIT_STENCILS_HEADER "../stencils/generated/stencils_x86_64_windows.h"
 #endif
 #endif
 
@@ -76,10 +84,37 @@
 #define MINO_JIT_LOOP_MARKER_NAME  "mino_jit_loop_continue_marker"
 #define MINO_JIT_CHAIN_MARKER_NAME "mino_jit_chain_continue_marker"
 
-/* Direct-emit instruction sizes. */
-#define MINO_JIT_JMP_SIZE        4u
-#define MINO_JIT_JMPIFNOT_SIZE  20u
+/* Direct-emit instruction sizes -- arch-specific because each host
+ * encodes branches and trampolines differently:
+ *
+ *   ARM64    -- 4-byte fixed instructions throughout. JMP = one
+ *               `b imm26`; JMPIFNOT = five instructions (ldr, cbz,
+ *               sub, cmp, b.ls). Trampoline = ldr x16 + br x16 +
+ *               8-byte literal = 16 bytes.
+ *
+ *   x86_64   -- variable-length encoding. JMP = `e9 rel32` (5
+ *               bytes). JMPIFNOT = a small sequence that loads
+ *               `regs[A]` and branches on NULL or the tagged
+ *               nil/false range (30 bytes -- a 64-bit imm load
+ *               for the slot offset, a movq from rdi, a test for
+ *               NULL, a near branch, a sub, a cmp, a near
+ *               branch). Trampoline = `48 b8 <8 bytes target>`
+ *               + `ff e0` = 12 bytes.
+ *
+ * Both hosts pick the trampoline encoding that's reachable
+ * regardless of where in the address space the JIT region lives
+ * (ARM64's bl has ±128 MB range; x86_64's jmp rel32 has ±2 GB
+ * range -- big but not guaranteed when the helper fns are far
+ * from the JIT mmap). The trampoline indirection sidesteps both. */
+#if defined(MINO_CPJIT_HOST_ARM64)
+#define MINO_JIT_JMP_SIZE         4u
+#define MINO_JIT_JMPIFNOT_SIZE   20u
 #define MINO_JIT_TRAMPOLINE_SIZE 16u
+#elif defined(MINO_CPJIT_HOST_X86_64)
+#define MINO_JIT_JMP_SIZE         5u
+#define MINO_JIT_JMPIFNOT_SIZE   30u
+#define MINO_JIT_TRAMPOLINE_SIZE 12u
+#endif
 
 /* Stencil descriptor: per (opcode, variant) tuple. */
 typedef struct {
@@ -149,7 +184,14 @@ uint64_t mino_jit_imm_value(mino_bc_insn_t insn, mino_bc_insn_t insn2,
 /* Extern-helper resolution (defined in entry.c). */
 void *mino_jit_lookup_extern_fn(const char *name);
 
-/* ARM64 patchers and direct-emit byte writers (defined in patcher.c). */
+/* Host-arch patchers and direct-emit byte writers. The
+ * ARM64 versions live in patcher.c, the x86_64 versions in
+ * patcher_x86_64.c. Each TU gates its body on the matching
+ * MINO_CPJIT_HOST_* macro so only one set is compiled per binary;
+ * declarations stay visible to emit.c either way so the conditional
+ * dispatch in the compile pipeline reads cleanly without
+ * #ifdef-ing every call site. */
+#if defined(MINO_CPJIT_HOST_ARM64)
 void mino_jit_patch_adrp(uint32_t *insn, uintptr_t insn_addr,
                           uintptr_t target);
 void mino_jit_patch_pageoff12_ldr64(uint32_t *insn, uintptr_t target);
@@ -159,6 +201,34 @@ int  mino_jit_patch_b_unconditional(uint32_t *insn, uintptr_t insn_addr,
                                      uintptr_t target_addr);
 int  mino_jit_patch_imm19(uint32_t *insn, uintptr_t insn_addr,
                            uintptr_t target_addr);
+#elif defined(MINO_CPJIT_HOST_X86_64)
+/* x86_64 patchers.
+ *
+ * patch_abs64       -- 8-byte absolute target (R_X86_64_64).
+ * patch_pc32        -- 4-byte signed offset (R_X86_64_PC32). The
+ *                       offset is `target - (insn + 4)`, i.e. rip
+ *                       points at the next instruction.
+ * patch_gotpcrel    -- 4-byte signed offset to a pool slot holding
+ *                       the absolute address (R_X86_64_GOTPCREL).
+ *                       Same encoding as patch_pc32 but target is
+ *                       the pool slot, not the helper fn directly.
+ * patch_jmp32_to    -- rewrite a 5-byte `e9 <rel32>` jmp to point
+ *                       at target_addr. Used by the chain pass.
+ * patch_jcc32_to    -- rewrite a 6-byte `0f 8X <rel32>` jcc to
+ *                       point at target_addr. Used by JMPIFNOT
+ *                       target patching. */
+int  mino_jit_patch_abs64(unsigned char *insn, uintptr_t target,
+                           int32_t addend);
+int  mino_jit_patch_pc32(unsigned char *insn, uintptr_t insn_addr,
+                          uintptr_t target, int32_t addend);
+int  mino_jit_patch_gotpcrel(unsigned char *insn, uintptr_t insn_addr,
+                              uintptr_t pool_slot_addr, int32_t addend);
+int  mino_jit_patch_jmp32_to(unsigned char *insn, uintptr_t insn_addr,
+                              uintptr_t target_addr);
+int  mino_jit_patch_jcc32_to(unsigned char *insn, uintptr_t insn_addr,
+                              uintptr_t target_addr);
+#endif
+
 void mino_jit_write_trampoline(unsigned char *slot, uintptr_t target_addr);
 void mino_jit_emit_jmp_bytes(unsigned char *code, size_t pos);
 void mino_jit_emit_jmpifnot_bytes(unsigned char *code, size_t pos,
