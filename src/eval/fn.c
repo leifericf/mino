@@ -377,11 +377,16 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 && bc_rec->hot_counter < (unsigned)-1) {
                 bc_rec->hot_counter++;
                 if (bc_rec->hot_counter == MINO_JIT_THRESHOLD) {
-                    /* One compile attempt per crossing. Failure paths
-                     * (ineligible shape, mmap failure) leave native
-                     * NULL and hot_counter saturating; the interpreter
-                     * keeps running the fn either way. */
-                    (void)mino_jit_compile(S, fn);
+                    /* One compile attempt per crossing. On success
+                     * native becomes non-NULL and subsequent calls
+                     * route to it. On failure (ineligible shape,
+                     * mmap failure) the counter is saturated so the
+                     * per-call eligibility re-check stops -- the fn
+                     * shape won't change under us, so a single
+                     * negative answer is final. */
+                    if (mino_jit_compile(S, fn) < 0) {
+                        bc_rec->hot_counter = (unsigned)-1;
+                    }
                 }
             }
             /* argv ABI: walk the cons spine into a stack scratch array.

@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.194.0 — Saturating Counter on JIT-Ineligible Fns
+
+The tier-selection branch in `apply_callable` now saturates a
+fn's `hot_counter` to UINT_MAX when `mino_jit_compile` rejects
+it. Subsequent calls skip the per-call eligibility re-check
+entirely -- the fn's shape (captures / IC slots / opcode mix) is
+stable across its lifetime, so a single negative answer is
+final.
+
+The plan's original v0.194.0 scope (background compile worker
+thread) is deferred under its own conditional clause: with the
+current narrow stencil set (MOVE / LOAD_K / RETURN), compile
+latency for any eligible fn is sub-millisecond and the
+synchronous compile path is already off the user-visible
+critical path. Reintroducing the worker becomes interesting once
+heavier stencils land and compile latency starts mattering.
+
 ## v0.193.0 — Single-Page JIT Layout for Small Fns
 
 The JIT compile path now detects when a fn's code plus literal
