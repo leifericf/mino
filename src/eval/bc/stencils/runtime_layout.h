@@ -133,6 +133,12 @@ typedef struct mino_bc_ic_slot {
                                      << MINO_TAG_BITS)                      \
                          | MINO_TAG_INT))
 #define MINO_INT_VAL(v) (((long long)(intptr_t)(v)) >> MINO_TAG_BITS)
+#define MINO_TRUE_PAYLOAD  ((uintptr_t)0x1)
+#define MINO_FALSE_PAYLOAD ((uintptr_t)0x0)
+#define MINO_MAKE_BOOL(b)                                                   \
+    ((struct mino_val *)(((b) ? MINO_TRUE_PAYLOAD : MINO_FALSE_PAYLOAD)     \
+                         << MINO_TAG_BITS                                   \
+                         | MINO_TAG_BOOL))
 #endif
 
 /* === Layout-anchor offsets ========================================= */

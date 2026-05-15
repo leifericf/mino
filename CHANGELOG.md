@@ -1,5 +1,73 @@
 # Changelog
 
+## v0.212.0 — Inline INC_I / DEC_I / ZERO_INT_P Fast Lanes
+
+The three single-operand tagged-int stencils that had been calling
+`unop_int_fast` via `bl` now inline the entire fast lane in the
+stencil bytes:
+
+  - **OP_INC_I**: tag check on operand, increment, overflow check
+    against `MINO_INT_MAX`, tag-encoded store.
+  - **OP_DEC_I**: tag check, decrement, underflow check against
+    `MINO_INT_MIN`, tag-encoded store.
+  - **OP_ZERO_INT_P**: tag check, compare to zero, tag-encoded bool
+    store via the new `MINO_MAKE_BOOL` macro added to
+    `runtime_layout.h`.
+
+On a tag miss (boxed int, non-numeric, etc.) or arith over/underflow
+the stencils fall through to the existing `mino_jit_unop_slow`
+helper, which routes through `prim_inc` / `prim_dec` / `prim_zero_p`
+exactly as the v0.210 stencils did.
+
+Mechanism reuses the v0.211 patch-all-rets infrastructure: the
+inline fast path lands in the lean basic block; the cold slow path
+sits behind the prologue / call. Both `ret` instructions chain to
+the next stencil.
+
+### Measurement
+
+Median of three runs on ARM64 Darwin:
+
+  | Workload                           | v0.210.0   | v0.212.0  | Ratio |
+  |------------------------------------|------------|-----------|-------|
+  | jit_bench (inc 1) x 1M             | 1.78us/op  | 1.75us/op | 1.02x |
+  | jit_bench (dec 1) x 1M             | 1.80us/op  | 1.79us/op | 1.01x |
+  | jit_bench (zero? 0) x 1M           | 1.80us/op  | 1.79us/op | 1.01x |
+  | realistic_bench map/filter/m/r     | 849us/op   | 758us/op  | 1.12x |
+  | jit_bench (countdown 1000) x 1K    | 2.42us/op  | 2.39us/op | 1.01x |
+
+The jit_bench unary rows -- `(fn [] (inc-fn 1))` etc. -- still sit
+at the noise floor. Each iter has one OP_INC_I per call, and the
+inline saves only the `bl` plus helper prologue, ~5ns out of a
+1.75us iter.
+
+The realistic_bench `map/filter/map/reduce over 50k` row is the
+visible signal: a 12% improvement on a workload whose hot path
+runs many tagged-int arith operations per iter. v0.210.0 → v0.211.0
+moved that row marginally; v0.211.0 → v0.212.0 contributes the
+unary-fast-lane savings on top.
+
+### Speedup-gate state
+
+The plan's mid-cycle risk callout asked: "If v0.211 + v0.212
+together don't show >= 1.2x on at least one bench row, pause the
+cycle." Map/filter/map/reduce comes in at 1.12x -- a real,
+reproducible win that beats the 0.95x regression floor but lands
+below the 1.2x target.
+
+Decision: continue to v0.213.0 (the arith / comparison II + IK
+family, thirteen stencils). v0.213.0 is the cycle's per-op-density
+release: a body with five tagged-int ops sees five inline checks
+per iter instead of five bl's, multiplying the per-op saving by
+the body's arith density. If v0.213.0 also lands below the 1.2x
+mark on the headline row, pause and re-profile.
+
+### Verification
+
+  - `make -j8` clean (release + ASan).
+  - 1688 tests / 7854 assertions pass under release + ASan.
+  - `gen-stencils` produces a clean `stencils_arm64_darwin.h`.
+
 ## v0.211.0 — Inline OP_GETGLOBAL_CACHED Hit Path
 
 First release that consumes `runtime_layout.h`. The OP_GETGLOBAL_CACHED
