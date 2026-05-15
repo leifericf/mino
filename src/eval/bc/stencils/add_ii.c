@@ -2,29 +2,35 @@
  * stencils/add_ii.c -- copy-and-patch stencil for OP_ADD_II.
  *
  * OP_ADD_II A B C is the specialised int+int form of `(+ a b)`. The
- * stencil tries the tagged-int fast lane (binop_int_fast with subop
- * BINOP_ADD); on a tag miss or overflow it falls back to the cons-
- * spine + prim_add path through mino_jit_binop_slow, which mirrors
- * the interpreter's OP_*_II handler exactly.
- *
- * Returns the chain tuple (regs, consts) so the JIT chain pattern
- * preserves x1 = consts across the patched ret; the matching macro
- * also pins x2 = S so subsequent stencils that call helpers see the
- * correct state pointer.
+ * stencil inlines the tagged-int fast lane: verify both operands
+ * carry the INT tag, add their values in 64-bit signed, verify the
+ * result fits the 60-bit signed inline-int range, and store the
+ * tagged result in regs[A]. On a tag miss (boxed int, non-numeric)
+ * or arith overflow the stencil falls through to
+ * mino_jit_binop_slow which routes through prim_add for the boxed-
+ * int / bigint-promotion / diagnostic paths.
  */
 
 #include "abi.h"
+#include "runtime_layout.h"
 
 mino_stencil_chain_t stencil_op_add_ii(mino_val_t **regs, mino_val_t **consts,
                                         mino_state_t *S)
 {
-    mino_val_t *r = binop_int_fast(S, regs[IMM_B], regs[IMM_C],
-                                   STENCIL_BINOP_ADD);
-    if (__builtin_expect(r == NULL, 0)) {
+    mino_val_t *lhs = regs[IMM_B];
+    mino_val_t *rhs = regs[IMM_C];
+    long long   r;
+    if (__builtin_expect(MINO_IS_INT(lhs) && MINO_IS_INT(rhs), 1)) {
+        r = MINO_INT_VAL(lhs) + MINO_INT_VAL(rhs);
+        if (__builtin_expect(r >= MINO_INT_MIN && r <= MINO_INT_MAX, 1)) {
+            regs[IMM_A] = MINO_MAKE_INT(r);
+        } else {
+            regs = mino_jit_binop_slow(S, regs, IMM_A, IMM_B, IMM_C,
+                                       STENCIL_BINOP_ADD);
+        }
+    } else {
         regs = mino_jit_binop_slow(S, regs, IMM_A, IMM_B, IMM_C,
                                    STENCIL_BINOP_ADD);
-    } else {
-        regs[IMM_A] = r;
     }
     MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
 }

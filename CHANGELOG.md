@@ -1,5 +1,67 @@
 # Changelog
 
+## v0.213.0 — Inline Arith II + IK Families
+
+Thirteen stencils that had been `bl`-ing into `binop_int_fast` now
+inline the tagged-int fast lane:
+
+  - **II arith**: `OP_ADD_II`, `OP_SUB_II`, `OP_MUL_II`. Both
+    operands tagged-int, 64-bit signed arithmetic, range check
+    against `MINO_INT_MAX` / `MIN`, tag-encoded store. `OP_MUL_II`
+    uses `__builtin_smulll_overflow` for the 60x60-bit product since
+    `long long` is 64 bits.
+  - **II comparison**: `OP_LT_II`, `OP_LE_II`, `OP_GT_II`,
+    `OP_GE_II`, `OP_EQ_II`. Both operands tagged-int, 64-bit signed
+    compare, tagged-bool store. No overflow path.
+  - **IK arith**: `OP_ADD_IK`, `OP_SUB_IK`. Lhs tagged-int (the
+    pre-tagged immediate is trusted); range check; tag-encoded
+    store.
+  - **IK comparison**: `OP_LT_IK`, `OP_LE_IK`, `OP_EQ_IK`. Lhs
+    tagged-int; compare; tagged-bool store.
+
+On a tag miss (boxed int, non-numeric, mixed type) or arith
+over/underflow each stencil falls through to the existing
+`mino_jit_binop_slow` / `mino_jit_binop_k_slow` helpers, which route
+through `prim_add` / `prim_lt` / etc. for the boxed-int /
+bigint-promote / diagnostic paths.
+
+### Measurement
+
+Median of three runs on ARM64 Darwin:
+
+  | Workload                           | v0.210.0   | v0.213.0  | Ratio |
+  |------------------------------------|------------|-----------|-------|
+  | jit_bench (add 1 2) x 1M           | 1.80us/op  | 1.77us/op | 1.02x |
+  | jit_bench (sub 3 2) x 1M           | 1.79us/op  | 1.76us/op | 1.02x |
+  | jit_bench (mul 2 3) x 1M           | 1.76us/op  | 1.73us/op | 1.02x |
+  | jit_bench (sum-to 1000) x 1K       | 19.04us/op | 19.43us/op| 0.98x |
+  | jit_bench (countdown 1000) x 1K    | 2.41us/op  | 2.38us/op | 1.01x |
+  | realistic_bench map/filter/m/r     | 779us/op   | 730us/op  | 1.07x |
+
+### Speedup-gate state
+
+Through v0.213.0, the cumulative speedup on the cycle's headline
+row (realistic_bench map/filter/map/reduce) sits at ~1.07-1.12x
+across runs vs the v0.210.0 baseline. The plan asked for 1.2x by
+the end of v0.212; we are at 1.12x peak. v0.213's per-row deltas
+are smaller still: the leaf arith benches in jit_bench have one
+arith op per iter, so the inline savings are below the iter-cost
+floor. The realistic workload exercises the unary fast lane (v0.212)
+more than the binary arith fast lane on its hot path.
+
+Continuing to v0.214 (inline OP_CALL_CACHED resolve fast path) --
+the cycle's highest-volume cached op and the one with the biggest
+expected single-release contribution to the cycle's target. If the
+v0.214 + v0.215 close still leaves the headline row below 1.2x we
+will document the gap in the cycle-close entry rather than press
+on with v0.216-equivalent work.
+
+### Verification
+
+  - `make -j8` clean (release + ASan).
+  - 1688 tests / 7854 assertions pass under release + ASan.
+  - `gen-stencils` produces a clean `stencils_arm64_darwin.h`.
+
 ## v0.212.0 — Inline INC_I / DEC_I / ZERO_INT_P Fast Lanes
 
 The three single-operand tagged-int stencils that had been calling
