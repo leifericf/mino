@@ -24,7 +24,7 @@
    "src/eval/special_registry.c"
    "src/eval/defs.c" "src/eval/bindings.c"
    "src/eval/control.c" "src/eval/fn.c"
-   "src/eval/bc/vm.c" "src/eval/bc/compile.c"
+   "src/eval/bc/vm.c" "src/eval/bc/compile.c" "src/eval/bc/jit.c"
    "src/runtime/state.c" "src/runtime/var.c"
    "src/runtime/error.c" "src/runtime/env.c"
    "src/runtime/ns_env.c"

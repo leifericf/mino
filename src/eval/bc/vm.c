@@ -24,6 +24,7 @@
 #include "eval/internal.h"          /* eval_impl, apply_callable */
 #include "eval/special_internal.h"  /* normalize_exception for OP_PUSHCATCH */
 #include "eval/bc/internal.h"
+#include "eval/bc/jit.h"
 #include "collections/internal.h"   /* make_fn */
 #include "prim/internal.h"          /* binary arith prim_* on bc fast-lane miss */
 
@@ -1161,6 +1162,23 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     size_t              saved_bc_current_pc = ctx->bc_current_pc;
     ctx->bc_current_bc = bc;
     ctx->bc_current_pc = (size_t)match->entry_pc;
+
+#ifdef MINO_CPJIT
+    /* Native-tier fast path. The JIT compiles only a narrow shape
+     * today (linear bodies of OP_MOVE / OP_LOAD_K / OP_RETURN with a
+     * single arity and no captures); mino_jit_eligible gates the
+     * compile so the field is only set for shapes the patched code
+     * actually handles. Bail back to the interpreter when the
+     * ic_gen snapshot is stale -- a def / ns-unmap / var_set_root
+     * has invalidated the JIT'd code's globally-cached resolutions
+     * since the page was emitted. */
+    if (bc->native != NULL && bc->native_gen == S->ic_gen) {
+        retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc, regs,
+                                 (mino_val_t **)bc->consts);
+        ok = (retval != NULL);
+        goto bc_done;
+    }
+#endif
 
     while (pc < bc->code_len) {
         /* Refresh the window pointer every cycle. Any op that can

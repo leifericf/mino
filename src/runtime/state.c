@@ -19,6 +19,7 @@
 #include "prim/internal.h"
 #include "async/scheduler.h"
 #include "async/timer.h"
+#include "eval/bc/jit.h"
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
@@ -386,6 +387,11 @@ void mino_state_free(mino_state_t *S)
     state_free_refs(S);
     state_free_ns_aliases(S);
     state_free_ns_env_table(S);
+    /* Unmap every JIT'd code region the runtime mmap'd. Safe to call
+     * before the GC tear-down: the bc_fn records still reference
+     * those regions through `native`, but nothing in the heap-free
+     * path touches the executable bytes. */
+    mino_jit_free_all(S);
     free(S->var_registry);
     free(S->var_hash);
     free(S->ic_table);

@@ -876,6 +876,17 @@ struct mino_state {
     size_t          bc_int_make_count;
     size_t          bc_int_alloc_avoided;
 
+    /* JIT executable-region list (CPJIT). Each entry is one mmap'd
+     * page-aligned region that the runtime materialised through the
+     * copy-and-patch pipeline. mino_state_free walks the list and
+     * munmaps every region so the OS reclaims the executable pages
+     * at state teardown. Empty until the first JIT compile. Field
+     * stays present even with MINO_CPJIT disabled (always NULL); the
+     * cleanup path checks for non-NULL before crossing the JIT-only
+     * code so embedders linking against a non-JIT build pay only the
+     * pointer slot. */
+    struct mino_jit_region *jit_regions;
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;

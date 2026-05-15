@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.185.0 — Runtime JIT Compile Path
+
+`src/eval/bc/jit.c` materialises bc-compiled fns into mmap'd RX
+pages through the copy-and-patch pipeline. The compile flow:
+
+- `mino_jit_compile` walks the bc, looks up each opcode's stencil
+  descriptor, sizes the code and literal pool, mmaps a PROT_READ |
+  PROT_WRITE region, memcpys the stencil bytes (stripping the
+  trailing arm64 `ret` from every stencil except the terminal
+  OP_RETURN so they chain via fall-through), populates per-instance
+  8-byte slots in the literal pool with the operand values, patches
+  every adrp + ldr pair (PAGE21 / PAGEOFF12 and the GOT-load
+  variants) to address its slot, flushes the I-cache, and mprotects
+  the region to PROT_READ | PROT_EXEC. Failures at any step
+  munmap the partial region and return -1; the interpreter keeps
+  running the fn.
+- `mino_jit_invoke` dispatches into the native entry point with the
+  uniform `(regs, consts, S)` signature in `(x0, x1, x2)`.
+- `mino_jit_eligible` gates the compile: single arity, no captures,
+  no IC slots, an OP_RETURN terminator, and every opcode in the
+  body covered by a stencil. The runtime currently covers OP_MOVE,
+  OP_LOAD_K, and OP_RETURN; anything else marks the fn ineligible
+  and the interpreter keeps running it.
+- `apply_callable`'s tier-selection branch in `src/eval/fn.c` does
+  the threshold check (`MINO_JIT_THRESHOLD = 100`), drops a stale
+  pointer when `native_gen` ≠ `S->ic_gen` so the next call
+  re-attempts, and triggers a single `mino_jit_compile` on
+  crossing.
+- `mino_bc_run`'s entry path checks `bc->native` after the register
+  window is set up and routes to `mino_jit_invoke` instead of the
+  interpreter loop; the cleanup path through `bc_done` runs
+  identically in both modes so dyn-stack / try-state / window-pop
+  invariants stay intact.
+
+The state's new `jit_regions` linked list owns every mmap'd region;
+`mino_state_free` walks the list and munmaps each one so the OS
+reclaims executable pages at teardown. The slot stays present even
+without the build flag (always NULL) so the field offset doesn't
+drift between configurations.
+
+The entire JIT path compiles in only when the build defines
+`MINO_CPJIT`. The default build leaves it off, so the runtime
+behaviour, footprint, and test results are unchanged for embedders.
+A `MINO_CPJIT_TRACE=1` environment variable emits one stderr line
+per successful compile -- a developer-facing diagnostic, off in the
+test suite. With the build flag on, a smoke fn whose body is
+`(fn [x] x)` warms past the threshold, compiles, and returns
+identical results on every subsequent call. The full test suite
+(1684 tests / 7843 assertions) passes under both builds and under
+ASan in both configurations.
+
+What does NOT yet ship: stencils for arithmetic, control flow,
+calls, IC-cached globals, lazy-seq production, or any opcode
+beyond MOVE / LOAD_K / RETURN. Those are scoped into the
+expansion releases that follow.
+
 ## v0.184.0 — Stencil Immediate ABI and Relocation Pipeline
 
 `src/eval/bc/stencils/abi.h` defines the copy-and-patch stencil

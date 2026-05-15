@@ -4,6 +4,7 @@
 
 #include "eval/special_internal.h"
 #include "eval/bc/internal.h"
+#include "eval/bc/jit.h"
 
 /* Build the clause list for a multi-arity fn or defmacro.
  * `arity_list` is the cons list of arity clauses: (([p] b...) ([p q] b...) ...).
@@ -354,19 +355,34 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         }
         mino_bc_check_require(S, fn);
         if (mino_type_of(fn) == MINO_FN && MINO_BC_RUNNABLE(fn)) {
-            /* Tier selection for the interpreter / native split. The
-             * native arm enters JIT'd code if the fn has been compiled
-             * and the ic_gen snapshot still matches. The counter arm
-             * accumulates calls so the threshold-driven compile path
-             * has data to act on. The interpreter arm is the fall-
-             * through. native always NULL today; the increment is the
-             * load-bearing piece of this scaffolding. */
+            /* Tier selection for the interpreter / native split. When
+             * CPJIT is enabled and the fn has crossed the hot
+             * threshold, attempt a single compile per generation. The
+             * native field stays NULL until a successful compile;
+             * after that, the runtime's invocation path (below) hands
+             * off to mino_jit_invoke instead of mino_bc_run. */
             mino_bc_fn_t *bc_rec = fn->as.fn.bc;
-            if (bc_rec->native != NULL && bc_rec->native_gen == S->ic_gen) {
-                /* Native fast path: handed to the CPJIT runtime when
-                 * its compile flow is wired. */
-            } else if (bc_rec->hot_counter < (unsigned)-1) {
+            if (bc_rec->native != NULL && bc_rec->native_gen != S->ic_gen) {
+                /* Stale native code: ic_gen advanced (def / ns-unmap /
+                 * var_set_root / var_unintern), so the JIT'd inline-
+                 * cache state and global resolutions are no longer
+                 * trustworthy. Drop the pointer so the next compile
+                 * attempt sees a fresh slate; the underlying region
+                 * stays mapped until mino_jit_free_all reaps it on
+                 * state teardown. */
+                bc_rec->native      = NULL;
+                bc_rec->native_size = 0;
+            }
+            if (bc_rec->native == NULL
+                && bc_rec->hot_counter < (unsigned)-1) {
                 bc_rec->hot_counter++;
+                if (bc_rec->hot_counter == MINO_JIT_THRESHOLD) {
+                    /* One compile attempt per crossing. Failure paths
+                     * (ineligible shape, mmap failure) leave native
+                     * NULL and hot_counter saturating; the interpreter
+                     * keeps running the fn either way. */
+                    (void)mino_jit_compile(S, fn);
+                }
             }
             /* argv ABI: walk the cons spine into a stack scratch array.
              * The slots are kept alive across any GC the body triggers
