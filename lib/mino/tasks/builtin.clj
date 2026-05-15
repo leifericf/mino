@@ -599,78 +599,107 @@
   (build-stencil-extract)
   (println (sh! "./tools/stencil_extract" "--selftest")))
 
-(defn gen-stencils
-  "Compile every stencil source under src/eval/bc/stencils/ to an
-   intermediate .o file and dispatch the extractor to write the byte
-   tables into src/eval/bc/stencils/generated/<arch>_<os>.h. The
-   runtime build includes the generated header; regenerate after
-   touching any stencil source or after a toolchain change that
-   would shift the emitted code."
-  []
-  (build-stencil-extract)
-  (let [;; arch/os naming mirrors what platform releases extend.
-        triple    "arm64_darwin"
-        gen-dir   "src/eval/bc/stencils/generated"
+(def ^:private stencil-list
+  "Canonical mapping from stencil .c file to extracted symbol. The
+   list is the single source of truth for both gen-stencils and the
+   G2 registry check."
+  [["return.c"        "stencil_op_return_arg0"]
+   ["return.c"        "stencil_op_return_imm"]
+   ["move.c"          "stencil_op_move"]
+   ["load_k.c"        "stencil_op_load_k"]
+   ["load_k_return.c" "stencil_op_load_k_return"]
+   ["add_ii.c"        "stencil_op_add_ii"]
+   ["sub_ii.c"        "stencil_op_sub_ii"]
+   ["mul_ii.c"        "stencil_op_mul_ii"]
+   ["lt_ii.c"         "stencil_op_lt_ii"]
+   ["le_ii.c"         "stencil_op_le_ii"]
+   ["gt_ii.c"         "stencil_op_gt_ii"]
+   ["ge_ii.c"         "stencil_op_ge_ii"]
+   ["eq_ii.c"         "stencil_op_eq_ii"]
+   ["inc_i.c"         "stencil_op_inc_i"]
+   ["dec_i.c"         "stencil_op_dec_i"]
+   ["zero_int_p.c"    "stencil_op_zero_int_p"]
+   ["add_ik.c"        "stencil_op_add_ik"]
+   ["sub_ik.c"        "stencil_op_sub_ik"]
+   ["lt_ik.c"         "stencil_op_lt_ik"]
+   ["le_ik.c"         "stencil_op_le_ik"]
+   ["eq_ik.c"         "stencil_op_eq_ik"]
+   ["loop_int_lt.c"     "stencil_op_loop_int_lt"]
+   ["loop_int_dec.c"    "stencil_op_loop_int_dec"]
+   ["loop_int_lt_inc.c" "stencil_op_loop_int_lt_inc"]
+   ["getglobal_cached.c" "stencil_op_getglobal_cached"]
+   ["call_cached.c"      "stencil_op_call_cached"]
+   ["call.c"             "stencil_op_call"]
+   ["tailcall.c"         "stencil_op_tailcall"]
+   ["closure.c"          "stencil_op_closure"]
+   ["push_env.c"         "stencil_op_push_env"]
+   ["pop_env.c"          "stencil_op_pop_env"]
+   ["env_bind.c"         "stencil_op_env_bind"]
+   ["nth_vec.c"          "stencil_op_nth_vec"]
+   ["first_vec.c"        "stencil_op_first_vec"]
+   ["count_vec.c"        "stencil_op_count_vec"]
+   ["empty_vec.c"        "stencil_op_empty_vec"]
+   ["get_kw_map.c"       "stencil_op_get_kw_map"]
+   ["conj_vec.c"         "stencil_op_conj_vec"]
+   ["assoc.c"            "stencil_op_assoc"]])
+
+(defn- gen-stencils-for
+  "Compile every stencil source for the given target triple and
+   extract bytes into src/eval/bc/stencils/generated/stencils_<triple>.h.
+   target-cflags is a vector of extra cflags (e.g. cross-compile flag
+   for non-host targets) and compiler is the cc/clang binary to use."
+  [triple compiler target-cflags]
+  (let [gen-dir   "src/eval/bc/stencils/generated"
         out-hdr   (str gen-dir "/stencils_" triple ".h")
-        tmpdir    "/tmp/mino-stencils"
-        stencils  [["return.c"        "stencil_op_return_arg0"]
-                   ["return.c"        "stencil_op_return_imm"]
-                   ["move.c"          "stencil_op_move"]
-                   ["load_k.c"        "stencil_op_load_k"]
-                   ["load_k_return.c" "stencil_op_load_k_return"]
-                   ["add_ii.c"        "stencil_op_add_ii"]
-                   ["sub_ii.c"        "stencil_op_sub_ii"]
-                   ["mul_ii.c"        "stencil_op_mul_ii"]
-                   ["lt_ii.c"         "stencil_op_lt_ii"]
-                   ["le_ii.c"         "stencil_op_le_ii"]
-                   ["gt_ii.c"         "stencil_op_gt_ii"]
-                   ["ge_ii.c"         "stencil_op_ge_ii"]
-                   ["eq_ii.c"         "stencil_op_eq_ii"]
-                   ["inc_i.c"         "stencil_op_inc_i"]
-                   ["dec_i.c"         "stencil_op_dec_i"]
-                   ["zero_int_p.c"    "stencil_op_zero_int_p"]
-                   ["add_ik.c"        "stencil_op_add_ik"]
-                   ["sub_ik.c"        "stencil_op_sub_ik"]
-                   ["lt_ik.c"         "stencil_op_lt_ik"]
-                   ["le_ik.c"         "stencil_op_le_ik"]
-                   ["eq_ik.c"         "stencil_op_eq_ik"]
-                   ["loop_int_lt.c"     "stencil_op_loop_int_lt"]
-                   ["loop_int_dec.c"    "stencil_op_loop_int_dec"]
-                   ["loop_int_lt_inc.c" "stencil_op_loop_int_lt_inc"]
-                   ["getglobal_cached.c" "stencil_op_getglobal_cached"]
-                   ["call_cached.c"      "stencil_op_call_cached"]
-                   ["call.c"             "stencil_op_call"]
-                   ["tailcall.c"         "stencil_op_tailcall"]
-                   ["closure.c"          "stencil_op_closure"]
-                   ["push_env.c"         "stencil_op_push_env"]
-                   ["pop_env.c"          "stencil_op_pop_env"]
-                   ["env_bind.c"         "stencil_op_env_bind"]
-                   ["nth_vec.c"          "stencil_op_nth_vec"]
-                   ["first_vec.c"        "stencil_op_first_vec"]
-                   ["count_vec.c"        "stencil_op_count_vec"]
-                   ["empty_vec.c"        "stencil_op_empty_vec"]
-                   ["get_kw_map.c"       "stencil_op_get_kw_map"]
-                   ["conj_vec.c"         "stencil_op_conj_vec"]
-                   ["assoc.c"            "stencil_op_assoc"]]]
+        tmpdir    (str "/tmp/mino-stencils-" triple)
+        base-args ["-std=c99" "-O2" "-fno-builtin"
+                   "-fno-optimize-sibling-calls"]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto
     ;; the same header file. The compiler dedup-compiles each source
     ;; once per distinct file path.
-    (loop [[[file sym] & rest] stencils
+    (loop [[[file sym] & rest] stencil-list
            first? true
            compiled #{}]
       (when file
         (let [src (str "src/eval/bc/stencils/" file)
               obj (str tmpdir "/" file ".o")]
           (when-not (compiled file)
-            (sh! cc "-std=c99" "-O2" "-fno-builtin"
-                 "-fno-optimize-sibling-calls" "-c" src "-o" obj))
+            (apply sh! compiler (concat base-args target-cflags
+                                        ["-c" src "-o" obj])))
           (if first?
             (sh! "./tools/stencil_extract" obj sym out-hdr)
             (sh! "./tools/stencil_extract" "--append" obj sym out-hdr))
           (recur rest false (conj compiled file)))))
     (println (str "  stencils -> " out-hdr))))
+
+(defn gen-stencils
+  "Compile every stencil source under src/eval/bc/stencils/ to an
+   intermediate .o file and dispatch the extractor to write the byte
+   tables into src/eval/bc/stencils/generated/<arch>_<os>.h. The
+   runtime build includes the generated header; regenerate after
+   touching any stencil source or after a toolchain change that
+   would shift the emitted code.
+
+   Defaults to the host triple (arm64_darwin on Apple Silicon).
+   Other targets are produced via cross-compile and committed
+   alongside the host header so non-host platforms can be built
+   without their toolchain regenerating bytes."
+  []
+  (build-stencil-extract)
+  ;; arch/os naming mirrors what platform releases extend.
+  (gen-stencils-for "arm64_darwin" cc []))
+
+(defn gen-stencils-arm64-linux
+  "Cross-compile every stencil to aarch64-linux-gnu using clang's
+   built-in cross-target support and write stencils_arm64_linux.h.
+   The output header is checked into source so native Linux builds
+   pick it up without needing to regenerate. Re-run when stencil
+   sources change."
+  []
+  (build-stencil-extract)
+  (gen-stencils-for "arm64_linux" "clang" ["--target=aarch64-linux-gnu"]))
 
 (defn test-suite
   "Run the test suite."

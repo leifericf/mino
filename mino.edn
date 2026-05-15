@@ -64,4 +64,6 @@
   test-stencil-extract  {:doc  "Run stencil-extract selftest"
                          :task mino.tasks.builtin/test-stencil-extract}
   gen-stencils          {:doc  "Regenerate stencil byte-tables header"
-                         :task mino.tasks.builtin/gen-stencils}}}
+                         :task mino.tasks.builtin/gen-stencils}
+  gen-stencils-arm64-linux {:doc  "Cross-compile stencils for ARM64 Linux"
+                            :task mino.tasks.builtin/gen-stencils-arm64-linux}}}

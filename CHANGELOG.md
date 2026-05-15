@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.231.0 — Generated stencils_arm64_linux.h Committed
+
+Closes cycle A1. The byte tables for every stencil are now
+generated and checked in for ARM64 Linux alongside the existing
+ARM64 Darwin header. Native Linux builds pick up the committed
+header without needing a regenerate pass.
+
+  - `lib/mino/tasks/builtin.clj`: `gen-stencils` refactored into a
+    parameterised `gen-stencils-for` so the same compile + extract
+    pipeline drives every target. New `gen-stencils-arm64-linux`
+    task cross-compiles via clang's `--target=aarch64-linux-gnu`,
+    using the same `-O2 -fno-builtin -fno-optimize-sibling-calls`
+    flags as the Darwin path so the generated codegen mirrors what
+    a native Linux clang would produce.
+  - `mino.edn`: new `gen-stencils-arm64-linux` task entry.
+  - `src/eval/bc/stencils/generated/stencils_arm64_linux.h`:
+    generated header committed. 39 stencils, byte-for-byte
+    equivalent semantics to the Darwin header with the expected
+    ELF/Mach-O code-gen ordering differences (relocs reorder,
+    instruction scheduling reshuffles loads).
+
+Runtime side already gates on `MINO_CPJIT_ARM64_LINUX` and points
+at this header path (`src/eval/bc/jit/internal.h:23`). Native ARM64
+Linux builds with `-DMINO_CPJIT_ARM64_LINUX=1` now compile cleanly
+with the JIT enabled. CI runner setup for ARM64 Linux is
+operational follow-up; this release ships the on-disk artifacts.
+
+`release-gate` green on Darwin.
+
 ## v0.230.0 — ELF Parser In Stencil Extractor
 
 Opens cycle A1 (ARM64 Linux portability). The stencil extractor
