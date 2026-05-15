@@ -1,5 +1,73 @@
 # Changelog
 
+## v0.203.0 — JIT Introspection + Eligibility Tracer
+
+Adds an opt-in observability layer over the CPJIT compile pipeline.
+Setting `MINO_CPJIT_STATS=1` in the environment turns on a per-fn
+tracker; at process exit, a summary plus per-fn table is written to
+stderr.
+
+The tracker records every fn that crosses `MINO_JIT_THRESHOLD` and
+becomes a compile candidate. For each candidate it stores:
+
+  - source location (file:line:column, from the bc source map)
+  - bytecode length
+  - eligibility outcome (`ok` or a specific blocker reason)
+  - first unknown opcode (only for the `unknown-op` reason)
+  - whether compile succeeded
+  - native bytes emitted
+
+The blocker reasons mirror the existing eligibility check:
+`captures`, `ic-slots`, `n-clauses`, `has-rest`, `unknown-op`,
+`empty`, `bad-terminator`, `null-bc`. The summary block aggregates
+attempt / eligible / compiled counts and total native bytes; the
+per-reason block shows the histogram across blockers; the
+unknown-op breakdown shows which specific opcodes are responsible
+for unknown-op rejections, naming the next stencilisation targets
+in priority order.
+
+`mino_jit_eligible` keeps its existing boolean contract; internally
+it delegates to a new `classify_eligibility` helper that returns a
+typed reason. The boolean wrapper collapses every non-OK reason
+back to 0, so the existing call site in `fn.c` is unchanged.
+`mino_jit_compile` becomes a thin wrapper around a renamed
+`compile_inner`: it classifies eligibility, records the result, and
+recordings include both successful and rejected attempts.
+
+Also closes an asymmetry between the two callable-entry paths in
+`fn.c`. `apply_callable` (cons-args ABI) has always bumped
+`bc->hot_counter` and triggered a compile at the threshold;
+`apply_callable_argv` (the argv ABI hit by `OP_CALL` and
+`OP_TAILCALL` from inside bc bodies) used to skip both. Without
+the warming hook on the argv path, fns reached exclusively through
+the bc call ABI never reach the threshold, regardless of their
+shape. The tracer made this visible -- a fresh test-suite run
+showed exactly one compile attempt against a corpus that contains
+many hot eligible fns. With the hook mirrored across both entry
+points the test suite now reports 69 attempts; jit_bench reports 39.
+
+Baseline eligibility on this binary (arm64 / Darwin):
+
+  | Workload              | attempts | eligible | top blocker       |
+  |-----------------------|----------|----------|-------------------|
+  | tests/run.clj         |       69 | 18.8%    | ic-slots (46%)    |
+  | benchmarks/jit_bench  |       39 | 43.6%    | ic-slots (51%)    |
+
+`ic-slots > 0` is the single biggest unlock the upcoming
+`OP_GETGLOBAL_CACHED` stencil targets. Every defn that reads a
+global var has at least one ic-slot, so dropping that blocker
+extends compile coverage to roughly two-thirds of real-workload
+fns.
+
+The infrastructure adds no measurable overhead when the env var is
+unset: a tri-state cached check in `cpjit_stats_record` short-
+circuits before any allocation. With the var set, allocations are
+one `cpjit_stat_entry_t` per compile attempt; the linked list and
+strdup'd filenames live until process exit (atexit-dumped, then
+the host frees the process).
+
+Full test suite (1688 / 7854) passes.
+
 ## v0.202.0 — CPJIT Stencil Cycle Close + Perf Measurement
 
 Drops `OP_LOOP_INT_LT` from the active stencil descriptor table

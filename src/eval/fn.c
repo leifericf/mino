@@ -719,6 +719,25 @@ mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
         }
         mino_bc_check_require(S, fn);
         if (MINO_BC_RUNNABLE(fn)) {
+            /* Tier selection mirrors apply_callable's: bump the hot
+             * counter on every entry, attempt a single compile when
+             * the threshold is crossed. Without this, fns reached
+             * exclusively through OP_CALL / OP_TAILCALL (the bytecode
+             * call ABI) never warm and thus never JIT, regardless of
+             * eligibility -- the runtime simply never asks. */
+            mino_bc_fn_t *bc_rec = fn->as.fn.bc;
+            if (bc_rec->native != NULL && bc_rec->native_gen != S->ic_gen) {
+                mino_jit_invalidate(S, fn);
+            }
+            if (bc_rec->native == NULL
+                && bc_rec->hot_counter < (unsigned)-1) {
+                bc_rec->hot_counter++;
+                if (bc_rec->hot_counter == MINO_JIT_THRESHOLD) {
+                    if (mino_jit_compile(S, fn) < 0) {
+                        bc_rec->hot_counter = (unsigned)-1;
+                    }
+                }
+            }
             mino_val_t **call_argv = argv;
             int          call_argc = argc;
             int          cap       = argc;
