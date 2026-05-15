@@ -182,6 +182,18 @@ extern mino_val_t **mino_jit_call_cached_slow(mino_state_t *S,
                                                mino_bc_fn_t *bc,
                                                unsigned slot_idx);
 
+/* Inlined-resolve complement: the stencil's inline fast path verified
+ * the IC slot is hot (cached !=NULL, gen match, no dyn binding) and
+ * pre-resolved the callee. This helper skips the second IC lookup
+ * and goes straight to `apply_callable_argv`. Same regs / GC
+ * refresh contract as `mino_jit_call_cached_slow`. */
+extern mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S,
+                                                 mino_val_t **regs,
+                                                 mino_val_t *callee,
+                                                 unsigned arg_base,
+                                                 unsigned argc,
+                                                 unsigned dst);
+
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
  * return value lands at regs[dst]. Routes through

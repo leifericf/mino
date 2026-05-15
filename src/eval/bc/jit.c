@@ -1011,6 +1011,28 @@ mino_val_t **mino_jit_call_cached_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Inlined-resolve fast complement of mino_jit_call_cached_slow. The
+ * stencil's inline path verified the IC slot is hot (cached !=NULL,
+ * gen match, no dyn binding active), so it hands the resolved callee
+ * to this helper directly and skips the second IC lookup. Same
+ * dispatch + regs-refresh contract as the cached_slow path. */
+mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S, mino_val_t **regs,
+                                          mino_val_t *callee,
+                                          unsigned arg_base, unsigned argc,
+                                          unsigned dst)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_val_t *r = apply_callable_argv(S, callee,
+                                        S->bc_regs + base + arg_base,
+                                        (int)argc, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+}
+
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */
@@ -1143,6 +1165,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_loop_int_lt_inc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_inc_slow},
     {"mino_jit_getglobal_cached_slow", (void *)(uintptr_t)mino_jit_getglobal_cached_slow},
     {"mino_jit_call_cached_slow",      (void *)(uintptr_t)mino_jit_call_cached_slow},
+    {"mino_jit_call_resolved_slow",    (void *)(uintptr_t)mino_jit_call_resolved_slow},
     {"mino_jit_call_slow",             (void *)(uintptr_t)mino_jit_call_slow},
     {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
     {"mino_jit_closure_slow",          (void *)(uintptr_t)mino_jit_closure_slow},

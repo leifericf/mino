@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.214.0 — Inline OP_CALL_CACHED Resolve Fast Path
+
+The OP_CALL_CACHED stencil now inlines the IC-slot hit check (same
+shape as OP_GETGLOBAL_CACHED inlined in v0.211): read the slot,
+verify cached / gen / dyn_stack, and on hit hand the pre-resolved
+callee directly to a thin new helper that skips the IC cascade and
+goes straight to `apply_callable_argv`. On miss (slot unfilled,
+gen stale, or dyn binding active) the stencil falls through to the
+existing `mino_jit_call_cached_slow` which runs the full IC
+resolve.
+
+The new `mino_jit_call_resolved_slow` helper is the smallest viable
+post-resolve path: it pulls env off the published ctx and dispatches
+through `apply_callable_argv`. Same regs / GC refresh contract as
+the cached_slow path.
+
+The actual call into `apply_callable_argv` is unavoidable at this
+release -- it walks the callable's dispatch table and may invoke
+arbitrary mino code that triggers GC. The win on the hit branch is
+purely the IC-resolve step (a function call, a slot reread, a gen
+compare, a dyn-stack reread). Per-call savings are a handful of
+cycles, but high-frequency cached call sites compound them.
+
+### Measurement
+
+Median of three runs on ARM64 Darwin:
+
+  | Workload                            | v0.210.0   | v0.214.0   | Ratio |
+  |-------------------------------------|------------|------------|-------|
+  | realistic_bench fibonacci(25)       | 7.75ms/op  | 6.53ms/op  | **1.19x** |
+  | realistic_bench map/filter/m/r 50k  | 773us/op   | 730us/op   | 1.06x |
+  | realistic_bench build 5k int-map    | 11.31ms/op | 11.37ms/op | 0.99x |
+  | realistic_bench bump 5k int-map     | 20.21ms/op | 20.22ms/op | 1.00x |
+
+Fibonacci is the visible signal. Pure-recursive arithmetic with no
+intermediate allocations, every iter is `(+ (fib (- n 1)) (fib (- n
+2)))`: the body has two OP_CALL_CACHED ops and the call frequency
+dwarfs everything else. The inline-resolve fast path saves a `bl`
+per call. Over the ~150,000 calls fib(25) generates, that adds up to
+the observed 19% speedup.
+
+Workloads dominated by collection mutation (build/bump 5k int-map)
+or HAMT / lazy-seq traversal (map/filter/map/reduce) spend most of
+their time outside the JIT region in `mino_assoc` / `mino_conj` /
+the lazy realisation slow paths. Their per-row deltas stay at
+run-to-run noise.
+
+### Speedup-gate state
+
+Cumulative through v0.214.0: the cycle's headline row family now
+includes a >= 1.2x row. Fibonacci hits 1.19x, just below the gate
+floor; map/filter/map/reduce sits at 1.06x; the rest are flat.
+
+The mid-cycle gate (after v0.212) called for 1.2x; v0.214 brings
+the strongest row to within 1 percentage point. Continuing to v0.215
+(self-recursive tail-call shortcut) -- fibonacci has been retained
+specifically as the workload where v0.215 should compound, since
+fib's tail-position recur-on-self pattern is exactly what the new
+short-circuit targets.
+
+### Verification
+
+  - `make -j8` clean (release + ASan).
+  - 1688 tests / 7854 assertions pass under release + ASan.
+  - `gen-stencils` produces a clean `stencils_arm64_darwin.h`.
+
 ## v0.213.0 — Inline Arith II + IK Families
 
 Thirteen stencils that had been `bl`-ing into `binop_int_fast` now
