@@ -291,29 +291,30 @@
   (build-sanitized "tsan" "mino_tsan"
                    ["-fsanitize=thread"]))
 
-(defn build-nojit
-  "Build mino_nojit with -DMINO_CPJIT=1 stripped. Every call goes
+(defn build-lean
+  "Build mino-lean with -DMINO_CPJIT=1 stripped. Every call goes
    through the bytecode interpreter; the JIT pipeline compiles to a
-   no-op stub. Used by the test-jit-parity task to confirm the
-   inlined stencils produce results indistinguishable from the
-   interpreter's matching OP_*_II / OP_*_IK / OP_INC_I / etc.
-   handlers."
+   no-op stub. mino-lean is the distributable lean artifact: smaller
+   static footprint, faster cold start, no JIT region allocation.
+   Also drives test-jit-parity to confirm the inlined stencils
+   produce results indistinguishable from the interpreter's matching
+   OP_*_II / OP_*_IK / OP_INC_I / etc. handlers."
   []
   (gen-core-header)
   (gen-stdlib-headers)
-  (let [nojit-cflags (filterv #(not= % "-DMINO_CPJIT=1") cflags)
+  (let [lean-cflags (filterv #(not= % "-DMINO_CPJIT=1") cflags)
         args (into [cc]
-                   (concat nojit-cflags
+                   (concat lean-cflags
                            ldflags
-                           ["-o" "mino_nojit"]
+                           ["-o" "mino-lean"]
                            all-srcs
                            libs))]
     (println (str "  " (str/join " " args)))
     (apply sh! args)
-    (println "  nojit build -> mino_nojit")))
+    (println "  lean build -> mino-lean")))
 
 (defn test-jit-parity
-  "Build ./mino and ./mino_nojit, run tests/jit_parity_test.clj
+  "Build ./mino and ./mino-lean, run tests/jit_parity_test.clj
    against each, and assert their stdout bytes are byte-identical.
    The parity test pins ~40 literal-expected-value assertions
    covering range boundaries, tag-miss, comparison identity, and
@@ -325,32 +326,32 @@
    failure rather than crashing the task."
   []
   (build)
-  (build-nojit)
+  (build-lean)
   (let [parity-test "tests/jit_parity_test.clj"
-        jit-result   (sh mino-bin    parity-test)
-        nojit-result (sh "./mino_nojit" parity-test)
-        jit-out      (get jit-result   :out)
-        nojit-out    (get nojit-result :out)
-        jit-exit     (get jit-result   :exit)
-        nojit-exit   (get nojit-result :exit)]
+        jit-result  (sh mino-bin     parity-test)
+        lean-result (sh "./mino-lean" parity-test)
+        jit-out     (get jit-result  :out)
+        lean-out    (get lean-result :out)
+        jit-exit    (get jit-result  :exit)
+        lean-exit   (get lean-result :exit)]
     (cond
-      (and (= jit-out nojit-out) (= jit-exit nojit-exit) (= 0 jit-exit))
+      (and (= jit-out lean-out) (= jit-exit lean-exit) (= 0 jit-exit))
       (do (println jit-out)
           (println "  jit-parity: OK -- stdout byte-identical, both exit 0"))
 
       :else
-      (do (spit "jit-parity-jit.out" jit-out)
-          (spit "jit-parity-nojit.out" nojit-out)
+      (do (spit "jit-parity-jit.out"  jit-out)
+          (spit "jit-parity-lean.out" lean-out)
           (println "  jit-parity: FAIL")
-          (println (str "    jit   exit=" jit-exit))
-          (println (str "    nojit exit=" nojit-exit))
-          (println "    wrote jit-parity-jit.out / jit-parity-nojit.out")
-          (println (get (sh "diff" "jit-parity-jit.out" "jit-parity-nojit.out")
+          (println (str "    jit  exit=" jit-exit))
+          (println (str "    lean exit=" lean-exit))
+          (println "    wrote jit-parity-jit.out / jit-parity-lean.out")
+          (println (get (sh "diff" "jit-parity-jit.out" "jit-parity-lean.out")
                         :out))
           (throw (ex-info "jit-parity failure"
                           {:status :differ
-                           :jit-exit jit-exit
-                           :nojit-exit nojit-exit}))))))
+                           :jit-exit  jit-exit
+                           :lean-exit lean-exit}))))))
 
 ;; ---- Release guardrails (G1 / G2 / G3 + composite release-gate) -----
 ;;

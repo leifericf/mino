@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.237.0 — Dual-Binary Build: mino + mino-lean
+
+Opens cycle D. The pre-existing `mino_nojit` build is renamed to
+`mino-lean` -- the lean distributable artifact for hosts that
+prefer a smaller static footprint and faster cold start over JIT
+throughput. Both binaries build from the same source tree.
+
+  - `lib/mino/tasks/builtin.clj`: `build-nojit` renamed to
+    `build-lean`. Output binary is `./mino-lean` (hyphen matches
+    the mino ecosystem convention of mino-site / mino-bench /
+    mino-lsp / mino-examples / tree-sitter-mino). The
+    `test-jit-parity` task drives both binaries; the parity-diff
+    artifact pair is now `jit-parity-jit.out` /
+    `jit-parity-lean.out`.
+  - `mino.edn`: `build-nojit` → `build-lean`. Test runner registers
+    the renamed task.
+  - `.gitignore`: drops the obsolete `/mino_nojit`, `/mino_no_jit`,
+    and `jit-parity-nojit.out` entries; adds `/mino-lean` and
+    `jit-parity-lean.out`.
+
+On ARM64 Darwin, `mino-lean` measures 991 KB vs `mino` at 1.03 MB
+-- a ~4 % static-footprint reduction driven by dropping the
+emit / patcher / stencil-table code paths the lean build doesn't
+need.
+
+`release-gate` green; parity-test stdout byte-identical between
+the two binaries.
+
+Subsequent cycle D releases add runtime JIT mode control
+(ON/OFF/AUTO), threshold tuning, and a capability query API to
+the full `mino` binary so embedding hosts can choose their JIT
+posture per VM state.
+
 ## v0.236.0 — COFF Parser + VirtualAlloc Swap + Generated x86_64 Windows Header
 
 Closes cycle A4. The extractor now parses PE/COFF amd64 object

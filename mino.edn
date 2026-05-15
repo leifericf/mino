@@ -28,9 +28,9 @@
                    :task mino.tasks.builtin/build-ubsan}
   build-tsan      {:doc  "Build mino_tsan with ThreadSanitizer"
                    :task mino.tasks.builtin/build-tsan}
-  build-nojit     {:doc  "Build mino_nojit with MINO_CPJIT disabled"
-                   :task mino.tasks.builtin/build-nojit}
-  test-jit-parity {:doc  "Build mino + mino_nojit; assert parity-test stdout matches byte-for-byte"
+  build-lean      {:doc  "Build mino-lean with MINO_CPJIT disabled"
+                   :task mino.tasks.builtin/build-lean}
+  test-jit-parity {:doc  "Build mino + mino-lean; assert parity-test stdout matches byte-for-byte"
                    :task mino.tasks.builtin/test-jit-parity}
   check-stencils-fresh {:doc  "G1: gen-stencils + git-diff guardrail for stale committed bytes"
                         :task mino.tasks.builtin/check-stencils-fresh}

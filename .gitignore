@@ -15,10 +15,9 @@ bin/
 /mino_ubsan
 /mino_prof
 /mino_opcounts
-/mino_no_jit
-/mino_nojit
+/mino-lean
 jit-parity-jit.out
-jit-parity-nojit.out
+jit-parity-lean.out
 /data/
 src/core_mino.h
 src/lib_clojure_*.h
