@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.207.0 — Multi-Arity + Variadic Eligibility
+
+Drops the `n_clauses != 1` and `has_rest` blockers from the
+eligibility check. Multi-arity fns and `& rest` variadics are now
+JIT-eligible.
+
+The two pieces are asymmetric in how much new machinery they need:
+
+  - **`has_rest` is free.** `mino_bc_run`'s entry-time dispatch
+    builds the rest-collection cons list and places it at
+    `regs[n_params]` before the JIT region runs; the body reads
+    that slot the same way it reads any other local. The JIT path
+    never sees the rest-collection step. The blocker existed only
+    to keep the eligibility check minimal during the early stencil
+    rollout.
+
+  - **`n_clauses > 1` needs an entry guard.** Each clause has its
+    own `entry_pc` into the shared bytecode stream. The JIT region
+    is one block of mmap'd code with a single ARM64 function
+    prologue at the front -- entering mid-region would skip the
+    callee-saved register saves and corrupt the caller's frame on
+    epilogue. So the JIT-invoke check in `mino_bc_run` now also
+    gates on `match->entry_pc == 0`: the JIT fires when the
+    matched clause starts at the region's front (typically
+    clauses[0], the first source-order arity), and falls back to
+    the interpreter for other clauses. Lifting that constraint
+    needs per-clause native entry points; a follow-on cycle's
+    work.
+
+Eligibility-tracer comparison (`MINO_CPJIT_STATS=1`,
+`tests/run.clj`):
+
+  | Reason            | v0.206.0 | v0.207.0 |
+  |-------------------|----------|----------|
+  | ok                |       83 |       96 |
+  | captures          |       15 |       15 |
+  | n-clauses         |        7 |        0 |
+  | has-rest          |        2 |        0 |
+  | unknown-op        |       14 |       15 |
+  | total eligibility |   68.6%  |   76.2%  |
+
+Full test suite (1688 / 7854) passes; ASan rebuild + tests pass.
+
 ## v0.206.0 — OP_CALL Uncached + OP_TAILCALL Stencils
 
 Closes the call story for the cycle's eligibility set. Adds the

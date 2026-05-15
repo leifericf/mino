@@ -453,11 +453,15 @@ static cpjit_reason_t classify_eligibility(const mino_bc_fn_t *bc,
     if (bc->captures)            return CPJIT_REASON_CAPTURES;
     /* ic_slots_len > 0 no longer blocks: OP_GETGLOBAL_CACHED has a
      * stencil. PROTOCOL-kind slots are still rejected via their
-     * unstencilised ops (OP_PROTOCOL_*_CACHED) in the loop below. */
-    if (bc->n_clauses != 1)      return CPJIT_REASON_N_CLAUSES;
-    if (bc->n_clauses == 1 && bc->clauses != NULL && bc->clauses[0].has_rest) {
-        return CPJIT_REASON_HAS_REST;  /* variadic dispatch not stencilised */
-    }
+     * unstencilised ops (OP_PROTOCOL_*_CACHED) in the loop below.
+     *
+     * Multi-arity and variadic fns are now JIT-eligible: bc_run's
+     * outer dispatch picks the matching clause and sets up regs
+     * (including the rest-collection list at regs[n_params]) before
+     * the JIT entry check fires. For multi-arity, the JIT invoke
+     * only enters when the matched clause's entry_pc == 0 (i.e.,
+     * the body starts at the JIT region's front); calls into later
+     * clauses fall back to the interpreter. */
     for (size_t pc = 0; pc < bc->code_len; pc++) {
         unsigned op = OP_OF(bc->code[pc]);
         if (is_direct_emit_op(op)) continue;

@@ -1172,7 +1172,14 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
      * ic_gen snapshot is stale -- a def / ns-unmap / var_set_root
      * has invalidated the JIT'd code's globally-cached resolutions
      * since the page was emitted. */
-    if (bc->native != NULL && bc->native_gen == S->ic_gen) {
+    /* JIT enters at pc=0 only. Multi-arity bodies whose matched
+     * clause starts at a non-zero entry_pc fall through to the
+     * interpreter -- the JIT region's first stencil owns the
+     * ARM64 function prologue, so a mid-region entry would skip
+     * the callee-saved register saves and corrupt the caller's
+     * frame on epilogue. */
+    if (bc->native != NULL && bc->native_gen == S->ic_gen
+        && match->entry_pc == 0) {
         retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc, regs,
                                  (mino_val_t **)bc->consts, env);
         ok = (retval != NULL);
