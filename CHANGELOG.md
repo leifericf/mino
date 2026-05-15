@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.197.0 — Stencil Call ABI + ADD_II / SUB_II / MUL_II
+
+`src/eval/bc/stencils/{add_ii,sub_ii,mul_ii}.c` are the first JIT
+stencils that call host C helpers. Each stencil reads `regs[B]` and
+`regs[C]`, dispatches to `binop_int_fast` for the tagged-int fast
+lane, falls back through `mino_jit_binop_slow` (a new jit.c helper
+that builds the two-element cons list and dispatches to the matching
+prim with regs-base refresh) on a miss, and writes `regs[A]`. The
+stencil ABI settles at `(regs, consts, S)` in `(x0, x1, x2)`; every
+non-final stencil now returns `regs` so the chain preserves the
+window pointer across `bl` calls that clobber `x0`.
+
+`tools/stencil_extract.c` already extracted `ARM64_RELOC_BRANCH26`;
+the runtime side gains a `patch_branch26` patcher and a 16-byte
+per-call trampoline (`ldr x16, [pc, #8]; br x16; <target-addr>`)
+appended between the code region and the literal pool. The
+trampoline sidesteps the bl's ±128 MB range when the host helper
+lives far from the mmap'd region. The trampoline-slot count is
+sized from a one-pass classification of every stencil symbol;
+`MINO_STENCIL_IMM_*` names route to pool slots, all other names
+look up in a small extern-fn table (currently 2 entries:
+`binop_int_fast`, `mino_jit_binop_slow`).
+
+The trailing-`ret` trim heuristic is gone. Every non-final stencil
+emits its full body; the JIT's second pass scans each instance for
+the first `ret` (0xd65f03c0) and rewrites it as `b <next>` so the
+chain falls through to the next stencil. Cold blocks that clang
+lays out after the natural exit (the slow-path `bl` and merge-back
+branch in the new arith stencils) stay in place, reachable only
+through the in-stencil cbz + b-back-to-epilogue pattern. The layout
+becomes `[code | trampolines | literal-pool]` in a single mmap;
+the multi-page distinction is dropped since `adrp` handles any
+±4 GB page diff regardless.
+
+Stencils compile with a new `-fno-optimize-sibling-calls` flag in
+the `gen-stencils` task so clang doesn't tail-call the slow
+helper -- the chain pattern depends on stencils returning normally
+through the rewritten `ret`.
+
+Bench gate: 1688 tests / 7854 assertions pass under both the
+default build (`-DMINO_CPJIT=1`) and the `mino_asan` rebuild with
+`-DMINO_CPJIT=1`. The micro-bench at `~/Code/mino-bench/benchmarks/
+jit_bench.clj` confirms `add-fn` JIT-compiles (152 code bytes,
+32 trampoline bytes, 4 pool slots) and runs within run-to-run
+noise of v0.195.0; per-call savings inside `add-fn` are dwarfed
+by the bench-closure wrapper. The wins land progressively in
+v0.198+ as more shapes (comparisons, unary, control flow) become
+JIT-eligible.
+
 ## v0.196.0 — Externalise Int-Arith Fast-Path Helpers
 
 `binop_int_fast`, `unop_int_fast`, and `tag_or_box_int` lose their

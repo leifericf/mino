@@ -73,6 +73,8 @@
 
 #include "../../mino.h"
 #include "../../mino_internal.h"
+#include "../../prim/internal.h"
+#include "internal.h"
 #include MINO_CPJIT_STENCILS_HEADER
 
 /* Reloc kind enum mirror -- kept in sync with the values
@@ -86,9 +88,10 @@
 #define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12  5u
 
 /* Stencil descriptor: per (opcode, variant) tuple. The selection logic
- * looks up an entry by opcode and emits its bytes after stripping the
- * trailing `ret` (for chained stencils) or keeping it (for OP_RETURN
- * which terminates the JIT'd region). */
+ * looks up an entry by opcode and emits its bytes; the JIT runtime
+ * then replaces the trailing `ret` with a `b <next>` chain branch for
+ * non-final stencils. OP_RETURN keeps its `ret` so the JIT region
+ * exits to the caller through it. */
 typedef struct {
     unsigned             opcode;
     const unsigned char *bytes;
@@ -97,7 +100,10 @@ typedef struct {
     unsigned long        nsymbols;
     const unsigned int (*relocs)[4];
     unsigned long        nrelocs;
-    unsigned long        trim_tail_bytes;
+    /* Non-zero for the OP_RETURN-class stencil: the trailing `ret`
+     * is preserved as the JIT region's exit instead of being
+     * rewritten into a chain branch. */
+    unsigned             is_final;
 } stencil_desc_t;
 
 /* Symbol-name to immediate-kind lookup. Stencil sources declare extern
@@ -150,28 +156,49 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_move_bytes, stencil_op_move_size,
         stencil_op_move_symbols, stencil_op_move_nsymbols,
         stencil_op_move_relocs, stencil_op_move_nrelocs,
-        4u  /* strip trailing arm64 `ret` -- fall through to next */
+        0u  /* non-final: trailing `ret` is patched to b <next> */
     },
     {
         OP_LOAD_K,
         stencil_op_load_k_bytes, stencil_op_load_k_size,
         stencil_op_load_k_symbols, stencil_op_load_k_nsymbols,
         stencil_op_load_k_relocs, stencil_op_load_k_nrelocs,
-        4u
+        0u
     },
     {
         OP_RETURN,
         stencil_op_return_imm_bytes, stencil_op_return_imm_size,
         stencil_op_return_imm_symbols, stencil_op_return_imm_nsymbols,
         stencil_op_return_imm_relocs, stencil_op_return_imm_nrelocs,
-        0u  /* keep `ret` -- this is the function exit */
+        1u  /* keep `ret` -- this is the function exit */
     },
     {
         OP_FUSED_LOAD_K_RETURN,
         stencil_op_load_k_return_bytes, stencil_op_load_k_return_size,
         stencil_op_load_k_return_symbols, stencil_op_load_k_return_nsymbols,
         stencil_op_load_k_return_relocs, stencil_op_load_k_return_nrelocs,
-        0u  /* keep `ret` -- fused stencil exits the fn */
+        1u  /* keep `ret` -- fused stencil exits the fn */
+    },
+    {
+        OP_ADD_II,
+        stencil_op_add_ii_bytes, stencil_op_add_ii_size,
+        stencil_op_add_ii_symbols, stencil_op_add_ii_nsymbols,
+        stencil_op_add_ii_relocs, stencil_op_add_ii_nrelocs,
+        0u
+    },
+    {
+        OP_SUB_II,
+        stencil_op_sub_ii_bytes, stencil_op_sub_ii_size,
+        stencil_op_sub_ii_symbols, stencil_op_sub_ii_nsymbols,
+        stencil_op_sub_ii_relocs, stencil_op_sub_ii_nrelocs,
+        0u
+    },
+    {
+        OP_MUL_II,
+        stencil_op_mul_ii_bytes, stencil_op_mul_ii_size,
+        stencil_op_mul_ii_symbols, stencil_op_mul_ii_nsymbols,
+        stencil_op_mul_ii_relocs, stencil_op_mul_ii_nrelocs,
+        0u
     }
 };
 static const int g_stencils_count =
@@ -204,6 +231,70 @@ int mino_jit_eligible(const mino_bc_fn_t *bc)
     if (bc->code_len == 0) return 0;
     if (OP_OF(bc->code[bc->code_len - 1]) != OP_RETURN) return 0;
     return 1;
+}
+
+/* ----- Cold helpers stencils call ---------------------------------------- */
+
+/* Slow path for the arith stencils. Mirrors the interpreter's OP_*_II
+ * fallback: build a two-element cons list rooted in the bytecode
+ * register window, dispatch to the matching numeric prim, and store
+ * the result through the (possibly relocated) regs base before
+ * returning that base to the caller. Returns NULL only when the prim
+ * itself returns NULL -- in practice prims raise through longjmp on
+ * type errors, so the NULL return is the defensive case the stencil's
+ * caller propagates back up the JIT region. */
+mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
+                                 unsigned a, unsigned b, unsigned c,
+                                 unsigned subop)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    /* Read regs[b] / regs[c] through the freshly-rebased pointer at
+     * every step: a GC inside mino_cons can reallocate bc_regs and
+     * leave the C local stale. The base offset stays valid. */
+    list = mino_cons(S, S->bc_regs[base + c], list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    mino_val_t *r;
+    switch (subop) {
+    case BINOP_ADD: r = prim_add(S, list, NULL); break;
+    case BINOP_SUB: r = prim_sub(S, list, NULL); break;
+    case BINOP_MUL: r = prim_mul(S, list, NULL); break;
+    default:        r = NULL;                    break;
+    }
+    if (r == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* ----- Extern-symbol resolution table ------------------------------------ */
+
+/* Stencils call into a small fixed set of host helpers. Each entry
+ * maps the linker-visible symbol name (without the Mach-O leader
+ * underscore) to the C address. Adding a new helper means adding it
+ * to this table and to any stencil source that references it. */
+typedef struct {
+    const char *name;
+    void       *addr;
+} extern_fn_t;
+
+static const extern_fn_t g_extern_fns[] = {
+    {"binop_int_fast",      (void *)(uintptr_t)binop_int_fast},
+    {"mino_jit_binop_slow", (void *)(uintptr_t)mino_jit_binop_slow},
+    {NULL, NULL}
+};
+
+static void *lookup_extern_fn(const char *name)
+{
+    for (int i = 0; g_extern_fns[i].name != NULL; i++) {
+        if (strcmp(g_extern_fns[i].name, name) == 0) {
+            return g_extern_fns[i].addr;
+        }
+    }
+    return NULL;
 }
 
 /* ----- ARM64 instruction patchers ---------------------------------------- */
@@ -239,6 +330,81 @@ static void patch_pageoff12_ldr64(uint32_t *insn, uintptr_t target)
     *insn = base;
 }
 
+/* Patch a `bl` (or any BRANCH26-encoded branch) at *insn so it
+ * targets `target_addr`. The 26-bit signed offset (in 4-byte units)
+ * has ±128 MB range -- always reachable when target is within the
+ * JIT region's own mmap. Returns 0 on success, -1 if the target is
+ * unreachable or unaligned. */
+static int patch_branch26(uint32_t *insn, uintptr_t insn_addr,
+                          uintptr_t target_addr)
+{
+    int64_t diff = (int64_t)(target_addr - insn_addr);
+    if ((diff & 3) != 0) return -1;
+    int64_t imm26 = diff >> 2;
+    if (imm26 < -(int64_t)(1 << 25) || imm26 >= (int64_t)(1 << 25)) {
+        return -1;
+    }
+    uint32_t base = *insn;
+    base &= ~(uint32_t)0x03ffffffu;
+    base |= (uint32_t)((uint64_t)imm26 & 0x03ffffffu);
+    *insn = base;
+    return 0;
+}
+
+/* Overwrite a 32-bit slot with an unconditional `b <target>`. Used to
+ * replace the trailing `ret` of a non-final stencil with a chain
+ * branch to the next stencil's first instruction. */
+static int patch_b_unconditional(uint32_t *insn, uintptr_t insn_addr,
+                                 uintptr_t target_addr)
+{
+    int64_t diff = (int64_t)(target_addr - insn_addr);
+    if ((diff & 3) != 0) return -1;
+    int64_t imm26 = diff >> 2;
+    if (imm26 < -(int64_t)(1 << 25) || imm26 >= (int64_t)(1 << 25)) {
+        return -1;
+    }
+    *insn = (uint32_t)0x14000000u
+          | (uint32_t)((uint64_t)imm26 & 0x03ffffffu);
+    return 0;
+}
+
+/* Locate the first `ret` (encoded as 0xd65f03c0) within the stencil
+ * bytes. The compiler-emitted layout for our stencils places exactly
+ * one ret at the natural function exit; cold blocks merge back into
+ * the epilogue via an intra-stencil branch before the ret. Returns
+ * the offset of the ret or -1 when none is found. */
+static long find_first_ret(const unsigned char *bytes, unsigned long size)
+{
+    for (unsigned long i = 0; i + 4 <= size; i += 4) {
+        uint32_t insn;
+        memcpy(&insn, bytes + i, 4);
+        if (insn == 0xd65f03c0u) return (long)i;
+    }
+    return -1;
+}
+
+/* Each BRANCH26 reloc in a stencil bl-calls a 16-byte trampoline
+ * whose body loads an absolute target address from an embedded
+ * literal pool and branches to it. The trampoline is self-contained:
+ *   00:  ldr x16, [pc, #8]   (0x58000050)
+ *   04:  br  x16              (0xd61f0200)
+ *   08:  <8-byte absolute target address, little-endian>
+ *
+ * This sidesteps the bl's 26-bit signed offset limit (±128 MB) when
+ * the host fn is far from the mmap'd region. Trampolines live in a
+ * dedicated slab between the code region and the per-instruction
+ * literal pool. */
+#define MINO_JIT_TRAMPOLINE_SIZE 16u
+
+static void write_trampoline(unsigned char *slot, uintptr_t target_addr)
+{
+    static const uint32_t LDR_X16_PC_REL_8 = 0x58000050u;
+    static const uint32_t BR_X16           = 0xd61f0200u;
+    memcpy(slot + 0,  &LDR_X16_PC_REL_8, 4);
+    memcpy(slot + 4,  &BR_X16,           4);
+    memcpy(slot + 8,  &target_addr,      8);
+}
+
 /* ----- region book-keeping ------------------------------------------------ */
 
 static int region_track(mino_state_t *S, void *ptr, size_t size, void *aux_ptr)
@@ -269,57 +435,120 @@ void mino_jit_free_all(mino_state_t *S)
 
 /* ----- emit one stencil instance ----------------------------------------- */
 
-/* Place `st`'s body at `code + pos`, populate `nsymbols` consecutive
- * 8-byte slots in the literal pool with the bytecode operand values,
- * and patch every reloc to address its slot. Returns the number of
- * bytes consumed in the code section (post-trim) or -1 on overflow. */
-static long emit_stencil(unsigned char *code, size_t pos,
-                         size_t code_cap,
+/* Per-emit symbol classification slots. The fixed bound mirrors the
+ * extractor's MAX_SYMS (32 in tools/stencil_extract.c); raising it
+ * means raising both sides together. */
+enum { MINO_JIT_MAX_SYMS_PER_STENCIL = 32 };
+
+typedef struct {
+    int    is_fn;        /* 0 = IMM pool slot, 1 = FN trampoline slot */
+    size_t slot_offset;  /* pool[slot_offset] (IMM) or
+                          * tramp_buf + slot_offset (FN, byte-indexed). */
+} sym_slot_t;
+
+/* Place `st`'s body at `code + pos`. Walks the stencil's symbol
+ * table, allocating either a pool slot (for MINO_STENCIL_IMM_*
+ * symbols) or a 16-byte trampoline (for extern helper-fn symbols)
+ * per entry. Patches every reloc into the corresponding slot:
+ * GOT_LOAD pairs land on pool slots, BRANCH26 lands on trampoline
+ * slots. Returns the number of bytes consumed in the code section
+ * (== st->size; the trailing `ret` is rewritten in a later pass).
+ * Returns -1 on capacity overflow or unknown symbol. */
+static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
                          uint64_t *pool, size_t pool_pos, size_t pool_cap,
                          size_t *out_pool_pos,
+                         unsigned char *tramp_buf,
+                         size_t tramp_pos, size_t tramp_cap,
+                         size_t *out_tramp_pos,
                          const stencil_desc_t *st, mino_bc_insn_t insn,
-                         uintptr_t code_base, uintptr_t pool_base)
+                         uintptr_t code_base, uintptr_t pool_base,
+                         uintptr_t tramp_base)
 {
-    size_t emit_size = st->size - st->trim_tail_bytes;
-    if (pos + emit_size > code_cap) return -1;
-    if (pool_pos + st->nsymbols > pool_cap) return -1;
-    /* Populate the literal pool slots for this instance. The
-     * extractor's symbol-table ordering matches the order each name
-     * was first encountered in the reloc table; the stencil's reloc
-     * slot index then keys directly into our pool. */
+    if (pos + st->size > code_cap) return -1;
+    if (st->nsymbols > (unsigned long)MINO_JIT_MAX_SYMS_PER_STENCIL) return -1;
+    sym_slot_t slots[MINO_JIT_MAX_SYMS_PER_STENCIL];
+    size_t new_pool_pos  = pool_pos;
+    size_t new_tramp_pos = tramp_pos;
+    /* Walk the symbol table once: classify each entry as IMM or FN
+     * and allocate the corresponding slot. The extractor preserves
+     * the order each name was first encountered, so subsequent
+     * reloc-driven patches index slots[s] by sym_index directly. */
     for (unsigned long s = 0; s < st->nsymbols; s++) {
-        int kind = imm_kind_from_name(st->symbols[s]);
-        if (kind < 0) return -1;
-        pool[pool_pos + s] = imm_value(insn, (imm_kind_t)kind);
+        const char *name = st->symbols[s];
+        int k = imm_kind_from_name(name);
+        if (k >= 0) {
+            if (new_pool_pos >= pool_cap) return -1;
+            slots[s].is_fn       = 0;
+            slots[s].slot_offset = new_pool_pos;
+            pool[new_pool_pos]   = imm_value(insn, (imm_kind_t)k);
+            new_pool_pos++;
+        } else {
+            void *addr = lookup_extern_fn(name);
+            if (addr == NULL) return -1;
+            if (new_tramp_pos + MINO_JIT_TRAMPOLINE_SIZE > tramp_cap) return -1;
+            slots[s].is_fn       = 1;
+            slots[s].slot_offset = new_tramp_pos;
+            write_trampoline(tramp_buf + new_tramp_pos, (uintptr_t)addr);
+            new_tramp_pos += MINO_JIT_TRAMPOLINE_SIZE;
+        }
     }
-    memcpy(code + pos, st->bytes, emit_size);
+    memcpy(code + pos, st->bytes, st->size);
     for (unsigned long r = 0; r < st->nrelocs; r++) {
         unsigned int off  = st->relocs[r][0];
         unsigned int kind = st->relocs[r][1];
         unsigned int sym  = st->relocs[r][2];
-        if (off >= emit_size) continue;       /* points into the trimmed tail */
+        if (off >= st->size) return -1;
         if (sym >= st->nsymbols) return -1;
         uintptr_t   insn_addr = code_base + pos + off;
-        uintptr_t   target    = pool_base + (pool_pos + sym) * sizeof(uint64_t);
         uint32_t   *insn_p    = (uint32_t *)(code + pos + off);
-        switch (kind) {
-        case MINO_STENCIL_RELOC_ARM64_PAGE21:
-        case MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21:
-            patch_adrp(insn_p, insn_addr, target);
-            break;
-        case MINO_STENCIL_RELOC_ARM64_PAGEOFF12:
-        case MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12:
-            patch_pageoff12_ldr64(insn_p, target);
-            break;
-        default:
-            return -1;
+        if (slots[sym].is_fn) {
+            uintptr_t target = tramp_base + slots[sym].slot_offset;
+            if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) return -1;
+            if (patch_branch26(insn_p, insn_addr, target) != 0) return -1;
+        } else {
+            uintptr_t target = pool_base
+                + slots[sym].slot_offset * sizeof(uint64_t);
+            switch (kind) {
+            case MINO_STENCIL_RELOC_ARM64_PAGE21:
+            case MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21:
+                patch_adrp(insn_p, insn_addr, target);
+                break;
+            case MINO_STENCIL_RELOC_ARM64_PAGEOFF12:
+            case MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12:
+                patch_pageoff12_ldr64(insn_p, target);
+                break;
+            default:
+                return -1;
+            }
         }
     }
-    *out_pool_pos = pool_pos + st->nsymbols;
-    return (long)emit_size;
+    *out_pool_pos  = new_pool_pos;
+    *out_tramp_pos = new_tramp_pos;
+    return (long)st->size;
 }
 
 /* ----- top-level compile -------------------------------------------------- */
+
+/* Pick the stencil + a hint about whether the current pc participates
+ * in a OP_LOAD_K + OP_RETURN superinstruction fusion. Returns the
+ * stencil descriptor and writes `*out_fused = 1` when fusion fires
+ * (caller must advance pc by 2 in that branch). Returns NULL when no
+ * stencil covers the opcode. */
+static const stencil_desc_t *pick_stencil(const mino_bc_fn_t *bc,
+                                          size_t pc, int *out_fused)
+{
+    unsigned op = OP_OF(bc->code[pc]);
+    *out_fused  = 0;
+    if (op == OP_LOAD_K && pc + 1 < bc->code_len) {
+        mino_bc_insn_t cur  = bc->code[pc];
+        mino_bc_insn_t next = bc->code[pc + 1];
+        if (OP_OF(next) == OP_RETURN && A_OF(next) == A_OF(cur)) {
+            *out_fused = 1;
+            return find_stencil(OP_FUSED_LOAD_K_RETURN);
+        }
+    }
+    return find_stencil(op);
+}
 
 int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
 {
@@ -329,49 +558,49 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     if (bc->native != NULL) return 0;
     if (!mino_jit_eligible(bc)) return -1;
 
-    /* Estimate worst-case sizes (sum of stencil sizes; pool sized to
-     * worst nsymbols per opcode). */
-    size_t code_size = 0;
-    size_t pool_slots = 0;
+    /* First pass: classify every symbol of every stencil to size the
+     * code / trampoline / pool regions. The pass also validates that
+     * every extern fn symbol resolves to a known host helper, so the
+     * mmap below has zero chance of failing partway through. */
+    size_t code_size   = 0;
+    size_t pool_slots  = 0;
+    size_t tramp_count = 0;
     for (size_t pc = 0; pc < bc->code_len; pc++) {
-        unsigned op = OP_OF(bc->code[pc]);
-        const stencil_desc_t *st = find_stencil(op);
-        code_size  += st->size - st->trim_tail_bytes;
-        pool_slots += st->nsymbols;
+        int fused;
+        const stencil_desc_t *st = pick_stencil(bc, pc, &fused);
+        if (st == NULL) return -1;
+        code_size += st->size;
+        for (unsigned long s = 0; s < st->nsymbols; s++) {
+            const char *name = st->symbols[s];
+            int k = imm_kind_from_name(name);
+            if (k >= 0) {
+                pool_slots++;
+            } else {
+                if (lookup_extern_fn(name) == NULL) return -1;
+                tramp_count++;
+            }
+        }
+        if (fused) pc++;
     }
-    if (code_size == 0 || pool_slots == 0) {
-        /* Pool may legitimately be zero for an OP_RETURN-only body,
-         * but the literal pool page is still required so the patchers
-         * have an addressable target page. Falling through here keeps
-         * the layout uniform; an unused page is cheap. */
-    }
+
+    /* Layout: [code] [trampolines, 16-byte aligned] [pool, 8-byte
+     * aligned]. Trampolines live in the same RX mmap as the code
+     * (they're branched into by the in-stencil bl instructions) and
+     * each carries its own 8-byte target literal. The pool follows
+     * trampolines and holds the per-instruction immediate values
+     * loaded via GOT-style adrp+ldr pairs. */
+    size_t tramp_offset    = (code_size + 15u) & ~(size_t)15u;
+    size_t tramp_bytes     = tramp_count * MINO_JIT_TRAMPOLINE_SIZE;
+    size_t pool_offset_raw = tramp_offset + tramp_bytes;
+    size_t pool_offset     = (pool_offset_raw + 7u) & ~(size_t)7u;
+    size_t pool_bytes      = pool_slots * sizeof(uint64_t);
+    size_t need_bytes      = pool_offset + pool_bytes;
+    if (need_bytes == 0) need_bytes = 1;  /* mmap with size 0 is an error */
+
     long page_l = sysconf(_SC_PAGESIZE);
     if (page_l <= 0) return -1;
-    size_t page = (size_t)page_l;
-    size_t pool_bytes = pool_slots * sizeof(uint64_t);
-    /* Single-page layout for small fns: code occupies the start, the
-     * literal pool sits at an 8-byte-aligned offset right after.
-     * Adrp's page-relative addressing works because both halves live
-     * on the same 4 KB page (page diff = 0; ldr's 12-bit page offset
-     * reaches anywhere within). For fns that don't fit in one page,
-     * fall back to the multi-page layout where code and pool occupy
-     * separate page ranges. The single-page path halves per-fn
-     * memory consumption for typical small fns (the OP_MOVE +
-     * OP_RETURN smoke shape goes from 8 KB to 4 KB resident). */
-    size_t pool_offset_in_single = (code_size + 7u) & ~(size_t)7u;
-    int    single_page  = (pool_offset_in_single + pool_bytes <= page);
-    size_t code_pages, pool_pages, total_size;
-    if (single_page) {
-        code_pages = 1;
-        pool_pages = 0;
-        total_size = page;
-    } else {
-        code_pages = (code_size + page - 1) / page;
-        if (code_pages == 0) code_pages = 1;
-        pool_pages = (pool_bytes + page - 1) / page;
-        if (pool_pages == 0) pool_pages = 1;
-        total_size = (code_pages + pool_pages) * page;
-    }
+    size_t page       = (size_t)page_l;
+    size_t total_size = (need_bytes + page - 1) & ~(page - 1);
 
     void *region = mmap(NULL, total_size, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANON, -1, 0);
@@ -387,74 +616,94 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
         return -1;
     }
 
-    unsigned char *code = (unsigned char *)region;
-    uint64_t      *pool;
-    size_t         code_cap;
-    size_t         pool_cap;
-    if (single_page) {
-        pool     = (uint64_t *)((unsigned char *)region + pool_offset_in_single);
-        code_cap = pool_offset_in_single;  /* code must fit before the pool */
-        pool_cap = (page - pool_offset_in_single) / sizeof(uint64_t);
-    } else {
-        pool     = (uint64_t *)((unsigned char *)region + code_pages * page);
-        code_cap = code_pages * page;
-        pool_cap = (pool_pages * page) / sizeof(uint64_t);
+    /* Per-stencil-instance tracking so the post-emit ret patcher
+     * knows which spans are non-final and where the next instance
+     * begins. Sized to code_len (upper bound; fusion strictly
+     * reduces the count). */
+    size_t *inst_starts = (size_t *)malloc(bc->code_len * sizeof(size_t));
+    unsigned char *inst_is_final =
+        (unsigned char *)malloc(bc->code_len * sizeof(unsigned char));
+    if (inst_starts == NULL || inst_is_final == NULL) {
+        free(inst_starts);
+        free(inst_is_final);
+        free(pc_offsets);
+        munmap(region, total_size);
+        return -1;
     }
-    uintptr_t      code_base = (uintptr_t)code;
-    uintptr_t      pool_base = (uintptr_t)pool;
+    size_t n_inst = 0;
 
-    size_t pos = 0;
-    size_t pool_pos = 0;
+    unsigned char *code      = (unsigned char *)region;
+    unsigned char *tramp_buf = code + tramp_offset;
+    uint64_t      *pool      = (uint64_t *)(code + pool_offset);
+    uintptr_t      code_base  = (uintptr_t)code;
+    uintptr_t      tramp_base = (uintptr_t)tramp_buf;
+    uintptr_t      pool_base  = (uintptr_t)pool;
+
+    size_t pos       = 0;
+    size_t pool_pos  = 0;
+    size_t tramp_pos = 0;
     for (size_t pc = 0; pc < bc->code_len; pc++) {
         pc_offsets[pc] = (unsigned)pos;
-        unsigned op = OP_OF(bc->code[pc]);
-
-        /* Superinstruction fusion: OP_LOAD_K followed by OP_RETURN
-         * with matching A collapses into the fused stencil. Skips
-         * the intermediate regs[A] write -- consts[Bx] lands
-         * directly in x0 and the fn returns. The fused stencil
-         * uses Bx (the OP_LOAD_K's constant index) as its single
-         * immediate; OP_RETURN's A is implicit (we don't need to
-         * write back). */
-        if (op == OP_LOAD_K && pc + 1 < bc->code_len) {
-            mino_bc_insn_t cur  = bc->code[pc];
-            mino_bc_insn_t next = bc->code[pc + 1];
-            if (OP_OF(next) == OP_RETURN && A_OF(next) == A_OF(cur)) {
-                const stencil_desc_t *st =
-                    find_stencil(OP_FUSED_LOAD_K_RETURN);
-                size_t new_pool_pos = pool_pos;
-                long n = emit_stencil(code, pos, code_cap, pool, pool_pos,
-                                      pool_cap, &new_pool_pos, st, cur,
-                                      code_base, pool_base);
-                if (n < 0) {
-                    free(pc_offsets);
-                    munmap(region, total_size);
-                    return -1;
-                }
-                pos += (size_t)n;
-                pool_pos = new_pool_pos;
-                /* Both pcs map to the start of the fused chunk; the
-                 * fused stencil is atomic, so deopt mid-fusion is
-                 * not a representable state. */
-                pc_offsets[pc + 1] = pc_offsets[pc];
-                pc++;
-                continue;
-            }
-        }
-
-        const stencil_desc_t *st = find_stencil(op);
-        size_t new_pool_pos = pool_pos;
-        long n = emit_stencil(code, pos, code_cap, pool, pool_pos, pool_cap,
-                              &new_pool_pos,
-                              st, bc->code[pc], code_base, pool_base);
+        int fused;
+        const stencil_desc_t *st = pick_stencil(bc, pc, &fused);
+        size_t new_pool_pos  = pool_pos;
+        size_t new_tramp_pos = tramp_pos;
+        long n = emit_stencil(code, pos, code_size,
+                              pool, pool_pos, pool_slots, &new_pool_pos,
+                              tramp_buf, tramp_pos, tramp_bytes, &new_tramp_pos,
+                              st, bc->code[pc],
+                              code_base, pool_base, tramp_base);
         if (n < 0) {
+            free(inst_starts);
+            free(inst_is_final);
             free(pc_offsets);
             munmap(region, total_size);
             return -1;
         }
-        pos += (size_t)n;
-        pool_pos = new_pool_pos;
+        inst_starts[n_inst]   = pos;
+        inst_is_final[n_inst] = (unsigned char)st->is_final;
+        n_inst++;
+        pos       += (size_t)n;
+        pool_pos   = new_pool_pos;
+        tramp_pos  = new_tramp_pos;
+        if (fused) {
+            /* Both pcs map to the start of the fused chunk; the fused
+             * stencil is atomic, so deopt mid-fusion is not a
+             * representable state. */
+            pc_offsets[pc + 1] = pc_offsets[pc];
+            pc++;
+        }
     }
+
+    /* Second pass: rewrite each non-final stencil's trailing `ret`
+     * into a `b <next_stencil_start>` chain branch. clang lays the
+     * cold blocks out after the natural exit; the first ret in the
+     * byte stream is always the success-path exit. */
+    for (size_t i = 0; i + 1 < n_inst; i++) {
+        if (inst_is_final[i]) continue;
+        size_t span_size = inst_starts[i + 1] - inst_starts[i];
+        long   ret_off   = find_first_ret(code + inst_starts[i], span_size);
+        if (ret_off < 0) {
+            free(inst_starts);
+            free(inst_is_final);
+            free(pc_offsets);
+            munmap(region, total_size);
+            return -1;
+        }
+        uintptr_t ret_addr  = code_base + inst_starts[i] + (size_t)ret_off;
+        uintptr_t next_addr = code_base + inst_starts[i + 1];
+        uint32_t *insn_p    =
+            (uint32_t *)(code + inst_starts[i] + (size_t)ret_off);
+        if (patch_b_unconditional(insn_p, ret_addr, next_addr) != 0) {
+            free(inst_starts);
+            free(inst_is_final);
+            free(pc_offsets);
+            munmap(region, total_size);
+            return -1;
+        }
+    }
+    free(inst_starts);
+    free(inst_is_final);
 
     /* Flush the I-cache so the CPU sees the freshly written
      * instructions. On ARM64 the data and instruction caches are
@@ -485,18 +734,16 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     bc->native_pc_offsets = pc_offsets;
     /* Optional diagnostic: emit a stderr line on each compile when
      * `MINO_CPJIT_TRACE` is set in the environment. The check fires
-     * once per compile, off the hot path. Used by the v0.185.0
-     * smoke verification to confirm the JIT'd path is exercised. */
+     * once per compile, off the hot path. */
     {
         const char *trace = getenv("MINO_CPJIT_TRACE");
         if (trace != NULL && trace[0] != '\0' && trace[0] != '0') {
             fprintf(stderr,
                     "[cpjit] compiled bc (code_len=%zu, region=%p, "
-                    "layout=%s, total_size=%zu, code_used=%zu, "
+                    "total_size=%zu, code_used=%zu, tramp_used=%zu, "
                     "pool_used=%zu)\n",
-                    bc->code_len, region,
-                    single_page ? "single-page" : "multi-page",
-                    total_size, pos, pool_pos);
+                    bc->code_len, region, total_size, pos,
+                    tramp_pos, pool_pos);
         }
     }
     return 0;

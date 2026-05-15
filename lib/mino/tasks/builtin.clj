@@ -340,7 +340,10 @@
                    ["return.c"        "stencil_op_return_imm"]
                    ["move.c"          "stencil_op_move"]
                    ["load_k.c"        "stencil_op_load_k"]
-                   ["load_k_return.c" "stencil_op_load_k_return"]]]
+                   ["load_k_return.c" "stencil_op_load_k_return"]
+                   ["add_ii.c"        "stencil_op_add_ii"]
+                   ["sub_ii.c"        "stencil_op_sub_ii"]
+                   ["mul_ii.c"        "stencil_op_mul_ii"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto
@@ -353,7 +356,8 @@
         (let [src (str "src/eval/bc/stencils/" file)
               obj (str tmpdir "/" file ".o")]
           (when-not (compiled file)
-            (sh! cc "-std=c99" "-O2" "-fno-builtin" "-c" src "-o" obj))
+            (sh! cc "-std=c99" "-O2" "-fno-builtin"
+                 "-fno-optimize-sibling-calls" "-c" src "-o" obj))
           (if first?
             (sh! "./tools/stencil_extract" obj sym out-hdr)
             (sh! "./tools/stencil_extract" "--append" obj sym out-hdr))

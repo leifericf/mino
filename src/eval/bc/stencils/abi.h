@@ -55,4 +55,39 @@ extern char MINO_STENCIL_IMM_SBX[];
 #define IMM_BX  ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_BX)
 #define IMM_SBX ((long)(intptr_t)MINO_STENCIL_IMM_SBX)
 
+/* Sub-op constants the BINOP_INT family shares with the bytecode VM.
+ * Kept in numeric sync with mino_bc_binop_t in src/eval/bc/internal.h;
+ * the runtime side has compile-time asserts elsewhere that the values
+ * agree. Duplicated here so the stencil sources stay hermetic. */
+#define STENCIL_BINOP_ADD  0u
+#define STENCIL_BINOP_SUB  1u
+#define STENCIL_BINOP_MUL  2u
+#define STENCIL_BINOP_LT   3u
+#define STENCIL_BINOP_LE   4u
+#define STENCIL_BINOP_GT   5u
+#define STENCIL_BINOP_GE   6u
+#define STENCIL_BINOP_EQ   7u
+#define STENCIL_UNOP_INC      0u
+#define STENCIL_UNOP_DEC      1u
+#define STENCIL_UNOP_ZERO_P   2u
+
+/* Runtime helpers stencils call. Declarations stay minimal: opaque
+ * forward-declared types only, no runtime headers. The compiler
+ * emits ARM64_RELOC_BRANCH26 against each name; the JIT runtime
+ * resolves the symbol to the host C address and patches each bl
+ * through a 16-byte trampoline appended to the JIT region.
+ *
+ * binop_int_fast: tagged-int speculative fast lane (NULL on miss).
+ * mino_jit_binop_slow: cold helper that builds a cons list, dispatches
+ *   to the matching prim, and stores the result through regs[a]. May
+ *   trigger GC; returns the (possibly relocated) regs pointer so the
+ *   caller can fall through with the latest base. Returns NULL when
+ *   the prim itself returns NULL (the prim normally raises through
+ *   longjmp on type errors -- a NULL return is the defensive case). */
+extern mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
+                                  mino_val_t *rhs, unsigned subop);
+extern mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
+                                        unsigned a, unsigned b, unsigned c,
+                                        unsigned subop);
+
 #endif /* MINO_BC_STENCIL_ABI_H */
