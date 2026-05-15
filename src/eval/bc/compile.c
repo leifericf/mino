@@ -66,6 +66,24 @@ extern mino_val_t *mino_nil(mino_state_t *S);
  * pointer to skip the retry on subsequent calls. */
 const mino_bc_fn_t mino_bc_declined = {0};
 
+/* Look up the source position recorded for a given pc. Returns 1 with
+ * out_file / out_line / out_column filled in if a meaningful position
+ * is recorded, 0 otherwise. NULL out_* args are tolerated. */
+int mino_bc_source_lookup(const mino_bc_fn_t *bc, size_t pc,
+                          const char **out_file, int *out_line,
+                          int *out_column)
+{
+    if (bc == NULL || bc == &mino_bc_declined) return 0;
+    if (bc->source_map.positions == NULL) return 0;
+    if (pc >= bc->source_map.len) return 0;
+    mino_bc_source_pos_t p = bc->source_map.positions[pc];
+    if (p.line <= 0) return 0;
+    if (out_file != NULL)   *out_file   = bc->source_map.file;
+    if (out_line != NULL)   *out_line   = p.line;
+    if (out_column != NULL) *out_column = p.column;
+    return 1;
+}
+
 /* Bytecode-required mode. When non-zero, the tree-walker fallback at
  * apply_callable's bc-entry path is treated as a fatal error so VM
  * regressions surface loudly instead of degrading silently. Set from
@@ -123,6 +141,7 @@ typedef struct compiler {
                                       * consts buffers through it */
     size_t             consts_cap;
     size_t             code_cap;
+    size_t             src_cap;      /* allocated length of source_map.positions */
     bc_local_t         locals[BC_MAX_LOCALS];
     int                n_locals;
     int                n_regs;       /* high-water mark */
@@ -135,6 +154,14 @@ typedef struct compiler {
                                        * apply_callable knows to check
                                        * compile_ic_gen at dispatch. */
     loop_target_t     *loop;          /* innermost loop or NULL */
+    /* The form being compiled right now; emit_* reads (line, column)
+     * out of its cons metadata and stores the values per-pc in the
+     * source map. compile_expr saves/restores this in nested call
+     * sites so source positions track the innermost form. The file
+     * slot lives on the source_map itself (compile records it once
+     * from the first cons it sees). */
+    int                cur_line;
+    int                cur_column;
 } compiler_t;
 
 /* ------------------------------------------------------------------- */
@@ -182,6 +209,45 @@ static int ensure_code(compiler_t *c, size_t need)
     c->bc->code = grown;
     c->code_cap = cap;
     return 1;
+}
+
+/* Grow the source_map positions buffer so positions[pc] is in-range.
+ * Each emit calls this just before bumping code_len, so the position
+ * slot for the new instruction is always reachable. Returns 0 on OOM. */
+static int ensure_source_map(compiler_t *c, size_t need)
+{
+    if (need <= c->src_cap) return 1;
+    size_t cap = c->src_cap == 0 ? 16 : c->src_cap;
+    while (cap < need) cap *= 2;
+    mino_bc_source_pos_t *grown = (mino_bc_source_pos_t *)gc_alloc_typed(
+        c->S, GC_T_RAW, cap * sizeof(*grown));
+    if (grown == NULL) { c->ok = 0; return 0; }
+    if (c->bc->source_map.positions != NULL && c->bc->source_map.len > 0) {
+        memcpy(grown, c->bc->source_map.positions,
+               c->bc->source_map.len * sizeof(*grown));
+    }
+    for (size_t i = c->bc->source_map.len; i < cap; i++) {
+        grown[i].line   = 0;
+        grown[i].column = 0;
+    }
+    gc_write_barrier(c->S, c->bc, c->bc->source_map.positions, grown);
+    c->bc->source_map.positions = grown;
+    c->src_cap = cap;
+    return 1;
+}
+
+/* Record the compiler's current (cur_line, cur_column) for the
+ * instruction slot at c->bc->code_len. Called from each emit_* before
+ * writing the instruction, so source positions are densely populated. */
+static void record_source_pc(compiler_t *c)
+{
+    size_t pc = c->bc->code_len;
+    if (!ensure_source_map(c, pc + 1)) return;
+    c->bc->source_map.positions[pc].line   = c->cur_line;
+    c->bc->source_map.positions[pc].column = c->cur_column;
+    if (pc + 1 > c->bc->source_map.len) {
+        c->bc->source_map.len = pc + 1;
+    }
 }
 
 /* Grow the slot buffer if needed and return the index of a freshly
@@ -275,6 +341,7 @@ static void emit_abc(compiler_t *c, mino_bc_op_t op,
                      unsigned a, unsigned b, unsigned cc)
 {
     if (!ensure_code(c, c->bc->code_len + 1)) return;
+    record_source_pc(c);
     c->bc->code[c->bc->code_len++] = MK_ABC(op, a, b, cc);
 }
 
@@ -282,12 +349,14 @@ static void emit_abx(compiler_t *c, mino_bc_op_t op,
                      unsigned a, unsigned bx)
 {
     if (!ensure_code(c, c->bc->code_len + 1)) return;
+    record_source_pc(c);
     c->bc->code[c->bc->code_len++] = MK_ABx(op, a, bx);
 }
 
 static int emit_jmp_placeholder(compiler_t *c, mino_bc_op_t op, unsigned a)
 {
     if (!ensure_code(c, c->bc->code_len + 1)) return -1;
+    record_source_pc(c);
     int pos = (int)c->bc->code_len;
     c->bc->code[c->bc->code_len++] = MK_AsBx(op, a, 0);
     return pos;
@@ -556,6 +625,8 @@ static int is_special_form_name(const char *name)
  * their inner tail position so a nested call there emits OP_TAILCALL
  * and goes through the trampoline (constant C stack). */
 static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail);
+static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
+                                 int dst, int tail);
 static int compile_body(compiler_t *c, mino_val_t *body, int dst, int tail);
 /* Forward decl: defined alongside try_fold_call further down. Used by
  * compile_let to compute the compile-time-known value of a binding's
@@ -3363,6 +3434,24 @@ static int compile_symbol_ref(compiler_t *c, mino_val_t *sym, int dst)
 
 static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
+    int saved_line = c->cur_line;
+    int saved_col  = c->cur_column;
+    if (form != NULL && mino_is_cons(form)) {
+        if (form->as.cons.line > 0)   c->cur_line   = form->as.cons.line;
+        if (form->as.cons.column > 0) c->cur_column = form->as.cons.column;
+        if (c->bc->source_map.file == NULL && form->as.cons.file != NULL) {
+            c->bc->source_map.file = form->as.cons.file;
+        }
+    }
+    int rc = compile_expr_dispatch(c, form, dst, tail);
+    c->cur_line   = saved_line;
+    c->cur_column = saved_col;
+    return rc;
+}
+
+static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
+                                 int dst, int tail)
+{
     if (form == NULL) {
         int k = add_const(c, mino_nil(c->S));
         if (k < 0) return -1;
@@ -3831,6 +3920,13 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
      * recompiles from source. */
     bc->has_folds      = c.has_folds;
     bc->compile_ic_gen = S->ic_gen;
+    /* Tighten the source-map length: keep only the slots that match
+     * actual emitted instructions. Over-allocated tail entries are
+     * harmless but the len field is the only signal a lookup uses to
+     * detect an out-of-range pc, so make it precise. */
+    if (bc->source_map.len > bc->code_len) {
+        bc->source_map.len = bc->code_len;
+    }
     return MINO_BC_OK;
 
 decline:

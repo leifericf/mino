@@ -696,6 +696,7 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         gc_mark_child_push(S, bc->code);
         gc_mark_child_push(S, bc->consts);
         gc_mark_child_push(S, bc->clauses);
+        gc_mark_child_push(S, bc->source_map.positions);
         gc_mark_bc_ic_slots(S, bc);
         break;
     }

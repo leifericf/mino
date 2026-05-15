@@ -247,6 +247,27 @@ typedef enum {
 #define sBx_OF(i)   ((int)((int)Bx_OF(i) - 0x8000))
 #define BINOP_OF(i) ((unsigned)(((i) >> 4) & 0xFu))
 
+/* Per-pc source position. One slot per instruction word; populated by
+ * the compiler from each form's cons metadata. Used by error reporting
+ * to report the exact instruction's source line (more precise than the
+ * call-site line in the call frame), and consulted by future native
+ * tiers that need PC -> source line mapping for stack traces in JIT'd
+ * code. line == 0 means "unknown / no source"; column == 0 likewise. */
+typedef struct mino_bc_source_pos {
+    int line;
+    int column;
+} mino_bc_source_pos_t;
+
+/* Per-fn source-map side table. positions is allocated GC_T_RAW (POD,
+ * no pointer scan); len matches code_len after compile. file is a
+ * borrowed pointer into the runtime's interned-filename pool (lifetime
+ * matches the state's lifetime, so no GC tracking needed). */
+typedef struct mino_bc_source_map {
+    mino_bc_source_pos_t *positions;
+    size_t                len;
+    const char           *file;
+} mino_bc_source_map_t;
+
 /* Compiled function record. Owned by its parent MINO_FN value. Lifetime
  * matches the fn: the GC walks consts as a root via the parent fn's
  * mark pass. code is a GC_T_RAW buffer of uint32_t; consts is a
@@ -343,6 +364,8 @@ typedef struct mino_bc_fn {
                                    * MINO_FN GC pass). */
     int              ic_slots_len;
     int              ic_slots_cap;
+    mino_bc_source_map_t source_map; /* per-pc source positions; len
+                                      * matches code_len when present */
 } mino_bc_fn_t;
 
 /* Compile / run status. Returned from mino_bc_compile_fn and consulted
@@ -364,6 +387,13 @@ mino_val_t *mino_bc_run(struct mino_state *S, mino_val_t *fn,
  * the closure-build path so a partially-constructed bc fn stays rooted
  * across allocations. */
 void mino_bc_fn_mark(struct mino_state *S, const mino_bc_fn_t *bc);
+
+/* Look up the source position recorded for a given pc. Returns 1 with
+ * the position filled in if available, 0 if no source info is recorded
+ * (uncompiled fn, pc out of range, or position with line == 0). */
+int mino_bc_source_lookup(const mino_bc_fn_t *bc, size_t pc,
+                          const char **out_file, int *out_line,
+                          int *out_column);
 
 /* Sentinel placed in MINO_FN.bc after a failed compile attempt so the
  * next call doesn't re-attempt compilation. apply_callable sees this
