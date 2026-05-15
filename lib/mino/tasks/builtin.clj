@@ -363,7 +363,11 @@
                    ["getglobal_cached.c" "stencil_op_getglobal_cached"]
                    ["call_cached.c"      "stencil_op_call_cached"]
                    ["call.c"             "stencil_op_call"]
-                   ["tailcall.c"         "stencil_op_tailcall"]]]
+                   ["tailcall.c"         "stencil_op_tailcall"]
+                   ["closure.c"          "stencil_op_closure"]
+                   ["push_env.c"         "stencil_op_push_env"]
+                   ["pop_env.c"          "stencil_op_pop_env"]
+                   ["env_bind.c"         "stencil_op_env_bind"]]]
     (sh! "mkdir" "-p" gen-dir)
     (sh! "mkdir" "-p" tmpdir)
     ;; First stencil writes the preamble; subsequent ones append onto

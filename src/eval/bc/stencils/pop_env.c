@@ -1,0 +1,19 @@
+/*
+ * stencils/pop_env.c -- copy-and-patch stencil for OP_POP_ENV.
+ *
+ * Bracket-end op paired with OP_PUSH_ENV. Walks the JIT-invoke env
+ * up one frame so the let scope's bindings drop out of resolve
+ * cascades after the bracketed body finishes.
+ *
+ * No operands.
+ */
+
+#include "abi.h"
+
+mino_stencil_chain_t stencil_op_pop_env(mino_val_t **regs,
+                                         mino_val_t **consts,
+                                         mino_state_t *S)
+{
+    regs = mino_jit_pop_env_slow(S, regs);
+    MINO_STENCIL_CHAIN_RETURN(regs, consts, S);
+}

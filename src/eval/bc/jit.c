@@ -386,6 +386,34 @@ static const stencil_desc_t g_stencils[] = {
         1u  /* FINAL: returns the tail-call sentinel; ret stays as the
              * fn's natural exit so subsequent stencils after this pc
              * are dead. */
+    },
+    {
+        OP_CLOSURE,
+        stencil_op_closure_bytes, stencil_op_closure_size,
+        stencil_op_closure_symbols, stencil_op_closure_nsymbols,
+        stencil_op_closure_relocs, stencil_op_closure_nrelocs,
+        0u
+    },
+    {
+        OP_PUSH_ENV,
+        stencil_op_push_env_bytes, stencil_op_push_env_size,
+        stencil_op_push_env_symbols, stencil_op_push_env_nsymbols,
+        stencil_op_push_env_relocs, stencil_op_push_env_nrelocs,
+        0u
+    },
+    {
+        OP_POP_ENV,
+        stencil_op_pop_env_bytes, stencil_op_pop_env_size,
+        stencil_op_pop_env_symbols, stencil_op_pop_env_nsymbols,
+        stencil_op_pop_env_relocs, stencil_op_pop_env_nrelocs,
+        0u
+    },
+    {
+        OP_ENV_BIND,
+        stencil_op_env_bind_bytes, stencil_op_env_bind_size,
+        stencil_op_env_bind_symbols, stencil_op_env_bind_nsymbols,
+        stencil_op_env_bind_relocs, stencil_op_env_bind_nrelocs,
+        0u
     }
 };
 static const int g_stencils_count =
@@ -450,7 +478,10 @@ static cpjit_reason_t classify_eligibility(const mino_bc_fn_t *bc,
                                            unsigned *first_unknown_op)
 {
     if (bc == NULL || bc->code == NULL) return CPJIT_REASON_NULL_BC;
-    if (bc->captures)            return CPJIT_REASON_CAPTURES;
+    /* captures no longer blocks: OP_CLOSURE / OP_PUSH_ENV / OP_POP_ENV /
+     * OP_ENV_BIND all have stencils that route through the
+     * jit_invoke_env publish point so closures pick up the right
+     * lexical chain. */
     /* ic_slots_len > 0 no longer blocks: OP_GETGLOBAL_CACHED has a
      * stencil. PROTOCOL-kind slots are still rejected via their
      * unstencilised ops (OP_PROTOCOL_*_CACHED) in the loop below.
@@ -800,6 +831,72 @@ mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* OP_CLOSURE slow helper. Reads the child fn from bc->consts[bx],
+ * builds a fresh closure value over the current jit_invoke_env, and
+ * stores it at regs[a]. Mirrors the interpreter's OP_CLOSURE
+ * handler. */
+mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
+                                    unsigned a, mino_bc_fn_t *bc, unsigned bx)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    if (bx >= bc->consts_len) return NULL;
+    mino_val_t *child = bc->consts[bx];
+    if (child == NULL || mino_type_of(child) != MINO_FN) return NULL;
+    mino_val_t *closure = make_fn(S, child->as.fn.params,
+                                   child->as.fn.body,
+                                   ctx->jit_invoke_env);
+    if (closure == NULL) return NULL;
+    closure->as.fn.defining_ns = child->as.fn.defining_ns;
+    *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
+    closure->as.fn.shape = child->as.fn.shape;
+    regs    = S->bc_regs + base;
+    regs[a] = closure;
+    return regs;
+}
+
+/* OP_PUSH_ENV slow helper. Extends the JIT-invoke env with a fresh
+ * child frame; subsequent OP_ENV_BIND helpers bind into it and
+ * resolve-cascade lookups walk through it before reaching the
+ * caller-supplied env. */
+mino_val_t **mino_jit_push_env_slow(mino_state_t *S, mino_val_t **regs)
+{
+    mino_thread_ctx_t *ctx   = mino_current_ctx(S);
+    mino_env_t        *child = env_child(S, ctx->jit_invoke_env);
+    if (child == NULL) return NULL;
+    ctx->jit_invoke_env = child;
+    return regs;
+}
+
+/* OP_POP_ENV slow helper. Walks the JIT-invoke env up one frame.
+ * NULL parent (already at the root) is a malformed bc; surface as a
+ * slow-path failure rather than corrupting the chain. */
+mino_val_t **mino_jit_pop_env_slow(mino_state_t *S, mino_val_t **regs)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    mino_env_t        *env = ctx->jit_invoke_env;
+    if (env == NULL || env->parent == NULL) return NULL;
+    ctx->jit_invoke_env = env->parent;
+    return regs;
+}
+
+/* OP_ENV_BIND slow helper. Publishes regs[a] under the symbol at
+ * bc->consts[bx] into the current JIT-invoke env. Mirrors the
+ * interpreter's OP_ENV_BIND so inner fn literals captured at
+ * OP_CLOSURE time pick up the same names the interpreter would. */
+mino_val_t **mino_jit_env_bind_slow(mino_state_t *S, mino_val_t **regs,
+                                     unsigned a, mino_bc_fn_t *bc,
+                                     unsigned bx)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    if (bx >= bc->consts_len) return NULL;
+    mino_val_t *sym = bc->consts[bx];
+    if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) return NULL;
+    env_bind_sym(S, ctx->jit_invoke_env, sym, S->bc_regs[base + a]);
+    return regs;
+}
+
 /* OP_TAILCALL slow helper. Builds the args cons list head-first
  * from regs[fn_reg + 1..fn_reg + argc] and publishes (callee, args)
  * on `S->tail_call_sentinel`. Returns the sentinel pointer so the
@@ -991,6 +1088,10 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_call_cached_slow",      (void *)(uintptr_t)mino_jit_call_cached_slow},
     {"mino_jit_call_slow",             (void *)(uintptr_t)mino_jit_call_slow},
     {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
+    {"mino_jit_closure_slow",          (void *)(uintptr_t)mino_jit_closure_slow},
+    {"mino_jit_push_env_slow",         (void *)(uintptr_t)mino_jit_push_env_slow},
+    {"mino_jit_pop_env_slow",          (void *)(uintptr_t)mino_jit_pop_env_slow},
+    {"mino_jit_env_bind_slow",         (void *)(uintptr_t)mino_jit_env_bind_slow},
     {NULL, NULL}
 };
 

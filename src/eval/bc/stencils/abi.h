@@ -204,6 +204,29 @@ extern mino_val_t *mino_jit_tailcall_slow(mino_state_t *S,
                                            unsigned fn_reg,
                                            unsigned argc);
 
+/* Closure / env helpers. The JIT-invoke env is published on
+ * `mino_thread_ctx_t::jit_invoke_env`; every helper that mutates
+ * env (`mino_jit_push_env_slow`, `mino_jit_pop_env_slow`,
+ * `mino_jit_env_bind_slow`) updates that field so subsequent
+ * lookups by `mino_jit_getglobal_cached_slow` see the new chain.
+ * mino_jit_invoke restores the prior env on JIT-region exit so
+ * neighbouring JIT regions and the surrounding interpreter frame
+ * are unaffected. */
+extern mino_val_t **mino_jit_closure_slow(mino_state_t *S,
+                                           mino_val_t **regs,
+                                           unsigned a,
+                                           mino_bc_fn_t *bc,
+                                           unsigned bx);
+extern mino_val_t **mino_jit_push_env_slow(mino_state_t *S,
+                                            mino_val_t **regs);
+extern mino_val_t **mino_jit_pop_env_slow(mino_state_t *S,
+                                           mino_val_t **regs);
+extern mino_val_t **mino_jit_env_bind_slow(mino_state_t *S,
+                                            mino_val_t **regs,
+                                            unsigned a,
+                                            mino_bc_fn_t *bc,
+                                            unsigned bx);
+
 /* Fused counted-loop step helpers. Each takes the loop's register
  * indices, runs one iteration's slow path (prim_lt / prim_inc / etc.
  * with cons-spine args), and returns the (possibly relocated) regs

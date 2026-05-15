@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.208.0 — Closure / Env Stencils
+
+Drops the `captures` blocker by stencilising the four env-related
+ops the bytecode compiler emits when a fn body contains an inner
+fn literal:
+
+  - `OP_CLOSURE`  -- create a fresh closure over the current env,
+                      bind the child bc, store at regs[A].
+  - `OP_PUSH_ENV` -- extend the JIT-invoke env with a new frame.
+  - `OP_POP_ENV`  -- walk the env up one frame.
+  - `OP_ENV_BIND` -- publish regs[A] under a symbol into the env.
+
+All four route through the `jit_invoke_env` ctx field v0.204.0
+established, so reads via `OP_GETGLOBAL_CACHED`'s env-lookup
+branch (the only path that finds env-bound names) see the same
+env an interpreter pass would see at the same pc. The slow
+helpers' bodies mirror the interpreter handlers line-for-line.
+
+mino_jit_invoke's save / restore of `jit_invoke_env` around the
+JIT region's call means nested JIT regions inherit the right
+chain at entry and don't leak modifications past the chain's
+trailing ret.
+
+Eligibility-tracer comparison (`MINO_CPJIT_STATS=1`,
+`tests/run.clj`):
+
+  | Reason            | v0.207.0 | v0.208.0 |
+  |-------------------|----------|----------|
+  | ok                |       96 |      120 |
+  | captures          |       15 |        0 |
+  | unknown-op        |       15 |       23 |
+  | total eligibility |   76.2%  |   83.9%  |
+
+The unknown-op rise reflects the cycle's now-visible long tail:
+unstencilised body ops the closure-eligible fns happen to use --
+`OP_GET_KW_MAP` (6 fns), `OP_FIRST_VEC` / `OP_COUNT_VEC` / etc.
+(2-3 fns each), `OP_MAKE_LAZY` (6 fns), `OP_THROW` (1 fn). All
+are out-of-cycle follow-on stencil work.
+
+Full test suite (1688 / 7854) passes; ASan rebuild + tests pass.
+
 ## v0.207.0 — Multi-Arity + Variadic Eligibility
 
 Drops the `n_clauses != 1` and `has_rest` blockers from the
