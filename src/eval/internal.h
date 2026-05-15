@@ -85,6 +85,14 @@ mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
                                 mino_val_t **argv, int argc,
                                 mino_env_t *env);
 
+/* JIT-only fast entry into apply_callable_argv's bc-fn branch. Skips
+ * the dispatch switch and reuses the shared bc-fn invocation core.
+ * Defensive: returns to apply_callable_argv if the callee's shape
+ * has drifted from what the IC slot captured. */
+mino_val_t *mino_apply_known_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
+                                        mino_val_t **argv, int argc,
+                                        mino_env_t *env);
+
 /* ------------------------------------------------------------------------- */
 /* print.c                                                                   */
 /* ------------------------------------------------------------------------- */

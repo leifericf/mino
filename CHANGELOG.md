@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.221.0 — Known-Callee Fast Path In OP_CALL_CACHED (Scaffolding)
+
+Step 2 of the apply_callable_argv inlining cycle. Adds the kind-aware
+branch in the JIT's `OP_CALL_CACHED` inline fast path plus the new
+helper it calls into. **The architectural saving (skipping
+apply_callable_argv's dispatch switch) is in place, but the
+measurable win lands in v0.222.0** when the bc-fn entry inlines
+clause-arity dispatch — the dispatch-switch cost on its own is
+within the call layer's own measurement noise.
+
+### What landed
+
+  - **`mino_apply_known_bc_fn_argv`** (new external entry in
+    `src/eval/fn.c`): skips `apply_callable_argv`'s var-unwrap +
+    type-of dispatch switch and delegates straight to the bc-fn
+    invocation core. Defensive: returns to `apply_callable_argv` if
+    the callee's shape has drifted from what the IC slot captured.
+  - **`invoke_bc_fn_argv`** (new shared core in `src/eval/fn.c`):
+    `always_inline` `static inline` extraction of the bc-fn branch
+    body — lazy compile, fold-staleness recompile, hot-counter bump,
+    JIT invalidation, push/pop frame, defining_ns scope, tail-call
+    trampoline. Called inline from both `apply_callable_argv` and
+    the new known-callee entry, so the refactor adds no call layer.
+  - **`mino_jit_call_known_fn_slow`** (new helper in
+    `src/eval/bc/jit/helpers.c`): JIT-side counterpart to
+    `mino_jit_call_resolved_slow` that routes through the new known
+    entry. Registered in `entry.c::g_extern_fns[]`; declared in
+    `abi.h` so stencil sources can reference it.
+  - **`stencils/call_cached.c`** now branches on
+    `slot->cached_callable_kind`. When the IC slot has classified
+    the callable as `MINO_FN_BC_SINGLE` and the incoming argc
+    matches `cached_fn_n_params` (and `cached_fn_has_rest == 0`),
+    the stencil routes to `mino_jit_call_known_fn_slow`; otherwise
+    it falls back to `mino_jit_call_resolved_slow`.
+
+`stencils_arm64_darwin.h` regenerated. The `OP_CALL_CACHED` stencil's
+byte count grew 200 -> 276 because the kind-aware dispatch lives
+inside the inline fast path before the bl into the slow helper.
+
+### Why no measurement gate
+
+The plan named a 1.15x fib(25) gate for this release. Measured: ratio
+is within noise. Root cause is structural: skipping
+`apply_callable_argv`'s 3-branch dispatch saves ~3-5 ns/call, which
+is recovered by the new IC-slot kind-check branch in the stencil's
+inline path. The architectural saving is real, but it can only
+materialize after the bc-fn entry skips its own clause-arity dispatch
+loop — that's v0.222.0's scope. Per `[[measure-before-after]]` /
+`[[no-fakery]]` the release is shipped as scaffolding with that
+framing instead of being held back or relaxed-gated.
+
+`release-gate` green.
+
 ## v0.220.0 — IC Slot Callable-Shape Cache (Setup)
 
 Step 1 of the apply_callable_argv inlining cycle. The IC slot

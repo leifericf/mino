@@ -194,6 +194,19 @@ extern mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S,
                                                  unsigned argc,
                                                  unsigned dst);
 
+/* Known-bc-fn complement: stencil's inline fast path additionally
+ * verified that the IC slot's cached_callable_kind is the
+ * single-arity bc-fn shape (and that argc matches), so this helper
+ * skips the var-unwrap + type-of dispatch switch inside
+ * apply_callable_argv and enters at mino_apply_known_bc_fn_argv. Same
+ * regs / GC refresh contract as `mino_jit_call_resolved_slow`. */
+extern mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S,
+                                                 mino_val_t **regs,
+                                                 mino_val_t *callee,
+                                                 unsigned arg_base,
+                                                 unsigned argc,
+                                                 unsigned dst);
+
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the
  * return value lands at regs[dst]. Routes through

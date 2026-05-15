@@ -652,6 +652,161 @@ static mino_val_t *argv_to_cons(mino_state_t *S, mino_val_t **argv, int argc)
     return list;
 }
 
+/* Shared bc-fn invocation. Called from apply_callable_argv's MINO_FN
+ * branch and from the JIT's known-callee fast path. Pre-condition:
+ * `fn` is a MINO_FN with `as.fn.bc != NULL` and `MINO_BC_RUNNABLE(fn)`
+ * (caller checks). The implementation is the only place that handles
+ * lazy-recompile-on-fold-staleness, hot-counter bumping, JIT
+ * invalidation, push/pop frame, defining_ns scope, and the tail-call
+ * trampoline. Returns the final value or NULL on error.
+ *
+ * always_inline forced so the refactor doesn't add a function-call
+ * layer to either caller — apply_callable_argv's MINO_FN branch and
+ * mino_apply_known_bc_fn_argv both inline the body. */
+__attribute__((always_inline))
+static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
+                                            mino_val_t **argv, int argc,
+                                            mino_env_t *env)
+{
+    /* The two staleness checks (NULL bc + fold-staleness recompile)
+     * still run because the JIT path's IC slot can predate a fold
+     * promotion (compile_ic_gen advances independently of S->ic_gen,
+     * via mino_jit_compile). Skipping them risks running stale bc. */
+    if (fn->as.fn.bc == NULL) {
+        (void)mino_bc_compile_fn(S, fn);
+    }
+    if (fn->as.fn.bc != NULL
+        && fn->as.fn.bc != &mino_bc_declined
+        && fn->as.fn.bc->has_folds
+        && fn->as.fn.bc->compile_ic_gen != S->ic_gen) {
+        fn->as.fn.bc = NULL;
+        (void)mino_bc_compile_fn(S, fn);
+    }
+    mino_bc_check_require(S, fn);
+    if (!MINO_BC_RUNNABLE(fn)) {
+        /* Compile declined post-recompile: fall back to cons-form
+         * apply_callable for full multi-arity dispatch. */
+        mino_val_t *args = argv_to_cons(S, argv, argc);
+        if (args == NULL) return NULL;
+        return apply_callable(S, fn, args, env);
+    }
+    mino_bc_fn_t *bc_rec = fn->as.fn.bc;
+    if (bc_rec->native != NULL && bc_rec->native_gen != S->ic_gen) {
+        mino_jit_invalidate(S, fn);
+    }
+    if (bc_rec->native == NULL
+        && bc_rec->hot_counter < (unsigned)-1) {
+        bc_rec->hot_counter++;
+        if (bc_rec->hot_counter == MINO_JIT_THRESHOLD) {
+            if (mino_jit_compile(S, fn) < 0) {
+                bc_rec->hot_counter = (unsigned)-1;
+            }
+        }
+    }
+    mino_val_t **call_argv = argv;
+    int          call_argc = argc;
+    int          cap       = argc;
+    int          heap      = 0;
+    const char  *file      = NULL;
+    int          line      = 0;
+    int          col       = 0;
+    const char  *saved_ns      = S->current_ns;
+    const char  *saved_ambient = S->fn_ambient_ns;
+    mino_val_t  *result;
+    if (fn->as.fn.defining_ns != NULL) {
+        S->current_ns    = fn->as.fn.defining_ns;
+        S->fn_ambient_ns = fn->as.fn.defining_ns;
+    }
+    if (mino_current_ctx(S)->eval_current_form != NULL
+        && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
+        file = mino_current_ctx(S)->eval_current_form->as.cons.file;
+        line = mino_current_ctx(S)->eval_current_form->as.cons.line;
+        col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
+    }
+    push_frame(S, "fn", file, line, col);
+    for (;;) {
+        result = mino_bc_run(S, fn, call_argv, call_argc,
+                             fn->as.fn.env);
+        if (result == NULL) {
+            S->current_ns    = saved_ns;
+            S->fn_ambient_ns = saved_ambient;
+            return NULL;
+        }
+        if (mino_type_of(result) != MINO_TAIL_CALL) break;
+        mino_val_t *next_fn   = result->as.tail_call.fn;
+        mino_val_t *next_args = result->as.tail_call.args;
+        if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
+            && next_fn->as.fn.bc == NULL) {
+            (void)mino_bc_compile_fn(S, next_fn);
+        }
+        if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
+            && MINO_BC_RUNNABLE(next_fn)
+            && next_fn->as.fn.params != NULL) {
+            int new_argc = 0;
+            mino_val_t *cur = next_args;
+            while (mino_is_cons(cur)) {
+                if (new_argc >= cap || !heap) {
+                    int new_cap = (new_argc + 1) < (cap * 2)
+                        ? (cap * 2) : (new_argc + 8);
+                    mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
+                        S, GC_T_VALARR,
+                        (size_t)new_cap * sizeof(*grown));
+                    if (grown == NULL) {
+                        S->current_ns    = saved_ns;
+                        S->fn_ambient_ns = saved_ambient;
+                        return NULL;
+                    }
+                    memcpy(grown, call_argv,
+                           (size_t)new_argc * sizeof(*grown));
+                    call_argv = grown;
+                    cap       = new_cap;
+                    heap      = 1;
+                }
+                call_argv[new_argc++] = cur->as.cons.car;
+                cur = cur->as.cons.cdr;
+            }
+            call_argc = new_argc;
+            fn        = next_fn;
+            if (fn->as.fn.defining_ns != NULL) {
+                S->current_ns    = fn->as.fn.defining_ns;
+                S->fn_ambient_ns = fn->as.fn.defining_ns;
+            }
+            continue;
+        }
+        pop_frame(S);
+        S->current_ns    = saved_ns;
+        S->fn_ambient_ns = saved_ambient;
+        return apply_callable(S, next_fn, next_args, env);
+    }
+    pop_frame(S);
+    S->current_ns    = saved_ns;
+    S->fn_ambient_ns = saved_ambient;
+    return result;
+}
+
+/* JIT entry point: invoke a pre-resolved MINO_FN bc-runnable callable
+ * without going through apply_callable_argv's var-unwrap + type-of
+ * dispatch switch. The caller (mino_jit_call_known_fn_slow) only routes
+ * here when the IC slot's cached_callable_kind is MINO_FN_BC_SINGLE
+ * and a basic arity match held. Defensive: re-resolves a stale Var
+ * pointer and falls back to apply_callable_argv if the callee's shape
+ * drifted out from under the cache. */
+mino_val_t *mino_apply_known_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
+                                        mino_val_t **argv, int argc,
+                                        mino_env_t *env)
+{
+    if (fn != NULL && mino_type_of(fn) == MINO_VAR) {
+        if (!fn->as.var.bound || fn->as.var.root == NULL) {
+            return apply_callable_argv(S, fn, argv, argc, env);
+        }
+        fn = fn->as.var.root;
+    }
+    if (fn == NULL || mino_type_of(fn) != MINO_FN) {
+        return apply_callable_argv(S, fn, argv, argc, env);
+    }
+    return invoke_bc_fn_argv(S, fn, argv, argc, env);
+}
+
 mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
                                 mino_val_t **argv, int argc,
                                 mino_env_t *env)
@@ -702,135 +857,15 @@ mino_val_t *apply_callable_argv(mino_state_t *S, mino_val_t *fn,
         return result;
     }
 
-    /* Fast path #2: bc-runnable FN. Lazy compile, staleness check,
-     * trampoline through mino_bc_run. argv passes through; the
-     * tail-call sentinel still uses a cons-format args list, walked
-     * back into argv inside the trampoline. */
+    /* Fast path #2: bc-runnable FN. invoke_bc_fn_argv handles lazy
+     * compile, staleness check, tier promotion, and the tail-call
+     * trampoline. */
     if (mino_type_of(fn) == MINO_FN) {
-        if (fn->as.fn.bc == NULL) {
-            (void)mino_bc_compile_fn(S, fn);
-        }
-        if (fn->as.fn.bc != NULL
-            && fn->as.fn.bc != &mino_bc_declined
-            && fn->as.fn.bc->has_folds
-            && fn->as.fn.bc->compile_ic_gen != S->ic_gen) {
-            fn->as.fn.bc = NULL;
-            (void)mino_bc_compile_fn(S, fn);
-        }
-        mino_bc_check_require(S, fn);
-        if (MINO_BC_RUNNABLE(fn)) {
-            /* Tier selection mirrors apply_callable's: bump the hot
-             * counter on every entry, attempt a single compile when
-             * the threshold is crossed. Without this, fns reached
-             * exclusively through OP_CALL / OP_TAILCALL (the bytecode
-             * call ABI) never warm and thus never JIT, regardless of
-             * eligibility -- the runtime simply never asks. */
-            mino_bc_fn_t *bc_rec = fn->as.fn.bc;
-            if (bc_rec->native != NULL && bc_rec->native_gen != S->ic_gen) {
-                mino_jit_invalidate(S, fn);
-            }
-            if (bc_rec->native == NULL
-                && bc_rec->hot_counter < (unsigned)-1) {
-                bc_rec->hot_counter++;
-                if (bc_rec->hot_counter == MINO_JIT_THRESHOLD) {
-                    if (mino_jit_compile(S, fn) < 0) {
-                        bc_rec->hot_counter = (unsigned)-1;
-                    }
-                }
-            }
-            mino_val_t **call_argv = argv;
-            int          call_argc = argc;
-            int          cap       = argc;
-            int          heap      = 0;
-            const char  *file      = NULL;
-            int          line      = 0;
-            int          col       = 0;
-            const char  *saved_ns      = S->current_ns;
-            const char  *saved_ambient = S->fn_ambient_ns;
-            mino_val_t  *result;
-            if (fn->as.fn.defining_ns != NULL) {
-                S->current_ns    = fn->as.fn.defining_ns;
-                S->fn_ambient_ns = fn->as.fn.defining_ns;
-            }
-            if (mino_current_ctx(S)->eval_current_form != NULL
-                && mino_type_of(mino_current_ctx(S)->eval_current_form) == MINO_CONS) {
-                file = mino_current_ctx(S)->eval_current_form->as.cons.file;
-                line = mino_current_ctx(S)->eval_current_form->as.cons.line;
-                col  = mino_current_ctx(S)->eval_current_form->as.cons.column;
-            }
-            push_frame(S, "fn", file, line, col);
-            for (;;) {
-                result = mino_bc_run(S, fn, call_argv, call_argc,
-                                     fn->as.fn.env);
-                if (result == NULL) {
-                    S->current_ns    = saved_ns;
-                    S->fn_ambient_ns = saved_ambient;
-                    return NULL;
-                }
-                if (mino_type_of(result) != MINO_TAIL_CALL) break;
-                mino_val_t *next_fn   = result->as.tail_call.fn;
-                mino_val_t *next_args = result->as.tail_call.args;
-                if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
-                    && next_fn->as.fn.bc == NULL) {
-                    (void)mino_bc_compile_fn(S, next_fn);
-                }
-                if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
-                    && MINO_BC_RUNNABLE(next_fn)
-                    && next_fn->as.fn.params != NULL) {
-                    /* Walk the tail-call cons back into argv. Allocate
-                     * a heap buffer if the current cap isn't enough
-                     * (or if we were still pointing at the immutable
-                     * caller-supplied argv slice from OP_CALL, which
-                     * we must not write to). */
-                    int new_argc = 0;
-                    mino_val_t *cur = next_args;
-                    while (mino_is_cons(cur)) {
-                        if (new_argc >= cap || !heap) {
-                            int new_cap = (new_argc + 1) < (cap * 2)
-                                ? (cap * 2) : (new_argc + 8);
-                            mino_val_t **grown = (mino_val_t **)gc_alloc_typed(
-                                S, GC_T_VALARR,
-                                (size_t)new_cap * sizeof(*grown));
-                            if (grown == NULL) {
-                                S->current_ns    = saved_ns;
-                                S->fn_ambient_ns = saved_ambient;
-                                return NULL;
-                            }
-                            memcpy(grown, call_argv,
-                                   (size_t)new_argc * sizeof(*grown));
-                            call_argv = grown;
-                            cap       = new_cap;
-                            heap      = 1;
-                        }
-                        call_argv[new_argc++] = cur->as.cons.car;
-                        cur = cur->as.cons.cdr;
-                    }
-                    call_argc = new_argc;
-                    fn        = next_fn;
-                    if (fn->as.fn.defining_ns != NULL) {
-                        S->current_ns    = fn->as.fn.defining_ns;
-                        S->fn_ambient_ns = fn->as.fn.defining_ns;
-                    }
-                    continue;
-                }
-                /* Non-bc target: hand off via cons-form apply_callable
-                 * since the tail-call args are already in cons form. */
-                pop_frame(S);
-                S->current_ns    = saved_ns;
-                S->fn_ambient_ns = saved_ambient;
-                return apply_callable(S, next_fn, next_args, env);
-            }
-            pop_frame(S);
-            S->current_ns    = saved_ns;
-            S->fn_ambient_ns = saved_ambient;
-            return result;
-        }
-        /* Tree-walker fallback (compile declined): build cons, delegate
-         * to apply_callable for full multi-arity dispatch. */
+        return invoke_bc_fn_argv(S, fn, argv, argc, env);
     }
 
-    /* Slow paths: PRIM with fn1 ABI, MINO_FN tree-walker, MINO_MACRO,
-     * non-fn callables. Build the cons-spine and delegate. */
+    /* Slow paths: PRIM with fn1 ABI, MINO_MACRO, non-fn callables.
+     * Build the cons-spine and delegate. */
     {
         mino_val_t *args = argv_to_cons(S, argv, argc);
         if (args == NULL) return NULL;

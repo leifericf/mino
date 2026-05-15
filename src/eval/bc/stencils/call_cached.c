@@ -40,11 +40,29 @@ mino_stencil_chain_t stencil_op_call_cached(mino_val_t **regs,
                          && slot->gen == MINO_JIT_STATE_IC_GEN(S)
                          && MINO_JIT_CTX_DYN_STACK(ctx) == NULL,
                          1)) {
-        regs = mino_jit_call_resolved_slow(S, regs,
-                                           slot->cached,
-                                           (unsigned)IMM_A,
-                                           (unsigned)IMM_B,
-                                           (unsigned)IMM_C);
+        /* Known-callee fast path: the IC slot has classified the
+         * cached callable as a single-arity bc-runnable fn and the
+         * incoming argc matches; skip apply_callable_argv's dispatch
+         * switch entirely by entering at the known-bc entry. The
+         * arity-match check screens out rest-binding edge cases by
+         * requiring has_rest == 0 (the trampoline still copes if
+         * misclassified, but skipping rest-binding here makes the
+         * fast path's contract minimal). */
+        if (slot->cached_callable_kind == MINO_IC_CALLABLE_MINO_FN_BC_SINGLE
+            && slot->cached_fn_has_rest == 0
+            && (unsigned)IMM_B == (unsigned)slot->cached_fn_n_params) {
+            regs = mino_jit_call_known_fn_slow(S, regs,
+                                               slot->cached,
+                                               (unsigned)IMM_A,
+                                               (unsigned)IMM_B,
+                                               (unsigned)IMM_C);
+        } else {
+            regs = mino_jit_call_resolved_slow(S, regs,
+                                               slot->cached,
+                                               (unsigned)IMM_A,
+                                               (unsigned)IMM_B,
+                                               (unsigned)IMM_C);
+        }
     } else {
         regs = mino_jit_call_cached_slow(S, regs,
                                          (unsigned)IMM_A,

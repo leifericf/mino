@@ -331,6 +331,30 @@ mino_val_t **mino_jit_call_resolved_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Inline-cached-known-callee fast complement. Stencil's inline path
+ * additionally verified that slot->cached_callable_kind ==
+ * MINO_FN_BC_SINGLE and that argc == cached_fn_n_params (so no
+ * arity-clause walk inside mino_bc_run is needed). The helper skips
+ * apply_callable_argv's var-unwrap / type-of dispatch switch entirely
+ * by entering at mino_apply_known_bc_fn_argv. Same dispatch +
+ * regs-refresh contract as call_resolved_slow. */
+mino_val_t **mino_jit_call_known_fn_slow(mino_state_t *S, mino_val_t **regs,
+                                         mino_val_t *callee,
+                                         unsigned arg_base, unsigned argc,
+                                         unsigned dst)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    mino_val_t *r = mino_apply_known_bc_fn_argv(S, callee,
+                                                S->bc_regs + base + arg_base,
+                                                (int)argc, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+}
+
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */
