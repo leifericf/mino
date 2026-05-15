@@ -178,11 +178,29 @@ typedef struct {
 #define ARM64_RELOC_GOT_LOAD_PAGE21    5u  /* adrp for GOT-indirect access */
 #define ARM64_RELOC_GOT_LOAD_PAGEOFF12 6u  /* ldr  for GOT-indirect access */
 
-/* x86_64 Mach-O reloc kinds (subset used by the JIT). */
+/* x86_64 Mach-O reloc kinds. clang emits BRANCH for `call rel32` /
+ * `jmp rel32` (the musttail chain marker shows up as a BRANCH);
+ * GOT_LOAD for `mov rax, [rip+got]` style extern reads (every
+ * MINO_STENCIL_IMM_* read lands here); GOT for the rarer direct GOT
+ * accesses; UNSIGNED for any 8-byte absolute the build path might
+ * emit. SIGNED_X variants encode addends -1 / -2 / -4 in the kind;
+ * stencils never need addends other than -4 for SIGNED but we map
+ * the full set so the build fails loudly if clang ever produces a
+ * surprising kind. */
 #define X86_64_RELOC_UNSIGNED  0u
+#define X86_64_RELOC_SIGNED    1u
 #define X86_64_RELOC_BRANCH    2u
 #define X86_64_RELOC_GOT_LOAD  3u
 #define X86_64_RELOC_GOT       4u
+#define X86_64_RELOC_SIGNED_1  6u
+#define X86_64_RELOC_SIGNED_2  7u
+#define X86_64_RELOC_SIGNED_4  8u
+
+/* Mach-O cputype values (subset). The header's cputype tells the
+ * extractor which reloc-kind table to use. CPU_ARCH_ABI64 (the high
+ * bit, 0x01000000) is OR'd into both AArch64 and x86_64 cputypes. */
+#define CPU_TYPE_X86_64  ((uint32_t)(7 | 0x01000000u))  /*  16777223 */
+#define CPU_TYPE_ARM64   ((uint32_t)(12 | 0x01000000u)) /*  16777228 */
 
 /* Host enum encoded as a small integer the runtime can switch on. The
  * generated header references these by name so a runtime header change
@@ -200,6 +218,8 @@ typedef struct {
 #define MINO_STENCIL_RELOC_X86_64_GOTPCREL          8u
 
 static int reloc_arm64_kind_map(uint32_t macho_kind, uint32_t length);
+static int reloc_x86_64_macho_kind_map(uint32_t macho_kind, uint32_t length,
+                                        int32_t *out_implicit_addend);
 static int reloc_x86_64_elf_kind_map(uint32_t r_type);
 
 /* ------------------------------------------------------------------------- */
@@ -702,6 +722,45 @@ static int selftest(void)
     if (reloc_x86_64_elf_kind_map(0xffffffffu) != -1) {
         fprintf(stderr, "selftest: x86_64 kind_map should reject unknown\n"); failed++;
     }
+    /* x86_64 Mach-O reloc-kind map: BRANCH+SIGNED+SIGNED_4 -> PC32,
+     * GOT_LOAD+GOT -> GOTPCREL, UNSIGNED length=3 -> ABS64, others
+     * reject. Implicit addend = -4 for the rip-relative kinds. */
+    int32_t imp_addend = 0;
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_UNSIGNED, 3, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_ABS64 || imp_addend != 0) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map UNSIGNED wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_BRANCH, 2, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_PC32 || imp_addend != -4) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map BRANCH wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_SIGNED, 2, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_PC32 || imp_addend != -4) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map SIGNED wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_SIGNED_1, 2, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_PC32 || imp_addend != -1) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map SIGNED_1 wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_SIGNED_2, 2, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_PC32 || imp_addend != -2) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map SIGNED_2 wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_SIGNED_4, 2, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_PC32 || imp_addend != -4) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map SIGNED_4 wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_GOT_LOAD, 2, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL || imp_addend != -4) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map GOT_LOAD wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(X86_64_RELOC_GOT, 2, &imp_addend) !=
+        (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL || imp_addend != -4) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map GOT wrong\n"); failed++;
+    }
+    if (reloc_x86_64_macho_kind_map(0xffu, 2, &imp_addend) != -1) {
+        fprintf(stderr, "selftest: macho x86_64 kind_map should reject unknown\n"); failed++;
+    }
     if (failed > 0) return 1;
     printf("stencil_extract selftest: OK\n");
     return 0;
@@ -760,6 +819,51 @@ static int reloc_arm64_kind_map(uint32_t macho_kind, uint32_t length)
     }
 }
 
+/* Mach-O x86_64 reloc-kind map. Returns the runtime-stable
+ * MINO_STENCIL_RELOC_X86_64_* constant; also writes the implicit
+ * addend (Mach-O REL relocations carry no r_addend, so the addend
+ * is encoded either inline in the relocated bytes -- which the
+ * extractor doesn't yet decode -- or in the kind itself for the
+ * SIGNED_X family).
+ *
+ * For the kinds stencils actually emit (BRANCH, GOT_LOAD, GOT,
+ * SIGNED), the addend is always -4: rip points 4 bytes past the
+ * rel32 field, so the patcher needs `target - (insn_addr + 4)`.
+ * Setting addend = -4 lets emit.c's patch_pc32 / patch_gotpcrel
+ * compute `target + addend - insn_addr` uniformly with the ELF
+ * path. The SIGNED_1 and SIGNED_2 variants use -1 and -2; included
+ * here for completeness even though stencils don't generate them.
+ *
+ * UNSIGNED is a non-pcrel absolute (8 bytes on length=3); addend
+ * is the inline value at the reloc site, which the extractor
+ * leaves at 0 because stencils never embed UNSIGNED in __text. */
+static int reloc_x86_64_macho_kind_map(uint32_t macho_kind, uint32_t length,
+                                        int32_t *out_implicit_addend)
+{
+    *out_implicit_addend = 0;
+    switch (macho_kind) {
+    case X86_64_RELOC_UNSIGNED:
+        if (length == 3u) return (int)MINO_STENCIL_RELOC_X86_64_ABS64;
+        return -1;
+    case X86_64_RELOC_BRANCH:
+    case X86_64_RELOC_SIGNED:
+    case X86_64_RELOC_SIGNED_4:
+        *out_implicit_addend = -4;
+        return (int)MINO_STENCIL_RELOC_X86_64_PC32;
+    case X86_64_RELOC_SIGNED_1:
+        *out_implicit_addend = -1;
+        return (int)MINO_STENCIL_RELOC_X86_64_PC32;
+    case X86_64_RELOC_SIGNED_2:
+        *out_implicit_addend = -2;
+        return (int)MINO_STENCIL_RELOC_X86_64_PC32;
+    case X86_64_RELOC_GOT_LOAD:
+    case X86_64_RELOC_GOT:
+        *out_implicit_addend = -4;
+        return (int)MINO_STENCIL_RELOC_X86_64_GOTPCREL;
+    default: return -1;
+    }
+}
+
 /* Extract section relocations that fall inside the function body. The
  * Mach-O relocation table is per-section; for an .o file each reloc's
  * r_address is relative to the section's start. We translate that to
@@ -781,6 +885,7 @@ static int extract_relocs(const macho_view_t *v, uint64_t offset, uint64_t size,
     const char             *strtab = macho_strtab(v);
     const macho_nlist_64_t *nl     = macho_nlist(v);
     if (strtab == NULL || nl == NULL) return -1;
+    uint32_t cputype = v->hdr->cputype;
     for (uint32_t i = 0; i < sect->nreloc; i++) {
         const macho_reloc_info_t *r = &relocs[i];
         int32_t addr = r->r_address;
@@ -789,11 +894,23 @@ static int extract_relocs(const macho_view_t *v, uint64_t offset, uint64_t size,
         uint32_t len   = reloc_length(r);
         uint32_t ext   = reloc_extern(r);
         uint32_t snum  = reloc_symbolnum(r);
-        int mapped = reloc_arm64_kind_map(kind, len);
+        int32_t  implicit_addend = 0;
+        int mapped;
+        if (cputype == CPU_TYPE_ARM64) {
+            mapped = reloc_arm64_kind_map(kind, len);
+        } else if (cputype == CPU_TYPE_X86_64) {
+            mapped = reloc_x86_64_macho_kind_map(kind, len, &implicit_addend);
+        } else {
+            fprintf(stderr,
+                    "stencil_extract: unsupported Mach-O cputype 0x%x\n",
+                    (unsigned)cputype);
+            return -1;
+        }
         if (mapped < 0) {
             fprintf(stderr,
-                    "stencil_extract: unsupported reloc kind %u (length=%u) "
-                    "at offset 0x%x\n", kind, len, (unsigned)addr);
+                    "stencil_extract: unsupported Mach-O reloc kind %u (length=%u) "
+                    "at offset 0x%x (cputype=0x%x)\n",
+                    kind, len, (unsigned)addr, (unsigned)cputype);
             return -1;
         }
         if (!ext) {
@@ -822,7 +939,10 @@ static int extract_relocs(const macho_view_t *v, uint64_t offset, uint64_t size,
         out[*out_count].offset    = (uint32_t)(addr - (int32_t)offset);
         out[*out_count].kind      = (uint32_t)mapped;
         out[*out_count].sym_index = (uint32_t)sym_idx;
-        out[*out_count].addend    = 0;  /* Mach-O ARM64 uses implicit addends */
+        /* ARM64 patchers don't read addend; x86_64 patchers do. The
+         * map fn above returns the implicit addend per Mach-O kind
+         * (e.g., -4 for BRANCH / SIGNED / GOT_LOAD on x86_64). */
+        out[*out_count].addend    = implicit_addend;
         (*out_count)++;
     }
     return 0;

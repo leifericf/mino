@@ -714,6 +714,19 @@
   (gen-stencils-for "x86_64_linux" "clang"
                     ["--target=x86_64-linux-gnu" "-mno-red-zone"]))
 
+(defn gen-stencils-x86-64-darwin
+  "Cross-compile every stencil to x86_64-apple-darwin using clang's
+   built-in cross-target support and write stencils_x86_64_darwin.h.
+   Adds -mno-red-zone alongside the standard stencil flags so the
+   JIT region doesn't end up reading aliased red-zone slots when a
+   helper call returns. The output header is checked into source so
+   native x86_64 Darwin builds pick it up without needing to
+   regenerate."
+  []
+  (build-stencil-extract)
+  (gen-stencils-for "x86_64_darwin" "clang"
+                    ["--target=x86_64-apple-darwin" "-mno-red-zone"]))
+
 (defn test-suite
   "Run the test suite."
   []

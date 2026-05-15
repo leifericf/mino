@@ -68,4 +68,6 @@
   gen-stencils-arm64-linux {:doc  "Cross-compile stencils for ARM64 Linux"
                             :task mino.tasks.builtin/gen-stencils-arm64-linux}
   gen-stencils-x86-64-linux {:doc  "Cross-compile stencils for x86_64 Linux"
-                             :task mino.tasks.builtin/gen-stencils-x86-64-linux}}}
+                             :task mino.tasks.builtin/gen-stencils-x86-64-linux}
+  gen-stencils-x86-64-darwin {:doc  "Cross-compile stencils for x86_64 Darwin"
+                              :task mino.tasks.builtin/gen-stencils-x86-64-darwin}}}

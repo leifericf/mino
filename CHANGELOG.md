@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.235.0 — Mach-O x86_64 in Extractor + Generated x86_64 Darwin Header
+
+Lands the cycle A3 work: Mach-O x86_64 reloc-kind mapping in the
+extractor, dispatch by `cputype` between ARM64 and x86_64, and a
+cross-compiled `stencils_x86_64_darwin.h`. With cycle A2's runtime
+patcher set already in place, x86_64 Darwin builds now have an
+on-disk byte-table they can pick up via
+`-DMINO_CPJIT_X86_64_DARWIN=1`. End-to-end verification needs an
+x86_64 Darwin host (deferred); ARM64 Darwin builds stay
+byte-identical.
+
+  - `tools/stencil_extract.c`:
+    - New `X86_64_RELOC_*` constants for the kinds clang emits
+      (UNSIGNED, SIGNED, BRANCH, GOT_LOAD, GOT, SIGNED_1 / _2 / _4).
+      The SIGNED_X family encodes the implicit addend (-1 / -2 / -4)
+      in the kind itself because Mach-O REL relocations carry no
+      r_addend field.
+    - New `CPU_TYPE_X86_64` / `CPU_TYPE_ARM64` constants.
+    - New `reloc_x86_64_macho_kind_map`: maps Mach-O x86_64 reloc
+      kinds to the runtime-stable `MINO_STENCIL_RELOC_X86_64_*`
+      enum and writes out the implicit addend so the patcher gets
+      the same `S + A - P` semantics as the ELF path.
+    - `extract_relocs` now reads `v->hdr->cputype` and dispatches
+      between `reloc_arm64_kind_map` and
+      `reloc_x86_64_macho_kind_map`. The recorded addend now flows
+      through (was hard-coded to 0 in the ARM64-only path).
+    - `--selftest` extended to cover every x86_64 Mach-O reloc
+      entry plus the unknown-rejects path.
+  - `lib/mino/tasks/builtin.clj`: new `gen-stencils-x86-64-darwin`
+    task. Cross-compiles every stencil via
+    `clang --target=x86_64-apple-darwin -mno-red-zone` and emits
+    `stencils_x86_64_darwin.h`.
+  - `mino.edn`: registers the new task.
+  - `src/eval/bc/stencils/generated/stencils_x86_64_darwin.h` (new):
+    cross-compiled byte tables for all 39 stencils. PC32 + GOTPCREL
+    reloc kinds; every non-final stencil's symbol table includes
+    `mino_jit_chain_continue_marker`; implicit addend of -4 stored
+    explicitly in the reloc tuple's fourth slot.
+
+`release-gate` green on ARM64 Darwin (1737 tests / 7915 assertions,
+ASan clean, JIT parity byte-identical).
+
 ## v0.234.0 — x86_64 Patcher + Direct-emit + Trampoline + Arch Dispatch
 
 Lands the second half of cycle A2: x86_64 patcher functions, direct-emit
