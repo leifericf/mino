@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.205.0 — OP_CALL_CACHED Stencil + Two-Word Op Handling
+
+Adds the JIT stencil for `OP_CALL_CACHED`, the fused
+(resolve-global + call) op the bytecode compiler emits for any call
+whose head is a global symbol. The stencil drives the same shared
+IC cascade `OP_GETGLOBAL_CACHED` uses (added in v0.204.0) and then
+hands off to `apply_callable_argv`, so PRIM-fn / FN-bc /
+multi-arity / record-method targets all reach their correct entry.
+
+`OP_CALL_CACHED` is the bytecode's first two-word instruction in
+the JIT pipeline. The compile walk and the eligibility check both
+grow a new helper, `op_extra_words`, that returns the number of
+trailing words an opcode consumes after its primary word. The
+walks consult it to advance pc the way the interpreter consumes
+those words via its handler's `code[pc++]`. Without the skip, the
+eligibility loop classifies the slot-bearing word (whose `OP_OF`
+field is the placeholder `OP_NOP`) as an unknown op.
+
+`emit_stencil` grows an `insn2` parameter and a new
+`IMM_KIND_BX2` immediate kind so a stencil can pull the slot
+index out of the trailing word at JIT-compile time. The pool slot
+the JIT writes for `IMM_BX2` is the same 16-bit unsigned the
+interpreter reads via `Bx_OF(slot_word)`.
+
+The chain ABI carries through unchanged. The existing
+`MINO_STENCIL_CHAIN_RETURN` macro already pins `x2 = S` at the
+trailing `ret` via a register-asm pin, and the struct return pins
+`x1 = consts` via AAPCS, so a mid-stencil `bl` into the slow
+helper (which itself calls `apply_callable_argv` and clobbers
+every caller-saved register) leaves clang to spill / reload the
+chain registers naturally. No new spill discipline at the stencil
+source layer.
+
+Eligibility-tracer comparison (`MINO_CPJIT_STATS=1`,
+`tests/run.clj`):
+
+  | Reason            | v0.204.0 | v0.205.0 |
+  |-------------------|----------|----------|
+  | ok                |       14 |       18 |
+  | captures          |       15 |       15 |
+  | n-clauses         |        7 |        7 |
+  | has-rest          |        2 |        2 |
+  | unknown-op (op=19, OP_CALL_CACHED) |  12 |  0 |
+  | unknown-op (op=8,  OP_TAILCALL)    |   8 | 14 |
+
+`OP_CALL_CACHED` rejections (op=19) drop to zero. Most fns that
+were previously double-blocked (`OP_CALL_CACHED` + `OP_TAILCALL`)
+now reveal the tail-call as the remaining hot blocker, which the
+next release stencilises.
+
+Full test suite (1688 / 7854) passes; ASan rebuild + tests pass.
+
 ## v0.204.0 — OP_GETGLOBAL_CACHED Stencil
 
 Adds the JIT stencil for `OP_GETGLOBAL_CACHED` and drops the

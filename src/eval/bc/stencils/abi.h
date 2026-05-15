@@ -90,6 +90,11 @@ extern char MINO_STENCIL_IMM_KIMM[];
  * reach the fn's ic_slots, consts, or other per-fn state read it as
  * a `mino_bc_fn_t *`. */
 extern char MINO_STENCIL_IMM_BC[];
+/* Bx of the trailing word for two-word ops (OP_CALL_CACHED and the
+ * protocol-call siblings). The JIT compile walk consumes both words
+ * together; the pool slot carries the slot-index payload from word-2
+ * so the stencil reads it as a 16-bit unsigned. */
+extern char MINO_STENCIL_IMM_BX2[];
 
 #define IMM_A    ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_A)
 #define IMM_B    ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_B)
@@ -98,6 +103,7 @@ extern char MINO_STENCIL_IMM_BC[];
 #define IMM_SBX  ((long)(intptr_t)MINO_STENCIL_IMM_SBX)
 #define IMM_KIMM ((mino_val_t *)(uintptr_t)MINO_STENCIL_IMM_KIMM)
 #define IMM_BC   ((mino_bc_fn_t *)(uintptr_t)MINO_STENCIL_IMM_BC)
+#define IMM_BX2  ((unsigned long)(uintptr_t)MINO_STENCIL_IMM_BX2)
 
 /* Sub-op constants the BINOP_INT family shares with the bytecode VM.
  * Kept in numeric sync with mino_bc_binop_t in src/eval/bc/internal.h;
@@ -160,6 +166,21 @@ extern mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
                                                     unsigned a,
                                                     mino_bc_fn_t *bc,
                                                     unsigned slot_idx);
+
+/* OP_CALL_CACHED slow helper. Resolves the callee through the same
+ * IC cascade (dyn / env / cached / resolve), invokes
+ * `apply_callable_argv` with the args sitting at
+ * regs[arg_base..arg_base + argc - 1], and stores the return value
+ * at regs[dst]. Refreshes the regs base on return; returns NULL on
+ * resolve failure or apply-side error (longjmp-style errors fire
+ * through the caller's try frame and never reach this NULL path). */
+extern mino_val_t **mino_jit_call_cached_slow(mino_state_t *S,
+                                               mino_val_t **regs,
+                                               unsigned arg_base,
+                                               unsigned argc,
+                                               unsigned dst,
+                                               mino_bc_fn_t *bc,
+                                               unsigned slot_idx);
 
 /* Fused counted-loop step helpers. Each takes the loop's register
  * indices, runs one iteration's slow path (prim_lt / prim_inc / etc.

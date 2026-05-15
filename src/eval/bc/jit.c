@@ -124,7 +124,12 @@ typedef enum {
      * compile time from the compile_inner walk's `bc`. Stencils that
      * need to reach into per-fn state (ic_slots, consts via bc, etc.)
      * read the pool slot as a `mino_bc_fn_t *`. */
-    IMM_KIND_BC   = 6
+    IMM_KIND_BC   = 6,
+    /* Bx field of the SECOND instruction word for two-word ops
+     * (OP_CALL_CACHED / OP_PROTOCOL_*_CACHED). The compile walk reads
+     * `code[pc + 1]` and passes it to imm_value alongside the primary
+     * word so this kind can extract the slot index. */
+    IMM_KIND_BX2  = 7
 } imm_kind_t;
 
 static int imm_kind_from_name(const char *sym)
@@ -136,11 +141,12 @@ static int imm_kind_from_name(const char *sym)
     if (strcmp(sym, "MINO_STENCIL_IMM_SBX")  == 0) return IMM_KIND_SBX;
     if (strcmp(sym, "MINO_STENCIL_IMM_KIMM") == 0) return IMM_KIND_KIMM;
     if (strcmp(sym, "MINO_STENCIL_IMM_BC")   == 0) return IMM_KIND_BC;
+    if (strcmp(sym, "MINO_STENCIL_IMM_BX2")  == 0) return IMM_KIND_BX2;
     return -1;
 }
 
-static uint64_t imm_value(mino_bc_insn_t insn, imm_kind_t k,
-                          const mino_bc_fn_t *bc)
+static uint64_t imm_value(mino_bc_insn_t insn, mino_bc_insn_t insn2,
+                          imm_kind_t k, const mino_bc_fn_t *bc)
 {
     switch (k) {
     case IMM_KIND_A:    return (uint64_t)A_OF(insn);
@@ -153,8 +159,27 @@ static uint64_t imm_value(mino_bc_insn_t insn, imm_kind_t k,
         return (uint64_t)(uintptr_t)MINO_MAKE_INT(lit);
     }
     case IMM_KIND_BC:   return (uint64_t)(uintptr_t)bc;
+    case IMM_KIND_BX2:  return (uint64_t)Bx_OF(insn2);
     }
     return 0;
+}
+
+/* Number of extra instruction words a given opcode reads after its
+ * primary word. Today only the IC-mediated call ops fetch a second
+ * word; the primary dispatch never sees the slot-bearing word as a
+ * free-standing op. The eligibility loop and the JIT compile walk
+ * both consult this so they skip the slot word in lockstep with the
+ * interpreter's `code[pc++]` in vm.c. */
+static int op_extra_words(unsigned op)
+{
+    switch (op) {
+    case OP_CALL_CACHED:
+    case OP_PROTOCOL_CALL_CACHED:
+    case OP_PROTOCOL_TAILCALL_CACHED:
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 /* Pseudo-opcode for the fused LOAD_K + RETURN superinstruction. Sits
@@ -338,6 +363,13 @@ static const stencil_desc_t g_stencils[] = {
         stencil_op_getglobal_cached_symbols, stencil_op_getglobal_cached_nsymbols,
         stencil_op_getglobal_cached_relocs, stencil_op_getglobal_cached_nrelocs,
         0u
+    },
+    {
+        OP_CALL_CACHED,
+        stencil_op_call_cached_bytes, stencil_op_call_cached_size,
+        stencil_op_call_cached_symbols, stencil_op_call_cached_nsymbols,
+        stencil_op_call_cached_relocs, stencil_op_call_cached_nrelocs,
+        0u
     }
 };
 static const int g_stencils_count =
@@ -417,6 +449,11 @@ static cpjit_reason_t classify_eligibility(const mino_bc_fn_t *bc,
             if (first_unknown_op != NULL) *first_unknown_op = op;
             return CPJIT_REASON_UNKNOWN_OP;
         }
+        /* Skip the trailing word of multi-word ops so the eligibility
+         * scan doesn't classify the slot's encoded NOP byte as an
+         * "unknown op". The interpreter consumes the same word via
+         * `code[pc++]` from inside the handler. */
+        pc += (size_t)op_extra_words(op);
     }
     /* Need at least one OP_RETURN so the fn terminates. The compiler
      * always emits one at the end of the body; we double-check so a
@@ -722,6 +759,38 @@ mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
     return regs;
 }
 
+/* OP_CALL_CACHED slow helper. Resolves the callee through the same
+ * IC cascade as the read-only OP_GETGLOBAL_CACHED variant, then
+ * dispatches via `apply_callable_argv` so all callable kinds (PRIM
+ * argv, FN bc, FN tree-walker, multi-arity dispatch, etc.) reach
+ * their correct entry. The argv slice is taken straight from the
+ * bytecode register window at regs[arg_base..arg_base + argc - 1];
+ * `apply_callable_argv` reads from this slice without writing back,
+ * so the live regs base is stable for the duration of the call's
+ * argv reads (any GC inside the callee may relocate the window
+ * afterwards, which is why the helper refreshes from S on return). */
+mino_val_t **mino_jit_call_cached_slow(mino_state_t *S, mino_val_t **regs,
+                                       unsigned arg_base, unsigned argc,
+                                       unsigned dst,
+                                       mino_bc_fn_t *bc, unsigned slot_idx)
+{
+    ptrdiff_t          base       = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx        = mino_current_ctx(S);
+    int                dyn_active = (ctx->dyn_stack != NULL);
+    mino_env_t        *env        = ctx->jit_invoke_env;
+    mino_val_t        *callee     = mino_bc_ic_global_load(S, bc,
+                                                            (int)slot_idx,
+                                                            env, dyn_active);
+    if (callee == NULL) return NULL;
+    mino_val_t *r = apply_callable_argv(S, callee,
+                                        S->bc_regs + base + arg_base,
+                                        (int)argc, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+}
+
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */
@@ -853,6 +922,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_loop_int_dec_slow",    (void *)(uintptr_t)mino_jit_loop_int_dec_slow},
     {"mino_jit_loop_int_lt_inc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_inc_slow},
     {"mino_jit_getglobal_cached_slow", (void *)(uintptr_t)mino_jit_getglobal_cached_slow},
+    {"mino_jit_call_cached_slow",      (void *)(uintptr_t)mino_jit_call_cached_slow},
     {NULL, NULL}
 };
 
@@ -1117,7 +1187,8 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
                          unsigned char *tramp_buf,
                          size_t tramp_pos, size_t tramp_cap,
                          size_t *out_tramp_pos,
-                         const stencil_desc_t *st, mino_bc_insn_t insn,
+                         const stencil_desc_t *st,
+                         mino_bc_insn_t insn, mino_bc_insn_t insn2,
                          const mino_bc_fn_t *bc,
                          uintptr_t code_base, uintptr_t pool_base,
                          uintptr_t tramp_base)
@@ -1139,7 +1210,7 @@ static long emit_stencil(unsigned char *code, size_t pos, size_t code_cap,
             if (new_pool_pos >= pool_cap) return -1;
             slots[s].kind        = SYM_SLOT_IMM;
             slots[s].slot_offset = new_pool_pos;
-            pool[new_pool_pos]   = imm_value(insn, (imm_kind_t)k, bc);
+            pool[new_pool_pos]   = imm_value(insn, insn2, (imm_kind_t)k, bc);
             new_pool_pos++;
         } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0) {
             slots[s].kind        = SYM_SLOT_LOOP;
@@ -1304,6 +1375,7 @@ static int compile_inner(mino_state_t *S, mino_val_t *fn_val)
             }
         }
         if (fused) pc++;
+        pc += (size_t)op_extra_words(op);
     }
 
     /* Layout: [code] [trampolines, 16-byte aligned] [pool, 8-byte
@@ -1385,10 +1457,18 @@ static int compile_inner(mino_state_t *S, mino_val_t *fn_val)
         const stencil_desc_t *st = pick_stencil(bc, pc, &fused, allow_fusion);
         size_t new_pool_pos  = pool_pos;
         size_t new_tramp_pos = tramp_pos;
+        /* insn2 carries the trailing word for two-word ops. Single-
+         * word ops never read insn2 -- their stencil descriptors
+         * declare no IMM_KIND_BX2 symbols -- so the value passed when
+         * pc+1 is out of range is irrelevant. */
+        mino_bc_insn_t insn2 = 0;
+        if (op_extra_words(op) > 0 && pc + 1 < bc->code_len) {
+            insn2 = bc->code[pc + 1];
+        }
         long n = emit_stencil(code, pos, code_size,
                               pool, pool_pos, pool_slots, &new_pool_pos,
                               tramp_buf, tramp_pos, tramp_bytes, &new_tramp_pos,
-                              st, bc->code[pc], bc,
+                              st, bc->code[pc], insn2, bc,
                               code_base, pool_base, tramp_base);
         if (n < 0) {
             free(insts);
@@ -1408,6 +1488,12 @@ static int compile_inner(mino_state_t *S, mino_val_t *fn_val)
             /* Both pcs map to the start of the fused chunk; the fused
              * stencil is atomic, so deopt mid-fusion is not a
              * representable state. */
+            pc_offsets[pc + 1] = pc_offsets[pc];
+            pc++;
+        }
+        if (op_extra_words(op) > 0) {
+            /* Two-word op: the slot-bearing word shares the stencil's
+             * native span with its primary word. */
             pc_offsets[pc + 1] = pc_offsets[pc];
             pc++;
         }
