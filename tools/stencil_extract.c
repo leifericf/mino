@@ -51,6 +51,19 @@
 #define ELF_MAGIC_BYTE_2  'L'
 #define ELF_MAGIC_BYTE_3  'F'
 
+/* COFF object-file magic: amd64 COFF starts with the 2-byte machine
+ * ID 0x8664 in little-endian, followed by the section count. The
+ * Windows x86_64 platform release wires the COFF parser; this
+ * release scaffolds the sniff so the dispatch surface is settled. */
+#define COFF_MACHINE_AMD64  0x8664u
+
+/* x86_64 COFF reloc kinds (`<winnt.h>` enum). */
+#define IMAGE_REL_AMD64_ABSOLUTE  0x0000u
+#define IMAGE_REL_AMD64_ADDR64    0x0001u
+#define IMAGE_REL_AMD64_ADDR32    0x0002u
+#define IMAGE_REL_AMD64_REL32     0x0004u
+#define IMAGE_REL_AMD64_REL32_1   0x0005u
+
 /* ARM64 ELF reloc kinds the JIT patcher consumes. The numeric values
  * come from `<elf.h>` and the AArch64 ELF ABI. Mapping to the
  * runtime-stable `MINO_STENCIL_RELOC_*` enum lives below alongside
@@ -712,6 +725,19 @@ int main(int argc, char **argv)
                 "lands in the ARM64 Linux platform release. Rebuild "
                 "after that release on a Linux host to regenerate "
                 "src/eval/bc/stencils/generated/stencils_arm64_linux.h.\n");
+        blob_free(&blob);
+        return 3;
+    }
+    /* COFF amd64: little-endian machine ID is the first 2 bytes. */
+    if (blob.len >= 2
+        && blob.data[0] == (COFF_MACHINE_AMD64 & 0xff)
+        && blob.data[1] == ((COFF_MACHINE_AMD64 >> 8) & 0xff)) {
+        fprintf(stderr,
+                "stencil_extract: COFF amd64 object detected; the "
+                "COFF parser lands in the Windows x86_64 platform "
+                "release. The runtime side needs the VirtualAlloc / "
+                "VirtualProtect adapter before the JIT path can be "
+                "enabled on Windows.\n");
         blob_free(&blob);
         return 3;
     }

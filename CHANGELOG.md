@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.192.0 — Windows COFF Detection Scaffolding
+
+`tools/stencil_extract.c` learns to sniff a COFF amd64 object
+(machine ID `0x8664` little-endian in the first two bytes) and
+emits a placeholder error pointing at the Windows platform
+release. The x86_64 COFF reloc-kind constants
+(`IMAGE_REL_AMD64_ADDR64`, `IMAGE_REL_AMD64_ADDR32`,
+`IMAGE_REL_AMD64_REL32`, `IMAGE_REL_AMD64_REL32_1`) are declared
+so the eventual parser maps each through the shared
+`MINO_STENCIL_RELOC_*` enum without restructuring the existing
+extraction pipeline.
+
+The Windows runtime needs a `VirtualAlloc` /  `VirtualProtect`
+adapter alongside the mmap path on Linux / Darwin; that
+adapter, the COFF parser, and the x86_64 instruction patcher
+land together with the first Windows stencil. Embedders on
+Windows land on the stub path today and get the JIT once the
+adapter + parser + patcher arrive in a future release.
+
 ## v0.191.0 — x86_64 Infrastructure Scaffolding
 
 `tools/stencil_extract.c` declares the x86_64 ELF reloc-kind
