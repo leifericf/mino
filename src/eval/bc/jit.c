@@ -52,6 +52,12 @@
 #elif defined(__aarch64__) && defined(__linux__) && defined(MINO_CPJIT_ARM64_LINUX)
 #define MINO_CPJIT_HOST 1
 #define MINO_CPJIT_STENCILS_HEADER "stencils/generated/stencils_arm64_linux.h"
+#elif defined(__x86_64__) && defined(__linux__) && defined(MINO_CPJIT_X86_64_LINUX)
+#define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_STENCILS_HEADER "stencils/generated/stencils_x86_64_linux.h"
+#elif defined(__x86_64__) && defined(__APPLE__) && defined(MINO_CPJIT_X86_64_DARWIN)
+#define MINO_CPJIT_HOST 1
+#define MINO_CPJIT_STENCILS_HEADER "stencils/generated/stencils_x86_64_darwin.h"
 #endif
 #endif
 

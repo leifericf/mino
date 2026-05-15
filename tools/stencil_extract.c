@@ -64,6 +64,15 @@
 #define R_AARCH64_ADR_GOT_PAGE        311u
 #define R_AARCH64_LD64_GOT_LO12_NC    312u
 
+/* x86_64 ELF reloc kinds. Same enum convention as AArch64 above;
+ * the platform release that lands the ELF parser maps each to a
+ * runtime-stable `MINO_STENCIL_RELOC_X86_64_*` entry. */
+#define R_X86_64_64           1u   /* direct 64-bit                  */
+#define R_X86_64_PC32         2u   /* 32-bit pc-relative             */
+#define R_X86_64_PLT32        4u   /* 32-bit PLT call                */
+#define R_X86_64_GOTPCREL     9u   /* GOT entry, RIP-relative        */
+#define R_X86_64_REX_GOTPCRELX 42u /* optimised GOT lookup, RIP-rel  */
+
 /* N_TYPE mask bits in nlist_64.n_type. Only N_EXT and N_SECT matter for
  * stencil symbol lookup: the linker emits the stencil function as an
  * extern N_SECT-bound symbol, and the relocations reference imm

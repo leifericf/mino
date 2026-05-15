@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.191.0 — x86_64 Infrastructure Scaffolding
+
+`tools/stencil_extract.c` declares the x86_64 ELF reloc-kind
+constants (`R_X86_64_64`, `R_X86_64_PC32`, `R_X86_64_PLT32`,
+`R_X86_64_GOTPCREL`, `R_X86_64_REX_GOTPCRELX`) so the eventual
+parser landing on an x86_64 Linux build host drops directly into
+the existing `MINO_STENCIL_RELOC_*` mapping flow.
+
+`src/eval/bc/jit.c` host detection grows two new branches behind
+`MINO_CPJIT_X86_64_LINUX` and `MINO_CPJIT_X86_64_DARWIN`. The
+detection picks the right `MINO_CPJIT_STENCILS_HEADER` path for
+each host triple; when the corresponding generated header is
+committed and the macro defined at build time, the full pipeline
+compiles in.
+
+The x86_64 instruction patcher (RIP-relative addressing,
+variable-length instruction width) lives outside today's
+ARM64-only `patch_adrp` / `patch_pageoff12_ldr64` pair and lands
+with its first stencil source. Like the ARM64 Linux work, the
+generated header needs a build run on the target host. Embedders
+on x86_64 land on the stub path today.
+
 ## v0.190.0 — ARM64 Linux Infrastructure Scaffolding
 
 `tools/stencil_extract.c` learns to sniff an object file's magic
