@@ -81,7 +81,19 @@ jobs:
         # Run the suite runner directly so stdout streams. `task test`
         # wraps the subprocess in sh!, which buffers output until exit;
         # under a hang, no diagnostic ever surfaces.
-        run: ./mino tests/run.clj
+        #
+        # MINO_TEST_TRACE=1 prints one stderr line per deftest before
+        # it runs; combined with capturing stderr into a file and
+        # tee'ing it to the job log, the last visible trace line
+        # pinpoints any hanging test. The stderr capture is what makes
+        # an opaque "Test timed out" actionable. Keeps trace off
+        # locally (env-gated) so a normal `./mino tests/run.clj`
+        # produces the same output as before.
+        env:
+          MINO_TEST_TRACE: "1"
+        run: |
+          set -o pipefail
+          ./mino tests/run.clj 2> >(tee /tmp/test_trace.log >&2)
         # Tests usually finish in seconds; a hang means a deadlock, not
         # a slow runner. Cap so we get diagnostic output instead of
         # waiting on the 6h job-default timeout.
@@ -91,6 +103,19 @@ jobs:
         # assertions do not strip. Build still must pass; tests are
         # informational on Windows until the suite is portable.
         continue-on-error: ${{ matrix.os == 'windows-2022' }}
+
+      - name: Upload test trace on failure
+        # The trace captures each deftest entry; the last line shows
+        # what was running when the timeout fired. Artifacts are
+        # public on the run page so triage doesn't require log
+        # download permission.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-trace-${{ matrix.os }}
+          path: /tmp/test_trace.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Release gate
         # The composite gate -- check-reloc-mirror, check-stencil-

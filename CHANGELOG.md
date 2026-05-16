@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.255.8 — Diagnostic: Per-Deftest Trace for CI Hang Investigation
+
+A diagnostic-only release: surfaces which test is running at the
+point CI hits the 8-minute timeout. `clojure.test`'s `run-tests-impl`
+now prints `[trace] <ns>/<deftest-name>` to stderr before each
+deftest fires, gated on `MINO_TEST_TRACE`. Locally the trace stays
+off so plain `./mino tests/run.clj` looks unchanged.
+
+The hang is CI-only: all four matrix entries
+(macos-14, ubuntu-24.04, ubuntu-24.04-arm, windows-2022) time out
+at exactly the same point in the test run, but the suite passes
+locally (Apple Silicon, 1.6 s) and inside Docker (arm64 native +
+x86_64 emulation, both under cpus=3 / memory=7g resource caps that
+mirror GHA macos-14, both under bash `-e -o pipefail`). Without a
+local reproducer the next step has to be a focused CI data
+gather; this release is that.
+
+CI workflow now sets `MINO_TEST_TRACE=1`, tees stderr to
+`/tmp/test_trace.log`, and uploads the trace as a
+`test-trace-<matrix.os>` artifact on failure. The last line of the
+trace identifies the hanging deftest; the actual fix lands in
+v0.255.9.
+
+No runtime semantics changed; binary behaviour with
+`MINO_TEST_TRACE` unset is byte-identical to v0.255.7.
+
 ## v0.255.7 — Portability: gcc Sanitizer Detection, POSIX strcasecmp, Empty TUs
 
 CI on ubuntu-24.04, ubuntu-24.04-arm, and windows-2022 went red on

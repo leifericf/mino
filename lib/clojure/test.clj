@@ -184,12 +184,17 @@
                         {} tests)
           ns-list (mapv (fn [t] (get t :ns)) tests)
           ns-order (vec (distinct ns-list))
+          trace? (some? (getenv "MINO_TEST_TRACE"))
           run-one (fn [t]
                     (let [tname (get t :name)
                           tfn   (get t :fn)
                           tns   (get t :ns)
                           fxs   (get @fixtures-registry tns)
                           each-wrap (compose-fixtures (get fxs :each))]
+                      (when trace?
+                        (binding [*out* *err*]
+                          (println (str "[trace] " tns "/" tname))
+                          (flush)))
                       (binding [*current-test*     tname
                                 *testing-contexts* ()]
                         (try
