@@ -720,14 +720,32 @@ void mino_future_gc_sweep(mino_val_t *fut)
     impl = fut->as.future.impl;
     if (impl == NULL) { return; }
 
-    /* GC is suppressed while thread_count > 0, so any worker for this
-     * future has decremented S->thread_count and is on its way out of
-     * worker_entry. Join here so the pthread is fully reaped before
-     * we destroy mu/cv -- otherwise the worker's final mu_unlock can
-     * touch destroyed mutex memory. pthread_join on an already-exited
-     * joinable thread returns immediately. */
+    /* Join the worker thread before destroying mu/cv -- otherwise the
+     * worker's final mu_unlock would touch destroyed mutex memory.
+     *
+     * Lock-yield discipline: the worker thread needs state_lock to
+     * make progress through its body / through worker_entry's exit
+     * sequence (the thread_count decrement and ctx detach run under
+     * worker_list_lock, but the body itself ran inside mino_call
+     * which holds state_lock). If our caller -- a sweep nested inside
+     * mino_gc_collect via (gc!) -- still holds state_lock recursively
+     * we deadlock: worker is blocked acquiring state_lock; we are
+     * blocked in pthread_join waiting for the worker to finish.
+     *
+     * Drop state_lock for the join, then resume the same depth after
+     * the worker is reaped. mino_future_deref uses the same pattern
+     * for cv_wait; this brings sweep into alignment.
+     *
+     * Background: under the legacy gc_tick_should_suppress path the
+     * collector wouldn't fire while thread_count > 0, so this hang
+     * couldn't surface from auto-tick. But mino_gc_collect (the
+     * public (gc!) API) skips that suppression and runs sweep even
+     * with live workers -- which exposed the deadlock on the v0.255.x
+     * CI runs at transient-survives-gc-yield. */
     S = impl->state;
     if (impl->thread_started && !impl->thread_joined) {
+        int depth = 0;
+        if (S != NULL) depth = mino_yield_lock(S);
 #if defined(_WIN32) && defined(_MSC_VER)
         WaitForSingleObject(impl->thread, INFINITE);
         CloseHandle(impl->thread);
@@ -735,6 +753,7 @@ void mino_future_gc_sweep(mino_val_t *fut)
         pthread_join(impl->thread, NULL);
 #endif
         impl->thread_joined = 1;
+        if (S != NULL) mino_resume_lock(S, depth);
     }
 
     /* Detach from S->future_list_head before freeing so quiesce

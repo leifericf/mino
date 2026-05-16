@@ -1,5 +1,58 @@
 # Changelog
 
+## v0.255.11 — Fix: Yield state_lock Around pthread_join in Future Sweep
+
+The actual cause of the v0.255.x CI hang, pinpointed by v0.255.10's
+watchdog backtrace. The trace from CI macos-14 showed:
+
+```
+[mino] fatal SIGABRT (signal 6)
+[mino] gc: minor=133 major=5 ... phase=1 ...
+ 0   crash_handler
+ 2   _pthread_join          <-- stuck here
+ 3   mino_future_gc_sweep
+ 4   gc_minor_collect
+ 5   mino_gc_collect
+ 6   prim_gc_bang
+```
+
+`mino_future_gc_sweep` calls `pthread_join` on a worker thread
+while the caller still holds `state_lock`. The worker thread needs
+`state_lock` to make progress through its body (it ran inside
+`mino_call`, which acquires state_lock). Result: classic
+acquire-while-holding deadlock -- worker is blocked on state_lock,
+sweep is blocked on pthread_join, neither moves.
+
+Why it didn't surface from auto-tick GC: the legacy
+`gc_tick_should_suppress` path skips collection while
+`thread_count > 0`, so sweep never ran with live workers there.
+But `mino_gc_collect` (the public `(gc!)` API) explicitly does
+not check `gc_tick_should_suppress` -- and `transient-survives-
+gc-yield` calls `(gc!)` three times mid-test, right after
+`bc_closure_test`'s `closure-capture-macro-introduced` left
+worker threads in their cleanup tail (worker has finished
+`deliver`, returned from the thunk, but hasn't yet reached the
+`thread_count--` at the bottom of worker_run -- so the future's
+MINO_VAL is unreachable and sweep tries to free it while the
+worker still has work to do under state_lock).
+
+Fix: drop state_lock around the pthread_join via the existing
+`mino_yield_lock` / `mino_resume_lock` pair, matching what
+`mino_future_deref` already does for its `cv_wait`. The worker
+finishes its cleanup tail unblocked, pthread_join returns
+immediately, sweep resumes lock and finishes destroying mu/cv
+and freeing the impl.
+
+The v0.255.10 SIGABRT watchdog stays in `.github/workflows/ci.yml`
+as a permanent safety net for future hangs -- harmless when no
+hang fires (sleep 450 + kill never reaches a live pid). The
+v0.255.9 GC ordering fix is also load-bearing; both bugs were
+real and live at `transient-survives-gc-yield`. This release
+unblocks the CI matrix on macos-14 / ubuntu-24.04{,-arm}.
+
+Local verification: 1274/4557 tests green; mino_asan green;
+release-gate 17/17 green.
+
 ## v0.255.10 — Diagnostic: SIGABRT Watchdog on CI Test Hang
 
 A diagnostic-only release that converts the remaining CI test
