@@ -20,6 +20,7 @@
 #include "async/scheduler.h"
 #include "async/timer.h"
 #include "eval/bc/jit.h"
+#include "eval/special_internal.h"  /* normalize_exception */
 
 #ifdef _WIN32
 #  define WIN32_LEAN_AND_MEAN
@@ -670,14 +671,21 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
             load_stack_truncate(S, mino_current_ctx(S)->try_stack[saved_try].saved_load_len);
             mino_current_ctx(S)->try_depth = saved_try;
             if (mino_last_error(S) == NULL) {
-                /* If the exception is a diagnostic map, extract its
-                 * message for the error buffer. */
-                if (ex != NULL && mino_type_of(ex) == MINO_MAP) {
-                    mino_val_t *msg = map_get_val(ex,
+                /* Normalize first so an ex-info map ({:message :data})
+                 * gets reshaped to the diagnostic form ({:mino/kind
+                 * :mino/code :mino/message :mino/data}) before lookup.
+                 * Catch landing pads do the same; without it, raw
+                 * ex-info values reach the top-level handler with the
+                 * un-namespaced :message key and we'd fall through to
+                 * generic "unhandled exception". */
+                mino_val_t *nex = (ex != NULL)
+                    ? normalize_exception(S, ex) : NULL;
+                if (nex != NULL && mino_type_of(nex) == MINO_MAP) {
+                    mino_val_t *msg = map_get_val(nex,
                         mino_keyword(S, "mino/message"));
-                    mino_val_t *kind = map_get_val(ex,
+                    mino_val_t *kind = map_get_val(nex,
                         mino_keyword(S, "mino/kind"));
-                    mino_val_t *code = map_get_val(ex,
+                    mino_val_t *code = map_get_val(nex,
                         mino_keyword(S, "mino/code"));
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                         (kind && mino_type_of(kind) == MINO_KEYWORD)
@@ -747,6 +755,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
     mino_val_t     *last  = mino_nil(S);
     const char     *saved_file = S->reader_file;
     int             saved_line = S->reader_line;
+    int             saved_col  = S->reader_col;
     int             saved_try  = mino_current_ctx(S)->try_depth;
     gc_note_host_frame(S, (void *)&probe);
     (void)probe;
@@ -757,6 +766,11 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
         S->reader_file = intern_filename(S, "<string>");
     }
     S->reader_line = 1;
+    /* reset reader_col so line-1 of this source sees fresh column
+     * tracking. Without this, the terminal column of the previous
+     * load (e.g. the bundled core.mino) leaks into the next load and
+     * the very first error reports a wildly off column. */
+    S->reader_col  = 1;
 
     /* Top-level try frame so that OOM during read or eval surfaces as a
      * NULL return instead of aborting the process. */
@@ -778,11 +792,33 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
             mino_current_ctx(S)->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;
+            S->reader_col  = saved_col;
             if (mino_last_error(S) == NULL) {
-                /* Preserve the original exception message if available,
-                 * and include the file being loaded for context. */
+                /* Preserve the original exception's kind/code/message.
+                 * Mirrors mino_eval_inner so file-mode (script) errors
+                 * report the same diagnostic the REPL prints; without
+                 * normalizing first, ex-info maps (with un-namespaced
+                 * :message / :data keys) and prim_throw_classified maps
+                 * would take different paths and degrade to a generic
+                 * MCT001 wrapper. */
                 const char *file = S->reader_file;
-                if (ex != NULL && mino_type_of(ex) == MINO_STRING
+                mino_val_t *nex = (ex != NULL)
+                    ? normalize_exception(S, ex) : NULL;
+                if (nex != NULL && mino_type_of(nex) == MINO_MAP) {
+                    mino_val_t *msg = map_get_val(nex,
+                        mino_keyword(S, "mino/message"));
+                    mino_val_t *kind = map_get_val(nex,
+                        mino_keyword(S, "mino/kind"));
+                    mino_val_t *code = map_get_val(nex,
+                        mino_keyword(S, "mino/code"));
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                        (kind && mino_type_of(kind) == MINO_KEYWORD)
+                            ? kind->as.s.data : "internal",
+                        (code && mino_type_of(code) == MINO_STRING)
+                            ? code->as.s.data : "MIN001",
+                        (msg && mino_type_of(msg) == MINO_STRING)
+                            ? msg->as.s.data : "unhandled exception");
+                } else if (ex != NULL && mino_type_of(ex) == MINO_STRING
                     && ex->as.s.len > 0) {
                     if (file != NULL && strcmp(file, "<string>") != 0
                         && strcmp(file, "<input>") != 0) {
@@ -812,6 +848,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
                 mino_current_ctx(S)->try_depth   = saved_try;
                 S->reader_file = saved_file;
                 S->reader_line = saved_line;
+                S->reader_col  = saved_col;
                 return NULL;
             }
             if (end != NULL && end > src) {
@@ -825,6 +862,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
             mino_current_ctx(S)->try_depth   = saved_try;
             S->reader_file = saved_file;
             S->reader_line = saved_line;
+            S->reader_col  = saved_col;
             return NULL;
         }
         src = end;
@@ -832,6 +870,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
     mino_current_ctx(S)->try_depth   = saved_try;
     S->reader_file = saved_file;
     S->reader_line = saved_line;
+    S->reader_col  = saved_col;
     return last;
 }
 

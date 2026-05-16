@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.252.1 — Developer UX Fixes from Cycle-I Whitebox Pass
+
+Adversarial whitebox testing on the v0.252.0 surface (JIT CLI,
+mino-lean dual-binary, REPL workflow, error-reporting UX) turned
+up seven defects that degrade the developer experience without
+being JIT-architecture regressions. All are fixed in this patch;
+none change observable JIT behavior or the embed API.
+
+Diagnostic accuracy:
+
+  - `reader_col` is now reset alongside `reader_line` at the
+    start of every `mino_eval_string` / `mino_load_file` call.
+    Without the reset, the terminal column of the previously
+    loaded source (typically the bundled `core.mino`) leaked
+    into the next load, so every line-1 error reported a
+    wildly off column. `(/ 1 0)` on its own line went from
+    `<file>:1:87` (caret 86 spaces past the source) back to
+    `<file>:1:1` with the caret under the `(`.
+  - File-mode (script and `-e`) error reporting now preserves
+    the inner exception's kind, code, and message instead of
+    degrading every runtime error to a generic
+    `MCT001 unhandled exception`. The map-unwrap path mirrors
+    the REPL handler and routes through `normalize_exception`
+    so an `ex-info` value (`{:message ... :data ...}`) reports
+    `error[MUS001]: <message>` rather than swallowing the
+    payload. Both `mino script.clj` and `mino -e EXPR` paths
+    now agree with the REPL on what a thrown value looks like.
+  - REPL multi-line snippets now render the actual user input.
+    The REPL keeps an append-only session-history buffer and
+    publishes that to the source cache, instead of just the
+    bytes still pending parse. Errors past the first form
+    previously rendered as `  3 |  ` (blank line); they now
+    show the real line the user typed.
+
+JIT CLI / dual-binary UX:
+
+  - `--jit=` is now case-insensitive, matching the `MINO_JIT`
+    env var. `--jit=ON`, `--jit=Auto`, `--jit=Off` all parse;
+    the old behavior accepted `MINO_JIT=ON` but rejected
+    `--jit=ON`, which was the worst-of-both kind of asymmetry.
+  - `mino-lean` (or any build with the JIT compiled out) now
+    emits a one-line `stderr` note when `--jit=on` or
+    `MINO_JIT=on` is requested explicitly: "this build has
+    the JIT compiled out; --jit=on / MINO_JIT=on has no
+    effect, interpreter will run". Silently swallowing user
+    intent was the worst-of-both for the dual-binary design.
+    `--jit=auto` and `--jit=off` stay silent because they're
+    compatible with a no-JIT build.
+  - `mino-lean --help` now annotates the `--jit=` and
+    `--jit-threshold=` flags as "Accepted for parity; this
+    build has the JIT compiled out" instead of advertising
+    them with their full-binary descriptions.
+  - `mino-lean --version` now reports
+    `mino-lean 0.252.0 (no-jit)` instead of `mino 0.252.0`,
+    so install audits and bug reports can tell the two
+    binaries apart at a glance.
+
+The 4-way parity (jit-auto / jit-on / jit-off / lean) stays
+byte-identical on stdout. The new `mino-lean` note goes to
+stderr and only fires when the user asked for `--jit=on` or
+set `MINO_JIT=on`, so the release-gate parity sweep continues
+to pass unchanged. `mino task test` is green at 1737 tests
+/ 7920 assertions / 0 failed; `mino task release-gate` is
+green; the stencil-extract selftest is green.
+
 ## v0.252.0 — JIT Feature-Complete Declaration + Cycle I Close
 
 Closes Cycle I. The CPJIT layer is feature-complete on the dev

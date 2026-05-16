@@ -16,6 +16,7 @@
 
 #include "runtime/internal.h"
 #include "path_buf.h"
+#include "eval/bc/jit.h"  /* MINO_CPJIT_HOST_DETECTED for --help/--version */
 
 #include <errno.h>
 #include <signal.h>
@@ -340,7 +341,14 @@ static int run_deps(mino_state_t *S, mino_env_t *env)
 
 static void print_version(FILE *out)
 {
+#if MINO_CPJIT_HOST_DETECTED
     fprintf(out, "mino %s\n", mino_version_string());
+#else
+    /* mino-lean (or any host where the JIT module was compiled out)
+     * advertises a distinct build tag so install audits and bug
+     * reports can tell which binary the user is running. */
+    fprintf(out, "mino-lean %s (no-jit)\n", mino_version_string());
+#endif
 }
 
 static void print_usage(FILE *out)
@@ -358,8 +366,13 @@ static void print_usage(FILE *out)
         "    -e, --eval EXPR     Evaluate EXPR and print the result\n"
         "    -h, --help          Show this help and exit\n"
         "    -V, --version       Show version and exit\n"
+#if MINO_CPJIT_HOST_DETECTED
         "    --jit=auto|off|on   JIT mode (default auto; overrides MINO_JIT env)\n"
         "    --jit-threshold=N   Hot-call count before AUTO compiles (default 100)\n"
+#else
+        "    --jit=auto|off|on   Accepted for parity; this build has the JIT compiled out\n"
+        "    --jit-threshold=N   Accepted for parity; this build has the JIT compiled out\n"
+#endif
         "    --                  End of options; treat the rest as FILE\n"
         "\n"
         "SUBCOMMANDS:\n"
@@ -793,15 +806,17 @@ int main(int argc, char **argv)
                                   &cli_jit_mode, &cli_jit_threshold);
     if (parse_state == 1) return 0;
     if (parse_state == 2) return 2;
-    /* --jit=auto|off|on rejects anything else loudly. */
+    /* --jit=auto|off|on rejects anything else loudly. Matches the
+     * MINO_JIT env var's case-insensitive parsing in state.c, so
+     * --jit=ON and MINO_JIT=ON don't diverge in behavior. */
     mino_jit_mode_t cli_jit = MINO_JIT_MODE_AUTO;
     int cli_jit_set = 0;
     if (cli_jit_mode != NULL) {
-        if (strcmp(cli_jit_mode, "auto") == 0) {
+        if (strcasecmp(cli_jit_mode, "auto") == 0) {
             cli_jit = MINO_JIT_MODE_AUTO; cli_jit_set = 1;
-        } else if (strcmp(cli_jit_mode, "off") == 0) {
+        } else if (strcasecmp(cli_jit_mode, "off") == 0) {
             cli_jit = MINO_JIT_MODE_OFF;  cli_jit_set = 1;
-        } else if (strcmp(cli_jit_mode, "on") == 0) {
+        } else if (strcasecmp(cli_jit_mode, "on") == 0) {
             cli_jit = MINO_JIT_MODE_ON;   cli_jit_set = 1;
         } else {
             fprintf(stderr,
@@ -869,11 +884,47 @@ int main(int argc, char **argv)
     S = mino_state_new();
     if (cli_jit_set)       mino_state_set_jit_mode(S, cli_jit);
     if (cli_threshold_set) mino_state_set_jit_hot_threshold(S, cli_threshold);
+
+    /* If the user explicitly requested JIT=ON (CLI or env) but this
+     * build has the JIT compiled out or the host isn't supported,
+     * announce that the request is being honored as a no-op. Silent
+     * dropping of user intent is the worst-of-both for the dual-binary
+     * design -- the interpreter still runs, but the user thinks they
+     * got JIT. AUTO and OFF don't trigger the warning because they're
+     * compatible with a no-JIT build. */
+    {
+        mino_jit_capability_t cap = mino_state_jit_capability(S);
+        if (cap.available == 0) {
+            int explicit_on = (cli_jit_set && cli_jit == MINO_JIT_MODE_ON);
+            if (!explicit_on) {
+                const char *env_jit = getenv("MINO_JIT");
+                if (env_jit != NULL && strcasecmp(env_jit, "on") == 0) {
+                    explicit_on = 1;
+                }
+            }
+            if (explicit_on) {
+                fprintf(stderr,
+                    "mino: note: this build has the JIT compiled out; "
+                    "--jit=on / MINO_JIT=on has no effect, "
+                    "interpreter will run\n");
+            }
+        }
+    }
+
     install_crash_handler(S);
     mino_env_t   *env = mino_env_new(S);
     char *buf  = NULL;
     size_t cap = 0;
     size_t len = 0;
+    /* Session-wide history of REPL input. The parse buffer (buf/len)
+     * is truncated each time a form is consumed; the history buffer
+     * (hist_buf/hist_len) is append-only so source_cache_store can
+     * publish every line the user has typed for snippet rendering.
+     * Without it, errors that name a line number past the first form
+     * land in a cache that no longer contains the relevant line. */
+    char *hist_buf = NULL;
+    size_t hist_cap = 0;
+    size_t hist_len = 0;
     int    awaiting_continuation = 0;
     int    exit_code = 0;
 
@@ -1076,6 +1127,27 @@ int main(int argc, char **argv)
             }
             memcpy(buf + len, line, add + 1);
             len += add;
+
+            /* Mirror the line into the append-only history buffer
+             * used for source-snippet rendering. Errors reference
+             * reader_line, which counts every line typed since
+             * session start, so the cache needs the full history,
+             * not just the bytes still pending parse. */
+            if (hist_len + add + 1 > hist_cap) {
+                size_t new_cap = hist_cap == 0 ? 256 : hist_cap;
+                while (new_cap < hist_len + add + 1) {
+                    new_cap *= 2;
+                }
+                hist_buf = (char *)realloc(hist_buf, new_cap);
+                if (hist_buf == NULL) {
+                    fputs("mino: out of memory\n", stderr);
+                    exit_code = 1;
+                    goto cleanup;
+                }
+                hist_cap = new_cap;
+            }
+            memcpy(hist_buf + hist_len, line, add + 1);
+            hist_len += add;
         }
 
         /* Drain as many complete forms as we have. */
@@ -1092,8 +1164,11 @@ int main(int argc, char **argv)
                 break;
             }
 
-            /* Cache REPL input for diagnostic source snippets. */
-            source_cache_store(S, S->reader_file, buf, len);
+            /* Cache REPL input for diagnostic source snippets. Publish
+             * the full session history, not just the parse buffer: the
+             * parse buffer is truncated whenever a form is consumed,
+             * but reader_line keeps accumulating across forms. */
+            source_cache_store(S, S->reader_file, hist_buf, hist_len);
 
             form = mino_read(S, cursor, &end);
             if (form != NULL && form->type == MINO_KEYWORD) {
@@ -1188,6 +1263,7 @@ int main(int argc, char **argv)
 
 cleanup:
     free(buf);
+    free(hist_buf);
     mino_env_free(S, env);
     mino_state_free(S);
     return exit_code;
