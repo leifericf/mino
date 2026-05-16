@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.255.25 — Fix: `seq_iter_init` walks records as kv pairs
+
+`(into {} record)` returned `{}` instead of `{:x 1 :y 2}`. The
+iterator that backs `into`, `reduce`, `transduce`, and most other
+seq aggregates fell through to the default (immediately-done) case
+for `MINO_RECORD`. `prim_seq` itself had a record case that built a
+`[k v]` cons list in declared-field-then-ext order, but the
+iterator didn't route through it.
+
+`seq_iter_init` now routes `MINO_RECORD` through `prim_seq` up-front
+so every downstream consumer walks records as a seq of `[k v]`
+pairs. After this:
+
+```clojure
+(into {} (->Point 1 2))           ; => {:x 1 :y 2}
+(into [] (->Point 1 2))           ; => [[:x 1] [:y 2]]
+(reduce conj #{} (->Point 1 2))   ; => #{[:x 1] [:y 2]}
+```
+
+Regression in `tests/records_test.clj` (`record-seq-is-iterable`).
+
 ## v0.255.24 — Fix: Vector destructuring of lazy / chunked seqs
 
 `(let [[a b c] (range 3)] [a b c])` returned `[nil nil nil]` instead

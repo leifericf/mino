@@ -109,6 +109,23 @@
     (is (satisfies? IGreet g))
     (is (instance? Greeter g))))
 
+(deftest record-seq-is-iterable
+  ;; Regression: seq_iter_init didn't handle MINO_RECORD, so any seq-
+  ;; iterator-based aggregate over a record came back empty.
+  ;; (into {} record) returned {} and (reduce kv-fn {} record) was
+  ;; a no-op. (seq record) itself worked (prim_seq has a record case)
+  ;; -- the gap was in the iterator. seq_iter_init now routes records
+  ;; through prim_seq up-front so every downstream consumer (into,
+  ;; reduce, transduce, etc.) walks records as a seq of [k v] pairs.
+  (defrecord PointForInto [x y])
+  (let [p (->PointForInto 1 2)]
+    (testing "(into {} record) collects fields as map entries"
+      (is (= {:x 1 :y 2} (into {} p))))
+    (testing "(into [] record) collects [k v] pairs in declared order"
+      (is (= [[:x 1] [:y 2]] (into [] p))))
+    (testing "(reduce conj #{} record) walks the kv pairs"
+      (is (= #{[:x 1] [:y 2]} (reduce conj #{} p))))))
+
 (deftest defrecord-inline-method-binds-fields
   ;; Real Clojure binds each declared field as a local inside any
   ;; inline protocol method body, so the body can write the field

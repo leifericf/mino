@@ -330,6 +330,18 @@ void seq_iter_init(mino_state_t *S, seq_iter_t *it, const mino_val_t *coll)
         (mino_type_of(coll) == MINO_SORTED_MAP || mino_type_of(coll) == MINO_SORTED_SET)) {
         coll = sorted_seq(S, coll);
     }
+    /* Records: route through prim_seq which builds a cons list of
+     * [k v] pairs in declared-field-then-ext-insertion order. Without
+     * this, seq_iter_done returns true immediately for MINO_RECORD
+     * (default case), so `(into {} record)` returned `{}` and any
+     * other seq-based aggregate over a record came back empty. */
+    if (coll != NULL && mino_type_of(coll) == MINO_RECORD) {
+        mino_val_t *args = mino_cons(S, (mino_val_t *)coll, mino_nil(S));
+        coll = prim_seq(S, args, NULL);
+        if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
+            coll = lazy_force(S, (mino_val_t *)coll);
+        }
+    }
     it->coll  = coll;
     it->idx   = 0;
     it->cons_p = (coll != NULL && mino_type_of(coll) == MINO_CONS) ? coll : NULL;
