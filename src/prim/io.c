@@ -682,8 +682,17 @@ mino_val_t *prim_exit(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_nil(S); /* unreachable */
 }
 
-/* (time-ms) — return process time in milliseconds as a float.
- * Uses ANSI C clock() for portability across all C99 platforms. */
+/* (time-ms) — return monotonic wall-clock time in milliseconds as a
+ * float. The `(time expr)` macro in core.clj builds on this to print
+ * elapsed wall-clock; Clojure's `(time)` contract is wall-clock, and
+ * task runners need wall-clock too (a thread-sleep that took 200ms
+ * should report ~200ms, not ~0ms because the calling thread spent
+ * no CPU time during the sleep).
+ *
+ * Previously this returned clock() / CLOCKS_PER_SEC, i.e. process
+ * CPU time. That made `(time (thread-sleep 200))` print "0.194 ms"
+ * and any wall-clock benchmarking that built on (time-ms) silently
+ * undercounted by however long the thread spent blocked. */
 mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     (void)args;
@@ -691,7 +700,7 @@ mino_val_t *prim_time_ms(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "time-ms takes no arguments");
     }
-    return mino_float(S, (double)clock() / (double)CLOCKS_PER_SEC * 1000.0);
+    return mino_float(S, (double)mino_monotonic_ns() / 1.0e6);
 }
 
 /* (nano-time) — return monotonic wall-clock time in nanoseconds as an integer. */

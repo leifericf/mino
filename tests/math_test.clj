@@ -63,7 +63,17 @@
   (testing "elapsed time is positive"
     (let [start (time-ms)]
       (loop [i 0] (if (< i 100000) (recur (+ i 1)) nil))
-      (is (>= (- (time-ms) start) 0)))))
+      (is (>= (- (time-ms) start) 0))))
+  (testing "measures wall-clock, not CPU time"
+    ;; Regression: time-ms used to be clock()/CLOCKS_PER_SEC (process
+    ;; CPU time). (time (thread-sleep 200)) reported "0.194 ms" because
+    ;; the sleeping thread spent no CPU. Now backed by monotonic
+    ;; wall-clock (nano-time / 1e6) so it reports >= the sleep duration.
+    (let [start (time-ms)
+          _     (thread-sleep 50)
+          elapsed (- (time-ms) start)]
+      (is (>= elapsed 40))
+      (is (<= elapsed 5000)))))
 
 (deftest math-pi-constant
   (is (> math-pi 3.14159))

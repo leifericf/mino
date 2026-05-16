@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.255.21 — Fix: `time-ms` returns wall-clock, not process CPU time
+
+`(time-ms)` was implemented as `clock() / CLOCKS_PER_SEC * 1000` —
+process CPU time, not wall-clock. The `(time expr)` macro in
+core.clj and the task runner's "elapsed" reporter both built on
+this, so `(time (thread-sleep 200))` printed "Elapsed time: 0.194
+ms" instead of "~200 ms": the sleeping thread spent no CPU during
+the sleep, even though 200ms of wall time elapsed. Same shape any
+benchmark or progress reporter built on `time-ms` silently
+undercounted by however long the process spent blocked.
+
+Clojure's `(time expr)` contract is wall-clock; mino's diverged
+silently. Fixed by routing `time-ms` through `mino_monotonic_ns() /
+1e6`, matching the same monotonic clock `nano-time` already
+exposed. The new release-gate elapsed reading jumps from "44 ms"
+(CPU) to "~24000 ms" (real wall-clock) — the latter is honest.
+
+Regression in `tests/math_test.clj` (`time-ms-fn` testing block
+"measures wall-clock, not CPU time").
+
 ## v0.255.20 — Fix: defrecord auto-binds fields in inline method bodies
 
 Real Clojure binds each declared field as a local inside an inline
