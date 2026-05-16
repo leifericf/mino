@@ -1,5 +1,61 @@
 # Changelog
 
+## v0.250.0 — Default Nursery 1 MiB -> 4 MiB + Cycle G Close
+
+Closes cycle G with one substantive change. The default GC
+nursery size bumps from 1 MiB to 4 MiB. Allocation-heavy
+realistic workloads spend 35-43% of wall time in minor-GC at
+1 MiB; bumping to 4 MiB cuts total GC time by ~35-60% across
+the board without raising worst-case minor-GC pause -- the
+larger nursery means each minor pass collects more bytes per
+cycle, lowering per-byte overhead.
+
+### realistic_bench (before / after / speedup)
+
+| Row                              | 1 MiB (v0.249) | 4 MiB (v0.250) | speedup |
+|----------------------------------|---------------:|---------------:|--------:|
+| build 5k int-map and sum         |   12.72 ms     |   11.18 ms     |  1.14x  |
+| bump 5k int-map values           |   22.92 ms     |   16.12 ms     |  1.42x  |
+| map/filter/map/reduce over 50k   |    0.77 ms     |    0.68 ms     |  1.13x  |
+| nested vectors 500x100           |   23.00 ms     |   16.92 ms     |  1.36x  |
+| realize 10k of lazy range        |    7.82 ms     |    5.79 ms     |  1.35x  |
+| fibonacci(25)                    |    7.83 ms     |    6.43 ms     |  1.22x  |
+
+GC-time share on the four allocating rows fell from 35-43% to
+20-32%. Worst-case minor-GC pause dropped from ~3.5 ms to
+~2.0 ms.
+
+### Trade-off
+
+Each VM state now holds 3 extra MiB of young-gen residency
+before the first major GC. Embedders with tighter memory
+budgets override via the `MINO_GC_NURSERY_BYTES` env var or
+`mino_gc_set(state, MINO_GC_NURSERY_BYTES, n)`. The comment in
+`src/runtime/state.c` documents the rationale.
+
+### Cycle G closure
+
+Plan called for v0.250 -- v0.254 as five candidate releases
+gated `>= 1.05x` per-release ratchet, with cycle gate at
+`>= 1.10x` on at least one row before v0.255 close. The single
+v0.250 change cleared the cycle gate on every row (6/6),
+1.42x peak. Per `[[release-per-cohesive-piece]]` and
+`[[no-fakery]]`, the additional placeholder releases collapsed
+into this one; cycle closes at v0.250.
+
+Levers parked for a future perf cycle:
+  - PHM-32 lookup constants
+  - Vector slice without copy
+  - Sorted-coll node-fan tuning
+  - Multi-arity dispatch cache
+
+  - `src/runtime/state.c`: default `gc_nursery_bytes` bumped
+    1 MiB -> 4 MiB. Inline comment captures the rationale and
+    the override path.
+
+`release-gate` green: 1737 tests / 7919 assertions, ASan clean,
+4-way JIT parity stdout byte-identical.
+
 ## v0.249.0 — Perf Cycle G: Measurement Baseline
 
 Opens cycle G. This release is measurement-only: a fixed
