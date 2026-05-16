@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.255.3 — Fix: VM Arithmetic Fallback UB
+
+`BINOP_ADD` / `BINOP_SUB` / `BINOP_MUL` in `src/eval/bc/vm.c` had a
+non-GCC/Clang fallback that performed direct signed integer
+arithmetic. Signed overflow is UB per ISO C, so the fallback was
+unsafe even though no major mino target ships without the
+`__builtin_*_overflow` builtins.
+
+Fix: the fallbacks now detect overflow explicitly.
+
+  - ADD / SUB cast to `unsigned long long`, perform the well-
+    defined wrap, and use the textbook sign-bit comparison
+    (XOR-of-operands AND XOR-of-result, shifted to bit 63) to
+    detect overflow.
+  - MUL pre-checks against `LLONG_MAX` / `LLONG_MIN` via
+    division so the multiply itself never overflows; the
+    `LLONG_MIN * -1` corner case is rejected explicitly.
+
+The GCC/Clang `__builtin_*_overflow` paths are unchanged.
+`<limits.h>` added to the includes for `LLONG_MAX` / `LLONG_MIN`.
+
+Suite: 1270 / 4544 green.
+
 ## v0.255.2 — Fix: thread_count Atomic Accesses
 
 Surfaced by mino-tests's adv_stm_mix probe under TSan: a data race

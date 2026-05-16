@@ -12,6 +12,7 @@
  * compile time; redefinition stays visible.
  */
 
+#include <limits.h>
 #include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -481,20 +482,52 @@ mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_saddll_overflow(a, b, &r)) return NULL;
 #else
-        r = a + b;
+        /* Non-GCC/Clang fallback. Direct signed `a + b` is UB on
+         * overflow per ISO C; the unsigned wrap form is well-defined,
+         * and the textbook sign-bit comparison detects the overflow. */
+        {
+            unsigned long long ua = (unsigned long long)a;
+            unsigned long long ub = (unsigned long long)b;
+            unsigned long long ur = ua + ub;
+            if (((ua ^ ur) & (ub ^ ur))
+                >> (sizeof(long long) * 8 - 1))
+                return NULL;
+            r = (long long)ur;
+        }
 #endif
         return tag_or_box_int(S, r);
     case BINOP_SUB:
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_ssubll_overflow(a, b, &r)) return NULL;
 #else
-        r = a - b;
+        {
+            unsigned long long ua = (unsigned long long)a;
+            unsigned long long ub = (unsigned long long)b;
+            unsigned long long ur = ua - ub;
+            if (((ua ^ ub) & (ua ^ ur))
+                >> (sizeof(long long) * 8 - 1))
+                return NULL;
+            r = (long long)ur;
+        }
 #endif
         return tag_or_box_int(S, r);
     case BINOP_MUL:
 #if defined(__GNUC__) || defined(__clang__)
         if (__builtin_smulll_overflow(a, b, &r)) return NULL;
 #else
+        /* Pre-check via division so the multiply itself never
+         * overflows. LLONG_MIN * -1 is the special case that division
+         * can't handle; reject it explicitly. */
+        if (a == LLONG_MIN && b == -1) return NULL;
+        if (b == LLONG_MIN && a == -1) return NULL;
+        if (b != 0) {
+            long long limit = (a >= 0) == (b >= 0) ? LLONG_MAX : LLONG_MIN;
+            if ((a > 0 && b > 0 && a > limit / b)
+             || (a < 0 && b < 0 && a < limit / b)
+             || (a > 0 && b < 0 && b < limit / a)
+             || (a < 0 && b > 0 && a < limit / b))
+                return NULL;
+        }
         r = a * b;
 #endif
         return tag_or_box_int(S, r);
