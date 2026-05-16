@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.243.0 — Extractor Carve-Out: elf Module
+
+Third extractor carve-out. Lifts the ELF64 parser into its own
+module: header types (`elf64_ehdr_t`, `elf64_shdr_t`,
+`elf64_sym_t`, `elf64_rela_t`), section / class / symbol-info
+constants, AArch64 + x86_64 reloc-kind constants, the parser
+entry points (`elf_open`, `elf_list_symbols`,
+`elf_find_symbol`), the AArch64 + x86_64 reloc-kind maps, and
+the `elf_emit_stencil_header` entry. The `r_info` bit-field
+accessors stay as `static inline` in the header so callers
+across the module boundary use the same decode path.
+
+The kind-map functions take an `elf_` prefix
+(`elf_reloc_arm64_kind_map`, `elf_reloc_x86_64_kind_map`) to
+mirror the Mach-O module's naming convention.
+
+  - `tools/stencil_extract/elf.h`: new. ELF64 types + constants +
+    reloc accessor inlines + parser API.
+  - `tools/stencil_extract/elf.c`: new. Implementation.
+  - `tools/stencil_extract.c`: removes the ELF block; the
+    selftest references the new prefixed map names.
+  - `lib/mino/tasks/builtin.clj`: `stencil-extract-srcs` gains
+    `elf.c`.
+
+COFF stays in the monolith; its carve-out plus the synthetic-
+blob selftests land in v0.244.
+
+The generated stencil headers regenerate byte-identical across
+the move. `release-gate` green: 1737 tests / 7919 assertions,
+ASan clean, 4-way JIT parity stdout byte-identical.
+
 ## v0.242.0 — Extractor Carve-Out: macho Module
 
 Second extractor carve-out. Lifts the Mach-O 64 parser into its

@@ -618,6 +618,7 @@
    carve-out from the original monolith just adds another file here."
   ["tools/stencil_extract.c"
    "tools/stencil_extract/core.c"
+   "tools/stencil_extract/elf.c"
    "tools/stencil_extract/macho.c"])
 
 (defn build-stencil-extract
