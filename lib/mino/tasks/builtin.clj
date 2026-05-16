@@ -617,7 +617,8 @@
    format-agnostic core sits alongside the per-format parsers; each
    carve-out from the original monolith just adds another file here."
   ["tools/stencil_extract.c"
-   "tools/stencil_extract/core.c"])
+   "tools/stencil_extract/core.c"
+   "tools/stencil_extract/macho.c"])
 
 (defn build-stencil-extract
   "Build tools/stencil-extract: the copy-and-patch stencil extractor

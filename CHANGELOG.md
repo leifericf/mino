@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.242.0 — Extractor Carve-Out: macho Module
+
+Second extractor carve-out. Lifts the Mach-O 64 parser into its
+own module: header types, ARM64 + x86_64 reloc-kind constants,
+reloc bit-field accessors, the parser entry points
+(`macho_open`, `macho_list_symbols`, `macho_find_symbol`), the
+ARM64 + x86_64 reloc-kind maps, and the
+`macho_emit_stencil_header` entry. Function names take a
+`macho_` prefix to match the module boundary; the selftest and
+the main dispatch update to the new spelling.
+
+  - `tools/stencil_extract/macho.h`: new. Mach-O header types +
+    constants + reloc accessor inlines + parser API.
+  - `tools/stencil_extract/macho.c`: new. Implementation.
+  - `tools/stencil_extract.c`: removes the Mach-O block; main
+    dispatches to `macho_emit_stencil_header`; selftest
+    references `macho_reloc_*` symbols.
+  - `lib/mino/tasks/builtin.clj`: `stencil-extract-srcs` gains
+    `macho.c`.
+
+The generated stencil headers regenerate byte-identical across
+the move. ELF + COFF stay in the monolith; their carve-outs land
+in v0.243 and v0.244.
+
+`release-gate` green: 1737 tests / 7919 assertions, ASan clean,
+4-way JIT parity stdout byte-identical.
+
 ## v0.241.0 — Extractor Carve-Out: core Module
 
 Opens cycle E. The stencil extractor lived for the entire cpjit
