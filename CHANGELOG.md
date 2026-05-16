@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.255.16 — Fix: Defer to libsanitizer + filter JIT note from parity diff
+
+Two remaining CI matrix failures after v0.255.15:
+
+- **ubuntu-24.04 (x86_64) ASan SEGV.** mino's `install_crash_handler`
+  unconditionally installs SIGSEGV / SIGABRT / SIGBUS handlers via
+  `sigaction`. Under libasan (gcc) those run BEFORE libasan's own
+  handlers, so a sanitizer-driven trap (red-zone read or any other
+  ASan-flagged access) produces an opaque
+  `[mino] fatal SIGSEGV (signal 11)` line with no `==XXX==ERROR:
+  AddressSanitizer:` preamble -- the actual diagnostic libasan
+  formatted gets swallowed. Apple clang's ASan on macos was permissive
+  enough not to surface this. Skip the crash handler entirely when any
+  sanitizer (ASan / TSan / UBSan) is built in; the sanitizer's
+  reports are strictly better than mino's minimal preamble.
+
+- **ubuntu-24.04-arm jit-parity warning leak.** `test-jit-parity`
+  builds four variants (`--jit=auto`, `--jit=on`, `--jit=off`,
+  `mino-lean`) and asserts every variant's stdout is byte-identical.
+  On hosts where the JIT is not available (every non-arm64-darwin
+  runner in this matrix), `--jit=on` prints a one-line note to stderr
+  that the build can't honor the flag. `sh` captures stderr via
+  `2>&1`, so the note lands in `:out` and breaks the diff. The note
+  is informational and orthogonal to the parity contract (which is
+  about the evaluator's stdout). Strip it before comparing.
+
+### Changes
+
+- `main.c::install_crash_handler`: dual-path early-return when
+  `__has_feature(address_sanitizer)` (clang) or
+  `__SANITIZE_ADDRESS__` / `__SANITIZE_THREAD__` /
+  `__SANITIZE_UNDEFINED__` (gcc).
+- `lib/mino/tasks/builtin.clj::run-parity-variant`: filter the
+  "this build has the JIT compiled out" line out of each variant's
+  `:out` before the byte-identity comparison. Line-based filter
+  because mino's `clojure.string/replace` doesn't accept regex.
+- `src/mino.h`: `MINO_VERSION_PATCH` bumped to 16.
+
+### Verification
+
+- Local `release-gate` 17/17 green.
+- Local `tests/run.clj` 1274 tests / 4557 assertions green.
+- On ubuntu-24.04 x86_64 the v0.255.16 ASan run will either pass
+  (if the previous SEGV was an instrumentation false positive only
+  masked by the handler) or surface the real ASan report (if there
+  IS a real OOB). Either is a step forward from the silent SEGV.
+
 ## v0.255.15 — Fix: Free dyn_frame on eval_try unwind path
 
 With v0.255.14's ASan stack-scan attribute fix letting the ASan

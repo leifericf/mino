@@ -313,10 +313,33 @@
     (apply sh! args)
     (println "  lean build -> mino-lean")))
 
+(def ^:private jit-disabled-warning-prefix
+  "mino: note: this build has the JIT compiled out")
+
+(defn- strip-jit-disabled-warning [s]
+  ;; mino prints a one-line stderr note when --jit=on or MINO_JIT=on is
+  ;; requested on a build/host where the JIT isn't available (e.g. all
+  ;; non-arm64-darwin matrix entries: arm64-linux, x86_64-linux,
+  ;; x86_64-windows). sh captures stderr via 2>&1, so the note lands in
+  ;; the variant's :out and breaks the byte-identity diff against
+  ;; jit-auto (which doesn't trip the warning). The note is informational
+  ;; and not part of the parity contract -- jit-parity is about the
+  ;; runtime evaluator's stdout, not about which CLI flags this build
+  ;; honors. Strip it before comparing.
+  ;;
+  ;; Implemented line-by-line because mino's clojure.string/replace
+  ;; requires a string match; regex matching is unavailable on this path.
+  (if (nil? s)
+    s
+    (str/join "\n"
+              (remove (fn [line]
+                        (str/starts-with? line jit-disabled-warning-prefix))
+                      (str/split s "\n")))))
+
 (defn- run-parity-variant [bin-args label parity-test]
   (let [result (apply sh (concat bin-args [parity-test]))]
     {:label label
-     :out   (get result :out)
+     :out   (strip-jit-disabled-warning (get result :out))
      :exit  (get result :exit)}))
 
 (defn test-jit-parity

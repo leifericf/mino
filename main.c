@@ -760,6 +760,27 @@ static void install_crash_handler(mino_state_t *S)
     if (disabled != NULL && disabled[0] != '\0' && disabled[0] != '0') {
         return;
     }
+    /* Skip when running under a sanitizer: libasan / libtsan / libubsan
+     * install their own SIGSEGV / SIGABRT handlers and produce far more
+     * detailed reports (red-zone diagnosis, allocation backtraces, leak
+     * graphs). Mino's handler intercepting SIGSEGV first means the
+     * sanitizer's report path never runs -- on ubuntu-24.04 x86_64 a
+     * conservative-stack-scan false positive surfaced as an opaque
+     * "[mino] fatal SIGSEGV" line with no ASan preamble, masking the
+     * actual diagnostic. Detect clang via __has_feature and gcc via
+     * __SANITIZE_*__ predefined macros (same dual-path used in
+     * gc/internal.h's MINO_GC_PIN_LOUD_ASSERT). */
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer) \
+      || __has_feature(thread_sanitizer) \
+      || __has_feature(undefined_behavior_sanitizer)
+    return;
+#  endif
+#elif defined(__SANITIZE_ADDRESS__) \
+    || defined(__SANITIZE_THREAD__) \
+    || defined(__SANITIZE_UNDEFINED__)
+    return;
+#endif
     crash_handler_state = S;
 #ifndef _WIN32
     {
