@@ -625,6 +625,50 @@ mino_val_t *prim_get_thread_bindings(mino_state_t *S, mino_val_t *args,
     return mino_snapshot_thread_bindings(S);
 }
 
+/* (set-dyn-binding! 'name value) -- mutate the topmost active dynamic
+ * binding for `name` to `value`. Returns the new value. Throws when
+ * there is no active binding frame for the name (matches Clojure's
+ * contract: set! on a dynamic var without an enclosing binding form
+ * raises "Can't change/establish root binding"). Used by the
+ * (set! *var* expr) macro to back the JVM-Clojure dynamic-var mutation
+ * shape. */
+mino_val_t *prim_set_dyn_binding(mino_state_t *S, mino_val_t *args,
+                                 mino_env_t *env)
+{
+    mino_val_t    *name_sym;
+    mino_val_t    *new_val;
+    const char    *name;
+    dyn_frame_t   *f;
+    dyn_binding_t *b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+            "set-dyn-binding! requires two arguments: name value");
+    }
+    name_sym = args->as.cons.car;
+    new_val  = args->as.cons.cdr->as.cons.car;
+    if (name_sym == NULL || mino_type_of(name_sym) != MINO_SYMBOL) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "set-dyn-binding!: first argument must be a symbol");
+    }
+    name = name_sym->as.s.data;
+    for (f = mino_current_ctx(S)->dyn_stack; f != NULL; f = f->prev) {
+        for (b = f->bindings; b != NULL; b = b->next) {
+            if (strcmp(b->name, name) == 0) {
+                b->val = new_val;
+                return new_val;
+            }
+        }
+    }
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+            "Can't change/establish root binding of: %s with set!", name);
+        return prim_throw_classified(S, "eval/contract", "MCT001", msg);
+    }
+}
+
 /* (with-bindings* bindings-map fn) -- pushes a fresh dynamic-binding
  * frame from the map's entries (symbol-or-string keys), invokes fn
  * with no arguments, pops the frame, and returns the result. Used by
@@ -994,6 +1038,8 @@ const mino_prim_def k_prims_stateful[] = {
      "Returns a map of symbol->value for the active dynamic bindings, or nil if no binding frames are active."},
     {"with-bindings*", prim_with_bindings_star,
      "(with-bindings* bindings-map fn) — pushes the bindings as a dynamic frame and invokes fn with no args."},
+    {"set-dyn-binding!", prim_set_dyn_binding,
+     "(set-dyn-binding! 'name value) — mutate the topmost active dynamic binding for `name`. Returns the value. Throws when no binding frame is active for `name`. Backs (set! *var* expr)."},
     {"set-fail-alloc-at!", prim_set_fail_alloc_at,
      "Make the n-th GC allocation fail (simulated OOM). Pass 0 to disable."},
     {"mino-thread-limit", prim_mino_thread_limit,

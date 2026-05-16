@@ -1004,8 +1004,18 @@
     `(let [~@pairs] ~@body)))
 
 (defmacro set!
-  "No-op. JVM compiler directive, not applicable to mino."
-  [& _] nil)
+  "Mutates a thread-local dynamic-var binding to the given value.
+   The target must be a dynamic var with an enclosing (binding ...)
+   form on the call stack; without one, throws \"Can't
+   change/establish root binding\". Matches Clojure JVM's contract
+   for set! on Vars. Returns the new value.
+
+   The JVM-only field-mutation shape (set! (.-field obj) val) is not
+   supported -- mino has no JVM fields."
+  [target value]
+  (when-not (symbol? target)
+    (throw "set!: first argument must be a symbol naming a dynamic var"))
+  (list 'set-dyn-binding! (list 'quote target) value))
 
 (defmacro comment "Ignores body, returns nil." [& body] nil)
 

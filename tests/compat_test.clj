@@ -266,11 +266,33 @@
   (testing "second defonce does not overwrite"
     (is (= 42 compat-defonce-val))))
 
-;; --- set! no-op ---
+;; --- set! on dynamic vars ---
+;;
+;; mino used to make set! a no-op so JVM-Clojure code that pokes
+;; *warn-on-reflection* etc. would load without erroring. That hid
+;; the legitimate set!-on-bound-dynamic-var contract: real Clojure
+;; mutates the thread-local binding frame, and code that needs to
+;; bump a counter or stash a value inside binding relies on it.
+;; Now set! mutates the topmost dyn frame when one exists, and
+;; throws "Can't change/establish root binding" when no binding
+;; frame is active -- matching JVM Clojure's runtime contract.
 
-(deftest set-bang-noop
-  (testing "set! is a no-op that returns nil"
-    (is (nil? (set! *warn-on-reflection* true)))))
+(deftest set-bang-mutates-dynamic-binding
+  (testing "set! mutates the topmost binding frame"
+    (def ^:dynamic *set-bang-test* 0)
+    (binding [*set-bang-test* 0]
+      (is (= 1 (set! *set-bang-test* 1)))
+      (is (= 1 *set-bang-test*))
+      (set! *set-bang-test* 99)
+      (is (= 99 *set-bang-test*))))
+  (testing "set! on dynamic var without binding form throws"
+    (def ^:dynamic *set-bang-unbound* 0)
+    (is (thrown? (set! *set-bang-unbound* 5))))
+  (testing "set!-style increment inside binding"
+    (def ^:dynamic *counter* 0)
+    (binding [*counter* 0]
+      (dotimes [_ 5] (set! *counter* (inc *counter*)))
+      (is (= 5 *counter*)))))
 
 ;; --- random-uuid ---
 

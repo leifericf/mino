@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.255.23 — Fix: `set!` mutates dynamic-var bindings (was no-op)
+
+`set!` used to be a no-op macro: `(set! *x* 5)` returned `nil` and
+left `*x*` unchanged, even inside a `(binding [*x* 0] ...)` form.
+The comment called it "a JVM compiler directive, not applicable to
+mino", which is half-true (`set!` does double duty in JVM Clojure:
+field mutation on the JVM side, *and* thread-local dynamic-var
+binding mutation). The dynamic-var shape is portable code that
+mino was silently ignoring.
+
+Now: `(set! *x* expr)` calls the new `set-dyn-binding!` C primitive
+which walks `ctx->dyn_stack`, finds the topmost binding for the
+symbol, mutates its `val`, and returns the new value. With no
+active binding frame for the named var, throws
+`Can't change/establish root binding of: *name* with set!` —
+matches JVM Clojure's runtime contract.
+
+The JVM-only field-mutation shape `(set! (.-field obj) val)` is not
+supported; mino has no JVM fields. Pre-existing Clojure code that
+relied on the old no-op behavior to silently swallow
+`(set! *warn-on-reflection* true)` now needs to wrap such calls in
+`try/catch` (or just delete them, since they had no effect anyway).
+Per `[[alpha-no-backwards-compat]]`, this contract change is acceptable.
+
+Regression in `tests/compat_test.clj`
+(`set-bang-mutates-dynamic-binding`).
+
 ## v0.255.22 — Fix: Regex engine now parses `{n}` / `{n,m}` / `{n,}` quantifiers
 
 The vendored regex engine recognized `*`, `+`, `?` quantifiers but
