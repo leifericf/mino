@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.255.0 — Fix: loop+recur Closures Inside defn Bodies
+
+Surfaced by mino-tests's T8 closure_tco_jit probe during Cycle A: a
+`(loop [i 0 ...] ... (recur ...))` inside a defn body returns closures
+that all share iteration-0's bindings. Top-level loops worked
+correctly; the bug lived entirely in the BC compile path.
+
+Root cause: `compile_loop` emitted `OP_PUSH_ENV` + `OP_ENV_BIND`s
+ONCE before the recur target. Each `recur` then jumped back to the
+post-binding entry, updated the loop register values via `OP_MOVE`,
+and re-ran the body. The env frame, however, was the same frame --
+and OP_ENV_BIND stores a snapshot of the register value, not a
+reference -- so the env's `"i" -> value` mapping stayed at iter 0.
+Every closure built in the body captured that env, so every closure
+returned iter-0's value.
+
+Fix: `compile_recur` now emits `OP_POP_ENV` + `OP_PUSH_ENV` +
+re-`OP_ENV_BIND` of every loop binding before jumping back, when the
+enclosing function is env-capturing (`bc->captures`). Loops with no
+closure capture skip the work; the fused counted-loop family
+(`OP_LOOP_INT_DEC` etc.) also skips because they don't go through
+`compile_recur`. The tree-walker `eval_loop` path was already
+correct: it allocates a fresh `env_child` per recur iteration.
+
+`loop_target_t` gains `captures` and `bind_const_idx[]` so
+`compile_recur` knows which symbol names to publish without
+re-resolving them.
+
+Regression test in `tests/bc_closure_test.clj` adds three deftests
+that fail under the old behavior: closure capture inside a defn
+body, side-effect capture inside a defn body, and nested-loop
+capture across outer + inner bindings. Suite: 1269 / 4542 green.
+
 ## v0.254.0 — Cross-Repo Release-Gate Hook
 
 mino's release-gate composite now chains into the mino-tests

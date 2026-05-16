@@ -92,6 +92,41 @@
           (recur (inc i))))
       (is (= [0 1 2] (mapv (fn [f] (f)) @cls))))))
 
+(deftest closure-capture-loop-recur-inside-defn
+  ;; Regression: the BC compile path for `loop` re-used a single env
+  ;; frame across recur iterations, so closures built in the body all
+  ;; saw iter-0's bindings rather than per-iteration values. The
+  ;; top-level loop test above doesn't catch this -- the bug only
+  ;; surfaces when the loop sits inside a defn body that goes through
+  ;; the BC compiler.
+  (testing "loop+recur inside defn body captures per-iteration value"
+    (defn build-closures []
+      (let [fs (loop [i 0 acc []]
+                 (if (>= i 5) acc
+                     (recur (inc i) (conj acc (fn [] i)))))]
+        (mapv (fn [f] (f)) fs)))
+    (is (= [0 1 2 3 4] (build-closures))))
+  (testing "side-effect capture inside defn body"
+    (defn collect-closures []
+      (let [cls (atom [])]
+        (loop [i 0]
+          (when (< i 4)
+            (swap! cls conj (fn [] i))
+            (recur (inc i))))
+        (mapv (fn [f] (f)) @cls)))
+    (is (= [0 1 2 3] (collect-closures))))
+  (testing "nested loop+recur inside defn body"
+    (defn nested-closures []
+      (vec (for [outer (range 3)]
+             (let [inner-fs (loop [j 0 acc []]
+                              (if (>= j 3) acc
+                                  (recur (inc j) (conj acc (fn [] [outer j])))))]
+               (mapv (fn [f] (f)) inner-fs)))))
+    (is (= [[[0 0] [0 1] [0 2]]
+            [[1 0] [1 1] [1 2]]
+            [[2 0] [2 1] [2 2]]]
+           (nested-closures)))))
+
 (deftest closure-capture-dotimes
   (testing "dotimes index captured per iteration"
     (let [fs (atom [])]

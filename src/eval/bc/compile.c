@@ -129,7 +129,19 @@ typedef struct local {
 typedef struct loop_target {
     int  entry_pc;
     int  bind_regs[BC_MAX_LOCALS];
+    int  bind_const_idx[BC_MAX_LOCALS]; /* const-pool index for each
+                                          binding's name symbol, used by
+                                          compile_recur to re-publish the
+                                          env entry on each iteration so
+                                          a closure built in iter N
+                                          captures iter N's value, not
+                                          iter 0's. -1 when there's no
+                                          captured env (loop body has no
+                                          closures that escape). */
     int  n_bindings;
+    int  captures;                     /* mirrors bc->captures at loop
+                                          entry: were we wrapped in an
+                                          OP_PUSH_ENV / OP_POP_ENV pair? */
 } loop_target_t;
 
 typedef struct compiler {
@@ -1875,6 +1887,8 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
     loop_target_t *saved_loop = c->loop;
     loop_target_t this_loop;
     this_loop.n_bindings = n_bindings;
+    this_loop.captures   = c->bc->captures ? 1 : 0;
+    for (int i = 0; i < n_bindings; i++) this_loop.bind_const_idx[i] = -1;
     int pushed_env = 0;
     if (c->bc->captures) {
         emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
@@ -1897,6 +1911,7 @@ static int compile_loop(compiler_t *c, mino_val_t *form, int dst, int tail)
         if (pushed_env) {
             int k = add_const(c, name_form);
             if (k < 0) goto out;
+            this_loop.bind_const_idx[i] = k;
             emit_abx(c, OP_ENV_BIND, (unsigned)reg, (unsigned)k);
         }
     }
@@ -1960,6 +1975,27 @@ static int compile_recur(compiler_t *c, mino_val_t *form, int dst, int tail)
         emit_abc(c, OP_MOVE, (unsigned)c->loop->bind_regs[i],
                  (unsigned)(temp_base + i), 0);
     }
+
+    /* If the enclosing loop wrapped its bindings in an OP_PUSH_ENV /
+     * OP_POP_ENV pair, replace the live env frame on every recur so a
+     * closure built in iteration N captures iter N's bindings. Without
+     * this, all closures share the env frame that was bound once at
+     * loop entry; OP_MOVE updates the register but the env's
+     * symbol -> value mapping still points at the iter-0 value (the
+     * env stores a snapshot, not a register reference). The tree-
+     * walker eval_loop in bindings.c does the equivalent fresh
+     * env_child per recur. */
+    if (c->loop->captures) {
+        emit_abc(c, OP_POP_ENV, 0, 0, 0);
+        emit_abc(c, OP_PUSH_ENV, 0, 0, 0);
+        for (int i = 0; i < n; i++) {
+            int k = c->loop->bind_const_idx[i];
+            if (k < 0) { c->ok = 0; return -1; }
+            emit_abx(c, OP_ENV_BIND, (unsigned)c->loop->bind_regs[i],
+                     (unsigned)k);
+        }
+    }
+
     /* OP_JMP's offset is added to pc after the instruction is fetched.
      * Bias-encoded as 16-bit unsigned (+0x8000): valid range -0x8000..0x7FFF. */
     int off = c->loop->entry_pc - ((int)c->bc->code_len + 1);
