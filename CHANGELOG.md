@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.255.22 — Fix: Regex engine now parses `{n}` / `{n,m}` / `{n,}` quantifiers
+
+The vendored regex engine recognized `*`, `+`, `?` quantifiers but
+silently dropped `{n}` and friends — the compile-time `switch`
+never matched `{`, so the brace and its digits were treated as
+unknown meta and the pattern produced "zero matches needed"
+behavior. `(re-find #"\d{4}" "year 2026")` returned `nil`;
+`(re-matches #"(\d{4})-(\d{2})-(\d{2})" "2026-05-17")` returned
+`nil`. Date / version / hex-id / password patterns common in
+Clojure code all failed silently.
+
+Added a `BOUNDED` op with `{min, max}` storage in the regex_t
+union, a `case '{':` arm that parses `{n}` / `{n,}` / `{n,m}` (and
+falls back to treating `{` as a literal when followed by non-digit
+content, so `{abc}` still parses), and a `matchbounded` matcher
+modeled on `matchstar` / `matchplus` with explicit bounds and
+backtracking. `{n,}` encodes max == 0xFF as the unbounded sentinel.
+
+Min/max clamped to 255 — far above any real-world pattern. Greedy
+with backtracking, same shape the other quantifiers use.
+
+Regression in `tests/regex_test.clj` (`re-bounded-quantifier`).
+
 ## v0.255.21 — Fix: `time-ms` returns wall-clock, not process CPU time
 
 `(time-ms)` was implemented as `clock() / CLOCKS_PER_SEC * 1000` —

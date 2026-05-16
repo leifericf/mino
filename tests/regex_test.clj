@@ -99,3 +99,28 @@
     (is (nil? (re-find
                #"#define\s+(MINO_STENCIL_RELOC_[A-Z_0-9]+)\s+(\d+)u?"
                "/*")))))
+
+(deftest re-bounded-quantifier
+  ;; Regression: mino's regex engine previously did not parse {n} /
+  ;; {n,m} / {n,} bounded repeats. Patterns like #"\d{4}" silently
+  ;; matched zero characters (returning nil for re-find) because the
+  ;; compile path skipped the unknown '{' meta-char. Real Clojure
+  ;; regex (and POSIX EREs) treat {n,m} as a standard quantifier.
+  (testing "exact-count {n}"
+    (is (= "2026" (re-find #"\d{4}" "year 2026")))
+    (is (= "abcd" (re-find #"[a-z]{4}" "abcdef")))
+    (is (nil? (re-find #"\d{5}" "1234"))))
+  (testing "range {n,m}"
+    (is (= "ab"   (re-find #"[a-z]{1,3}" "ab")))
+    (is (= "abc"  (re-find #"[a-z]{1,3}" "abcdef")))
+    (is (= "1234" (re-find #"\d{2,4}" "12345"))))
+  (testing "open-ended {n,}"
+    (is (= "abc"    (re-find #"[a-z]{2,}" "abc")))
+    (is (= "abcdef" (re-find #"[a-z]{2,}" "abcdef")))
+    (is (nil? (re-find #"[a-z]{4,}" "abc"))))
+  (testing "re-matches with bounded quantifier + capture groups"
+    (is (= ["2026-05-17" "2026" "05" "17"]
+           (re-matches #"(\d{4})-(\d{2})-(\d{2})" "2026-05-17")))
+    (is (nil? (re-matches #"(\d{4})-(\d{2})-(\d{2})" "26-05-17"))))
+  (testing "literal { without digits stays a literal char"
+    (is (= "{abc}" (re-find #"\{abc\}" "x{abc}y")))))

@@ -49,7 +49,7 @@
 #define MAX_CHAR_CLASS_LEN      256   /* Max length of character-class buffer in.   */
 
 
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE /* , BRANCH */ };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED /* , BRANCH */ };
 
 typedef struct regex_t
 {
@@ -59,6 +59,10 @@ typedef struct regex_t
     unsigned char  ch;   /*      the character itself             */
     unsigned char* ccl;  /*  OR  a pointer to characters in class */
     unsigned char  gid;  /*  OR  the capture group id (1..15)     */
+    struct {             /*  OR  the bounded-repeat min/max for   */
+      unsigned char min; /*  {n}, {n,m}, {n,}. {n} stores min==max. */
+      unsigned char max; /*  {n,} stores max == 0xFF (unbounded). */
+    } bnd;
   } u;
 } regex_t;
 
@@ -223,6 +227,69 @@ re_t re_compile(const char* pattern)
       case '*': {    re_compiled[j].type = STAR;            } break;
       case '+': {    re_compiled[j].type = PLUS;            } break;
       case '?': {    re_compiled[j].type = QUESTIONMARK;    } break;
+      /* Bounded repeat: {n} / {n,} / {n,m}. Modifies the preceding atom
+       * by recording a min/max repeat count. Clamps to 0..255 since the
+       * union storage is two bytes; {n,} encodes max == 0xFF (unbounded
+       * sentinel). Malformed {...} (missing closing brace, non-digit
+       * inside) is rejected by failing the compile, matching mino's
+       * regex-engine contract of returning NULL on bad input rather
+       * than silently treating the braces as literals. */
+      case '{':
+      {
+        int min_v = 0, max_v = 0;
+        int has_max = 0;
+        int saved_i = i;
+        i++;
+        if (pattern[i] < '0' || pattern[i] > '9')
+        {
+          /* Not a valid {n...}; treat '{' as a literal character so
+           * `{abc}` and similar non-quantifier braces still parse. */
+          i = saved_i;
+          re_compiled[j].type = CHAR;
+          re_compiled[j].u.ch = '{';
+          break;
+        }
+        while (pattern[i] >= '0' && pattern[i] <= '9')
+        {
+          min_v = min_v * 10 + (pattern[i] - '0');
+          i++;
+        }
+        if (pattern[i] == ',')
+        {
+          i++;
+          if (pattern[i] == '}')
+          {
+            has_max = 0; /* {n,} -- unbounded */
+          }
+          else if (pattern[i] >= '0' && pattern[i] <= '9')
+          {
+            while (pattern[i] >= '0' && pattern[i] <= '9')
+            {
+              max_v = max_v * 10 + (pattern[i] - '0');
+              i++;
+            }
+            has_max = 1;
+          }
+          else
+          {
+            free(re_compiled); return 0;
+          }
+        }
+        else
+        {
+          max_v = min_v; /* {n} -- exact */
+          has_max = 1;
+        }
+        if (pattern[i] != '}')
+        {
+          free(re_compiled); return 0;
+        }
+        if (min_v > 255) min_v = 255;
+        if (has_max && max_v > 255) max_v = 255;
+        re_compiled[j].type = BOUNDED;
+        re_compiled[j].u.bnd.min = (unsigned char)min_v;
+        re_compiled[j].u.bnd.max = has_max ? (unsigned char)max_v : (unsigned char)0xFF;
+      } break;
 /*    case '|': {    re_compiled[j].type = BRANCH;          } break; <-- not working properly */
 
       /* Escaped character-classes (\s \w ...): */
@@ -531,6 +598,38 @@ static int matchplus(regex_t p, regex_t* pattern, const char* text, int* matchle
   return 0;
 }
 
+/* Bounded-repeat matcher: match the preceding atom p between min and
+ * max times (max == 0xFF means unbounded). Greedy with backtracking,
+ * same shape as matchstar/matchplus but with explicit bounds. */
+static int matchbounded(regex_t p, regex_t* pattern, const char* text,
+                        int* matchlength, int min, int max)
+{
+  int prelen   = *matchlength;
+  int count    = 0;
+  const char *prepoint;
+  /* Greedy: consume as many as possible up to max. */
+  while (count < max && text[0] != '\0' && matchone(p, *text))
+  {
+    text++;
+    (*matchlength)++;
+    count++;
+  }
+  /* Backtrack down to min trying to match the suffix at each point. */
+  prepoint = text;
+  while (count >= min)
+  {
+    if (matchpattern(pattern, text, matchlength))
+      return 1;
+    if (count == 0) break;
+    text--;
+    (*matchlength)--;
+    count--;
+  }
+  (void)prepoint;
+  *matchlength = prelen;
+  return 0;
+}
+
 static int matchquestion(regex_t p, regex_t* pattern, const char* text, int* matchlength)
 {
   if (p.type == UNUSED)
@@ -623,6 +722,15 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
     else if (pattern[1].type == PLUS)
     {
       return matchplus(pattern[0], &pattern[2], text, matchlength);
+    }
+    else if (pattern[1].type == BOUNDED)
+    {
+      int max = (int)pattern[1].u.bnd.max;
+      /* 0xFF is the unbounded sentinel; matchbounded uses INT_MAX
+       * internally so the greedy loop runs to end-of-input. */
+      if (max == 0xFF) max = 0x7FFFFFFF;
+      return matchbounded(pattern[0], &pattern[2], text, matchlength,
+                          (int)pattern[1].u.bnd.min, max);
     }
     else if ((pattern[0].type == END) && pattern[1].type == UNUSED)
     {
