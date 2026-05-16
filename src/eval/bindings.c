@@ -671,6 +671,22 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
             "loop bindings must be a list or vector");
         return NULL;
     }
+    /* Each `recur` allocates a fresh env_child for the next
+     * iteration instead of mutating `local` in place. Closures
+     * captured during the current iteration (including ones
+     * introduced by macros that expand to a (fn ...) form, e.g.
+     * `future`, `delay`, `for`, `doseq`) keep pointing at the
+     * env_child that was in scope when they were built, matching
+     * Clojure's per-iteration frame semantics. Static analysis of
+     * the source body to skip this cost wouldn't catch macros that
+     * introduce closures via expansion -- and a closure captured
+     * over a recur slot that later iterations rebind is a silent
+     * correctness bug -- so the alloc is unconditional here. Tight
+     * counted-loop shapes the BC compiler can recognise (the fused
+     * OP_LOOP_INT_DEC family) skip this trampoline entirely; the
+     * cost is contained to general loops where one env_child
+     * allocation per iteration is a small price for sound
+     * closure-capture. */
     for (;;) {
         mino_val_t *result = eval_implicit_do_impl(S, body, local, tail);
         if (result == NULL) {
@@ -679,6 +695,8 @@ mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
         if (mino_type_of(result) != MINO_RECUR) {
             return result;
         }
+        local = env_child(S, env);
+        if (local == NULL) return NULL;
         if (!bind_params(S, local, params, result->as.recur.args,
                          "recur")) {
             return NULL;

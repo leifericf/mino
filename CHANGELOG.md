@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.252.3 — Closure Capture Across Self-Tail-Call
+
+A third adversarial whitebox pass — this one building real multi-CPU
+concurrency workloads to tease out races, deadlocks, and pathological
+slowdowns — caught a deep, pre-existing Clojure-semantics divergence:
+**self-tail-call reused the same `local` env_child and `bind_params`
+mutated param slots in place**, so a closure built in iteration N
+silently observed iteration N+1's param values once the next recur
+landed. Every common closure-over-iteration pattern was affected:
+
+  - `(loop [i 0] (recur ...) + (fn [] i))`
+  - `(dotimes [i N] (fn [] i))`
+  - `(defn G [i] ... (G (inc i)))` self-recursion
+  - `(for [i ...] (fn [] i))` (expanded form)
+  - Any macro that expands to `(fn [] ...)` — `future`, `delay`,
+    `lazy-seq`, `for`, `doseq` — when used inside a recur body
+
+The original surface that caught this in pass 3 was W10:
+`(def ps (vec (repeatedly 10 promise)))
+ (dotimes [i 10] (future (deliver (nth ps i) ...)))
+ (mapv deref ps)`
+which hung indefinitely (every future captured the post-loop `i = 10`,
+so every `(nth ps 10)` threw out-of-bounds and no promise got
+delivered) and, under `--jit=on`, SIGSEGV'd in
+`mino_jit_getglobal_cached_slow` while the threads dereffed corrupt
+state.
+
+The fix is in two paths:
+
+  - `apply_callable`'s self-tail-call trampoline (`src/eval/fn.c`)
+    for both the `(recur ...)` and named-self-call cases now
+    allocates a fresh `env_child` on each iteration instead of
+    reusing `local` and mutating param slots in place.
+  - `eval_loop`'s recur trampoline (`src/eval/bindings.c`) does
+    the same on every `recur` rebind.
+
+Source-level "does the body have closures?" analysis would miss the
+macro-introduced closures (a `future` body isn't a `fn` form until
+after macroexpansion), so the allocation is unconditional on these
+paths. The BC compiler's fused counted-loop family
+(`OP_LOOP_INT_DEC`, `OP_LOOP_INT_LT_INC`, …) recognises the tight-
+loop shapes ahead of this code, so the cost is contained to general
+self-recursion: one `env_child` allocation per iteration, ≈640 ns
+on a tight `(loop [i 100000] ...)`.
+
+Why the existing test suite didn't catch this: `tests/bc_closure_test.clj`
+covered closures over fn params *across separate invocations*
+(`(let [c1 (mk-counter 100) c2 (mk-counter 200)] ...)`) but had no
+test for closures captured *during a single invocation that
+self-recurses*. The new regression block (six deftests, nine
+assertions) closes that gap:
+
+  - `closure-capture-named-self-tail-call` — `(defn G [i] ... (G (inc i)))`
+  - `closure-capture-loop-recur` — both value-collecting and side-
+    effect-via-atom shapes
+  - `closure-capture-dotimes` — the most common surface in real code
+  - `closure-capture-for-comprehension`
+  - `closure-capture-macro-introduced` — future/delay/W10 promise
+    fan-out, the cases that source-level scanning would miss
+  - `closure-capture-multi-arity-self-call` — covers the
+    multi-arity branch of `apply_callable`'s recur trampoline
+
+Full suite: 1743 tests / 7929 assertions / 0 failed (was 1737/7920
+pre-fix — +6 tests, +9 assertions). 4-way parity byte-identical on
+stdout; mino-lean + JIT-on/off/auto all match.
+
 ## v0.252.2 — Runtime Hardening from Cycle-I Whitebox Pass 2
 
 A second adversarial whitebox pass targeted the runtime internals

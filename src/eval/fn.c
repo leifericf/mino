@@ -599,6 +599,17 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     if (cur_params != prev_params)
                         local = env_child(S, fn->as.fn.env);
                 }
+                /* Each recur allocates a fresh env_child so a closure
+                 * built during the current iteration keeps pointing at
+                 * the slots it captured, not the next iteration's
+                 * rebinds. Source-level scanning of the body can't see
+                 * closures introduced by macros that expand to a
+                 * (fn ...) form (e.g. `future`, `delay`, `for`,
+                 * `doseq`), so the alloc is unconditional here. Tight
+                 * counted-loop shapes the BC compiler can recognise
+                 * skip this trampoline entirely; the cost is contained
+                 * to general self-recursion. */
+                local = env_child(S, fn->as.fn.env);
                 /* Safepoint poll at the fn-self-recur backward
                  * branch — same rationale as the loop trampoline in
                  * eval/bindings.c: tight tail-recursive bodies skip
@@ -611,9 +622,16 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                 mino_val_t *new_fn = result->as.tail_call.fn;
                 call_args = result->as.tail_call.args;
                 if (new_fn == fn && fn->as.fn.params != NULL) {
-                    /* Self tail call, single-arity: reuse local env; the
-                     * loop's bind_params will update the existing param
-                     * slots in place without allocating a fresh frame. */
+                    /* Self tail call, single-arity: allocate a fresh
+                     * env_child each iteration. The previous
+                     * reuse-and-mutate-in-place shortcut let a closure
+                     * built in iteration N silently observe iteration
+                     * N+1's params once bind_params ran -- a Clojure-
+                     * semantics divergence. Closure-free tail recurs
+                     * pay one env_child alloc per iteration; the BC
+                     * compiler's fused counted-loop family covers the
+                     * tight-loop case ahead of this path. */
+                    local = env_child(S, fn->as.fn.env);
                     continue;
                 }
                 fn        = new_fn;
