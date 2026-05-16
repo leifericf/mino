@@ -89,14 +89,53 @@ jobs:
         # an opaque "Test timed out" actionable. Keeps trace off
         # locally (env-gated) so a normal `./mino tests/run.clj`
         # produces the same output as before.
+        #
+        # Watchdog wrapper: GHA's timeout-minutes sends a SIGKILL after
+        # the cap, which gives no diagnostic at all on a hang. We
+        # spawn mino in the background, sleep just inside the cap,
+        # then SIGABRT it -- mino's crash_handler (main.c:711) prints
+        # a backtrace + gc stats on SIGABRT, so a hang now leaves a
+        # readable stack in the log instead of a silent kill. mino
+        # exits non-zero after the dump, which fails the step
+        # normally (no continue-on-error masking).
         env:
           MINO_TEST_TRACE: "1"
         run: |
-          set -o pipefail
-          ./mino tests/run.clj 2> >(tee /tmp/test_trace.log >&2)
+          set +e
+          # Pre-create + tail the trace file so its lines stream to
+          # the live job log as mino emits them. Without the tail,
+          # the trace only appears via the failure artifact, which
+          # makes a live `gh run watch` opaque.
+          : > /tmp/test_trace.log
+          (tail -F /tmp/test_trace.log 2>/dev/null) &
+          TAIL_PID=$!
+          # exec replaces the subshell with mino so $! is mino's
+          # pid directly -- the watchdog's kill -ABRT then lands
+          # on mino, not on an outer shell wrapper.
+          (exec ./mino tests/run.clj) 2> /tmp/test_trace.log &
+          MINO_PID=$!
+          # Wake at 7m30s (the cap is 8m) so SIGABRT has time to
+          # run mino's handler before GHA's own SIGKILL lands.
+          # mino's crash_handler (main.c:711) prints a backtrace +
+          # GC stats on SIGABRT, so a hang now leaves a readable
+          # stack in the log + trace artifact instead of a silent
+          # kill. mino exits 134 (128 + SIGABRT) after the dump.
+          (sleep 450; if kill -0 $MINO_PID 2>/dev/null; then
+             echo "##[warning]Watchdog firing SIGABRT on hung mino (pid $MINO_PID)"
+             kill -ABRT $MINO_PID
+           fi) &
+          WD_PID=$!
+          wait $MINO_PID
+          RC=$?
+          # Give the trace tail a moment to flush mino's last lines.
+          sleep 1
+          kill $WD_PID 2>/dev/null || true
+          kill $TAIL_PID 2>/dev/null || true
+          exit $RC
         # Tests usually finish in seconds; a hang means a deadlock, not
         # a slow runner. Cap so we get diagnostic output instead of
-        # waiting on the 6h job-default timeout.
+        # waiting on the 6h job-default timeout. The watchdog above
+        # fires 30s before this cap so we keep the stack trace.
         timeout-minutes: 8
         # The Windows test suite has documented divergence: cmd.exe's
         # echo emits a trailing space before \n, which the proc-test

@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.255.10 — Diagnostic: SIGABRT Watchdog on CI Test Hang
+
+A diagnostic-only release that converts the remaining CI test
+hang from "silent SIGKILL at the 8-min cap" into "SIGABRT 30s
+before the cap, mino's crash_handler dumps a backtrace + GC
+stats". v0.255.9 fixed one real bug at `transient-survives-gc-
+yield` (use-after-free reproducible locally under ASan) but
+mino's CI matrix still hangs at the same test on macos-14 /
+ubuntu-24.04 / ubuntu-24.04-arm. Without a stack trace from the
+hung process we can't tell whether mino is in a tight loop, a
+pthread cv_wait, a GC mark-stack drain, or somewhere else.
+
+`.github/workflows/ci.yml`'s Test step now wraps `./mino
+tests/run.clj` in a watchdog:
+
+* Streams stderr to `/tmp/test_trace.log` (already an artifact
+  on failure since v0.255.8).
+* Backgrounds mino via `(exec ./mino ...)` so the subshell's
+  `$!` is mino's pid directly.
+* 7m30s into the run, if mino is still alive, sends SIGABRT.
+* mino's existing crash_handler (`main.c:711`) prints
+  `[mino] fatal SIGABRT (signal 6)`, GC stats (minor / major /
+  live / alloc / freed / phase / remset), and a libc-backtrace
+  stack frame list.
+* The 30s buffer before GHA's own SIGKILL gives the handler
+  time to flush stdout/stderr and exit cleanly with code 134.
+
+Local behaviour unchanged: a plain `./mino tests/run.clj` still
+exits 0 in ~1.6s without the watchdog firing. The wrapper only
+lives in CI.
+
+This release does not include any runtime change; v0.255.9's
+fix is still load-bearing for the use-after-free path.
+
 ## v0.255.9 — Fix: `(gc!)` During In-Flight Major Mark Use-After-Free
 
 Root cause of the v0.255.6 / .7 / .8 CI hang: `mino_gc_collect(MINO_GC_FULL)`
