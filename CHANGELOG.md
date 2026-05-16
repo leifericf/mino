@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.246.0 — GHA Matrix Extension + Release-Gate Step
+
+Extends the GitHub Actions CI matrix to cover every host arch
+with a committed stencil header, then adds a release-gate step
+that exercises the cpjit substrate end-to-end on each.
+
+Matrix shape (was: ubuntu-latest / macos-latest / windows-latest):
+
+  - `ubuntu-24.04`      -- x86_64 Linux native
+  - `ubuntu-24.04-arm`  -- ARM64 Linux native (GHA added this
+                            tier in 2024)
+  - `macos-14`          -- ARM64 Darwin native (Apple Silicon)
+  - `windows-2022`      -- x86_64 Windows native
+
+Runner labels are pinned so a future GHA image bump doesn't
+silently shift the matrix.
+
+A new `Release gate` step runs `./mino task release-gate` on
+every non-Windows entry. The gate covers check-reloc-mirror,
+check-stencil-registry, check-stencils-fresh, the test suite,
+the ASan-built suite, and 4-way JIT parity (auto / on / off /
+lean). Windows skips the gate because the ASan step needs a
+libsanitizer mingw doesn't ship; the matrix still builds and
+runs the smoke test on the Windows runner.
+
+This is the moment the "5 host paths code-complete" line stops
+being aspirational: every push now exercises the runtime patcher,
+the stencil byte tables, and the dual-binary build pipeline on
+each host the cpjit cycle wired up.
+
+  - `.github/workflows/ci.yml`: matrix entries pinned; release-
+    gate step added; `windows-latest` -> `windows-2022` propagated
+    through CC selection and continue-on-error gate.
+
+`release-gate` green locally; CI matrix activates on push.
+
 ## v0.245.0 — Docker Images + ci-matrix Task
 
 Opens cycle F. Adds the local CI scaffolding that makes the

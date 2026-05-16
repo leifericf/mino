@@ -11,23 +11,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Pinned runner labels so a future GHA image bump doesn't
+        # silently shift the matrix. `ubuntu-24.04-arm` is the GHA
+        # ARM64 Linux tier (added 2024); together with `ubuntu-24.04`
+        # we cover both Linux architectures natively. `macos-14` is
+        # Apple Silicon. `windows-2022` is x86_64 Windows.
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
     env:
-      CC: ${{ matrix.os == 'windows-latest' && 'gcc' || 'cc' }}
+      CC: ${{ matrix.os == 'windows-2022' && 'gcc' || 'cc' }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Compiler version
         run: |
           $CC --version
-          # On ubuntu-latest the alt-versions are also available; print
+          # On ubuntu-24.04 the alt-versions are also available; print
           # them so a future regression that's gcc-13-specific (or
           # 12-specific) is easier to triage.
-          if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          if [ "${{ matrix.os }}" = "ubuntu-24.04" ] || [ "${{ matrix.os }}" = "ubuntu-24.04-arm" ]; then
             for v in 12 13 14; do
               if command -v gcc-$v >/dev/null; then
                 gcc-$v --version | head -1
@@ -85,7 +90,18 @@ jobs:
         # echo emits a trailing space before \n, which the proc-test
         # assertions do not strip. Build still must pass; tests are
         # informational on Windows until the suite is portable.
-        continue-on-error: ${{ matrix.os == 'windows-latest' }}
+        continue-on-error: ${{ matrix.os == 'windows-2022' }}
+
+      - name: Release gate
+        # The composite gate -- check-reloc-mirror, check-stencil-
+        # registry, check-stencils-fresh, the test suite under ASan,
+        # and 4-way JIT parity (auto / on / off / lean) -- runs on
+        # every non-Windows matrix entry. Windows skips the gate
+        # because the gate's ASan step needs a libsanitizer that
+        # mingw doesn't ship.
+        if: matrix.os != 'windows-2022'
+        run: ./mino task release-gate
+        timeout-minutes: 12
 
   external-test-suite:
     name: external-test-suite (clojure-test-suite)
