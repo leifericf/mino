@@ -29,3 +29,37 @@
       acc
       (build__gc (- n 1) (list acc)))))
   (is (cons? (build__gc 200 42))))
+
+;; Regression for gc! during mid-major-mark: mino_gc_collect(MINO_GC_FULL)
+;; used to run the minor BEFORE finishing the in-flight major; the minor
+;; would free a YOUNG header still on the major's mark stack, and the
+;; subsequent major step would chase the freed pointer. Surfaces on CI
+;; runners as a hang in tests/transient_test (test-suite ordering puts
+;; transient-survives-gc-yield inside an in-flight major). Locally
+;; reproduced via ASan as heap-use-after-free in gc_mark_child_push.
+;;
+;; The trigger is: heat enough OLD objects to start an incremental
+;; major, then call gc! while the major's mark stack is still
+;; non-empty. The fixed mino_gc_collect now finish-majors first, then
+;; runs the minor, matching the auto-tick path's invariant.
+(deftest gc-bang-during-incremental-major
+  ;; Warm up: promote many objects so the next minor will start a
+  ;; major. Each loop iteration grows a vec; the vec survives long
+  ;; enough to be promoted.
+  (let [warmup (loop [i 0 acc []]
+                 (if (= i 5000)
+                   acc
+                   (recur (inc i) (conj acc i))))]
+    (is (= 5000 (count warmup))))
+  ;; Now run the pattern that used to corrupt: transient + gc!
+  ;; sequence under an active major mark. If the bug regresses we
+  ;; get a SIGSEGV in gc_sweep / gc_mark_child_push, or a stray
+  ;; "inc expects a number" caught by the test framework.
+  (let [t (transient [])]
+    (conj! t 1)
+    (gc!)
+    (conj! t 2)
+    (gc!)
+    (conj! t 3)
+    (gc!)
+    (is (= [1 2 3] (persistent! t)))))

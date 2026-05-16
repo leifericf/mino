@@ -35,11 +35,17 @@ void mino_gc_collect(mino_state_t *S, mino_gc_kind_t kind)
         if (mino_current_ctx(S)->gc_stack_bottom == NULL) {
             return;
         }
-        if (S->gc_bytes_young > 0) {
-            gc_minor_collect(S);
-        }
+        /* Finish any in-flight major BEFORE running the minor. A nested
+         * minor while major's mark stack still holds OLD entries could
+         * free a YOUNG object reachable only through an OLD pointer
+         * pending on major's stack; major's next gc_trace_children
+         * would then chase the freed pointer. Same invariant the
+         * auto-tick path (gc_tick_during_major) honours. */
         if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
             gc_force_finish_major(S);
+        }
+        if (S->gc_bytes_young > 0) {
+            gc_minor_collect(S);
         }
         if (S->gc_phase == GC_PHASE_IDLE) {
             gc_major_collect(S);

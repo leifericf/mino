@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.255.9 — Fix: `(gc!)` During In-Flight Major Mark Use-After-Free
+
+Root cause of the v0.255.6 / .7 / .8 CI hang: `mino_gc_collect(MINO_GC_FULL)`
+(the `(gc!)` primitive) ran the nested minor BEFORE finishing the
+in-flight major. The minor freed a YOUNG header that was still on
+major's mark stack from a prior incremental slice; the subsequent
+`gc_force_finish_major` chased the freed pointer through
+`gc_mark_child_push`.
+
+`gc_tick_during_major` (driver.c:141-147) already documents the
+correct ordering -- "finish-then-minor rather than nest" -- and
+honours it for the auto-tick path; the public-API path simply had
+the calls reversed. Auto-tick is the common case so the bug went
+unnoticed locally; CI's test ordering puts `transient-survives-gc-
+yield` (which explicitly calls `(gc!)`) inside an in-flight major
+on every push, surfacing the bug deterministically.
+
+Symptom shape under each environment:
+
+* GitHub Actions matrix (macos-14 / ubuntu-24.04{,-arm} /
+  windows-2022): 8-min timeout in the Test step, identical hang
+  point across all four OSes -- the v0.255.8 diagnostic trace
+  pinned the hanging deftest to `transient-survives-gc-yield`.
+* Local without sanitizer: intermittent SIGSEGV in
+  `tiny_free_no_lock` (sweep double-free) or
+  `error[MTY001] inc expects a number` (corrupted value via the
+  reused freed header).
+* Local under ASan: clean repro --
+  `heap-use-after-free at gc_mark_child_push driver.c:414`
+  with the freer site at `gc_minor_collect minor.c:472` inside the
+  same `mino_gc_collect` call.
+
+Fix: reorder `MINO_GC_FULL` to finish the major BEFORE the minor,
+mirroring `gc_tick_during_major`. Behaviour for `MINO_GC_MINOR` and
+`MINO_GC_MAJOR` unchanged.
+
+Regression: `tests/gc_test.clj` gains
+`gc-bang-during-incremental-major` -- warms up enough OLDs to start
+an incremental major, then calls `(gc!)` mid-mark in the transient
+shape that surfaced the bug. Fails (SIGSEGV / inc-error / hang)
+under the old ordering, passes under the fix. Full suite climbs
+from 1273 / 4555 to 1274 / 4557 (one deftest, two assertions).
+
+Local verification:
+* `./mino tests/run.clj`: 1274 / 4557 green in 1.6s.
+* `./mino_asan tests/run.clj`: 1274 / 4557 green, ASan clean.
+* `./mino task release-gate`: 17/17 probes green.
+* 5x consecutive `./mino /tmp/repro.clj` (35 transient deftests):
+  all green, no flakiness.
+
 ## v0.255.8 — Diagnostic: Per-Deftest Trace for CI Hang Investigation
 
 A diagnostic-only release: surfaces which test is running at the
