@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.244.0 — Extractor Carve-Out: coff + Synthetic-Blob Selftests + Cycle E Close
+
+Closes cycle E. Two changes in this release:
+
+**1. Final extractor carve-out: coff module.** Lifts the PE/COFF
+amd64 parser into its own module: file-header + section
+typedefs, IMAGE_REL_AMD64_* reloc constants, storage-class
+constants, the byte-packed-symtab accessors, parser entry
+points (`coff_open`, `coff_list_symbols`,
+`coff_find_symbol`), the x86_64 reloc-kind map
+(`coff_reloc_x86_64_kind_map`), and the
+`coff_emit_stencil_header` entry. `tools/stencil_extract.c`
+now sits at ~440 lines: format-magic sniff, main(), and the
+aggregate selftest dispatcher.
+
+**2. Per-format synthetic-blob unit tests.** New
+`tools/stencil_extract/selftest.{h,c}` builds tiny in-memory
+.o-style buffers (Mach-O / ELF / COFF) by hand, parses each
+via its public format API, and asserts symbol lookup + body
+size + reloc-bound checks match the known-good values encoded
+into the blob. These tests catch parser regressions
+independent of compiling the project's own .c files into .o:
+a struct-layout drift on a new compiler, a missing reloc-kind
+map entry, or an off-by-one in a per-format extract loop now
+surfaces from `--selftest` without needing a full
+gen-stencils pass.
+
+The aggregate `selftest()` in `tools/stencil_extract.c` calls
+each per-format synthetic test in turn; each prints `OK` on
+success, accumulates a fail count on miss.
+
+Cycle E summary (v0.241.0 -- v0.244.0):
+
+  - `tools/stencil_extract.c`: 1833 lines -> ~440 lines.
+  - 6 new files under `tools/stencil_extract/`:
+    `core.{h,c}`, `macho.{h,c}`, `elf.{h,c}`, `coff.{h,c}`,
+    `selftest.{h,c}`.
+  - Binary renamed `tools/stencil_extract` -> `tools/stencil-extract`
+    (hyphen, matching the mino-lean convention) to free the
+    directory name for the source modules.
+  - `lib/mino/tasks/builtin.clj`: `build-stencil-extract` takes a
+    source-file list; adding a new format / new architecture is
+    a localised change instead of 1700-line surgery.
+
+The generated stencil headers regenerate byte-identical across
+every carve-out -- a parser refactor that changes any byte output
+would be a bug, not a feature.
+
+`release-gate` green: 1737 tests / 7919 assertions, ASan clean,
+4-way JIT parity stdout byte-identical, synthetic-blob selftests
+green on all three formats.
+
 ## v0.243.0 — Extractor Carve-Out: elf Module
 
 Third extractor carve-out. Lifts the ELF64 parser into its own
