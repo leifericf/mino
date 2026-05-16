@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.249.0 — Perf Cycle G: Measurement Baseline
+
+Opens cycle G. This release is measurement-only: a fixed
+baseline on `realistic_bench` so the v0.250 -- v0.254
+candidate releases have a stable reference to ratchet against.
+
+Baseline captured on the dev host (ARM64 Darwin, macOS 24.6.0):
+
+| Row                              | mean       | alloc/op | gc%  |
+|----------------------------------|-----------:|---------:|-----:|
+| build 5k int-map and sum         |  12.72 ms  |  7.27 MB | 35.3 |
+| bump 5k int-map values           |  22.92 ms  | 13.00 MB | 37.5 |
+| map/filter/map/reduce over 50k   |   0.77 ms  |  0.01 MB |  0.0 |
+| nested vectors 500x100           |  23.00 ms  | 20.24 MB | 36.3 |
+| realize 10k of lazy range        |   7.82 ms  |  3.96 MB | 42.5 |
+| fibonacci(25)                    |   7.83 ms  |  0.00 MB |  0.0 |
+
+Notes:
+  - Four of six rows are 35-43% GC time. Allocation is the
+    dominant cost.
+  - The pipeline row (774 us) shows the
+    `[[clojure-aware-perf-cycle]]` transducer-fusion win is
+    already in place; no further win available there.
+  - fib-25 is mutator-bound (no allocation); no obvious lever
+    short of broader stencil expansion, which this cycle's
+    gate explicitly rules out.
+
+Candidate selection (one per axis, per Cortex's framing in
+`[[next-cycle-cortex-feedback]]`):
+
+  - Allocation:    bump 5k int-map values  (nursery sizing)
+  - Data-struct:   nested vectors 500x100  (small-int cache reach)
+  - Dispatch:      build 5k int-map        (int-key assoc fast path)
+
+Cycle gate: one `realistic_bench` row >= 1.10x cumulative
+before v0.255.0 close.
+
+  - `.local/perf-cycle-baseline.md`: captured numbers.
+  - `.local/perf-cycle-candidates.md`: per-axis lever notes
+    and sequencing.
+
+No code change in this release; baseline parity vs. v0.248.0
+is the success criterion.
+
 ## v0.248.0 — Nightly Matrix Workflow + Cycle F Close
 
 Closes cycle F. Adds `.github/workflows/ci-nightly.yml`: a
