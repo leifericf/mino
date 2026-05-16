@@ -11,7 +11,6 @@
 (reset! clojure.test/suite-mode true)
 
 (require "tests/compat_test")
-(require "tests/doc_examples_test")
 (require "tests/arithmetic_test")
 (require "tests/binding_test")
 (require "tests/control_test")
@@ -56,7 +55,6 @@
 (require "tests/error_path_test")
 (require "tests/bc_try_catch_test")
 (require "tests/bc_error_quality_test")
-(require "tests/bc_jit_deopt_test")
 (require "tests/jit_parity_test")
 (require "tests/bc_binding_test")
 (require "tests/bc_destructure_test")
@@ -84,7 +82,6 @@
 (require "tests/hierarchy_test")
 (require "tests/multimethod_test")
 (require "tests/clojure_string_test")
-(require "tests/spawn_stress_regression")
 (require "tests/tasks_test")
 (require "tests/records_test")
 (require "tests/instant_template_test")

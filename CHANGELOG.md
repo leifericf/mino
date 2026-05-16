@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.253.3 — Test-Suite Split: Borderline E2E Audit
+
+Fourth migration cut. Per the strict-by-category boundary
+principle the borderline tests move to mino-tests:
+
+  - `tests/creative_test.clj` -- multi-feature closure / atom
+    combinators run as a script (no deftest). Heavy E2E.
+  - `tests/doc_examples_test.clj` (427 lines) -- documentation-
+    matched example deftests; designed for the mino-site example
+    matcher.
+  - `tests/bc_jit_deopt_test.clj` -- cross-runtime JIT deopt
+    behaviour; exercises the CPJIT path under multiple binary
+    modes.
+  - `tests/ns_parity_run.clj` -- multi-process namespace parity
+    runner; loads upstream Clojure / ClojureScript / Babashka
+    namespace-mechanic corpora.
+  - `tests/spawn_stress_regression.clj` -- spawn-fleet stress
+    against the precise-GC HAMT churn surface.
+
+Mino suite: 1268 tests / 4539 assertions.
+
 ## v0.253.2 — Test-Suite Split: C-Side Embed Harnesses + Error-Message Normalization
 
 Third migration cut moves the multi-state / STM / capability C-side
