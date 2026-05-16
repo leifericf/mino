@@ -2855,7 +2855,18 @@ static int try_fold_arg(compiler_t *c, mino_val_t *v, mino_val_t **out)
             args = mino_cons(c->S, stack[i], args);
             if (args == NULL) return 0;
         }
+        /* The speculative fold contract requires prim_throw_classified
+         * to take the "set diag + return NULL" branch on error, not the
+         * "longjmp to active try-frame" branch. If the compile is
+         * happening underneath a live try (compile-on-call from inside
+         * a user (try ...) block, for instance), longjmp would escape
+         * the compile and surface a stale exception. Suppress try_depth
+         * for the duration of the speculative prim call; the saved
+         * value is restored regardless of outcome. */
+        int saved_td = mino_current_ctx(c->S)->try_depth;
+        mino_current_ctx(c->S)->try_depth = 0;
         folded = pp->prim(c->S, args, c->env);
+        mino_current_ctx(c->S)->try_depth = saved_td;
         if (folded == NULL) { clear_error(c->S); return 0; }
         if (!fold_result_constable(folded)) return 0;
         *out = folded;
@@ -2893,7 +2904,13 @@ static int try_fold_call(compiler_t *c, mino_val_t *form, int dst,
         if (args == NULL) return 1;
     }
 
+    /* Same try_depth suppression as try_fold_arg: the speculative
+     * fold needs prim_throw_classified to take the diag-return-NULL
+     * branch, not longjmp. */
+    int saved_td = mino_current_ctx(c->S)->try_depth;
+    mino_current_ctx(c->S)->try_depth = 0;
     mino_val_t *folded = pp->prim(c->S, args, c->env);
+    mino_current_ctx(c->S)->try_depth = saved_td;
     if (folded == NULL) {
         /* The prim raised at fold time (e.g., division by zero).
          * Clear the diagnostic and decline -- the runtime path will

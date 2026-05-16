@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.255.6 — Fix: BC Speculative Fold Longjmps Through Active Try-Frame
+
+Surfaced by mino-tests v0.7.0's `gen_program.clj`: a `defn` whose
+body contains an `(if cond then else)` where the else-branch holds
+a compile-time-foldable error (`(quot/mod/rem a 0)`, shift out of
+range, `LLONG_MIN/-1`) raised the error at runtime even when the
+cond was statically truthy and the else was unreachable. Top-level
+forms with the same shape worked. Reproducer:
+
+```
+(defn f [] (if (zero? 0) 43 (quot 1 0)))
+(f) ; => quot: division by zero  -- expected 43
+```
+
+Root cause: `try_fold_call` and `try_fold_arg` in
+`src/eval/bc/compile.c` speculatively invoke a pure prim at compile
+time to test whether the call can fold to a constant. The contract
+assumes `prim_throw_classified` will take the "set diag and return
+NULL" branch on error so the caller can `clear_error` and decline.
+But that branch only runs when `try_depth == 0`; with an active
+try-frame in the surrounding eval context (compile-on-call from
+inside any `(try ...)`), `prim_throw_classified` `longjmp`s into
+the active frame instead. The longjmp escapes the compile, the
+exception lands on the user's catch, and the unreachable else
+surfaces as if it were the actual eval path.
+
+Fix: save and zero `try_depth` around the speculative prim call in
+both `try_fold_call` and `try_fold_arg`. The prim sees a clean
+no-try context, takes the diag-return-NULL path, and the caller's
+existing `clear_error` + decline logic works as documented. The
+try-frame stack contents are untouched; only the depth counter is
+temporarily masked.
+
+Regression: `tests/bc_let_fold_test.clj` gains
+`if-else-fold-error-stays-unreachable` with 6 sub-tests covering
+the anchor reproducer plus mod/rem, `when`-with-unreachable-then,
+and param-driven cond paths.
+
 ## v0.255.5 — Fix: BC Bitwise Fast Path No Longer Promotes to Bigint
 
 Surfaced by mino-tests's `gen.clj` while building a seeded RNG: an

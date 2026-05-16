@@ -95,3 +95,30 @@
         (finally (def + old-plus))))
     ;; After restore, original semantics return.
     (is (= 30 (rd1)))))
+
+(deftest if-else-fold-error-stays-unreachable
+  ;; When an if-form's cond is statically truthy (or a compile-time
+  ;; resolvable shape) and the else-branch contains a call that would
+  ;; fold to a runtime error (division by zero, shift out of range,
+  ;; LLONG_MIN/-1 overflow), the compiler's speculative fold attempt
+  ;; on the else expression must NOT escape into the surrounding
+  ;; eval context. The unreachable else stays unreachable; the fn
+  ;; returns the then-branch value normally.
+  (testing "(zero? 0) cond + (quot 1 0) unreachable else"
+    (defn iea1 [] (if (zero? 0) 43 (quot 1 0)))
+    (is (= 43 (iea1))))
+  (testing "let-bound zero divisor under (zero? d) cond"
+    (defn iea2 [] (let [d 0] (if (zero? d) 43 (mod 43 d))))
+    (is (= 43 (iea2))))
+  (testing "rem under (zero? d) cond"
+    (defn iea3 [] (let [d 0] (if (zero? d) 99 (rem 100 d))))
+    (is (= 99 (iea3))))
+  (testing "when guarding an unreachable quot"
+    (defn iea4 [] (when (zero? 0) (quot 100 5)))
+    (is (= 20 (iea4))))
+  (testing "param-based cond doesn't pre-eval else"
+    (defn iea5 [c] (if c 43 (quot 1 0)))
+    (is (= 43 (iea5 true))))
+  (testing "param-false cond hits the runtime quot error"
+    (defn iea6 [c] (if c 43 (quot 1 0)))
+    (is (thrown? (iea6 false)))))
