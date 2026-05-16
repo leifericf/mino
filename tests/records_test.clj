@@ -109,6 +109,32 @@
     (is (satisfies? IGreet g))
     (is (instance? Greeter g))))
 
+(deftest defrecord-inline-method-binds-fields
+  ;; Real Clojure binds each declared field as a local inside any
+  ;; inline protocol method body, so the body can write the field
+  ;; name directly instead of (:field this). mino's defrecord
+  ;; previously left bodies un-wrapped: bare `side` inside the method
+  ;; resolved to "unbound symbol: side" at compile time, forcing
+  ;; users to write (:side this) or destructure manually. The
+  ;; defrecord macro now wraps each method body with a let that
+  ;; binds field -> (get this :field).
+  (testing "bare field name resolves inside inline method"
+    (defprotocol IShape (area [s]))
+    (defrecord Square [side] IShape (area [_] (* side side)))
+    (is (= 16 (area (->Square 4)))))
+  (testing "multiple fields, no `this` reference needed"
+    (defprotocol IRect (rect-area [r]))
+    (defrecord Rect [w h] IRect (rect-area [this] (* w h)))
+    (is (= 12 (rect-area (->Rect 3 4)))))
+  (testing "method param shadowing a field name keeps the param"
+    ;; If a method param shadows a field name, the param wins -- the
+    ;; auto-let does NOT shadow it back. Matches Clojure: `[this]`
+    ;; is just whatever first param the user wrote.
+    (defprotocol ISelf (selfp [s]))
+    (defrecord Self [self] ISelf (selfp [self] self))
+    (let [r (->Self :a)]
+      (is (= r (selfp r))))))
+
 (deftest extend-type-with-record-symbol
   (defprotocol IDouble (doublev [x]))
   (defrecord Wrap [v])

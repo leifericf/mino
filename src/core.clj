@@ -3119,6 +3119,46 @@
 ;; learn about the gap immediately and library failures point at the
 ;; real cause.
 
+(defn- defrecord-bind-fields-in-method
+  "Wraps a protocol method body so the record's field names are
+   visible as locals bound to (get this :field). Matches Clojure
+   defrecord's contract: in (defrecord R [a b] IFoo (bar [this] a)),
+   `a` resolves to (:a this) inside the method body.
+
+   Returns the method form unchanged if it doesn't look like a
+   method spec (`(symbol [vec] body...)`), so protocol-name
+   separators inside specs pass through. Bypasses wrapping when
+   there are no fields. Skips binding for fields whose name shadows
+   the method's first param (i.e. the dispatching `this` slot).
+
+   Order of bindings inside the let preserves the field declaration
+   order so later fields can reference earlier ones if a user shadows
+   intentionally."
+  [fields method]
+  (if (and (or (list? method) (cons? method))
+           (seq method)
+           (symbol? (first method))
+           (or (list? (rest method)) (cons? (rest method)))
+           (vector? (first (rest method)))
+           (seq fields))
+    (let [mname    (first method)
+          params   (first (rest method))
+          body     (rest (rest method))
+          this-sym (first params)
+          this-kw  (when (symbol? this-sym) this-sym)
+          shadows? (fn [f] (= f this-kw))
+          binds    (vec (mapcat
+                          (fn [f]
+                            (if (shadows? f)
+                              []
+                              [f (list 'get this-sym (keyword (str f)))]))
+                          fields))]
+      (if (seq binds)
+        (list mname params
+              (apply list 'let binds body))
+        method))
+    method))
+
 (defmacro defrecord
   "Defines a record type Name with the given fields and optional
    inline protocol specs. Establishes:
@@ -3132,23 +3172,38 @@
 
    Fields must be a vector of symbols; they are stored as keywords
    on the type. Specs follow the same shape as extend-type:
-   protocol-name followed by one or more (method [args] body) forms."
+   protocol-name followed by one or more (method [args] body) forms.
+
+   Inside an inline protocol method body, field names resolve as
+   locals bound to (get this :field) -- matches Clojure's defrecord
+   contract so (defrecord R [a b] IFoo (bar [this] (+ a b))) works
+   without writing (:a this) / (:b this) by hand."
   [name fields & specs]
   (when-not (vector? fields)
     (throw (str "defrecord: fields must be a vector, got: "
                 (pr-str fields))))
-  (let [ns-str    (str (ns-name *ns*))
-        name-str  (str name)
-        ctor      (symbol (str "->" name))
-        map-ctor  (symbol (str "map->" name))
-        field-kws (mapv (fn [f] (keyword (str f))) fields)
-        forms     [(list 'def name (list 'defrecord* ns-str name-str field-kws))
-                   (list 'defn ctor fields
-                         (list 'record* name (vec fields)))
-                   (list 'defn map-ctor ['m]
-                         (list 'record-from-map name 'm))]]
-    (apply list 'do (if (seq specs)
-                      (conj forms (apply list 'extend-type name specs))
+  (let [ns-str     (str (ns-name *ns*))
+        name-str   (str name)
+        ctor       (symbol (str "->" name))
+        map-ctor   (symbol (str "map->" name))
+        field-kws  (mapv (fn [f] (keyword (str f))) fields)
+        bind-meth  (fn [m] (defrecord-bind-fields-in-method fields m))
+        wrap-spec  (fn [s]
+                     (if (and (or (list? s) (cons? s))
+                              (seq s)
+                              (symbol? (first s))
+                              (or (list? (rest s)) (cons? (rest s)))
+                              (vector? (first (rest s))))
+                       (bind-meth s)
+                       s))
+        specs*     (mapv wrap-spec specs)
+        forms      [(list 'def name (list 'defrecord* ns-str name-str field-kws))
+                    (list 'defn ctor fields
+                          (list 'record* name (vec fields)))
+                    (list 'defn map-ctor ['m]
+                          (list 'record-from-map name 'm))]]
+    (apply list 'do (if (seq specs*)
+                      (conj forms (apply list 'extend-type name specs*))
                       forms))))
 
 (defmacro deftype

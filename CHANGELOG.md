@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.255.20 — Fix: defrecord auto-binds fields in inline method bodies
+
+Real Clojure binds each declared field as a local inside an inline
+protocol method body, so
+
+```clojure
+(defrecord Square [side] IShape (area [_] (* side side)))
+```
+
+works as written. mino's defrecord previously didn't wrap method
+bodies: bare `side` raised "unbound symbol: side" at compile time,
+forcing users to write `(:side this)` or destructure manually.
+
+defrecord now transforms each spec method (mname [params] body...)
+by wrapping body in a `(let [field (get this :field) ...] body)`
+that introduces every declared field as a local pointing at
+`(get this :kw)`. Fields whose name shadows the method's first
+parameter are skipped (the param wins, matching Clojure: the user's
+chosen first-param name is the dispatching slot regardless of what
+the protocol declared it).
+
+Regression in `tests/records_test.clj`
+(`defrecord-inline-method-binds-fields`).
+
 ## v0.255.19 — Fix: Worker leaks last_diag on uncaught throw
 
 LSan on the gcc-built ubuntu-24.04 runners reported a 160-byte
