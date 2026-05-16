@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.255.24 — Fix: Vector destructuring of lazy / chunked seqs
+
+`(let [[a b c] (range 3)] [a b c])` returned `[nil nil nil]` instead
+of `[0 1 2]`. `bind_vec_destructure` walked the value as a cons
+chain via `mino_is_cons`, which returns false for `MINO_LAZY` and
+`MINO_CHUNKED_CONS` (the shapes `range`, `map`, `filter`, and most
+of `clojure.core`'s seq pipeline produce). Every pattern slot fell
+through to "bind nil when value is shorter than pattern". Vector and
+list values worked because they were pre-converted to a cons chain
+at the top of the function; lazy and chunked-cons had no
+corresponding case.
+
+Added a type-dispatched inline walker that handles `MINO_LAZY`
+(force then re-dispatch), `MINO_CHUNKED_CONS` (walk chunk slice
+then descend into `.more`), `MINO_CHUNK` (walk the flat array), and
+`MINO_VECTOR` (positional read), realizing just the prefix the
+pattern needs and stashing it as a fresh cons chain so the
+downstream positional walk works uniformly.
+
+Affects every destructure of a sequence produced by `range`, `map`,
+`filter`, `take`, `drop`, etc. (i.e. most real-world Clojure code
+that uses vector destructure on a seq).
+
+Regression in `tests/destructuring_test.clj`
+(`vec-destructure-lazy-seq`).
+
 ## v0.255.23 — Fix: `set!` mutates dynamic-var bindings (was no-op)
 
 `set!` used to be a no-op macro: `(set! *x* 5)` returned `nil` and

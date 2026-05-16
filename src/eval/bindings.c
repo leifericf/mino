@@ -3,6 +3,7 @@
  */
 
 #include "eval/special_internal.h"
+#include "eval/internal.h"
 #include "collections/internal.h"
 
 int kw_eq(const mino_val_t *v, const char *s)
@@ -54,6 +55,67 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
         /* Map entry behaves like a 2-vector for destructuring. */
         args = mino_cons(S, val->as.map_entry.k,
                             mino_cons(S, val->as.map_entry.v, mino_nil(S)));
+    } else if (val != NULL
+               && (mino_type_of(val) == MINO_LAZY
+                   || mino_type_of(val) == MINO_CHUNKED_CONS
+                   || mino_type_of(val) == MINO_CHUNK)) {
+        /* Lazy / chunked sequential value: the downstream positional
+         * walk's mino_is_cons check fails on these types, so every
+         * pattern slot would bind to nil. Walk plen elements via a
+         * type-dispatched inline cursor (LAZY -> force then re-dispatch,
+         * CHUNKED_CONS -> walk current chunk slice then descend into
+         * .more, CHUNK -> walk the flat array, CONS -> car/cdr). Stash
+         * the realized prefix as a fresh cons chain so the downstream
+         * loop's positional walk works uniformly. */
+        mino_val_t *cur = val;
+        mino_val_t *head = NULL;
+        mino_val_t *tail_pin = NULL;
+        size_t      chunk_off = 0;
+        size_t      built = 0;
+        /* For CHUNKED_CONS we resume the chunk iter from off+0; the
+         * inner loop advances chunk_off until the chunk is drained
+         * then crosses into .more. */
+        while (built < plen && cur != NULL) {
+            mino_val_t *elt = NULL;
+            mino_type_t k;
+            while (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
+                cur = lazy_force(S, cur);
+            }
+            if (cur == NULL) break;
+            k = mino_type_of(cur);
+            if (k == MINO_NIL || k == MINO_EMPTY_LIST) break;
+            if (k == MINO_CONS) {
+                elt = cur->as.cons.car;
+                cur = cur->as.cons.cdr;
+            } else if (k == MINO_CHUNKED_CONS) {
+                mino_val_t *chk = cur->as.chunked_cons.chunk;
+                size_t off = (size_t)cur->as.chunked_cons.off + chunk_off;
+                if (chk == NULL || off >= chk->as.chunk.len) {
+                    cur = cur->as.chunked_cons.more;
+                    chunk_off = 0;
+                    continue;
+                }
+                elt = chk->as.chunk.vals[off];
+                chunk_off++;
+            } else if (k == MINO_CHUNK) {
+                if (chunk_off >= (size_t)cur->as.chunk.len) break;
+                elt = cur->as.chunk.vals[chunk_off];
+                chunk_off++;
+            } else if (k == MINO_VECTOR) {
+                if (chunk_off >= cur->as.vec.len) break;
+                elt = vec_nth(cur, chunk_off);
+                chunk_off++;
+            } else {
+                break;
+            }
+            {
+                mino_val_t *node = mino_cons(S, elt, mino_nil(S));
+                if (head == NULL) { head = node; tail_pin = node; }
+                else { tail_pin->as.cons.cdr = node; tail_pin = node; }
+            }
+            built++;
+        }
+        args = head != NULL ? head : mino_nil(S);
     }
     for (i = 0; i < plen; i++) {
         mino_val_t *p = vec_nth(pattern, i);

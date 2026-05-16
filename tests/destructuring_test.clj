@@ -192,3 +192,35 @@
 (deftest map-destructure-syms-fn-params
   (defn pick-syms__dt [{:syms [a b]}] [a b])
   (is (= [1 2] (pick-syms__dt {'a 1 'b 2}))))
+
+(deftest vec-destructure-lazy-seq
+  ;; Regression: vector destructuring failed on lazy seqs because the
+  ;; downstream positional walk's mino_is_cons check returned false for
+  ;; MINO_LAZY (and MINO_CHUNKED_CONS). Every pattern slot bound to
+  ;; nil instead of the corresponding element. Common in code that
+  ;; destructures (range), (map), (filter), or any chunked seq.
+  (testing "(let [[a b c] (range 3)] ...) binds to 0 1 2"
+    (let [[a b c] (range 3)]
+      (is (= 0 a))
+      (is (= 1 b))
+      (is (= 2 c))))
+  (testing "destructure (map f coll)"
+    (let [[x y z] (map inc [10 20 30])]
+      (is (= 11 x))
+      (is (= 21 y))
+      (is (= 31 z))))
+  (testing "destructure (filter pred coll)"
+    (let [[a b] (filter even? (range 10))]
+      (is (= 0 a))
+      (is (= 2 b))))
+  (testing "shorter lazy seq pads with nil"
+    (let [[a b c] (range 2)]
+      (is (= 0 a))
+      (is (= 1 b))
+      (is (nil? c))))
+  (testing "destructure inside fn arg"
+    (defn first-three [[a b c]] [a b c])
+    (is (= [0 1 2] (first-three (range 3)))))
+  (testing "doall lazy seq still destructures"
+    (let [[a b c] (doall (range 3))]
+      (is (= [0 1 2] [a b c])))))
