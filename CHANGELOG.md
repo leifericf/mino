@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.254.0 — Cross-Repo Release-Gate Hook
+
+mino's release-gate composite now chains into the mino-tests
+satellite suite when both repos are checked out side-by-side
+(`../mino-tests/mino.edn` detection). The chain runs mino-tests's
+`tests/adv/runner.clj --seed 0 --mode smoke`, which exercises all
+eleven script-side adversarial probes. A clean fresh clone of mino
+without mino-tests adjacent prints a "skipped satellite smoke"
+notice and the gate continues; no hard dependency.
+
+The hook makes the boundary principle operationally explicit:
+mino's release-gate verifies language semantics + JIT parity, and
+when the satellite suite is available it also verifies the
+adversarial / E2E posture. Either repo can release independently
+or together.
+
+Also bundled here: the v0.253.3 borderline-E2E audit landed
+`ns_parity_run.clj` back in mino (it depends on mino's own
+`tests/ns_*_test.clj` corpus and isn't standalone). The companion
+audit in mino-tests dropped `creative_test.clj` (zero deftests --
+script-only output, belongs in mino-examples).
+
 ## v0.253.3 — Test-Suite Split: Borderline E2E Audit
 
 Fourth migration cut. Per the strict-by-category boundary

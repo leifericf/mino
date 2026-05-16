@@ -571,6 +571,15 @@
                       {:exit (get r :exit)}))))
   (println "  check-reloc-mirror: OK"))
 
+(defn- mino-tests-adjacent
+  "Path to a sibling mino-tests clone, or nil if not present.
+   The release-gate composite uses this to chain into the satellite
+   suite's smoke when both repos are checked out side-by-side."
+  []
+  (let [candidates ["../mino-tests" "../../mino-tests"]]
+    (some (fn [p] (when (file-exists? (str p "/mino.edn")) p))
+          candidates)))
+
 (defn release-gate
   "Composite pre-tag gate. Fails fast on the first non-OK check;
    the first failure is what the human reads, not a paragraph-long
@@ -582,6 +591,8 @@
      4. test-suite             -- bytecode + JIT path
      5. test-suite-asan        -- same suite, sanitiser-built
      6. test-jit-parity        -- byte-identical stdout vs no-JIT
+     7. mino-tests adv-test    -- IF mino-tests is cloned adjacent;
+                                   skipped with a warn otherwise.
 
    Exits 0 on a clean tree. Negative controls live in the cycle's
    .local/ status file -- this task is the positive control."
@@ -593,6 +604,18 @@
   (build-asan)
   (println (sh! "./mino_asan" "tests/run.clj"))
   (test-jit-parity)
+  (if-let [mt (mino-tests-adjacent)]
+    (do
+      (println "  release-gate: chaining to mino-tests at" mt)
+      ;; The probe runner uses relative paths (load-file "tests/...");
+      ;; chdir via `sh -c` so it resolves from the mino-tests root.
+      (println (sh! "sh" "-c"
+                    (str "cd " mt " && "
+                         "MINO_BIN=" (getenv "PWD") "/mino "
+                         "MINO_LEAN_BIN=" (getenv "PWD") "/mino-lean "
+                         (getenv "PWD") "/mino "
+                         "tests/adv/runner.clj --seed 0 --mode smoke"))))
+    (println "  release-gate: mino-tests not adjacent -- skipped satellite smoke"))
   (println "  release-gate: OK"))
 
 (def ^:private ci-matrix-targets
