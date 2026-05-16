@@ -6,7 +6,7 @@
  * The descriptor table at the bottom of this file is the single source
  * of truth for which opcodes the JIT understands. Adding a new stencil
  * means (a) extending the generated stencil header through
- * `tools/stencil_extract` over the new stencil source, and (b) adding
+ * `tools/stencil-extract` over the new stencil source, and (b) adding
  * an entry here. Removing one means dropping its entry; the
  * eligibility classifier will then reject any bc that references it
  * and the fn falls back to the interpreter.

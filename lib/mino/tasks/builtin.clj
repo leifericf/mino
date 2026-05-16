@@ -527,18 +527,18 @@
 (defn check-reloc-mirror
   "G3: pin the MINO_STENCIL_RELOC_* enum mirror across the two files
    that carry it (src/eval/bc/jit/internal.h on the runtime side,
-   tools/stencil_extract.c on the toolchain side), and run
-   tools/stencil_extract --selftest for the extractor's internal
-   consistency. The selftest catches drift within stencil_extract.c
-   between its enum values and reloc_arm64_kind_map; the cross-file
-   parse catches drift between the two enums independent of each
-   file's internal consistency. Promotes the verbal `kept in sync`
-   comment that lived in jit.c pre-v0.216 into a build-time
+   tools/stencil_extract/core.h on the toolchain side), and run
+   tools/stencil-extract --selftest for the extractor's internal
+   consistency. The selftest catches drift within the extractor
+   between its enum values and the per-format reloc-kind maps; the
+   cross-file parse catches drift between the two enums independent
+   of each file's internal consistency. Promotes the verbal `kept in
+   sync` comment that lived in jit.c pre-v0.216 into a build-time
    contract."
   []
   (build-stencil-extract)
   (let [runtime-defs   (parse-reloc-defines "src/eval/bc/jit/internal.h")
-        extractor-defs (parse-reloc-defines "tools/stencil_extract.c")
+        extractor-defs (parse-reloc-defines "tools/stencil_extract/core.h")
         ;; The extractor declares one extra symbol per non-ARM64 arch
         ;; (e.g., MINO_STENCIL_RELOC_X86_64_*) the runtime side does
         ;; not need to know until the corresponding stencil header
@@ -564,7 +564,7 @@
       (throw (ex-info (str "check-reloc-mirror: runtime declares names "
                            "the extractor does not: " missing-tool)
                       {:missing-tool missing-tool}))))
-  (let [r (sh "./tools/stencil_extract" "--selftest")]
+  (let [r (sh "./tools/stencil-extract" "--selftest")]
     (when-not (= 0 (get r :exit))
       (println (get r :out))
       (throw (ex-info "check-reloc-mirror: stencil-extract selftest failed"
@@ -612,24 +612,34 @@
     (apply sh! args)
     (println (str "  alloc-profile build -> mino_prof"))))
 
+(def ^:private stencil-extract-srcs
+  "Source files compiled together into tools/stencil-extract. The
+   format-agnostic core sits alongside the per-format parsers; each
+   carve-out from the original monolith just adds another file here."
+  ["tools/stencil_extract.c"
+   "tools/stencil_extract/core.c"])
+
 (defn build-stencil-extract
-  "Build tools/stencil_extract: the copy-and-patch stencil extractor
-   used by the native tier build pipeline. Parses Mach-O .o files and
-   emits a C header with the extracted function bytes."
+  "Build tools/stencil-extract: the copy-and-patch stencil extractor
+   used by the native tier build pipeline. The source splits across
+   tools/stencil_extract.c (main + magic-sniff + aggregate selftest)
+   and the per-format modules under tools/stencil_extract/. The
+   binary keeps a hyphen because the directory takes the underscore
+   name."
   []
-  (let [args [cc "-std=c99" "-O2" "-Wall" "-Wpedantic"
-              "-o" "tools/stencil_extract"
-              "tools/stencil_extract.c"]]
+  (let [args (into [cc "-std=c99" "-O2" "-Wall" "-Wpedantic"
+                    "-o" "tools/stencil-extract"]
+                   stencil-extract-srcs)]
     (println (str "  " (str/join " " args)))
     (apply sh! args)
-    (println "  stencil-extract build -> tools/stencil_extract")))
+    (println "  stencil-extract build -> tools/stencil-extract")))
 
 (defn test-stencil-extract
   "Run the stencil-extract self-test. Verifies that the Mach-O struct
    layouts match the documented file format on the host."
   []
   (build-stencil-extract)
-  (println (sh! "./tools/stencil_extract" "--selftest")))
+  (println (sh! "./tools/stencil-extract" "--selftest")))
 
 (def ^:private stencil-list
   "Canonical mapping from stencil .c file to extracted symbol. The
@@ -701,8 +711,8 @@
             (apply sh! compiler (concat base-args target-cflags
                                         ["-c" src "-o" obj])))
           (if first?
-            (sh! "./tools/stencil_extract" obj sym out-hdr)
-            (sh! "./tools/stencil_extract" "--append" obj sym out-hdr))
+            (sh! "./tools/stencil-extract" obj sym out-hdr)
+            (sh! "./tools/stencil-extract" "--append" obj sym out-hdr))
           (recur rest false (conj compiled file)))))
     (println (str "  stencils -> " out-hdr))))
 

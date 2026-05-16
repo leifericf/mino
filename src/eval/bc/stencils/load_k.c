@@ -7,7 +7,7 @@
  * the JIT only emits this stencil when the compile-time Bx is in range.
  *
  * Build: compiled as part of the stencil pipeline only. The compiled .o
- * is fed to tools/stencil_extract, which writes the byte table + reloc
+ * is fed to tools/stencil-extract, which writes the byte table + reloc
  * table into src/eval/bc/stencils/generated/stencils_<arch>_<os>.h.
  */
 

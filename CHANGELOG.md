@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.241.0 — Extractor Carve-Out: core Module
+
+Opens cycle E. The stencil extractor lived for the entire cpjit
+cycle as a single 1700-line `tools/stencil_extract.c` covering
+Mach-O, ELF, and COFF parsers plus shared schema, format-agnostic
+emit, and the selftest. Adding a fifth format compounds the
+problem; carving the file into per-format modules unblocks easier
+maintenance for the rest of the cycle and any future format work.
+
+This first carve-out lifts the format-agnostic plumbing into a
+`core` module:
+
+  - `tools/stencil_extract/core.h`: `mblob_t`, `stencil_reloc_t`,
+    `sym_table_intern`, `write_stencil_header` prototypes, and the
+    `MINO_STENCIL_RELOC_*` host enum.
+  - `tools/stencil_extract/core.c`: matching implementation.
+  - `tools/stencil_extract.c`: shrinks; includes `core.h`.
+
+The build task `build-stencil-extract` now compiles the
+multi-file pipeline. The binary moves to `tools/stencil-extract`
+(hyphen, matching the `mino-lean` convention) so the underscore
+directory name can carry the source modules without a filesystem
+collision. All callers, source comments, and `.gitignore` updated.
+
+The per-format parsers (Mach-O, ELF, COFF) stay in the entry
+file for now; their carve-outs follow in v0.242 -- v0.244. The
+generated stencil headers stay byte-identical across the move; a
+parser refactor that changes any byte output would be a bug, not
+a feature.
+
+  - `tools/stencil_extract/core.h`: new.
+  - `tools/stencil_extract/core.c`: new.
+  - `tools/stencil_extract.c`: removed the carved-out declarations.
+  - `lib/mino/tasks/builtin.clj`: `build-stencil-extract` extended
+    to take a source list; `check-reloc-mirror` reads
+    `core.h` instead of the monolith for the enum mirror.
+  - `.gitignore`: tracks `tools/stencil-extract` (was
+    `tools/stencil_extract`).
+
+`release-gate` green: 1737 tests / 7919 assertions, ASan clean,
+4-way JIT parity stdout byte-identical, generated stencil
+headers identical before and after the split.
+
 ## v0.240.0 — 4-Way JIT Parity (AUTO / ON / OFF / lean) + Cycle Close
 
 Closes cycle D. The parity test now exercises every JIT

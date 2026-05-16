@@ -31,6 +31,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "stencil_extract/core.h"
+
 /* ------------------------------------------------------------------------- */
 /* Mach-O constants                                                          */
 /* ------------------------------------------------------------------------- */
@@ -202,20 +204,8 @@ typedef struct {
 #define CPU_TYPE_X86_64  ((uint32_t)(7 | 0x01000000u))  /*  16777223 */
 #define CPU_TYPE_ARM64   ((uint32_t)(12 | 0x01000000u)) /*  16777228 */
 
-/* Host enum encoded as a small integer the runtime can switch on. The
- * generated header references these by name so a runtime header change
- * doesn't require regenerating every stencil. Mach-O ARM64 kinds map
- * 1:1 to MINO_STENCIL_RELOC_ARM64_*; other archs add new entries when
- * their parsers land. */
-#define MINO_STENCIL_RELOC_ARM64_PAGE21           0u
-#define MINO_STENCIL_RELOC_ARM64_PAGEOFF12        1u
-#define MINO_STENCIL_RELOC_ARM64_BRANCH26         2u
-#define MINO_STENCIL_RELOC_ABS64                  3u
-#define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGE21    4u
-#define MINO_STENCIL_RELOC_ARM64_GOT_LOAD_PAGEOFF12 5u
-#define MINO_STENCIL_RELOC_X86_64_ABS64             6u
-#define MINO_STENCIL_RELOC_X86_64_PC32              7u
-#define MINO_STENCIL_RELOC_X86_64_GOTPCREL          8u
+/* MINO_STENCIL_RELOC_* host enum + stencil_reloc_t live in
+ * stencil_extract/core.h; the per-format mappers feed them. */
 
 static int reloc_arm64_kind_map(uint32_t macho_kind, uint32_t length);
 static int reloc_x86_64_macho_kind_map(uint32_t macho_kind, uint32_t length,
@@ -342,38 +332,6 @@ static int reloc_x86_64_elf_kind_map(uint32_t r_type)
     default: return -1;
     }
 }
-
-/* ------------------------------------------------------------------------- */
-/* File buffer                                                               */
-/* ------------------------------------------------------------------------- */
-
-typedef struct {
-    uint8_t *data;
-    size_t   len;
-} mblob_t;
-
-static int read_file(const char *path, mblob_t *out)
-{
-    FILE *f = fopen(path, "rb");
-    if (f == NULL) {
-        fprintf(stderr, "stencil_extract: cannot open '%s'\n", path);
-        return -1;
-    }
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
-    long sz = ftell(f);
-    if (sz < 0) { fclose(f); return -1; }
-    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return -1; }
-    uint8_t *buf = (uint8_t *)malloc((size_t)sz);
-    if (buf == NULL) { fclose(f); return -1; }
-    size_t n = fread(buf, 1, (size_t)sz, f);
-    fclose(f);
-    if (n != (size_t)sz) { free(buf); return -1; }
-    out->data = buf;
-    out->len  = (size_t)sz;
-    return 0;
-}
-
-static void blob_free(mblob_t *b) { free(b->data); b->data = NULL; b->len = 0; }
 
 /* ------------------------------------------------------------------------- */
 /* Mach-O parser                                                             */
@@ -792,39 +750,9 @@ static int selftest(void)
 /* Header emission                                                           */
 /* ------------------------------------------------------------------------- */
 
-/* Stencil-extracted reloc, normalised to a host-format the JIT runtime
- * consumes. Per stencil we filter only the relocations that fall inside
- * the function body and emit them keyed by a stable kind enum that the
- * runtime maps to a patcher. */
-typedef struct {
-    uint32_t offset;       /* byte offset within the stencil body         */
-    uint32_t kind;         /* MINO_STENCIL_RELOC_* in the host enum       */
-    uint32_t sym_index;    /* index into the per-stencil symbol table     */
-    int32_t  addend;       /* added to the symbol value before patching   */
-} stencil_reloc_t;
-
-/* Forward declaration: the format-agnostic header writer is defined
- * after the COFF parser block but is called from coff_emit_stencil_header
- * which lives inside that block. Both Mach-O and ELF emitters use it. */
-static int write_stencil_header(const char *symbol,
-                                const uint8_t *body, uint64_t size,
-                                const stencil_reloc_t *relocs, int nrelocs,
-                                const char *const *syms, int nsyms,
-                                const char *out_path, int append);
-
-/* Find or insert a symbol-table index. Returns the slot index. The
- * caller pre-allocates an array large enough for the worst case (one
- * symbol per reloc). */
-static int sym_table_intern(const char *name,
-                            const char **table, int *count, int cap)
-{
-    for (int i = 0; i < *count; i++) {
-        if (strcmp(table[i], name) == 0) return i;
-    }
-    if (*count >= cap) return -1;
-    table[*count] = name;
-    return (*count)++;
-}
+/* stencil_reloc_t + sym_table_intern + write_stencil_header all live
+ * in stencil_extract/core.{h,c}. The per-format extract_relocs feed
+ * them. */
 
 /* Map an ARM64 Mach-O reloc kind to a runtime-stable MINO_STENCIL_RELOC_*.
  * Returns -1 when the kind is unsupported -- the build fails loudly
@@ -1600,75 +1528,9 @@ static int coff_emit_stencil_header(const coff_view_t *v, const char *symbol,
                                 syms, nsyms, out_path, append);
 }
 
-/* Format-agnostic header writer. Takes already-extracted body bytes +
- * relocs + symbol list and emits the C arrays the JIT runtime consumes.
- * Both the Mach-O and ELF parsers funnel into this so the on-disk shape
- * stays single-source. */
-static int write_stencil_header(const char *symbol,
-                                const uint8_t *body, uint64_t size,
-                                const stencil_reloc_t *relocs, int nrelocs,
-                                const char *const *syms, int nsyms,
-                                const char *out_path, int append)
-{
-    FILE *out = (out_path != NULL && strcmp(out_path, "-") != 0)
-        ? fopen(out_path, append ? "a" : "w") : stdout;
-    if (out == NULL) {
-        fprintf(stderr, "stencil_extract: cannot open '%s' for write\n",
-                out_path);
-        return -1;
-    }
-    if (!append) {
-        fprintf(out, "/* Generated by tools/stencil_extract. Do not edit. */\n\n");
-    } else {
-        fprintf(out, "\n");
-    }
-    fprintf(out, "static const unsigned char %s_bytes[%" PRIu64 "] = {\n",
-            symbol, size);
-    for (uint64_t i = 0; i < size; i++) {
-        if ((i & 15) == 0) fprintf(out, "    ");
-        fprintf(out, "0x%02x", body[i]);
-        if (i + 1 < size) fprintf(out, ",");
-        if ((i & 15) == 15) fprintf(out, "\n");
-        else                fprintf(out, " ");
-    }
-    if ((size & 15) != 0) fprintf(out, "\n");
-    fprintf(out, "};\n");
-    fprintf(out, "static const unsigned long %s_size = %" PRIu64 ";\n",
-            symbol, size);
-    /* Symbol table for this stencil: each reloc references a symbol by
-     * its index in this table. */
-    fprintf(out, "static const char *const %s_symbols[%d] = {\n",
-            symbol, nsyms == 0 ? 1 : nsyms);
-    if (nsyms == 0) {
-        fprintf(out, "    0\n");
-    } else {
-        for (int i = 0; i < nsyms; i++) {
-            fprintf(out, "    \"%s\"%s\n", syms[i], i + 1 < nsyms ? "," : "");
-        }
-    }
-    fprintf(out, "};\n");
-    fprintf(out, "static const unsigned long %s_nsymbols = %d;\n",
-            symbol, nsyms);
-    /* Reloc table emitted as quadruples (offset, kind, sym_index,
-     * addend). Empty when the stencil takes no immediates. */
-    fprintf(out, "static const unsigned int %s_relocs[%d][4] = {\n",
-            symbol, nrelocs == 0 ? 1 : nrelocs);
-    if (nrelocs == 0) {
-        fprintf(out, "    {0, 0, 0, 0}\n");
-    } else {
-        for (int i = 0; i < nrelocs; i++) {
-            fprintf(out, "    {%u, %u, %u, %d}%s\n",
-                    relocs[i].offset, relocs[i].kind,
-                    relocs[i].sym_index, relocs[i].addend,
-                    i + 1 < nrelocs ? "," : "");
-        }
-    }
-    fprintf(out, "};\n");
-    fprintf(out, "static const unsigned long %s_nrelocs = %d;\n",
-            symbol, nrelocs);
-    if (out != stdout) fclose(out);
-    return 0;
-}
+/* The format-agnostic write_stencil_header lives in
+ * stencil_extract/core.c. Each per-format emit_stencil_header funnels
+ * its extracted body+relocs+syms through it. */
 
 /* Mach-O entry point: extract relocs from the Mach-O view then funnel
  * through the format-agnostic writer. */
