@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.248.0 — Nightly Matrix Workflow + Cycle F Close
+
+Closes cycle F. Adds `.github/workflows/ci-nightly.yml`: a
+cron-scheduled (04:00 UTC daily) workflow that runs the full
+extended-suite battery on every supported Linux + Darwin host:
+
+  - `release-gate` (re-run, since nightly is self-contained)
+  - `test-gc-stress` (GC stability under stress collection)
+  - `test-fault-inject` (simulated OOM fault-injected paths)
+  - `test-embed` (C embedding stress with 16 states / 16 pthreads)
+
+Same host set as the PR-time matrix (`ubuntu-24.04`,
+`ubuntu-24.04-arm`, `macos-14`). Windows is skipped for the
+same reason it skips PR-time release-gate -- ASan needs a
+libsanitizer mingw doesn't ship.
+
+PR-time CI keeps to the smoke set + release-gate (push latency
+stays low); the nightly catches regressions in the
+stress-test paths that aren't worth running on every PR.
+
+Cycle F summary (v0.245.0 -- v0.248.0):
+
+  - Two Dockerfiles + `ci-matrix` task (local Linux mirror of
+    the GHA matrix).
+  - GHA matrix pinned to four host labels (`ubuntu-24.04`,
+    `ubuntu-24.04-arm`, `macos-14`, `windows-2022`) with a
+    release-gate step on every non-Windows entry.
+  - `cross-compile` job on `macos-14` covering every
+    `gen-stencils-<arch>-<os>` target via header-byte
+    parity -- the verification floor for x86_64 Darwin until
+    GHA re-introduces Intel Mac runners.
+  - Nightly extended-suite workflow on Linux + Darwin.
+
+The "5 host paths code-complete" line is no longer
+aspirational: every push exercises the runtime patcher on
+ARM64 Linux, x86_64 Linux, ARM64 Darwin, and x86_64 Windows;
+every push also re-verifies the cross-compiled bytes for
+x86_64 Darwin; nightly batteries cover the stress paths.
+
+`release-gate` green locally; nightly workflow activates on
+the next 04:00 UTC tick or via `workflow_dispatch`.
+
 ## v0.247.0 — Cross-Compile Smoke Job + x86_64 Darwin Posture
 
 Adds a `cross-compile` GHA job on `macos-14` that runs every

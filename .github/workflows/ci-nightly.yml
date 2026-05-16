@@ -1,0 +1,55 @@
+name: ci-nightly
+
+# Runs the full extended-suite battery on every supported host
+# once a day. PR-time CI keeps to the smoke set so push latency
+# stays low; the nightly job catches:
+#   - GC stability under stress collection (test-gc-stress)
+#   - Fault-injected OOM paths (test-fault-inject)
+#   - C embedding stress (test-embed)
+# in addition to release-gate, which the PR matrix already runs.
+on:
+  schedule:
+    # 04:00 UTC daily. Off-peak relative to most contributors.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  extended:
+    name: extended (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Same host set as ci.yml's PR matrix. Windows skips the
+        # extended battery for the same reason it skips release-gate
+        # in ci.yml -- ASan path needs a libsanitizer mingw doesn't
+        # ship, and several stress tasks depend on it.
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bootstrap mino
+        run: make
+
+      - name: Release gate
+        # First gate -- if release-gate fails, the rest of the
+        # nightly battery is noise. Same gate as PR CI; included
+        # here so nightly is self-contained.
+        run: ./mino task release-gate
+        timeout-minutes: 12
+
+      - name: GC stress
+        run: ./mino task test-gc-stress
+        timeout-minutes: 15
+
+      - name: Fault injection
+        run: ./mino task test-fault-inject
+        timeout-minutes: 10
+
+      - name: Embed stress
+        run: ./mino task test-embed
+        timeout-minutes: 10
