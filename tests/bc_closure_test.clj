@@ -150,11 +150,18 @@
           (future (deliver p (* i i)))
           (recur (inc i))))
       (is (= 0 @p))))
-  (testing "10 futures x 10 promises via dotimes deliver to distinct slots"
-    (let [ps (vec (repeatedly 10 promise))]
-      (dotimes [i 10]
+  (testing "N futures x N promises via dotimes deliver to distinct slots"
+    ;; The closure-capture invariant doesn't depend on N; any N >= 2
+    ;; that fires distinct futures with distinct captured i exercises
+    ;; the macro-introduced-closure path. Adapt N to the host thread
+    ;; grant so 3-4 CPU CI runners don't hit MTH001 before the test
+    ;; can verify the invariant. Clamp [2, 10].
+    (let [n  (max 2 (min 10 (- (mino-thread-limit) 1)))
+          ps (vec (repeatedly n promise))]
+      (dotimes [i n]
         (future (deliver (nth ps i) (* i i))))
-      (is (= [0 1 4 9 16 25 36 49 64 81] (mapv deref ps)))))
+      (is (= (mapv (fn [i] (* i i)) (range n))
+             (mapv deref ps)))))
   (testing "delay inside self-tail-call captures per-iteration param"
     (let [cls (atom [])]
       (defn G-delay [i]

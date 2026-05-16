@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.255.12 — Fix: Adapt closure-capture-macro-introduced fanout to thread-limit
+
+With the v0.255.11 pthread_join deadlock cleared, CI got past the
+`transient-survives-gc-yield` hang and reached the next latent issue:
+`closure-capture-macro-introduced` in `tests/bc_closure_test.clj`
+spawns 10 simultaneous futures unconditionally. The default host
+`thread_limit` is `cpu_count`, and GitHub-hosted runners are 3-4 CPUs
+(macos-14, ubuntu-24.04, ubuntu-24.04-arm), so the 10-way fanout
+trips `MTH001` (thread-limit-exceeded) before the test can verify
+the closure-capture invariant.
+
+The invariant under test is "N macro-introduced closures each capture
+their own per-iteration `i`" — and N is a parameter, not the property
+under test. Any N ≥ 2 exercises the bug fix this regression test
+guards. The fix adapts the fanout to `(- (mino-thread-limit) 1)`,
+clamped to `[2, 10]`, so:
+
+- Local dev (12+ CPUs): N=10, same as before.
+- GHA macos-14 / ubuntu-24.04 (3-4 CPUs): N=3, the test runs and
+  asserts.
+- Embedder with `mino_set_thread_limit(S, 1)`: N=2, still meaningful.
+
+Same shape as the T9 probe fix in `mino-tests` v0.8.1. The local
+suite reports 1274 tests, 4557 assertions, 0 failed on this branch.
+
+### Verification
+
+- `./mino tests/run.clj` green locally (1274 tests, 4557 assertions).
+- `release-gate` 17/17 green.
+- CI matrix expected green on the v0.255.12 push (the original hang
+  cleared in v0.255.11; the thread-limit failure cleared here).
+
+### Files
+
+- `tests/bc_closure_test.clj` — adapt N to host thread limit.
+- `src/mino.h` — `MINO_VERSION_PATCH` bumped to 12.
+
 ## v0.255.11 — Fix: Yield state_lock Around pthread_join in Future Sweep
 
 The actual cause of the v0.255.x CI hang, pinpointed by v0.255.10's
