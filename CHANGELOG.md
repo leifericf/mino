@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.247.0 — Cross-Compile Smoke Job + x86_64 Darwin Posture
+
+Adds a `cross-compile` GHA job on `macos-14` that runs every
+`gen-stencils-<arch>-<os>` task and asserts the freshly-
+generated stencil headers match the committed bytes. The job
+catches toolchain drift on every supported target without
+needing an end-to-end runtime on each:
+
+  - `gen-stencils-arm64-linux`
+  - `gen-stencils-x86-64-linux`
+  - `gen-stencils-x86-64-darwin`
+  - `gen-stencils-x86-64-windows`
+
+A `git diff --exit-code` on `src/eval/bc/stencils/generated/`
+gates the job. If a clang point release ever changes codegen
+for any target, the diff is the diagnostic.
+
+**x86_64 Darwin posture.** Apple has been retiring Intel Mac
+GHA runners; Docker on Apple Silicon cannot run Darwin/x86_64
+either. The cross-compile job covers x86_64 Darwin via
+header-generation parity (the parser confirms bytes; the
+runtime patcher confirms patch arithmetic in `--selftest`),
+which is the verification floor for that target until either:
+
+  - GHA re-introduces an Intel Mac runner tier, or
+  - the project self-hosts an Intel Mac mini, or
+  - the target is dropped from the supported list.
+
+The synthetic-blob selftests from v0.244.0 plus this cross-
+compile job together give x86_64 Darwin a credible parser /
+toolchain coverage without an end-to-end runtime gate.
+
+  - `.github/workflows/ci.yml`: new `cross-compile` job on
+    `macos-14`; runs after `build` succeeds.
+
+`release-gate` green locally; new cross-compile job activates
+on push.
+
 ## v0.246.0 — GHA Matrix Extension + Release-Gate Step
 
 Extends the GitHub Actions CI matrix to cover every host arch
