@@ -708,6 +708,31 @@
 ;; machine where each <! and >! call is a park point.
 ;; ---------------------------------------------------------------------
 
+;; --- Parking operation surface vars ---
+;;
+;; >! and <! are parking operations recognized by the go-block
+;; compiler before macroexpansion. They have no meaningful definition
+;; outside (go ...) -- a bare call cannot park, since no state machine
+;; encloses it. The go-transform walker pattern-matches on the literal
+;; symbols `>!` and `<!`, so these definitions only fire when the call
+;; sits outside any go block.
+;;
+;; They exist as vars so script code can `(require '[clojure.core.async
+;; :as a :refer [<! >!]])` -- without the vars, `:refer` raises an
+;; unresolved-name error before the user's go block even compiles.
+;; Real Clojure core.async ships the same stubs for the same reason.
+
+(defmacro >!
+  "puts a val into port. nil values are not allowed. Must be called
+   inside a (go ...) block. Will park if no buffer space available."
+  [_port _val]
+  `(throw "(>! port val) used not in (go ...) block"))
+
+(defmacro <!
+  "takes a val from port. Must be called inside a (go ...) block.
+   Will park if nothing is available."
+  [_port]
+  `(throw "(<! port) used not in (go ...) block"))
 
 (defn timeout
   "Returns a channel that closes after ms milliseconds."
