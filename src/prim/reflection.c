@@ -945,12 +945,20 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
          * :mino/kind/:mino/code/:mino/message), or an ex-info-style
          * {:message ... :data ...}. Probe each shape so the original
          * message survives in the surfaced diagnostic instead of the
-         * bare "unhandled exception". */
+         * bare "unhandled exception".
+         *
+         * For ex-info / classified-map shapes that carry a :data (or
+         * :mino/data) payload, route through set_eval_diag_with_data
+         * so the diag preserves the data field. This matters when the
+         * throw happens inside a future worker -- the worker's exit
+         * captures mino_last_error_map(S), and ex-info data must
+         * survive into the consumer-side rethrow. */
         char msg[512];
         const char *kind = "user";
         const char *code = "MUS001";
         char        kbuf[64];
         char        cbuf[32];
+        mino_val_t *data = NULL;
         if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
@@ -961,8 +969,13 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 mino_keyword(S, "mino/kind"));
             mino_val_t *m_code = map_get_val(ex,
                 mino_keyword(S, "mino/code"));
+            mino_val_t *m_data = map_get_val(ex,
+                mino_keyword(S, "mino/data"));
             if (m_msg == NULL || mino_type_of(m_msg) != MINO_STRING) {
                 m_msg = map_get_val(ex, mino_keyword(S, "message"));
+            }
+            if (m_data == NULL) {
+                m_data = map_get_val(ex, mino_keyword(S, "data"));
             }
             if (m_msg != NULL && mino_type_of(m_msg) == MINO_STRING) {
                 snprintf(msg, sizeof(msg), "%.*s",
@@ -982,8 +995,16 @@ mino_val_t *prim_throw(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 cbuf[m_code->as.s.len] = '\0';
                 code = cbuf;
             }
+            data = m_data;
         } else {
             snprintf(msg, sizeof(msg), "unhandled exception");
+        }
+        if (data != NULL) {
+            set_eval_diag_with_data(S,
+                mino_current_ctx(S)->eval_current_form,
+                kind, code, msg, data, NULL);
+            append_trace(S);
+            return NULL;
         }
         return prim_throw_classified(S, kind, code, msg);
     }

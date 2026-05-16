@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.255.18 — Fix: Preserve ex-info data through futures + expose `>!` / `<!`
+
+Two async-surface canon-parity fixes surfaced by an adversarial
+concurrency probe pass.
+
+**ex-info data lost through futures.** When a future body threw
+`(ex-info "msg" {:k :v})`, derefing in a try/catch returned an
+exception map with `:mino/data nil` — the `:data` payload disappeared
+on the way out of the worker. Two places dropped it:
+
+- `prim_throw` at `try_depth == 0` (the worker's outer eval frame)
+  ran the thrown map through `prim_throw_classified(S, kind, code,
+  msg)`, which has no data field; the diag's `d->data` stayed NULL,
+  and `mino_last_error_map(S)` rendered `:mino/data nil`. Fixed:
+  `prim_throw` now extracts `:data` (or `:mino/data`) from the
+  thrown map and routes through `set_eval_diag_with_data` so the
+  diag preserves it.
+- `mino_future_deref`'s rethrow path likewise rebuilt the exception
+  via `prim_throw_classified`, dropping data plus any other fields
+  the worker had attached. Fixed: when `try_depth > 0` the captured
+  map longjmps into the enclosing try-frame verbatim. The narrow
+  `(kind, code, message)` extraction stays for the `try_depth == 0`
+  case where there's no catch frame to receive a richer shape.
+
+Regression in `tests/async_smoke_test.clj`
+(`async-future-ex-info-data-preserved`).
+
+**`>!` and `<!` not :refer-able.** The parking variants of
+`clojure.core.async` had no var definitions, only the blocking
+`>!! / <!!`. `(:require [clojure.core.async :refer [<! >!]])` raised
+an unresolved-name error before the user's `go` block compiled,
+even though the go-transformer recognized the symbols by literal
+name inside a go body. Added stub macros that throw on direct
+invocation (matching real core.async's shape); the transformer
+intercepts them before expansion when used inside `(go ...)`.
+
+Regression in `tests/async_smoke_test.clj`
+(`async-parking-ops-are-referable`).
+
 ## v0.255.17 — Fix: Disable ASan fake-stack for conservative scanner
 
 After v0.255.16 let libasan print its full report on ubuntu-24.04

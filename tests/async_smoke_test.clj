@@ -42,3 +42,38 @@
       (thread-sleep 200)
       (is (realized? p))
       (is (= 42 @p)))))
+
+(deftest async-parking-ops-are-referable
+  ;; Regression: clojure.core.async previously did not expose `>!` or
+  ;; `<!` as vars (only the blocking `>!!` / `<!!`). Script code that
+  ;; wrote `(:require [clojure.core.async :refer [<! >!]])` got a
+  ;; require-time error before its (go ...) block could compile,
+  ;; because :refer needs a resolvable var per name. They're now
+  ;; defined as stub macros that throw when called outside a go, and
+  ;; the go-transformer intercepts them by literal symbol before the
+  ;; stub would expand. Real Clojure core.async ships the same stubs
+  ;; for the same reason.
+  (testing ":refer [<! >!] resolves; usage inside go still parks correctly"
+    (let [ch (a/chan 1)]
+      (a/>!! ch :inside)
+      (is (= :inside (a/<!! (a/go (a/<! ch))))))))
+
+(deftest async-future-ex-info-data-preserved
+  ;; Regression: when a future body throws (ex-info "..." {:k :v}),
+  ;; (deref fut) inside a try/catch lost the :data payload. prim_throw
+  ;; at try_depth==0 (inside the worker) routed through
+  ;; prim_throw_classified, which drops the data field, and
+  ;; mino_future_deref's rethrow path likewise rebuilt the exception
+  ;; via prim_throw_classified rather than longjmp'ing the original
+  ;; map. Both paths fixed: prim_throw now extracts :data (or :mino/data)
+  ;; and uses set_eval_diag_with_data; mino_future_deref now longjmps
+  ;; the captured map verbatim when try_depth>0.
+  (testing "ex-info :data survives future -> deref -> catch"
+    (let [f (future (throw (ex-info "boom" {:n 42 :tag :test})))
+          result (try (deref f) (catch e e))
+          data   (when (map? result) (get result :mino/data))]
+      (is (map? result))
+      (is (= "boom" (get result :mino/message)))
+      (is (map? data))
+      (is (= 42 (get data :n)))
+      (is (= :test (get data :tag))))))
