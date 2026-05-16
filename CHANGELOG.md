@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.251.0 — JIT Portability Matrix + On/Off A/B Evidence
+
+Cycle I opens with documentation evidence rather than source
+changes. The companion mino-site repo gains a new Internals
+page, **JIT support matrix**, that records the verification
+posture for each of the five CPJIT host pipelines and the
+median-of-three on/off A/B numbers captured against
+`mino-bench/benchmarks/realistic_bench.clj` on the dev host.
+
+The A/B confirms the v0.250 nursery-bump gains were
+JIT-architecture independent: five of six realistic_bench rows
+sit within the +/- 7% noise envelope when toggling
+`MINO_JIT=on` vs `MINO_JIT=off`, while `fibonacci(25)` (pure
+compute, near-zero allocation) shows a 1.37x JIT win and the
+fused transducer pipeline shows a 1.06x JIT win. Allocation-
+and GC-dominated workloads are not where the JIT lives; the
+runtime-perf track that follows feature-complete is correctly
+framed as allocation- and dispatch-dominated rather than
+stencil-substrate-dominated.
+
+No source changes beyond the version bump.
+
 ## v0.250.0 — Default Nursery 1 MiB -> 4 MiB + Cycle G Close
 
 Closes cycle G with one substantive change. The default GC
