@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.253.0 — Test-Suite Split: Concurrency-Heavy Migration
+
+Aggressive migration kickoff. The concurrency-heavy and async-soak
+tests move out of mino's tests/ and into the new sibling repo
+`mino-tests` (see [the satellite suite](https://github.com/leifericf/mino-tests)).
+The split's boundary principle: mino keeps tests of language
+semantics (one primitive or special form at a time, sub-second,
+single-runtime); mino-tests holds anything multi-runtime,
+concurrency-heavy, fuzz, soak, sanitizer-trinity, coverage, or
+adversarial.
+
+Moved out of mino:
+
+  - `tests/stm_concurrent_test.clj` (multi-thread STM contention)
+  - `tests/host_threads_test.clj` (host-thread budget + lifecycle)
+  - `tests/agent_test.clj` (511 lines of agent fan-out)
+  - `tests/regex_reentrant_test.clj` (multi-thread regex)
+  - `tests/async_alts_test.clj`, `async_api_test.clj`,
+    `async_blocking_test.clj`, `async_buffer_test.clj`,
+    `async_combinators_test.clj`, `async_conformance_test.clj`
+    (1056 lines), `async_go_test.clj`, `async_mult_pub_test.clj`,
+    `async_timer_test.clj`
+
+Kept in mino as a minimal three-shape conformance:
+
+  - `tests/async_smoke_test.clj` — one go, one alts!!, one
+    promise. Single deftest each; sub-second.
+
+Suite shrank from 1743 tests / 7929 assertions to 1433 / 7395; the
+migrated set runs green at 313 tests / 538 assertions in mino-tests.
+
 ## v0.252.3 — Closure Capture Across Self-Tail-Call
 
 A third adversarial whitebox pass — this one building real multi-CPU
