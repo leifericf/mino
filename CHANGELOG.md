@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.255.7 — Portability: gcc Sanitizer Detection, POSIX strcasecmp, Empty TUs
+
+CI on ubuntu-24.04, ubuntu-24.04-arm, and windows-2022 went red on
+the v0.255.6 push with three pre-existing portability bugs that
+landed sometime in the v0.241-v0.252 cycle but didn't surface
+locally:
+
+* `src/gc/internal.h:150` -- `defined(__has_feature) &&
+  __has_feature(address_sanitizer)` doesn't short-circuit at the
+  preprocessor level under gcc. gcc evaluates the right side
+  syntactically and fails with "missing binary operator before
+  token '('". Split into nested `#if defined(__has_feature)` so
+  gcc never sees the `__has_feature(...)` call when the macro
+  isn't defined.
+
+* `main.c:815` -- `strcasecmp` is POSIX, declared in `<strings.h>`
+  (not `<string.h>`). Add the include under `#ifndef _WIN32`; on
+  Windows alias `mino_strcasecmp` to `_stricmp`. Call sites updated
+  to use the portable name.
+
+* `src/eval/bc/jit/{helpers,emit,patcher,patcher_x86_64,stats}.c`
+  -- empty translation unit under `-Werror=pedantic` when
+  `MINO_CPJIT_HOST` isn't defined for the build target (e.g.,
+  mingw without `MINO_CPJIT_X86_64_WINDOWS`). Added a sentinel
+  typedef after each `#endif` to keep each TU non-empty.
+
+* `src/eval/bc/jit/entry.c:680` -- `mino_jit_invoke` stub had 4
+  parameters; header declared 5 (`mino_env *env` was added
+  in the v0.219+ refactor and the stub wasn't updated). Stub
+  signature now matches the header.
+
+Verified: full local build + tests pass (1273 tests / 4555
+assertions, 0 failed). Pushed to trigger a fresh CI run.
+
 ## v0.255.6 — Fix: BC Speculative Fold Longjmps Through Active Try-Frame
 
 Surfaced by mino-tests v0.7.0's `gen_program.clj`: a `defn` whose

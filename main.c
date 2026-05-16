@@ -27,9 +27,12 @@
 
 #ifndef _WIN32
 #include <execinfo.h>
+#include <strings.h>  /* POSIX strcasecmp on Linux + macOS */
+#define mino_strcasecmp strcasecmp
 #else
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
+#  define mino_strcasecmp _stricmp
 #endif
 
 #if defined(__APPLE__)
@@ -812,11 +815,11 @@ int main(int argc, char **argv)
     mino_jit_mode_t cli_jit = MINO_JIT_MODE_AUTO;
     int cli_jit_set = 0;
     if (cli_jit_mode != NULL) {
-        if (strcasecmp(cli_jit_mode, "auto") == 0) {
+        if (mino_strcasecmp(cli_jit_mode, "auto") == 0) {
             cli_jit = MINO_JIT_MODE_AUTO; cli_jit_set = 1;
-        } else if (strcasecmp(cli_jit_mode, "off") == 0) {
+        } else if (mino_strcasecmp(cli_jit_mode, "off") == 0) {
             cli_jit = MINO_JIT_MODE_OFF;  cli_jit_set = 1;
-        } else if (strcasecmp(cli_jit_mode, "on") == 0) {
+        } else if (mino_strcasecmp(cli_jit_mode, "on") == 0) {
             cli_jit = MINO_JIT_MODE_ON;   cli_jit_set = 1;
         } else {
             fprintf(stderr,
@@ -898,7 +901,7 @@ int main(int argc, char **argv)
             int explicit_on = (cli_jit_set && cli_jit == MINO_JIT_MODE_ON);
             if (!explicit_on) {
                 const char *env_jit = getenv("MINO_JIT");
-                if (env_jit != NULL && strcasecmp(env_jit, "on") == 0) {
+                if (env_jit != NULL && mino_strcasecmp(env_jit, "on") == 0) {
                     explicit_on = 1;
                 }
             }

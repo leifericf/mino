@@ -172,3 +172,7 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
 }
 
 #endif /* MINO_CPJIT_HOST */
+
+/* Keep this TU non-empty under -Werror=pedantic when the gate above
+ * is false. */
+typedef int mino_jit_stats_tu_marker;

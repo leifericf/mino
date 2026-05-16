@@ -762,3 +762,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
 }
 
 #endif /* MINO_CPJIT_HOST */
+
+/* Keep this TU non-empty under -Werror=pedantic when the gate above
+ * is false. */
+typedef int mino_jit_emit_tu_marker;

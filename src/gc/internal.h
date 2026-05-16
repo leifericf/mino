@@ -146,9 +146,20 @@ typedef struct {
  * Sanitizer builds want loud failure to flag liveness regressions;
  * release builds keep the documented soft-loss path so the
  * conservative C-stack scanner still covers values that escape
- * the pin array. */
-#if (defined(__has_feature) && __has_feature(address_sanitizer)) \
-    || defined(__SANITIZE_ADDRESS__) \
+ * the pin array. The __has_feature check is nested inside its own
+ * `defined` test because gcc evaluates the second half of an &&
+ * syntactically even when the first half is false -- splitting
+ * into nested #if keeps gcc preprocessing happy while still
+ * detecting clang's ASan / TSan / UBSan flavours. */
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer) \
+      || __has_feature(thread_sanitizer) \
+      || __has_feature(undefined_behavior_sanitizer)
+#    define MINO_GC_PIN_LOUD_ASSERT 1
+#  else
+#    define MINO_GC_PIN_LOUD_ASSERT 0
+#  endif
+#elif defined(__SANITIZE_ADDRESS__) \
     || defined(__SANITIZE_THREAD__) \
     || defined(__SANITIZE_UNDEFINED__)
 #  define MINO_GC_PIN_LOUD_ASSERT 1

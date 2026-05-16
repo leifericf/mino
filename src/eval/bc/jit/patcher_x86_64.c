@@ -188,3 +188,7 @@ void mino_jit_write_trampoline(unsigned char *slot, uintptr_t target_addr)
 }
 
 #endif /* MINO_CPJIT_HOST_X86_64 */
+
+/* Keep this TU non-empty under -Werror=pedantic when the gate above
+ * is false (e.g., arm64 builds). */
+typedef int mino_jit_patcher_x86_64_tu_marker;

@@ -778,3 +778,7 @@ mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
 }
 
 #endif /* MINO_CPJIT_HOST */
+
+/* Keep this TU non-empty under -Werror=pedantic when MINO_CPJIT_HOST
+ * isn't defined for the build target. */
+typedef int mino_jit_helpers_tu_marker;

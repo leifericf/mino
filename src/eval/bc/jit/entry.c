@@ -678,9 +678,10 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
 }
 
 mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
-                            mino_val_t **regs, mino_val_t **consts)
+                            mino_val_t **regs, mino_val_t **consts,
+                            mino_env_t *env)
 {
-    (void)S; (void)bc; (void)regs; (void)consts; return NULL;
+    (void)S; (void)bc; (void)regs; (void)consts; (void)env; return NULL;
 }
 
 void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn)
