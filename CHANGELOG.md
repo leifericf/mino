@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.255.1 — Fix: thread-sleep Yields state_lock
+
+Surfaced by mino-tests's T9 conc_deadlock probe: a polling pattern
+like
+```
+(loop [...]
+  (when-not (realized? p) (thread-sleep 50) (recur)))
+```
+spun forever even though the promise was eventually delivered by a
+sibling future.
+
+Root cause: `thread-sleep` called `nanosleep` while holding
+`state_lock`. Worker threads spawned by `(future ...)` need
+`state_lock` for any `mino_call` -- including the body's call to
+`deliver` -- so they couldn't make progress during the sleep. The
+main thread observed `realized? p` as false at every poll because
+no worker had actually run yet. `@p` worked because
+`mino_future_deref` yields the lock before blocking on the
+condvar; `thread-sleep` didn't have an equivalent yield.
+
+Fix: wrap the `nanosleep` loop in `mino_yield_lock` /
+`mino_resume_lock`, matching what `mino_future_deref` already
+does. Workers can now make progress during the sleep, so a
+sibling future's delivery is visible to the next `realized?`
+call.
+
+Regression test in `tests/async_smoke_test.clj` adds
+`async-realized-cross-thread` which fails under the old behavior
+and passes under the fix. Suite: 1270 / 4544 green.
+
 ## v0.255.0 — Fix: loop+recur Closures Inside defn Bodies
 
 Surfaced by mino-tests's T8 closure_tco_jit probe during Cycle A: a

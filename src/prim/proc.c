@@ -299,8 +299,21 @@ mino_val_t *prim_thread_sleep(mino_state_t *S, mino_val_t *args, mino_env_t *env
     }
     ts.tv_sec  = (time_t)(ms / 1000);
     ts.tv_nsec = (long)((ms % 1000) * 1000000L);
-    while (nanosleep(&ts, &ts) == -1) {
-        /* Restart on EINTR using the residual time written into ts. */
+    /* Yield state_lock for the duration of the sleep so worker
+     * threads (futures, agents) can make progress. Without this,
+     * a `(thread-sleep 200)` between a `(future ...)` spawn and a
+     * subsequent realized? / state observation would starve every
+     * worker -- they all need state_lock to call into mino_call,
+     * but a sleeping main thread holds it. The polling pattern
+     *     (loop [...] (when-not (realized? p) (thread-sleep 50) (recur)))
+     * would otherwise spin forever. mino_future_deref already does
+     * the same yield; this brings thread-sleep into alignment. */
+    {
+        int depth = mino_yield_lock(S);
+        while (nanosleep(&ts, &ts) == -1) {
+            /* Restart on EINTR using the residual time written into ts. */
+        }
+        mino_resume_lock(S, depth);
     }
     return mino_nil(S);
 }
