@@ -377,6 +377,18 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
     }
     mino_worker_list_lock_release(S);
 
+    /* Worker may have set ctx->last_diag if its body threw and the
+     * throw landed at try_depth == 0 (no enclosing try). The diag's
+     * cached_map (if any) was already captured into impl->exception
+     * and is reachable from the future on the GC heap; only the
+     * unmanaged diag struct itself remains. Reclaim it before free(ctx)
+     * so a future that throws does not leak a ~160-byte diag per call.
+     * LSan surfaced this on the gcc-built linux runners where libasan
+     * runs the leak detector at exit. */
+    if (ctx->last_diag != NULL) {
+        diag_free(ctx->last_diag);
+        ctx->last_diag = NULL;
+    }
     mino_tls_ctx = NULL;
     free(ctx);
 }

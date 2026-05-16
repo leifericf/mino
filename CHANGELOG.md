@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.255.19 — Fix: Worker leaks last_diag on uncaught throw
+
+LSan on the gcc-built ubuntu-24.04 runners reported a 160-byte
+direct leak from `diag_new` via `set_eval_diag_with_data` after the
+v0.255.18 async test added `(future (throw (ex-info ...)))`. The
+worker's per-thread ctx allocates a `mino_diag_t` when its body
+throws and the throw lands at try_depth == 0 (no enclosing try);
+the diag installed itself into `ctx->last_diag`, its cached_map
+got captured into `impl->exception` for consumer-side rethrow, and
+then `worker_run` called `free(ctx)` without freeing the diag
+itself.
+
+The leak predates v0.255.18 — any future that threw leaked its
+diag — but macOS clang ASan ships without LSan, so it never showed
+locally. v0.255.17's CI run had no async test that threw; v0.255.18
+added one and surfaced it.
+
+Fix: `worker_run` now calls `diag_free(ctx->last_diag)` before
+`free(ctx)`. The diag struct's malloc'd fields (kind/code/msg
+strings, notes, spans, frames) all get reclaimed; the Mino-side
+cached_map stays reachable from the future's `impl->exception` on
+the GC heap.
+
 ## v0.255.18 — Fix: Preserve ex-info data through futures + expose `>!` / `<!`
 
 Two async-surface canon-parity fixes surfaced by an adversarial
