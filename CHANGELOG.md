@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.255.15 — Fix: Free dyn_frame on eval_try unwind path
+
+With v0.255.14's ASan stack-scan attribute fix letting the ASan
+suite run to completion on Linux runners, LeakSanitizer (active by
+default in gcc's libsanitizer; off on macOS) flagged a real leak:
+
+```
+==2692==ERROR: LeakSanitizer: detected memory leaks
+Direct leak of 16 byte(s) in 1 object(s) allocated from:
+    #0 ... in malloc
+    #1 ... in eval_binding src/eval/bindings.c:855
+```
+
+`eval_binding` heap-allocates a `dyn_frame_t` deliberately --
+the comment at bindings.c:803 calls out that a stack-allocated
+frame would be read-after-pop by control.c's throw-unwind walker.
+The normal-completion path at line 868 calls `free(frame)`. The
+throw-unwind walker in `control.c::eval_try_special_form` does
+`dyn_binding_list_free(f->bindings)` and unlinks the frame from
+`dyn_stack`, but forgets to free `f` itself -- so every `binding`
+form whose body throws leaks 16 bytes.
+
+The BC VM's matching unwind paths (`bc_done` at vm.c:2103-2109
+and the catch landing pad at vm.c:2057-2063) already free `f`
+correctly. control.c had the two walkers that lacked the free.
+
+### Changes
+
+- `src/eval/control.c`: free the frame after each
+  `dyn_binding_list_free(f->bindings)` in both eval_try unwind
+  walkers (lines 189-193 and 237-241). Mirrors the BC VM
+  walkers' shape.
+- `src/mino.h`: `MINO_VERSION_PATCH` bumped to 15.
+
+### Verification
+
+- Local `release-gate` 17/17 green.
+- Local `tests/run.clj` 1274 tests / 4557 assertions green.
+
 ## v0.255.14 — Fix: gc_scan_stack no_sanitize attribute on gcc-built ASan
 
 With the v0.255.13 stencil-check drop letting CI's `Release gate`

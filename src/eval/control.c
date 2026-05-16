@@ -190,6 +190,11 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
             dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
             mino_current_ctx(S)->dyn_stack = f->prev;
             dyn_binding_list_free(f->bindings);
+            /* Mirror eval_binding's normal-path free(frame); the
+             * frame is malloc'd in bindings.c (heap-allocated so
+             * the pointer survives a body throw) and must be
+             * reclaimed here on the unwind path. */
+            free(f);
         }
         clear_error(S);
         got_exception = 1;
@@ -238,6 +243,7 @@ mino_val_t *eval_try(mino_state_t *S, mino_val_t *form,
                     dyn_frame_t *f = mino_current_ctx(S)->dyn_stack;
                     mino_current_ctx(S)->dyn_stack = f->prev;
                     dyn_binding_list_free(f->bindings);
+                    free(f);
                 }
                 clear_error(S);
                 /* got_exception stays 1, vol_ex updated. */
