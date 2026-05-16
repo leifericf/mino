@@ -864,16 +864,6 @@
   []
   (println (sh! mino-bin "tests/external_runner.clj")))
 
-(defn test-fault-inject
-  "Run fault injection tests (simulated OOM)."
-  []
-  (println (sh! mino-bin "tests/fault_inject_runner.clj")))
-
-(defn test-gc-stress
-  "Run GC stability tests under MINO_GC_STRESS=1 (collect on every allocation)."
-  []
-  (println (sh! "env" "MINO_GC_STRESS=1" mino-bin "tests/gc_stress_runner.clj")))
-
 (defn- compile-and-run-embed-test
   "Compile a tests/embed_*.c harness against the lib srcs and run it."
   [src bin]

@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.253.1 — Test-Suite Split: Fuzz / GC Stress / Fault Injection
+
+Second migration cut. Fuzz, GC stress, fault-injection, and the
+HAMT churn regression move out of mino's tests/ into the
+mino-tests sibling repo.
+
+Moved out of mino:
+
+  - `tests/reader_fuzz_test.clj`
+  - `tests/gc_generational_test.clj`
+  - `tests/gc_incremental_test.clj`
+    (basic GC tests in `tests/gc_test.clj` stay here)
+  - `tests/regression_hamt_str_churn.clj`
+  - `tests/fault_inject_test.clj`,
+    `tests/fault_inject_runner.clj`
+  - `tests/gc_stress_runner.clj`
+
+Tasks removed from mino's task table:
+
+  - `test-fault-inject` (runner now in mino-tests)
+  - `test-gc-stress` (runner now in mino-tests)
+
+CI nightly workflow simplified: the GC-stress and fault-injection
+job steps move to mino-tests's own nightly; mino's nightly keeps
+release-gate + embed-stress only.
+
+Mino suite shrank to 1367 tests / 4732 assertions; mino-tests
+migrated suite grew to 384 / 3204.
+
 ## v0.253.0 — Test-Suite Split: Concurrency-Heavy Migration
 
 Aggressive migration kickoff. The concurrency-heavy and async-soak

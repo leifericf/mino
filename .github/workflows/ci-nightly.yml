@@ -1,12 +1,9 @@
 name: ci-nightly
 
-# Runs the full extended-suite battery on every supported host
-# once a day. PR-time CI keeps to the smoke set so push latency
-# stays low; the nightly job catches:
-#   - GC stability under stress collection (test-gc-stress)
-#   - Fault-injected OOM paths (test-fault-inject)
-#   - C embedding stress (test-embed)
-# in addition to release-gate, which the PR matrix already runs.
+# Runs the C embedding stress on every supported host once a day,
+# in addition to release-gate (which the PR matrix already runs).
+# GC stress and fault-injection tests live in the mino-tests
+# satellite repo's nightly workflow now.
 on:
   schedule:
     # 04:00 UTC daily. Off-peak relative to most contributors.
@@ -41,14 +38,6 @@ jobs:
         # here so nightly is self-contained.
         run: ./mino task release-gate
         timeout-minutes: 12
-
-      - name: GC stress
-        run: ./mino task test-gc-stress
-        timeout-minutes: 15
-
-      - name: Fault injection
-        run: ./mino task test-fault-inject
-        timeout-minutes: 10
 
       - name: Embed stress
         run: ./mino task test-embed
