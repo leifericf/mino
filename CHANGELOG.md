@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.255.5 — Fix: BC Bitwise Fast Path No Longer Promotes to Bigint
+
+Surfaced by mino-tests's `gen.clj` while building a seeded RNG: an
+xorshift64* step inside a `defn` body raised `MTY001 "bit-xor
+expects integers"` after a few iterations. The same code at the
+top level worked.
+
+Root cause: `binop_int_fast` in `src/eval/bc/vm.c` routed BAND /
+BOR / BXOR / SHL / SHR / USHR results through `tag_or_box_int`,
+which falls back to `mino_int` for values outside the inline-tag
+range. `mino_int` promotes to `MINO_BIGINT` when the bignum
+capability is installed. The corresponding prims
+(`prim_bit_shift_left`, `prim_bit_and`, ...) all use
+`mino_int_wrap`, which always boxes as a plain `MINO_INT` and never
+promotes. The two paths produced different result types for the
+same operation, and a downstream `bit-xor`'s fast-path check
+refused the bigint with `MTY001 "bit-xor expects integers"`.
+
+Fix: bitwise BC fast-path results now go through `mino_int_wrap`,
+matching the prim semantics exactly. Arithmetic (ADD / SUB / MUL)
+keeps `tag_or_box_int` since Clojure-correct overflow there
+DOES promote to bigint.
+
+Regression test in `tests/bc_bitwise_test.clj` covers all five
+bitwise ops at i64 range plus the xorshift64* chain that surfaced
+the original issue. Suite: 1272 / 4549 green.
+
 ## v0.255.4 — Hygiene: I/O Buffer Overflow + Safepoint Comment
 
 Two small cleanups closing the rest of the runtime-audit BUGS.md

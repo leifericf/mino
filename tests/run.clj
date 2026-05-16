@@ -61,6 +61,7 @@
 (require "tests/bc_closure_test")
 (require "tests/reduce_perf_test")
 (require "tests/bc_let_fold_test")
+(require "tests/bc_bitwise_test")
 (require "tests/ifn_test")
 (require "tests/stack_test")
 (require "tests/sorted_test")

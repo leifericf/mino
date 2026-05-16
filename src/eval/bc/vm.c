@@ -549,21 +549,29 @@ mino_val_t *binop_int_fast(mino_state_t *S, mino_val_t *lhs,
         r = a % b;
         if (subop == BINOP_MOD && r != 0 && ((r < 0) != (b < 0))) r += b;
         return tag_or_box_int(S, r);
-    case BINOP_BAND: return tag_or_box_int(S, a & b);
-    case BINOP_BOR:  return tag_or_box_int(S, a | b);
-    case BINOP_BXOR: return tag_or_box_int(S, a ^ b);
+    /* Bitwise ops are i64 operations -- the prims call mino_int_wrap
+     * which always boxes as MINO_INT, never promotes to bigint. Route
+     * the fast-path results through mino_int_wrap as well so a BC-
+     * compiled call has the same result type as the prim path. Using
+     * tag_or_box_int here promoted to bigint via mino_int's overflow
+     * branch when the bignum capability was installed, and the
+     * surface bug was a downstream bit-xor refusing the promoted
+     * bigint (MTY001 "bit-xor expects integers"). */
+    case BINOP_BAND: return mino_int_wrap(S, a & b);
+    case BINOP_BOR:  return mino_int_wrap(S, a | b);
+    case BINOP_BXOR: return mino_int_wrap(S, a ^ b);
     case BINOP_SHL:
         /* Shift amount must be in [0, 63]; route through unsigned so
          * that bit-shift-left of negative values matches the prim's
          * wrap-around result (and stays clear of signed-overflow UB). */
         if (b < 0 || b >= 64) return NULL;
-        return tag_or_box_int(S, (long long)((unsigned long long)a << b));
+        return mino_int_wrap(S, (long long)((unsigned long long)a << b));
     case BINOP_SHR:
         if (b < 0 || b >= 64) return NULL;
-        return tag_or_box_int(S, a >> b);
+        return mino_int_wrap(S, a >> b);
     case BINOP_USHR:
         if (b < 0 || b >= 64) return NULL;
-        return tag_or_box_int(S, (long long)((unsigned long long)a >> b));
+        return mino_int_wrap(S, (long long)((unsigned long long)a >> b));
     default:       return NULL;
     }
 }
