@@ -109,3 +109,13 @@
   (is (= ["a" "b" "c" "d"]  (split "a,b,c,d"      #",")))
   (is (= ["a" "b,c,d"]      (split "a,b,c,d"      #"," 2)))
   (is (= ["ab" "cd"]        (split "ab cd"        #" +"))))
+
+(deftest split-empty-input
+  ;; Regression: (str/split "" re) used to return [] (an empty
+  ;; vector). Clojure / JVM String.split returns [""] (a single empty-
+  ;; string element) for empty input regardless of the separator.
+  ;; Downstream code that destructures [head & tail] on the result
+  ;; relies on the [""] shape so head is "" rather than nil.
+  (is (= [""] (split "" #",")))
+  (is (= [""] (split "" #"\s+")))
+  (is (= [""] (split "" ","))))

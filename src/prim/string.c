@@ -468,6 +468,17 @@ mino_val_t *prim_split(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     s    = s_val->as.s.data;
     slen = s_val->as.s.len;
+    /* Empty input: return [""] (a single empty-string element) per
+     * Clojure / JVM String.split semantics. mino previously returned
+     * an empty vector here. The single-empty form is what downstream
+     * Clojure code expects from (str/split "" re). */
+    if (slen == 0) {
+        mino_val_t **buf1 = (mino_val_t **)gc_alloc_typed(S,
+            GC_T_VALARR, 1 * sizeof(*buf1));
+        if (buf1 == NULL) return NULL;
+        buf1[0] = mino_string_n(S, "", 0);
+        return mino_vector(S, buf1, 1);
+    }
     if (mino_type_of(sep_val) == MINO_REGEX
         && sep_val->as.regex.source != NULL
         && mino_type_of(sep_val->as.regex.source) == MINO_STRING) {

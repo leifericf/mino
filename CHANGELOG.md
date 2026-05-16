@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.255.26 — Fix: `(str/split "" re)` returns `[""]`, not `[]`
+
+JVM Clojure (and POSIX String.split) returns `[""]` -- a single
+empty-string element -- when the input is empty, regardless of the
+separator. mino's `prim_split` returned `[]` (an empty vector)
+because the empty-input case fell into the regular split loop which
+never appended a piece. Downstream code that destructures
+`[head & tail]` on the result expected `head` to be `""`, not nil.
+
+`prim_split` now short-circuits on `slen == 0` and returns a
+1-element vector containing the empty string before either the
+regex or literal-string path runs.
+
+Regression in `tests/string_test.clj` (`split-empty-input`).
+
 ## v0.255.25 — Fix: `seq_iter_init` walks records as kv pairs
 
 `(into {} record)` returned `{}` instead of `{:x 1 :y 2}`. The
