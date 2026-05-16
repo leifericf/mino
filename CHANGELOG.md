@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.255.17 — Fix: Disable ASan fake-stack for conservative scanner
+
+After v0.255.16 let libasan print its full report on ubuntu-24.04
+x86_64, the report named the real bug: a SEGV inside `gc_scan_stack`
+at `src/gc/roots.c` reading from an unmapped page near `0x7f7a65220000`.
+Root cause is ASan's fake-stack (use-after-return detection) feature,
+which is default-on in gcc-built ASan binaries.
+
+When fake-stack is active, each function's address-taken locals are
+relocated to a separately allocated region. `&probe` recorded at state
+init (`gc_note_host_frame`) and `&probe` taken inside `gc_scan_stack`
+end up in **different** fake-stack regions, with unrelated heap pages
+between them. The conservative scanner walks word-by-word from one
+`&probe` toward the other, hits a guard page, and SEGVs.
+
+The `no_sanitize_address` attribute added in v0.255.14 only suppresses
+red-zone checks; it does not change where local addresses live. The
+correct fix is to disable fake-stack at the ASan runtime layer.
+
+Define `__asan_default_options()` in `main.c` (a weak hook libasan
+calls before `main`) that returns `"detect_stack_use_after_return=0"`
+when the binary is built with ASan. Use-after-return is a
+nice-to-have; the heap-corruption / red-zone class of bugs the
+release-gate ASan run actually targets is unaffected. `detect_leaks`
+remains on, so LSan continues to catch what ubuntu-24.04-arm was
+flagging in v0.255.15.
+
+macos-14 / windows-2022 / ubuntu-24.04-arm stayed green in v0.255.16;
+only ubuntu-24.04 x86_64 carried this layer.
+
 ## v0.255.16 — Fix: Defer to libsanitizer + filter JIT note from parity diff
 
 Two remaining CI matrix failures after v0.255.15:
