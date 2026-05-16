@@ -595,6 +595,76 @@
   (test-jit-parity)
   (println "  release-gate: OK"))
 
+(def ^:private ci-matrix-targets
+  "Per-Docker-target build images. Each entry binds a docker tag
+   (the image name) to its build context. Used by the ci-matrix
+   task to drive end-to-end verification on every host that has a
+   committed stencil header.
+
+   Windows x86_64 is not represented here: Windows containers
+   need a Windows host. GitHub Actions covers that target via the
+   `windows-2022` runner in .github/workflows/ci.yml. The local
+   `ci-matrix` driver is for the Linux pair only."
+  [{:tag        "mino-ci-arm64-linux"
+    :dockerfile "docker/arm64-linux.Dockerfile"
+    :platform   "linux/arm64"}
+   {:tag        "mino-ci-x86_64-linux"
+    :dockerfile "docker/x86_64-linux.Dockerfile"
+    :platform   "linux/amd64"}])
+
+(defn ci-matrix
+  "Build + run release-gate inside each Docker target image.
+   On an Apple Silicon dev host: linux/arm64 runs natively via
+   the macOS Virtualization framework; linux/amd64 runs via
+   Rosetta 2 / qemu (slow but functional).
+
+   For each target the driver:
+     1. docker build -t <tag> -f docker/<arch>.Dockerfile .
+     2. docker run --rm --platform <platform> -v $PWD:/mino:rw
+                   <tag> sh -c 'make && ./mino task release-gate'
+     3. Reports pass/fail per target; non-zero on any failure.
+
+   Reproduces the CI matrix locally so failures surface before
+   pushing. The GHA matrix in .github/workflows/ci.yml is the
+   authoritative gate; this task is the local mirror."
+  []
+  (let [failures
+        (reduce
+          (fn [acc {:keys [tag dockerfile platform]}]
+            (println (str "--- ci-matrix: " tag " (" platform ") ---"))
+            (let [build (sh "docker" "build"
+                            "--platform" platform
+                            "-t" tag
+                            "-f" dockerfile
+                            ".")]
+              (when-not (= 0 (get build :exit))
+                (println (get build :out))
+                (println (get build :err))))
+            (let [run (sh "docker" "run" "--rm"
+                          "--platform" platform
+                          "-v" (str (System/getProperty "user.dir") ":/mino:rw")
+                          tag
+                          "sh" "-c"
+                          "make && ./mino task release-gate")]
+              (let [out (get run :out)
+                    err (get run :err)
+                    ok? (= 0 (get run :exit))]
+                (when-not ok?
+                  (println "--- last 60 lines of output ---")
+                  (let [combined (str out err)
+                        lines    (str/split-lines combined)
+                        tail     (take-last 60 lines)]
+                    (doseq [l tail] (println l))))
+                (println (str "  ci-matrix " tag ": " (if ok? "OK" "FAIL")))
+                (if ok? acc (conj acc tag)))))
+          []
+          ci-matrix-targets)]
+    (if (seq failures)
+      (throw (ex-info (str "ci-matrix: failed targets: "
+                           (str/join ", " failures))
+                      {:failed-targets failures}))
+      (println "  ci-matrix: OK"))))
+
 (defn build-alloc-profile
   "Build mino_prof with -DMINO_ALLOC_PROFILE=1. Wraps every gc_alloc_typed
    call with a per-callsite recorder; expose the data with the

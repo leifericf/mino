@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.245.0 — Docker Images + ci-matrix Task
+
+Opens cycle F. Adds the local CI scaffolding that makes the
+"5 host paths code-complete" claim continuously verifiable
+instead of aspirational.
+
+Two new Dockerfiles under `docker/` build minimal Ubuntu 24.04
+images carrying just the toolchain `mino task release-gate`
+needs (gcc + make + libc6 dev headers):
+
+  - `docker/arm64-linux.Dockerfile` (`arm64v8/ubuntu:24.04`)
+  - `docker/x86_64-linux.Dockerfile` (`amd64/ubuntu:24.04`)
+
+A new `mino task ci-matrix` driver builds each image (cached),
+bind-mounts the repo as a read-write volume, runs
+`make && ./mino task release-gate` inside, and aggregates pass /
+fail per target. Failure prints the last 60 lines of output for
+the failed target so the diagnostic surfaces without trawling
+through Docker layer logs.
+
+On an Apple Silicon dev host:
+  - `linux/arm64` runs natively via the macOS Virtualization
+    framework.
+  - `linux/amd64` runs via Rosetta 2 / qemu (slower but functional).
+
+x86_64 Windows is not in this matrix: Windows containers need a
+Windows host. The GHA matrix in `.github/workflows/ci.yml`
+covers that target via the `windows-2022` runner; the local
+`ci-matrix` driver mirrors only the Linux pair.
+
+  - `docker/arm64-linux.Dockerfile`: new.
+  - `docker/x86_64-linux.Dockerfile`: new.
+  - `lib/mino/tasks/builtin.clj`: new `ci-matrix-targets` table
+    and `ci-matrix` driver.
+  - `mino.edn`: registers the `ci-matrix` task.
+
+The GHA matrix extension lands in v0.246.0; the cross-compile
+smoke job in v0.247.0; the nightly workflow + cycle close in
+v0.248.0.
+
+`release-gate` green: 1737 tests / 7919 assertions, ASan clean,
+4-way JIT parity stdout byte-identical.
+
 ## v0.244.0 — Extractor Carve-Out: coff + Synthetic-Blob Selftests + Cycle E Close
 
 Closes cycle E. Two changes in this release:

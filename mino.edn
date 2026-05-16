@@ -40,6 +40,8 @@
                       :task mino.tasks.builtin/check-reloc-mirror}
   release-gate {:doc  "Composite pre-tag gate: G3 + G2 + G1 + tests + parity, fail-fast"
                 :task mino.tasks.builtin/release-gate}
+  ci-matrix    {:doc  "Local Docker matrix: release-gate inside linux/arm64 + linux/amd64"
+                :task mino.tasks.builtin/ci-matrix}
   clean           {:doc  "Remove build artifacts"
                    :task mino.tasks.builtin/clean}
   test            {:doc  "Build and run the test suite"
