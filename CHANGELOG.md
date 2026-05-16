@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.255.4 — Hygiene: I/O Buffer Overflow + Safepoint Comment
+
+Two small cleanups closing the rest of the runtime-audit BUGS.md
+backlog.
+
+* `src/prim/io.c`:
+  - `append_byte`'s growth loop wraps the doubling in
+    `checked_double_sz`. The pattern `*cap == 0 ? 64 : *cap * 2`
+    was the only doubling left in the file without an overflow
+    guard.
+  - `file_seq_recurse`'s items-array growth wraps both the
+    capacity doubling and the `nc * sizeof(**items)` multiplication
+    in `checked_double_sz` / `checked_mul_sz`.
+* `src/runtime/internal.h`: the `should_yield` field's comment said
+  "Single-threaded today: nothing sets the flag" but
+  `mino_safepoint_propagate_stw` in state.c does set it (and
+  `mino_safepoint_park` clears it). Comment updated to describe
+  the actual writers / readers.
+
+Suite: 1270 / 4544 green.
+
 ## v0.255.3 — Fix: VM Arithmetic Fallback UB
 
 `BINOP_ADD` / `BINOP_SUB` / `BINOP_MUL` in `src/eval/bc/vm.c` had a

@@ -189,8 +189,16 @@ static int append_byte(mino_state_t *S, char **buf, size_t *len,
                        size_t *cap, char c)
 {
     if (*len + 1 > *cap) {
-        size_t nc = *cap == 0 ? 64 : *cap * 2;
-        char  *nb = (char *)realloc(*buf, nc);
+        size_t nc;
+        char  *nb;
+        if (*cap == 0) {
+            nc = 64;
+        } else if (!checked_double_sz(*cap, &nc)) {
+            prim_throw_classified(S, "internal", "MIN001",
+                "print: buffer size overflow");
+            return -1;
+        }
+        nb = (char *)realloc(*buf, nc);
         if (nb == NULL) {
             prim_throw_classified(S, "internal", "MIN001",
                 "print: out of memory");
@@ -772,9 +780,18 @@ static void file_seq_recurse(mino_state_t *S, const char *dir,
             file_seq_recurse(S, path, items, len, cap);
         } else {
             if (*len == *cap) {
-                size_t nc = *cap == 0 ? 64 : *cap * 2;
-                mino_val_t **nb = (mino_val_t **)realloc(*items,
-                                                          nc * sizeof(**items));
+                size_t nc;
+                size_t alloc_sz;
+                mino_val_t **nb;
+                if (*cap == 0) {
+                    nc = 64;
+                } else if (!checked_double_sz(*cap, &nc)) {
+                    closedir(d); return;
+                }
+                if (!checked_mul_sz(nc, sizeof(**items), &alloc_sz)) {
+                    closedir(d); return;
+                }
+                nb = (mino_val_t **)realloc(*items, alloc_sz);
                 if (nb == NULL) { closedir(d); return; }
                 *items = nb;
                 *cap = nc;

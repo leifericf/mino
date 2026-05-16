@@ -365,18 +365,19 @@ typedef struct mino_thread_ctx {
 
     /* Safepoint-cooperative-yield flag.
      *
-     * Set by the GC driver when a major collection wants every worker
-     * for this state to park at its next safepoint, so the collector
-     * can run with a stable view of the heap. The mutator polls
-     * `should_yield` at canonical safepoints (eval_impl entry,
-     * gc_alloc_typed prologue, loop/recur backward branches); when
-     * non-zero the mutator calls into the parking slow path.
+     * Set by the stop-the-world propagation path when a major
+     * collection wants every worker for this state to park at its
+     * next safepoint so the collector can run with a stable view of
+     * the heap. The mutator polls `should_yield` at canonical
+     * safepoints (eval_impl entry, gc_alloc_typed prologue,
+     * loop/recur backward branches); when non-zero the mutator calls
+     * into the parking slow path.
      *
-     * Single-threaded today: nothing sets the flag, so the poll is
-     * a single predictably-not-taken branch on the fast path. The
-     * GC driver flips it once real host threads exist, and
-     * `mino_safepoint_park` blocks the mutator until the collector
-     * signals release. */
+     * The flag is set by `mino_safepoint_propagate_stw`
+     * (runtime/state.c) when STW is requested, and cleared by
+     * `mino_safepoint_park` and `mino_safepoint_resume_world` once
+     * the collector releases the world. The fast-path poll is a
+     * single predictably-not-taken branch when STW isn't active. */
     volatile int    should_yield;
 
     /* Exception handling: longjmp targets for try/catch. */
