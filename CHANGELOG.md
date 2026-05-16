@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.252.0 — JIT Feature-Complete Declaration + Cycle I Close
+
+Closes Cycle I. The CPJIT layer is feature-complete on the dev
+host. The companion mino-site repo gains a new Internals page,
+**JIT status**, that carries the verification checklist (seven
+local boxes ticked at v0.252; three deferred boxes pending the
+first push to upstream), documents the runtime-control surface
+(`mino_state_set_jit_mode`, `mino_state_set_jit_hot_threshold`,
+`mino_state_jit_capability`, the `--jit=auto|off|on` and
+`--jit-threshold=N` CLI flags, and the `MINO_JIT` /
+`MINO_JIT_HOT_THRESHOLD` env vars), and lists the by-design
+omissions (no type-feedback specialization, no deoptimization,
+no adaptive stencil expansion).
+
+What "feature-complete" means here:
+
+  - 39 stencils registered across five host arches with on-disk
+    byte tables in `src/eval/bc/stencils/generated/`.
+  - Dual-binary build: full `mino` (CPJIT-enabled, AUTO default)
+    + `mino-lean` (CPJIT compiled out, smaller footprint).
+  - Four-way parity green on the dev host: stdout byte-identical
+    across `MINO_JIT=auto/on/off` plus `mino-lean`.
+  - Synthetic-blob selftests pass for Mach-O / ELF / COFF via
+    `tools/stencil-extract --selftest`.
+  - Embed API stable since v0.240; no breaking changes through
+    cycle close.
+
+What "feature-complete" does not mean: a freeze. Bug fixes,
+portability fixes, and perf-neutral cleanup remain in scope. New
+stencils land in a separate opcode-expansion cycle.
+
+Perf thresholds for the runtime-perf track that follows are
+seeded developer-side (regression ceiling +/- 10%, gain ratchet
+>= 10%, +/- 7% single-run noise envelope, median-of-3 discipline
+for any number that enters a CHANGELOG perf table); see the
+JIT status page on mino-site for the headline numbers.
+
+No mino source changes beyond the version bump.
+
 ## v0.251.0 — JIT Portability Matrix + On/Off A/B Evidence
 
 Cycle I opens with documentation evidence rather than source
