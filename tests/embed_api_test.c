@@ -142,8 +142,8 @@ static void test_throw_uncaught(mino_state_t *S, mino_env_t *env)
     const char *err;
     REQUIRE(r == NULL, "throw-uncaught: should produce NULL result");
     err = mino_last_error(S);
-    REQUIRE(err != NULL && strstr(err, "unhandled exception") != NULL,
-            "throw-uncaught: error does not mention unhandled exception");
+    REQUIRE(err != NULL && strstr(err, "uncaught exception") != NULL,
+            "throw-uncaught: error does not mention uncaught exception");
 }
 
 /* mino_to_int round-trips a value put in via mino_int regardless of

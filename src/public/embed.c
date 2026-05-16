@@ -28,10 +28,10 @@ mino_val_t *mino_throw(mino_state_t *S, mino_val_t *ex)
         /* No enclosing try: surface as a classified error. */
         char msg[512];
         if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
-            snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
+            snprintf(msg, sizeof(msg), "uncaught exception: %.*s",
                      (int)ex->as.s.len, ex->as.s.data);
         } else {
-            snprintf(msg, sizeof(msg), "unhandled exception");
+            snprintf(msg, sizeof(msg), "uncaught exception");
         }
         return prim_throw_classified(S, "user", "MUS001", msg);
     }

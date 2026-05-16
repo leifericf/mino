@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.253.2 — Test-Suite Split: C-Side Embed Harnesses + Error-Message Normalization
+
+Third migration cut moves the multi-state / STM / capability C-side
+embed harnesses out to mino-tests. The lightweight API-surface
+smoke (`tests/embed_api_test.c`) stays in mino — single state,
+sub-second, exercising the basic C API contract.
+
+Also: the "unhandled exception" wording emitted by the top-level
+unprotected-throw path is normalised to "uncaught exception"
+project-wide, matching the wording already used by
+`normalize_exception` in `src/eval/control.c` since v0.252.1's
+`embed: surface raw thrown payload through _ex out_ex`
+introduced the new path. Previously the two emitters disagreed
+and `tests/embed_api_test.c::test_throw_uncaught` was checking
+the older wording; the v0.252.1 commit added a sibling test but
+left this one stale. Fixed inline: state.c and embed.c now emit
+"uncaught exception"; the existing test asserts the new wording.
+
+Moved out of mino:
+
+  - `tests/embed_multi_state.c` (16 states + 16 pthreads)
+  - `tests/embed_stm_test.c`    (STM Layer 2a smoke)
+  - `tests/embed_caps_test.c`   (capability install matrix)
+
+mino's `test-embed` task now compiles + runs only
+`embed_api_test.c` (renamed in spirit to "embed-api smoke"; the
+full battery moved).
+
 ## v0.253.1 — Test-Suite Split: Fuzz / GC Stress / Fault Injection
 
 Second migration cut. Fuzz, GC stress, fault-injection, and the

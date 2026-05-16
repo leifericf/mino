@@ -877,20 +877,13 @@
     (println (sh! (str "./" bin)))))
 
 (defn test-embed
-  "Compile and run the C embedding tests:
-     - embed_multi_state: 16 mino_state_t x 16 pthreads, asserts the
-       embedding API is safe under the one-state-per-thread contract.
-     - embed_stm_test: STM Layer 2a smoke test (mino_tx_run,
-       mino_tx_alter_c, mino_tx_commute_c, mino_tx_ensure, watches).
-     - embed_caps_test: capability-gated install surface -- minimal /
-       selective caps / install_all paths and MNS002 diagnostics."
+  "Compile and run the embed_api_test smoke. Multi-state, STM, and
+   capability embed tests live in the mino-tests satellite repo
+   (test-embed-suite there); this smoke verifies the basic API
+   surface in mino's own gate."
   []
-  (compile-and-run-embed-test "tests/embed_multi_state.c"
-                              "embed_multi_state")
-  (compile-and-run-embed-test "tests/embed_stm_test.c"
-                              "embed_stm_test")
-  (compile-and-run-embed-test "tests/embed_caps_test.c"
-                              "embed_caps_test"))
+  (compile-and-run-embed-test "tests/embed_api_test.c"
+                              "embed_api_test"))
 
 ;; ---- Architecture quality gates ----
 

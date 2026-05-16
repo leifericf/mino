@@ -677,7 +677,7 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
                  * Catch landing pads do the same; without it, raw
                  * ex-info values reach the top-level handler with the
                  * un-namespaced :message key and we'd fall through to
-                 * generic "unhandled exception". */
+                 * generic "uncaught exception". */
                 mino_val_t *nex = (ex != NULL)
                     ? normalize_exception(S, ex) : NULL;
                 if (nex != NULL && mino_type_of(nex) == MINO_MAP) {
@@ -693,7 +693,7 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
                         (code && mino_type_of(code) == MINO_STRING)
                             ? code->as.s.data : "MIN001",
                         (msg && mino_type_of(msg) == MINO_STRING)
-                            ? msg->as.s.data : "unhandled exception");
+                            ? msg->as.s.data : "uncaught exception");
                 } else if (ex != NULL && mino_type_of(ex) == MINO_STRING) {
                     char msg[512];
                     snprintf(msg, sizeof(msg), "unhandled exception: %.*s",
@@ -703,7 +703,7 @@ static mino_val_t *mino_eval_inner(mino_state_t *S, mino_val_t *form, mino_env_t
                 } else {
                     set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
                                   "internal", "MIN001",
-                                  "unhandled exception");
+                                  "uncaught exception");
                 }
             }
             mino_current_ctx(S)->call_depth = 0;
@@ -817,7 +817,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
                         (code && mino_type_of(code) == MINO_STRING)
                             ? code->as.s.data : "MIN001",
                         (msg && mino_type_of(msg) == MINO_STRING)
-                            ? msg->as.s.data : "unhandled exception");
+                            ? msg->as.s.data : "uncaught exception");
                 } else if (ex != NULL && mino_type_of(ex) == MINO_STRING
                     && ex->as.s.len > 0) {
                     if (file != NULL && strcmp(file, "<string>") != 0
@@ -831,7 +831,7 @@ static mino_val_t *mino_eval_string_inner(mino_state_t *S, const char *src_in, m
                                       ex->as.s.data);
                     }
                 } else {
-                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", "unhandled exception");
+                    set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "eval/contract", "MCT001", "uncaught exception");
                 }
             }
             mino_current_ctx(S)->call_depth = 0;
