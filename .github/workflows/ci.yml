@@ -167,43 +167,15 @@ jobs:
         run: ./mino task release-gate
         timeout-minutes: 12
 
-  cross-compile:
-    name: cross-compile (stencil-fresh on every target)
-    runs-on: macos-14
-    needs: build
-    # Cross-compiles every stencil header on macOS via the
-    # gen-stencils-<arch>-<os> tasks, then asserts the committed
-    # byte tables match the freshly-generated ones. Catches
-    # toolchain drift on targets the runtime can't book end-to-end
-    # from CI (notably x86_64 Darwin, where GHA's Intel Mac runners
-    # have been retiring).
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Bootstrap mino
-        run: make
-
-      - name: Cross-compile every target's stencils
-        # gen-stencils-* writes to src/eval/bc/stencils/generated/.
-        # If the toolchain produces different bytes than what's
-        # committed, the git diff below trips and the job fails.
-        run: |
-          ./mino task gen-stencils-arm64-linux
-          ./mino task gen-stencils-x86-64-linux
-          ./mino task gen-stencils-x86-64-darwin
-          ./mino task gen-stencils-x86-64-windows
-
-      - name: Verify generated stencils match committed
-        # The repo never holds stale stencil headers; if the
-        # toolchain drift produced different output, the diff is
-        # the diagnostic.
-        run: |
-          if ! git diff --exit-code -- src/eval/bc/stencils/generated/; then
-            echo "::error::Cross-compiled stencil headers diverge from committed bytes"
-            exit 1
-          fi
-          echo "All cross-compiled stencil headers match committed bytes"
+  # NOTE: a previous workflow had a `cross-compile` job here that
+  # regenerated each target's stencil header on macos-14 and diffed
+  # against committed bytes. It was removed when the dev / CI clang
+  # version split (Apple clang 17 locally vs Apple clang 15 on
+  # macos-14) made byte-identity infeasible across hosts. Stale-
+  # commit hygiene is now a dev pre-commit step
+  # (`./mino task check-stencils-fresh`); CI correctness is gated by
+  # the test suite, ASan, and 4-way JIT parity, which catch the
+  # runtime impact of a stale stencil regardless of compiler version.
 
   external-test-suite:
     name: external-test-suite (clojure-test-suite)

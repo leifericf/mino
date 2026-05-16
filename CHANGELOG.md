@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.255.13 — Fix: Drop byte-identity stencil checks from CI
+
+With the v0.255.12 fanout fix landing, CI finally reached the
+`Release gate` step on the matrix runners for the first time since
+the gate was wired into the workflow on 2026-05-14. Two pre-existing
+infrastructure issues surfaced immediately:
+
+- **macos-14 stencil byte drift.** `check-stencils-fresh`
+  regenerates `stencils_arm64_darwin.h` using the runner's `cc`
+  (Apple clang 15.0.0 on macos-14, clang-1500.3.9.4) and diffs
+  against committed bytes generated locally (Apple clang 17.0.0,
+  clang-1700.6.3.2). Two major LLVM versions apart, the aarch64
+  register allocator and scheduler shift, so the bytes diverge on
+  every stencil even though semantics are identical.
+
+- **ubuntu-24.04 gcc/musttail.** `check-stencils-fresh` compiles
+  stencil sources with `cc`, which on ubuntu-24.04 is gcc. gcc
+  rejects `__attribute__((musttail)) return ...` at
+  `src/eval/bc/stencils/abi.h:81` — the attribute is clang-only.
+  The host-target stencil regen was never gcc-compatible.
+
+Byte identity is a dev pre-commit hygiene check ("did you regen
+after editing a stencil source"), not a runtime correctness check.
+The runtime impact of any stale stencil is caught by the actual
+correctness gates: bytecode + JIT path, ASan, 4-way JIT parity.
+Pinning a canonical clang version across dev and every matrix host
+isn't tractable; the check belongs locally.
+
+### Changes
+
+- `lib/mino/tasks/builtin.clj`: `release-gate` composite drops the
+  `check-stencils-fresh` step. The standalone task remains for
+  dev pre-commit use.
+- `.github/workflows/ci.yml`: the `cross-compile (stencil-fresh on
+  every target)` job is removed. It re-did the same byte-identity
+  check across 4 cross targets on macos-14, with the same
+  cross-compiler-version drift exposure.
+- `src/mino.h`: `MINO_VERSION_PATCH` bumped to 13.
+
+### Verification
+
+- Local `release-gate` 17/17 green (without check-stencils-fresh).
+- Local `tests/run.clj` 1274 tests / 4557 assertions green.
+- `./mino task check-stencils-fresh` remains callable as a dev
+  task and is byte-clean on the dev box.
+
 ## v0.255.12 — Fix: Adapt closure-capture-macro-introduced fanout to thread-limit
 
 With the v0.255.11 pthread_join deadlock cleared, CI got past the

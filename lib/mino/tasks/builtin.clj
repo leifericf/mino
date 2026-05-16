@@ -587,19 +587,29 @@
 
      1. check-reloc-mirror    -- G3, smallest scope
      2. check-stencil-registry -- G2, no I/O
-     3. check-stencils-fresh   -- G1, runs gen-stencils
-     4. test-suite             -- bytecode + JIT path
-     5. test-suite-asan        -- same suite, sanitiser-built
-     6. test-jit-parity        -- byte-identical stdout vs no-JIT
-     7. mino-tests adv-test    -- IF mino-tests is cloned adjacent;
+     3. test-suite             -- bytecode + JIT path
+     4. test-suite-asan        -- same suite, sanitiser-built
+     5. test-jit-parity        -- byte-identical stdout vs no-JIT
+     6. mino-tests adv-test    -- IF mino-tests is cloned adjacent;
                                    skipped with a warn otherwise.
+
+   `check-stencils-fresh` is intentionally NOT part of the composite:
+   it regenerates stencils with the host `cc`, which means the
+   committed bytes have to byte-match whatever clang version the
+   runner ships. CI matrix runners (Apple clang 15 on macos-14,
+   gcc on ubuntu-24.04) diverge from dev (Apple clang 17), so the
+   check is structurally incompatible with the matrix. Dev runs
+   `./mino task check-stencils-fresh` before committing stencil
+   source edits; CI correctness is gated by test-suite + ASan +
+   4-way JIT parity, which catch the actual runtime impact of a
+   stale stencil regardless of compiler version. See
+   `.local/BUGS.md` for the architectural decision context.
 
    Exits 0 on a clean tree. Negative controls live in the cycle's
    .local/ status file -- this task is the positive control."
   []
   (check-reloc-mirror)
   (check-stencil-registry)
-  (check-stencils-fresh)
   (test-suite)
   (build-asan)
   (println (sh! "./mino_asan" "tests/run.clj"))
