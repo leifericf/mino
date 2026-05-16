@@ -136,16 +136,40 @@ typedef struct {
  * makes the overflow case loud in debug / sanitizer builds so the
  * silent-loss path doesn't quietly drop liveness protection on a
  * deeply-nested test; release builds keep the documented soft
- * behavior so a runaway pin doesn't crash the host.
+ * behavior so a runaway pin doesn't crash the host -- a script
+ * with a ~60-clause case form expands to deeply-nested cond, each
+ * level pins fn through eval_apply_regular_call, and the standard
+ * -O2 build (no -DNDEBUG) used to abort the embedder there.
  * Require a local variable named `S` of type mino_state_t *. */
 #define GC_SAVE_MAX 64
-#define gc_pin(v) \
+/* Gate the overflow assert on whether we're in a sanitizer build.
+ * Sanitizer builds want loud failure to flag liveness regressions;
+ * release builds keep the documented soft-loss path so the
+ * conservative C-stack scanner still covers values that escape
+ * the pin array. */
+#if (defined(__has_feature) && __has_feature(address_sanitizer)) \
+    || defined(__SANITIZE_ADDRESS__) \
+    || defined(__SANITIZE_THREAD__) \
+    || defined(__SANITIZE_UNDEFINED__)
+#  define MINO_GC_PIN_LOUD_ASSERT 1
+#else
+#  define MINO_GC_PIN_LOUD_ASSERT 0
+#endif
+#if MINO_GC_PIN_LOUD_ASSERT
+#  define gc_pin(v) \
     do { assert(mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX); \
          if (mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX) mino_current_ctx(S)->gc_save[mino_current_ctx(S)->gc_save_len] = (v); \
          mino_current_ctx(S)->gc_save_len++; } while (0)
-#define gc_unpin(n) \
+#  define gc_unpin(n) \
     do { assert(mino_current_ctx(S)->gc_save_len >= (n)); \
          mino_current_ctx(S)->gc_save_len -= (n); } while (0)
+#else
+#  define gc_pin(v) \
+    do { if (mino_current_ctx(S)->gc_save_len < GC_SAVE_MAX) mino_current_ctx(S)->gc_save[mino_current_ctx(S)->gc_save_len] = (v); \
+         mino_current_ctx(S)->gc_save_len++; } while (0)
+#  define gc_unpin(n) \
+    do { mino_current_ctx(S)->gc_save_len -= (n); } while (0)
+#endif
 
 /* ------------------------------------------------------------------------- */
 /* Shared GC function declarations                                           */

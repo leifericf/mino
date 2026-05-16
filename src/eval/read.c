@@ -55,6 +55,16 @@ const char *intern_filename(mino_state_t *S, const char *name)
 #define MRE008 "MRE008" /* malformed literal */
 #define MRE009 "MRE009" /* expected form after reader macro */
 #define MRE010 "MRE010" /* invalid metadata */
+#define MRE011 "MRE011" /* nesting too deep */
+
+/* Hard cap on read_form recursion depth. Default main-thread stack
+ * on macOS / glibc is ~8 MiB; read_form's call frame plus the
+ * list/vector/map walkers' per-element state takes ~250-300 bytes,
+ * so ~30k nesting levels exhaust the stack and SIGSEGV the embedder
+ * with no diagnostic. 1024 is well above any legitimate source
+ * (legacy macro expansion peaks at ~50; pathological hand-written
+ * data peaks at a few hundred) and well below the overflow point. */
+#define MINO_READER_MAX_DEPTH 1024
 
 static void set_reader_diag(mino_state_t *S, const char *code,
                             const char *msg, int line, int col)
@@ -2065,7 +2075,7 @@ static mino_val_t *read_dispatch(mino_state_t *S, const char **p)
     return NULL;
 }
 
-static mino_val_t *read_form(mino_state_t *S, const char **p)
+static mino_val_t *read_form_dispatch(mino_state_t *S, const char **p)
 {
     skip_ws(S, p);
     if (**p == '\0') {
@@ -2143,6 +2153,25 @@ static mino_val_t *read_form(mino_state_t *S, const char **p)
     return read_atom(S, p);
 }
 
+/* Universal reader entry point. Depth-bounds the recursion so a
+ * pathological '((((...' input raises MRE011 instead of stack-
+ * overflowing the embedder. Increments reader_depth on entry,
+ * decrements on the single exit, so every container type and
+ * reader macro funnels through one balanced pair. */
+static mino_val_t *read_form(mino_state_t *S, const char **p)
+{
+    mino_val_t *v;
+    if (S->reader_depth >= MINO_READER_MAX_DEPTH) {
+        set_reader_diag(S, MRE011, "nesting too deep",
+                        S->reader_line, S->reader_col);
+        return NULL;
+    }
+    S->reader_depth++;
+    v = read_form_dispatch(S, p);
+    S->reader_depth--;
+    return v;
+}
+
 mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
 {
     volatile char probe = 0;
@@ -2169,6 +2198,11 @@ mino_val_t *mino_read(mino_state_t *S, const char *src, const char **end)
         S->reader_file = intern_filename(S, "<input>");
     }
     clear_error(S);
+    /* Reader is non-reentrant per state, so resetting depth on
+     * every public entry is safe and protects against a previous
+     * call that bailed via a deeper non-local exit (set_reader_diag
+     * + early return) leaving the counter elevated. */
+    S->reader_depth = 0;
     v = read_form(S, &p);
     if (end != NULL) {
         *end = p;

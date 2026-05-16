@@ -1183,6 +1183,15 @@ struct mino_state {
 
     /* Async timer queue. */
     timer_entry_t  *async_timers;
+
+    /* Reader recursion depth. Bumped on every read_form entry,
+     * checked against MINO_READER_MAX_DEPTH so pathological
+     * input ('(' repeated 30k+ times) emits MRE011 instead of
+     * stack-overflowing the embedder. Placed at the end of the
+     * struct to keep the JIT's pinned offsets (ic_gen, bc_regs,
+     * jit_invoke_ctx, etc. in src/eval/bc/stencils/runtime_layout.h)
+     * stable across this addition. */
+    int             reader_depth;
 };
 
 /* Resolve the active per-thread ctx for state S.

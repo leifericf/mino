@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.252.2 — Runtime Hardening from Cycle-I Whitebox Pass 2
+
+A second adversarial whitebox pass targeted the runtime internals
+(stencil patcher boundaries, GC × JIT interaction under allocation
+pressure, multi-state lifecycle, reader hostile inputs, host-thread
++ JIT concurrency) instead of the surface UX the previous pass
+covered. Two pre-existing defects turned up, both reachable from
+ordinary script input and both able to crash the embedder
+process. Neither is JIT-architecture related; both are fixed
+here so a hostile or merely-deep script can no longer SIGSEGV /
+SIGABRT the host.
+
+  - Reader recursion depth is now bounded at 1024 levels with a
+    clean MRE011 "nesting too deep" diagnostic. Without the bound,
+    a pathological `((((...` input around 30,000 nested levels
+    exhausts the default 8 MiB main-thread stack and SIGSEGVs
+    the embedder with no message. The check fires in `read_form`
+    (the universal reader entry) so lists, vectors, maps, sets,
+    and reader macros all share one balanced enter/exit pair.
+    Legitimate input never gets close to 1024 — even macro-heavy
+    code peaks around 50; pathological hand-written data peaks
+    around a few hundred. The new state field is appended to the
+    end of `struct mino_state` so the JIT's pinned offsets in
+    `src/eval/bc/stencils/runtime_layout.h` stay byte-stable.
+
+  - `gc_pin` / `gc_unpin` overflow asserts are now gated on
+    sanitizer-build detection rather than firing in every -O2
+    build. The macros' header comment already documented the
+    intent ("debug / sanitizer builds loud; release builds keep
+    the documented soft-loss path") but the standard build
+    didn't define `NDEBUG`, so the asserts fired anyway. A
+    script with ~60+ `case` clauses expands to a deeply-nested
+    cond chain; each level pins `fn` through
+    `eval_apply_regular_call`, blows past `GC_SAVE_MAX = 64`,
+    and used to abort the process at
+    `special.c:785`. The fix detects `__SANITIZE_ADDRESS__`,
+    `__SANITIZE_THREAD__`, `__SANITIZE_UNDEFINED__`, and
+    clang's `__has_feature(address_sanitizer)`. Sanitizer builds
+    keep the loud assert (which is the regression-detector for
+    real liveness drift); release-grade builds keep the soft-loss
+    path the conservative C-stack scanner already covers.
+
+Release-gate green; 4-way parity byte-identical on stdout;
+ASan build still asserts loudly on the case repro (verified);
+1737 tests / 7920 assertions / 0 failed.
+
 ## v0.252.1 — Developer UX Fixes from Cycle-I Whitebox Pass
 
 Adversarial whitebox testing on the v0.252.0 surface (JIT CLI,
