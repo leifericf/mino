@@ -994,6 +994,14 @@ struct mino_state {
      * thrown stubs that distinguish "host has not granted threads"
      * from "host granted but runtime impl is in flight." */
     int             thread_limit;
+    /* thread_count is mutated by host_threads under worker_list_lock
+     * but read without a lock from gc_tick_should_suppress and
+     * mino_thread_count (relaxed observability counter -- see
+     * runtime/state.c). Plain int was UB under the C standard and
+     * TSan flagged the race. All accesses go through __atomic_*
+     * with RELAXED ordering: the counter approximation tolerates
+     * stale reads, and the lock-side writes pair with the
+     * lock-side reads for the cases that need a tight value. */
     int             thread_count;
     int             multi_threaded;
 

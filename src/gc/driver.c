@@ -113,9 +113,12 @@ void gc_force_finish_major(mino_state_t *S)
  * frame. Memory normalizes again after mino_quiesce_threads. */
 static int gc_tick_should_suppress(mino_state_t *S)
 {
+    /* Relaxed-atomic read: workers mutate thread_count under
+     * worker_list_lock, but this fast-path consults it without
+     * locking. See internal.h thread_count comment. */
     return mino_current_ctx(S)->gc_depth > 0
         || mino_current_ctx(S)->gc_stack_bottom == NULL
-        || S->thread_count > 0;
+        || __atomic_load_n(&S->thread_count, __ATOMIC_RELAXED) > 0;
 }
 
 /* Stress mode: every alloc forces a full STW major, preserving the

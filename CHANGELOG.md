@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.255.2 — Fix: thread_count Atomic Accesses
+
+Surfaced by mino-tests's adv_stm_mix probe under TSan: a data race
+between `gc_tick_should_suppress` (driver.c) reading `S->thread_count`
+without a lock and `worker_run` (host_threads.c) decrementing it
+under `worker_list_lock`. The plain-int access was documented as a
+"relaxed observability counter" since the value only feeds an
+approximation (suppress major GC while host workers are alive), but
+under the C standard the unsynchronised read concurrent with a write
+is UB, and TSan correctly flagged the race.
+
+Fix: route every read and write through `__atomic_load_n` /
+`__atomic_fetch_add` / `__atomic_fetch_sub` with `__ATOMIC_RELAXED`.
+The semantics are unchanged -- relaxed ordering is exactly what the
+"stale value is fine" comment promised -- but the C standard is no
+longer offended and TSan stops flagging the race. Lock-side accesses
+(spawn gate, exit decrement) also use atomic ops; the worker_list_lock
+still serializes the gate-then-increment so two spawns can't both
+pass the limit check.
+
+Verified: TSan harness was 15/15 + 1 warning before this fix;
+15/15 + 0 warnings after.
+
 ## v0.255.1 — Fix: thread-sleep Yields state_lock
 
 Surfaced by mino-tests's T9 conc_deadlock probe: a polling pattern
