@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.255.14 — Fix: gc_scan_stack no_sanitize attribute on gcc-built ASan
+
+With the v0.255.13 stencil-check drop letting CI's `Release gate`
+reach the ASan suite step on Linux runners for the first time, a
+latent gcc-only bug surfaced:
+
+```
+==2674==ERROR: AddressSanitizer: stack-buffer-overflow
+READ of size 8 at 0x7f44bb31daa0 thread T0
+    #0 ... in memcpy /usr/include/x86_64-linux-gnu/bits/string_fortified.h:29
+    #1 ... in gc_scan_stack src/gc/roots.c:560
+    #2 ... in gc_minor_collect src/gc/minor.c:460
+```
+
+`gc_scan_stack` is a conservative stack scanner -- it walks every
+aligned machine word between `gc_stack_bottom` and the collector's
+own frame, treating each as a candidate pointer. By design it
+crosses every prior frame and reads ASan's poisoned red zones; the
+function is decorated with `__attribute__((no_sanitize_address))`
+to suppress the false positive.
+
+The decoration was gated on `__has_feature(address_sanitizer)`,
+which is a clang-only builtin. gcc exposes ASan via the
+`__SANITIZE_ADDRESS__` predefined macro instead. On gcc-built ASan
+binaries the attribute was silently dropped and libsanitizer
+flagged every cross-frame read in the scan loop.
+
+The same dual-detection pattern was already in
+`src/gc/internal.h` for the `MINO_GC_PIN_LOUD_ASSERT` macro --
+adopted here for the scanner attribute. macos clang's ASan was
+permissive enough to let the scan slide without the attribute,
+which is why the bug went undetected for the cycle.
+
+### Changes
+
+- `src/gc/roots.c`: dual-path `no_sanitize_address` attribute for
+  `gc_scan_stack` -- clang (`__has_feature`) plus gcc
+  (`__SANITIZE_ADDRESS__`).
+- `src/mino.h`: `MINO_VERSION_PATCH` bumped to 14.
+
+### Verification
+
+- Local `release-gate` 17/17 green (ASan step inclusive).
+- Local `tests/run.clj` 1274 tests / 4557 assertions green.
+- CI matrix expected to land all four entries green once this
+  pushes -- macos-14 / windows-2022 were already green on
+  v0.255.13; ubuntu-24.04 and ubuntu-24.04-arm should now match.
+
 ## v0.255.13 — Fix: Drop byte-identity stencil checks from CI
 
 With the v0.255.12 fanout fix landing, CI finally reached the

@@ -530,11 +530,22 @@ void gc_mark_roots(mino_state_t *S)
  * ASan inserts red zones between locals; a conservative scan that
  * walks through them looks like stack-buffer-overflow to the
  * sanitizer. The scan is the entire point, so suppress the check.
+ *
+ * Clang exposes ASan via `__has_feature(address_sanitizer)`; gcc
+ * uses the `__SANITIZE_ADDRESS__` predefined macro. The `__has_feature`
+ * check is nested inside its own `defined` test because gcc evaluates
+ * the second half of an `&&` syntactically even when the first half is
+ * false. Without the gcc branch the attribute is silently dropped and
+ * libsanitizer flags every cross-frame word read in the scan loop --
+ * which surfaced as a CI failure on ubuntu-24.04 when release-gate's
+ * ASan suite ran on a non-clang host for the first time.
  */
 #if defined(__has_feature)
-# if __has_feature(address_sanitizer)
-__attribute__((no_sanitize("address")))
-# endif
+#  if __has_feature(address_sanitizer)
+__attribute__((no_sanitize_address))
+#  endif
+#elif defined(__SANITIZE_ADDRESS__)
+__attribute__((no_sanitize_address))
 #endif
 void gc_scan_stack(mino_state_t *S)
 {
