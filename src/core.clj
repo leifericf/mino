@@ -1822,22 +1822,33 @@
 
 (defmacro condp
   "Takes a binary predicate, an expression, and clauses. Returns the
-   first clause value where (pred test-val expr) is truthy."
+   first clause value where (pred test-val expr) is truthy. The
+   special clause shape `test :>> result-fn` calls `(result-fn p)`
+   on the truthy pred-result whenever `(pred test expr)` is truthy."
   [pred expr & clauses]
-  (let [gexpr (gensym)]
-    `(let [~gexpr ~expr]
-       ~(let [build (fn build [cls]
-                      (if (< (count cls) 2)
-                        (if (= (count cls) 1)
-                          (first cls)
-                          nil)
-                        (let [test (first cls)
-                              then (first (rest cls))
-                              more (rest (rest cls))]
-                          `(if (~pred ~test ~gexpr)
-                             ~then
-                             ~(build more)))))]
-          (build clauses)))))
+  (let [gpred (gensym "pred__")
+        gexpr (gensym "expr__")
+        build (fn build [cls]
+                (cond
+                  (empty? cls) nil
+                  (= (count cls) 1) (first cls)
+                  (and (>= (count cls) 3) (= (second cls) :>>))
+                  (let [test   (first cls)
+                        res-fn (nth cls 2)
+                        more   (drop 3 cls)
+                        gp     (gensym "p__")]
+                    `(if-let [~gp (~gpred ~test ~gexpr)]
+                       (~res-fn ~gp)
+                       ~(build more)))
+                  :else
+                  (let [test (first cls)
+                        then (second cls)
+                        more (drop 2 cls)]
+                    `(if (~gpred ~test ~gexpr)
+                       ~then
+                       ~(build more)))))]
+    `(let [~gpred ~pred ~gexpr ~expr]
+       ~(build clauses))))
 
 (defmacro case
   "Dispatches on the value of expr. Matches constants in pairs, with

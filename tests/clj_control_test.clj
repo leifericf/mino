@@ -95,6 +95,16 @@
   (is (= :pass (condp = 1  2 :fail  :pass)))
   (is (= :pass (condp = 1  :pass))))
 
+(deftest clj-condp-arrow-form
+  ;; (condp pred expr test :>> result-fn ...) calls result-fn with the
+  ;; truthy pred-result whenever the clause matches.
+  (is (= 3 (condp some [1 2 3 4]
+             #{0 6 7} :>> inc
+             #{4 5 9} :>> dec
+             :default)))
+  (is (= "got true" (condp = 1 1 :>> (fn [x] (str "got " x)) :default)))
+  (is (= :default   (condp = 99 1 :>> (fn [x] (str "got " x)) :default))))
+
 ;; --- case ---
 
 (deftest clj-case

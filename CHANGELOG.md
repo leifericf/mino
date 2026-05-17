@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.261.0 — `condp` recognizes the `:>>` result-fn arrow
+
+`(condp pred expr ... test :>> result-fn ...)` now activates the
+JVM result-fn arrow form: when `(pred test expr)` is truthy, the
+truthy pred-result is bound and passed to `result-fn`, and the
+call replaces the branch. The plain 2-form `test then` continues
+to work unchanged. Useful for set/predicate dispatches where the
+match value itself is the input to the handler.
+
 ## v0.260.0 — `subseq` / `rsubseq` 5-arg form matches JVM Clojure semantics
 
 The 5-arg `(subseq sc start-test start-key end-test end-key)` form
