@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.296.0 — `MINO_CPJIT_STATS=summary` one-line mode
+
+`MINO_CPJIT_STATS` now honours a third value: `summary`. When set,
+the env-var sniff captures the same aggregate counters as the
+existing full-dump mode (compiled / eligible / attempted, total
+native bytes, per-op rejection counts) but skips the per-fn ring
+allocation entirely. At atexit it emits a single self-describing
+line:
+
+```
+[cpjit-stats] compiled=58/59 eligible=58 native_bytes=950272 top_blockers=OP_LOOP_INT_LT(1)
+```
+
+Suitable for routine `--jit=auto` introspection without the per-fn
+verbosity. The full dump remains available under
+`MINO_CPJIT_STATS=1` for deeper investigation.
+
 ## v0.295.0 — JIT-call fast lane through `mino_bc_run_known_native`
 
 The IC-hit call path now enters a streamlined `mino_bc_run_known_native`

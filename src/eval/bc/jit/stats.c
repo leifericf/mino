@@ -36,8 +36,19 @@ typedef struct cpjit_stat_entry {
     struct cpjit_stat_entry *next;
 } cpjit_stat_entry_t;
 
+/* Mode tri-state for the MINO_CPJIT_STATS env-var sniff:
+ *   0  -- not yet sniffed
+ *  -1  -- off (default, env-var unset / "0")
+ *   1  -- full dump (env-var "1" or any non-summary truthy value)
+ *   2  -- one-line summary (env-var "summary"). Suppresses the
+ *         per-fn ring entirely so a long-running JIT'd workload
+ *         doesn't pay the allocation cost. */
+#define CPJIT_STATS_OFF      (-1)
+#define CPJIT_STATS_FULL     1
+#define CPJIT_STATS_SUMMARY  2
+
 static struct {
-    int                  enabled;        /* tri-state: 0 untested, 1 on, -1 off */
+    int                  enabled;        /* see modes above */
     unsigned long        fns_attempted;
     unsigned long        fns_eligible;
     unsigned long        fns_compiled;
@@ -48,8 +59,58 @@ static struct {
     int                  atexit_registered;
 } g_cpjit_stats;
 
+/* One-line "JIT engagement" report intended for --jit=auto runs to
+ * confirm the JIT is actually doing work without the per-fn ring's
+ * verbosity. Top blockers are listed in op-number order so a stable
+ * diff across runs is meaningful; the 5-entry cap keeps the line
+ * scannable. */
+static void cpjit_stats_dump_summary(void)
+{
+    int top_ops[5];
+    unsigned long top_counts[5];
+    int top_n = 0;
+    for (int op = 0; op < OP__COUNT; op++) {
+        unsigned long n = g_cpjit_stats.op_reject_count[op];
+        if (n == 0) continue;
+        int insert = top_n;
+        for (int i = 0; i < top_n; i++) {
+            if (n > top_counts[i]) { insert = i; break; }
+        }
+        if (insert < 5) {
+            int end = top_n < 5 ? top_n : 4;
+            for (int j = end; j > insert; j--) {
+                top_ops[j]    = top_ops[j - 1];
+                top_counts[j] = top_counts[j - 1];
+            }
+            top_ops[insert]    = op;
+            top_counts[insert] = n;
+            if (top_n < 5) top_n++;
+        }
+    }
+    fprintf(stderr,
+            "[cpjit-stats] compiled=%lu/%lu eligible=%lu native_bytes=%zu",
+            g_cpjit_stats.fns_compiled,
+            g_cpjit_stats.fns_attempted,
+            g_cpjit_stats.fns_eligible,
+            g_cpjit_stats.native_bytes_total);
+    if (top_n > 0) {
+        fprintf(stderr, " top_blockers=");
+        for (int i = 0; i < top_n; i++) {
+            fprintf(stderr, "%s%s(%lu)",
+                    i == 0 ? "" : ",",
+                    mino_bc_op_name((unsigned)top_ops[i]),
+                    top_counts[i]);
+        }
+    }
+    fprintf(stderr, "\n");
+}
+
 static void cpjit_stats_dump(void)
 {
+    if (g_cpjit_stats.enabled == CPJIT_STATS_SUMMARY) {
+        cpjit_stats_dump_summary();
+        return;
+    }
     fprintf(stderr, "\n[cpjit-stats] ---- summary ----\n");
     fprintf(stderr, "  fns_attempted    %lu\n", g_cpjit_stats.fns_attempted);
     fprintf(stderr, "  fns_eligible     %lu (%.1f%%)\n",
@@ -122,14 +183,20 @@ static int cpjit_stats_enabled(void)
 {
     if (g_cpjit_stats.enabled == 0) {
         const char *e = getenv("MINO_CPJIT_STATS");
-        g_cpjit_stats.enabled =
-            (e != NULL && e[0] != '\0' && e[0] != '0') ? 1 : -1;
-        if (g_cpjit_stats.enabled == 1 && !g_cpjit_stats.atexit_registered) {
+        if (e == NULL || e[0] == '\0' || e[0] == '0') {
+            g_cpjit_stats.enabled = CPJIT_STATS_OFF;
+        } else if (strcmp(e, "summary") == 0) {
+            g_cpjit_stats.enabled = CPJIT_STATS_SUMMARY;
+        } else {
+            g_cpjit_stats.enabled = CPJIT_STATS_FULL;
+        }
+        if (g_cpjit_stats.enabled != CPJIT_STATS_OFF
+            && !g_cpjit_stats.atexit_registered) {
             atexit(cpjit_stats_dump);
             g_cpjit_stats.atexit_registered = 1;
         }
     }
-    return g_cpjit_stats.enabled == 1;
+    return g_cpjit_stats.enabled != CPJIT_STATS_OFF;
 }
 
 void mino_jit_stats_record(const mino_bc_fn_t *bc,
@@ -148,6 +215,10 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
     if (reason == CPJIT_REASON_UNKNOWN_OP && first_unknown_op < OP__COUNT) {
         g_cpjit_stats.op_reject_count[first_unknown_op]++;
     }
+    /* Summary mode skips the per-fn ring: the one-line dump only
+     * reads the aggregate counters, so the alloc + the borrowed
+     * file-string copy would be pure overhead in a long run. */
+    if (g_cpjit_stats.enabled != CPJIT_STATS_FULL) return;
     cpjit_stat_entry_t *ent = (cpjit_stat_entry_t *)calloc(1, sizeof *ent);
     if (ent == NULL) return;
     ent->bc       = bc;
