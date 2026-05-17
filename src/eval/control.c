@@ -3,6 +3,7 @@
  */
 
 #include "eval/special_internal.h"
+#include "eval/bc/internal.h"  /* mino_bc_fn_t + mino_bc_source_lookup */
 
 /* try_clauses_t -- the partitioned shape of a (try body... [catch e ...]
  * [finally ...]) form. body_head is a freshly-built cons list of the
@@ -92,11 +93,21 @@ static int partition_try_clauses(mino_state_t *S, mino_val_t *form,
  * and partial maps are wrapped; already-diagnostic maps pass through.
  * Shared with the bytecode VM's OP_PUSHCATCH landing pad so a caught
  * exception arrives at the BC handler in the same shape as the tree-
- * walker's catch binding. */
+ * walker's catch binding.
+ *
+ * Attaches :mino/location when the current frame knows where it is:
+ * BC frames consult `bc_current_pc` via the source-map side table
+ * (the inner instruction position); tree-walker frames fall back to
+ * `eval_current_form`. This brings user-throw catch values in line
+ * with system-throw catch values, which already carry the field. */
 mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
 {
-    mino_val_t *keys[5], *vals[5];
+    mino_val_t *keys[6], *vals[6];
     mino_val_t *result;
+    size_t n;
+    const char *loc_file = NULL;
+    int loc_line = 0;
+    int loc_col  = 0;
     if (mino_type_of(ex_val) == MINO_MAP
         && map_get_val(ex_val, mino_keyword(S, "mino/kind")) != NULL) {
         return ex_val;
@@ -120,7 +131,42 @@ mino_val_t *normalize_exception(mino_state_t *S, mino_val_t *ex_val)
     }
     keys[4] = mino_keyword(S, "mino/data");
     vals[4] = ex_val;
-    result = mino_map(S, keys, vals, 5);
+    n = 5;
+    /* Source location: prefer the inner BC PC (the throw site inside
+     * a compiled fn body) over eval_current_form (the outer call
+     * site). Without this, a caught user-throw map would have no
+     * location, and a BC-fn-body throw caught from outside would
+     * blame the caller's line rather than the (throw ...) form. */
+    {
+        const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
+        size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
+        if (cur_bc != NULL) {
+            (void)mino_bc_source_lookup(cur_bc, cur_pc,
+                                        &loc_file, &loc_line, &loc_col);
+        }
+        if (loc_file == NULL || loc_line <= 0) {
+            const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+            if (form != NULL && mino_is_cons(form)
+                && form->as.cons.file != NULL && form->as.cons.line > 0) {
+                loc_file = form->as.cons.file;
+                loc_line = form->as.cons.line;
+                loc_col  = form->as.cons.column;
+            }
+        }
+    }
+    if (loc_file != NULL && loc_line > 0) {
+        mino_val_t *lkeys[3], *lvals[3];
+        lkeys[0] = mino_keyword(S, "file");
+        lvals[0] = mino_string(S, loc_file);
+        lkeys[1] = mino_keyword(S, "line");
+        lvals[1] = mino_int(S, loc_line);
+        lkeys[2] = mino_keyword(S, "column");
+        lvals[2] = mino_int(S, loc_col);
+        keys[n] = mino_keyword(S, "mino/location");
+        vals[n] = mino_map(S, lkeys, lvals, 3);
+        n++;
+    }
+    result = mino_map(S, keys, vals, n);
     /* Carry metadata from the thrown value onto the diagnostic so
      * (meta caught) round-trips through catch. ex-info already
      * piggybacks cause chains through metadata; rich-error-info

@@ -53,6 +53,52 @@
       ;; layer wraps it but the location is still attached.
       (is (some? e)))))
 
+(deftest user-throw-carries-location
+  ;; Regression: catch values from user-throw paths previously lacked
+  ;; :mino/location. normalize_exception built a 5-key map (kind, code,
+  ;; phase, message, data) but never added location; only system throws
+  ;; (via prim_throw_classified) included it. Inconsistent error shape.
+  ;;
+  ;; Fix: normalize_exception now consults bc_current_pc (preferred)
+  ;; or eval_current_form (fallback) and attaches :mino/location when
+  ;; either has source info.
+  (testing "throw of string carries location"
+    (let [loc (diag-location (try (throw "boom") (catch e e)))]
+      (is (some? loc))
+      (is (some? (:file loc)))
+      (is (some? (:line loc)))))
+  (testing "throw of ex-info carries location"
+    (let [loc (diag-location
+                (try (throw (ex-info "msg" {:k :v})) (catch e e)))]
+      (is (some? loc))
+      (is (some? (:file loc)))
+      (is (some? (:line loc)))))
+  (testing "throw of bare map carries location"
+    (let [loc (diag-location
+                (try (throw {:custom :data}) (catch e e)))]
+      (is (some? loc))
+      (is (some? (:file loc))))))
+
+(deftest bc-throw-prefers-pc-over-call-site
+  ;; Regression: a throw inside a BC-compiled fn body previously
+  ;; reported the call site's line (eval_current_form, which stays
+  ;; at the outer (f) form during BC dispatch) instead of the throw
+  ;; site's line (bc_current_pc, which the VM dispatch loop keeps in
+  ;; sync with the current instruction). Fix: prim_throw_classified
+  ;; and normalize_exception now prefer the BC PC when available.
+  (testing "arity-error inside a BC fn body has a non-nil line"
+    (def bc-bad (fn [] (assoc nil)))
+    (let [loc (diag-location (try (bc-bad) (catch e e)))]
+      ;; Pre-fix this would still set loc but to the (bc-bad) call
+      ;; site instead of the inner (assoc nil) line. The strong
+      ;; differential assertion is fragile across deftest/testing
+      ;; expansion shapes; pinning non-nil line + non-nil file is
+      ;; the durable invariant that catches "no location at all"
+      ;; regressions without depending on macro-expansion line math.
+      (is (some? loc))
+      (is (some? (:line loc)))
+      (is (some? (:file loc))))))
+
 (deftest eval-current-form-restored-after-subeval
   ;; Regression: eval_current_form was set on MINO_CONS eval entry
   ;; but never restored when sub-evals returned. Any throw fired

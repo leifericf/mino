@@ -48,18 +48,24 @@ mino_val_t *prim_throw_classified(mino_state_t *S, const char *kind,
         const char *loc_file = NULL;
         int         loc_line = 0;
         int         loc_col  = 0;
-        const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
-        if (form != NULL && mino_is_cons(form)
-            && form->as.cons.file != NULL && form->as.cons.line > 0) {
-            loc_file = form->as.cons.file;
-            loc_line = form->as.cons.line;
-            loc_col  = form->as.cons.column;
-        } else {
-            const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
-            size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
-            if (cur_bc != NULL) {
-                (void)mino_bc_source_lookup(cur_bc, cur_pc,
-                                            &loc_file, &loc_line, &loc_col);
+        /* Prefer the BC PC lookup (inner instruction inside a compiled
+         * fn body) over eval_current_form (the outer call site), so
+         * a throw inside (defn f [] (assoc nil)) reports the assoc
+         * line, not the caller's (f) line. eval_current_form is the
+         * fallback for tree-walker frames that have no BC cursor. */
+        const mino_bc_fn_t *cur_bc = mino_current_ctx(S)->bc_current_bc;
+        size_t              cur_pc = mino_current_ctx(S)->bc_current_pc;
+        if (cur_bc != NULL) {
+            (void)mino_bc_source_lookup(cur_bc, cur_pc,
+                                        &loc_file, &loc_line, &loc_col);
+        }
+        if (loc_file == NULL || loc_line <= 0) {
+            const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+            if (form != NULL && mino_is_cons(form)
+                && form->as.cons.file != NULL && form->as.cons.line > 0) {
+                loc_file = form->as.cons.file;
+                loc_line = form->as.cons.line;
+                loc_col  = form->as.cons.column;
             }
         }
         size_t n = 0;

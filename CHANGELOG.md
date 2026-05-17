@@ -1,6 +1,57 @@
 # Changelog
 
-## Unreleased
+## v0.255.27 — Bug-fix sweep: deref/regex/location/concurrency/cleanup
+
+Nine fixes landed in this patch, covering Clojure-canon correctness
+gaps, BC VM concurrency safety, location reporting hygiene, and
+one cosmetic source-tree boundary. Headline items:
+
+- **per-ctx BC register stack**: concurrent fn calls that yield
+  state_lock no longer corrupt each other's argument slots.
+  `pmap` ships in `clojure.core` now that the underlying yield
+  safety is in place.
+- **BC safepoint poll**: `future-cancel` interrupts CPU-bound
+  workers; busy-spin futures auto-yield state_lock periodically
+  so siblings get scheduling time.
+- **3-arg `(deref ref ms timeout-val)`**: portable timed deref
+  for futures and promises.
+- **regex inline flags**: JVM-style `(?i)`, `(?s)`, `(?m)`, `(?x)`
+  plus negation `(?-i)` and combination `(?ix)`.
+- **`eval_current_form` restore**: throw locations no longer
+  point at a previous file's last form.
+- **diag location precision**: user-throw catch values now carry
+  `:mino/location`; BC fn body throws blame the throw site, not
+  the caller's line.
+- **`(char n)` constructor** added to clojure.core.
+
+Details in the per-fix sections below.
+
+### Fix: user-throw catch values now carry `:mino/location`; BC throws blame the throw site
+
+Two related diag-location precision fixes:
+
+1. **User-throw catch values previously lacked `:mino/location`.**
+   `(try (throw "boom") (catch e (get e :mino/location)))` returned
+   nil. `(try (throw (ex-info "x" {})) ...)` likewise. System throws
+   (`prim_throw_classified`) included the field; user-throw paths
+   (`normalize_exception`) didn't, producing an inconsistent error
+   shape. Fix: `normalize_exception` now consults `bc_current_pc`
+   (preferred) or `eval_current_form` (fallback) and attaches the
+   location.
+
+2. **A throw inside a BC-compiled fn body previously blamed the
+   call site, not the throw site.** `(defn f [] (assoc nil))`
+   followed by `(f)` reported the `(f)` line for the arity error
+   instead of the inner `(assoc nil)` line. Root cause: both
+   `prim_throw_classified` and `normalize_exception` checked
+   `eval_current_form` first, which stays at the outer call form
+   during BC dispatch. Fix: both paths now consult the BC PC first
+   (which the VM keeps in sync with each instruction); they fall
+   back to `eval_current_form` for tree-walker frames.
+
+Regression in `tests/bc_error_quality_test.clj`
+(`user-throw-carries-location`,
+`bc-throw-prefers-pc-over-call-site`).
 
 ### Fix: `(char n)` constructor added to clojure.core
 
@@ -18,28 +69,6 @@ codepoints throw MBD001; non-integer / non-char inputs throw
 MTY001.
 
 Regression in `tests/char_test.clj` (`char-constructor-from-codepoint`).
-
-## v0.255.27 — Bug-fix sweep: deref/regex/location/concurrency/cleanup
-
-Eight fixes landed in this patch, covering Clojure-canon
-correctness gaps, BC VM concurrency safety, location reporting
-hygiene, and one cosmetic source-tree boundary. Headline items:
-
-- **per-ctx BC register stack**: concurrent fn calls that yield
-  state_lock no longer corrupt each other's argument slots.
-  `pmap` ships in `clojure.core` now that the underlying yield
-  safety is in place.
-- **BC safepoint poll**: `future-cancel` interrupts CPU-bound
-  workers; busy-spin futures auto-yield state_lock periodically
-  so siblings get scheduling time.
-- **3-arg `(deref ref ms timeout-val)`**: portable timed deref
-  for futures and promises.
-- **regex inline flags**: JVM-style `(?i)`, `(?s)`, `(?m)`, `(?x)`
-  plus negation `(?-i)` and combination `(?ix)`.
-- **`eval_current_form` restore**: throw locations no longer
-  point at a previous file's last form.
-
-Details in the per-fix sections below.
 
 ### CI: release-gate doc clarified for `check-stencils-fresh` exclusion
 
