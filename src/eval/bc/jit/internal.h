@@ -302,6 +302,19 @@ mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
 mino_val_t **mino_jit_make_lazy_slow(mino_state_t *S, mino_val_t **regs,
                                       unsigned a, mino_bc_fn_t *bc,
                                       unsigned bx);
+mino_val_t **mino_jit_protocol_call_cached_slow(mino_state_t *S,
+                                                 mino_val_t **regs,
+                                                 unsigned a,
+                                                 unsigned argn,
+                                                 unsigned ret,
+                                                 mino_bc_fn_t *bc,
+                                                 unsigned slot_idx);
+mino_val_t  *mino_jit_protocol_tailcall_cached_slow(mino_state_t *S,
+                                                     mino_val_t **regs,
+                                                     unsigned a,
+                                                     unsigned argn,
+                                                     mino_bc_fn_t *bc,
+                                                     unsigned slot_idx);
 mino_val_t **mino_jit_push_env_slow(mino_state_t *S, mino_val_t **regs);
 mino_val_t **mino_jit_pop_env_slow(mino_state_t *S, mino_val_t **regs);
 mino_val_t **mino_jit_env_bind_slow(mino_state_t *S, mino_val_t **regs,

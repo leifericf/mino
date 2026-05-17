@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.291.0 — Protocol-dispatch stencils
+
+JIT now compiles `OP_PROTOCOL_CALL_CACHED` and
+`OP_PROTOCOL_TAILCALL_CACHED`. Both are two-word IC-mediated ops:
+word-1 carries `A` (arg base, also first-arg slot for type-disc),
+`B` (argn), `C` (return dst); word-2 carries the IC slot index.
+
+The two stencils route through `mino_jit_protocol_call_cached_slow`
+and `mino_jit_protocol_tailcall_cached_slow`, both new in this
+release. They mirror the interpreter's handler bit-for-bit:
+bounds-check the slot, atom-shape-check, call the (now-exposed)
+`mino_bc_ic_resolve_protocol` for the dispatch-table lookup +
+write-barriered IC refill + MPR001 / MPR002 diagnostics, then
+`apply_callable_argv` with the args sitting at `regs[A..A+B-1]`.
+
+The tail variant is a FINAL stencil -- its return value becomes the
+fn's return value, matching the interpreter's `retval = r; goto
+bc_done` shape. Self-tail-recursive protocol methods continue to
+grow the C stack linearly here (the deliberate trade-off avoids the
+cons-spine the `MINO_TAIL_CALL` sentinel path would otherwise force
+on the JIT region).
+
+Measured on Apple Silicon, 1M-iter protocol-dispatch loop:
+
+| benchmark               | off (ms) | on (ms) | speedup |
+|-------------------------|---------:|--------:|--------:|
+| `(area sq)` x 1M        |    62.48 |   35.18 |  1.78×  |
+
+`ic_resolve_protocol`'s inline fast lane (atom-deref + type-disc +
+triple-pointer-compare) is intentionally left in the slow helper for
+now: the type-disc compute branches on record-vs-non-record and the
+no-impl throw path is large enough that fully inlining the resolver
+in the stencil would bloat the JIT region for marginal win. Phase F's
+IC cache work (cache `bc->native` directly in the IC slot) is the
+natural follow-up here.
+
 ## v0.290.0 — `OP_MAKE_LAZY` stencil unblocks lazy-using core helpers
 
 JIT now compiles `OP_MAKE_LAZY` (op=17), previously the single

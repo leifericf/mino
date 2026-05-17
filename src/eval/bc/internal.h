@@ -483,6 +483,20 @@ void mino_bc_fn_mark(struct mino_state *S, const mino_bc_fn_t *bc);
  * the MINO_BC_OP_COUNTS dispatch profiler. */
 const char *mino_bc_op_name(unsigned op);
 
+/* Resolve a protocol-method implementation through an IC slot. The
+ * slot's atom holds the protocol's dispatch-table map; the first arg
+ * supplies the type-discriminator. On cache hit returns the cached
+ * impl directly; on miss does the map lookup with a :default fallback
+ * and refills the slot under GC write barriers. Throws MPR001 /
+ * MPR002 (via longjmp) on no-impl / bad-table-shape; returns NULL
+ * only if the throw path's setup itself fails. Caller is responsible
+ * for slot-bounds + argn-non-zero + slot->atom-shape validation. */
+struct mino_bc_ic_slot;
+mino_val_t *mino_bc_ic_resolve_protocol(struct mino_state *S,
+                                         const mino_bc_fn_t *bc,
+                                         struct mino_bc_ic_slot *slot,
+                                         mino_val_t *first_arg);
+
 /* Look up the source position recorded for a given pc. Returns 1 with
  * the position filled in if available, 0 if no source info is recorded
  * (uncompiled fn, pc out of range, or position with line == 0). */

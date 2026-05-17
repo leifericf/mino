@@ -709,7 +709,7 @@ mino_val_t *mino_bc_ic_global_load(mino_state_t *S,
  * impl for type) and the caller should goto bc_done. The atom-NULL
  * / non-atom guard is the caller's responsibility (argn-and-shape
  * validation belongs at the dispatch site). */
-static mino_val_t *ic_resolve_protocol(mino_state_t *S,
+mino_val_t *mino_bc_ic_resolve_protocol(mino_state_t *S,
                                         const mino_bc_fn_t *bc,
                                         mino_bc_ic_slot_t *slot,
                                         mino_val_t *first_arg)
@@ -1448,7 +1448,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 || mino_type_of(slot->atom) != MINO_ATOM) {
                 ok = 0; goto bc_done;
             }
-            mino_val_t *impl = ic_resolve_protocol(S, bc, slot, regs[a]);
+            mino_val_t *impl = mino_bc_ic_resolve_protocol(S, bc, slot, regs[a]);
             if (impl == NULL) { ok = 0; goto bc_done; }
             mino_val_t *r = apply_callable_argv(S, impl, regs + a,
                                                 (int)argn, env);

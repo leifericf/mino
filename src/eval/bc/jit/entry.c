@@ -437,6 +437,27 @@ const stencil_desc_t mino_jit_stencils[] = {
         0u
     },
     {
+        OP_PROTOCOL_CALL_CACHED,
+        stencil_op_protocol_call_cached_bytes,
+        stencil_op_protocol_call_cached_size,
+        stencil_op_protocol_call_cached_symbols,
+        stencil_op_protocol_call_cached_nsymbols,
+        stencil_op_protocol_call_cached_relocs,
+        stencil_op_protocol_call_cached_nrelocs,
+        0u
+    },
+    {
+        OP_PROTOCOL_TAILCALL_CACHED,
+        stencil_op_protocol_tailcall_cached_bytes,
+        stencil_op_protocol_tailcall_cached_size,
+        stencil_op_protocol_tailcall_cached_symbols,
+        stencil_op_protocol_tailcall_cached_nsymbols,
+        stencil_op_protocol_tailcall_cached_relocs,
+        stencil_op_protocol_tailcall_cached_nrelocs,
+        1u  /* FINAL: the impl's return value is the fn's return
+             * value; keep ret as the fn's natural exit. */
+    },
+    {
         OP_CALL,
         stencil_op_call_bytes, stencil_op_call_size,
         stencil_op_call_symbols, stencil_op_call_nsymbols,
@@ -661,6 +682,10 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
     {"mino_jit_closure_slow",          (void *)(uintptr_t)mino_jit_closure_slow},
     {"mino_jit_make_lazy_slow",        (void *)(uintptr_t)mino_jit_make_lazy_slow},
+    {"mino_jit_protocol_call_cached_slow",
+                                       (void *)(uintptr_t)mino_jit_protocol_call_cached_slow},
+    {"mino_jit_protocol_tailcall_cached_slow",
+                                       (void *)(uintptr_t)mino_jit_protocol_tailcall_cached_slow},
     {"mino_jit_push_env_slow",         (void *)(uintptr_t)mino_jit_push_env_slow},
     {"mino_jit_pop_env_slow",          (void *)(uintptr_t)mino_jit_pop_env_slow},
     {"mino_jit_env_bind_slow",         (void *)(uintptr_t)mino_jit_env_bind_slow},

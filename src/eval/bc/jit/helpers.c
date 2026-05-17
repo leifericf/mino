@@ -791,6 +791,71 @@ mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* OP_PROTOCOL_CALL_CACHED slow helper. Mirrors the interpreter's
+ * handler bit-for-bit: bounds-check the slot, atom-shape-check, run
+ * mino_bc_ic_resolve_protocol (handles the dispatch-table lookup, IC
+ * refill under write barriers, MPR001 / MPR002 diagnostics), then
+ * apply_callable_argv with the args sitting at regs[a..a+argn-1]
+ * (note: regs[a] IS the first arg -- protocol dispatch uses the
+ * leading positional argument as the type-discriminator source).
+ * Stores the return at regs[ret]. */
+mino_val_t **mino_jit_protocol_call_cached_slow(mino_state_t *S,
+                                                 mino_val_t **regs,
+                                                 unsigned a,
+                                                 unsigned argn,
+                                                 unsigned ret,
+                                                 mino_bc_fn_t *bc,
+                                                 unsigned slot_idx)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    if ((int)slot_idx >= bc->ic_slots_len) return NULL;
+    mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
+    if (argn < 1 || slot->atom == NULL
+        || mino_type_of(slot->atom) != MINO_ATOM) {
+        return NULL;
+    }
+    mino_val_t *first_arg = S->bc_regs[base + a];
+    mino_val_t *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
+    if (impl == NULL) return NULL;
+    mino_val_t *r = apply_callable_argv(S, impl,
+                                         S->bc_regs + base + a,
+                                         (int)argn, env);
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[ret] = r;
+    return regs;
+}
+
+/* OP_PROTOCOL_TAILCALL_CACHED slow helper. Resolves the impl the same
+ * way as the non-tail variant, but exits the JIT region by returning
+ * the impl's result directly (no register write-back). The owning
+ * stencil is FINAL: its return value is the fn's return value. */
+mino_val_t *mino_jit_protocol_tailcall_cached_slow(mino_state_t *S,
+                                                    mino_val_t **regs,
+                                                    unsigned a,
+                                                    unsigned argn,
+                                                    mino_bc_fn_t *bc,
+                                                    unsigned slot_idx)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    if ((int)slot_idx >= bc->ic_slots_len) return NULL;
+    mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
+    if (argn < 1 || slot->atom == NULL
+        || mino_type_of(slot->atom) != MINO_ATOM) {
+        return NULL;
+    }
+    mino_val_t *first_arg = S->bc_regs[base + a];
+    mino_val_t *impl = mino_bc_ic_resolve_protocol(S, bc, slot, first_arg);
+    if (impl == NULL) return NULL;
+    return apply_callable_argv(S, impl,
+                                S->bc_regs + base + a,
+                                (int)argn, env);
+}
+
 /* OP_MAKE_LAZY slow helper. Mirrors the interpreter's OP_MAKE_LAZY
  * cold-op handler: read the body bc from bc->consts[bx], allocate a
  * MINO_LAZY value, fill its fields (body, captured jit-invoke env,
