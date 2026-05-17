@@ -97,3 +97,35 @@
   (is (thrown? (str/reverse nil)))
   (is (thrown? (str/reverse 1)))
   (is (thrown? (str/reverse :a))))
+
+;; --- replace ---
+
+(deftest str-replace-string-match
+  (is (= "hello-world" (str/replace "hello world" " " "-")))
+  (is (= "abc"         (str/replace "a.b.c" "." "")))
+  (is (= ""            (str/replace "" "x" "y"))))
+
+(deftest str-replace-char-match
+  (is (= "aXc" (str/replace "abc" \b \X)))
+  (is (= "aXc" (str/replace "abc" \b "X"))))
+
+(deftest str-replace-regex-string
+  (is (= "aXc"         (str/replace "abc" #"b" "X")))
+  (is (= "Hell0 W0rld" (str/replace "Hello World" #"o" "0")))
+  (is (= "XbX"         (str/replace "abc" #"[ac]" "X")))
+  (is (= "ab"          (str/replace "abc" #"c$" "")))
+  (is (= "xbc"         (str/replace "abc" #"^a" "x"))))
+
+(deftest str-replace-regex-backref
+  (is (= "[H][e][l][l][o]" (str/replace "Hello" #"(\w)" "[$1]")))
+  (is (= "1a2b"            (str/replace "a1b2" #"(\w)(\d)" "$2$1"))))
+
+(deftest str-replace-regex-quote
+  (is (= "$out"  (str/replace "Xout" #"X" (str/re-quote-replacement "$"))))
+  (is (= "\\out" (str/replace "Xout" #"X" (str/re-quote-replacement "\\")))))
+
+(deftest str-replace-regex-fn
+  (is (= "ABC"       (str/replace "abc" #"\w" (fn [m] (str/upper-case m)))))
+  (is (= "<a>-<bb>"  (str/replace "a-bb" #"\w+" (fn [m] (str "<" m ">")))))
+  (is (= "1a-2b"     (str/replace "a1-b2" #"(\w)(\d)"
+                                  (fn [[_ g1 g2]] (str g2 g1))))))

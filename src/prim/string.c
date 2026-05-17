@@ -678,89 +678,334 @@ mino_val_t *prim_join(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
 }
 
-/* (str-replace s match replacement) -- single-pass string replacement. */
+/* Grow `*pbuf` so `*plen + n + 1` bytes fit, then append `n` bytes from
+ * `src`. On OOM, frees `*pbuf` and returns -1 (caller must surface the
+ * error to S). Used by the regex-replace and template-expansion paths. */
+static int str_replace_buf_append(mino_state_t *S, char **pbuf,
+                                  size_t *plen, size_t *pcap,
+                                  const char *src, size_t n)
+{
+    size_t need;
+    if (n > SIZE_MAX - *plen - 1) {
+        free(*pbuf); *pbuf = NULL;
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "internal", "MIN001",
+                      "str-replace: result size overflow");
+        return -1;
+    }
+    need = *plen + n + 1;
+    if (need > *pcap) {
+        size_t new_cap = *pcap == 0 ? 256 : *pcap;
+        char  *nb;
+        while (new_cap < need) {
+            if (new_cap > SIZE_MAX / 2) {
+                free(*pbuf); *pbuf = NULL;
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "internal", "MIN001",
+                              "str-replace: result size overflow");
+                return -1;
+            }
+            new_cap *= 2;
+        }
+        nb = (char *)realloc(*pbuf, new_cap);
+        if (nb == NULL) {
+            free(*pbuf); *pbuf = NULL;
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return -1;
+        }
+        *pbuf = nb;
+        *pcap = new_cap;
+    }
+    if (n > 0) memcpy(*pbuf + *plen, src, n);
+    *plen += n;
+    return 0;
+}
+
+/* JVM-style replacement-template expansion. Recognised escapes:
+ *   \$  -> literal $
+ *   \\  -> literal \
+ *   $N  -> capture group N (0 = whole match, 1..9 = positional groups).
+ * Other characters are copied verbatim. `text_base` plus the offsets in
+ * `g` and `match_idx` resolves to absolute group bytes in the search
+ * input. Returns 0 on success or -1 on error (S has the diag). */
+static int str_replace_expand_template(mino_state_t *S,
+                                       char **pbuf, size_t *plen, size_t *pcap,
+                                       const char *tmpl, size_t tlen,
+                                       const char *text_base,
+                                       int match_idx, int match_len,
+                                       const re_groups_t *g)
+{
+    size_t i = 0;
+    while (i < tlen) {
+        char c = tmpl[i];
+        if (c == '\\' && i + 1 < tlen) {
+            if (str_replace_buf_append(S, pbuf, plen, pcap, tmpl + i + 1, 1) < 0)
+                return -1;
+            i += 2;
+        } else if (c == '$' && i + 1 < tlen
+                   && tmpl[i + 1] >= '0' && tmpl[i + 1] <= '9') {
+            int n = tmpl[i + 1] - '0';
+            if (n == 0) {
+                if (str_replace_buf_append(S, pbuf, plen, pcap,
+                                           text_base + match_idx,
+                                           (size_t)match_len) < 0)
+                    return -1;
+            } else if (n <= g->n) {
+                int gs = g->starts[n - 1], ge = g->ends[n - 1];
+                if (gs >= 0 && ge >= gs) {
+                    if (str_replace_buf_append(S, pbuf, plen, pcap,
+                                               text_base + gs,
+                                               (size_t)(ge - gs)) < 0)
+                        return -1;
+                }
+                /* unmatched group: contributes nothing, mirroring JVM */
+            } else {
+                free(*pbuf); *pbuf = NULL;
+                prim_throw_classified(S, "eval/contract", "MCT001",
+                    "str-replace: replacement references missing capture group");
+                return -1;
+            }
+            i += 2;
+        } else {
+            if (str_replace_buf_append(S, pbuf, plen, pcap, &c, 1) < 0)
+                return -1;
+            i += 1;
+        }
+    }
+    return 0;
+}
+
+/* Build the match value handed to a callable replacement: the whole-
+ * match string when the pattern has no capture groups, or
+ * `[whole g1 g2 ...]` when it does. Returns NULL on allocation failure
+ * (diag already set). */
+static mino_val_t *str_replace_match_arg(mino_state_t *S,
+                                         const char *text_base,
+                                         int match_idx, int match_len,
+                                         const re_groups_t *g)
+{
+    if (g->n == 0) {
+        return mino_string_n(S, text_base + match_idx, (size_t)match_len);
+    }
+    {
+        mino_val_t *items[1 + RE_MAX_GROUPS];
+        size_t      n = 1;
+        int         i;
+        items[0] = mino_string_n(S, text_base + match_idx, (size_t)match_len);
+        for (i = 0; i < g->n; i++) {
+            if (g->starts[i] < 0 || g->ends[i] < 0
+             || g->ends[i] < g->starts[i]) {
+                items[n++] = mino_nil(S);
+            } else {
+                items[n++] = mino_string_n(S, text_base + g->starts[i],
+                                           (size_t)(g->ends[i] - g->starts[i]));
+            }
+        }
+        return mino_vector(S, items, n);
+    }
+}
+
+/* (str-replace s match replacement)
+ *
+ *   match=string : literal substring replacement (single-pass).
+ *   match=regex  : regex-driven replacement. When `replacement` is a
+ *                  string, $N references and \$ / \\ escapes are
+ *                  expanded JVM-style; otherwise `replacement` is
+ *                  called as a fn with the match value (a string when
+ *                  the pattern has no groups, or `[whole g1 g2 ...]`
+ *                  when it does) and its (str-coerced) result is used
+ *                  literally. */
 mino_val_t *prim_str_replace(mino_state_t *S, mino_val_t *args,
                              mino_env_t *env)
 {
     mino_val_t *s_val, *match_val, *repl_val;
-    const char *s, *match, *repl, *p;
-    size_t slen, mlen, rlen;
-    char  *buf = NULL;
-    size_t buf_len = 0, buf_cap = 0;
+    const char *s;
+    size_t      slen;
+    char       *buf = NULL;
+    size_t      buf_len = 0, buf_cap = 0;
     (void)env;
 
     if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
         || !mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
-            "str-replace requires three string arguments");
+            "str-replace requires three arguments");
     }
     s_val     = args->as.cons.car;
     match_val = args->as.cons.cdr->as.cons.car;
     repl_val  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
-    if (s_val == NULL || mino_type_of(s_val) != MINO_STRING
-        || match_val == NULL || mino_type_of(match_val) != MINO_STRING
-        || repl_val == NULL || mino_type_of(repl_val) != MINO_STRING) {
+    if (s_val == NULL || mino_type_of(s_val) != MINO_STRING) {
         return prim_throw_classified(S, "eval/type", "MTY001",
-            "str-replace: all arguments must be strings");
+            "str-replace: first argument must be a string");
     }
-    s    = s_val->as.s.data;     slen = s_val->as.s.len;
-    match = match_val->as.s.data; mlen = match_val->as.s.len;
-    repl  = repl_val->as.s.data;  rlen = repl_val->as.s.len;
-
-    if (mlen == 0) return s_val; /* empty match: return original */
-
-    buf_cap = slen + 256;
-    buf = (char *)malloc(buf_cap);
-    if (buf == NULL) {
-        set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001",
-                      "out of memory");
-        return NULL;
+    if (match_val == NULL
+        || (mino_type_of(match_val) != MINO_STRING
+            && mino_type_of(match_val) != MINO_REGEX)) {
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "str-replace: match must be a string or regex");
     }
+    s    = s_val->as.s.data;
+    slen = s_val->as.s.len;
 
-    p = s;
-    while (p < s + slen) {
-        const char *found = NULL;
-        const char *q;
-        for (q = p; q + mlen <= s + slen; q++) {
-            if (memcmp(q, match, mlen) == 0) {
-                found = q;
+    /* ----- literal-string match: the original fast path ----- */
+    if (mino_type_of(match_val) == MINO_STRING) {
+        const char *match, *repl, *p;
+        size_t mlen, rlen;
+        if (repl_val == NULL || mino_type_of(repl_val) != MINO_STRING) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "str-replace: replacement must be a string when match is a string");
+        }
+        match = match_val->as.s.data; mlen = match_val->as.s.len;
+        repl  = repl_val->as.s.data;  rlen = repl_val->as.s.len;
+        if (mlen == 0) return s_val;
+        buf_cap = slen + 256;
+        buf = (char *)malloc(buf_cap);
+        if (buf == NULL) {
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
+        p = s;
+        while (p < s + slen) {
+            const char *found = NULL;
+            const char *q;
+            for (q = p; q + mlen <= s + slen; q++) {
+                if (memcmp(q, match, mlen) == 0) { found = q; break; }
+            }
+            if (found != NULL) {
+                size_t prefix_len = (size_t)(found - p);
+                if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                           p, prefix_len) < 0) return NULL;
+                if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                           repl, rlen) < 0) return NULL;
+                p = found + mlen;
+            } else {
+                size_t tail_len = (size_t)(s + slen - p);
+                if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                           p, tail_len) < 0) return NULL;
                 break;
             }
         }
-        if (found != NULL) {
-            size_t prefix_len = (size_t)(found - p);
-            size_t need = buf_len + prefix_len + rlen;
-            if (need > buf_cap) {
-                char *newbuf;
-                while (buf_cap < need) buf_cap = buf_cap * 2;
-                newbuf = (char *)realloc(buf, buf_cap);
-                if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
-                buf = newbuf;
-            }
-            memcpy(buf + buf_len, p, prefix_len);
-            buf_len += prefix_len;
-            memcpy(buf + buf_len, repl, rlen);
-            buf_len += rlen;
-            p = found + mlen;
-        } else {
-            size_t tail_len = (size_t)(s + slen - p);
-            size_t need = buf_len + tail_len;
-            if (need > buf_cap) {
-                char *newbuf;
-                while (buf_cap < need) buf_cap = buf_cap * 2;
-                newbuf = (char *)realloc(buf, buf_cap);
-                if (newbuf == NULL) { free(buf); set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "out of memory"); return NULL; }
-                buf = newbuf;
-            }
-            memcpy(buf + buf_len, p, tail_len);
-            buf_len += tail_len;
-            break;
+        {
+            mino_val_t *result = mino_string_n(S, buf, buf_len);
+            free(buf);
+            return result;
         }
     }
+
+    /* ----- regex match ----- */
     {
-        mino_val_t *result = mino_string_n(S, buf, buf_len);
-        free(buf);
-        return result;
+        const char *pat_src;
+        re_t        compiled;
+        size_t      pos = 0;
+        int         repl_is_string = (repl_val != NULL
+                                      && mino_type_of(repl_val) == MINO_STRING);
+        const char *tmpl = repl_is_string ? repl_val->as.s.data  : NULL;
+        size_t      tlen = repl_is_string ? repl_val->as.s.len   : 0;
+        if (match_val->as.regex.source == NULL
+            || mino_type_of(match_val->as.regex.source) != MINO_STRING) {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                "str-replace: regex has no source pattern");
+        }
+        pat_src  = match_val->as.regex.source->as.s.data;
+        compiled = re_compile(pat_src);
+        if (compiled == NULL) {
+            return prim_throw_classified(S, "eval/contract", "MCT001",
+                "str-replace: invalid regex pattern");
+        }
+        buf_cap = slen + 256;
+        buf = (char *)malloc(buf_cap);
+        if (buf == NULL) {
+            re_free(compiled);
+            set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                          "internal", "MIN001", "out of memory");
+            return NULL;
+        }
+        while (pos <= slen) {
+            int         match_len = 0;
+            re_groups_t groups;
+            int         idx;
+            idx = re_matchp_groups(compiled, s + pos, &match_len, &groups);
+            if (idx < 0) {
+                /* No more matches: copy the tail and finish. */
+                if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                           s + pos, slen - pos) < 0) {
+                    re_free(compiled); return NULL;
+                }
+                break;
+            }
+            /* Emit the prefix between `pos` and the match start. */
+            if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                       s + pos, (size_t)idx) < 0) {
+                re_free(compiled); return NULL;
+            }
+            /* Emit the replacement: template expansion or fn call. */
+            if (repl_is_string) {
+                if (str_replace_expand_template(S, &buf, &buf_len, &buf_cap,
+                                                tmpl, tlen,
+                                                s + pos, idx, match_len,
+                                                &groups) < 0) {
+                    re_free(compiled);
+                    return NULL;
+                }
+            } else {
+                mino_val_t *argv1[1];
+                mino_val_t *call_arg;
+                mino_val_t *call_res;
+                call_arg = str_replace_match_arg(S, s + pos, idx, match_len,
+                                                 &groups);
+                if (call_arg == NULL) {
+                    free(buf); re_free(compiled); return NULL;
+                }
+                argv1[0] = call_arg;
+                call_res = apply_callable_argv(S, repl_val, argv1, 1, env);
+                if (call_res == NULL) {
+                    free(buf); re_free(compiled); return NULL;
+                }
+                if (mino_type_of(call_res) == MINO_STRING) {
+                    if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                               call_res->as.s.data,
+                                               call_res->as.s.len) < 0) {
+                        re_free(compiled); return NULL;
+                    }
+                } else if (mino_type_of(call_res) == MINO_CHAR) {
+                    /* Single-codepoint result: render as the literal char
+                     * byte. Avoids forcing every fn-result through `str`
+                     * for the common upper/lower-case style mapping. */
+                    char cb = (char)(call_res->as.ch & 0xff);
+                    if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                               &cb, 1) < 0) {
+                        re_free(compiled); return NULL;
+                    }
+                } else {
+                    free(buf); re_free(compiled);
+                    return prim_throw_classified(S, "eval/type", "MTY001",
+                        "str-replace: fn replacement must return a string or char");
+                }
+            }
+            /* Advance past the match. For zero-width matches, step by
+             * one byte to avoid an infinite loop -- copy the byte at
+             * the match site so the result mirrors the input shape. */
+            if (match_len <= 0) {
+                if (pos + (size_t)idx >= slen) {
+                    /* Zero-width match at end-of-string: nothing left. */
+                    break;
+                }
+                if (str_replace_buf_append(S, &buf, &buf_len, &buf_cap,
+                                           s + pos + idx, 1) < 0) {
+                    re_free(compiled); return NULL;
+                }
+                pos += (size_t)idx + 1;
+            } else {
+                pos += (size_t)idx + (size_t)match_len;
+            }
+        }
+        re_free(compiled);
+        {
+            mino_val_t *result = mino_string_n(S, buf, buf_len);
+            free(buf);
+            return result;
+        }
     }
 }
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.256.0 — `clojure.string/replace` accepts regex match and fn replacement
+
+`(clojure.string/replace s match repl)` now accepts a regex as the
+`match` argument, matching JVM Clojure. The C primitive walks the
+input via the existing regex engine and emits each replacement, so
+the regex path works whether or not the script has explicitly
+required `clojure.string` first — which closes the cookbook gap the
+ClojureDocs differential probe surfaced (`(clojure.string/replace
+"The color is red" #"red" "blue")`).
+
+Three replacement shapes are supported on the regex path:
+
+- **String** — JVM `Matcher.appendReplacement` template semantics.
+  `$N` substitutes capture group N (0 = whole match, 1..9 =
+  positional groups). `\$` and `\\` are the literal-dollar and
+  literal-backslash escapes. Other characters copy verbatim.
+- **Callable** — invoked once per match. Receives the whole-match
+  string when the pattern has no capture groups, or the
+  `[whole g1 g2 ...]` vector when it does. The return value is
+  inserted literally (strings and chars); other return types raise
+  a type error.
+- **Char / string** for the legacy literal-match shape continues to
+  work unchanged.
+
+The `clojure.string/replace` wrapper now only adds char-match
+coercion (1-char-string → primitive); regex dispatch lives in C.
+
 ## v0.255.29 — Fix: BC catch lands restore `bc_current_bc`; safepoint sleeps for fair handoff
 
 Two follow-ups to v0.255.27's safepoint poll + diag location work,

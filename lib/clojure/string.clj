@@ -60,8 +60,25 @@
 (defn upper-case [s]
   (prim-upper-case (as-str s)))
 
-(defn replace [s match replacement]
-  (prim-replace (assert-string s) match replacement))
+(defn replace
+  "Replace all matches of `match` in `s` with `replacement`. `match` may
+   be a string, char, or regex. For regex `match`, `replacement` may be
+   a string (with `$N` group backrefs and `\\$` / `\\\\` escapes) or a
+   function called per match with the whole-match string when the
+   pattern has no groups, or `[whole g1 g2 ...]` when it does. Char
+   `match` is coerced to a 1-char string before delegating to the C
+   primitive."
+  [s match replacement]
+  (let [s (assert-string s)]
+    (cond
+      (char? match)
+      (prim-replace s (str match) (as-str replacement))
+
+      :else
+      ;; The C primitive handles string and regex `match`; for regex it
+      ;; also dispatches on whether `replacement` is a string (template
+      ;; with backrefs) or a callable.
+      (prim-replace s match replacement))))
 
 (defn split-lines [s]
   (split (assert-string s) "\n"))
@@ -170,4 +187,5 @@
     (if-let [i (index-of s m)]
       (str (subs s 0 i) replacement (subs s (+ i (count m))))
       s)))
+
 
