@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.283.0 — `apply` passes lazy / chunked tails to fn rest-args
+
+`(apply f a1 a2 ... infinite-seq)` previously materialized the
+final-arg collection element-by-element before invoking `f`, which
+hangs whenever the seq is infinite. JVM Clojure's variadic dispatch
+hands the seq directly to the callee's rest-arg binding; mino now
+does the same when the callee is a single-arity fn with `& rest`.
+
+`prim_apply` splices a `LAZY` or chunked tail directly into the
+args spine when the callee shape qualifies (helper:
+`fn_lazy_safe_rest`). Anything else -- prims, fixed-arity fns,
+multi-arity dispatch -- keeps the eager `seq_iter` materialization
+so primitives that walk raw cons cells stay correct.
+
+`apply_callable` probes the args spine for a non-cons tail
+(`LAZY` / `CHUNKED_CONS` / `CHUNK`) and routes those calls
+through the tree-walker; the bc fast path's argv walk would
+otherwise silently drop the tail. `bind_params` and
+`bind_vec_destructure` now force lazy cells incrementally per
+positional bind, and the vector pre-walk stops at the `&` boundary
+so the rest-arg receives the unforced remainder. `val_to_seq`
+(used by `cons`) gained pass-throughs for `CHUNKED_CONS` and
+`CHUNK` so consumers downstream of the splice can keep their
+chunked spine.
+
+Closes the spiral example from the ClojureDocs probe
+(`partition:16-19`): `(apply concat coll (repeat pad))` now
+terminates under `(take n ...)`.
+
+| Shape                                  | Before | After  |
+|----------------------------------------|--------|--------|
+| `(apply mfn (list 1 2 3 4 5))`         | ~6.8μs | ~6.9μs |
+| `(apply mfn (range 10))`               | ~7.6μs | ~6.4μs |
+| `(apply mfn (range 100))`              | ~19.7μs| ~6.7μs |
+| `(apply + (list 1 2 3 4 5))`           | ~6.7μs | ~6.7μs |
+| `(take 4 (apply concat p (repeat q)))` | hang   | finite |
+
+(Times are per-call from `.local/bench_apply.clj` on the dev
+machine; comparison serves as a regression gate, not a deep
+benchmark.)
+
 ## v0.282.0 — `do` body iteration forces lazy cdrs
 
 `eval_implicit_do_impl` walks a body cons chain via `cdr` and

@@ -93,6 +93,18 @@ mino_val_t *mino_apply_known_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
                                         mino_val_t **argv, int argc,
                                         mino_env_t *env);
 
+/* fn_lazy_safe_rest -- predicate used by prim_apply to decide whether
+ * the final-arg collection can be spliced into the args spine
+ * (preserving a lazy tail) rather than materialized.
+ *
+ * Returns 1 only when fn (var-unwrapped) is a single-arity MINO_FN
+ * whose params include `& rest`. Multi-arity fns are excluded because
+ * dispatch_multi_arity counts args via list_len, which would not
+ * terminate on an infinite lazy tail. Anything that isn't an FN
+ * with rest-args (MINO_PRIM, fixed-arity FN, MACRO, keywords-as-fn,
+ * ...) is rejected so the caller falls back to eager materialization. */
+int fn_lazy_safe_rest(mino_val_t *fn);
+
 /* ------------------------------------------------------------------------- */
 /* print.c                                                                   */
 /* ------------------------------------------------------------------------- */

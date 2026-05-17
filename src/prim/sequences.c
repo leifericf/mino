@@ -2169,11 +2169,26 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *call_args;
     mino_val_t *p;
     size_t      n;
+    int         lazy_safe;
     arg_count(S, args, &n);
     if (n < 2) {
         return prim_throw_classified(S, "eval/arity", "MAR001", "apply requires a function and arguments");
     }
     fn = args->as.cons.car;
+    /* `lazy_safe` is computed lazily -- only the paths that would
+     * splice a LAZY tail check it (avoiding the fn-shape walk for
+     * the very common `(apply f finite-list)` case where last is
+     * CONS). When the callee is a single-arity fn with a rest-arg,
+     * we can splice the final collection's seq directly into the
+     * args spine instead of forcing every element via seq_iter.
+     * apply_callable detects the lazy tail and routes such calls to
+     * the tree-walker (whose bind_params walks lazy cells
+     * incrementally and hands the rest-arg the still-lazy tail).
+     * For unsafe callees -- prims that walk raw cons, multi-arity
+     * fns whose dispatch counts args, and fixed-arity fns where
+     * over-supply is an arity error anyway -- we keep the eager
+     * seq_iter materialization. */
+    lazy_safe = -1;
     if (n == 2) {
         /* (apply f coll) — spread coll as args. */
         last = args->as.cons.cdr->as.cons.car;
@@ -2190,6 +2205,22 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             p = p->as.cons.cdr;
         }
         last = p->as.cons.car; /* the final collection argument */
+        /* Lazy-safe splice: attach `last` (CONS or LAZY) directly as
+         * the cdr of the prepend chain so an infinite tail flows
+         * through to a rest-arg without materializing. */
+        if (last != NULL
+            && (mino_type_of(last) == MINO_LAZY
+                || mino_type_of(last) == MINO_CONS)) {
+            if (lazy_safe < 0) lazy_safe = fn_lazy_safe_rest(fn);
+            if (lazy_safe) {
+                if (tail2 == NULL) {
+                    head = last;
+                } else {
+                    mino_cons_cdr_set(S, tail2, last);
+                }
+                return apply_callable(S, fn, head, env);
+            }
+        }
         /* Append elements from `last` collection. */
         if (last != NULL && mino_type_of(last) != MINO_NIL) {
             seq_iter_t it;
@@ -2210,6 +2241,13 @@ mino_val_t *prim_apply(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     if (mino_type_of(last) == MINO_CONS) {
         return apply_callable(S, fn, last, env);
+    }
+    /* Lazy-safe pure-LAZY collection: hand the lazy seq directly. */
+    if (mino_type_of(last) == MINO_LAZY) {
+        if (lazy_safe < 0) lazy_safe = fn_lazy_safe_rest(fn);
+        if (lazy_safe) {
+            return apply_callable(S, fn, last, env);
+        }
     }
     /* Convert non-list collection to cons list. */
     {

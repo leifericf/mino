@@ -61,21 +61,35 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
                    || mino_type_of(val) == MINO_CHUNK)) {
         /* Lazy / chunked sequential value: the downstream positional
          * walk's mino_is_cons check fails on these types, so every
-         * pattern slot would bind to nil. Walk plen elements via a
-         * type-dispatched inline cursor (LAZY -> force then re-dispatch,
-         * CHUNKED_CONS -> walk current chunk slice then descend into
-         * .more, CHUNK -> walk the flat array, CONS -> car/cdr). Stash
-         * the realized prefix as a fresh cons chain so the downstream
-         * loop's positional walk works uniformly. */
+         * pattern slot would bind to nil. Walk only up to the `&`
+         * position via a type-dispatched inline cursor (LAZY -> force
+         * then re-dispatch, CHUNKED_CONS -> walk current chunk slice
+         * then descend into .more, CHUNK -> walk the flat array,
+         * CONS -> car/cdr). Stash the realized prefix as a fresh cons
+         * chain whose tail is the still-lazy remainder so the rest-arg
+         * gets the unforced tail and short fixed patterns still pull
+         * exactly the elements they need (plus any beyond-fn arity
+         * surplus that triggers the bottom strict-arity check). */
+        size_t walk_limit = plen;
+        {
+            size_t j;
+            for (j = 0; j < plen; j++) {
+                mino_val_t *pj = vec_nth(pattern, j);
+                if (sym_eq(pj, "&")) { walk_limit = j; break; }
+            }
+            /* When no `&` is present, force one extra element past
+             * the fixed arity so the strict-arity check at the bottom
+             * of the for-loop can observe a surplus and report it.
+             * Capped by plen+1 so infinite seqs don't make us walk
+             * beyond the smallest amount needed for that detection. */
+            if (walk_limit == plen) walk_limit = plen + 1;
+        }
         mino_val_t *cur = val;
         mino_val_t *head = NULL;
         mino_val_t *tail_pin = NULL;
         size_t      chunk_off = 0;
         size_t      built = 0;
-        /* For CHUNKED_CONS we resume the chunk iter from off+0; the
-         * inner loop advances chunk_off until the chunk is drained
-         * then crosses into .more. */
-        while (built < plen && cur != NULL) {
+        while (built < walk_limit && cur != NULL) {
             mino_val_t *elt = NULL;
             mino_type_t k;
             while (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
@@ -115,10 +129,34 @@ static int bind_vec_destructure(mino_state_t *S, mino_env_t *env,
             }
             built++;
         }
-        args = head != NULL ? head : mino_nil(S);
+        /* Splice the unforced remainder onto the realized prefix so
+         * the rest-arg binding picks it up as-is. For chunked/vector
+         * remainders that aren't directly bindable as a seq cell,
+         * fall back to nil-terminating: the rest-arg gets exactly the
+         * elements we materialized, which is correct because the
+         * non-LAZY tail has no infinite-future risk. */
+        if (head == NULL) {
+            args = cur != NULL && mino_type_of(cur) == MINO_LAZY
+                ? cur
+                : mino_nil(S);
+        } else {
+            if (cur != NULL && mino_type_of(cur) == MINO_LAZY) {
+                tail_pin->as.cons.cdr = cur;
+            }
+            args = head;
+        }
     }
     for (i = 0; i < plen; i++) {
         mino_val_t *p = vec_nth(pattern, i);
+        /* Force any lazy cell at the cursor before deciding what to bind.
+         * Args may be a CONS spine that ends in a LAZY cell when apply
+         * preserves the tail; vec destructure must thread that LAZY
+         * through to the rest-arg without binding earlier slots to nil
+         * because they followed a CONS->LAZY hand-off. */
+        while (args != NULL && mino_type_of(args) == MINO_LAZY) {
+            args = lazy_force(S, args);
+            if (args == NULL) return 0;
+        }
         if (sym_eq(p, "&")) {
             /* Rest parameter: next element gets remaining args. */
             if (i + 1 >= plen) {
@@ -543,6 +581,16 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
     if (params != NULL && mino_type_of(params) == MINO_VECTOR) {
         return bind_vec_destructure(S, env, params, args, ctx);
     }
+    /* Force any leading lazy cell on the args spine. apply may pass
+     * a LAZY tail through directly when the callee has a reachable
+     * rest-arg; walking it with raw cons.cdr requires forcing each
+     * boundary as we hit it. The rest-arg path below hands `args`
+     * to bind_form as-is, so the lazy tail is preserved past the
+     * fixed positional binds. */
+    while (args != NULL && mino_type_of(args) == MINO_LAZY) {
+        args = lazy_force(S, args);
+        if (args == NULL) return 0;
+    }
     /* Cons-list params: walk in parallel with args. */
     while (mino_is_cons(params)) {
         mino_val_t *name = params->as.cons.car;
@@ -577,12 +625,24 @@ int bind_params(mino_state_t *S, mino_env_t *env, mino_val_t *params,
         params = params->as.cons.cdr;
         args   = args->as.cons.cdr;
         bound++;
+        /* Force any lazy cell at the new args position. */
+        while (args != NULL && mino_type_of(args) == MINO_LAZY) {
+            args = lazy_force(S, args);
+            if (args == NULL) return 0;
+        }
     }
-    if (mino_is_cons(args)) {
-        size_t extra = 0;
-        mino_val_t *cur = args;
-        while (mino_is_cons(cur)) { extra++; cur = cur->as.cons.cdr; }
-        emit_arity_mismatch(S, ctx, bound, bound + extra);
+    if (mino_is_cons(args)
+        || (args != NULL && mino_type_of(args) == MINO_LAZY)) {
+        /* Args has leftover elements past the params count. The tail
+         * may be an infinite lazy seq (e.g. `(apply f (range))` to
+         * a fixed-arity callee), so we don't walk to count — just
+         * report "more than expected". Mirrors the message style
+         * used by bind_vec_destructure's strict-arity branch. */
+        char msg[96];
+        snprintf(msg, sizeof(msg),
+                 "wrong number of args (more than %zu) passed", bound);
+        set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                      "eval/arity", "MAR001", msg);
         return 0;
     }
     return 1;

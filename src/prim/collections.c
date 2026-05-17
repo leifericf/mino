@@ -52,6 +52,13 @@ mino_val_t *val_to_seq(mino_state_t *S, mino_val_t *v)
      * here to avoid infinite recursion with self-referential sequences
      * like (repeat x). */
     if (mino_type_of(v) == MINO_LAZY) return v;
+    /* Chunked-cons spines (the shape produced by `rest` over chunked
+     * sources like vector-backed lazy maps) are valid as cons cdr;
+     * seq_iter and the seq prim handle them downstream without
+     * materializing. Same for a raw chunk: passing it through keeps
+     * the consumer's chunked path live. */
+    if (mino_type_of(v) == MINO_CHUNKED_CONS) return v;
+    if (mino_type_of(v) == MINO_CHUNK) return v;
     if (mino_type_of(v) == MINO_VECTOR) {
         if (v->as.vec.len == 0) return mino_nil(S);
         head = mino_nil(S);

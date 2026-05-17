@@ -54,6 +54,25 @@
   (is (= 6 (apply + [1 2 3])))
   (is (= 10 (apply + 1 2 [3 4]))))
 
+(deftest apply-lazy-args-to-rest-binding
+  (is (= [0 1 2] (apply (fn [& xs] (vec (take 3 xs))) (range))))
+  (is (= [:a [0 1 2]]
+         (apply (fn [a & xs] [a (vec (take 3 xs))]) :a (range))))
+  (is (= [0 1 2]
+         (apply (fn [a b c & xs] (vec (take 3 xs))) 1 2 3 (range)))))
+
+(deftest apply-cons-list-params
+  (let [f (fn [a b & rest] [a b (count rest)])]
+    (is (= [1 2 3] (apply f 1 2 [3 4 5])))
+    (is (= [1 2 0] (apply f 1 2 [])))
+    (is (= [1 2 3] (apply f 1 [2 3 4 5])))))
+
+(deftest apply-vector-destructure-params
+  (is (= [:a :b 3] (apply (fn [[a b & rest]] [a b (count rest)])
+                          [[:a :b :c :d :e]])))
+  (is (= [:a :b 0] (apply (fn [[a b & rest]] [a b (count rest)])
+                          [[:a :b]]))))
+
 (deftest higher-order-utils
   (is (= false ((comp not nil?) nil)))
   (is (= 15 ((partial + 10) 5)))

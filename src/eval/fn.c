@@ -187,6 +187,24 @@ static int param_arity(const mino_val_t *params, int *has_rest)
     return n;
 }
 
+int fn_lazy_safe_rest(mino_val_t *fn)
+{
+    int has_rest = 0;
+    if (fn == NULL) return 0;
+    if (mino_type_of(fn) == MINO_VAR) {
+        if (!fn->as.var.bound) return 0;
+        fn = fn->as.var.root;
+        if (fn == NULL) return 0;
+    }
+    if (mino_type_of(fn) != MINO_FN) return 0;
+    /* Multi-arity uses list_len during dispatch -- unsafe for infinite
+     * lazy tails. Future work: count up to max-fixed-arity + 1 and
+     * stop, then this can extend to multi-arity rest clauses. */
+    if (fn->as.fn.params == NULL) return 0;
+    (void)param_arity(fn->as.fn.params, &has_rest);
+    return has_rest;
+}
+
 /* For a multi-arity fn (params == NULL, body = list of (params . body)
  * clauses), find the clause matching the given arg count. */
 static mino_val_t *find_arity_clause(mino_state_t *S, mino_val_t *clauses,
@@ -327,6 +345,23 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
     }
     if (mino_type_of(fn) == MINO_FN || mino_type_of(fn) == MINO_MACRO) {
         const char *tag       = mino_type_of(fn) == MINO_MACRO ? "macro" : "fn";
+        /* Non-CONS seq-tail detection. `apply` may have spliced a
+         * (possibly infinite) seq into the args spine as a trailing
+         * LAZY / CHUNKED_CONS / CHUNK cell; the bc fast path's argv
+         * walk would silently drop the trailing portion. Route those
+         * calls through the tree-walker which uses lazy-aware
+         * bind_params. Cheap to probe -- the walk is the same cdr
+         * chain the bc path would walk anyway. */
+        int args_lazy_tail;
+        {
+            mino_val_t *probe = args;
+            mino_type_t tt;
+            while (mino_is_cons(probe)) probe = probe->as.cons.cdr;
+            tt = probe != NULL ? mino_type_of(probe) : MINO_NIL;
+            args_lazy_tail = (tt == MINO_LAZY
+                              || tt == MINO_CHUNKED_CONS
+                              || tt == MINO_CHUNK);
+        }
         /* Lazy compile-on-first-call. Macros stay tree-walked; their
          * call frequency is low and the bc compiler's macro-body
          * handling lives in Phase 2. Plain fns get one compile attempt
@@ -354,7 +389,8 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             (void)mino_bc_compile_fn(S, fn);
         }
         mino_bc_check_require(S, fn);
-        if (mino_type_of(fn) == MINO_FN && MINO_BC_RUNNABLE(fn)) {
+        if (mino_type_of(fn) == MINO_FN && MINO_BC_RUNNABLE(fn)
+            && !args_lazy_tail) {
             /* Tier selection for the interpreter / native split. When
              * CPJIT is enabled and the fn has crossed the hot
              * threshold, attempt a single compile per generation. The
@@ -458,9 +494,25 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     && next_fn->as.fn.bc == NULL) {
                     (void)mino_bc_compile_fn(S, next_fn);
                 }
+                /* Non-CONS seq-tail detection on the new args. If a
+                 * tail call landed at a callee whose argv would lose
+                 * a trailing LAZY / CHUNKED_CONS / CHUNK cell, bail
+                 * out of the bc trampoline and let the recursive
+                 * apply_callable route to the tree-walker. */
+                int next_args_lazy_tail = 0;
+                {
+                    mino_val_t *np = next_args;
+                    mino_type_t ntt;
+                    while (mino_is_cons(np)) np = np->as.cons.cdr;
+                    ntt = np != NULL ? mino_type_of(np) : MINO_NIL;
+                    next_args_lazy_tail = (ntt == MINO_LAZY
+                        || ntt == MINO_CHUNKED_CONS
+                        || ntt == MINO_CHUNK);
+                }
                 if (next_fn != NULL && mino_type_of(next_fn) == MINO_FN
                     && MINO_BC_RUNNABLE(next_fn)
-                    && next_fn->as.fn.params != NULL) {
+                    && next_fn->as.fn.params != NULL
+                    && !next_args_lazy_tail) {
                     /* Rebuild argv from the new args list. */
                     argc = 0;
                     cur  = next_args;
