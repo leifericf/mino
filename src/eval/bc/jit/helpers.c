@@ -378,10 +378,15 @@ mino_val_t **mino_jit_unop_slow(mino_state_t *S, mino_val_t **regs,
     if (list == NULL) return NULL;
     mino_val_t *r;
     switch (subop) {
-    case UNOP_INC:    r = prim_inc   (S, list, NULL); break;
-    case UNOP_DEC:    r = prim_dec   (S, list, NULL); break;
-    case UNOP_ZERO_P: r = prim_zero_p(S, list, NULL); break;
-    default:          r = NULL;                       break;
+    case UNOP_INC:    r = prim_inc    (S, list, NULL); break;
+    case UNOP_DEC:    r = prim_dec    (S, list, NULL); break;
+    case UNOP_ZERO_P: r = prim_zero_p (S, list, NULL); break;
+    case UNOP_POS_P:  r = prim_pos_p  (S, list, NULL); break;
+    case UNOP_NEG_P:  r = prim_neg_p  (S, list, NULL); break;
+    case UNOP_EVEN_P: r = prim_even_p (S, list, NULL); break;
+    case UNOP_ODD_P:  r = prim_odd_p  (S, list, NULL); break;
+    case UNOP_BNOT:   r = prim_bit_not(S, list, NULL); break;
+    default:          r = NULL;                        break;
     }
     if (r == NULL) return NULL;
     regs = S->bc_regs + base;

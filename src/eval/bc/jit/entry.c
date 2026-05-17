@@ -357,6 +357,41 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_ushr_ii_relocs, stencil_op_ushr_ii_nrelocs,
         0u
     },
+    {
+        OP_POS_P_I,
+        stencil_op_pos_p_i_bytes, stencil_op_pos_p_i_size,
+        stencil_op_pos_p_i_symbols, stencil_op_pos_p_i_nsymbols,
+        stencil_op_pos_p_i_relocs, stencil_op_pos_p_i_nrelocs,
+        0u
+    },
+    {
+        OP_NEG_P_I,
+        stencil_op_neg_p_i_bytes, stencil_op_neg_p_i_size,
+        stencil_op_neg_p_i_symbols, stencil_op_neg_p_i_nsymbols,
+        stencil_op_neg_p_i_relocs, stencil_op_neg_p_i_nrelocs,
+        0u
+    },
+    {
+        OP_EVEN_P_I,
+        stencil_op_even_p_i_bytes, stencil_op_even_p_i_size,
+        stencil_op_even_p_i_symbols, stencil_op_even_p_i_nsymbols,
+        stencil_op_even_p_i_relocs, stencil_op_even_p_i_nrelocs,
+        0u
+    },
+    {
+        OP_ODD_P_I,
+        stencil_op_odd_p_i_bytes, stencil_op_odd_p_i_size,
+        stencil_op_odd_p_i_symbols, stencil_op_odd_p_i_nsymbols,
+        stencil_op_odd_p_i_relocs, stencil_op_odd_p_i_nrelocs,
+        0u
+    },
+    {
+        OP_BNOT_I,
+        stencil_op_bnot_i_bytes, stencil_op_bnot_i_size,
+        stencil_op_bnot_i_symbols, stencil_op_bnot_i_nsymbols,
+        stencil_op_bnot_i_relocs, stencil_op_bnot_i_nrelocs,
+        0u
+    },
     /* OP_LOOP_INT_LT intentionally absent: measurement against the
      * interpreter's inline fast path showed a 17% regression on the
      * canonical `count-loop` workload. The bytecode compiler still

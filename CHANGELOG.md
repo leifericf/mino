@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.289.0 — Stencils for unary int predicates + `bit-not`
+
+JIT now compiles `pos?` / `neg?` / `even?` / `odd?` / `bit-not` on
+tagged-int operands (`OP_POS_P_I`, `OP_NEG_P_I`, `OP_EVEN_P_I`,
+`OP_ODD_P_I`, `OP_BNOT_I`). Each stencil mirrors `zero_int_p.c`:
+tag-check, evaluate inline (compare-against-zero / parity-LSB-check /
+complement), store the boolean or tagged result. Boxed ints / doubles
+/ non-numeric values still take the slow path through `prim_*`.
+
+`bit-not` cannot escape the 60-bit tagged range on a tagged input,
+so no range guard is needed.
+
+Measured on Apple Silicon, 1M-iter loop kernels:
+
+| op       | off (ms) | on (ms) | speedup |
+|----------|---------:|--------:|--------:|
+| `pos?`   |    27.04 |    3.22 |  8.39×  |
+| `even?`  |    26.35 |    3.47 |  7.59×  |
+| `bit-not`|    26.73 |    2.75 |  9.71×  |
+
+`neg?` and `odd?` mirror `pos?` / `even?` byte-for-byte; their bench
+kernels were omitted to keep the row count short.
+
 ## v0.288.0 — Stencils for the bitwise int family
 
 JIT now compiles the bitwise int ops: `OP_BAND_II`, `OP_BOR_II`,

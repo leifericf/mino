@@ -59,6 +59,12 @@
 (defn p-shr-ii  [a b] (bit-shift-right a b))
 (defn p-ushr-ii [a b] (unsigned-bit-shift-right a b))
 
+(defn p-pos-p   [a] (pos? a))
+(defn p-neg-p   [a] (neg? a))
+(defn p-even-p  [a] (even? a))
+(defn p-odd-p   [a] (odd? a))
+(defn p-bnot-i  [a] (bit-not a))
+
 ;; IK variants: rhs immediate fits in signed 8-bit, lhs comes from a
 ;; param. The bc compiler folds the literal into the C field of the
 ;; encoded instruction, so `(+ a 1)` emits OP_ADD_IK with sC=1.
@@ -80,7 +86,8 @@
     (p-sub-ik-128 3) (p-lt-ik-10 5) (p-le-ik-10 10) (p-eq-ik-7 7)
     (p-mod-ii 10 3) (p-quot-ii 10 3) (p-rem-ii 10 3)
     (p-band-ii 7 3) (p-bor-ii 4 2) (p-bxor-ii 6 5)
-    (p-shl-ii 1 3) (p-shr-ii 16 2) (p-ushr-ii 16 2)))
+    (p-shl-ii 1 3) (p-shr-ii 16 2) (p-ushr-ii 16 2)
+    (p-pos-p 1) (p-neg-p -1) (p-even-p 2) (p-odd-p 3) (p-bnot-i 0)))
 
 (deftest -aaa-warm-all
   ;; Runs first (alphabetical leading-dash); warms every parity fn
@@ -328,6 +335,41 @@
   ;; Unsigned right shift of -1 by 1 = 0x7fff... -- outside tagged
   ;; range; slow path's mino_int_wrap matches the prim's semantics.
   (is (= (unsigned-bit-shift-right -1 1) (p-ushr-ii -1 1))))
+
+;; ---- Section 4d: unary int predicates / bnot ---------------------
+
+(deftest pos-p-positive
+  (is (= true (p-pos-p 5))))
+(deftest pos-p-zero
+  (is (= false (p-pos-p 0))))
+(deftest pos-p-negative
+  (is (= false (p-pos-p -5))))
+
+(deftest neg-p-negative
+  (is (= true (p-neg-p -5))))
+(deftest neg-p-zero
+  (is (= false (p-neg-p 0))))
+(deftest neg-p-positive
+  (is (= false (p-neg-p 5))))
+
+(deftest even-p-even
+  (is (= true (p-even-p 8))))
+(deftest even-p-odd
+  (is (= false (p-even-p 7))))
+(deftest even-p-zero
+  (is (= true (p-even-p 0))))
+
+(deftest odd-p-odd
+  (is (= true (p-odd-p 7))))
+(deftest odd-p-even
+  (is (= false (p-odd-p 8))))
+
+(deftest bnot-i-zero
+  (is (= -1 (p-bnot-i 0))))
+(deftest bnot-i-positive
+  (is (= -8 (p-bnot-i 7))))
+(deftest bnot-i-negative
+  (is (= 7 (p-bnot-i -8))))
 
 ;; ---- Section 5: loop-shape parity --------------------------------
 ;;
