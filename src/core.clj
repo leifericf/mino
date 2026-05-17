@@ -928,6 +928,26 @@
     (throw (str "vec: cannot create a vector from a transient"))
     :else (into [] coll)))
 
+(defn seq-to-map-for-destructuring
+  "Builds a map from a sequence of keyword/value pairs, possibly with
+   a trailing override map. Used by JVM Clojure's 1.11+ map-destructure
+   over a varargs seq. Public so portable code can call it directly."
+  [s]
+  (let [s (seq s)]
+    (cond
+      (nil? s)
+      {}
+      (nil? (next s))
+      (if (map? (first s)) (first s) {})
+      :else
+      (let [items (vec s)
+            trailing-map? (map? (peek items))
+            pair-items    (if trailing-map? (pop items) items)
+            base          (apply hash-map pair-items)]
+        (if trailing-map?
+          (merge base (peek items))
+          base)))))
+
 ;; --- Random utilities ---
 
 (defn rand-int

@@ -145,6 +145,16 @@
         {person-name k} {:name "john"}]
     (is (= "john" person-name))))
 
+(deftest seq-to-map-for-destructuring-shapes
+  ;; Helper used by 1.11+ kwargs destructuring of varargs seqs.
+  (is (= {}              (seq-to-map-for-destructuring [])))
+  (is (= {}              (seq-to-map-for-destructuring nil)))
+  (is (= {:a 1 :b 2}     (seq-to-map-for-destructuring [:a 1 :b 2])))
+  (is (= {:x 1}          (seq-to-map-for-destructuring [{:x 1}])))
+  ;; Trailing override map wins on conflicts.
+  (is (= {:a 99 :b 2 :c 3}
+         (seq-to-map-for-destructuring [:a 1 :b 2 {:a 99 :c 3}]))))
+
 (deftest map-destructure-nested-patterns
   ;; The binding position in {pattern :key} may itself be a vector
   ;; or map pattern; recursive destructure binds its elements.

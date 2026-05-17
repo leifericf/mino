@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.268.0 — `seq-to-map-for-destructuring` helper
+
+Adds the JVM 1.11+ helper used by varargs kwargs destructuring:
+collapses a seq of `:k v :k v ...` (optionally with a trailing
+override map) into a single map. Empty input or a single-element
+seq with a map element pass through; trailing override entries
+overwrite same-keyed pair entries.
+
 ## v0.267.0 — Nested patterns inside map destructuring
 
 The pattern position of `{pattern :key}` now accepts vector and
