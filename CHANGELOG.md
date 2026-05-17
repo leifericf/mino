@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.297.0 — GC/alloc bench harness extensions
+
+Companion repo `mino-bench` gains a new `gc_alloc_micro.clj` suite
+covering the four allocator levers the next cycle targets:
+transient builder fast path, persistent HAMT assoc, write-barrier
+old<-young hot path, and pure nursery pressure. Plus a fixed-size
+alloc-only row that isolates the small-alloc free-list / calloc
+boundary.
+
+The shared `mino.bench` reporter now prints `alloc-bytes/op` in the
+human-readable line. The EDN block was already complete; this brings
+the at-a-glance view up to par.
+
+No behavior change in the mino runtime. Baseline at v0.296.0 frozen
+for cycle-end comparison.
+
 ## v0.296.0 — `MINO_CPJIT_STATS=summary` one-line mode
 
 `MINO_CPJIT_STATS` now honours a third value: `summary`. When set,
