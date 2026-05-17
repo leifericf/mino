@@ -1915,6 +1915,40 @@ mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return narrow_cast(S, args->as.cons.car, -128LL, 127LL, "byte");
 }
 
+mino_val_t *prim_char(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    mino_val_t *v;
+    long long   ll;
+    const char *err = NULL;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001",
+                                     "char requires one argument");
+    }
+    v = args->as.cons.car;
+    /* (char \a) is identity. */
+    if (v != NULL && mino_type_of(v) == MINO_CHAR) {
+        return v;
+    }
+    if (!extract_integer_for_cast(S, v, &ll, &err)) {
+        char buf[160];
+        snprintf(buf, sizeof(buf), "char: %s",
+                 err ? err : "expected an integer codepoint or char");
+        return prim_throw_classified(S, "eval/type", "MTY001", buf);
+    }
+    /* Unicode scalar value range: 0..0x10FFFF, excluding surrogates
+     * 0xD800..0xDFFF. JVM Clojure accepts the surrogate range (its
+     * Character is a UTF-16 code unit), but mino's MINO_CHAR is a
+     * Unicode scalar value -- the strict canon. */
+    if (ll < 0 || ll > 0x10FFFFLL) {
+        char buf[160];
+        snprintf(buf, sizeof(buf),
+                 "char: codepoint %lld out of range (0..0x10FFFF)", ll);
+        return prim_throw_classified(S, "eval/bounds", "MBD001", buf);
+    }
+    return mino_char(S, (int)ll);
+}
+
 mino_val_t *prim_float(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *v;
@@ -2560,6 +2594,10 @@ const mino_prim_def k_prims_numeric[] = {
      "Coerces x to a byte (8-bit integer). Throws on out-of-range "
      "values, NaN, or infinity. Returns the value as a long since mino "
      "has only one integer tier."},
+    {"char",  prim_char,
+     "Coerces x to a character: integer codepoint (0..0x10FFFF) "
+     "becomes the Unicode scalar value, character is identity. Throws "
+     "on out-of-range values, non-integer types."},
     {"float", prim_float,
      "Coerces x to a 32-bit float (returns a MINO_FLOAT32). Throws "
      "on out-of-float32-range, +/-Infinity. NaN passes through. "

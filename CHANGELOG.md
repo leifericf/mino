@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fix: `(char n)` constructor added to clojure.core
+
+`(char 65)` previously raised `MNS001 unbound symbol: char`. The
+underlying `mino_char(S, codepoint)` C entry point existed and
+`MINO_CHAR` was already a first-class type with literals (`\A`),
+predicate (`char?`), and char-keyed collection support -- but the
+canonical Clojure constructor that turns an integer codepoint into
+a character was not exposed.
+
+`prim_char` is now registered in clojure.core: takes one argument,
+identity on existing characters, integer codepoints in 0..0x10FFFF
+become the corresponding Unicode scalar value. Out-of-range
+codepoints throw MBD001; non-integer / non-char inputs throw
+MTY001.
+
+Regression in `tests/char_test.clj` (`char-constructor-from-codepoint`).
+
 ## v0.255.27 — Bug-fix sweep: deref/regex/location/concurrency/cleanup
 
 Eight fixes landed in this patch, covering Clojure-canon

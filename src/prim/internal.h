@@ -127,6 +127,7 @@ mino_val_t *prim_mul(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_mulp(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_short(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_byte(mino_state_t *S, mino_val_t *args, mino_env_t *env);
+mino_val_t *prim_char(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_long(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_double(mino_state_t *S, mino_val_t *args, mino_env_t *env);
 mino_val_t *prim_unchecked_add(mino_state_t *S, mino_val_t *args, mino_env_t *env);

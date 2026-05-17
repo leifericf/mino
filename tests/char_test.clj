@@ -84,3 +84,20 @@
     (is (contains? s \a))
     (is (contains? s \b))
     (is (not (contains? s "a")))))
+
+(deftest char-constructor-from-codepoint
+  ;; Regression: clojure.core/char was unbound, so (char 65) raised
+  ;; MNS001. Now (char n) coerces an integer codepoint (0..0x10FFFF)
+  ;; into a MINO_CHAR. Identity on existing chars.
+  (testing "char of integer codepoint"
+    (is (= \A (char 65)))
+    (is (= \a (char 97)))
+    (is (= \0 (char 48))))
+  (testing "char of char is identity"
+    (is (= \X (char \X))))
+  (testing "char of out-of-range codepoint throws MBD001"
+    (is (thrown? (char -1)))
+    (is (thrown? (char 9999999))))
+  (testing "char of non-integer throws MTY001"
+    (is (thrown? (char "x")))
+    (is (thrown? (char :kw)))))
