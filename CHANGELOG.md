@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.308.0 — `OP_LOOP_INT_LT` stencil re-enabled
+
+The forward-counted single-binding loop stencil
+(`(loop [i 0] (if (< i N) (recur (inc i)) i))`) is back in the
+entry table. The historical 17% regression that pulled it out
+no longer reproduces; the workload now runs ~35% faster JIT-on
+vs JIT-off:
+
+| metric                          | JIT-off  | JIT-on   |
+|---------------------------------|---------:|---------:|
+| lt-only 10M (median of 25 runs) |  29.8 ms |  19.4 ms |
+
+The stencil source under `src/eval/bc/stencils/loop_int_lt.c`
+hasn't changed; the win is the cumulative effect of the JIT
+infrastructure improvements that landed across the JIT-ROI cycle
+(IC fast-lane, mino_bc_run prologue trim, bc-cache).
+
+This closes one of the two remaining stencil-coverage gaps in
+Cortex's "actionable missing" list. `OP_BINOP_INT` and the seven
+control-flow / dynamic-scope ops are deferred to side-exit
+handling per Phase 3.
+
 ## v0.307.0 — `task jit-blocker-report` dashboard
 
 A new task runs `realistic_bench.clj` through
