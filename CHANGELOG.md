@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.303.0 — Nursery default 4 MiB → 8 MiB
+
+A/B against {1, 4, 8, 16} MiB nursery sizes on the four alloc-bound
+realistic_bench rows picked 8 MiB as the median-best.
+
+| row                 | 4 MiB (prev) | 8 MiB (new) | 16 MiB |
+|---------------------|-------------:|------------:|-------:|
+| build 5k int-map    |       9.00ms |     8.89ms  | 9.60ms |
+| bump 5k int-map     |      16.23ms |    15.95ms  |15.08ms |
+| nested vec 500x100  |      16.96ms |    15.98ms  |17.67ms |
+| realize 10k lazy    |       5.39ms |     4.02ms  | 3.21ms |
+
+8 MiB cuts the lazy-realize row by ~25% (fewer minor cycles per
+realization sweep) and the nested-vec row by ~6%; smaller-alloc
+rows stay within noise. 16 MiB does even better on lazy but
+regresses build int-map and nested vec slightly (the longer
+per-cycle trace outweighs the cycle-count drop).
+
+Max single-cycle pause stayed under 5 ms across the runs at 8 MiB.
+Embedders with tighter memory or pause budgets can still override
+via `MINO_GC_NURSERY_BYTES`.
+
 ## v0.302.0 — Builder-loop transient rewrite covers sets
 
 The compile-time builder-loop rewriter (which lifts a `(loop [m {}]

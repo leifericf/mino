@@ -114,11 +114,20 @@ static void state_init(mino_state_t *S)
      * total GC time by ~35-40% on `bump-int-map` and `nested-vectors`
      * (realistic_bench), without raising worst-case minor-GC pause
      * beyond noise (max minor stays ~3 ms vs. ~3.5 ms at 1 MiB). The
-     * trade-off is a higher steady-state working set: 3 extra MiB of
-     * young-gen residency per VM state. Embedders with tighter
-     * memory budgets can override via the `MINO_GC_NURSERY_BYTES`
-     * env var or `mino_gc_set(state, MINO_GC_NURSERY_BYTES, n)`. */
-    S->gc_nursery_bytes        = 4u * (1u << 20);  /* 4 MiB default */
+     * trade-off is a higher steady-state working set: 7 extra MiB of
+     * young-gen residency per VM state vs. the prior 1 MiB. Embedders
+     * with tighter memory budgets can override via the
+     * `MINO_GC_NURSERY_BYTES` env var or `mino_gc_set(state,
+     * MINO_GC_NURSERY_BYTES, n)`.
+     *
+     * 8 MiB measured against the 4-MiB previous default cuts the
+     * lazy-realize row by ~25% (fewer minor cycles per realization
+     * sweep) and the nested-vec row by ~6%, with no regression on the
+     * smaller-alloc rows. 16 MiB was probed too: more wins on lazy
+     * but small regressions on build int-map and nested vec (longer
+     * trace per cycle outweighs the cycle count reduction). 8 MiB is
+     * the median-best of {1, 4, 8, 16} MiB. */
+    S->gc_nursery_bytes        = 8u * (1u << 20);  /* 8 MiB default */
     {
         const char *nb = getenv("MINO_GC_NURSERY_BYTES");
         if (nb != NULL && nb[0] != '\0') {
