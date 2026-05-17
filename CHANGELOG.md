@@ -1,6 +1,40 @@
 # Changelog
 
-## Unreleased
+## v0.255.27 — Bug-fix sweep: deref/regex/location/concurrency/cleanup
+
+Eight fixes landed in this patch, covering Clojure-canon
+correctness gaps, BC VM concurrency safety, location reporting
+hygiene, and one cosmetic source-tree boundary. Headline items:
+
+- **per-ctx BC register stack**: concurrent fn calls that yield
+  state_lock no longer corrupt each other's argument slots.
+  `pmap` ships in `clojure.core` now that the underlying yield
+  safety is in place.
+- **BC safepoint poll**: `future-cancel` interrupts CPU-bound
+  workers; busy-spin futures auto-yield state_lock periodically
+  so siblings get scheduling time.
+- **3-arg `(deref ref ms timeout-val)`**: portable timed deref
+  for futures and promises.
+- **regex inline flags**: JVM-style `(?i)`, `(?s)`, `(?m)`, `(?x)`
+  plus negation `(?-i)` and combination `(?ix)`.
+- **`eval_current_form` restore**: throw locations no longer
+  point at a previous file's last form.
+
+Details in the per-fix sections below.
+
+### CI: release-gate doc clarified for `check-stencils-fresh` exclusion
+
+The release-gate composite has not included `check-stencils-fresh`
+since the dev / CI toolchain divergence emerged (Apple clang 17 on
+dev, Apple clang 15 on macos-14 GHA runners, gcc-no-musttail on
+ubuntu-24.04 runners). The CI workflow's step comment was stale and
+still listed `check-stencils-fresh` as part of the gate; the actual
+composite in `lib/mino/tasks/builtin.clj` has long excluded it.
+
+Updated `.github/workflows/ci.yml` to describe the actual gate
+(reloc-mirror, stencil-registry, test suite, ASan, 4-way JIT
+parity) and the architectural reason `check-stencils-fresh` is a
+dev pre-commit step rather than a CI gate. No code change.
 
 ### Internals: `src/public` borrows internals through one explicit bridge
 

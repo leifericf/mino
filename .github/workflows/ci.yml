@@ -158,11 +158,21 @@ jobs:
 
       - name: Release gate
         # The composite gate -- check-reloc-mirror, check-stencil-
-        # registry, check-stencils-fresh, the test suite under ASan,
-        # and 4-way JIT parity (auto / on / off / lean) -- runs on
-        # every non-Windows matrix entry. Windows skips the gate
-        # because the gate's ASan step needs a libsanitizer that
-        # mingw doesn't ship.
+        # registry, the test suite under ASan, and 4-way JIT parity
+        # (auto / on / off / lean) -- runs on every non-Windows
+        # matrix entry. Windows skips the gate because the gate's
+        # ASan step needs a libsanitizer that mingw doesn't ship.
+        #
+        # `check-stencils-fresh` is intentionally NOT in the gate:
+        # it regenerates stencils with the host `cc`, which means
+        # the committed bytes have to byte-match whatever toolchain
+        # the runner ships. Dev (Apple clang 17), macos-14 (Apple
+        # clang 15), and ubuntu-24.04 (gcc, no musttail support)
+        # diverge enough that the byte check is structurally
+        # incompatible with the matrix. Stale-commit hygiene is a
+        # dev pre-commit step; CI correctness is gated by the test
+        # suite + ASan + 4-way parity, which catch the actual
+        # runtime impact of a stale stencil regardless of compiler.
         if: matrix.os != 'windows-2022'
         run: ./mino task release-gate
         timeout-minutes: 12
