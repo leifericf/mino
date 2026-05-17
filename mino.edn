@@ -42,6 +42,8 @@
                 :task mino.tasks.builtin/release-gate}
   perf-gate    {:doc  "Run mino-bench perf_gate.clj against the pinned baseline"
                 :task mino.tasks.builtin/perf-gate}
+  jit-blocker-report {:doc  "Run tracing-stats over the bench corpus; write a markdown blocker dashboard to .local/"
+                      :task mino.tasks.builtin/jit-blocker-report}
   ci-matrix    {:doc  "Local Docker matrix: release-gate inside linux/arm64 + linux/amd64"
                 :task mino.tasks.builtin/ci-matrix}
   clean           {:doc  "Remove build artifacts"

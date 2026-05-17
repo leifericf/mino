@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.307.0 — `task jit-blocker-report` dashboard
+
+A new task runs `realistic_bench.clj` through
+`MINO_CPJIT_STATS=tracing` and writes the bytes-blocked-by-op
+table to `.local/jit-blockers-latest.md`. Rename the file after
+each run for date-stamped history; the diff between dashboards
+shows whether opcode-coverage work is moving the blocker surface.
+
+No-op when mino-bench isn't checked out adjacent.
+
 ## v0.306.0 — `task perf-gate` chains to mino-bench
 
 A new task wraps mino-bench's `perf_gate.clj` (15 benches × 3 runs,
