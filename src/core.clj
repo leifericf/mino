@@ -1309,7 +1309,10 @@
      (step 0 coll))))
 
 (defn partition-all
-  "Like partition, but includes a final partial group if items remain."
+  "Like partition, but includes a final partial group if items remain.
+   The transducer arity emits each group as a vector (matching JVM
+   Clojure's `(vec (.toArray buf))`); the seq arities emit lists per
+   `partition`'s shape."
   ([n]
    (fn [rf]
      (let [buf (volatile! [])]
@@ -1318,13 +1321,13 @@
             (let [b @buf]
               (if (empty? b)
                 (rf result)
-                (let [r (rf result (seq b))]
+                (let [r (rf result b)]
                   (rf (unreduced r))))))
            ([result input]
             (let [b (vswap! buf conj input)]
               (if (= (count b) n)
                 (do (vreset! buf [])
-                    (rf result (seq b)))
+                    (rf result b))
                 result)))))))
   ([n coll] (partition-all n n coll))
   ([n step coll]

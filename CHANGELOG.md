@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.270.0 — `partition-all` transducer emits vector groups
+
+The 1-arg transducer arity of `partition-all` was passing each
+group through `(seq buf)`, so transduced output printed as
+`[(a b c) (d e f)]`. JVM's transducer impl emits each group as
+`(vec (.toArray buf))` — i.e. a vector — and downstream consumers
+that compose via `(into [] ...)` produce `[[a b c] [d e f]]`. The
+mino transducer now emits the buf vector directly. The 2- and
+3-arg seq arities continue to produce lists, matching plain
+`(partition n coll)`.
+
 ## v0.269.0 — Doubles print at the shortest round-trippable precision
 
 `pr-str` on a double used `%g` with the C default of 6 sig figs,
