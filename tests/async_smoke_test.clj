@@ -58,6 +58,30 @@
       (a/>!! ch :inside)
       (is (= :inside (a/<!! (a/go (a/<! ch))))))))
 
+(deftest async-deref-timed-promise
+  ;; Regression: (deref ref ms timeout-val) returns timeout-val if a
+  ;; blocking ref isn't realized within ms milliseconds. Routes
+  ;; through mino_future_deref_timed which uses pthread_cond_timedwait
+  ;; (Win32 SleepConditionVariableCS) under a yielded state_lock so
+  ;; sibling workers can still deliver during the wait.
+  (testing "3-arg deref returns timeout-val on pending promise"
+    (let [p (promise)]
+      (is (= :timeout (deref p 50 :timeout)))))
+  (testing "3-arg deref returns the value if delivered in time"
+    (let [p (promise)]
+      (future (thread-sleep 30) (deliver p :ok))
+      (is (= :ok (deref p 500 :timeout)))))
+  (testing "3-arg deref poll (ms=0) on already-delivered promise"
+    (let [p (promise)]
+      (deliver p :delivered)
+      (is (= :delivered (deref p 0 :timeout)))))
+  (testing "3-arg deref returns result for a fast future"
+    (let [f (future 42)]
+      (is (= 42 (deref f 500 :timeout)))))
+  (testing "3-arg deref times out on a slow future"
+    (let [f (future (thread-sleep 200) 99)]
+      (is (= :timeout (deref f 10 :timeout))))))
+
 (deftest async-future-ex-info-data-preserved
   ;; Regression: when a future body throws (ex-info "..." {:k :v}),
   ;; (deref fut) inside a try/catch lost the :data payload. prim_throw

@@ -199,11 +199,45 @@ mino_val_t *prim_atom(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *a;
+    int         argc;
+    mino_val_t *ms_v        = NULL;
+    mino_val_t *timeout_val = NULL;
     (void)env;
-    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr)) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one argument");
+    if (!mino_is_cons(args)) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
     }
-    a = args->as.cons.car;
+    a    = args->as.cons.car;
+    argc = 1;
+    if (mino_is_cons(args->as.cons.cdr)) {
+        ms_v = args->as.cons.cdr->as.cons.car;
+        if (!mino_is_cons(args->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
+        }
+        timeout_val = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+        if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+            return prim_throw_classified(S, "eval/arity", "MAR001", "deref requires one or three arguments");
+        }
+        argc = 3;
+    }
+
+    if (argc == 3) {
+        long       ms;
+        long long  ms_ll;
+        if (!mino_val_int_p(ms_v)) {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "deref: timeout argument must be an integer (milliseconds)");
+        }
+        ms_ll = mino_val_int_get(ms_v);
+        if (ms_ll < 0) ms_ll = 0;
+        if (ms_ll > 2147483647LL) ms_ll = 2147483647LL;
+        ms = (long)ms_ll;
+        if (a != NULL && mino_type_of(a) == MINO_FUTURE) {
+            return mino_future_deref_timed(S, a, ms, timeout_val);
+        }
+        return prim_throw_classified(S, "eval/type", "MTY001",
+            "deref: 3-arg form only supported on blocking refs (future, promise)");
+    }
+
     if (a != NULL && mino_type_of(a) == MINO_ATOM) {
         return a->as.atom.val;
     }

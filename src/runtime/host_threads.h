@@ -28,6 +28,12 @@ mino_val_t *mino_future_spawn(mino_state_t *S, mino_val_t *thunk,
  * :mino/cancelled. */
 mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut);
 
+/* Block until the future is realized or ms milliseconds elapse. On
+ * timeout, return timeout_val without throwing. On realized/failed/
+ * cancelled, behaves like mino_future_deref. */
+mino_val_t *mino_future_deref_timed(mino_state_t *S, mino_val_t *fut,
+                                    long ms, mino_val_t *timeout_val);
+
 /* Promise delivery. Returns 1 if the value was delivered, 0 if the
  * promise was already realized. */
 int mino_promise_deliver(mino_state_t *S, mino_val_t *promise,

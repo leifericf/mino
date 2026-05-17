@@ -830,12 +830,22 @@
   "Forces evaluation of a delay. If x is not a delay, returns x."
   [x] (if (delay? x) (deref-delay x) x))
 ;; Override C deref so delays (which are map-shaped on mino) participate
-;; in (deref ...) like atoms/futures/vars do.
+;; in (deref ...) like atoms/futures/vars do. The 3-arg form takes a
+;; timeout in milliseconds and a value to return if not realized in
+;; time; it dispatches through C for blocking refs (futures/promises)
+;; where the deadline is honored under state_lock yield.
 (let [c-deref deref]
   (def deref
     "Returns the current value of a reference type: atom, var, volatile,
-     future, promise, reduced, or delay. Forces a delay on first call."
-    (fn [x] (if (delay? x) (deref-delay x) (c-deref x)))))
+     future, promise, reduced, or delay. Forces a delay on first call.
+     The 3-arg form (deref ref ms timeout-val) returns timeout-val if
+     ref is a blocking ref that doesn't realize within ms milliseconds."
+    (fn
+      ([x] (if (delay? x) (deref-delay x) (c-deref x)))
+      ([x ms timeout-val]
+       (if (delay? x)
+         (deref-delay x)
+         (c-deref x ms timeout-val))))))
 ;; Override C realized? to also handle delays and futures
 (let [c-realized? realized?]
   (def realized?

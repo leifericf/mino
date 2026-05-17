@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Fix: `(deref ref ms timeout-val)` 3-arg timed deref
+
+Real Clojure ships a 3-arg deref that returns `timeout-val` if a
+blocking ref (future, promise) doesn't realize within `ms`
+milliseconds. mino's `prim_deref` rejected anything other than the
+1-arg form with `MAR001`, so callers had to spin
+`(realized? p)` + `thread-sleep` -- busier and racier than the
+canonical form.
+
+`prim_deref` now dispatches on arity; the 3-arg form routes futures
+and promises through a new `mino_future_deref_timed` that wraps a
+portable `cv_timedwait_ms` shim (pthread_cond_timedwait on POSIX,
+SleepConditionVariableCS on Windows). Spurious wakes recompute the
+remaining budget against the monotonic clock so the deadline is
+honest. The wait runs under a yielded `state_lock` so sibling
+workers can still deliver during the timed window. Non-blocking ref
+types (atom, var, volatile, agent, reduced, tx-ref, delay) throw a
+clear "3-arg form only supported on blocking refs" diagnostic.
+
+The `core.clj` `deref` override (which routes delays through
+`deref-delay`) now also dispatches on arity so the new C path is
+reachable.
+
+Regression in `tests/async_smoke_test.clj` (`async-deref-timed-promise`).
+
 ## v0.255.26 — Fix: `(str/split "" re)` returns `[""]`, not `[]`
 
 JVM Clojure (and POSIX String.split) returns `[""]` -- a single

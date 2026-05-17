@@ -50,6 +50,13 @@ static void cv_destroy(CONDITION_VARIABLE *c) { (void)c; }
 static void cv_wait(CONDITION_VARIABLE *c, CRITICAL_SECTION *m)
 { SleepConditionVariableCS(c, m, INFINITE); }
 static void cv_broadcast(CONDITION_VARIABLE *c) { WakeAllConditionVariable(c); }
+/* Returns 1 on signal, 0 on timeout. */
+static int cv_timedwait_ms(CONDITION_VARIABLE *c, CRITICAL_SECTION *m,
+                           long ms)
+{
+    DWORD wait = (ms < 0) ? 0 : (DWORD)ms;
+    return SleepConditionVariableCS(c, m, wait) ? 1 : 0;
+}
 #else
 static void mu_init(pthread_mutex_t *m)    { pthread_mutex_init(m, NULL); }
 static void mu_destroy(pthread_mutex_t *m) { pthread_mutex_destroy(m); }
@@ -60,6 +67,26 @@ static void cv_destroy(pthread_cond_t *c)  { pthread_cond_destroy(c); }
 static void cv_wait(pthread_cond_t *c, pthread_mutex_t *m)
 { pthread_cond_wait(c, m); }
 static void cv_broadcast(pthread_cond_t *c) { pthread_cond_broadcast(c); }
+/* Returns 1 on signal, 0 on timeout. Negative ms means "already
+ * elapsed"; treated as a 0-wait poll. */
+static int cv_timedwait_ms(pthread_cond_t *c, pthread_mutex_t *m, long ms)
+{
+    struct timespec deadline;
+    long sec, nsec;
+    int rc;
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    if (ms < 0) ms = 0;
+    sec  = ms / 1000;
+    nsec = (ms % 1000) * 1000000L;
+    deadline.tv_sec += sec;
+    deadline.tv_nsec += nsec;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec  += 1;
+        deadline.tv_nsec -= 1000000000L;
+    }
+    rc = pthread_cond_timedwait(c, m, &deadline);
+    return (rc == 0) ? 1 : 0;
+}
 #endif
 
 /* ------------------------------------------------------------------------- */
@@ -634,6 +661,73 @@ mino_val_t *mino_future_deref(mino_state_t *S, mino_val_t *fut)
     /* FAILED with no captured exception (worker hit OOM): synthesize. */
     return prim_throw_classified(S, "mino/future-failed", "MTH003",
                                  "future failed");
+}
+
+mino_val_t *mino_future_deref_timed(mino_state_t *S, mino_val_t *fut,
+                                    long ms, mino_val_t *timeout_val)
+{
+    mino_future_t *impl;
+    mino_val_t    *out;
+    int            timed_out = 0;
+
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) {
+        return mino_nil(S);
+    }
+    impl = fut->as.future.impl;
+    if (impl == NULL) { return mino_nil(S); }
+
+    /* Fast path: if already done, skip the cv dance entirely. */
+    {
+        int depth = mino_yield_lock(S);
+        mu_lock(&impl->mu);
+        if (impl->state_tag != MINO_FUTURE_PENDING) {
+            mu_unlock(&impl->mu);
+            mino_resume_lock(S, depth);
+            return mino_future_deref(S, fut);
+        }
+
+        /* Wait up to ms milliseconds. Spurious wake re-checks the
+         * deadline by computing the remaining budget. */
+        {
+            long long start_ns = mino_monotonic_ns();
+            long      remain   = (ms < 0) ? 0 : ms;
+            for (;;) {
+                int signalled;
+                if (impl->state_tag != MINO_FUTURE_PENDING) { break; }
+                if (remain <= 0) {
+                    timed_out = 1;
+                    break;
+                }
+                signalled = cv_timedwait_ms(&impl->cv, &impl->mu, remain);
+                if (impl->state_tag != MINO_FUTURE_PENDING) { break; }
+                if (!signalled) {
+                    timed_out = 1;
+                    break;
+                }
+                /* Spurious wake: recompute remaining budget. */
+                {
+                    long long now_ns   = mino_monotonic_ns();
+                    long long used_ms  = (now_ns - start_ns) / 1000000LL;
+                    remain = (long)((long long)ms - used_ms);
+                }
+            }
+        }
+        out = (impl->state_tag == MINO_FUTURE_RESOLVED) ? impl->result : NULL;
+        mu_unlock(&impl->mu);
+        mino_resume_lock(S, depth);
+    }
+
+    if (timed_out) {
+        return timeout_val;
+    }
+    if (out != NULL) {
+        return out;
+    }
+    /* Finalised state without a result: delegate to the standard
+     * deref so the FAILED / CANCELLED rethrow paths stay in one
+     * place. The future has already been observed as non-PENDING, so
+     * mino_future_deref's loop will fall through immediately. */
+    return mino_future_deref(S, fut);
 }
 
 /* ------------------------------------------------------------------------- */
