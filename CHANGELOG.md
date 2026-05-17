@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.277.0 — `rem` / `mod` on doubles match JVM byte-identically
+
+`(mod 1024.8402 5.12)` returned `0.840200000000074`; JVM returns
+`0.8402000000000953`. Both implementations follow the same spec
+(`a - trunc(a/b) * b`) but the C library's `fmod` and inline
+`a - q*b` were free to use a fused-multiply-add, which yields a
+different ULP-level result than JVM's two-step rounded sequence.
+
+The primitive now computes `q = trunc(a/b)`, then forces the
+multiply and subtract into separate IEEE 754 ops via volatiles.
+For huge magnitudes where `q` overflows `long`, falls back to
+`fmod`. All three corpus `mod` examples now match JVM exactly:
+`6.095000000000027`, `0.8402000000000953`, `4.279799999999905`.
+
 ## v0.276.0 — Keywords / symbols carry ns and name as separate boundaries
 
 Previously a keyword or symbol stored a single flat interned

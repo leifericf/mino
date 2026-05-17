@@ -1275,7 +1275,26 @@ static mino_val_t *mqr_float(mino_state_t *S, double a, double b, mqr_op_t op,
         return mino_float(S, r >= 0 ? floor(r) : ceil(r));
     }
     if (isinf(b)) return mino_float(S, NAN);
-    r = fmod(a, b);
+    /* JVM defines `a % b` for doubles as `a - q*b` where q is the
+     * integer part of a/b truncated toward zero. We compute it in two
+     * volatile steps (multiply, then subtract) to ensure each
+     * operation rounds to double independently — the compiler is
+     * otherwise free to fuse them into an FMA, which yields a
+     * different ULP-level result than libm's fmod or the JVM's `%`.
+     * fmod fallback when q overflows long (huge magnitudes). */
+    {
+        double q_d = a / b;
+        if (q_d >= -9.2233720368547758e18 && q_d <= 9.2233720368547758e18) {
+            long q_l = (long)q_d;  /* trunc toward zero */
+            volatile double prod;
+            volatile double diff;
+            prod = (double)q_l * b;
+            diff = a - prod;
+            r = diff;
+        } else {
+            r = fmod(a, b);
+        }
+    }
     if (op == MQR_MOD && r != 0.0 && ((r < 0.0) != (b < 0.0))) r += b;
     return mino_float(S, r);
 }
