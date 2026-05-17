@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.298.0 — Alloc-source probe in `(gc-stats)`
+
+`(gc-stats)` gains three counters exposing where every allocation
+came from: `:alloc-freelist-hits`, `:alloc-calloc-class-miss`,
+`:alloc-calloc-no-class`. They're cumulative since state creation
+and cost nothing in the common path (one branch + one increment in
+`gc_alloc_raw`, which the call already pays for size-class
+selection).
+
+The counters drive the cycle's next allocator-design work. On the
+realistic_bench rows: freelist hit rates run 62-96% with the
+remaining mass split between calloc-class-miss (5-15%) and
+calloc-no-class (0-37%). The non-class arm dominates for
+nested-vec and HAMT-internal-node workloads.
+
+The counters are placed at the tail of `mino_state_t` alongside
+`reader_depth` so the JIT's pinned offsets in
+`stencils/runtime_layout.h` stay stable. No stencil regeneration.
+
 ## v0.297.0 — GC/alloc bench harness extensions
 
 Companion repo `mino-bench` gains a new `gc_alloc_micro.clj` suite

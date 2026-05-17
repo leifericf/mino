@@ -1257,6 +1257,17 @@ struct mino_state {
      * jit_invoke_ctx, etc. in src/eval/bc/stencils/runtime_layout.h)
      * stable across this addition. */
     int             reader_depth;
+
+    /* Alloc-source counters: every gc_alloc_raw call increments exactly
+     * one. freelist_hits = pulled from a per-size-class freelist;
+     * calloc_size_class_miss = size matches a freelist class but the
+     * list was empty (so we calloc'd a fresh header); calloc_no_class =
+     * size has no freelist class at all (so we calloc by definition).
+     * Used by (gc-stats) for allocator-source profiling. Placed at the
+     * end alongside reader_depth to keep JIT-pinned offsets stable. */
+    size_t          gc_alloc_freelist_hits;
+    size_t          gc_alloc_calloc_size_class_miss;
+    size_t          gc_alloc_calloc_no_class;
 };
 
 /* Resolve the active per-thread ctx for state S.

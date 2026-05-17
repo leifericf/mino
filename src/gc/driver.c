@@ -204,9 +204,15 @@ static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
         h = S->gc_freelists[fc];
         S->gc_freelists[fc] = h->next;
         memset(h, 0, sizeof(*h) + size);
+        S->gc_alloc_freelist_hits++;
     } else {
         h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
         if (h == NULL) return NULL;
+        if (fc >= 0) {
+            S->gc_alloc_calloc_size_class_miss++;
+        } else {
+            S->gc_alloc_calloc_no_class++;
+        }
     }
     h->type_tag        = tag;
     h->mark            = 0;
