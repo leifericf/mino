@@ -2054,6 +2054,30 @@
                       :mino/thread-limit (mino-thread-limit)}))
      (future-call (fn [] ~@body))))
 
+(defn pmap
+  "Like map, except f is applied in parallel via futures. Semi-lazy in
+   that the parallel computation stays no more than thread-limit-1
+   items ahead of the consumer. f's invocations across the collection
+   are independent; do not pmap with a side-effectful f if order of
+   effects matters.
+
+   Single-arity collection only: (pmap f coll). When host threads are
+   not granted (mino-thread-limit <= 1), falls back to (map f coll)
+   so callers don't need a conditional."
+  ([f coll]
+   (if (<= (mino-thread-limit) 1)
+     (map f coll)
+     (let [chunk-size (max 1 (- (mino-thread-limit) 1))
+           step (fn step [s]
+                  (lazy-seq
+                    (let [realized-chunk (doall (map (fn [x] (future (f x)))
+                                                     (take chunk-size s)))
+                          remaining       (drop chunk-size s)]
+                      (if (seq remaining)
+                        (concat (map deref realized-chunk) (step remaining))
+                        (map deref realized-chunk)))))]
+       (step coll)))))
+
 ;; ---------------------------------------------------------------------------
 ;; Protocols: polymorphic dispatch on the type of the first argument.
 ;; Gated on the :protocols capability -- defprotocol / extend-protocol /

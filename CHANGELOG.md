@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+### Fix: per-ctx BC register stack + `pmap` re-enabled
+
+Concurrent fn calls that yield `state_lock` (e.g. via `thread-sleep`)
+previously corrupted each other's argument slots. Root cause:
+`S->bc_regs` and `S->bc_top` lived on `mino_state_t`, so all workers
+shared one BC register stack. The second worker's `bc_push_window`
+grew the stack above the first worker's frame; when the first
+worker resumed and ran `bc_pop_window`, it dropped `bc_top` below
+the second worker's frame, NULL'ing slots the second worker would
+later read on resume. The visible symptom was
+`(let [f (fn [x] (thread-sleep 5) x) f1 (future-call (fn [] (f 1)))
+f2 (future-call (fn [] (f 2)))] [@f1 @f2])` returning `[1 nil]`
+instead of `[1 2]`.
+
+Fix: each `mino_thread_ctx_t` now owns its BC register stack
+pointer / cap / top via dedicated `bc_regs_storage` /
+`bc_regs_storage_cap` / `bc_top_snapshot` fields. `mino_lock` /
+`mino_unlock` snapshot the state-level cursor into the current ctx
+on outermost lock-depth transitions; `mino_yield_lock` /
+`mino_resume_lock` mirror the snapshot across the yield window so
+a peer worker that takes the lock during the yield sees its own
+ctx's view of `S->bc_regs`. The GC root walker visits every yielded
+ctx's stored snapshot so a peer's allocation pressure can't collect
+slots a parked worker holds.
+
+JIT-pinned offsets shifted by 32 bytes (the ctx grew); the
+generated stencils were regenerated and `runtime_layout.h` updated
+to match.
+
+With the underlying yield-safety fixed, `clojure.core/pmap` is now
+shipped: a lazy parallel map that spawns `(- (mino-thread-limit) 1)`
+futures per chunk and derefs them in order. Falls back to plain
+`map` when threads aren't granted so callers don't need a guard.
+
+Regression in `tests/async_smoke_test.clj`
+(`async-concurrent-fn-yield-preserves-args`).
+
 ### Fix: BC VM safepoint poll for `future-cancel` + busy-spin auto-yield
 
 `future-cancel` previously only flipped the impl's CANCELLED tag and

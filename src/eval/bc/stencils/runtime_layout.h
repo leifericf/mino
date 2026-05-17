@@ -164,9 +164,9 @@ typedef struct mino_bc_ic_slot {
  * compile error before any stencil could mis-read. Change one
  * number here only after updating the corresponding _Static_assert
  * in jit.c and re-running gen-stencils. */
-#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN         ((size_t)47824)
-#define MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS        ((size_t)47856)
-#define MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ((size_t)47904)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_IC_GEN         ((size_t)47856)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_BC_REGS        ((size_t)47888)
+#define MINO_JIT_LAYOUT_OFFSET_STATE_JIT_INVOKE_CTX ((size_t)47936)
 #define MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK        ((size_t)25712)
 #define MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS          ((size_t)72)
 

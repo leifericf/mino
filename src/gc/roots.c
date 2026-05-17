@@ -463,6 +463,37 @@ static void gc_mark_runtime_globals(mino_state_t *S)
             }
         }
     }
+    /* Per-ctx BC stack snapshots. When a worker yields state_lock,
+     * its bc_regs/cap/top are saved into its ctx so a sibling
+     * worker can install its own bc_regs into S during the yield
+     * window. The saved snapshots are live roots while the worker
+     * is parked: every slot in [0, bc_top_snapshot) is an active
+     * register value the worker will resume reading. Without this
+     * walk, a yielded worker's slot could be collected during a
+     * peer's allocation pressure.
+     *
+     * main_ctx's snapshot is reachable here only when the embedder
+     * is itself yielded (a nested mino_call from a primitive that
+     * yields), which currently doesn't happen but is included for
+     * symmetry. */
+    {
+        mino_thread_ctx_t *w;
+        mino_worker_list_lock_acquire(S);
+        for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+            if (w->bc_snapshot_valid && w->bc_regs_storage != NULL) {
+                size_t bi;
+                gc_mark_interior(S, w->bc_regs_storage);
+                if (w->bc_top_snapshot <= w->bc_regs_storage_cap) {
+                    for (bi = 0; bi < w->bc_top_snapshot; bi++) {
+                        if (w->bc_regs_storage[bi] != NULL) {
+                            gc_mark_interior(S, w->bc_regs_storage[bi]);
+                        }
+                    }
+                }
+            }
+        }
+        mino_worker_list_lock_release(S);
+    }
 }
 
 /* Pin async-subsystem live values: scheduler run-queue callbacks/values

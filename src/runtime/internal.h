@@ -480,6 +480,29 @@ typedef struct mino_thread_ctx {
      * main_ctx is not on this list; the GC walker processes it
      * separately. NULL on main_ctx and on the head sentinel. */
     struct mino_thread_ctx *next_worker;
+
+    /* Per-ctx BC register stack snapshot.
+     *
+     * The state-level S->bc_regs / S->bc_top / S->bc_regs_cap fields
+     * track the BC stack of whichever worker currently holds
+     * state_lock. When that worker yields (mino_yield_lock), the
+     * full snapshot is copied here so the bc_top cursor + the array
+     * pointer survive across the lock-release window; the actual
+     * slot data lives in the ctx's owned bc_regs_storage array,
+     * which the GC traces via the worker-ctx walk. When the worker
+     * resumes (mino_resume_lock), the snapshot is restored.
+     *
+     * This makes concurrent `(fn [x] (thread-sleep 5) x)` calls from
+     * sibling workers safe: each worker's `x` arg lives in its own
+     * private bc_regs_storage; a peer's bc_push/pop on the shared
+     * state during the yield window can't reach it.
+     *
+     * Placed at struct tail so existing JIT-pinned offsets
+     * (dyn_stack, jit_invoke_env) stay byte-stable. */
+    mino_val_t    **bc_regs_storage;     /* this ctx's own array */
+    size_t          bc_regs_storage_cap; /* capacity of bc_regs_storage */
+    size_t          bc_top_snapshot;     /* this ctx's bc_top at yield */
+    int             bc_snapshot_valid;   /* 1 once first run installs */
 } mino_thread_ctx_t;
 
 /* TLS pointer to the per-thread ctx for the current worker.
@@ -1359,15 +1382,44 @@ void mino_worker_list_lock_release(mino_state_t *S);
  * which is on the order of tens of nanoseconds and dominated by other
  * eval costs. A fast-path skip is reintroducable later if safe-flip
  * sequencing can be proven. */
-#define mino_lock(S) do {                                                 \
-    mino_state_lock_acquire(S);                                            \
-    mino_current_ctx(S)->lock_depth++;                                     \
-} while (0)
+/* The outermost acquire / release also swap the BC register stack:
+ * on outermost acquire, install this ctx's snapshot into S->bc_regs/
+ * cap/top so the worker resumes with its own frame slots, isolated
+ * from any other worker that ran during the yield window. On
+ * outermost release, snapshot back so the next acquirer can install
+ * theirs. Without this, concurrent (fn [x] (thread-sleep) x) calls
+ * share one bc_regs stack and clobber each other's args. */
+static inline void mino_lock(mino_state_t *S)
+{
+    mino_thread_ctx_t *ctx;
+    mino_state_lock_acquire(S);
+    ctx = mino_current_ctx(S);
+    if (ctx->lock_depth == 0) {
+        if (ctx->bc_snapshot_valid) {
+            S->bc_regs     = ctx->bc_regs_storage;
+            S->bc_regs_cap = ctx->bc_regs_storage_cap;
+            S->bc_top      = ctx->bc_top_snapshot;
+        } else {
+            S->bc_regs     = NULL;
+            S->bc_regs_cap = 0;
+            S->bc_top      = 0;
+        }
+    }
+    ctx->lock_depth++;
+}
 
-#define mino_unlock(S) do {                                               \
-    mino_current_ctx(S)->lock_depth--;                                     \
-    mino_state_lock_release(S);                                            \
-} while (0)
+static inline void mino_unlock(mino_state_t *S)
+{
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    ctx->lock_depth--;
+    if (ctx->lock_depth == 0) {
+        ctx->bc_regs_storage     = S->bc_regs;
+        ctx->bc_regs_storage_cap = S->bc_regs_cap;
+        ctx->bc_top_snapshot     = S->bc_top;
+        ctx->bc_snapshot_valid   = 1;
+    }
+    mino_state_lock_release(S);
+}
 
 /* Yield: drop down to lock_depth==0, returning the previous depth so
  * the caller can resume to the same level after a blocking wait. */

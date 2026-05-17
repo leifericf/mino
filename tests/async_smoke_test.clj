@@ -82,6 +82,30 @@
     (let [f (future (thread-sleep 200) 99)]
       (is (= :timeout (deref f 10 :timeout))))))
 
+(deftest async-concurrent-fn-yield-preserves-args
+  ;; Regression: two workers calling the same fn that yields state_lock
+  ;; (e.g. via thread-sleep) previously corrupted each other's argument
+  ;; slots. Root cause: S->bc_regs / S->bc_top were per-state, so the
+  ;; second worker's bc_push grew the stack above the first worker's
+  ;; frame, and the first worker's bc_pop dropped bc_top below the
+  ;; second worker's frame, NULLing the second worker's slots before
+  ;; it could read them back on resume.
+  ;;
+  ;; Fix: mino_lock/mino_unlock snapshot the BC register stack into the
+  ;; current ctx on outermost transitions; mino_yield_lock/resume_lock
+  ;; do the same across the yield window. Each ctx owns its own bc_regs
+  ;; pointer / cap / top in its bc_*_storage fields, and the GC root
+  ;; walker visits every yielded ctx's snapshot so a peer's allocation
+  ;; pressure can't collect another worker's still-live values.
+  (testing "concurrent (fn [x] (thread-sleep) x) calls return distinct args"
+    (let [f  (fn [x] (thread-sleep 5) x)
+          f1 (future-call (fn [] (f 1)))
+          f2 (future-call (fn [] (f 2)))]
+      (is (= [1 2] [@f1 @f2]))))
+  (testing "pmap over a yielding f returns one result per input"
+    (let [results (pmap (fn [x] (thread-sleep 2) (* x x)) (range 1 6))]
+      (is (= [1 4 9 16 25] (vec results))))))
+
 (deftest async-future-cancel-interrupts-cpu-bound
   ;; Regression: future-cancel previously only flipped the impl's
   ;; CANCELLED tag and broadcast its cv. A CPU-bound worker running

@@ -1478,12 +1478,26 @@ void mino_worker_list_lock_release(mino_state_t *S)
 /* Drop the current thread's lock holding to zero so a blocking wait
  * (e.g. cv_wait inside future_deref) doesn't starve other workers.
  * Returns the saved depth; the caller must call mino_resume_lock
- * with that value when it's safe to re-take. */
+ * with that value when it's safe to re-take.
+ *
+ * Concurrency safety: also snapshots the state-level BC stack
+ * pointer/cap/top into the current ctx so a sibling worker that
+ * acquires state_lock during the yield window can install its own
+ * BC stack without clobbering this worker's frame slots. Without
+ * this, two concurrent `(fn [x] (thread-sleep 5) x)` calls would
+ * share one bc_regs array, and the second worker's bc_pop_window
+ * would NULL the first worker's still-alive arg slot. */
 int mino_yield_lock(mino_state_t *S)
 {
-    int depth = mino_current_ctx(S)->lock_depth;
-    while (mino_current_ctx(S)->lock_depth > 0) {
-        mino_current_ctx(S)->lock_depth--;
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    int depth = ctx->lock_depth;
+    /* Snapshot the BC stack into this ctx before releasing the lock. */
+    ctx->bc_regs_storage      = S->bc_regs;
+    ctx->bc_regs_storage_cap  = S->bc_regs_cap;
+    ctx->bc_top_snapshot      = S->bc_top;
+    ctx->bc_snapshot_valid    = 1;
+    while (ctx->lock_depth > 0) {
+        ctx->lock_depth--;
         mino_state_lock_release(S);
     }
     return depth;
@@ -1491,9 +1505,20 @@ int mino_yield_lock(mino_state_t *S)
 
 void mino_resume_lock(mino_state_t *S, int saved_depth)
 {
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
     while (saved_depth-- > 0) {
         mino_state_lock_acquire(S);
-        mino_current_ctx(S)->lock_depth++;
+        ctx->lock_depth++;
+    }
+    /* Restore the BC stack snapshot. The state's bc_regs/cap/top
+     * now reflect THIS worker's frame again, isolated from any peer
+     * worker's frames that ran during the yield window (those peers
+     * snapshotted their own state into THEIR ctxs and restored on
+     * their resume). */
+    if (ctx->bc_snapshot_valid) {
+        S->bc_regs     = ctx->bc_regs_storage;
+        S->bc_regs_cap = ctx->bc_regs_storage_cap;
+        S->bc_top      = ctx->bc_top_snapshot;
     }
 }
 
