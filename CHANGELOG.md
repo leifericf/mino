@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.263.0 — `keep-indexed` gains the 1-arg transducer arity
+
+`(keep-indexed pred)` returns a transducer that calls `pred` with
+the running index and each input, dropping `nil` results. The
+existing 2-arg lazy-seq path is unchanged.
+
 ## v0.262.0 — `name` / `namespace` split at the last slash
 
 The 2-arg keyword constructor `(keyword "a/b" "c")` produces a

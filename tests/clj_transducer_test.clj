@@ -85,6 +85,17 @@
   (is (= [[0 1] [1 2] [2 3] [3 4]]
          (sequence (map-indexed vector) (range 1 5)))))
 
+;; --- keep-indexed (transducer) ---
+
+(deftest clj-keep-indexed-xf
+  (is (= [] (sequence (keep-indexed (fn [i v] (when (odd? i) v))) [])))
+  (is (= [5 4 7 8]
+         (into [] (keep-indexed (fn [i v] (when (odd? i) v)))
+               [2 5 3 4 6 7 9 8])))
+  (is (= [:a :c :e]
+         (sequence (keep-indexed (fn [i v] (when (even? i) v)))
+                   [:a :b :c :d :e]))))
+
 ;; --- partition-all (transducer) ---
 
 (deftest clj-partition-all-xf
