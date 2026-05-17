@@ -73,7 +73,7 @@ MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_CTX_DYN_STACK ==
 MINO_JIT_LAYOUT_ASSERT(MINO_JIT_LAYOUT_OFFSET_BC_IC_SLOTS ==
                            offsetof(struct mino_bc_fn, ic_slots),
                        bc_ic_slots);
-MINO_JIT_LAYOUT_ASSERT(sizeof(mino_bc_ic_slot_t) == 56,
+MINO_JIT_LAYOUT_ASSERT(sizeof(mino_bc_ic_slot_t) == 64,
                        ic_slot_size);
 MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, sym) == 0,
                        ic_slot_sym);
@@ -98,6 +98,9 @@ MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t, cached_type) == 40,
 MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t,
                                 cached_fn_n_params) == 48,
                        ic_slot_cached_fn_n_params);
+MINO_JIT_LAYOUT_ASSERT(offsetof(mino_bc_ic_slot_t,
+                                cached_bc) == 56,
+                       ic_slot_cached_bc);
 
 int mino_jit_imm_kind_from_name(const char *sym)
 {
@@ -677,6 +680,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_call_cached_slow",      (void *)(uintptr_t)mino_jit_call_cached_slow},
     {"mino_jit_call_resolved_slow",    (void *)(uintptr_t)mino_jit_call_resolved_slow},
     {"mino_jit_call_known_fn_slow",    (void *)(uintptr_t)mino_jit_call_known_fn_slow},
+    {"mino_jit_call_known_native_slow",(void *)(uintptr_t)mino_jit_call_known_native_slow},
     {"mino_jit_call_known_prim_slow",  (void *)(uintptr_t)mino_jit_call_known_prim_slow},
     {"mino_jit_nth_vec_slow",          (void *)(uintptr_t)mino_jit_nth_vec_slow},
     {"mino_jit_first_vec_slow",        (void *)(uintptr_t)mino_jit_first_vec_slow},

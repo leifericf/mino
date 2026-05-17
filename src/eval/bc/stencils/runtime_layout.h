@@ -112,6 +112,10 @@ typedef struct mino_bc_ic_slot {
     mino_val_t   *cached_map;
     mino_val_t   *cached_type;
     unsigned short cached_fn_n_params;
+    unsigned short _pad_ic1;
+    unsigned       _pad_ic2;
+    /* MINO_FN_BC_SINGLE-only mirror; see internal.h. */
+    void          *cached_bc;
 } mino_bc_ic_slot_t;
 
 /* Stable tags matching mino_ic_callable_kind_t. Defined as #defines

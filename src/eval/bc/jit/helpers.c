@@ -711,6 +711,93 @@ fallback:
     }
 }
 
+/* Cached-native complement. Stencil pre-resolved the callee as a
+ * single-arity bc-runnable MINO_FN, pre-fetched its bc from the IC
+ * slot's `cached_bc` field, and verified argc / has_rest match. This
+ * helper skips the var-unwrap + type-of + bc-staleness + RUNNABLE +
+ * hot-counter dance that invoke_bc_fn_argv runs on every call (the
+ * IC's gen check already validated them) and enters mino_bc_run
+ * directly. The ns scope dance + push_frame are kept because they
+ * are semantically required for stack-trace attribution and lexical
+ * resolution of inner forms.
+ *
+ * Tail-call sentinel handling: when mino_bc_run returns a TAIL_CALL
+ * sentinel, this helper drives the cons-form apply_callable trampoline
+ * to keep parity with invoke_bc_fn_argv's loop. The hot-recursion
+ * case (fib, dispatch loops) does not use the sentinel, so the
+ * branch is rarely-taken. Falls back to apply_callable_argv on any
+ * unexpected shape so the slow path remains correct even when the
+ * cached slot drifts. */
+mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             mino_val_t *fn,
+                                             mino_bc_fn_t *bc,
+                                             unsigned arg_base,
+                                             unsigned argc,
+                                             unsigned dst)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    mino_env_t        *env  = ctx->jit_invoke_env;
+    /* Defensive: if the cached fn pointer has drifted to something
+     * that is no longer an FN, bail to the generic path. The IC's
+     * gen check normally screens this, but a fold-driven recompile
+     * can change fn->as.fn.bc out from under the slot without
+     * advancing ic_gen. */
+    if (fn == NULL || mino_type_of(fn) != MINO_FN
+        || fn->as.fn.bc != bc) {
+        goto fallback;
+    }
+    const char  *saved_ns      = S->current_ns;
+    const char  *saved_ambient = S->fn_ambient_ns;
+    if (fn->as.fn.defining_ns != NULL) {
+        S->current_ns    = fn->as.fn.defining_ns;
+        S->fn_ambient_ns = fn->as.fn.defining_ns;
+    }
+    const mino_val_t *form = mino_current_ctx(S)->eval_current_form;
+    const char *file = NULL;
+    int         line = 0;
+    int         col  = 0;
+    if (form != NULL && mino_type_of((mino_val_t *)form) == MINO_CONS) {
+        file = form->as.cons.file;
+        line = form->as.cons.line;
+        col  = form->as.cons.column;
+    }
+    push_frame(S, "fn", file, line, col);
+    mino_val_t *r = mino_bc_run(S, fn,
+                                 S->bc_regs + base + arg_base,
+                                 (int)argc, fn->as.fn.env);
+    /* TAIL_CALL sentinel: rare in the hot path. Delegate to
+     * apply_callable so the cons-form trampoline drives the next
+     * dispatch with full correctness. Frame + ns scope are dropped
+     * before delegation so the trampoline owns its own attribution. */
+    if (r != NULL && mino_type_of(r) == MINO_TAIL_CALL) {
+        mino_val_t *next_fn   = r->as.tail_call.fn;
+        mino_val_t *next_args = r->as.tail_call.args;
+        pop_frame(S);
+        S->current_ns    = saved_ns;
+        S->fn_ambient_ns = saved_ambient;
+        r = apply_callable(S, next_fn, next_args, env);
+    } else {
+        pop_frame(S);
+        S->current_ns    = saved_ns;
+        S->fn_ambient_ns = saved_ambient;
+    }
+    if (r == NULL) return NULL;
+    regs      = S->bc_regs + base;
+    regs[dst] = r;
+    return regs;
+fallback:
+    {
+        mino_val_t *r = apply_callable_argv(S, fn,
+            S->bc_regs + base + arg_base, (int)argc, env);
+        if (r == NULL) return NULL;
+        regs      = S->bc_regs + base;
+        regs[dst] = r;
+        return regs;
+    }
+}
+
 /* Helper for the OP_LOOP_INT_LT exit-signal convention. Tags the low
  * bit of a regs pointer to signal "loop exits" to the caller; the
  * caller masks the bit off before dereferencing. */

@@ -245,6 +245,25 @@ extern mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
                                                    unsigned argc,
                                                    unsigned dst);
 
+/* Cached-native complement: stencil's inline path verified the IC
+ * slot's cached_callable_kind is MINO_FN_BC_SINGLE, argc matches,
+ * has_rest is zero, AND slot->cached_bc is non-NULL (so the slot has
+ * already classified the callable as a bc-runnable single-arity fn).
+ * This helper skips invoke_bc_fn_argv's staleness rechecks (the IC
+ * gen already validated them) and enters mino_bc_run directly with
+ * the pre-resolved bc; mino_bc_run's own native dispatch then routes
+ * to mino_jit_invoke when bc->native is set. Falls back to
+ * apply_callable_argv when the cached bc has drifted out from under
+ * the slot (mino_bc_run returns NULL on shape mismatch). Same regs /
+ * GC refresh contract as `mino_jit_call_resolved_slow`. */
+extern mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
+                                                     mino_val_t **regs,
+                                                     mino_val_t *fn,
+                                                     mino_bc_fn_t *bc,
+                                                     unsigned arg_base,
+                                                     unsigned argc,
+                                                     unsigned dst);
+
 /* OP_NTH_VEC slow helper. Inlined vector fast lane + cons-and-prim_nth
  * fallback. */
 extern mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S,

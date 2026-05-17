@@ -1,5 +1,56 @@
 # Changelog
 
+## v0.293.0 — Cached-bc IC fast lane
+
+The `OP_CALL_CACHED` IC slot now caches the callee's `mino_bc_fn_t *`
+alongside the existing classified-callable-kind metadata. When the
+slot's hit branch sees `cached_callable_kind == FN_BC_SINGLE`,
+`has_rest == 0`, `cached_fn_n_params == argc`, AND `cached_bc !=
+NULL`, it routes to a new helper `mino_jit_call_known_native_slow`
+that skips `invoke_bc_fn_argv`'s per-call staleness rechecks
+(`MINO_BC_RUNNABLE`, `bc->native_gen` vs `S->ic_gen`, hot-counter
+bump, fold-staleness recompile) since the IC's own gen check already
+validated them. The helper enters `mino_bc_run` directly with the
+pre-resolved bc; `mino_bc_run`'s native dispatch then hands off to
+`mino_jit_invoke` as usual.
+
+The TAIL\_CALL sentinel branch remains correct: if `mino_bc_run`
+returns a TAIL\_CALL, the helper drops its frame + ns scope and
+hands off to `apply_callable` to drive the cons-form trampoline.
+The hot recursion case (fib, tight call loops over a global `defn`)
+does not produce sentinels.
+
+IC slot grows from 56 to 64 bytes (one new `cached_bc` pointer plus
+6 bytes of explicit padding so the layout assert is mechanical).
+Stencil byte tables regenerated across all five hosts -- the
+`MINO_JIT_BC_IC_SLOTS` mirror in `runtime_layout.h` carries the new
+size so any stencil that indexes the slot array picks up the new
+stride automatically.
+
+Measured on Apple Silicon, fresh build, median of 5 runs:
+
+| benchmark                                  | off (ms) | on (ms) | speedup |
+|--------------------------------------------|---------:|--------:|--------:|
+| `(fib 25)` global-defn recursion           |     9.07 |    4.58 |   1.98× |
+| 1M `defn`-call loop (one global callee)    |    40.15 |   18.88 |   2.13× |
+| user loop `(inc i) (dec j)` 1e7 iters      |    29.35 |   16.75 |   1.75× |
+
+Baseline at v0.283.0 for these same shapes: fib(25) was 1.46× (9.87 /
+6.78 ms). The cached-bc IC fast lane moved fib's already-JIT'd path
+from 6.78 ms to 4.58 ms -- a 1.48× compounding gain on top of the
+prior IC kind-classification work.
+
+`realistic_bench.clj` rows whose fib uses a local `(fn fib ...)`
+rather than a global `defn` show no change: the local-recursive
+call goes through `OP_CALL` on a register, not `OP_CALL_CACHED`, so
+the IC fast lane is not on that path. This is the honest
+behavioural contract of v0.293.0 -- IC-mediated global recursion
+is sped up; non-IC dispatch (local recursion, closure invocation
+across an `fn` boundary) is unchanged. Alloc-heavy rows
+(`build/bump 5k int-map`, `nested vec 500x100`, `realize 10k lazy`)
+remain bound by the HAMT/vector allocator path and are likewise
+unchanged within noise.
+
 ## v0.292.0 — `OP_DISSOC` stencil
 
 JIT now compiles `OP_DISSOC` (op=59). Mirrors `OP_ASSOC` -- a thin

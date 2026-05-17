@@ -47,15 +47,29 @@ void stencil_op_call_cached(mino_val_t **regs,
          * arity-match check screens out rest-binding edge cases by
          * requiring has_rest == 0 (the trampoline still copes if
          * misclassified, but skipping rest-binding here makes the
-         * fast path's contract minimal). */
+         * fast path's contract minimal). When slot->cached_bc is
+         * also set (the IC fill captured the bc pointer on
+         * classification), route to the native-aware complement
+         * which additionally skips invoke_bc_fn_argv's staleness
+         * rechecks (RUNNABLE, native_gen, hot_counter) since the
+         * gen check above already validated them. */
         if (slot->cached_callable_kind == MINO_IC_CALLABLE_MINO_FN_BC_SINGLE
             && slot->cached_fn_has_rest == 0
             && (unsigned)IMM_B == (unsigned)slot->cached_fn_n_params) {
-            regs = mino_jit_call_known_fn_slow(S, regs,
-                                               slot->cached,
-                                               (unsigned)IMM_A,
-                                               (unsigned)IMM_B,
-                                               (unsigned)IMM_C);
+            if (slot->cached_bc != NULL) {
+                regs = mino_jit_call_known_native_slow(S, regs,
+                                                       slot->cached,
+                                                       slot->cached_bc,
+                                                       (unsigned)IMM_A,
+                                                       (unsigned)IMM_B,
+                                                       (unsigned)IMM_C);
+            } else {
+                regs = mino_jit_call_known_fn_slow(S, regs,
+                                                   slot->cached,
+                                                   (unsigned)IMM_A,
+                                                   (unsigned)IMM_B,
+                                                   (unsigned)IMM_C);
+            }
         } else if (slot->cached_callable_kind ==
                    MINO_IC_CALLABLE_PRIM_ARGV) {
             /* PRIM_ARGV path: callee is a MINO_PRIM with fn2 set.

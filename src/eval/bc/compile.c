@@ -288,6 +288,9 @@ static int reserve_ic_slot(compiler_t *c)
             grown[i].cached_map           = NULL;
             grown[i].cached_type          = NULL;
             grown[i].cached_fn_n_params   = 0;
+            grown[i]._pad_ic1             = 0;
+            grown[i]._pad_ic2             = 0;
+            grown[i].cached_bc            = NULL;
         }
         gc_write_barrier(c->S, c->bc, c->bc->ic_slots, grown);
         c->bc->ic_slots = grown;
@@ -305,6 +308,9 @@ static int reserve_ic_slot(compiler_t *c)
     c->bc->ic_slots[idx].cached_map           = NULL;
     c->bc->ic_slots[idx].cached_type          = NULL;
     c->bc->ic_slots[idx].cached_fn_n_params   = 0;
+    c->bc->ic_slots[idx]._pad_ic1             = 0;
+    c->bc->ic_slots[idx]._pad_ic2             = 0;
+    c->bc->ic_slots[idx].cached_bc            = NULL;
     return idx;
 }
 

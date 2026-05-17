@@ -676,6 +676,19 @@ static mino_val_t *ic_resolve_global(mino_state_t *S,
         slot->cached_callable_kind = kind;
         slot->cached_fn_has_rest   = has_rest;
         slot->cached_fn_n_params   = n_params;
+        /* Stash the bc pointer for the JIT's FN_BC_SINGLE fast lane.
+         * Reads through the same var-unwrap that classify_callable_kind
+         * did so a Var-wrapped callable's bc is reached without a
+         * second deref. NULL stays sticky for non-FN-shaped callables;
+         * the stencil's hit check screens on cached_bc != NULL anyway. */
+        if (kind == MINO_IC_CALLABLE_MINO_FN_BC_SINGLE) {
+            mino_val_t *fnv = v;
+            if (mino_type_of(fnv) == MINO_VAR) fnv = fnv->as.var.root;
+            slot->cached_bc = (fnv != NULL && mino_type_of(fnv) == MINO_FN)
+                ? fnv->as.fn.bc : NULL;
+        } else {
+            slot->cached_bc = NULL;
+        }
     }
     return v;
 }

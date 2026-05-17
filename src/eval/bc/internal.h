@@ -313,6 +313,15 @@ typedef struct mino_bc_ic_slot {
     mino_val_t   *cached_map;
     mino_val_t   *cached_type;
     unsigned short cached_fn_n_params;
+    unsigned short _pad_ic1;
+    unsigned       _pad_ic2;
+    /* MINO_FN_BC_SINGLE-only: the cached fn's bc pointer at fill
+     * time. Lets the JIT call-cached stencil hand bc directly to a
+     * streamlined invoker that skips invoke_bc_fn_argv's
+     * staleness rechecks (the IC gen already validated them) and
+     * routes straight to mino_bc_run. NULL when the slot hasn't
+     * yet seen a callable, or the cached kind isn't FN_BC_SINGLE. */
+    struct mino_bc_fn *cached_bc;
 } mino_bc_ic_slot_t;
 
 /* Callable-shape tags used by cached_callable_kind. Values are

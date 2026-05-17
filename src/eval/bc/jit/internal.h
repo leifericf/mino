@@ -280,6 +280,13 @@ mino_val_t **mino_jit_call_known_prim_slow(mino_state_t *S,
                                            unsigned arg_base,
                                            unsigned argc,
                                            unsigned dst);
+mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             mino_val_t *fn,
+                                             mino_bc_fn_t *bc,
+                                             unsigned arg_base,
+                                             unsigned argc,
+                                             unsigned dst);
 mino_val_t **mino_jit_nth_vec_slow(mino_state_t *S, mino_val_t **regs,
                                    unsigned a, unsigned b, unsigned c);
 mino_val_t **mino_jit_first_vec_slow(mino_state_t *S, mino_val_t **regs,
