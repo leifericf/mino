@@ -2329,6 +2329,21 @@
   rather than walk a seq of [k v] pairs."
   (kv-reduce [coll f init]))
 
+;; JVM Clojure's reduce-kv on a vector uses (index, element) pairs.
+;; Provide that directly so `(reduce-kv f init [a b c])` calls
+;; `(f acc 0 a)`, `(f acc 1 b)`, `(f acc 2 c)` rather than falling
+;; through to internal-reduce-kv (which iterates over `(seq coll)`
+;; and decomposes each element as a pair — yielding char-keyed
+;; nonsense when the elements are strings).
+(extend-type :vector IKVReduce
+  (kv-reduce [coll f init]
+    (let [n (count coll)]
+      (loop [i 0 acc init]
+        (if (>= i n)
+          acc
+          (let [r (f acc i (nth coll i))]
+            (if (reduced? r) @r (recur (inc i) r))))))))
+
 (defprotocol Datafiable
   "Protocol for things that can present a data view of themselves.
   The default impl is identity; user types may override."

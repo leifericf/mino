@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.271.0 — `reduce-kv` on vectors uses index-as-key
+
+JVM Clojure's `reduce-kv` on a vector calls
+`(f acc index element)` per slot. Mino was falling through to
+the seq-driven `internal-reduce-kv`, which decomposed each
+element as a `[k v]` pair — so `(reduce-kv (fn [m k v] (assoc m
+k v)) {} ["one" "two" "three"])` produced char-keyed garbage
+instead of `{0 "one", 1 "two", 2 "three"}`. The IKVReduce
+protocol now ships a `:vector` impl that walks index-by-index
+and respects `reduced?`.
+
 ## v0.270.0 — `partition-all` transducer emits vector groups
 
 The 1-arg transducer arity of `partition-all` was passing each
