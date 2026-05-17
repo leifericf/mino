@@ -3171,17 +3171,31 @@ mino_val_t *prim_merge_with(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     mino_val_t *cur;
     mino_val_t *result = NULL;
     int any_non_nil = 0;
+    size_t n_inputs = 0;
     if (!mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
             "merge-with requires at least 1 argument: combiner f");
     }
     fn  = args->as.cons.car;
     cur = args->as.cons.cdr;
+    {
+        mino_val_t *p = cur;
+        while (mino_is_cons(p)) {
+            n_inputs++;
+            p = p->as.cons.cdr;
+        }
+    }
     while (mino_is_cons(cur)) {
         mino_val_t *m = cur->as.cons.car;
         cur = cur->as.cons.cdr;
         if (m == NULL || mino_is_nil(m)) continue;
         if (mino_type_of(m) != MINO_MAP) {
+            /* JVM: `(merge-with f x)` with a single non-map input
+             * returns x (it's `(reduce1 merge2 [x])` -> x). With
+             * more than one input it throws. Mirror that so the
+             * deep-merge / recursive idiom that bottoms out at a
+             * non-map leaf works. */
+            if (n_inputs == 1) return m;
             return prim_throw_classified(S, "eval/type", "MTY001",
                 "merge-with: every input must be a map or nil");
         }

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.273.0 — `merge-with` returns a single non-map input as-is
+
+JVM Clojure's `(merge-with f x)` with a single non-map input
+reduces to `x` (the underlying reduce of one element). Mino was
+rejecting non-map non-nil inputs unconditionally, which broke
+the recursive `deep-merge` idiom whose base case bottoms out at
+a non-map leaf. The primitive now short-circuits when there is
+exactly one input arg: the arg is returned unchanged regardless
+of type. Two or more non-map inputs still raise, matching JVM.
+
 ## v0.272.0 — `walk` recurses into any `seq?`, not just `cons?`
 
 The walk kernel checked `(cons? form)` for its sequence branch,
