@@ -512,7 +512,60 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
         const char *saved_ambient = S->fn_ambient_ns;
         mino_val_t *result;
         if (mino_type_of(fn) == MINO_MACRO) {
-            env_bind(S, local, "&env", mino_nil(S));
+            /* &env is a map of {sym <opaque-info>} for every local
+             * in scope at the call site. JVM Clojure binds the values
+             * to LocalBinding objects; mino doesn't have a corresponding
+             * shape, so each entry maps to nil — the truthy check on
+             * (contains? &env sym) and (keys &env) work, which is what
+             * macros that introspect locals actually use.
+             *
+             * &form is the entire macro-call form (head + tail). It
+             * comes from the evaluator's "currently expanding" form
+             * pointer set by eval_value before any macro invocation. */
+            mino_env_t *e;
+            size_t      n_locals = 0;
+            mino_val_t *form_for_env = NULL;
+            if (mino_current_ctx(S)->eval_current_form != NULL) {
+                form_for_env = mino_current_ctx(S)->eval_current_form;
+            }
+            /* Walk lexical frames; stop at the namespace root env so
+             * we don't enumerate the (large) set of Vars. The ns root
+             * lives in current_ns_env(S). */
+            {
+                mino_env_t *ns_root = current_ns_env(S);
+                for (e = env; e != NULL && e != ns_root; e = e->parent) {
+                    size_t i;
+                    for (i = 0; i < e->len; i++) n_locals++;
+                }
+            }
+            {
+                mino_val_t **keys = NULL;
+                mino_val_t **vals = NULL;
+                if (n_locals > 0) {
+                    keys = (mino_val_t **)gc_alloc_typed(
+                        S, GC_T_VALARR, n_locals * sizeof(*keys));
+                    vals = (mino_val_t **)gc_alloc_typed(
+                        S, GC_T_VALARR, n_locals * sizeof(*vals));
+                    if (keys != NULL && vals != NULL) {
+                        mino_env_t *ns_root = current_ns_env(S);
+                        size_t out = 0;
+                        for (e = env; e != NULL && e != ns_root; e = e->parent) {
+                            size_t i;
+                            for (i = 0; i < e->len; i++) {
+                                if (out < n_locals) {
+                                    keys[out] = mino_symbol(S, e->bindings[i].name);
+                                    vals[out] = mino_nil(S);
+                                    out++;
+                                }
+                            }
+                        }
+                        n_locals = out;
+                    }
+                }
+                env_bind(S, local, "&env", mino_map(S, keys, vals, n_locals));
+                env_bind(S, local, "&form",
+                         form_for_env != NULL ? form_for_env : mino_nil(S));
+            }
         }
         /* Closures resolve free unqualified vars in the namespace they
          * were created in. Swap current_ns for the body so def/etc land

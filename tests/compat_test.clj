@@ -339,15 +339,25 @@
 
 ;; --- &env in macros ---
 
-(defmacro env-nil? [] (list 'quote (nil? &env)))
-(defmacro env-contains? [sym] (list 'quote (and &env (contains? &env sym))))
+(defmacro env-map? [] (list 'quote (map? &env)))
+(defmacro env-contains? [sym] (list 'quote (contains? &env sym)))
+(defmacro env-keys [] (list 'quote (sort (map name (keys &env)))))
 
 (deftest ampersand-env-in-macros
-  (testing "&env is nil in macro bodies"
-    (is (true? (env-nil?))))
+  (testing "&env is a map in macro bodies"
+    (is (true? (env-map?))))
 
-  (testing "contains? on nil &env returns falsy"
-    (is (not (env-contains? x)))))
+  (testing "contains? sees lexical locals"
+    (is (not (env-contains? x)))
+    (let [x 1]
+      (is (env-contains? x))))
+
+  (testing "keys lists every lexical local in scope"
+    (let [a 1 b 2 c 3
+          ks (set (env-keys))]
+      (is (contains? ks "a"))
+      (is (contains? ks "b"))
+      (is (contains? ks "c")))))
 
 ;; --- Pure-Clojure surface ---
 

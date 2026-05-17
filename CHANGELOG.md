@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.278.0 — Macros receive `&env` (map of locals) and `&form`
+
+Inside a macro body, `&env` is now a map whose keys are every
+lexical local in scope at the call site (values are nil — JVM
+binds LocalBinding objects, but the typical uses,
+`(contains? &env sym)` and `(keys &env)`, are key-driven). `&form`
+is bound to the entire macro-call form. Both were previously
+bound to nil, so macros that inspect locals (the standard
+`resolve` / `destructure` / `check-call` idioms ClojureDocs
+documents) couldn't tell a local from a var.
+
+The walk stops at the namespace-root env so the map doesn't
+balloon with the global var set.
+
 ## v0.277.0 — `rem` / `mod` on doubles match JVM byte-identically
 
 `(mod 1024.8402 5.12)` returned `0.840200000000074`; JVM returns
