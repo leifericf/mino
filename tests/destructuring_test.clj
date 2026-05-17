@@ -135,6 +135,16 @@
     (is (= "Bob" n))
     (is (= 25 a))))
 
+(deftest map-destructure-symbol-key-evaluates
+  ;; In {sym k} the RHS is evaluated, not used as a literal, so a
+  ;; bound symbol resolves to whatever it points to at that scope.
+  (let [k :name]
+    (let [{nm k} {:name "john"}]
+      (is (= "john" nm))))
+  (let [k (keyword "name")
+        {person-name k} {:name "john"}]
+    (is (= "john" person-name))))
+
 (deftest map-destructure-defaults
   (let [{:keys [x y] :or {x 10 y 20}} {:x 5}]
     (is (= 5 x))

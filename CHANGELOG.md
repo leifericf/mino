@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.265.0 — Map destructuring evaluates the key expression
+
+`{sym k}` previously used `k` as a literal key, so destructuring
+`{nm k} {:name "john"}` with `k` bound to `:name` looked up the
+symbol `k` rather than the keyword `:name` and bound `nm` to nil.
+The runtime destructure path now evaluates the RHS expression
+when it is a symbol — matching JVM Clojure, which expands
+`{sym k}` to `(get gmap k)` so `k` resolves in the surrounding
+scope. Self-evaluating forms (keywords, strings, numbers) are
+unchanged.
+
 ## v0.264.0 — `keys` / `vals` accept seqs of map entries
 
 `(keys coll)` and `(vals coll)` previously demanded a map and

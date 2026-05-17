@@ -296,10 +296,20 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                    && memcmp(pkey->as.s.data, "as", 2) == 0) {
             as_sym = pval;
         } else if (mino_type_of(pkey) == MINO_SYMBOL) {
-            /* Explicit binding: {sym :key} */
+            /* Explicit binding: {sym :key}.
+             * Per JVM Clojure, the RHS in this position is an
+             * expression, not a literal — `{sym k}` looks up
+             * whatever `k` resolves to in the surrounding scope.
+             * Self-evaluating forms (keywords, strings, numbers)
+             * pass through unchanged. */
+            mino_val_t *lookup_key = pval;
             mino_val_t *found = NULL;
+            if (pval != NULL && mino_type_of(pval) == MINO_SYMBOL) {
+                lookup_key = eval(S, pval, env);
+                if (lookup_key == NULL) return 0;
+            }
             if (mino_type_of(val) == MINO_MAP) {
-                found = map_get_val(val, pval);
+                found = map_get_val(val, lookup_key);
             }
             if (found == NULL && or_map != NULL && mino_type_of(or_map) == MINO_MAP) {
                 mino_val_t *deflt = map_get_val(or_map, pkey);
