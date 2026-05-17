@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Fix: BC VM safepoint poll for `future-cancel` + busy-spin auto-yield
+
+`future-cancel` previously only flipped the impl's CANCELLED tag and
+broadcast its cv. A CPU-bound worker running a tight `(loop ...
+recur)` had no enclosing `cv_wait`, so the cancel was invisible to
+the worker and the subsequent `state_destroy` hung forever waiting
+on `pthread_join`.
+
+Separately, a worker future running a busy spin without explicit
+yield monopolized `state_lock`, so sibling workers couldn't make
+progress and the script deadlocked.
+
+Both fixes share one mechanism: a new `mino_bc_safepoint(S)` poll
+called from every backward jump in the BC VM (OP_JMP, OP_JMPIFNOT,
+and all OP_LOOP_INT_* fast and slow paths). Two responsibilities:
+
+- Read through `mino_tls_cancel_ptr` (a TLS pointer set in
+  `worker_run` to the worker's `impl->cancel_flag`); when set, throw
+  `:mino/cancelled` (MTH002), letting the BC loop unwind so
+  `worker_run` publishes CANCELLED and the join completes.
+- Increment `mino_tls_safepoint_count`; every ~64K iterations, drop
+  and re-acquire `state_lock` so sibling workers get scheduling
+  time. Wrapped with `sched_yield()` on POSIX so the OS scheduler
+  picks a different runnable thread before we re-acquire.
+
+The fast-path cost is one branch (`tls_cancel_ptr != NULL`, which
+is NULL on the embedder thread) plus an unsigned counter
+increment. The TLS storage avoids growing `mino_thread_ctx_t`,
+which would shift JIT-pinned offsets in `main_ctx`.
+
+Regression in `tests/async_smoke_test.clj`
+(`async-future-cancel-interrupts-cpu-bound`,
+`async-busy-spin-does-not-starve-siblings`).
+
 ### Fix: `eval_current_form` restored after sub-eval
 
 When eval recursed into a sub-form, `eval_current_form` was

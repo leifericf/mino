@@ -29,6 +29,10 @@
 #  include <time.h>
 #endif
 
+#if !defined(_WIN32) || !defined(_MSC_VER)
+#  include <sched.h>  /* sched_yield() for BC safepoint auto-yield */
+#endif
+
 /* ------------------------------------------------------------------------- */
 /* Version                                                                   */
 /* ------------------------------------------------------------------------- */
@@ -1300,6 +1304,64 @@ void gc_request_stw(mino_state_t *S)
      * already at the safepoint by definition; setting should_yield
      * on its current ctx is a formal record, not a wake signal. */
     mino_current_ctx(S)->should_yield = 1;
+}
+
+/* TLS storage for the BC safepoint poll. Declared in internal.h. */
+#if defined(_WIN32) && defined(_MSC_VER)
+__declspec(thread)
+#else
+__thread
+#endif
+volatile int *mino_tls_cancel_ptr = NULL;
+
+#if defined(_WIN32) && defined(_MSC_VER)
+__declspec(thread)
+#else
+__thread
+#endif
+unsigned int mino_tls_safepoint_count = 0;
+
+/* BC dispatch safepoint poll.
+ *
+ * Called from the bytecode VM at every backward jump. Two jobs:
+ *
+ * 1. Cooperative cancellation: if a sibling thread set our
+ *    impl->cancel_flag via future-cancel, throw :mino/cancelled
+ *    so the BC loop unwinds and worker_run publishes CANCELLED.
+ *    The throw routes through prim_throw_classified, which either
+ *    longjmps into an enclosing try-frame or sets the eval diag
+ *    and we return failure.
+ *
+ * 2. Auto-yield for busy-spin patterns: every ~64K backward jumps,
+ *    drop and re-acquire state_lock so sibling workers waiting on
+ *    the same per-state lock can make progress. Without this, a
+ *    fn like `(loop [i 0] (recur (inc i)))` monopolizes state_lock
+ *    indefinitely. The yield window is brief (a sched_yield hint
+ *    plus the mutex release-reacquire round-trip).
+ *
+ * Returns 1 to continue, 0 to abort (caller must propagate NULL).
+ * The fast path is one branch on mino_tls_cancel_ptr (NULL on the
+ * embedder thread, populated on workers) plus the counter
+ * increment. State is in TLS rather than mino_thread_ctx_t so
+ * adding the cancel/counter doesn't shift JIT-pinned offsets in
+ * main_ctx. */
+int mino_bc_safepoint(mino_state_t *S)
+{
+    if (S == NULL) return 1;
+    if (mino_tls_cancel_ptr != NULL && *mino_tls_cancel_ptr) {
+        (void)prim_throw_classified(S, "mino/cancelled", "MTH002",
+                                    "future was cancelled");
+        return 0;
+    }
+    if (S->multi_threaded
+        && (++mino_tls_safepoint_count & 0xFFFFu) == 0) {
+        int depth = mino_yield_lock(S);
+#if !defined(_WIN32) || !defined(_MSC_VER)
+        sched_yield();
+#endif
+        mino_resume_lock(S, depth);
+    }
+    return 1;
 }
 
 void gc_release_stw(mino_state_t *S)

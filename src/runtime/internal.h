@@ -497,6 +497,32 @@ __thread
 #endif
 mino_thread_ctx_t *mino_tls_ctx;
 
+/* TLS pointer to the owning future_impl's cancel_flag for worker
+ * threads. NULL on the embedder's main thread. The BC safepoint
+ * poll reads through this pointer to check whether future-cancel
+ * has been called on the worker's future. Kept out of
+ * mino_thread_ctx_t so the JIT-pinned offsets in main_ctx don't
+ * shift; TLS is a clean place since lookup is per-thread anyway. */
+extern
+#if defined(_WIN32) && defined(_MSC_VER)
+__declspec(thread)
+#else
+__thread
+#endif
+volatile int *mino_tls_cancel_ptr;
+
+/* TLS counter for the BC safepoint poll's auto-yield slot. Rolls
+ * over naturally on unsigned overflow; the auto-yield slot bit is
+ * checked once every ~64K iterations so the safepoint cost is
+ * amortised. */
+extern
+#if defined(_WIN32) && defined(_MSC_VER)
+__declspec(thread)
+#else
+__thread
+#endif
+unsigned int mino_tls_safepoint_count;
+
 /* Forward decl for the embed thread pool surface (mino.h provides
  * the struct definition; struct mino_state stores a pointer). */
 struct mino_thread_pool;
@@ -1289,6 +1315,13 @@ static inline void mino_safepoint_poll(mino_state_t *S)
         mino_safepoint_park(S);
     }
 }
+
+/* BC dispatch safepoint poll: cooperative cancel + state_lock
+ * auto-yield. Called from every backward jump in the BC VM. Returns
+ * 1 to continue, 0 to abort (caller propagates NULL via bc_done).
+ * Fast path is one branch on cancel_ptr (NULL on the embedder)
+ * plus an unsigned counter increment. */
+int mino_bc_safepoint(mino_state_t *S);
 
 /* GC-side STW driver: request all worker ctxs park before a major sweep,
  * then release them after. Single-threaded today these are O(1) on

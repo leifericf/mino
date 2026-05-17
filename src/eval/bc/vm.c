@@ -1362,6 +1362,11 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
         case OP_JMP: {
             int off = sBx_OF(ins);
             pc = (size_t)((long)pc + off);
+            /* Backward jump: poll for cancel + auto-yield. Forward
+             * jumps skip the poll since they don't form a loop. */
+            if (off < 0 && !mino_bc_safepoint(S)) {
+                ok = 0; goto bc_done;
+            }
             break;
         }
 
@@ -1370,6 +1375,9 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
             int off = sBx_OF(ins);
             if (!mino_is_truthy_inline(regs[a])) {
                 pc = (size_t)((long)pc + off);
+                if (off < 0 && !mino_bc_safepoint(S)) {
+                    ok = 0; goto bc_done;
+                }
             }
             break;
         }
@@ -1596,6 +1604,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 if (t != MINO_INT_MIN) {
                     regs[a] = MINO_MAKE_INT(t - 1);
                     pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                     break;
                 }
                 /* MIN_INT: fall through to the prim_dec slow path so
@@ -1623,6 +1632,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 regs = S->bc_regs + base;
                 regs[a] = decv;
                 pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                 break;
             }
         }
@@ -1645,6 +1655,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                     regs[a] = MINO_MAKE_INT(t - 1);
                     regs[b] = MINO_MAKE_INT(i + 1);
                     pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                     break;
                 }
                 /* Overflow on dec or inc: fall through to the prim
@@ -1673,6 +1684,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 regs[a] = decv;
                 regs[b] = incv;
                 pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                 break;
             }
         }
@@ -1696,6 +1708,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 if (c_ != MINO_INT_MAX) {
                     regs[a] = MINO_MAKE_INT(c_ + 1);
                     pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                     break;
                 }
                 /* MAX_INT: fall through to the prim_inc slow path so
@@ -1718,6 +1731,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 regs = S->bc_regs + base;
                 regs[a] = incv;
                 pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                 break;
             }
         }
@@ -1742,6 +1756,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                     regs[a] = MINO_MAKE_INT(c_ + 1);
                     regs[c] = MINO_MAKE_INT(k_ + 1);
                     pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                     break;
                 }
             }
@@ -1769,6 +1784,7 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                 regs[a] = incv;
                 regs[c] = incv2;
                 pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
                 break;
             }
         }

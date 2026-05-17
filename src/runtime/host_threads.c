@@ -280,6 +280,14 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
     }
     ctx->gc_stack_bottom = (void *)stack_anchor;
     mino_tls_ctx = ctx;
+    /* Wire cooperative cancel: BC safepoint reads through this TLS
+     * pointer. future-cancel writes impl->cancel_flag; the worker
+     * observes on its next safepoint poll and throws :mino/cancelled.
+     * Reset the safepoint counter so the auto-yield slot is aligned
+     * to this worker's start, not whatever value was left over from
+     * a recycled pool thread. */
+    mino_tls_cancel_ptr      = &impl->cancel_flag;
+    mino_tls_safepoint_count = 0;
 
     /* Link onto S->worker_ctxs_head so gc_mark_roots can walk the
      * worker's gc_save and dyn_stack while it's blocked. Take the
@@ -416,7 +424,8 @@ static void worker_run(mino_future_t *impl, char *stack_anchor)
         diag_free(ctx->last_diag);
         ctx->last_diag = NULL;
     }
-    mino_tls_ctx = NULL;
+    mino_tls_ctx        = NULL;
+    mino_tls_cancel_ptr = NULL;
     free(ctx);
 }
 

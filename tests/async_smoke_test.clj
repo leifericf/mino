@@ -82,6 +82,45 @@
     (let [f (future (thread-sleep 200) 99)]
       (is (= :timeout (deref f 10 :timeout))))))
 
+(deftest async-future-cancel-interrupts-cpu-bound
+  ;; Regression: future-cancel previously only flipped the impl's
+  ;; CANCELLED tag and broadcast its cv. A CPU-bound worker running
+  ;; a tight (loop ... recur) had no enclosing cv_wait, so the cancel
+  ;; was invisible to the worker and the subsequent state_destroy
+  ;; hung forever waiting on pthread_join.
+  ;;
+  ;; Fix: BC VM safepoint poll at every backward jump reads through
+  ;; a TLS pointer to the worker's owning impl->cancel_flag and throws
+  ;; :mino/cancelled when set. The worker unwinds, worker_run
+  ;; publishes CANCELLED, quiesce's join returns.
+  (testing "future-cancel breaks a tight recur loop and lets script exit"
+    (let [f (future (loop [i 0] (recur (inc i))))]
+      (thread-sleep 50)
+      (future-cancel f)
+      ;; Give the worker a moment to observe the cancel and unwind.
+      (thread-sleep 100)
+      (is (future-cancelled? f)))))
+
+(deftest async-busy-spin-does-not-starve-siblings
+  ;; Regression: a worker future running a busy spin without explicit
+  ;; yield monopolized state_lock, so sibling workers couldn't make
+  ;; progress and the script deadlocked. The BC VM safepoint now
+  ;; auto-yields state_lock periodically (~64K backward jumps) so
+  ;; siblings get scheduling time.
+  (testing "busy-spin reader doesn't block writer futures from delivering"
+    (let [n 4
+          ps (vec (repeatedly n promise))]
+      (dotimes [i n]
+        (future (dotimes [_ 200] :work)
+                (deliver (nth ps i) :done)))
+      (let [reader (future
+                     (loop [it 0]
+                       (if (every? realized? ps)
+                         :done
+                         (recur (inc it)))))]
+        (doseq [p ps] (is (= :done @p)))
+        (is (= :done @reader))))))
+
 (deftest async-future-ex-info-data-preserved
   ;; Regression: when a future body throws (ex-info "..." {:k :v}),
   ;; (deref fut) inside a try/catch lost the :data payload. prim_throw
