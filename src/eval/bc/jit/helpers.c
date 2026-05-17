@@ -460,10 +460,21 @@ mino_val_t **mino_jit_getglobal_cached_slow(mino_state_t *S,
 }
 
 /* OP_CALL slow helper -- uncached call site. Reads the callee from
- * regs[fn_reg], invokes `apply_callable_argv` with argv at
+ * regs[fn_reg], invokes the callable with argv at
  * regs[fn_reg + 1..fn_reg + argc], stores the result at regs[dst].
  * env reaches the callable via the same `jit_invoke_env` publish
- * point the cached variants use. */
+ * point the cached variants use.
+ *
+ * Routes through `mino_apply_known_bc_fn_argv` so the common
+ * MINO_FN case skips apply_callable_argv's outer var-deref and
+ * type-of switch: invoke_bc_fn_argv is forced-inlined inside the
+ * known-bc helper, so the MINO_FN fast lane is a single inlined
+ * dispatch. Non-MINO_FN callables (PRIM, MINO_VAR with non-fn
+ * root, macros, slow-path callables) cost one extra C call hop
+ * via the known-bc helper's fallback into apply_callable_argv;
+ * for the targeted callback workloads (user fns passed to map /
+ * reduce / filter / sort comparators) the MINO_FN lane fires
+ * every iteration. */
 mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
                                 unsigned fn_reg, unsigned argc, unsigned dst)
 {
@@ -471,9 +482,8 @@ mino_val_t **mino_jit_call_slow(mino_state_t *S, mino_val_t **regs,
     mino_thread_ctx_t *ctx  = mino_current_ctx(S);
     mino_env_t        *env  = ctx->jit_invoke_env;
     mino_val_t        *callee = S->bc_regs[base + fn_reg];
-    mino_val_t        *r = apply_callable_argv(S, callee,
-                                                S->bc_regs + base + fn_reg + 1,
-                                                (int)argc, env);
+    mino_val_t        *r = mino_apply_known_bc_fn_argv(
+        S, callee, S->bc_regs + base + fn_reg + 1, (int)argc, env);
     if (r == NULL) return NULL;
     regs      = S->bc_regs + base;
     regs[dst] = r;

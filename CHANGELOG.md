@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.311.0 — Non-IC call routes through known-bc fast helper
+
+`mino_jit_call_slow` (the uncached OP_CALL helper) now invokes
+the callable via `mino_apply_known_bc_fn_argv` instead of
+`apply_callable_argv`. For MINO_FN callees this skips one
+var-deref check and one type-of dispatch per call; the
+always-inlined `invoke_bc_fn_argv` body runs inside the known-bc
+helper without an extra function-call layer.
+
+Measured deltas on Apple Silicon: the callback-heavy benches
+(map+inc over 100k, filter+even? over 100k) sit at the floor of
+the noise envelope -- the dispatch saving is real but the
+workload spends most of its time in alloc and prim call, not in
+the callable-type switch. fib(25) is unchanged because it
+already runs through the IC-cached fast lane that landed in
+JIT-ROI Phase F.
+
+Shipped for code-shape: non-MINO_FN callees pay one extra C
+call hop, which is acceptable because the targeted callback
+workloads (user fns passed to map / reduce / filter / sort
+comparators) hit the MINO_FN lane every iteration.
+
 ## v0.310.0 — Side-exit design scoped to a follow-up cycle
 
 The originally planned three-release side-exit / partial-
