@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.295.0 — JIT-call fast lane through `mino_bc_run_known_native`
+
+The IC-hit call path now enters a streamlined `mino_bc_run_known_native`
+helper instead of the generic `mino_bc_run`. The fast helper handles
+the single-clause, fixed-arity, captures-free, JIT-compiled case
+inline -- bc cursor save, dyn anchor, register window push, arg
+copy, optional try snapshot, `mino_jit_invoke`, and matching
+cleanup -- and skips the clause matcher + captures branch + the
+per-op `bc_current_pc` write that the bytecode dispatch loop owns.
+
+Any precondition miss (multi-arity, rest-binding, inner-fn /
+lazy-seq captures, missing native, fold-driven stale `native_gen`,
+mismatched argc) tail-calls `mino_bc_run` so a stale IC slot still
+produces correct output. The fallback path is hit on the cold
+path only; the steady-state hot loop stays in the fast lane.
+
+Final Phase F numbers (medians of 5 runs, Apple Silicon):
+
+| benchmark                                  | off (ms) | on (ms) | speedup |
+|--------------------------------------------|---------:|--------:|--------:|
+| `(fib 25)` global-defn recursion           |     9.23 |    4.45 |   2.07x |
+| 1M `defn`-call loop (one global callee)    |    39.21 |   18.99 |   2.06x |
+| user loop `(inc i) (dec j)` 1e7 iters      |     ~29  |   16.63 |   1.75x |
+
+vs the v0.283.0 starting point:
+
+| benchmark                | v0.283 on | v0.295 on | gain   |
+|--------------------------|----------:|----------:|-------:|
+| `(fib 25)` global-defn   |    6.78ms |    4.45ms | 1.52x  |
+| user loop dec-inc 1e7    |   30.83ms |   16.63ms | 1.85x  |
+
+`realistic_bench.clj` rows remain in the noise envelope (~3-7%
+run-to-run variance, allocator-dominated). The local-recursive
+`fibonacci(25)` row in that suite uses `(fn fib ...)` not a global
+`defn`, so the recursive call dispatches through `OP_CALL` on a
+register rather than `OP_CALL_CACHED`, and the cached-bc IC fast
+lane introduced in v0.293 is not on that path. This is the honest
+contract: IC-mediated calls (the common case for globally-defined
+fns calling each other) see the full Phase F win; non-IC call
+shapes are unchanged.
+
 ## v0.294.0 — Defer `mino_bc_run` try-state snapshot
 
 `mino_bc_fn_t` carries a new `has_try` flag, set during compile when

@@ -764,9 +764,14 @@ mino_val_t **mino_jit_call_known_native_slow(mino_state_t *S,
         col  = form->as.cons.column;
     }
     push_frame(S, "fn", file, line, col);
-    mino_val_t *r = mino_bc_run(S, fn,
-                                 S->bc_regs + base + arg_base,
-                                 (int)argc, fn->as.fn.env);
+    /* Take the JIT-call fast lane when the cached bc + the matched
+     * single-arity / no-rest / captures-free / native-ready
+     * preconditions all hold. mino_bc_run_known_native falls back to
+     * mino_bc_run automatically when any precondition has drifted,
+     * so the helper stays correct against a stale IC slot. */
+    mino_val_t *r = mino_bc_run_known_native(S, fn,
+                                              S->bc_regs + base + arg_base,
+                                              (int)argc, fn->as.fn.env);
     /* TAIL_CALL sentinel: rare in the hot path. Delegate to
      * apply_callable so the cons-form trampoline drives the next
      * dispatch with full correctness. Frame + ns scope are dropped

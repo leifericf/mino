@@ -2166,6 +2166,80 @@ bc_done:
     return retval != NULL ? retval : mino_nil(S);
 }
 
+/* JIT-call fast lane. Skips mino_bc_run's clause matcher + the
+ * captures branch + the bc_current_pc-per-op write that the bytecode
+ * dispatch loop owns. The preconditions in the header docstring
+ * are what make this safe: single-clause, fixed-arity, captures-free
+ * bodies have no work to do between arg copy and mino_jit_invoke.
+ *
+ * Any precondition miss falls through to mino_bc_run -- a stale IC
+ * slot, a fold-driven recompile that flipped clause count, or a
+ * fn whose JIT compile lost a race against a redef will all land
+ * on the safe path and produce the same answer the interpreter
+ * would. */
+mino_val_t *mino_bc_run_known_native(mino_state_t *S, mino_val_t *fn_val,
+                                      mino_val_t **argv, int argc,
+                                      mino_env_t *env)
+{
+#ifdef MINO_CPJIT
+    const mino_bc_fn_t *bc = fn_val->as.fn.bc;
+    if (bc == NULL || bc->code == NULL) goto fallback;
+    if (bc->native == NULL || bc->native_gen != S->ic_gen) goto fallback;
+    if (bc->n_clauses != 1 || bc->clauses == NULL) goto fallback;
+    const mino_bc_clause_t *cl = &bc->clauses[0];
+    if (cl->has_rest) goto fallback;
+    if (cl->n_params != argc) goto fallback;
+    if (cl->entry_pc != 0) goto fallback;
+    if (bc->captures) goto fallback;
+
+    size_t base = bc_push_window(S, bc->n_regs);
+    if (base == (size_t)-1) return NULL;
+    for (int i = 0; i < argc; i++) {
+        S->bc_regs[base + (size_t)i] = argv[i];
+    }
+
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    int saved_try_depth      = 0;
+    int saved_bc_catch_depth = 0;
+    if (bc->has_try) {
+        saved_try_depth      = ctx->try_depth;
+        saved_bc_catch_depth = ctx->bc_catch_depth;
+    }
+    dyn_frame_t       *saved_dyn_stack   = ctx->dyn_stack;
+    const mino_bc_fn_t *saved_bc_current = ctx->bc_current_bc;
+    size_t              saved_bc_pc      = ctx->bc_current_pc;
+    ctx->bc_current_bc = bc;
+    ctx->bc_current_pc = 0;
+
+    mino_val_t *retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc,
+                                          S->bc_regs + base,
+                                          (mino_val_t **)bc->consts, env);
+
+    if (bc->has_try) {
+        if (ctx->bc_catch_depth > saved_bc_catch_depth) {
+            ctx->bc_catch_depth = saved_bc_catch_depth;
+        }
+        if (ctx->try_depth > saved_try_depth) {
+            ctx->try_depth = saved_try_depth;
+        }
+    }
+    while (ctx->dyn_stack != saved_dyn_stack) {
+        dyn_frame_t *f = ctx->dyn_stack;
+        if (f == NULL) break;
+        ctx->dyn_stack = f->prev;
+        dyn_binding_list_free(f->bindings);
+        free(f);
+    }
+    bc_pop_window(S, base);
+    ctx->bc_current_bc = saved_bc_current;
+    ctx->bc_current_pc = saved_bc_pc;
+    if (retval == NULL) return NULL;
+    return retval;
+fallback:
+#endif
+    return mino_bc_run(S, fn_val, argv, argc, env);
+}
+
 void mino_bc_fn_mark(mino_state_t *S, const mino_bc_fn_t *bc)
 {
     (void)S; (void)bc;

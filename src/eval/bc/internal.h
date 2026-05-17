@@ -476,6 +476,22 @@ int mino_bc_compile_fn(struct mino_state *S, mino_val_t *fn);
 mino_val_t *mino_bc_run(struct mino_state *S, mino_val_t *fn,
                         mino_val_t **argv, int argc, mino_env_t *env);
 
+/* JIT-call fast lane: enters mino_jit_invoke directly with the
+ * minimum window + cursor + dyn / try snapshot work that
+ * mino_bc_run's prologue does for every call. Preconditions:
+ *   - fn->as.fn.bc != NULL
+ *   - bc->native != NULL && bc->native_gen == S->ic_gen
+ *   - bc->n_clauses == 1 && clauses[0].entry_pc == 0
+ *   - clauses[0].has_rest == 0
+ *   - argc == clauses[0].n_params
+ *   - bc->captures == 0
+ * Any precondition miss tail-calls mino_bc_run with the same args,
+ * so a misclassified IC slot still produces correct output. */
+mino_val_t *mino_bc_run_known_native(struct mino_state *S,
+                                      mino_val_t *fn,
+                                      mino_val_t **argv, int argc,
+                                      mino_env_t *env);
+
 /* Tagged-int fast lanes. Externalised so JIT stencils can BL into them
  * the same way the interpreter dispatch does. The contract is "return
  * NULL on a tag miss or arithmetic overflow; the caller falls back to
