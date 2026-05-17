@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.281.0 — Regex `|` top-level alternation + trailing-greedy fix
+
+`(re-find #"a|b" "cat")` previously returned `nil` because the
+tiny-regex compiler ignored `|` (treated it as a literal char).
+The token is now compiled as a new `ALT` op; `re_matchp`
+dispatches top-level alternations by trying each branch in
+left-to-right order at every text position. JVM semantics:
+first matching alternative at the leftmost position wins.
+
+Also closes a real bug in the matcher: when `matchpattern`
+early-returned 0 from a failed `matchplus`/`matchstar`/etc.
+sub-call, the partial increments to `matchlength` from atoms
+that ran *before* the failed quantifier leaked through to the
+next probe position, making `re-find` / `re-seq` on multi-word
+inputs return whole-match strings one byte too long
+(`["fodder " "o" "dder"]` instead of `["fodder" "o" "dder"]`).
+Every early-failure path now resets `matchlength` to its
+entry value.
+
+`(?i)`-style inline flags already worked. Nested alternation
+inside groups (`(foo|bar)+`) is not yet handled and remains a
+follow-up.
+
 ## v0.280.0 — `eval` recurses through lazy / chunked call forms
 
 A call form built via `concat` / `sequence` (the shape macros

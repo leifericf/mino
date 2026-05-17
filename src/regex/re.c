@@ -49,7 +49,7 @@
 #define MAX_CHAR_CLASS_LEN      256   /* Max length of character-class buffer in.   */
 
 
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS /* , BRANCH */ };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS, ALT };
 
 /* Inline-flag bits parsed from JVM-style (?<flags>) syntax. The
  * compiler emits a SET_FLAGS slot that the matcher absorbs at its
@@ -167,7 +167,80 @@ int re_matchp_groups(re_t pattern, const char* text, int* matchlength,
   return idx;
 }
 
+/* Walk the compiled pattern array; return the slot index of the
+ * next top-level ALT (`|` not inside a group), or the UNUSED
+ * sentinel index if none remains. Used by re_matchp to split a
+ * pattern with top-level alternations and try each branch. */
+static int next_top_alt(re_t pattern, int start)
+{
+  int depth = 0;
+  int i;
+  for (i = start; pattern[i].type != UNUSED; i++)
+  {
+    if (pattern[i].type == GROUP_OPEN)       depth++;
+    else if (pattern[i].type == GROUP_CLOSE) { if (depth > 0) depth--; }
+    else if (pattern[i].type == ALT && depth == 0) return i;
+  }
+  return i;
+}
+
+/* Single-branch match. Same shape as the prior re_matchp (no
+ * top-level alternation awareness). re_matchp dispatches to this
+ * once per alternative. */
+static int re_matchp_one(re_t pattern, const char* text, int* matchlength);
+
 int re_matchp(re_t pattern, const char* text, int* matchlength)
+{
+  if (pattern == 0) return -1;
+  /* If the pattern has no top-level alternation, the single-branch
+   * path is faithful. Detect by scanning for ALT at depth 0. */
+  {
+    int first_alt = next_top_alt(pattern, 0);
+    if (pattern[first_alt].type != ALT)
+    {
+      return re_matchp_one(pattern, text, matchlength);
+    }
+    /* Top-level alternation: try each branch in left-to-right order
+     * at the earliest matching position. JVM's regex picks the first
+     * alternative that matches at the leftmost position, so we
+     * iterate position outermost, branches innermost. */
+    {
+      int             alt_start = 0;
+      int             best_idx  = -1;
+      int             best_len  = 0;
+      regex_t        *mp        = (regex_t *)pattern;
+      while (1)
+      {
+        int    end       = next_top_alt(pattern, alt_start);
+        int    saved     = mp[end].type;
+        int    branch_ml = 0;
+        int    branch_idx;
+        /* Temporarily terminate the branch with UNUSED so the inner
+         * matchpattern stops there. Restored after the call. */
+        mp[end].type = UNUSED;
+        branch_idx = re_matchp_one(&mp[alt_start], text, &branch_ml);
+        mp[end].type = (unsigned char)saved;
+        if (branch_idx >= 0)
+        {
+          if (best_idx < 0
+              || branch_idx < best_idx
+              || (branch_idx == best_idx && branch_ml > best_len))
+          {
+            best_idx = branch_idx;
+            best_len = branch_ml;
+          }
+        }
+        if (mp[end].type != ALT) break;
+        alt_start = end + 1;
+      }
+      if (best_idx < 0) return -1;
+      *matchlength = best_len;
+      return best_idx;
+    }
+  }
+}
+
+static int re_matchp_one(re_t pattern, const char* text, int* matchlength)
 {
   *matchlength = 0;
   /* Reset group spans for groupless callers too, so stale state from
@@ -370,7 +443,7 @@ re_t re_compile(const char* pattern)
         re_compiled[j].u.bnd.min = (unsigned char)min_v;
         re_compiled[j].u.bnd.max = has_max ? (unsigned char)max_v : (unsigned char)0xFF;
       } break;
-/*    case '|': {    re_compiled[j].type = BRANCH;          } break; <-- not working properly */
+      case '|':  {    re_compiled[j].type = ALT;             } break;
 
       /* Escaped character-classes (\s \w ...): */
       case '\\':
@@ -913,33 +986,48 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
     }
     if ((pattern[0].type == UNUSED) || (pattern[1].type == QUESTIONMARK))
     {
-      return matchquestion(pattern[0], &pattern[2], text, matchlength);
+      int r = matchquestion(pattern[0], &pattern[2], text, matchlength);
+      if (!r) *matchlength = pre;
+      return r;
     }
     else if (pattern[1].type == STAR)
     {
-      return matchstar(pattern[0], &pattern[2], text, matchlength);
+      int r = matchstar(pattern[0], &pattern[2], text, matchlength);
+      if (!r) *matchlength = pre;
+      return r;
     }
     else if (pattern[1].type == PLUS)
     {
-      return matchplus(pattern[0], &pattern[2], text, matchlength);
+      int r = matchplus(pattern[0], &pattern[2], text, matchlength);
+      if (!r) *matchlength = pre;
+      return r;
     }
     else if (pattern[1].type == BOUNDED)
     {
       int max = (int)pattern[1].u.bnd.max;
+      int r;
       /* 0xFF is the unbounded sentinel; matchbounded uses INT_MAX
        * internally so the greedy loop runs to end-of-input. */
       if (max == 0xFF) max = 0x7FFFFFFF;
-      return matchbounded(pattern[0], &pattern[2], text, matchlength,
-                          (int)pattern[1].u.bnd.min, max);
+      r = matchbounded(pattern[0], &pattern[2], text, matchlength,
+                       (int)pattern[1].u.bnd.min, max);
+      if (!r) *matchlength = pre;
+      return r;
     }
     else if ((pattern[0].type == END) && pattern[1].type == UNUSED)
     {
+      int r;
       /* (?m) makes `$` match before any `\n` as well as at EOF. */
       if (re_flags & RE_FLAG_MULTILINE)
       {
-        return (text[0] == '\0' || text[0] == '\n');
+        r = (text[0] == '\0' || text[0] == '\n');
       }
-      return (text[0] == '\0');
+      else
+      {
+        r = (text[0] == '\0');
+      }
+      if (!r) *matchlength = pre;
+      return r;
     }
 /*  Branching is not working properly
     else if (pattern[1].type == BRANCH)
