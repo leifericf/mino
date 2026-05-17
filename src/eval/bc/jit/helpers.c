@@ -791,6 +791,32 @@ mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* OP_MAKE_LAZY slow helper. Mirrors the interpreter's OP_MAKE_LAZY
+ * cold-op handler: read the body bc from bc->consts[bx], allocate a
+ * MINO_LAZY value, fill its fields (body, captured jit-invoke env,
+ * cached=NULL, realized=0), and store it at regs[a]. The "slow"
+ * suffix is borrowed from the arith stencils for naming consistency
+ * even though there's no fast-path counterpart -- every OP_MAKE_LAZY
+ * routes through this helper. */
+mino_val_t **mino_jit_make_lazy_slow(mino_state_t *S, mino_val_t **regs,
+                                      unsigned a, mino_bc_fn_t *bc,
+                                      unsigned bx)
+{
+    ptrdiff_t          base = regs - S->bc_regs;
+    mino_thread_ctx_t *ctx  = mino_current_ctx(S);
+    if (bx >= bc->consts_len) return NULL;
+    mino_val_t *body = bc->consts[bx];
+    mino_val_t *lz   = alloc_val(S, MINO_LAZY);
+    if (lz == NULL) return NULL;
+    lz->as.lazy.body     = body;
+    lz->as.lazy.env      = ctx->jit_invoke_env;
+    lz->as.lazy.cached   = NULL;
+    lz->as.lazy.realized = 0;
+    regs    = S->bc_regs + base;
+    regs[a] = lz;
+    return regs;
+}
+
 /* Slow path for OP_LOOP_INT_DEC_INC. Mirrors the interpreter's
  * cons + prim_zero_p + prim_dec + prim_inc dance for the two-binding
  * reverse-counted loop shape. Returns the same low-bit-tagged signal

@@ -329,6 +329,11 @@ extern mino_val_t **mino_jit_closure_slow(mino_state_t *S,
                                            unsigned a,
                                            mino_bc_fn_t *bc,
                                            unsigned bx);
+extern mino_val_t **mino_jit_make_lazy_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a,
+                                             mino_bc_fn_t *bc,
+                                             unsigned bx);
 extern mino_val_t **mino_jit_push_env_slow(mino_state_t *S,
                                             mino_val_t **regs);
 extern mino_val_t **mino_jit_pop_env_slow(mino_state_t *S,

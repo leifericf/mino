@@ -460,6 +460,13 @@ const stencil_desc_t mino_jit_stencils[] = {
         0u
     },
     {
+        OP_MAKE_LAZY,
+        stencil_op_make_lazy_bytes, stencil_op_make_lazy_size,
+        stencil_op_make_lazy_symbols, stencil_op_make_lazy_nsymbols,
+        stencil_op_make_lazy_relocs, stencil_op_make_lazy_nrelocs,
+        0u
+    },
+    {
         OP_PUSH_ENV,
         stencil_op_push_env_bytes, stencil_op_push_env_size,
         stencil_op_push_env_symbols, stencil_op_push_env_nsymbols,
@@ -653,6 +660,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_call_slow",             (void *)(uintptr_t)mino_jit_call_slow},
     {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
     {"mino_jit_closure_slow",          (void *)(uintptr_t)mino_jit_closure_slow},
+    {"mino_jit_make_lazy_slow",        (void *)(uintptr_t)mino_jit_make_lazy_slow},
     {"mino_jit_push_env_slow",         (void *)(uintptr_t)mino_jit_push_env_slow},
     {"mino_jit_pop_env_slow",          (void *)(uintptr_t)mino_jit_pop_env_slow},
     {"mino_jit_env_bind_slow",         (void *)(uintptr_t)mino_jit_env_bind_slow},

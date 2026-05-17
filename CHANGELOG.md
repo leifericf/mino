@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.290.0 — `OP_MAKE_LAZY` stencil unblocks lazy-using core helpers
+
+JIT now compiles `OP_MAKE_LAZY` (op=17), previously the single
+biggest fn-level eligibility blocker on real workloads. The blocker
+histogram on `realistic_bench` drops from one blocker (10 fns
+rejected) to zero -- every body in the bench is now JIT-eligible.
+
+The op has no useful fast-path (every invocation hits the
+allocator), so the stencil pattern mirrors `OP_CLOSURE`: a thin
+shim that calls `mino_jit_make_lazy_slow`, which captures the
+current `jit_invoke_env`, reads the child body bc from
+`bc->consts[bx]`, allocates a `MINO_LAZY`, fills its four fields,
+and stores it at `regs[a]`. The interpreter's cold-op handler does
+exactly the same; this lifts that work into the JIT region so the
+surrounding control flow can stay native.
+
+Eligibility-unlocked fns in `<core>` include `mapcat`, `repeat`,
+`iterate`, `range`, and the inner `lazy-seq` helpers used across
+the sequence library.
+
+A/B on `realistic_bench` rows (median of 3, ARM64 Darwin):
+
+| row                          | off (ms/op) | on (ms/op) | ratio |
+|------------------------------|------------:|-----------:|------:|
+| build 5k int-map and sum     |       11.19 |     10.73  | 1.04× |
+| bump 5k int-map values       |       18.98 |     18.35  | 1.03× |
+| map/filter/map/reduce 50k    |        0.79 |      0.74  | 1.07× |
+| nested vectors 500x100       |       22.04 |     22.08  | 1.00× |
+| realize 10k of lazy range    |        7.84 |      7.49  | 1.05× |
+| fibonacci(25)                |        9.78 |      6.74  | 1.45× |
+
+The user's headline `dec-inc 10M` benchmark holds the v0.285.0 win
+(30.7 ms off → 18.3 ms on, 1.67×).
+
 ## v0.289.0 — Stencils for unary int predicates + `bit-not`
 
 JIT now compiles `pos?` / `neg?` / `even?` / `odd?` / `bit-not` on
