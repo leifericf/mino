@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.300.0 — Bump allocator on by default
+
+`MINO_BUMP_ALLOC` defaults to 1; the env var only needs to be set
+to `0` to fall back to the calloc-only path. The bump arm runs
+when the freelist arm misses and replaces the per-call `calloc`
+with a single cursor advance inside a 64 KiB slab.
+
+Median-of-5 measurement on Apple Silicon (ARM64 Darwin), JIT-off:
+
+| benchmark                        | bump off | bump on  | delta  |
+|----------------------------------|---------:|---------:|-------:|
+| realistic / nested vec 500x100   |  18.73ms |  16.78ms | -10.4% |
+| realistic / build 5k int-map     |   9.36ms |   9.05ms |  -3.3% |
+| realistic / realize 10k lazy     |   5.52ms |   5.33ms |  -3.4% |
+| realistic / bump 5k int-map      |  15.74ms |  16.23ms |  +3.1% |
+| gc-alloc / alloc-only 100k vals  |   8.39ms |   7.60ms |  -9.4% |
+| gc-alloc / nursery-pressure 50k  |   5.47ms |   4.73ms | -13.5% |
+| gc-alloc / hamt-assoc 1k         |   1.70ms |   1.61ms |  -5.3% |
+| gc-alloc / transient-build 5k    |   6.37ms |   6.21ms |  -2.5% |
+| gc-alloc / persistent-build 5k   |   9.51ms |   9.39ms |  -1.3% |
+| gc-alloc / write-barrier 5k      |   8.43ms |   8.60ms |  +2.0% |
+
+Win pattern: rows whose alloc mix is dominated by sizes without a
+freelist class (vec internal/leaf nodes, larger HAMT nodes)
+benefit most; rows where the freelist was already absorbing 80%+
+of allocs see modest or no gain. No row regresses outside the ±7%
+noise envelope.
+
+The aspirational micro target (≥ 25% on alloc-only) was not met
+on this host: macOS libmalloc is well-tuned for small allocs and
+the bump path's saving over `calloc` is bounded by libmalloc's
+already-low per-call cost. Targets remaining for later releases
+in the cycle are nursery cadence and write-barrier batching, both
+of which compose on top of bump.
+
 ## v0.299.0 — Slab-backed bump allocator (opt-in)
 
 A new bump-allocator path lives alongside the existing freelist arm

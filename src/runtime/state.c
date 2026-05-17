@@ -128,13 +128,17 @@ static void state_init(mino_state_t *S)
     }
     S->gc_promotion_age        = 1;
     S->gc_major_growth_tenths  = 15;        /* 1.5x old-gen growth */
-    /* Bump allocator opt-in (sticky read at state init). The default
-     * stays off so the existing freelist + calloc path remains the
-     * shipped behavior; the flag is for A/B measurement on the GC
-     * cycle's wire-in release before any default-on switch. */
+    /* Bump allocator on by default; MINO_BUMP_ALLOC=0 disables it for
+     * A/B comparison or to fall back to the calloc-only path. The
+     * bump path bypasses libmalloc's per-call bookkeeping by carving
+     * fresh headers from 64 KiB slabs that get one calloc per
+     * thousand-or-so allocs. */
+    S->gc_bump_enabled = 1;
     {
         const char *bp = getenv("MINO_BUMP_ALLOC");
-        S->gc_bump_enabled = (bp != NULL && bp[0] != '\0' && bp[0] != '0');
+        if (bp != NULL && bp[0] == '0' && bp[1] == '\0') {
+            S->gc_bump_enabled = 0;
+        }
     }
     /* Headers popped per slice. 4096 amortizes the per-slice overhead
      * on small-heap allocation-heavy workloads; max pause rises but
