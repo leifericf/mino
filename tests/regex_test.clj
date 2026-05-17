@@ -124,3 +124,43 @@
     (is (nil? (re-matches #"(\d{4})-(\d{2})-(\d{2})" "26-05-17"))))
   (testing "literal { without digits stays a literal char"
     (is (= "{abc}" (re-find #"\{abc\}" "x{abc}y")))))
+
+(deftest re-inline-flags
+  ;; Regression: real Clojure regex supports JVM-style inline flags
+  ;; (?<flags>). mino's regex engine previously parsed them as
+  ;; literal characters, so `(?i)foo` matched the literal substring
+  ;; "(?i)foo" rather than enabling case-insensitive matching. Now
+  ;; the compiler emits SET_FLAGS pattern slots that the matcher
+  ;; absorbs to update a per-match flag word; matchone, matchdot,
+  ;; matchcharclass, BEGIN, and END all honor the active flags.
+  (testing "(?i) case-insensitive single-char and class"
+    (is (= "FOO"   (re-find #"(?i)foo" "FOO")))
+    (is (= "Bar"   (re-find #"(?i)bar" "Bar")))
+    (is (= "ABCD"  (re-find #"(?i)[a-z]+" "ABCD")))
+    (is (= "hello" (re-find #"(?i)HELLO" "before hello after"))))
+  (testing "(?-i) clears case-insensitivity downstream"
+    (is (nil?      (re-find #"(?i)(?-i)foo" "FOO")))
+    (is (= "foo"   (re-find #"(?i)(?-i)foo" "FOO foo"))))
+  (testing "(?s) DOTALL makes . match \\n"
+    (is (nil?      (re-find #"a.b"     "a\nb")))
+    (is (= "a\nb"  (re-find #"(?s)a.b" "a\nb"))))
+  (testing "(?m) multiline ^ at line starts"
+    (is (nil?     (re-find #"^bar"     "foo\nbar")))
+    (is (= "bar"  (re-find #"(?m)^bar" "foo\nbar"))))
+  (testing "(?m) multiline $ before \\n"
+    (is (= "foo"  (re-find #"(?m)foo$" "foo\nbar"))))
+  (testing "(?x) extended ignores pattern whitespace and #-comments"
+    (is (= "foobar" (re-find #"(?x) foo bar " "x foobar y")))
+    ;; `#"..."` raw literals don't process escape sequences, so the
+    ;; \n inside the pattern body is two literal chars. Use the
+    ;; string form to embed a real newline that terminates the
+    ;; #-line comment cleanly.
+    (is (= "abc"    (re-find (re-pattern "(?x) a #comment\n b c ") "abc"))))
+  (testing "Multiple flags combined: (?ix)"
+    (is (= "FOO" (re-find #"(?ix) f o o " "FOO"))))
+  (testing "Scoped flag groups (?<flags>:...) rejected with a clear error"
+    ;; re-pattern stores the literal pattern string; compile happens
+    ;; at re-find time. mino's engine returns NULL on unsupported
+    ;; scoped flags, which prim_regex translates into a classified
+    ;; MCT001. Verify the throw rather than the storage.
+    (is (thrown? (re-find #"(?i:foo)" "FOO")))))

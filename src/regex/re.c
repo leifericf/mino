@@ -49,7 +49,23 @@
 #define MAX_CHAR_CLASS_LEN      256   /* Max length of character-class buffer in.   */
 
 
-enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED /* , BRANCH */ };
+enum { UNUSED, DOT, BEGIN, END, QUESTIONMARK, STAR, PLUS, CHAR, CHAR_CLASS, INV_CHAR_CLASS, DIGIT, NOT_DIGIT, ALPHA, NOT_ALPHA, WHITESPACE, NOT_WHITESPACE, GROUP_OPEN, GROUP_CLOSE, BOUNDED, SET_FLAGS /* , BRANCH */ };
+
+/* Inline-flag bits parsed from JVM-style (?<flags>) syntax. The
+ * compiler emits a SET_FLAGS slot that the matcher absorbs at its
+ * GROUP_OPEN/GROUP_CLOSE skip-loop, updating a static `re_flags`
+ * word. Per-slot flags so writes like (?i)abc(?-i)def behave the
+ * same as JVM Pattern: each region honors the flag state in effect
+ * at the time the matcher walks past it. */
+#define RE_FLAG_ICASE      (1u << 0)  /* (?i) case-insensitive       */
+#define RE_FLAG_DOTALL     (1u << 1)  /* (?s) dot matches newline    */
+#define RE_FLAG_MULTILINE  (1u << 2)  /* (?m) ^ $ at line boundaries */
+#define RE_FLAG_EXTENDED   (1u << 3)  /* (?x) strip pattern ws       */
+
+/* Active flag word during a match. Reset to the pattern-level
+ * compile-time default by re_matchp before walking the pattern.
+ * Updated as the matcher absorbs SET_FLAGS slots. */
+static unsigned char re_flags;
 
 typedef struct regex_t
 {
@@ -63,6 +79,10 @@ typedef struct regex_t
       unsigned char min; /*  {n}, {n,m}, {n,}. {n} stores min==max. */
       unsigned char max; /*  {n,} stores max == 0xFF (unbounded). */
     } bnd;
+    struct {             /*  OR  the inline-flag op for SET_FLAGS: */
+      unsigned char mask; /* the flag bits to apply               */
+      unsigned char set;  /* 1 = OR mask into re_flags; 0 = clear */
+    } flg;
   } u;
 } regex_t;
 
@@ -157,21 +177,59 @@ int re_matchp(re_t pattern, const char* text, int* matchlength)
   {
     re_g_state_reset(text, 0);
   }
+  /* Reset inline-flag state. The first SET_FLAGS slot inside
+   * matchpattern (if any) installs the leading flags. */
+  re_flags = 0;
   if (pattern != 0)
   {
-    if (pattern[0].type == BEGIN)
+    /* If the pattern starts with one or more SET_FLAGS slots followed
+     * by BEGIN, absorb them before checking the BEGIN anchor so a
+     * pattern like "(?i)^abc" still pins to text[0]. */
+    int p0 = 0;
+    while (pattern[p0].type == SET_FLAGS)
     {
-      return ((matchpattern(&pattern[1], text, matchlength)) ? 0 : -1);
+      if (pattern[p0].u.flg.set) re_flags |=  pattern[p0].u.flg.mask;
+      else                       re_flags &= ~pattern[p0].u.flg.mask;
+      p0++;
+    }
+    if (pattern[p0].type == BEGIN)
+    {
+      /* In (?m) multiline mode, `^` matches at the start of input
+       * AND at every position immediately after a `\n`. Without
+       * (?m) it pins to text[0]. */
+      if (re_flags & RE_FLAG_MULTILINE)
+      {
+        const char *base       = text;
+        unsigned char leading  = re_flags;
+        int           idx      = 0;
+        while (1)
+        {
+          re_flags = leading;
+          if (matchpattern(&pattern[p0+1], text, matchlength))
+          {
+            return idx;
+          }
+          /* Advance to the position right after the next newline. */
+          while (*text != '\0' && *text != '\n') { text++; idx++; }
+          if (*text == '\0') break;
+          text++; idx++; /* skip the newline */
+        }
+        (void)base;
+        return -1;
+      }
+      return ((matchpattern(&pattern[p0+1], text, matchlength)) ? 0 : -1);
     }
     else
     {
       int idx = -1;
+      unsigned char leading_flags = re_flags;
 
       do
       {
         idx += 1;
+        re_flags = leading_flags; /* restart with leading flags each try */
 
-        if (matchpattern(pattern, text, matchlength))
+        if (matchpattern(&pattern[p0], text, matchlength))
         {
           if (text[0] == '\0')
             return -1;
@@ -208,6 +266,11 @@ re_t re_compile(const char* pattern)
   int           group_count       = 0;
   unsigned char group_stack[RE_MAX_GROUPS];
   int           group_stack_depth = 0;
+  /* `extended_mode` mirrors the (?x) flag at compile time so the
+   * parser can skip whitespace and `#`-line comments before they
+   * become CHAR slots. Toggled when (?x) / (?-x) inline-flag ops
+   * are parsed. */
+  int           extended_mode     = 0;
 
   re_compiled = (regex_t *)malloc(total);
   if (re_compiled == NULL) return 0;
@@ -217,6 +280,23 @@ re_t re_compile(const char* pattern)
   while (pattern[i] != '\0' && (j+1 < MAX_REGEXP_OBJECTS))
   {
     c = pattern[i];
+
+    /* Extended-mode preprocessing: skip whitespace and #-line
+     * comments before tokenizing. (?x) inside the pattern toggles
+     * this flag on the fly via the SET_FLAGS handler below. */
+    if (extended_mode)
+    {
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+      {
+        i++;
+        continue;
+      }
+      if (c == '#')
+      {
+        while (pattern[i] != '\0' && pattern[i] != '\n') i++;
+        continue;
+      }
+    }
 
     switch (c)
     {
@@ -381,9 +461,85 @@ re_t re_compile(const char* pattern)
         re_compiled[j].u.ccl = &ccl_buf[buf_begin];
       } break;
 
-      /* Capture groups. Maximum nesting depth = RE_MAX_GROUPS. */
+      /* Capture groups. Maximum nesting depth = RE_MAX_GROUPS.
+       *
+       * (? introduces an inline-flag op: (?<flags>) sets/clears
+       * pattern-level flags from this point onwards; (?<flags>:...) is
+       * the scoped variant (a non-capturing group with local flags),
+       * currently rejected with a clear diagnostic because mino's
+       * matchpattern has no group-scoped state to restore the prior
+       * flag word on group exit. */
       case '(':
       {
+        if (pattern[i+1] == '?')
+        {
+          unsigned int  set_mask   = 0;
+          unsigned int  clear_mask = 0;
+          int           direction  = 1; /* 1 = setting, 0 = clearing */
+          int           saw_close  = 0;
+          int           saw_colon  = 0;
+          i += 2; /* skip '(' and '?' */
+          while (pattern[i] != '\0')
+          {
+            char fc = pattern[i];
+            unsigned int *target;
+            unsigned int  bit;
+            if (fc == ')')      { saw_close = 1; break; }
+            if (fc == ':')      { saw_colon = 1; break; }
+            if (fc == '-')      { direction = 0; i++; continue; }
+            target = direction ? &set_mask : &clear_mask;
+            switch (fc)
+            {
+              case 'i': bit = RE_FLAG_ICASE;     break;
+              case 's': bit = RE_FLAG_DOTALL;    break;
+              case 'm': bit = RE_FLAG_MULTILINE; break;
+              case 'x': bit = RE_FLAG_EXTENDED;  break;
+              default:
+                /* Unknown flag char or malformed inline-flag op. */
+                free(re_compiled); return 0;
+            }
+            *target |= bit;
+            i++;
+          }
+          if (!saw_close && !saw_colon)
+          {
+            /* Unterminated (?... at end of pattern. */
+            free(re_compiled); return 0;
+          }
+          if (saw_colon)
+          {
+            /* Scoped flag group (?<flags>:...). Not supported yet:
+             * the matcher has no per-group flag-state stack to
+             * restore on group close. Reject the pattern rather
+             * than silently misinterpreting the body. */
+            free(re_compiled); return 0;
+          }
+          /* (?x) is compile-time-significant for the *parser* (so
+           * subsequent whitespace and #-comments get stripped); the
+           * other flags are runtime-significant for the matcher. We
+           * update extended_mode immediately so the outer parser's
+           * whitespace/comment skipping honors (?x) toggles partway
+           * through the pattern. */
+          if (set_mask & RE_FLAG_EXTENDED)   extended_mode = 1;
+          if (clear_mask & RE_FLAG_EXTENDED) extended_mode = 0;
+          /* Emit a clear-then-set pair so a single op like (?i-s)
+           * cleanly clears DOTALL and sets ICASE in one position.
+           * Most patterns use only one direction so the second
+           * slot is usually a no-op (mask == 0). */
+          if (clear_mask != 0)
+          {
+            re_compiled[j].type      = SET_FLAGS;
+            re_compiled[j].u.flg.mask = (unsigned char)clear_mask;
+            re_compiled[j].u.flg.set  = 0;
+            j++;
+            if (j+1 >= MAX_REGEXP_OBJECTS) { free(re_compiled); return 0; }
+          }
+          re_compiled[j].type      = SET_FLAGS;
+          re_compiled[j].u.flg.mask = (unsigned char)set_mask;
+          re_compiled[j].u.flg.set  = 1;
+          /* fallthrough into the i++/j++ at end of outer loop */
+          break;
+        }
         if (group_count >= RE_MAX_GROUPS - 1
          || group_stack_depth >= RE_MAX_GROUPS - 1)
         {
@@ -467,8 +623,33 @@ static int matchalphanum(char c)
 {
   return ((c == '_') || matchalpha(c) || matchdigit(c));
 }
+static int re_fold(char c)
+{
+  if (re_flags & RE_FLAG_ICASE)
+  {
+    return tolower((unsigned char)c);
+  }
+  return (unsigned char)c;
+}
 static int matchrange(char c, const char* str)
 {
+  if (re_flags & RE_FLAG_ICASE)
+  {
+    /* Case-fold both endpoints and the input so [A-Z] matches
+     * lowercase too. Ranges that span case (e.g. [A-z]) are
+     * intentionally not special-cased; the fold makes them
+     * equivalent to [a-z] in icase mode, matching JVM semantics. */
+    int lc = tolower((unsigned char)c);
+    int lo = tolower((unsigned char)str[0]);
+    int hi = tolower((unsigned char)str[2]);
+    return (    (c != '-')
+             && (str[0] != '\0')
+             && (str[0] != '-')
+             && (str[1] == '-')
+             && (str[2] != '\0')
+             && (lc >= lo)
+             && (lc <= hi));
+  }
   return (    (c != '-')
            && (str[0] != '\0')
            && (str[0] != '-')
@@ -479,10 +660,14 @@ static int matchrange(char c, const char* str)
 }
 static int matchdot(char c)
 {
+  /* (?s) DOTALL flag overrides the default \n/\r exclusion. The
+   * compile-time RE_DOT_MATCHES_NEWLINE option (if set) still wins
+   * since it predates the flag mechanism. */
 #if defined(RE_DOT_MATCHES_NEWLINE) && (RE_DOT_MATCHES_NEWLINE == 1)
   (void)c;
   return 1;
 #else
+  if (re_flags & RE_FLAG_DOTALL) return 1;
   return c != '\n' && c != '\r';
 #endif
 }
@@ -521,12 +706,12 @@ static int matchcharclass(char c, const char* str)
       {
         return 1;
       }
-      else if ((c == str[0]) && !ismetachar(c))
+      else if ((re_fold(c) == re_fold(str[0])) && !ismetachar(c))
       {
         return 1;
       }
     }
-    else if (c == str[0])
+    else if (re_fold(c) == re_fold(str[0]))
     {
       if (c == '-')
       {
@@ -556,7 +741,7 @@ static int matchone(regex_t p, char c)
     case NOT_ALPHA:      return !matchalphanum(c);
     case WHITESPACE:     return  matchwhitespace(c);
     case NOT_WHITESPACE: return !matchwhitespace(c);
-    default:             return  (p.u.ch == c);
+    default:             return  (re_fold(p.u.ch) == re_fold(c));
   }
 }
 
@@ -693,23 +878,38 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
     /* Capture-group markers are no-op for the matcher; they just
      * record the current text offset for the corresponding group.
      * Multiple writes during backtracking inside matchstar / matchplus
-     * settle to the final successful path's offsets. */
-    while (pattern[0].type == GROUP_OPEN || pattern[0].type == GROUP_CLOSE)
+     * settle to the final successful path's offsets.
+     *
+     * SET_FLAGS slots are also matcher-side no-ops; they only
+     * update the active flag word so later atoms see the correct
+     * case-fold / dotall / multiline behavior. */
+    while (pattern[0].type == GROUP_OPEN
+        || pattern[0].type == GROUP_CLOSE
+        || pattern[0].type == SET_FLAGS)
     {
-      int gid = (int)pattern[0].u.gid;
-      if (gid >= 1 && gid <= RE_MAX_GROUPS)
+      if (pattern[0].type == SET_FLAGS)
       {
-        int off = (int)(text - re_g_state.base);
-        if (pattern[0].type == GROUP_OPEN)
-        {
-          re_g_state.starts[gid - 1] = off;
-        }
-        else
-        {
-          re_g_state.ends[gid - 1] = off;
-        }
+        if (pattern[0].u.flg.set) re_flags |=  pattern[0].u.flg.mask;
+        else                      re_flags &= ~pattern[0].u.flg.mask;
+        pattern++;
+        continue;
       }
-      pattern++;
+      {
+        int gid = (int)pattern[0].u.gid;
+        if (gid >= 1 && gid <= RE_MAX_GROUPS)
+        {
+          int off = (int)(text - re_g_state.base);
+          if (pattern[0].type == GROUP_OPEN)
+          {
+            re_g_state.starts[gid - 1] = off;
+          }
+          else
+          {
+            re_g_state.ends[gid - 1] = off;
+          }
+        }
+        pattern++;
+      }
     }
     if ((pattern[0].type == UNUSED) || (pattern[1].type == QUESTIONMARK))
     {
@@ -734,6 +934,11 @@ static int matchpattern(regex_t* pattern, const char* text, int* matchlength)
     }
     else if ((pattern[0].type == END) && pattern[1].type == UNUSED)
     {
+      /* (?m) makes `$` match before any `\n` as well as at EOF. */
+      if (re_flags & RE_FLAG_MULTILINE)
+      {
+        return (text[0] == '\0' || text[0] == '\n');
+      }
       return (text[0] == '\0');
     }
 /*  Branching is not working properly

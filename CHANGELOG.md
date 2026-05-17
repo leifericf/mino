@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Fix: regex inline flags `(?i)` / `(?s)` / `(?m)` / `(?x)`
+
+JVM Pattern-style inline-flag ops are now supported. Previously
+`(re-find #"(?i)foo" "FOO")` returned `nil` because the engine
+parsed `(?i)foo` as literal characters and tried to match the
+substring `"(?i)foo"`. Now the compiler emits dedicated SET_FLAGS
+pattern slots that the matcher absorbs to update an active flag
+word; `matchone`, `matchcharclass`, `matchrange`, `matchdot`, and
+the BEGIN / END anchor handling all honor the active flags.
+
+Supported flags:
+
+- `(?i)` -- case-insensitive matching for both literal chars and
+  character classes (folds via `tolower`).
+- `(?s)` -- DOTALL: `.` also matches `\n` / `\r`.
+- `(?m)` -- multiline: `^` matches at start of input AND after any
+  `\n`; `$` matches before any `\n` AND at EOF.
+- `(?x)` -- extended: whitespace and `#`-to-end-of-line comments in
+  the pattern are stripped at compile time.
+
+Flags can be cleared with the negation form `(?-i)`, combined
+(`(?ix)`), or toggled in one op (`(?i-s)`). Mid-pattern flag ops
+apply from that point onwards, matching JVM semantics.
+
+Scoped flag groups `(?<flags>:...)` are detected and rejected with
+a clear compile error rather than silently misinterpreted, since
+mino's matcher has no per-group flag-state stack to restore the
+prior flags on group close. Adding that is a separate cycle.
+
+Default regex semantics are now closer to JVM: `.` no longer
+matches `\n` by default (`RE_DOT_MATCHES_NEWLINE` default flipped
+to 0). `(?s)` opts back into the previous always-on DOTALL
+behavior. Existing tests didn't exercise the previous default
+behavior; the change is observable only on patterns containing
+newlines, which are rare in the existing suite.
+
+Regression in `tests/regex_test.clj` (`re-inline-flags`).
+
 ### Fix: `(deref ref ms timeout-val)` 3-arg timed deref
 
 Real Clojure ships a 3-arg deref that returns `timeout-val` if a

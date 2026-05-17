@@ -32,8 +32,10 @@
 
 
 #ifndef RE_DOT_MATCHES_NEWLINE
-/* Define to 0 if you DON'T want '.' to match '\r' + '\n' */
-#define RE_DOT_MATCHES_NEWLINE 1
+/* Define to 1 to make '.' match '\r' + '\n' by default. Mino keeps
+ * this at 0 so the default matches JVM Pattern semantics; (?s) flag
+ * opts into DOTALL behavior per JVM. */
+#define RE_DOT_MATCHES_NEWLINE 0
 #endif
 
 #ifdef __cplusplus
