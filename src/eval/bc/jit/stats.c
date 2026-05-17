@@ -42,10 +42,17 @@ typedef struct cpjit_stat_entry {
  *   1  -- full dump (env-var "1" or any non-summary truthy value)
  *   2  -- one-line summary (env-var "summary"). Suppresses the
  *         per-fn ring entirely so a long-running JIT'd workload
- *         doesn't pay the allocation cost. */
+ *         doesn't pay the allocation cost.
+ *   3  -- tracing (env-var "tracing"). Full dump plus a
+ *         "code-bytes blocked" aggregation per blocking op so the
+ *         ranking surface reflects the total bytecode surface area
+ *         lost to each unstenciled op rather than just fn count.
+ *         A long fn carrying one unstenciled op loses more lane
+ *         coverage than a tiny one. */
 #define CPJIT_STATS_OFF      (-1)
 #define CPJIT_STATS_FULL     1
 #define CPJIT_STATS_SUMMARY  2
+#define CPJIT_STATS_TRACING  3
 
 static struct {
     int                  enabled;        /* see modes above */
@@ -54,6 +61,14 @@ static struct {
     unsigned long        fns_compiled;
     unsigned long        reason_count[CPJIT_REASON__COUNT];
     unsigned long        op_reject_count[OP__COUNT];
+    /* Per blocking op, sum of the code_len of every fn that was
+     * rejected with that op as the first_unknown_op. Bytes-blocked
+     * is a better lost-lane proxy than fn-count: a 300-op fn
+     * carrying one OP_THROW loses 300 ops worth of native coverage,
+     * while a 10-op leaf fn loses only 10. Populated by
+     * mino_jit_stats_record on every recorded entry; surfaced by
+     * the tracing dump. */
+    unsigned long long   op_reject_code_bytes[OP__COUNT];
     size_t               native_bytes_total;
     cpjit_stat_entry_t  *entries;
     int                  atexit_registered;
@@ -103,6 +118,52 @@ static void cpjit_stats_dump_summary(void)
         }
     }
     fprintf(stderr, "\n");
+}
+
+/* Tracing dump: per-op bytes-blocked ranking (descending). Used to
+ * answer "which unstenciled op, if covered, would unblock the most
+ * bytecode body?" so eligibility work prioritizes by lost surface
+ * area rather than rejection count. Bytes-blocked is the dominant
+ * scalar; pairing with fn-count gives a coarse "average fn size
+ * blocked" signal. */
+static void cpjit_stats_dump_tracing_op_table(void)
+{
+    int   order[OP__COUNT];
+    int   n = 0;
+    int   i;
+    int   j;
+    fprintf(stderr,
+            "\n[cpjit-stats] ---- bytes-blocked by op (tracing) ----\n");
+    for (i = 0; i < OP__COUNT; i++) {
+        if (g_cpjit_stats.op_reject_count[i] == 0) continue;
+        order[n++] = i;
+    }
+    /* Insertion sort -- n is bounded by OP__COUNT (~70) and the
+     * dump runs once at exit; a sort utility isn't worth the lib
+     * surface. */
+    for (i = 1; i < n; i++) {
+        int                key = order[i];
+        unsigned long long key_b = g_cpjit_stats.op_reject_code_bytes[key];
+        j = i - 1;
+        while (j >= 0
+               && g_cpjit_stats.op_reject_code_bytes[order[j]] < key_b) {
+            order[j + 1] = order[j];
+            j--;
+        }
+        order[j + 1] = key;
+    }
+    if (n == 0) {
+        fprintf(stderr, "  (no rejected fns)\n");
+        return;
+    }
+    for (i = 0; i < n; i++) {
+        int op = order[i];
+        fprintf(stderr,
+                "  op=%-3d  %-30s  %llu bytes blocked  %lu fns\n",
+                op, mino_bc_op_name((unsigned)op),
+                g_cpjit_stats.op_reject_code_bytes[op],
+                g_cpjit_stats.op_reject_count[op]);
+    }
 }
 
 static void cpjit_stats_dump(void)
@@ -177,6 +238,9 @@ static void cpjit_stats_dump(void)
         }
         fprintf(stderr, "[cpjit-stats] ---- %zu fns tracked ----\n", n);
     }
+    if (g_cpjit_stats.enabled == CPJIT_STATS_TRACING) {
+        cpjit_stats_dump_tracing_op_table();
+    }
 }
 
 static int cpjit_stats_enabled(void)
@@ -187,6 +251,8 @@ static int cpjit_stats_enabled(void)
             g_cpjit_stats.enabled = CPJIT_STATS_OFF;
         } else if (strcmp(e, "summary") == 0) {
             g_cpjit_stats.enabled = CPJIT_STATS_SUMMARY;
+        } else if (strcmp(e, "tracing") == 0) {
+            g_cpjit_stats.enabled = CPJIT_STATS_TRACING;
         } else {
             g_cpjit_stats.enabled = CPJIT_STATS_FULL;
         }
@@ -213,12 +279,18 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
     }
     g_cpjit_stats.reason_count[reason]++;
     if (reason == CPJIT_REASON_UNKNOWN_OP && first_unknown_op < OP__COUNT) {
+        size_t code_len = bc != NULL ? bc->code_len : 0;
         g_cpjit_stats.op_reject_count[first_unknown_op]++;
+        g_cpjit_stats.op_reject_code_bytes[first_unknown_op] +=
+            (unsigned long long)code_len;
     }
     /* Summary mode skips the per-fn ring: the one-line dump only
      * reads the aggregate counters, so the alloc + the borrowed
-     * file-string copy would be pure overhead in a long run. */
-    if (g_cpjit_stats.enabled != CPJIT_STATS_FULL) return;
+     * file-string copy would be pure overhead in a long run.
+     * Tracing mode behaves like full -- the ring carries the
+     * code_len needed for the bytes-blocked aggregation. */
+    if (g_cpjit_stats.enabled != CPJIT_STATS_FULL
+        && g_cpjit_stats.enabled != CPJIT_STATS_TRACING) return;
     cpjit_stat_entry_t *ent = (cpjit_stat_entry_t *)calloc(1, sizeof *ent);
     if (ent == NULL) return;
     ent->bc       = bc;

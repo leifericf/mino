@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.305.0 — `MINO_CPJIT_STATS=tracing` mode
+
+The CPJIT stats facility gains a fourth mode alongside off /
+full / summary: `tracing`. Tracing keeps the full-mode per-fn
+ring and adds a `bytes-blocked by op` table at dump end. Each
+row reports `op_name`, the cumulative bytecode body size of
+every fn that was rejected with that op as `first_unknown_op`,
+and the rejected-fn count.
+
+```
+[cpjit-stats] ---- bytes-blocked by op (tracing) ----
+  op=62   OP_LOOP_INT_LT                  5 bytes blocked  1 fns
+```
+
+Bytes-blocked is a stronger lost-lane proxy than fn-count alone:
+a long fn carrying one unstenciled op loses more native coverage
+than a small leaf fn. The table sorts descending so the top
+entries are the highest-impact stencil-coverage opportunities,
+matching the prioritization principle Cortex's "path to 10/10"
+calls out.
+
+No runtime overhead in the existing CPJIT_STATS modes; the new
+`op_reject_code_bytes` counter array is populated on the cold
+attribution path that already runs once per inspected fn.
+
 ## v0.304.0 — GC/alloc cycle close
 
 Eight-release allocator + GC cycle wrapping up. realistic_bench
