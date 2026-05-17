@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.282.0 — `do` body iteration forces lazy cdrs
+
+`eval_implicit_do_impl` walks a body cons chain via `cdr` and
+stops at the first non-cons cell. Macros that synthesize a
+`do` form via `(apply list 'do all-forms)` can leave the body
+as a lazy seq (or with a lazy intermediate cdr), and the prior
+iteration would treat the lazy as "no more forms" and silently
+skip the remainder. The walk now forces any lazy body / lazy
+cdr at each step. Same safety net `eval_impl`'s CONS branch
+already applies to call-form args.
+
 ## v0.281.0 — Regex `|` top-level alternation + trailing-greedy fix
 
 `(re-find #"a|b" "cat")` previously returned `nil` because the

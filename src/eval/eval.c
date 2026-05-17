@@ -495,11 +495,22 @@ mino_val_t *eval_value(mino_state_t *S, mino_val_t *form, mino_env_t *env)
 mino_val_t *eval_implicit_do_impl(mino_state_t *S, mino_val_t *body,
                                   mino_env_t *env, int tail)
 {
+    /* Force a lazy body, which apply/concat-built call forms leave
+     * dangling. The cdr forcing in the loop handles intermediate
+     * lazy cells in the spine. */
+    while (body != NULL && mino_type_of(body) == MINO_LAZY) {
+        body = lazy_force(S, body);
+        if (body == NULL) return NULL;
+    }
     if (!mino_is_cons(body)) {
         return mino_nil(S);
     }
     for (;;) {
         mino_val_t *rest = body->as.cons.cdr;
+        while (rest != NULL && mino_type_of(rest) == MINO_LAZY) {
+            rest = lazy_force(S, rest);
+            if (rest == NULL) return NULL;
+        }
         if (!mino_is_cons(rest)) {
             /* Last expression: tail position, propagate recur/tail-call. */
             return eval_impl(S, body->as.cons.car, env, tail);
