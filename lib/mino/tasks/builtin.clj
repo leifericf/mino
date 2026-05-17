@@ -512,7 +512,8 @@
                    ["empty_vec.c"        "stencil_op_empty_vec"]
                    ["get_kw_map.c"       "stencil_op_get_kw_map"]
                    ["conj_vec.c"         "stencil_op_conj_vec"]
-                   ["assoc.c"            "stencil_op_assoc"]]
+                   ["assoc.c"            "stencil_op_assoc"]
+                   ["dissoc.c"           "stencil_op_dissoc"]]
         stencil-dir "src/eval/bc/stencils"
         disk-files  (->> (file-seq stencil-dir)
                          (filterv #(str/ends-with? % ".c"))
@@ -853,7 +854,8 @@
    ["empty_vec.c"        "stencil_op_empty_vec"]
    ["get_kw_map.c"       "stencil_op_get_kw_map"]
    ["conj_vec.c"         "stencil_op_conj_vec"]
-   ["assoc.c"            "stencil_op_assoc"]])
+   ["assoc.c"            "stencil_op_assoc"]
+   ["dissoc.c"           "stencil_op_dissoc"]])
 
 (defn- gen-stencils-for
   "Compile every stencil source for the given target triple and

@@ -214,6 +214,36 @@ mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_DISSOC. MINO_MAP fast lane via mino_map_dissoc1
+ * (allocates -- regs base may relocate); other coll types fall through
+ * to prim_dissoc which raises a type diagnostic. Mirrors the
+ * interpreter's OP_DISSOC cold-op handler. */
+mino_val_t **mino_jit_dissoc_slow(mino_state_t *S, mino_val_t **regs,
+                                   unsigned a, unsigned b, unsigned c)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *key  = S->bc_regs[base + c];
+    if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
+        mino_val_t *r = mino_map_dissoc1(S, coll, key);
+        if (r == NULL) return NULL;
+        regs    = S->bc_regs + base;
+        regs[a] = r;
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, key, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_dissoc(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Slow path for OP_CONJ_VEC. MINO_VECTOR fast lane via vec_conj1
  * (allocates -- regs base may relocate); other coll types fall
  * through to prim_conj which handles lists, sorted-colls, sets,

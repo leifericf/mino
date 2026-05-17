@@ -293,6 +293,10 @@ extern mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S,
 extern mino_val_t **mino_jit_assoc_slow(mino_state_t *S,
                                          mino_val_t **regs,
                                          unsigned a, unsigned b);
+extern mino_val_t **mino_jit_dissoc_slow(mino_state_t *S,
+                                          mino_val_t **regs,
+                                          unsigned a, unsigned b,
+                                          unsigned c);
 
 /* OP_CALL slow helper -- uncached path. Callee comes from
  * regs[fn_reg]; args sit at regs[fn_reg + 1..fn_reg + argc]; the

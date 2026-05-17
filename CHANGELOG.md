@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.292.0 — `OP_DISSOC` stencil
+
+JIT now compiles `OP_DISSOC` (op=59). Mirrors `OP_ASSOC` -- a thin
+stencil that calls `mino_jit_dissoc_slow`, which inlines the
+`MINO_MAP` fast lane through `mino_map_dissoc1` and falls through to
+`prim_dissoc` for the type diagnostic on non-map operands.
+
+Unlike `OP_ASSOC` (which packs `[coll k v]` in three consecutive
+registers starting at `B`), `OP_DISSOC` uses three independent slot
+operands: `A=dst`, `B=coll`, `C=key`. The slow helper reads each
+slot directly.
+
+Dissoc-heavy workloads are bound by HAMT allocation, so this release
+doesn't move the needle on a tight dissoc loop (315 ms before, 315
+ms after on a 500-key dissoc-down-from-1k-entry-map). The value is
+fn-level eligibility: any body that contains an `OP_DISSOC` anywhere
+(common in `update`/`merge`/`select-keys`-shaped code) now JIT-
+compiles fully instead of falling back to the interpreter.
+
 ## v0.291.0 — Protocol-dispatch stencils
 
 JIT now compiles `OP_PROTOCOL_CALL_CACHED` and
