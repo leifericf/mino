@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.302.0 — Builder-loop transient rewrite covers sets
+
+The compile-time builder-loop rewriter (which lifts a `(loop [m {}]
+... (recur (assoc m k v)))`-shaped form into a transient
+equivalent with `(persistent! m)` at the exit) now also accepts
+`#{}` for the acc init. `(loop [s #{}] ... (recur (conj s x)))`
+emits `(loop [s (transient #{})] ... (recur (conj! s x)))` plus
+the `(persistent! s)` wrap, matching the existing vec / map
+treatment.
+
+Coverage measured against realistic_bench at v0.296: 2 hits / 2
+misses (50%) when no set builders were eligible; the eligible
+miss patterns are 4-binding loops with non-empty / non-literal
+accumulators that the rewriter is not in a position to promote
+safely. Set support unlocks `(into #{} ...)`-shaped tight loops
+that previously went through full persistent `conj`.
+
+The vec/map paths already shipped in earlier cycles; they are
+what already gives `realistic_bench/build 5k int-map` and
+`/nested vectors 500x100` their transient-equivalent cost in
+the v0.296 baseline.
+
 ## v0.301.0 — Write-barrier MAJOR_MARK call-site dedup
 
 `gc_write_barrier`'s two MAJOR_MARK arms collapse to a single

@@ -1462,6 +1462,13 @@ static int is_empty_map_literal(const mino_val_t *v)
         && v->as.map.len == 0;
 }
 
+static int is_empty_set_literal(const mino_val_t *v)
+{
+    return v != NULL
+        && mino_type_of(v) == MINO_SET
+        && v->as.set.len == 0;
+}
+
 /* Match `(<head> <args>...)`. Returns the args cons cell when head
  * is a symbol named `name`, NULL otherwise. */
 static mino_val_t *match_call(mino_val_t *form, const char *name)
@@ -1622,7 +1629,9 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
     acc_sym  = vec_nth(bindings, blen - 2);
     acc_init = vec_nth(bindings, blen - 1);
     if (acc_sym == NULL || mino_type_of(acc_sym) != MINO_SYMBOL) return NULL;
-    if (!is_empty_vec_literal(acc_init) && !is_empty_map_literal(acc_init)) {
+    if (!is_empty_vec_literal(acc_init)
+        && !is_empty_map_literal(acc_init)
+        && !is_empty_set_literal(acc_init)) {
         return NULL;
     }
     /* Body is exactly one form: (if <test> <then> <else>). */
@@ -1657,10 +1666,13 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
     if (step_pos < 0) return NULL;
     /* assoc step only makes sense when init is `{}`. */
     if (step_kind == 1 && !is_empty_map_literal(acc_init)) return NULL;
-    /* conj step matches `[]` (vector). `{}` and `#{}` are conj-able
-     * too in mino, but here we only rewrite the vector form for v1; a
-     * later cycle can extend to map/set conj if M5 surfaces it. */
-    if (step_kind == 0 && !is_empty_vec_literal(acc_init)) return NULL;
+    /* conj step accepts `[]` and `#{}` -- both have a transient that
+     * supports conj!. Maps are conj-able via [k v] pairs but the
+     * transient assoc! path is more efficient; the rewriter routes
+     * map-builder loops through the assoc step (step_kind=1). */
+    if (step_kind == 0
+        && !is_empty_vec_literal(acc_init)
+        && !is_empty_set_literal(acc_init)) return NULL;
     /* Safety: the rewrite reinterprets acc as a transient inside the
      * loop body. The transient protocol covers `count` / `nth` / `get`
      * but not `seq` / `reduce` / `=` / `contains?`. Any read of the
