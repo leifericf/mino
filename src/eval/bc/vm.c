@@ -151,8 +151,6 @@ static const char *call_shape_prim_name(mino_prim_fn fn)
 static size_t g_op_counts[OP__COUNT];
 static int    g_op_counts_atexit_registered;
 
-static const char *op_count_name(unsigned op);
-
 static void op_counts_dump(void)
 {
     size_t total = 0;
@@ -181,13 +179,15 @@ static void op_counts_dump(void)
         if (rows[i].count == 0) break;
         cumulative += rows[i].count;
         fprintf(stderr, "  %-25s %12zu  %6.2f%%  cum=%6.2f%%\n",
-                op_count_name(rows[i].op), rows[i].count,
+                mino_bc_op_name(rows[i].op), rows[i].count,
                 100.0 * (double)rows[i].count / (double)total,
                 100.0 * (double)cumulative / (double)total);
     }
 }
 
-static const char *op_count_name(unsigned op)
+#endif
+
+const char *mino_bc_op_name(unsigned op)
 {
     switch (op) {
     case OP_NOP: return "OP_NOP";
@@ -260,7 +260,6 @@ static const char *op_count_name(unsigned op)
     default: return "OP_UNKNOWN";
     }
 }
-#endif
 
 /* Grow S->bc_regs to hold an additional `n` slots and return the base
  * index of the new window. Returns (size_t)-1 on allocation failure. */

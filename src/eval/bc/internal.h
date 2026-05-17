@@ -477,6 +477,12 @@ mino_val_t *tag_or_box_int(struct mino_state *S, long long r);
  * across allocations. */
 void mino_bc_fn_mark(struct mino_state *S, const mino_bc_fn_t *bc);
 
+/* Symbolic name for an opcode id (e.g. OP_LOOP_INT_DEC_INC). Returns
+ * a static string; OP_UNKNOWN for out-of-range ids. Used by the
+ * MINO_CPJIT_STATS dumper to self-describe blocker histograms and by
+ * the MINO_BC_OP_COUNTS dispatch profiler. */
+const char *mino_bc_op_name(unsigned op);
+
 /* Look up the source position recorded for a given pc. Returns 1 with
  * the position filled in if available, 0 if no source info is recorded
  * (uncompiled fn, pc out of range, or position with line == 0). */

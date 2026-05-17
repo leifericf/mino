@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.284.0 — `MINO_CPJIT_STATS` blocker breakdown self-describes opcode names
+
+The `[cpjit-stats] ---- unknown-op breakdown ----` block previously
+printed each row as `op=17  9 fns`, leaving the numeric id without a
+symbolic name and forcing every downstream parser to carry its own
+opcode-name table.
+
+The opcode-name lookup that the bytecode dispatch profiler keeps
+behind `-DMINO_BC_OP_COUNTS=1` is now exposed as `mino_bc_op_name`,
+and the cpjit-stats dumper writes the name alongside the id:
+
+```
+[cpjit-stats] ---- unknown-op breakdown ----
+  op=17   OP_MAKE_LAZY                    9 fns
+  op=61   OP_LOOP_INT_DEC_INC             1 fns
+```
+
+The per-fn block already named these inline; the histogram now
+matches. No behaviour change for non-stats runs.
+
 ## v0.283.0 — `apply` passes lazy / chunked tails to fn rest-args
 
 `(apply f a1 a2 ... infinite-seq)` previously materialized the

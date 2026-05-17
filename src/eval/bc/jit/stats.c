@@ -79,7 +79,11 @@ static void cpjit_stats_dump(void)
         for (int op = 0; op < OP__COUNT; op++) {
             unsigned long n = g_cpjit_stats.op_reject_count[op];
             if (n == 0) continue;
-            fprintf(stderr, "  op=%-3d  %lu fns\n", op, n);
+            /* Self-describe each row: id and symbolic name together so
+             * downstream parsers (mino-bench histogram) don't need a
+             * private opcode-name table that drifts from the C enum. */
+            fprintf(stderr, "  op=%-3d  %-30s  %lu fns\n",
+                    op, mino_bc_op_name((unsigned)op), n);
             any = 1;
         }
         if (!any) fprintf(stderr, "  (none)\n");
