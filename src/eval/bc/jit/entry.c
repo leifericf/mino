@@ -294,6 +294,27 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_eq_ik_relocs, stencil_op_eq_ik_nrelocs,
         0u
     },
+    {
+        OP_MOD_II,
+        stencil_op_mod_ii_bytes, stencil_op_mod_ii_size,
+        stencil_op_mod_ii_symbols, stencil_op_mod_ii_nsymbols,
+        stencil_op_mod_ii_relocs, stencil_op_mod_ii_nrelocs,
+        0u
+    },
+    {
+        OP_QUOT_II,
+        stencil_op_quot_ii_bytes, stencil_op_quot_ii_size,
+        stencil_op_quot_ii_symbols, stencil_op_quot_ii_nsymbols,
+        stencil_op_quot_ii_relocs, stencil_op_quot_ii_nrelocs,
+        0u
+    },
+    {
+        OP_REM_II,
+        stencil_op_rem_ii_bytes, stencil_op_rem_ii_size,
+        stencil_op_rem_ii_symbols, stencil_op_rem_ii_nsymbols,
+        stencil_op_rem_ii_relocs, stencil_op_rem_ii_nrelocs,
+        0u
+    },
     /* OP_LOOP_INT_LT intentionally absent: measurement against the
      * interpreter's inline fast path showed a 17% regression on the
      * canonical `count-loop` workload. The bytecode compiler still

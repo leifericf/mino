@@ -52,15 +52,24 @@ mino_val_t **mino_jit_binop_slow(mino_state_t *S, mino_val_t **regs,
     if (list == NULL) return NULL;
     mino_val_t *r;
     switch (subop) {
-    case BINOP_ADD: r = prim_add(S, list, NULL); break;
-    case BINOP_SUB: r = prim_sub(S, list, NULL); break;
-    case BINOP_MUL: r = prim_mul(S, list, NULL); break;
-    case BINOP_LT:  r = prim_lt (S, list, NULL); break;
-    case BINOP_LE:  r = prim_lte(S, list, NULL); break;
-    case BINOP_GT:  r = prim_gt (S, list, NULL); break;
-    case BINOP_GE:  r = prim_gte(S, list, NULL); break;
-    case BINOP_EQ:  r = prim_eq (S, list, NULL); break;
-    default:        r = NULL;                    break;
+    case BINOP_ADD:  r = prim_add (S, list, NULL); break;
+    case BINOP_SUB:  r = prim_sub (S, list, NULL); break;
+    case BINOP_MUL:  r = prim_mul (S, list, NULL); break;
+    case BINOP_LT:   r = prim_lt  (S, list, NULL); break;
+    case BINOP_LE:   r = prim_lte (S, list, NULL); break;
+    case BINOP_GT:   r = prim_gt  (S, list, NULL); break;
+    case BINOP_GE:   r = prim_gte (S, list, NULL); break;
+    case BINOP_EQ:   r = prim_eq  (S, list, NULL); break;
+    case BINOP_MOD:  r = prim_mod (S, list, NULL); break;
+    case BINOP_QUOT: r = prim_quot(S, list, NULL); break;
+    case BINOP_REM:  r = prim_rem (S, list, NULL); break;
+    case BINOP_BAND: r = prim_bit_and (S, list, NULL); break;
+    case BINOP_BOR:  r = prim_bit_or  (S, list, NULL); break;
+    case BINOP_BXOR: r = prim_bit_xor (S, list, NULL); break;
+    case BINOP_SHL:  r = prim_bit_shift_left (S, list, NULL); break;
+    case BINOP_SHR:  r = prim_bit_shift_right(S, list, NULL); break;
+    case BINOP_USHR: r = prim_unsigned_bit_shift_right(S, list, NULL); break;
+    default:         r = NULL;                     break;
     }
     if (r == NULL) return NULL;
     regs = S->bc_regs + base;

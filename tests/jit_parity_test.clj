@@ -48,6 +48,10 @@
 (defn p-dec-i      [a] (dec a))
 (defn p-zero-int-p [a] (zero? a))
 
+(defn p-mod-ii  [a b] (mod a b))
+(defn p-quot-ii [a b] (quot a b))
+(defn p-rem-ii  [a b] (rem a b))
+
 ;; IK variants: rhs immediate fits in signed 8-bit, lhs comes from a
 ;; param. The bc compiler folds the literal into the C field of the
 ;; encoded instruction, so `(+ a 1)` emits OP_ADD_IK with sC=1.
@@ -66,7 +70,8 @@
     (p-ge-ii 3 3)  (p-eq-ii 4 4)
     (p-inc-i 1)    (p-dec-i 1)    (p-zero-int-p 0)
     (p-add-ik-1 3) (p-add-ik-127 3) (p-sub-ik-1 3)
-    (p-sub-ik-128 3) (p-lt-ik-10 5) (p-le-ik-10 10) (p-eq-ik-7 7)))
+    (p-sub-ik-128 3) (p-lt-ik-10 5) (p-le-ik-10 10) (p-eq-ik-7 7)
+    (p-mod-ii 10 3) (p-quot-ii 10 3) (p-rem-ii 10 3)))
 
 (deftest -aaa-warm-all
   ;; Runs first (alphabetical leading-dash); warms every parity fn
@@ -236,6 +241,43 @@
 
 (deftest zero-int-p-min
   (is (= false (p-zero-int-p +min+))))
+
+;; ---- Section 4b: mod / quot / rem on tagged ints -----------------
+
+(deftest mod-ii-normal-positive
+  (is (= 1 (p-mod-ii 10 3))))
+
+(deftest mod-ii-clojure-sign
+  ;; mod follows the divisor's sign (Clojure / Knuth).
+  (is (= 2 (p-mod-ii -10 3))))
+
+(deftest mod-ii-divide-by-zero-throws
+  (is (thrown? (p-mod-ii 10 0))))
+
+(deftest mod-ii-min-by-neg-one-tag-escape
+  ;; The MIN/-1 corner forces the bail-out (the inline divide would
+  ;; UB-overflow). prim_mod handles it through the boxed path and
+  ;; returns 0 (any number is divisible by -1).
+  (is (= 0 (p-mod-ii +min+ -1))))
+
+(deftest quot-ii-normal
+  (is (= 3 (p-quot-ii 10 3))))
+
+(deftest quot-ii-truncates-toward-zero
+  (is (= -3 (p-quot-ii -10 3))))
+
+(deftest quot-ii-divide-by-zero-throws
+  (is (thrown? (p-quot-ii 10 0))))
+
+(deftest rem-ii-normal
+  (is (= 1 (p-rem-ii 10 3))))
+
+(deftest rem-ii-c-sign
+  ;; rem follows the dividend's sign (C / Java's %).
+  (is (= -1 (p-rem-ii -10 3))))
+
+(deftest rem-ii-divide-by-zero-throws
+  (is (thrown? (p-rem-ii 10 0))))
 
 ;; ---- Section 5: loop-shape parity --------------------------------
 ;;

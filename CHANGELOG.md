@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.287.0 — Stencils for `mod` / `quot` / `rem`
+
+JIT now compiles the int divide family (`OP_MOD_II`, `OP_QUOT_II`,
+`OP_REM_II`). Each stencil inlines the tagged-int fast lane (both
+operands tagged, divisor non-zero, no `MIN/-1` overflow corner) and
+falls through to `mino_jit_binop_slow` for the boxed / bigint /
+diagnostic paths.
+
+The interpreter has had inline fast lanes for these opcodes for a
+while; previously any fn body that contained one of them was rejected
+by the JIT eligibility classifier and ran the entire body through the
+interpreter even with `--jit=on`.
+
+Measured on Apple Silicon, 1M-iter loops:
+
+| op            | off (ms) | on (ms) | speedup |
+|---------------|---------:|--------:|--------:|
+| `mod` loop    |    25.85 |    7.59 |  3.40×  |
+| `quot` loop   |    21.90 |    3.50 |  6.26×  |
+| `rem` loop    |    25.89 |    6.37 |  4.06×  |
+
+The realistic_bench blocker histogram drops `OP_QUOT_II` from the
+fns-blocked list (was 1 fn at baseline).
+
 ## v0.285.0 — `OP_LOOP_INT_DEC_INC` stencil
 
 The two-binding reverse-counted loop shape

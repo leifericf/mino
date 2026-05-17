@@ -129,9 +129,23 @@ extern char MINO_STENCIL_IMM_BX2[];
 #define STENCIL_BINOP_GT   5u
 #define STENCIL_BINOP_GE   6u
 #define STENCIL_BINOP_EQ   7u
+#define STENCIL_BINOP_MOD  8u
+#define STENCIL_BINOP_QUOT 9u
+#define STENCIL_BINOP_REM  10u
+#define STENCIL_BINOP_BAND 11u
+#define STENCIL_BINOP_BOR  12u
+#define STENCIL_BINOP_BXOR 13u
+#define STENCIL_BINOP_SHL  14u
+#define STENCIL_BINOP_SHR  15u
+#define STENCIL_BINOP_USHR 16u
 #define STENCIL_UNOP_INC      0u
 #define STENCIL_UNOP_DEC      1u
 #define STENCIL_UNOP_ZERO_P   2u
+#define STENCIL_UNOP_POS_P    3u
+#define STENCIL_UNOP_NEG_P    4u
+#define STENCIL_UNOP_EVEN_P   5u
+#define STENCIL_UNOP_ODD_P    6u
+#define STENCIL_UNOP_BNOT     7u
 
 /* Runtime helpers stencils call. Declarations stay minimal: opaque
  * forward-declared types only, no runtime headers. The compiler
