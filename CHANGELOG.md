@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.301.0 — Write-barrier MAJOR_MARK call-site dedup
+
+`gc_write_barrier`'s two MAJOR_MARK arms collapse to a single
+`gc_phase` load, and the SATB / Dijkstra `gc_mark_push` calls
+become conditional on `!h->mark` so the function-call path runs
+only when there is actually a header to enqueue.
+
+Measured effect on the targeted bench rows is at the floor of the
+noise envelope: write-barrier old<-young 5k moves between 8.49ms
+and 9.26ms across runs both before and after the change; the
+realistic_bench bump 5k row stays within 16.10-16.84ms. The
+optimization is shipped for its code-shape benefit (one fewer
+load on every non-mark-phase barrier, no extra work when the
+mark dedup hits) rather than for a measured speedup. The mark
+dedup was always going to happen inside `gc_mark_push`; pulling
+it to the call site removes a function-call round-trip when it
+fires.
+
+The original cycle target (≥ 8% on bump 5k int-map) was not met
+by this lever. The remaining cycle releases target builder-loop
+transient promotion and nursery cadence, both of which compose
+with the bump path landed in v0.300.
+
 ## v0.300.0 — Bump allocator on by default
 
 `MINO_BUMP_ALLOC` defaults to 1; the env var only needs to be set

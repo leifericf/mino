@@ -152,19 +152,25 @@ void gc_write_barrier(mino_state_t *S, void *container,
      * Both halves skip singletons (not GC-managed) and NULL (empty
      * slot). gc_mark_push deduplicates against h->mark, so the second
      * push is free when the value was already in the snapshot. */
-    if (S->gc_phase == GC_PHASE_MAJOR_MARK
-        && old_value != NULL
-        && ((uintptr_t)old_value & MINO_TAG_MASK) == 0
-        && !gc_ptr_is_state_embedded(S, old_value)) {
-        gc_hdr_t *h_old = ((gc_hdr_t *)old_value) - 1;
-        gc_mark_push(S, h_old);
-    }
-    if (S->gc_phase == GC_PHASE_MAJOR_MARK
-        && new_value != NULL
-        && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
-        && !gc_ptr_is_state_embedded(S, new_value)) {
-        gc_hdr_t *h_new_satb = ((gc_hdr_t *)new_value) - 1;
-        gc_mark_push(S, h_new_satb);
+    /* One gc_phase load gates both pushes. Each push is guarded by an
+     * inline h->mark dedup so the function-call path only runs when
+     * there is actually work to enqueue; the previous code paid the
+     * call cost on every barrier in MAJOR_MARK, including the common
+     * case where the value was already marked by an earlier barrier
+     * or by the snapshot root scan. */
+    if (S->gc_phase == GC_PHASE_MAJOR_MARK) {
+        if (old_value != NULL
+            && ((uintptr_t)old_value & MINO_TAG_MASK) == 0
+            && !gc_ptr_is_state_embedded(S, old_value)) {
+            gc_hdr_t *h_old = ((gc_hdr_t *)old_value) - 1;
+            if (!h_old->mark) gc_mark_push(S, h_old);
+        }
+        if (new_value != NULL
+            && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
+            && !gc_ptr_is_state_embedded(S, new_value)) {
+            gc_hdr_t *h_new_satb = ((gc_hdr_t *)new_value) - 1;
+            if (!h_new_satb->mark) gc_mark_push(S, h_new_satb);
+        }
     }
     if (container == NULL) {
         return;
