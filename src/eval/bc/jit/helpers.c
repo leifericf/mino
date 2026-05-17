@@ -777,6 +777,45 @@ mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_LOOP_INT_DEC_INC. Mirrors the interpreter's
+ * cons + prim_zero_p + prim_dec + prim_inc dance for the two-binding
+ * reverse-counted loop shape. Returns the same low-bit-tagged signal
+ * as the other loop helpers: NULL on OOM, regs|1 on exit, regs on
+ * continue. */
+mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a, unsigned b)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *zp = prim_zero_p(S, list, NULL);
+    if (zp == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (mino_is_truthy_inline(zp)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *decv = prim_dec(S, list2, NULL);
+    if (decv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    mino_val_t *list3 = mino_nil(S);
+    if (list3 == NULL) return NULL;
+    list3 = mino_cons(S, regs[b], list3);
+    if (list3 == NULL) return NULL;
+    mino_val_t *incv = prim_inc(S, list3, NULL);
+    if (incv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = decv;
+    regs[b] = incv;
+    return regs;
+}
+
 #endif /* MINO_CPJIT_HOST */
 
 /* Keep this TU non-empty under -Werror=pedantic when MINO_CPJIT_HOST

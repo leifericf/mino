@@ -346,6 +346,9 @@ extern mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S,
                                                    mino_val_t **regs,
                                                    unsigned a, unsigned b,
                                                    unsigned c);
+extern mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
+                                                    mino_val_t **regs,
+                                                    unsigned a, unsigned b);
 
 /* The continue-marker symbol. Fused-loop stencils end their continue
  * path with `__asm__("b _mino_jit_loop_continue_marker")`. The JIT

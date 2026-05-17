@@ -20,9 +20,10 @@
 ;;
 ;; OP_LOOP_INT_LT is intentionally excluded -- the descriptor table
 ;; omits it (interpreter inline fast path beat the stencil by 17%).
-;; Parity for the loop ops is covered by the realistic_bench loop
-;; rows; this file targets only the stencilised arith / cmp / unary
-;; opcodes.
+;; Loop-shape parity for OP_LOOP_INT_DEC / _DEC_INC / _LT_INC is
+;; covered by the loop-shape section at the bottom of this file;
+;; broader loop coverage continues to come from the realistic_bench
+;; and diff_random rows.
 
 (def +max+ 1152921504606846975)    ; (1 << 60) - 1
 (def +min+ -1152921504606846976)   ; -(1 << 60)
@@ -235,5 +236,64 @@
 
 (deftest zero-int-p-min
   (is (= false (p-zero-int-p +min+))))
+
+;; ---- Section 5: loop-shape parity --------------------------------
+;;
+;; Each loop fn exercises one of the fused OP_LOOP_INT_* opcodes
+;; (DEC, DEC_INC, LT_INC). The interpreter and JIT must produce
+;; identical results on:
+;;   - the normal exit (zero / lt) path,
+;;   - the n=0 / n=1 boundaries,
+;;   - the slow-path through prim_dec when the counter would
+;;     underflow MINO_TAGGED_INT_MIN.
+
+(defn p-loop-dec [n]
+  (loop [i n] (if (zero? i) i (recur (dec i)))))
+
+(defn p-loop-dec-inc [n]
+  (loop [i 0 j n] (if (zero? j) i (recur (inc i) (dec j)))))
+
+(defn p-loop-lt-inc [n]
+  (loop [i 0 k 0] (if (< i n) (recur (inc i) (inc k)) k)))
+
+(defn- warm-loops []
+  (dotimes [_ +warm+]
+    (p-loop-dec 100)
+    (p-loop-dec-inc 100)
+    (p-loop-lt-inc 100)))
+
+(deftest -aab-warm-loops
+  (warm-loops)
+  (is true))
+
+(deftest loop-dec-zero
+  (is (= 0 (p-loop-dec 0))))
+
+(deftest loop-dec-one
+  (is (= 0 (p-loop-dec 1))))
+
+(deftest loop-dec-1m
+  (is (= 0 (p-loop-dec 1000000))))
+
+(deftest loop-dec-inc-zero
+  (is (= 0 (p-loop-dec-inc 0))))
+
+(deftest loop-dec-inc-one
+  (is (= 1 (p-loop-dec-inc 1))))
+
+(deftest loop-dec-inc-100
+  (is (= 100 (p-loop-dec-inc 100))))
+
+(deftest loop-dec-inc-1m
+  (is (= 1000000 (p-loop-dec-inc 1000000))))
+
+(deftest loop-lt-inc-zero
+  (is (= 0 (p-loop-lt-inc 0))))
+
+(deftest loop-lt-inc-100
+  (is (= 100 (p-loop-lt-inc 100))))
+
+(deftest loop-lt-inc-1m
+  (is (= 1000000 (p-loop-lt-inc 1000000))))
 
 (run-tests-and-exit)

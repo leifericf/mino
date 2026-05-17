@@ -311,6 +311,13 @@ const stencil_desc_t mino_jit_stencils[] = {
         0u
     },
     {
+        OP_LOOP_INT_DEC_INC,
+        stencil_op_loop_int_dec_inc_bytes, stencil_op_loop_int_dec_inc_size,
+        stencil_op_loop_int_dec_inc_symbols, stencil_op_loop_int_dec_inc_nsymbols,
+        stencil_op_loop_int_dec_inc_relocs, stencil_op_loop_int_dec_inc_nrelocs,
+        0u
+    },
+    {
         OP_LOOP_INT_LT_INC,
         stencil_op_loop_int_lt_inc_bytes, stencil_op_loop_int_lt_inc_size,
         stencil_op_loop_int_lt_inc_symbols, stencil_op_loop_int_lt_inc_nsymbols,
@@ -532,6 +539,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_loop_int_lt_slow",     (void *)(uintptr_t)mino_jit_loop_int_lt_slow},
     {"mino_jit_loop_int_dec_slow",    (void *)(uintptr_t)mino_jit_loop_int_dec_slow},
     {"mino_jit_loop_int_lt_inc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_inc_slow},
+    {"mino_jit_loop_int_dec_inc_slow",(void *)(uintptr_t)mino_jit_loop_int_dec_inc_slow},
     {"mino_jit_getglobal_cached_slow", (void *)(uintptr_t)mino_jit_getglobal_cached_slow},
     {"mino_jit_call_cached_slow",      (void *)(uintptr_t)mino_jit_call_cached_slow},
     {"mino_jit_call_resolved_slow",    (void *)(uintptr_t)mino_jit_call_resolved_slow},

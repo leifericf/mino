@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.285.0 — `OP_LOOP_INT_DEC_INC` stencil
+
+The two-binding reverse-counted loop shape
+
+```
+(loop [i 0 j N] (if (zero? j) i (recur (inc i) (dec j))))
+```
+
+is the kernel of every count-down-from-N idiom. The bytecode compiler
+has emitted `OP_LOOP_INT_DEC_INC` (op=61) since the loop-fusion
+landings, but the JIT had no stencil for it: any fn containing the op
+fell through to the interpreter.
+
+This release adds `src/eval/bc/stencils/loop_int_dec_inc.c`, the
+matching `mino_jit_loop_int_dec_inc_slow` helper, and the entry-table
++ registry wire-up across all five host stencil byte tables. The fast
+path is a single inline pass per iter: tag-check both operands, zero-
+check the test register, overflow-guard the dec/inc pair, write back,
+continue.
+
+Measured on Apple Silicon, mino at `-O2`:
+
+| benchmark                                           | off (ms) | on (ms) | speedup |
+|-----------------------------------------------------|---------:|--------:|--------:|
+| `(loop [i 0 j 10000000] ...)` (top-level `time`)    |    30.69 |   18.41 |  1.67×  |
+| `dec-inc 10M` harness mode                          |    30.95 |   18.23 |  1.70×  |
+
+The headline benchmark `(time (run))` now reports ~18 ms with
+`MINO_JIT=on` and ~30 ms with `MINO_JIT=off` (median of 7).
+
+`OP_LOOP_INT_LT_INC` (1.91×) and `OP_LOOP_INT_DEC` (12×) remain the
+faster shapes — they do strictly less inner work — but the dec/inc
+pair is the shape users write most often, so the absolute floor matters
+more than the ratio.
+
 ## v0.284.0 — `MINO_CPJIT_STATS` blocker breakdown self-describes opcode names
 
 The `[cpjit-stats] ---- unknown-op breakdown ----` block previously
