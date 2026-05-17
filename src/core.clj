@@ -1710,10 +1710,10 @@
    result."
   [inner outer form]
   (cond
-    (cons?   form) (outer (apply list (map inner form)))
     (vector? form) (outer (mapv inner form))
     (map?    form) (outer (into (empty form) (map inner (seq form))))
     (set?    form) (outer (into (empty form) (map inner form)))
+    (seq?    form) (outer (apply list (map inner form)))
     true           (outer form)))
 
 (defn postwalk

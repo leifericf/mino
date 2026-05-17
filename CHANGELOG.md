@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.272.0 — `walk` recurses into any `seq?`, not just `cons?`
+
+The walk kernel checked `(cons? form)` for its sequence branch,
+so a lazy seq like `(map inc [1 2 3])` fell through to the
+default identity branch instead of being recursively walked.
+JVM Clojure's walk dispatches on anything that satisfies `seq?`
+(any ISeq). Mino now matches: `postwalk` and `prewalk` correctly
+recurse into the output of fns that return lazy seqs from the
+vector branch of their walking-fn.
+
 ## v0.271.0 — `reduce-kv` on vectors uses index-as-key
 
 JVM Clojure's `reduce-kv` on a vector calls
