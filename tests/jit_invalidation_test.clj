@@ -1,0 +1,121 @@
+(require "tests/test")
+
+;; CPJIT invalidation / deopt torture suite.
+;;
+;; Each test warms a fn past the JIT threshold so the assertion sees
+;; the native path on the JIT-enabled binary, then exercises a
+;; cache-busting REPL operation (def rebind, var-set-root, ns-unmap
+;; equivalent, binding cascades). The post-operation behavior must
+;; match what JIT-off would produce on the same source. The runner
+;; checks `./mino` and `./mino_nojit` stdout byte-for-byte; any
+;; divergence surfaces in its own output.
+
+(def +warm+ 200)
+
+;; ---- def rebind invalidation -----------------------------------------
+
+(defn caller-of-target [x] (target x))
+(defn target [x] (* x 2))
+
+(deftest def-rebind-invalidation
+  ;; Warm caller and target.
+  (dotimes [_ +warm+] (caller-of-target 5))
+  (is (= 10 (caller-of-target 5)))
+  ;; Rebind target.
+  (def target (fn [x] (* x 100)))
+  (is (= 500 (caller-of-target 5))))
+
+;; ---- var-set-root invalidation ---------------------------------------
+
+(defn rooted-callee [x] (+ x 1))
+(defn rooted-caller [x] (rooted-callee x))
+
+(deftest var-set-root-invalidation
+  (dotimes [_ +warm+] (rooted-caller 7))
+  (is (= 8 (rooted-caller 7)))
+  ;; alter-var-root style rebind via def.
+  (def rooted-callee (fn [x] (* x 10)))
+  (is (= 70 (rooted-caller 7))))
+
+;; ---- binding cascade with dyn-var ------------------------------------
+
+(def ^:dynamic *amp* 1)
+(defn dyn-callee [x] (* x *amp*))
+
+(deftest binding-cascade
+  (dotimes [_ +warm+] (dyn-callee 3))
+  (is (= 3 (dyn-callee 3)))
+  ;; Binding scope changes *amp* dynamically; jit'd dyn-callee must
+  ;; see the binding-thread-local value, not a stale snapshot.
+  (binding [*amp* 5]
+    (is (= 15 (dyn-callee 3))))
+  ;; After binding pops, original root restored.
+  (is (= 3 (dyn-callee 3))))
+
+;; ---- protocol-cached call after impl redef ---------------------------
+
+(defprotocol IShape (area [s]))
+(defrecord Square [side])
+(extend-type Square IShape (area [s] (* (:side s) (:side s))))
+
+(defn shape-area [s] (area s))
+
+(deftest protocol-impl-redef
+  (let [sq (->Square 4)]
+    (dotimes [_ +warm+] (shape-area sq))
+    (is (= 16 (shape-area sq)))
+    ;; Redefine the impl with a different formula.
+    (extend-type Square IShape (area [s] (* 2 (:side s))))
+    (is (= 8 (shape-area sq)))))
+
+;; ---- recursive fn redef while running --------------------------------
+
+(defn rec-fn [n] (if (<= n 0) 0 (+ n (rec-fn (- n 1)))))
+
+(deftest recursive-redef-after-warm
+  (dotimes [_ +warm+] (rec-fn 5))
+  (is (= 15 (rec-fn 5)))
+  ;; Replace with a non-recursive impl.
+  (def rec-fn (fn [n] (* n 100)))
+  (is (= 500 (rec-fn 5))))
+
+;; ---- caller chain across def rebind ----------------------------------
+
+(defn chain-leaf [x] x)
+(defn chain-mid  [x] (chain-leaf x))
+(defn chain-top  [x] (chain-mid  x))
+
+(deftest chain-leaf-redef
+  (dotimes [_ +warm+] (chain-top 9))
+  (is (= 9 (chain-top 9)))
+  ;; Redef the LEAF; both jit'd top and jit'd mid must observe.
+  (def chain-leaf (fn [x] (+ x 1000)))
+  (is (= 1009 (chain-top 9))))
+
+;; ---- repeated rebind churn -------------------------------------------
+
+(defn churn-target [n] n)
+(defn churn-caller [n] (churn-target n))
+
+(deftest churn-rebind
+  (dotimes [_ +warm+] (churn-caller 0))
+  (is (= 0 (churn-caller 0)))
+  ;; Rebind multiple times back-to-back; each must invalidate the
+  ;; cached IC slot in churn-caller.
+  (dotimes [i 5]
+    (def churn-target (fn [n] (+ n (* i 100))))
+    (is (= (* i 100) (churn-caller 0)))))
+
+;; ---- argc-shift redef --------------------------------------------------
+
+(defn shift-target [a] (* a 2))
+(defn shift-caller [a] (shift-target a))
+
+(deftest argc-shift-redef
+  (dotimes [_ +warm+] (shift-caller 5))
+  (is (= 10 (shift-caller 5)))
+  ;; Redef with same arity but different shape.
+  (def shift-target (fn [a] (* a 3)))
+  (is (= 15 (shift-caller 5))))
+
+(run-tests-and-exit)

@@ -56,6 +56,7 @@
 (require "tests/bc_try_catch_test")
 (require "tests/bc_error_quality_test")
 (require "tests/jit_parity_test")
+(require "tests/jit_invalidation_test")
 (require "tests/bc_binding_test")
 (require "tests/bc_destructure_test")
 (require "tests/bc_closure_test")

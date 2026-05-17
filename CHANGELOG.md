@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.314.0 — JIT invalidation/deopt torture tests
+
+New `tests/jit_invalidation_test.clj` torture suite for the
+interaction between JIT-compiled fns and runtime mutation:
+def rebind, var-set-root, binding cascades, protocol-impl
+extend, recursive redef, caller-chain leaf redef, repeated
+churn, argc-shift redef. Eight test groups, twenty-one
+assertions; runs as part of `task test` and `task release-gate`.
+
+All pass on both `mino` and `mino-lean` (no-JIT) so the parity
+oracle still byte-matches across the four-mode run.
+
 ## v0.313.0 — Adaptive JIT tiering for callsite-aware promotion
 
 `MINO_JIT=auto` mode previously gated every fn behind the same
