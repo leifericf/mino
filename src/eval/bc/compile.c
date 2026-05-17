@@ -165,6 +165,11 @@ typedef struct compiler {
                                        * propagates to bc->has_folds so
                                        * apply_callable knows to check
                                        * compile_ic_gen at dispatch. */
+    int                has_try;       /* 1 iff body emits OP_PUSHCATCH /
+                                       * OP_POPCATCH / OP_THROW. Gates
+                                       * mino_bc_run's per-call try-state
+                                       * snapshot + cleanup (saved in
+                                       * bc->has_try). */
     loop_target_t     *loop;          /* innermost loop or NULL */
     /* The form being compiled right now; emit_* reads (line, column)
      * out of its cons metadata and stores the values per-pc in the
@@ -2047,6 +2052,7 @@ static int compile_throw(compiler_t *c, mino_val_t *form, int dst, int tail)
     if (r < 0) return -1;
     if (compile_expr(c, arg, r, 0) < 0) return -1;
     emit_abc(c, OP_THROW, (unsigned)r, 0, 0);
+    c->has_try  = 1;
     c->next_reg = saved_next;
     return 0;
 }
@@ -2138,6 +2144,12 @@ static int compile_try(compiler_t *c, mino_val_t *form, int dst, int tail)
          * inherits tail. */
         return compile_body(c, cl.body, dst, tail);
     }
+
+    /* From here on the compile is guaranteed to emit at least one
+     * OP_PUSHCATCH (every catch and finally arm wraps the body in a
+     * push-pop catch pair). Set has_try here so mino_bc_run's
+     * prologue keeps its try-state snapshot for this fn. */
+    c->has_try = 1;
 
     /* The catch handler's tail position matches our caller's tail
      * position when there is no finally clause: a value from the
@@ -3986,6 +3998,7 @@ int mino_bc_compile_fn(mino_state_t *S, mino_val_t *fn)
      * mismatch path drops fn->bc back to NULL and the next call
      * recompiles from source. */
     bc->has_folds      = c.has_folds;
+    bc->has_try        = c.has_try;
     bc->compile_ic_gen = S->ic_gen;
     /* Tighten the source-map length: keep only the slots that match
      * actual emitted instructions. Over-allocated tail entries are

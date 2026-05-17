@@ -1265,10 +1265,18 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
      * try_depth back to where they were before this fn ran. A
      * leaked frame would leave a stale setjmp landing pad pointing
      * into this stack frame after we return, and the next longjmp
-     * up the chain would jump to garbage. */
+     * up the chain would jump to garbage. Gated on bc->has_try so
+     * bodies that never emit PUSHCATCH / POPCATCH / THROW skip the
+     * load+store pair on every call -- the cleanup at bc_done is
+     * gated on the same flag and the dummy saved values are then
+     * never read. */
     mino_thread_ctx_t *ctx = mino_current_ctx(S);
-    int saved_try_depth        = ctx->try_depth;
-    int saved_bc_catch_depth   = ctx->bc_catch_depth;
+    int saved_try_depth        = 0;
+    int saved_bc_catch_depth   = 0;
+    if (bc->has_try) {
+        saved_try_depth      = ctx->try_depth;
+        saved_bc_catch_depth = ctx->bc_catch_depth;
+    }
     /* Anchor the dyn_stack at fn entry so bc_done can unwind any
      * OP_PUSHDYN frames that survived an early exit (NULL return /
      * tail-call sentinel / catch landing). The body either matches
@@ -2127,12 +2135,17 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
 bc_done:
     /* Roll any BC catch frames that survived back so the try_stack is
      * exactly as it was at fn entry. Normal POPCATCH paths balance the
-     * count on their own; this only kicks in on error / unwind paths. */
-    if (ctx->bc_catch_depth > saved_bc_catch_depth) {
-        ctx->bc_catch_depth = saved_bc_catch_depth;
-    }
-    if (ctx->try_depth > saved_try_depth) {
-        ctx->try_depth = saved_try_depth;
+     * count on their own; this only kicks in on error / unwind paths.
+     * Gated on bc->has_try -- bodies that never emit PUSHCATCH /
+     * POPCATCH / THROW cannot have grown either counter past its
+     * entry value, so the rollback would be a no-op anyway. */
+    if (bc->has_try) {
+        if (ctx->bc_catch_depth > saved_bc_catch_depth) {
+            ctx->bc_catch_depth = saved_bc_catch_depth;
+        }
+        if (ctx->try_depth > saved_try_depth) {
+            ctx->try_depth = saved_try_depth;
+        }
     }
     /* Unwind any dyn frames that the body PUSHDYN'd but didn't POP --
      * happens on NULL-return error paths, tail-call sentinel paths,

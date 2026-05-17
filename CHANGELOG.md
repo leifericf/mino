@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.294.0 — Defer `mino_bc_run` try-state snapshot
+
+`mino_bc_fn_t` carries a new `has_try` flag, set during compile when
+the body emits any of `OP_PUSHCATCH` / `OP_POPCATCH` / `OP_THROW`.
+`mino_bc_run` now gates its per-call snapshot of `ctx->try_depth` /
+`ctx->bc_catch_depth` (and the matching cleanup at `bc_done`) on this
+flag. Bodies without try / catch / throw -- the overwhelming majority
+of hot fns including arithmetic recursors, loop kernels, and
+collection callbacks -- skip the load + store pair on every call.
+
+Correctness: a body without `OP_PUSHCATCH` / `OP_POPCATCH` / `OP_THROW`
+cannot grow either counter during its execution (callees that do use
+try / catch balance their pushes and pops within their own frames),
+so the defensive rollback at `bc_done` would be a no-op anyway.
+Primitives do not touch the try stack directly; `eval_try`'s
+`setjmp` / `longjmp` are balanced at its own boundary. The
+`saved_try_depth` / `saved_bc_catch_depth` locals are still passed
+through to `bc_cold_op` for `OP_POPCATCH`'s bounds check; that case
+only fires when the slot is non-zero, i.e. when `has_try == 1`.
+
+Saving is modest per call but cleanly compounds with v0.293's
+cached-bc fast lane on bytecode-dispatch-heavy paths:
+
+| benchmark                                  | off (ms) | on (ms) | speedup |
+|--------------------------------------------|---------:|--------:|--------:|
+| `(fib 25)` global-defn recursion           |     8.97 |    4.48 |   2.00x |
+| 1M `defn`-call loop (one global callee)    |    38.46 |   19.04 |   2.02x |
+| user loop `(inc i) (dec j)` 1e7 iters      |    29.55 |   16.59 |   1.78x |
+
+Vs the v0.293.0 numbers: the JIT-off rows pick up the larger absolute
+gain (the prologue runs on every bytecode call), while JIT-on rows
+benefit only for the outer entry into a JIT-compiled fn and any
+sub-call that drops to the interpreter for an unstenciled op.
+`realistic_bench.clj` rows remain in the noise envelope; GC-dominated
+rows (lazy realize, build/bump int-map) fluctuate by ~3-7% across
+runs, dominated by allocator variance.
+
 ## v0.293.0 — Cached-bc IC fast lane
 
 The `OP_CALL_CACHED` IC slot now caches the callee's `mino_bc_fn_t *`

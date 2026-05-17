@@ -382,6 +382,13 @@ typedef struct mino_bc_fn {
                                    * stay the way they were at fold
                                    * time, observed via compile_ic_gen
                                    * below. */
+    int              has_try;     /* 1 iff body emits any of OP_PUSHCATCH /
+                                   * OP_POPCATCH / OP_THROW. Gates
+                                   * mino_bc_run's per-call try-state
+                                   * snapshot (try_depth, bc_catch_depth)
+                                   * + the matching cleanup at bc_done.
+                                   * Bodies without try / catch / throw
+                                   * skip the snapshot entirely. */
     unsigned         compile_ic_gen; /* S->ic_gen at end of compile.
                                       * apply_callable invalidates the
                                       * bc and reruns the compile if a
