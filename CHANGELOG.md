@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.304.0 — GC/alloc cycle close
+
+Eight-release allocator + GC cycle wrapping up. realistic_bench
+deltas vs v0.296 (Apple Silicon, JIT-off, median of 5):
+
+| row                        | v0.296  | v0.303  | delta  |
+|----------------------------|--------:|--------:|-------:|
+| build 5k int-map and sum   |  9.88ms |  8.89ms | -10.0% |
+| bump 5k int-map values     | 17.27ms | 15.83ms |  -8.3% |
+| nested vectors 500x100     | 20.75ms | 16.18ms | -22.0% |
+| realize 10k of lazy range  |  6.90ms |  3.78ms | -45.2% |
+
+Pure-compute rows (map/filter/map/reduce, fibonacci(25)) stayed
+within noise as expected -- the cycle targeted allocator and GC
+path, not dispatch.
+
+Wins were concentrated where the v0.298 alloc-source probe pointed
+beforehand: rows with high `calloc-no-class` allocation share
+benefited most from the slab bump allocator (nested vec), and rows
+that fired many minor cycles per iteration benefited most from the
+nursery bump (realize lazy).
+
 ## v0.303.0 — Nursery default 4 MiB → 8 MiB
 
 A/B against {1, 4, 8, 16} MiB nursery sizes on the four alloc-bound
