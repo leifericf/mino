@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.275.0 — `last` survives `with-redefs` of `first`
+
+`(with-redefs [first last] (first [1 2]))` previously hung at
+100% CPU because mino routes every core-fn call through the var,
+including `last`'s own internal `(first s)` base case. With
+`first` redef'd to `last`, that base case became a recursive
+`(last s)` that never terminated.
+
+The fix captures `first` and `next` into private boot-time
+locals (`-lock-first`, `-lock-next`) and rewrites `last` as a
+tail-loop against those locals. JVM Clojure achieves the same
+isolation through direct-linking of the compiled `last`; mino
+captures the var values at definition time instead.
+
 ## v0.274.0 — `letfn` supports mutual recursion via `letfn*` special form
 
 The `letfn` macro previously expanded to a sequential `let`, which

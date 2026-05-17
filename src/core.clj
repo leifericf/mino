@@ -1081,11 +1081,22 @@
 
 ;; --- Sequence functions ---
 
+;; -lock-* are private aliases captured at boot. Internal calls to
+;; the underlying primitive route through these locals rather than
+;; the public Var, so `(with-redefs [first last] ...)` and similar
+;; tricks don't reroute the core fn's own recursion through the
+;; redef and spin forever. JVM Clojure achieves the same effect
+;; through direct-linking; mino has no such mechanism so we capture
+;; per use site.
+(def ^:private -lock-first first)
+(def ^:private -lock-next  next)
+
 (defn last "Returns the last item in coll." [coll]
   (let [s (seq coll)]
-    (if (next s)
-      (last (next s))
-      (first s))))
+    (loop [s s]
+      (if (-lock-next s)
+        (recur (-lock-next s))
+        (-lock-first s)))))
 
 (defn butlast "Returns a seq of all but the last item in coll." [coll]
   (let [s (seq coll)]
