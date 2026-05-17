@@ -154,13 +154,47 @@ static void intern_ht_rebuild(intern_table_t *tbl, size_t new_ht_cap)
     tbl->ht_cap = new_ht_cap;
 }
 
+/* Forward decl; defined below. */
+mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
+                                              mino_type_t type,
+                                              const char *s, size_t len,
+                                              size_t ns_len_hint);
+
 mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
                                            mino_type_t type,
                                            const char *s, size_t len)
 {
+    return intern_lookup_or_create_ns(S, tbl, type, s, len, (size_t)-1);
+}
+
+mino_val_t *intern_lookup_or_create_ns(mino_state_t *S, intern_table_t *tbl,
+                                              mino_type_t type,
+                                              const char *s, size_t len,
+                                              size_t ns_len_hint)
+{
     uint32_t h;
     size_t mask, idx;
     mino_val_t *v;
+    size_t ns_len;
+
+    /* ns_len resolution: callers that constructed via 2-arg (keyword
+     * ns name) pass an explicit `ns_len_hint`. Single-string callers
+     * pass (size_t)-1; we derive ns_len from the LAST '/' in `s` so a
+     * read-back form like `:a/b/c` parses ns="a/b", name="c". Strings
+     * always carry ns_len=0. */
+    if (type == MINO_STRING) {
+        ns_len = 0;
+    } else if (ns_len_hint != (size_t)-1) {
+        ns_len = ns_len_hint;
+    } else {
+        size_t i;
+        ns_len = 0;
+        if (len > 1) {
+            for (i = 0; i < len; i++) {
+                if (s[i] == '/') ns_len = i;
+            }
+        }
+    }
 
     /* Bootstrap: build hash table on first call. */
     if (tbl->ht_buckets == NULL) {
@@ -173,10 +207,14 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
     mask = tbl->ht_cap - 1;
     idx = h & mask;
 
-    /* Probe for existing entry. */
+    /* Probe for existing entry. Match (data, len, ns_len) so that
+     * `(keyword "a/b" "c")` and `(keyword "a" "b/c")` produce
+     * distinct vals even though their flat string is identical. */
     while (tbl->ht_buckets[idx] != INTERN_HT_EMPTY) {
         mino_val_t *e = tbl->entries[tbl->ht_buckets[idx]];
-        if (e->as.s.len == len && memcmp(e->as.s.data, s, len) == 0) {
+        if (e->as.s.len == len
+            && e->as.s.ns_len == ns_len
+            && memcmp(e->as.s.data, s, len) == 0) {
             return e;
         }
         idx = (idx + 1) & mask;
@@ -211,9 +249,10 @@ mino_val_t *intern_lookup_or_create(mino_state_t *S, intern_table_t *tbl,
     {
         char *data = dup_n(S, s, len);
         v = alloc_val(S, type);
-        v->as.s.data = data;
-        v->as.s.len  = len;
-        v->as.s.hash = h;
+        v->as.s.data   = data;
+        v->as.s.len    = len;
+        v->as.s.hash   = h;
+        v->as.s.ns_len = ns_len;
     }
     mino_current_ctx(S)->gc_depth--;
     tbl->entries[tbl->len] = v;
@@ -248,6 +287,79 @@ mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len)
 mino_val_t *mino_keyword(mino_state_t *S, const char *s)
 {
     return mino_keyword_n(S, s, strlen(s));
+}
+
+/* Explicit 2-arg constructors: the caller passes ns and name as two
+ * strings; we record the boundary so name/namespace can recover them
+ * exactly. (keyword "a/b" "c") interns ns_len=3 even though the flat
+ * data ("a/b/c") would otherwise be interpreted with last-slash split
+ * (which would also give ns_len=3 here — but for (keyword "a" "b/c")
+ * the explicit boundary preserves ns_len=1 and distinguishes the two
+ * keywords). */
+mino_val_t *mino_keyword_ns_n(mino_state_t *S,
+                              const char *ns, size_t ns_len,
+                              const char *name, size_t name_len)
+{
+    if (ns == NULL || ns_len == 0) {
+        return intern_lookup_or_create_ns(S, &S->kw_intern, MINO_KEYWORD,
+                                          name, name_len, 0);
+    }
+    {
+        size_t total = ns_len + 1 + name_len;
+        char  *buf;
+        mino_val_t *v;
+        if (total < 256) {
+            char stack_buf[256];
+            buf = stack_buf;
+            memcpy(buf, ns, ns_len);
+            buf[ns_len] = '/';
+            memcpy(buf + ns_len + 1, name, name_len);
+            v = intern_lookup_or_create_ns(S, &S->kw_intern, MINO_KEYWORD,
+                                           buf, total, ns_len);
+            return v;
+        }
+        buf = (char *)malloc(total);
+        memcpy(buf, ns, ns_len);
+        buf[ns_len] = '/';
+        memcpy(buf + ns_len + 1, name, name_len);
+        v = intern_lookup_or_create_ns(S, &S->kw_intern, MINO_KEYWORD,
+                                       buf, total, ns_len);
+        free(buf);
+        return v;
+    }
+}
+
+mino_val_t *mino_symbol_ns_n(mino_state_t *S,
+                             const char *ns, size_t ns_len,
+                             const char *name, size_t name_len)
+{
+    if (ns == NULL || ns_len == 0) {
+        return intern_lookup_or_create_ns(S, &S->sym_intern, MINO_SYMBOL,
+                                          name, name_len, 0);
+    }
+    {
+        size_t total = ns_len + 1 + name_len;
+        char  *buf;
+        mino_val_t *v;
+        if (total < 256) {
+            char stack_buf[256];
+            buf = stack_buf;
+            memcpy(buf, ns, ns_len);
+            buf[ns_len] = '/';
+            memcpy(buf + ns_len + 1, name, name_len);
+            v = intern_lookup_or_create_ns(S, &S->sym_intern, MINO_SYMBOL,
+                                           buf, total, ns_len);
+            return v;
+        }
+        buf = (char *)malloc(total);
+        memcpy(buf, ns, ns_len);
+        buf[ns_len] = '/';
+        memcpy(buf + ns_len + 1, name, name_len);
+        v = intern_lookup_or_create_ns(S, &S->sym_intern, MINO_SYMBOL,
+                                       buf, total, ns_len);
+        free(buf);
+        return v;
+    }
 }
 
 mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
@@ -1077,9 +1189,16 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
     case MINO_CHAR:
         return mino_val_char_get(a) == mino_val_char_get(b);
     case MINO_STRING:
+        return a->as.s.len == b->as.s.len
+            && memcmp(a->as.s.data, b->as.s.data, a->as.s.len) == 0;
     case MINO_SYMBOL:
     case MINO_KEYWORD:
-        return a->as.s.len == b->as.s.len
+        /* Keywords/symbols compare equal only when their (data, len,
+         * ns_len) all match. ns_len distinguishes (keyword "a/b" "c")
+         * from (keyword "a" "b/c") — they print the same but are
+         * structurally different. */
+        return a->as.s.len    == b->as.s.len
+            && a->as.s.ns_len == b->as.s.ns_len
             && memcmp(a->as.s.data, b->as.s.data, a->as.s.len) == 0;
     case MINO_CONS:
         return mino_eq(a->as.cons.car, b->as.cons.car)

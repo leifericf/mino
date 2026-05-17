@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 275
+#define MINO_VERSION_MINOR 276
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -306,6 +306,21 @@ mino_val_t *mino_keyword(mino_state_t *S, const char *s);
 
 /* Intern a keyword from a buffer of length len (without the leading :). */
 mino_val_t *mino_keyword_n(mino_state_t *S, const char *s, size_t len);
+
+/* Intern a keyword from explicit (ns, name) buffers. The resulting
+ * keyword carries `ns_len` so `name` / `namespace` round-trip the
+ * originally-passed segments — `(keyword "a/b" "c")` and `(keyword
+ * "a" "b/c")` produce DISTINCT vals even though their printed flat
+ * form is identical. ns may be NULL or ns_len == 0 for an unqualified
+ * keyword. */
+mino_val_t *mino_keyword_ns_n(mino_state_t *S,
+                              const char *ns, size_t ns_len,
+                              const char *name, size_t name_len);
+
+/* Same shape for symbols. */
+mino_val_t *mino_symbol_ns_n(mino_state_t *S,
+                             const char *ns, size_t ns_len,
+                             const char *name, size_t name_len);
 
 /* Create a cons cell (list node) with the given car and cdr. */
 mino_val_t *mino_cons(mino_state_t *S, mino_val_t *car, mino_val_t *cdr);

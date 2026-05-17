@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.276.0 — Keywords / symbols carry ns and name as separate boundaries
+
+Previously a keyword or symbol stored a single flat interned
+string, so `(keyword "a/b" "c")` and `(keyword "a" "b/c")` both
+produced `:a/b/c` and were indistinguishable: `name` and
+`namespace` couldn't recover the original split, and `=`
+reported them as equal.
+
+The interned value now records `ns_len` — the byte offset of the
+separating `/`. Two keywords with the same flat string but
+different `ns_len` are distinct (different intern slot, distinct
+identity, distinct equality, distinct `name` / `namespace`
+results). Read-back of a single-string form like `:a/b/c` derives
+the boundary via last-slash, matching JVM Clojure when the
+keyword wasn't constructed via the 2-arg form.
+
+New public constructors: `mino_keyword_ns_n`, `mino_symbol_ns_n`.
+The single-string `mino_keyword_n` / `mino_symbol_n` continue to
+work and now auto-derive `ns_len` from the data.
+
 ## v0.275.0 — `last` survives `with-redefs` of `first`
 
 `(with-redefs [first last] (first [1 2]))` previously hung at

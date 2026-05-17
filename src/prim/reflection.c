@@ -19,19 +19,12 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(v) == MINO_KEYWORD || mino_type_of(v) == MINO_SYMBOL) {
         const char *data = v->as.s.data;
         size_t len = v->as.s.len;
-        /* For qualified names (foo/bar), return the part after the LAST
-         * slash so multi-segment keywords like (keyword "a/b" "c")
-         * decompose back into ns "a/b" and name "c", matching JVM. */
-        if (len > 1) {
-            const char *slash = NULL;
-            size_t i;
-            for (i = 0; i < len; i++) {
-                if (data[i] == '/') slash = data + i;
-            }
-            if (slash != NULL) {
-                size_t after = len - (size_t)(slash - data) - 1;
-                return mino_string_n(S, slash + 1, after);
-            }
+        size_t ns_len = v->as.s.ns_len;
+        /* Use the explicit ns_len stored at construction time so
+         * `(name (keyword "a" "b/c"))` returns "b/c", distinct from
+         * `(name (keyword "a/b" "c"))` which returns "c". */
+        if (ns_len > 0 && ns_len < len) {
+            return mino_string_n(S, data + ns_len + 1, len - ns_len - 1);
         }
         return mino_string_n(S, data, len);
     }
@@ -256,20 +249,19 @@ mino_val_t *prim_keyword(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_is_cons(args->as.cons.cdr)) {
         mino_val_t *ns_val  = args->as.cons.car;
         mino_val_t *nm_val  = args->as.cons.cdr->as.cons.car;
-        char buf[256];
         if (mino_is_cons(args->as.cons.cdr->as.cons.cdr))
             return prim_throw_classified(S, "eval/arity", "MAR001", "keyword requires one or two arguments");
         if (mino_type_of(nm_val) != MINO_STRING)
             return prim_throw_classified(S, "eval/type", "MTY001", "keyword: name must be a string");
         if (ns_val == NULL || mino_type_of(ns_val) == MINO_NIL) {
-            return mino_keyword_n(S, nm_val->as.s.data, nm_val->as.s.len);
+            return mino_keyword_ns_n(S, NULL, 0,
+                                     nm_val->as.s.data, nm_val->as.s.len);
         }
         if (mino_type_of(ns_val) != MINO_STRING)
             return prim_throw_classified(S, "eval/type", "MTY001", "keyword: namespace must be a string or nil");
-        snprintf(buf, sizeof(buf), "%.*s/%.*s",
-                 (int)ns_val->as.s.len, ns_val->as.s.data,
-                 (int)nm_val->as.s.len, nm_val->as.s.data);
-        return mino_keyword_n(S, buf, strlen(buf));
+        return mino_keyword_ns_n(S,
+                                 ns_val->as.s.data, ns_val->as.s.len,
+                                 nm_val->as.s.data, nm_val->as.s.len);
     }
     v = args->as.cons.car;
     if (v == NULL || mino_type_of(v) == MINO_NIL)
@@ -1134,18 +1126,15 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     data = v->as.s.data;
     len  = v->as.s.len;
-    /* Mirror prim_name's last-slash split so (namespace (keyword "a/b"
-     * "c")) returns "a/b" (matching JVM's strict-keyword construction
-     * where the ns may itself contain slashes). */
-    slash = NULL;
+    (void)slash;
+    /* Use the explicit ns_len from the construction site rather than
+     * re-scanning data; preserves the (ns, name) split that 2-arg
+     * (keyword ns name) recorded. */
     {
-        size_t i;
-        for (i = 0; i < len; i++) {
-            if (data[i] == '/') slash = data + i;
-        }
+        size_t ns_len = v->as.s.ns_len;
+        if (ns_len == 0 || len == 1) return mino_nil(S);
+        return mino_string_n(S, data, ns_len);
     }
-    if (slash == NULL || len == 1) return mino_nil(S);
-    return mino_string_n(S, data, (size_t)(slash - data));
 }
 
 /* (last-error) -- return the last diagnostic as a map, or nil. */

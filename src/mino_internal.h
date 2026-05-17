@@ -148,6 +148,17 @@ struct mino_val {
                            * intern path; non-interned strings leave it
                            * zero. Internal use only; do not set
                            * externally. */
+            /* For MINO_SYMBOL / MINO_KEYWORD: length of the namespace
+             * prefix (excluding the separating `/`). 0 means the value
+             * has no namespace (e.g. `:foo`, `'bar`). When non-zero,
+             * `data[ns_len] == '/'` and `data[ns_len+1..len-1]` is the
+             * name. This is the only correct way to recover the
+             * original (ns, name) split — the 2-arg keyword/symbol
+             * constructor records the boundary explicitly so the
+             * (keyword "a/b" "c") vs (keyword "a" "b/c") distinction
+             * survives, matching JVM Clojure. For MINO_STRING this
+             * field is always 0. */
+            size_t ns_len;
         } s;
         struct {          /* MINO_CONS */
             mino_val_t *car;   /* first element */
