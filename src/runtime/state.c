@@ -1336,8 +1336,12 @@ unsigned int mino_tls_safepoint_count = 0;
  *    drop and re-acquire state_lock so sibling workers waiting on
  *    the same per-state lock can make progress. Without this, a
  *    fn like `(loop [i 0] (recur (inc i)))` monopolizes state_lock
- *    indefinitely. The yield window is brief (a sched_yield hint
- *    plus the mutex release-reacquire round-trip).
+ *    indefinitely. The yield window must include a brief nanosleep
+ *    -- POSIX mutex_unlock/lock is not a fair handoff, so on tight-
+ *    CPU hosts the yielding thread can re-acquire ahead of waiters
+ *    if we only call sched_yield. A 100us sleep is long enough for
+ *    the OS scheduler to wake a waiter and have it grab the mutex,
+ *    short enough to be invisible at one-per-64K-backjumps rates.
  *
  * Returns 1 to continue, 0 to abort (caller must propagate NULL).
  * The fast path is one branch on mino_tls_cancel_ptr (NULL on the
@@ -1356,8 +1360,17 @@ int mino_bc_safepoint(mino_state_t *S)
     if (S->multi_threaded
         && (++mino_tls_safepoint_count & 0xFFFFu) == 0) {
         int depth = mino_yield_lock(S);
-#if !defined(_WIN32) || !defined(_MSC_VER)
-        sched_yield();
+#if defined(_WIN32) && defined(_MSC_VER)
+        Sleep(0); /* yield time-slice */
+#else
+        {
+            struct timespec ts;
+            ts.tv_sec  = 0;
+            ts.tv_nsec = 100000L; /* 100us -- long enough for the
+                                   * scheduler to wake a waiter on
+                                   * non-fair mutex impls. */
+            nanosleep(&ts, NULL);
+        }
 #endif
         mino_resume_lock(S, depth);
     }

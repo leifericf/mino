@@ -135,10 +135,10 @@
   ;; siblings get scheduling time.
   (testing "busy-spin reader doesn't block writer futures from delivering"
     ;; Adapt n to the host's thread grant. Reserve one slot for the
-    ;; reader future + main thread; clamp [2, 4]. CI runners with
-    ;; 3-4 CPU allocations need the lower bound; high-core dev
-    ;; machines don't need the upper.
-    (let [n       (max 2 (min 4 (- (mino-thread-limit) 2)))
+    ;; reader future; on a 2-CPU GHA runner that leaves 1 writer
+    ;; (still enough to exercise the auto-yield path). Higher-budget
+    ;; hosts spawn more siblings, up to 3.
+    (let [n       (max 1 (min 3 (- (mino-thread-limit) 1)))
           ps      (vec (repeatedly n promise))
           writers (vec (for [i (range n)]
                          (future (dotimes [_ 200] :work)

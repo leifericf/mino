@@ -386,6 +386,27 @@ static void gc_mark_thread_state(mino_state_t *S)
         gc_mark_ctx_dyn_stack(S, w);
     }
     mino_worker_list_lock_release(S);
+    /* bc_current_bc: a raw pointer to the active BC fn struct
+     * (GC_T_BC allocation). Normally the fn is also reachable via
+     * its enclosing MINO_FN value (env binding, closure capture,
+     * etc.) so the GC would already keep it alive. But under a
+     * throw that longjmps past a BC frame's normal exit-time
+     * restore, ctx->bc_current_bc can briefly outlive its only
+     * other reachable owner -- e.g. an anonymous fn invoked once
+     * whose only env binding was the let frame that already
+     * unwound. Marking the cursor pin here makes the BC source
+     * map readable for :mino/location attribution on the catch
+     * side without relying on the broader fn val's reachability. */
+    if (S->main_ctx.bc_current_bc != NULL) {
+        gc_mark_interior(S, (void *)S->main_ctx.bc_current_bc);
+    }
+    mino_worker_list_lock_acquire(S);
+    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+        if (w->bc_current_bc != NULL) {
+            gc_mark_interior(S, (void *)w->bc_current_bc);
+        }
+    }
+    mino_worker_list_lock_release(S);
     gc_mark_ctx_gc_save(S, &S->main_ctx);
     mino_worker_list_lock_acquire(S);
     for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {

@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.255.29 — Fix: BC catch lands restore `bc_current_bc`; safepoint sleeps for fair handoff
+
+Two follow-ups to v0.255.27's safepoint poll + diag location work,
+surfaced by the v0.255.28 CI run on a 2-CPU ubuntu-24.04 x86_64
+runner.
+
+### `bc_current_bc` survives a longjmp out of an inner BC frame
+
+`prim_throw_classified` and `normalize_exception` (the v0.255.27
+diag-location work) now consult `ctx->bc_current_bc` first when
+attributing `:mino/location`. But when a throw inside an inner BC
+fn longjmps past that fn's normal exit-time restore, the cursor
+is left pointing at the now-popped frame. The catch handler's
+`normalize_exception` then dereferenced a soon-to-be-freed
+`bc_fn_t`, surfacing as a heap-use-after-free under ASan.
+
+Two fixes:
+
+- BC VM's OP_PUSHCATCH setjmp landing now restores
+  `ctx->bc_current_bc` to the current fn's `bc` before calling
+  `normalize_exception`, so the location resolves against the
+  catch-handler frame's source map.
+- `gc_mark_runtime_globals` now marks `ctx->bc_current_bc` as a
+  GC interior pointer for every live ctx. That covers cases the
+  setjmp restore can't (tree-walker `eval_try` landings, host
+  re-entry through `mino_pcall`), keeping the cursor alive even
+  if no fn val is otherwise reachable.
+
+### Auto-yield uses 100us nanosleep instead of `sched_yield()` only
+
+POSIX mutex unlock+lock is NOT a fair handoff: on a 2-CPU host,
+the yielding thread can re-acquire `state_lock` ahead of a
+waiter even with a `sched_yield()` between. The v0.255.28
+`async-busy-spin-does-not-starve-siblings` test hung on
+ubuntu-24.04 x86_64 because the busy-spin reader kept winning
+the lock race against the writer futures.
+
+The BC safepoint poll's auto-yield path now does a 100us
+`nanosleep` (POSIX) or `Sleep(0)` (Win32) between the
+`mino_yield_lock` release and the `mino_resume_lock` re-acquire.
+At one auto-yield per ~64K backward jumps the overhead is
+negligible on real workloads; on a pathological tight loop it
+caps throughput in a way that lets siblings actually run.
+
 ## v0.255.28 — Fix: tighten new async tests for tight-CPU CI runners
 
 Follow-up to v0.255.27: two of the new regression tests

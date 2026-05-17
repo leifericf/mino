@@ -2054,7 +2054,18 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                  * at the handler pc. Locals modified between setjmp
                  * and longjmp (pc, env, regs, retval, ok) are
                  * overwritten here; base / bc / code / match never
-                 * change after fn entry so they survive untouched. */
+                 * change after fn entry so they survive untouched.
+                 *
+                 * Restore ctx->bc_current_bc to this fn -- an inner
+                 * BC fn that threw may have left it pointing at the
+                 * inner fn (whose mino_bc_run never reached its
+                 * normal exit-time restore). Without this, any code
+                 * reading bc_current_bc on the catch-handler side
+                 * (including normalize_exception's mino_bc_source_lookup
+                 * for :mino/location) would dereference a stale
+                 * pointer once the inner fn's allocation is freed. */
+                ctx->bc_current_bc = bc;
+                ctx->bc_current_pc = (size_t)ctx->bc_catch_stack[ctx->bc_catch_depth - 1].handler_pc;
                 int d         = --ctx->bc_catch_depth;
                 int my_td     = ctx->bc_catch_stack[d].try_depth_at_push;
                 mino_val_t *ex = ctx->try_stack[my_td].exception;
