@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.255.28 — Fix: tighten new async tests for tight-CPU CI runners
+
+Follow-up to v0.255.27: two of the new regression tests
+(`async-busy-spin-does-not-starve-siblings` and
+`async-future-cancel-interrupts-cpu-bound`) failed on macos-14 and
+ubuntu-24.04 GHA runners with MTH001 `thread-limit-exceeded`. CI
+runners get ~3 CPU allocations vs 12 on dev; combined with the
+test order, prior workers were still in worker_run cleanup when
+the next spawn ran -- their thread_count slots not yet released.
+
+- busy-spin: clamp N to the host's thread grant, save the writer
+  futures and deref each after assertions, then thread-sleep 200ms
+  so post-publish cleanup completes before the next test.
+- future-cancel: existing 100ms cleanup wait bumped to 200ms.
+
+No runtime code change; just test hygiene.
+
 ## v0.255.27 — Bug-fix sweep: deref/regex/location/concurrency/cleanup
 
 Nine fixes landed in this patch, covering Clojure-canon correctness

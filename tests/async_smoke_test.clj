@@ -116,13 +116,15 @@
   ;; Fix: BC VM safepoint poll at every backward jump reads through
   ;; a TLS pointer to the worker's owning impl->cancel_flag and throws
   ;; :mino/cancelled when set. The worker unwinds, worker_run
-  ;; publishes CANCELLED, quiesce's join returns.
+  ;; publishes CANCELLED, quiesce's join completes.
   (testing "future-cancel breaks a tight recur loop and lets script exit"
     (let [f (future (loop [i 0] (recur (inc i))))]
       (thread-sleep 50)
       (future-cancel f)
-      ;; Give the worker a moment to observe the cancel and unwind.
-      (thread-sleep 100)
+      ;; Give the worker a moment to observe the cancel, unwind, and
+      ;; release its thread_count slot. CI runners with tight CPU
+      ;; budgets fail the next test's spawn otherwise.
+      (thread-sleep 200)
       (is (future-cancelled? f)))))
 
 (deftest async-busy-spin-does-not-starve-siblings
@@ -132,18 +134,31 @@
   ;; auto-yields state_lock periodically (~64K backward jumps) so
   ;; siblings get scheduling time.
   (testing "busy-spin reader doesn't block writer futures from delivering"
-    (let [n 4
-          ps (vec (repeatedly n promise))]
-      (dotimes [i n]
-        (future (dotimes [_ 200] :work)
-                (deliver (nth ps i) :done)))
-      (let [reader (future
-                     (loop [it 0]
-                       (if (every? realized? ps)
-                         :done
-                         (recur (inc it)))))]
-        (doseq [p ps] (is (= :done @p)))
-        (is (= :done @reader))))))
+    ;; Adapt n to the host's thread grant. Reserve one slot for the
+    ;; reader future + main thread; clamp [2, 4]. CI runners with
+    ;; 3-4 CPU allocations need the lower bound; high-core dev
+    ;; machines don't need the upper.
+    (let [n       (max 2 (min 4 (- (mino-thread-limit) 2)))
+          ps      (vec (repeatedly n promise))
+          writers (vec (for [i (range n)]
+                         (future (dotimes [_ 200] :work)
+                                 (deliver (nth ps i) :done))))
+          reader  (future
+                    (loop [it 0]
+                      (if (every? realized? ps)
+                        :done
+                        (recur (inc it)))))]
+      (doseq [p ps] (is (= :done @p)))
+      (is (= :done @reader))
+      ;; Deref each writer so its body has returned (publish complete),
+      ;; then sleep briefly so the worker thread can finish its post-
+      ;; publish cleanup and release its thread_count slot. Without
+      ;; this two-step, CI runners with tight CPU budgets can hit
+      ;; MTH001 on the following test's spawn even though the test
+      ;; itself only spawns one future -- the prior workers are still
+      ;; in the worker_run cleanup path with their slots reserved.
+      (doseq [w writers] (deref w))
+      (thread-sleep 200))))
 
 (deftest async-future-ex-info-data-preserved
   ;; Regression: when a future body throws (ex-info "..." {:k :v}),
