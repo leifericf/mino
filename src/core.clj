@@ -2766,9 +2766,17 @@
   ([to xf from] (transduce xf conj to from)))
 
 (defn sequence
-  "Returns a lazy sequence of applying transducer xf to coll, or to
-   the pair-wise step of multiple collections. Parallel collections
-   stop at the shortest."
+  "Coerces coll to a (possibly empty) sequence, if it is not already
+   one. Will not force a lazy seq. (sequence nil) yields ().
+
+   With a transducer xf, returns a lazy sequence of applying xf to
+   coll, or to the pair-wise step of multiple collections. Parallel
+   collections stop at the shortest."
+  ([coll]
+   (cond
+     (nil? coll)  ()
+     (seq? coll)  coll
+     :else        (or (seq coll) ())))
   ([xf coll]
    (let [acc   (atom [])
          xrf   (xf (fn

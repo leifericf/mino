@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.258.0 — `sequence` gains the 1-arg coerce-to-seq arity
+
+`(sequence coll)` was missing — only the 2- and N-arg transducer
+forms were defined, so `(sequence nil)`, `(sequence [])`, and
+`(sequence [1 2 3])` all raised `MAR002 no matching arity`. JVM
+Clojure's 1-arg form coerces its input to a (possibly empty) seq:
+`nil` and empty collections yield `()`, an already-realized seq is
+returned identically, and other seqables go through `seq`.
+
+The fix adds the missing arity to `sequence` in `src/core.clj` under
+the existing `(when (mino-installed? :transducers) ...)` block. The
+transducer-bearing arities are unchanged.
+
 ## v0.257.0 — `drop` always returns a seq, never the source collection
 
 `(drop n coll)` for `n <= 0` previously short-circuited and returned

@@ -87,6 +87,17 @@
   (is (= '(0 2 4 6 8) (take 5 (sequence (filter even?) (range)))))
   (is (= '(1 3 5 7 9) (take 5 (sequence (comp (filter even?) (map inc)) (range))))))
 
+(deftest sequence-one-arg-coerces-to-seq
+  (is (= "()"      (pr-str (sequence nil))))
+  (is (= "()"      (pr-str (sequence []))))
+  (is (= "()"      (pr-str (sequence ()))))
+  (is (= "()"      (pr-str (sequence {}))))
+  (is (= "(1 2 3)" (pr-str (sequence [1 2 3]))))
+  (is (= "(1 2 3)" (pr-str (sequence '(1 2 3)))))
+  (is (false? (vector? (sequence [1 2 3]))))
+  (let [s '(1 2 3)]
+    (is (identical? s (sequence s)))))
+
 ;; --- Early termination ---
 
 (deftest transduce-early-termination
