@@ -624,6 +624,42 @@
     (some (fn [p] (when (file-exists? (str p "/mino.edn")) p))
           candidates)))
 
+(defn- mino-bench-adjacent
+  "Path to a sibling mino-bench clone, or nil if not present.
+   perf-gate chains into mino-bench's perf_gate.clj when the
+   sibling is checked out side-by-side."
+  []
+  (let [candidates ["../mino-bench" "../../mino-bench"]]
+    (some (fn [p]
+            (when (file-exists? (str p "/benchmarks/perf_gate.clj"))
+              p))
+          candidates)))
+
+(defn perf-gate
+  "Run mino-bench/benchmarks/perf_gate.clj against the pinned
+   baseline. Fails on any timing regression past the gate's
+   threshold or any allocation drift.
+
+   When mino-bench is not checked out side-by-side, exits with a
+   warning rather than a failure: perf-gate is opt-in for
+   developers who care about the eval floor; CI invokes it from
+   the mino-bench repo directly.
+
+   On a perf change with a known cost, set MINO_PERF_GATE_RECORD=1
+   to rewrite the baseline in the same commit as the runtime change.
+
+   Not wired into release-gate by default: the perf benches take
+   tens of seconds to run, and release-gate is meant to be a
+   sub-minute pre-tag check. A perf-conscious cycle close can
+   chain to perf-gate explicitly."
+  []
+  (if-let [mb (mino-bench-adjacent)]
+    (println (sh! "sh" "-c"
+                  (str "cd " mb " && "
+                       (getenv "PWD") "/mino "
+                       "benchmarks/perf_gate.clj")))
+    (println "  perf-gate: mino-bench not adjacent -- skipped")))
+
 (defn release-gate
   "Composite pre-tag gate. Fails fast on the first non-OK check;
    the first failure is what the human reads, not a paragraph-long

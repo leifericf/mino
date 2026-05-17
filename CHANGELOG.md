@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.306.0 — `task perf-gate` chains to mino-bench
+
+A new task wraps mino-bench's `perf_gate.clj` (15 benches × 3 runs,
+allocations + timings) against the pinned baseline. When mino-bench
+isn't checked out side-by-side, perf-gate exits with a warning
+instead of failing -- the gate is opt-in for developers who care
+about the eval floor.
+
+Not wired into release-gate by default: the perf benches take
+roughly a minute to run, while release-gate is a sub-minute pre-tag
+check. A perf-conscious cycle close chains to perf-gate explicitly.
+
+`MINO_PERF_GATE_RECORD=1 ./mino task perf-gate` re-records the
+baseline in the same step. The companion mino-bench commit refreshes
+the pinned baseline against this version of the runtime.
+
 ## v0.305.0 — `MINO_CPJIT_STATS=tracing` mode
 
 The CPJIT stats facility gains a fourth mode alongside off /
