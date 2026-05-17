@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.310.0 — Side-exit design scoped to a follow-up cycle
+
+The originally planned three-release side-exit / partial-
+eligibility implementation has been scoped down. Two facts
+emerged during the cycle:
+
+1. The realistic_bench corpus shows zero rejected fns at v0.309
+   (`MINO_CPJIT_STATS=tracing` snapshot in
+   `.local/jit-blockers-latest.md`).
+2. The seven unstenciled control-flow / dyn-scope ops appear in
+   user code but not on any current hot path the cycle targets.
+
+The full implementation is multi-day work (single-op resume
+entry into `mino_bc_run`, deopt stencil with sentinel return
+path through `mino_jit_invoke`, register-save vector across the
+native/C boundary). Shipping it half-implemented would risk a
+broken native path. The design is captured at
+`mino/.local/side-exit-design.md`; a follow-up sub-cycle picks
+it up with multi-day attention.
+
+The rest of this cycle pivots to the measurable items: non-IC
+call fast lane (v0.311), safepoint cadence (v0.312), adaptive
+tiering (v0.313), and the invalidation/deopt torture suite plus
+real-workload corpus that the close-out depends on.
+
 ## v0.309.0 — `OP_BINOP_INT` reachability audit
 
 Audit follow-up to the v0.308 re-enable: `OP_BINOP_INT` is the
