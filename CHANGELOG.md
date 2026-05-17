@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.262.0 — `name` / `namespace` split at the last slash
+
+The 2-arg keyword constructor `(keyword "a/b" "c")` produces a
+qualified keyword whose name is `"c"` and whose namespace is
+`"a/b"` (matching JVM Clojure, which stores ns and name as
+separate strings). Previously `name` and `namespace` split at the
+*first* slash in the symbol/keyword's internal `"a/b/c"` form, so
+`(name (keyword "a/b" "c"))` returned `"b/c"` and `(namespace ...)`
+returned `"a"`. Both now scan for the last slash so the round-trip
+recovers the originally-passed segments.
+
 ## v0.261.0 — `condp` recognizes the `:>>` result-fn arrow
 
 `(condp pred expr ... test :>> result-fn ...)` now activates the

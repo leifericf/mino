@@ -81,6 +81,17 @@
   (is (= "str" (name "str")))
   (is (thrown? (name nil))))
 
+(deftest name-namespace-multi-segment-ns
+  ;; When the 2-arg keyword constructor receives an ns containing a
+  ;; slash, name/namespace split at the LAST slash so the round-trip
+  ;; preserves the constructed parts.
+  (let [k (keyword "a/b" "c")]
+    (is (= "c"   (name k)))
+    (is (= "a/b" (namespace k))))
+  (let [k (keyword "my.namespace" "my.key")]
+    (is (= "my.key"       (name k)))
+    (is (= "my.namespace" (namespace k)))))
+
 (deftest symbol-constructor
   (is (= 'hello (symbol "hello")))
   (is (symbol? (symbol "x")))

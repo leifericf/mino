@@ -19,9 +19,15 @@ mino_val_t *prim_name(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     if (mino_type_of(v) == MINO_KEYWORD || mino_type_of(v) == MINO_SYMBOL) {
         const char *data = v->as.s.data;
         size_t len = v->as.s.len;
-        /* For qualified names (foo/bar), return only the part after /. */
+        /* For qualified names (foo/bar), return the part after the LAST
+         * slash so multi-segment keywords like (keyword "a/b" "c")
+         * decompose back into ns "a/b" and name "c", matching JVM. */
         if (len > 1) {
-            const char *slash = memchr(data, '/', len);
+            const char *slash = NULL;
+            size_t i;
+            for (i = 0; i < len; i++) {
+                if (data[i] == '/') slash = data + i;
+            }
             if (slash != NULL) {
                 size_t after = len - (size_t)(slash - data) - 1;
                 return mino_string_n(S, slash + 1, after);
@@ -1128,7 +1134,16 @@ mino_val_t *prim_namespace(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     data = v->as.s.data;
     len  = v->as.s.len;
-    slash = memchr(data, '/', len);
+    /* Mirror prim_name's last-slash split so (namespace (keyword "a/b"
+     * "c")) returns "a/b" (matching JVM's strict-keyword construction
+     * where the ns may itself contain slashes). */
+    slash = NULL;
+    {
+        size_t i;
+        for (i = 0; i < len; i++) {
+            if (data[i] == '/') slash = data + i;
+        }
+    }
     if (slash == NULL || len == 1) return mino_nil(S);
     return mino_string_n(S, data, (size_t)(slash - data));
 }
