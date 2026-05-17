@@ -1268,6 +1268,22 @@ struct mino_state {
     size_t          gc_alloc_freelist_hits;
     size_t          gc_alloc_calloc_size_class_miss;
     size_t          gc_alloc_calloc_no_class;
+
+    /* Slab-backed bump allocator. Enabled by the MINO_BUMP_ALLOC env
+     * var on state creation. When on, gc_alloc_raw's calloc arm is
+     * replaced by a per-state bump from a linked list of fixed-size
+     * slabs. Freelist arm is unchanged (still the hot path for
+     * size-classed allocations). bump_enabled is the sticky toggle
+     * read once at init. bump_cur/bump_end are the active slab's
+     * cursor pair. bump_slabs is the head of every slab ever allocated.
+     * bump_alloc_hits / bump_slab_refills count allocator events; the
+     * counters are also surfaced via (gc-stats). */
+    int             gc_bump_enabled;
+    char           *gc_bump_cur;
+    char           *gc_bump_end;
+    struct gc_bump_slab *gc_bump_slabs;
+    size_t          gc_bump_alloc_hits;
+    size_t          gc_bump_slab_refills;
 };
 
 /* Resolve the active per-thread ctx for state S.

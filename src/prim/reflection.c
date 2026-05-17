@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[20];
-    mino_val_t *vs[20];
+    mino_val_t *ks[22];
+    mino_val_t *vs[22];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1253,7 +1253,11 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[18] = mino_int(S, (long long)S->gc_alloc_calloc_size_class_miss);
     ks[19] = mino_keyword(S, "alloc-calloc-no-class");
     vs[19] = mino_int(S, (long long)S->gc_alloc_calloc_no_class);
-    return mino_map(S, ks, vs, 20);
+    ks[20] = mino_keyword(S, "alloc-bump-hits");
+    vs[20] = mino_int(S, (long long)S->gc_bump_alloc_hits);
+    ks[21] = mino_keyword(S, "alloc-bump-slab-refills");
+    vs[21] = mino_int(S, (long long)S->gc_bump_slab_refills);
+    return mino_map(S, ks, vs, 22);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

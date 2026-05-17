@@ -128,6 +128,14 @@ static void state_init(mino_state_t *S)
     }
     S->gc_promotion_age        = 1;
     S->gc_major_growth_tenths  = 15;        /* 1.5x old-gen growth */
+    /* Bump allocator opt-in (sticky read at state init). The default
+     * stays off so the existing freelist + calloc path remains the
+     * shipped behavior; the flag is for A/B measurement on the GC
+     * cycle's wire-in release before any default-on switch. */
+    {
+        const char *bp = getenv("MINO_BUMP_ALLOC");
+        S->gc_bump_enabled = (bp != NULL && bp[0] != '\0' && bp[0] != '0');
+    }
     /* Headers popped per slice. 4096 amortizes the per-slice overhead
      * on small-heap allocation-heavy workloads; max pause rises but
      * stays under 20 ms on the GC stress shards. */
@@ -356,7 +364,7 @@ static void state_free_gc_aux(mino_state_t *S)
         gc_hdr_t *h = S->gc_freelists[i];
         while (h != NULL) {
             gc_hdr_t *next = h->next;
-            free(h);
+            if (!h->bump) free(h);
             h = next;
         }
     }
@@ -395,6 +403,7 @@ static void state_free_async(mino_state_t *S)
 static void state_free_heap(mino_state_t *S)
 {
     gc_hdr_t *h, *hnext;
+    gc_bump_slab_t *slab, *snext;
     for (h = S->gc_all_young; h != NULL; h = hnext) {
         hnext = h->next;
         if (h->type_tag == GC_T_VAL) {
@@ -403,7 +412,7 @@ static void state_free_heap(mino_state_t *S)
                 v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
             }
         }
-        free(h);
+        if (!h->bump) free(h);
     }
     for (h = S->gc_all_old; h != NULL; h = hnext) {
         hnext = h->next;
@@ -413,8 +422,17 @@ static void state_free_heap(mino_state_t *S)
                 v->as.handle.finalizer(v->as.handle.ptr, v->as.handle.tag);
             }
         }
-        free(h);
+        if (!h->bump) free(h);
     }
+    /* Bump slabs own the bump-allocated headers; free the whole slab
+     * here after finalizers have run on every header it contained. */
+    for (slab = S->gc_bump_slabs; slab != NULL; slab = snext) {
+        snext = slab->next;
+        free(slab);
+    }
+    S->gc_bump_slabs = NULL;
+    S->gc_bump_cur = NULL;
+    S->gc_bump_end = NULL;
 }
 
 /* Public JIT mode control. The fields live on mino_state directly

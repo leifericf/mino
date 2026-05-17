@@ -110,13 +110,18 @@ typedef struct {
 /* Header layout on a 64-bit target: 1+1+1+1 bytes followed by 4 bytes
  * of padding, then 8-byte size and 8-byte next. Four single-byte fields
  * fit into the padding slot that existed for type_tag/mark alone; the
- * struct size is unchanged. */
+ * struct size is unchanged. The `bump` field tags headers carved from
+ * a bump-allocator slab: those headers cannot be free()d on sweep
+ * (their memory belongs to the slab, freed only at state destruction)
+ * and never enter the per-size-class freelist (the freelist's pop arm
+ * would memset the bump flag away). */
 typedef struct gc_hdr {
     unsigned char  type_tag;
     unsigned char  mark;
     unsigned char  gen;
     unsigned char  age;
     unsigned char  dirty;  /* remset membership bit; see gc_write_barrier */
+    unsigned char  bump;   /* 1 if carved from a bump slab; never free()d */
     size_t         size;
     struct gc_hdr *next;
 } gc_hdr_t;
@@ -127,6 +132,24 @@ typedef struct {
     uintptr_t  end;
     gc_hdr_t  *h;
 } gc_range_t;
+
+/* Slab for the bump allocator. payload[] starts at the byte after the
+ * header and runs to MINO_BUMP_SLAB_BYTES total. Slabs are malloc'd
+ * page-aligned and never freed during the state's lifetime; bump
+ * cursor / end on mino_state_t advance through the head slab and
+ * a refill links a fresh slab onto the list.
+ *
+ * The bump path bypasses the per-size-class freelist arm of
+ * gc_alloc_raw; freed headers from bump-allocated slabs route to
+ * the freelist as today (the recycle path doesn't care which arm
+ * originally produced the header). Slab tail bytes that cannot
+ * hold the requested size on refill become permanent waste, which
+ * is bounded by the slab size. */
+#define MINO_BUMP_SLAB_BYTES (64u * 1024u)
+
+typedef struct gc_bump_slab {
+    struct gc_bump_slab *next;
+} gc_bump_slab_t;
 
 /* GC pin/unpin macros.
  * Always increment gc_save_len so pin/unpin pairs stay balanced even

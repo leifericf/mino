@@ -115,8 +115,14 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
         {
             int fc = gc_freelist_class(h->size);
             if (fc >= 0) {
+                /* Bump and calloc-origin headers both round-trip through
+                 * the freelist; gc_alloc_raw preserves h->bump across
+                 * the memset that resets pulled headers. */
                 h->next            = S->gc_freelists[fc];
                 S->gc_freelists[fc] = h;
+            } else if (h->bump) {
+                /* No size class: bump-origin leaks in its slab until
+                 * state destruction frees the whole slab. */
             } else {
                 free(h);
             }

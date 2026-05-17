@@ -187,25 +187,70 @@ static void gc_driver_tick(mino_state_t *S, size_t alloc_size)
     gc_tick_idle(S);
 }
 
+/* Slab-backed bump allocator. Allocates a fresh 64 KiB slab via calloc
+ * and zeroes it (the bump fast path relies on slab memory being zero
+ * so headers are returned in calloc-equivalent state without a per-alloc
+ * memset). Links the slab onto S->gc_bump_slabs and parks the cursor
+ * pair at the start of the usable payload region. Returns 0 on calloc
+ * failure (caller falls back to plain calloc per allocation). */
+static int gc_bump_slab_refill(mino_state_t *S)
+{
+    gc_bump_slab_t *slab;
+    slab = (gc_bump_slab_t *)calloc(1, MINO_BUMP_SLAB_BYTES);
+    if (slab == NULL) return 0;
+    slab->next = S->gc_bump_slabs;
+    S->gc_bump_slabs = slab;
+    S->gc_bump_cur = (char *)slab + sizeof(*slab);
+    S->gc_bump_end = (char *)slab + MINO_BUMP_SLAB_BYTES;
+    S->gc_bump_slab_refills++;
+    return 1;
+}
+
 /* gc_alloc_raw -- pure mechanism: pull a header from the freelist (when
- * a size-class slot is available) or calloc a fresh one, initialize the
- * header fields, link onto the young list, register with the range
- * index, and emit the alloc event. Returns NULL on calloc failure; no
- * GC, no fault-injection, no OOM recovery here -- those are the policy
- * wrapper's job. */
+ * a size-class slot is available), bump from the slab arena when the
+ * bump allocator is enabled and the alloc fits, or calloc a fresh one;
+ * initialize the header fields, link onto the young list, register with
+ * the range index, and emit the alloc event. Returns NULL on alloc
+ * failure; no GC, no fault-injection, no OOM recovery here -- those
+ * are the policy wrapper's job. */
 static gc_hdr_t *gc_alloc_raw(mino_state_t *S, unsigned char tag,
                               size_t size)
 {
-    gc_hdr_t *h;
+    gc_hdr_t *h = NULL;
     int       fc;
     /* Try free list first for fixed-size allocations. */
     fc = gc_freelist_class(size);
     if (fc >= 0 && S->gc_freelists[fc] != NULL) {
+        unsigned char was_bump;
         h = S->gc_freelists[fc];
         S->gc_freelists[fc] = h->next;
+        was_bump = h->bump;
         memset(h, 0, sizeof(*h) + size);
+        h->bump = was_bump;
         S->gc_alloc_freelist_hits++;
+    } else if (S->gc_bump_enabled) {
+        /* Bump path: zero-fill comes for free from the slab's calloc.
+         * Total = header + payload, rounded up to 8 bytes for alignment.
+         * Oversized requests (won't fit in a slab) bypass bump and fall
+         * through to the calloc arm. */
+        size_t total = sizeof(*h) + size;
+        total = (total + 7u) & ~(size_t)7u;
+        if (total <= MINO_BUMP_SLAB_BYTES - sizeof(gc_bump_slab_t)) {
+            if ((size_t)(S->gc_bump_end - S->gc_bump_cur) < total) {
+                if (!gc_bump_slab_refill(S)) {
+                    /* Slab refill failed; fall through to plain calloc. */
+                    goto calloc_path;
+                }
+            }
+            h = (gc_hdr_t *)S->gc_bump_cur;
+            S->gc_bump_cur += total;
+            h->bump = 1;
+            S->gc_bump_alloc_hits++;
+        } else {
+            goto calloc_path;
+        }
     } else {
+    calloc_path:
         h = (gc_hdr_t *)calloc(1, sizeof(*h) + size);
         if (h == NULL) return NULL;
         if (fc >= 0) {

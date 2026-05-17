@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.299.0 — Slab-backed bump allocator (opt-in)
+
+A new bump-allocator path lives alongside the existing freelist arm
+in `gc_alloc_raw`. When `MINO_BUMP_ALLOC` is set at state creation,
+allocations that miss the per-size-class freelist are carved from a
+64 KiB slab via a single cursor advance instead of going through
+`calloc`. Slabs are appended on-demand, never freed until state
+destruction.
+
+`gc_hdr_t` gains a one-byte `bump` flag (slotted into existing
+header padding; struct size unchanged) so sweep paths skip
+`free()` on slab-resident headers and the freelist round-trip
+preserves the flag through the pull-side memset.
+
+Default off in this release. The wire-in to default-on plus the
+full A/B measurement against the realistic_bench corpus lands in
+v0.300.0. `(gc-stats)` exposes two new counters
+(`:alloc-bump-hits`, `:alloc-bump-slab-refills`) so embedders can
+observe the path without driving it.
+
 ## v0.298.0 — Alloc-source probe in `(gc-stats)`
 
 `(gc-stats)` gains three counters exposing where every allocation
