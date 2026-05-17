@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.267.0 — Nested patterns inside map destructuring
+
+The pattern position of `{pattern :key}` now accepts vector and
+map patterns in addition to bare symbols, so
+`(let [{a :a, [lhs rhs] :c} {:a 1, :c [:foo :bar]}] ...)` binds
+`lhs` and `rhs` to `:foo` and `:bar` respectively. The recursive
+`bind_form` already knew how to walk vector/map patterns; the
+runtime map-destructure path just wasn't passing them through.
+`:or` defaults still apply only to leaf-symbol bindings (matching
+JVM).
+
 ## v0.266.0 — Symbols callable as keyword-style lookups
 
 `('sym m)` and `('sym m default)` now return the value at the

@@ -145,6 +145,18 @@
         {person-name k} {:name "john"}]
     (is (= "john" person-name))))
 
+(deftest map-destructure-nested-patterns
+  ;; The binding position in {pattern :key} may itself be a vector
+  ;; or map pattern; recursive destructure binds its elements.
+  (let [{a :a, [lhs rhs] :c} {:a 1, :c [:foo :bar]}]
+    (is (= 1     a))
+    (is (= :foo  lhs))
+    (is (= :bar  rhs)))
+  (let [{a :a, {x :x y :y} :inner} {:a 1 :inner {:x 10 :y 20}}]
+    (is (= 1  a))
+    (is (= 10 x))
+    (is (= 20 y))))
+
 (deftest map-destructure-defaults
   (let [{:keys [x y] :or {x 10 y 20}} {:x 5}]
     (is (= 5 x))

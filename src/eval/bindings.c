@@ -295,13 +295,17 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
         } else if (mino_type_of(pkey) == MINO_KEYWORD && pkey->as.s.len == 2
                    && memcmp(pkey->as.s.data, "as", 2) == 0) {
             as_sym = pval;
-        } else if (mino_type_of(pkey) == MINO_SYMBOL) {
-            /* Explicit binding: {sym :key}.
-             * Per JVM Clojure, the RHS in this position is an
-             * expression, not a literal — `{sym k}` looks up
-             * whatever `k` resolves to in the surrounding scope.
-             * Self-evaluating forms (keywords, strings, numbers)
-             * pass through unchanged. */
+        } else if (mino_type_of(pkey) == MINO_SYMBOL
+                   || mino_type_of(pkey) == MINO_VECTOR
+                   || mino_type_of(pkey) == MINO_MAP) {
+            /* Explicit binding: {pattern :key} where pattern may be
+             * a symbol (leaf binding) or a nested vector/map pattern
+             * (recursive destructure). Per JVM Clojure, the RHS in
+             * the value position is an expression, not a literal:
+             * `{sym k}` looks up whatever `k` resolves to in the
+             * surrounding scope. Self-evaluating forms (keywords,
+             * strings, numbers) pass through unchanged. */
+            int is_leaf = mino_type_of(pkey) == MINO_SYMBOL;
             mino_val_t *lookup_key = pval;
             mino_val_t *found = NULL;
             if (pval != NULL && mino_type_of(pval) == MINO_SYMBOL) {
@@ -312,10 +316,14 @@ static int bind_map_destructure(mino_state_t *S, mino_env_t *env,
                 found = map_get_val(val, lookup_key);
             }
             if (found == NULL && or_map != NULL && mino_type_of(or_map) == MINO_MAP) {
-                mino_val_t *deflt = map_get_val(or_map, pkey);
-                if (deflt != NULL) {
-                    found = eval(S, deflt, env);
-                    if (found == NULL) return 0;
+                /* :or only allows defaults keyed by leaf symbols; nested
+                 * patterns don't have a single key to look up. */
+                if (is_leaf) {
+                    mino_val_t *deflt = map_get_val(or_map, pkey);
+                    if (deflt != NULL) {
+                        found = eval(S, deflt, env);
+                        if (found == NULL) return 0;
+                    }
                 }
             }
             if (found == NULL) found = mino_nil(S);
