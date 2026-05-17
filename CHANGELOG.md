@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Fix: `eval_current_form` restored after sub-eval
+
+When eval recursed into a sub-form, `eval_current_form` was
+overwritten but never restored on return. Any throw that fired
+later -- e.g. a thread-limit throw from inside `mino_future_spawn`
+after `eval_args` had finished walking the argument list -- blamed
+the last sub-form's source location instead of the active call
+form's. Across test files, the "last sub-form" could be in a
+previously loaded file, so `:mino/location` reported a wrong
+filename entirely (the BUG was filed against
+`tests/bc_closure_test.clj` reporting locations from
+`tests/bc_binding_test.clj`).
+
+`eval_impl`'s MINO_CONS branch now saves the previous
+`eval_current_form` on entry and restores it before every return
+path (host syntax, special form, regular call). Throws that fire
+from a primitive after eval has handed off (e.g. arity errors
+from a prim called via `apply_callable`) now see the call form,
+not the last argument.
+
+Regression in `tests/bc_error_quality_test.clj`
+(`eval-current-form-restored-after-subeval`).
+
 ### Fix: regex inline flags `(?i)` / `(?s)` / `(?m)` / `(?x)`
 
 JVM Pattern-style inline-flag ops are now supported. Previously

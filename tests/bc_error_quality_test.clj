@@ -53,4 +53,32 @@
       ;; layer wraps it but the location is still attached.
       (is (some? e)))))
 
+(deftest eval-current-form-restored-after-subeval
+  ;; Regression: eval_current_form was set on MINO_CONS eval entry
+  ;; but never restored when sub-evals returned. Any throw fired
+  ;; after eval_args walked the argument list -- e.g. a thread-limit
+  ;; throw from inside mino_future_spawn -- blamed the last sub-form
+  ;; instead of the call form. Across test files, the "last sub-form"
+  ;; could be in a previously loaded file, so :mino/location reported
+  ;; a wrong filename entirely.
+  ;;
+  ;; This test pins the contract: when an inner form's eval finishes
+  ;; cleanly and a later throw fires from the same outer form's
+  ;; processing, the location resolves to the outer form, not the
+  ;; inner one.
+  (testing "throw via a prim that fires after eval_args restores location"
+    ;; Force the classifier through the eval_current_form path by
+    ;; calling a primitive whose throw doesn't carry its own form.
+    ;; (assoc nil) is a 1-arg arity error from prim_assoc that fires
+    ;; AFTER the (nil) arg has been eval'd; on the broken path the
+    ;; location reported the inner nil literal's position (often
+    ;; (0,0) since nil literals carry no source info), on the fixed
+    ;; path it reports the (assoc nil) call form.
+    (let [e   (try (assoc nil) (catch e e))
+          loc (diag-location e)]
+      (is (some? e))
+      (is (some? loc))
+      (is (some? (:line loc)))
+      (is (> (:line loc) 0)))))
+
 ;; (run-tests) -- called by tests/run.clj

@@ -1078,9 +1078,20 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         mino_val_t *head = form->as.cons.car;
         mino_val_t *args = form->as.cons.cdr;
         mino_val_t *host_result;
+        mino_val_t *result;
+        /* Save and restore eval_current_form around the recursive
+         * descent so a parent form's source span doesn't get clobbered
+         * by a child sub-eval. Without this, eval_current_form lingers
+         * at the LAST sub-form evaluated, so any throw that fires
+         * after eval returns (e.g. a thread-limit throw from inside
+         * mino_future_spawn, after eval_args has finished walking the
+         * argument list) blames the wrong source location -- often a
+         * form from a previously-loaded test file. */
+        const mino_val_t *prev_form = mino_current_ctx(S)->eval_current_form;
         mino_current_ctx(S)->eval_current_form = form;
 
         if (eval_try_host_syntax(S, form, head, args, env, &host_result)) {
+            mino_current_ctx(S)->eval_current_form = prev_form;
             return host_result;
         }
 
@@ -1090,12 +1101,15 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
             mino_val_t *sf_result;
             if (eval_try_special_form(S, form, head, args, env, tail,
                                       &sf_result)) {
+                mino_current_ctx(S)->eval_current_form = prev_form;
                 return sf_result;
             }
         }
 
         /* Function or macro application. */
-        return eval_apply_regular_call(S, form, head, args, env, tail);
+        result = eval_apply_regular_call(S, form, head, args, env, tail);
+        mino_current_ctx(S)->eval_current_form = prev_form;
+        return result;
     }
     }
     set_eval_diag(S, mino_current_ctx(S)->eval_current_form, "internal", "MIN001", "eval: unknown value type");
