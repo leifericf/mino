@@ -315,6 +315,48 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_rem_ii_relocs, stencil_op_rem_ii_nrelocs,
         0u
     },
+    {
+        OP_BAND_II,
+        stencil_op_band_ii_bytes, stencil_op_band_ii_size,
+        stencil_op_band_ii_symbols, stencil_op_band_ii_nsymbols,
+        stencil_op_band_ii_relocs, stencil_op_band_ii_nrelocs,
+        0u
+    },
+    {
+        OP_BOR_II,
+        stencil_op_bor_ii_bytes, stencil_op_bor_ii_size,
+        stencil_op_bor_ii_symbols, stencil_op_bor_ii_nsymbols,
+        stencil_op_bor_ii_relocs, stencil_op_bor_ii_nrelocs,
+        0u
+    },
+    {
+        OP_BXOR_II,
+        stencil_op_bxor_ii_bytes, stencil_op_bxor_ii_size,
+        stencil_op_bxor_ii_symbols, stencil_op_bxor_ii_nsymbols,
+        stencil_op_bxor_ii_relocs, stencil_op_bxor_ii_nrelocs,
+        0u
+    },
+    {
+        OP_SHL_II,
+        stencil_op_shl_ii_bytes, stencil_op_shl_ii_size,
+        stencil_op_shl_ii_symbols, stencil_op_shl_ii_nsymbols,
+        stencil_op_shl_ii_relocs, stencil_op_shl_ii_nrelocs,
+        0u
+    },
+    {
+        OP_SHR_II,
+        stencil_op_shr_ii_bytes, stencil_op_shr_ii_size,
+        stencil_op_shr_ii_symbols, stencil_op_shr_ii_nsymbols,
+        stencil_op_shr_ii_relocs, stencil_op_shr_ii_nrelocs,
+        0u
+    },
+    {
+        OP_USHR_II,
+        stencil_op_ushr_ii_bytes, stencil_op_ushr_ii_size,
+        stencil_op_ushr_ii_symbols, stencil_op_ushr_ii_nsymbols,
+        stencil_op_ushr_ii_relocs, stencil_op_ushr_ii_nrelocs,
+        0u
+    },
     /* OP_LOOP_INT_LT intentionally absent: measurement against the
      * interpreter's inline fast path showed a 17% regression on the
      * canonical `count-loop` workload. The bytecode compiler still

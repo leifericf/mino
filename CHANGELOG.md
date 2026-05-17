@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.288.0 — Stencils for the bitwise int family
+
+JIT now compiles the bitwise int ops: `OP_BAND_II`, `OP_BOR_II`,
+`OP_BXOR_II`, `OP_SHL_II`, `OP_SHR_II`, `OP_USHR_II`. Each stencil
+inlines the tagged-int fast lane (and / or / xor are unconditional;
+shifts guard `[0, 63]` on the amount, and shl / ushr range-check the
+result the same way add_ii does).
+
+Previously any fn body that used one of these ops was rejected by the
+JIT eligibility classifier even though the bytecode interpreter has
+inline fast lanes for all six.
+
+Measured on Apple Silicon, 1M-iter loop kernels:
+
+| op    | off (ms) | on (ms) | speedup |
+|-------|---------:|--------:|--------:|
+| band  |    19.85 |    2.90 |  6.85×  |
+| bor   |    19.86 |    2.49 |  7.98×  |
+| bxor  |    20.13 |    2.51 |  8.02×  |
+| shl   |    27.85 |    3.91 |  7.12×  |
+| shr   |    22.08 |    2.94 |  7.51×  |
+| ushr  |    22.55 |    3.10 |  7.27×  |
+
 ## v0.287.0 — Stencils for `mod` / `quot` / `rem`
 
 JIT now compiles the int divide family (`OP_MOD_II`, `OP_QUOT_II`,

@@ -52,6 +52,13 @@
 (defn p-quot-ii [a b] (quot a b))
 (defn p-rem-ii  [a b] (rem a b))
 
+(defn p-band-ii [a b] (bit-and a b))
+(defn p-bor-ii  [a b] (bit-or a b))
+(defn p-bxor-ii [a b] (bit-xor a b))
+(defn p-shl-ii  [a b] (bit-shift-left a b))
+(defn p-shr-ii  [a b] (bit-shift-right a b))
+(defn p-ushr-ii [a b] (unsigned-bit-shift-right a b))
+
 ;; IK variants: rhs immediate fits in signed 8-bit, lhs comes from a
 ;; param. The bc compiler folds the literal into the C field of the
 ;; encoded instruction, so `(+ a 1)` emits OP_ADD_IK with sC=1.
@@ -71,7 +78,9 @@
     (p-inc-i 1)    (p-dec-i 1)    (p-zero-int-p 0)
     (p-add-ik-1 3) (p-add-ik-127 3) (p-sub-ik-1 3)
     (p-sub-ik-128 3) (p-lt-ik-10 5) (p-le-ik-10 10) (p-eq-ik-7 7)
-    (p-mod-ii 10 3) (p-quot-ii 10 3) (p-rem-ii 10 3)))
+    (p-mod-ii 10 3) (p-quot-ii 10 3) (p-rem-ii 10 3)
+    (p-band-ii 7 3) (p-bor-ii 4 2) (p-bxor-ii 6 5)
+    (p-shl-ii 1 3) (p-shr-ii 16 2) (p-ushr-ii 16 2)))
 
 (deftest -aaa-warm-all
   ;; Runs first (alphabetical leading-dash); warms every parity fn
@@ -278,6 +287,47 @@
 
 (deftest rem-ii-divide-by-zero-throws
   (is (thrown? (p-rem-ii 10 0))))
+
+;; ---- Section 4c: bitwise int ops ---------------------------------
+
+(deftest band-ii-normal
+  (is (= 3 (p-band-ii 7 3))))
+
+(deftest band-ii-all-bits
+  (is (= 0 (p-band-ii 0 +max+))))
+
+(deftest bor-ii-normal
+  (is (= 7 (p-bor-ii 5 2))))
+
+(deftest bxor-ii-normal
+  (is (= 6 (p-bxor-ii 5 3))))
+
+(deftest bxor-ii-self
+  (is (= 0 (p-bxor-ii 42 42))))
+
+(deftest shl-ii-normal
+  (is (= 8 (p-shl-ii 1 3))))
+
+(deftest shl-ii-overflow-tag-escape
+  ;; Shifting MAX-fitting value far enough lands outside the inline
+  ;; range; slow path's mino_int_wrap matches the prim's wrap semantics.
+  (is (= (p-shl-ii (quot +max+ 2) 2)
+         (bit-shift-left (quot +max+ 2) 2))))
+
+(deftest shr-ii-normal
+  (is (= 4 (p-shr-ii 16 2))))
+
+(deftest shr-ii-negative
+  ;; Arithmetic right shift preserves the sign bit.
+  (is (= -1 (p-shr-ii -1 63))))
+
+(deftest ushr-ii-normal
+  (is (= 4 (p-ushr-ii 16 2))))
+
+(deftest ushr-ii-negative
+  ;; Unsigned right shift of -1 by 1 = 0x7fff... -- outside tagged
+  ;; range; slow path's mino_int_wrap matches the prim's semantics.
+  (is (= (unsigned-bit-shift-right -1 1) (p-ushr-ii -1 1))))
 
 ;; ---- Section 5: loop-shape parity --------------------------------
 ;;
