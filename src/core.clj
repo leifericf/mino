@@ -1024,14 +1024,18 @@
      (let [~x (first s#)] ~@body)))
 
 (defmacro letfn
-  "Binds local functions. Each binding is (name [params] body...)."
+  "Binds local functions. Each binding is (name [params] body...).
+   Expands to the `letfn*` special form so the bound fns can refer
+   to each other (mutual recursion) — every name is placeholder-
+   bound before any fn body is evaluated, so each fn's closure
+   captures the shared scope."
   [bindings & body]
   (let [pairs (vec (mapcat
                      (fn [b]
                        [(first b)
                         (apply list 'fn (first b) (rest b))])
                      bindings))]
-    `(let [~@pairs] ~@body)))
+    `(letfn* ~pairs ~@body)))
 
 (defmacro set!
   "Mutates a thread-local dynamic-var binding to the given value.

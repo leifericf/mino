@@ -685,6 +685,68 @@ mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
     return eval_implicit_do_impl(S, body, local, tail);
 }
 
+/* (letfn* [name fn-form name fn-form ...] body ...)
+ *
+ * Special form behind the public `letfn` macro. Pre-binds every name
+ * in a single child env (placeholders), evaluates each fn form in
+ * that env so the resulting closure captures the shared scope, and
+ * then mutates the env slot to the evaluated fn. Mutual recursion
+ * works because the closures all share the same env reference; by
+ * the time any of them is called, every slot has been filled.
+ *
+ * Mirrors JVM Clojure's `letfn*`, which is the special form that
+ * the public `letfn` macro expands to. */
+mino_val_t *eval_letfn_star(mino_state_t *S, mino_val_t *form,
+                            mino_val_t *args, mino_env_t *env, int tail)
+{
+    mino_val_t *bindings;
+    mino_val_t *body;
+    mino_env_t *local;
+    size_t      vlen;
+    size_t      vi;
+    if (!mino_is_cons(args)) {
+        set_eval_diag(S, form, "syntax", "MSY001",
+            "letfn* requires a binding vector and body");
+        return NULL;
+    }
+    bindings = args->as.cons.car;
+    body     = args->as.cons.cdr;
+    if (bindings == NULL || mino_type_of(bindings) != MINO_VECTOR) {
+        set_eval_diag(S, form, "syntax", "MSY003",
+            "letfn* bindings must be a vector");
+        return NULL;
+    }
+    vlen = bindings->as.vec.len;
+    if (vlen % 2 != 0) {
+        set_eval_diag(S, form, "syntax", "MSY003",
+            "letfn* vector bindings must have even number of forms");
+        return NULL;
+    }
+    local = env_child(S, env);
+    /* Pass 1: pre-bind every name to nil so the closures created in
+     * pass 2 can resolve sibling names without unbound-symbol errors. */
+    for (vi = 0; vi < vlen; vi += 2) {
+        mino_val_t *sym = vec_nth(bindings, vi);
+        if (sym == NULL || mino_type_of(sym) != MINO_SYMBOL) {
+            set_eval_diag(S, form, "syntax", "MSY003",
+                "letfn* binding names must be symbols");
+            return NULL;
+        }
+        env_bind_sym(S, local, sym, mino_nil(S));
+    }
+    /* Pass 2: evaluate each fn form in the now-populated env and
+     * re-bind the name to the closure. env_bind reuses the existing
+     * slot, so the closures' captured env sees the final fn. */
+    for (vi = 0; vi < vlen; vi += 2) {
+        mino_val_t *sym  = vec_nth(bindings, vi);
+        mino_val_t *form2 = vec_nth(bindings, vi + 1);
+        mino_val_t *fn_val = eval_value(S, form2, local);
+        if (fn_val == NULL) return NULL;
+        env_bind_sym(S, local, sym, fn_val);
+    }
+    return eval_implicit_do_impl(S, body, local, tail);
+}
+
 mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
                       mino_val_t *args, mino_env_t *env, int tail)
 {

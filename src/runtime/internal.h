@@ -1002,6 +1002,13 @@ struct mino_state {
     /* Gensym counter */
     long            gensym_counter;
 
+    /* `letfn*` special form symbol. Lives down here (rather than in
+     * the sf_* block above) because that block sits at byte offsets
+     * pinned by the JIT layout assertions in
+     * src/eval/bc/stencils/runtime_layout.h. New special-form symbols
+     * land after the layout-tracked region. */
+    mino_val_t     *sf_letfn_star;
+
     /* Host-retained value refs */
     mino_ref_t     *ref_roots;
 

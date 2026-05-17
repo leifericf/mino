@@ -252,7 +252,17 @@
                         ([x] x)
                         ([x y] (+ x y))
                         ([x y z] (+ x y z)))]
-               (add 1 2 3))))))
+               (add 1 2 3)))))
+
+  (testing "mutual recursion"
+    ;; Each fn's closure captures the same env, so forward references
+    ;; resolve at call time.
+    (is (= :odd (letfn [(my-even? [n] (if (zero? n) :even (my-odd?  (dec n))))
+                        (my-odd?  [n] (if (zero? n) :odd  (my-even? (dec n))))]
+                  (my-even? 7))))
+    (is (= :even (letfn [(my-even? [n] (if (zero? n) :even (my-odd?  (dec n))))
+                         (my-odd?  [n] (if (zero? n) :odd  (my-even? (dec n))))]
+                   (my-even? 6))))))
 
 ;; --- defonce ---
 

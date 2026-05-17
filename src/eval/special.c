@@ -424,6 +424,7 @@ static void sf_init(mino_state_t *S)
     S->sf_do               = mino_symbol(S, "do");
     S->sf_let              = mino_symbol(S, "let");
     S->sf_let_star         = mino_symbol(S, "let*");
+    S->sf_letfn_star       = mino_symbol(S, "letfn*");
     S->sf_fn               = mino_symbol(S, "fn");
     S->sf_fn_star          = mino_symbol(S, "fn*");
     S->sf_recur            = mino_symbol(S, "recur");

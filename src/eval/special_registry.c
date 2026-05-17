@@ -289,6 +289,7 @@ static const special_form_entry k_special_forms[] = {
     SF(sf_do,               "do",               eval_do),
     SF(sf_let,              "let",              eval_let),
     SF(sf_let_star,         "let*",             eval_let),
+    SF(sf_letfn_star,       "letfn*",           eval_letfn_star),
     SF(sf_fn,               "fn",               eval_fn),
     SF(sf_fn_star,          "fn*",              eval_fn),
     SF(sf_recur,            "recur",            eval_recur),

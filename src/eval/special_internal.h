@@ -52,6 +52,8 @@ mino_val_t *eval_ns(mino_state_t *S, mino_val_t *form,
 /* bindings.c */
 mino_val_t *eval_let(mino_state_t *S, mino_val_t *form,
                      mino_val_t *args, mino_env_t *env, int tail);
+mino_val_t *eval_letfn_star(mino_state_t *S, mino_val_t *form,
+                            mino_val_t *args, mino_env_t *env, int tail);
 mino_val_t *eval_loop(mino_state_t *S, mino_val_t *form,
                       mino_val_t *args, mino_env_t *env, int tail);
 mino_val_t *eval_binding(mino_state_t *S, mino_val_t *form,

@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.274.0 — `letfn` supports mutual recursion via `letfn*` special form
+
+The `letfn` macro previously expanded to a sequential `let`, which
+created a new env layer per binding — each fn's closure could only
+see bindings declared before it. JVM Clojure handles this through a
+`letfn*` special form that pre-binds every name (with placeholder
+values) in a single env, evaluates each fn body against that fully-
+populated env, and then mutates the slot to the evaluated fn.
+
+Mino now ships the same special form. `letfn` macro-expands to
+`letfn*`, so existing user code that depended on mutual recursion
+among local fns (`trampoline` / state-machine idioms) starts
+working.
+
+The new field for the `letfn*` symbol lives after the
+JIT-layout-pinned region of `mino_state` so the
+`runtime_layout.h` offsets are unaffected.
+
 ## v0.273.0 — `merge-with` returns a single non-map input as-is
 
 JVM Clojure's `(merge-with f x)` with a single non-map input
