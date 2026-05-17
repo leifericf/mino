@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.260.0 — `subseq` / `rsubseq` 5-arg form matches JVM Clojure semantics
+
+The 5-arg `(subseq sc start-test start-key end-test end-key)` form
+previously required `start-test ∈ {>, >=}` and `end-test ∈ {<, <=}`
+and performed a strict-bounds scan, rejecting any other test
+orientations with a type error. JVM Clojure permits any of `<`,
+`<=`, `>`, `>=` in either position and gives them a specific
+seqFrom-and-filter semantics: scan from `start-key` forward (for
+`subseq`) or `end-key` backward (for `rsubseq`), drop the first
+element if its pivot test fails, then `take-while` the other test.
+
+The C primitive now mirrors that semantics. The 3-arg form is
+unchanged. Empty-result behavior also tracks JVM: when seqFrom
+returned a non-empty list but the take-while drained it, the 5-arg
+form returns `()` rather than `nil` (matching the lazy-seq path
+JVM produces); when the sorted collection has no elements at or
+past the pivot, the result remains `nil`.
+
+The previous "rejects-bad-args" tests that pinned the strict
+interpretation have been replaced with positive tests covering the
+JVM-shape forms.
+
 ## v0.259.0 — `mapv` gains the multi-collection arity
 
 `(mapv f c1 c2 ...)` previously raised `MAR001 mapv requires 2

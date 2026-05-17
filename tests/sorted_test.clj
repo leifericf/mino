@@ -153,7 +153,7 @@
 
 (deftest subseq-empty-range
   (let [m (sorted-map 1 :a 5 :b 10 :c)]
-    (is (nil? (subseq m > 5 < 5)))
+    (is (= '() (subseq m > 5 < 5)))
     (is (nil? (subseq m > 100)))))
 
 (deftest subseq-empty-coll
@@ -162,8 +162,25 @@
 
 (deftest subseq-rejects-bad-args
   (is (thrown? (subseq [1 2 3] >= 1)))       ; not sorted
-  (is (thrown? (subseq (sorted-map) map 3))) ; test not comparison
-  (is (thrown? (subseq (sorted-map) < 1 > 5)))  ; start-test must be > family
-  (is (thrown? (subseq (sorted-map) >= 1 > 5)))) ; end-test must be < family
+  (is (thrown? (subseq (sorted-map) map 3)))) ; test not a comparison
+
+(deftest subseq-five-arg-jvm-semantics
+  ;; Five-arg subseq matches JVM Clojure: seqFrom start-key forward,
+  ;; drop first if start-test fails on it, then takeWhile end-test.
+  ;; start-test and end-test may each be any of <, <=, > or >=.
+  (let [s (sorted-set 0 1 2 3 4 5 6 7 8 9)]
+    (is (= '()             (subseq s < 9 > 2)))
+    (is (= '(3 4 5 6 7 8)  (subseq s > 2 < 9)))
+    (is (= '()             (subseq s > 2 > 6)))
+    (is (= '(2 3 4)        (subseq s >= 2 <= 4)))
+    (is (= '(4 5 6 7 8 9)  (subseq s <= 4 >= 2)))
+    (is (= '(4 5 6 7 8 9)  (subseq s >= 4 >= 2)))))
+
+(deftest rsubseq-five-arg-jvm-semantics
+  ;; Five-arg rsubseq mirrors subseq descending: seqFrom end-key
+  ;; backward, drop first if end-test fails, then takeWhile start-test.
+  (let [s (sorted-set 1 2 3 4 5)]
+    (is (= '(4 3 2) (rsubseq s >= 2 <= 4)))
+    (is (= '(2 1)   (rsubseq s <= 4 >= 2)))))
 
 ;; (run-tests) -- called by tests/run.clj

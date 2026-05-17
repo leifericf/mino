@@ -2695,20 +2695,19 @@ static int classify_subseq_test(const mino_val_t *v, int *is_gt, int *inclusive)
  * Three-arg form: (subseq sc test key)
  *   A > or >= test means "entries whose key is > / >= key" (lower bound).
  *   A < or <= test means "entries whose key is < / <= key" (upper bound).
+ *
  * Five-arg form: (subseq sc start-test start-key end-test end-key)
- *   start-test must be > or >=, end-test must be < or <=. Both bounds
- *   apply. */
+ *   Matches JVM Clojure: for subseq, scan ascending from start-key,
+ *   drop the first element if start-test fails on it, then takeWhile
+ *   end-test. For rsubseq, scan descending from end-key, drop the
+ *   first element if end-test fails, then takeWhile start-test.
+ *   start-test/end-test must each be one of <, <=, >, >=. */
 static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
 {
     size_t n;
     mino_val_t *sc;
     mino_val_t *head = mino_nil(S);
     mino_val_t *tail = NULL;
-    int has_lo = 0, lo_inclusive = 0;
-    int has_hi = 0, hi_inclusive = 0;
-    mino_val_t *lo_key = NULL;
-    mino_val_t *hi_key = NULL;
-    const char *name = reverse ? "rsubseq" : "subseq";
     int is_map;
     arg_count(S, args, &n);
     if (n != 3 && n != 5) {
@@ -2726,11 +2725,14 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
               : "subseq: first argument must be a sorted map or sorted set");
     }
     is_map = mino_type_of(sc) == MINO_SORTED_MAP;
-    (void)name;
     if (n == 3) {
         mino_val_t *test = args->as.cons.cdr->as.cons.car;
         mino_val_t *key  = args->as.cons.cdr->as.cons.cdr->as.cons.car;
         int is_gt, inclusive;
+        int has_lo = 0, lo_inclusive = 0;
+        int has_hi = 0, hi_inclusive = 0;
+        mino_val_t *lo_key = NULL;
+        mino_val_t *hi_key = NULL;
         if (!classify_subseq_test(test, &is_gt, &inclusive)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 reverse
@@ -2742,35 +2744,117 @@ static mino_val_t *subseq_impl(mino_state_t *S, mino_val_t *args, int reverse)
         } else {
             has_hi = 1; hi_inclusive = inclusive; hi_key = key;
         }
-    } else {
+        if (sc->as.sorted.len == 0) return mino_nil(S);
+        rb_bounded_seq(S, sc->as.sorted.root, is_map,
+                       has_lo, lo_inclusive, lo_key,
+                       has_hi, hi_inclusive, hi_key,
+                       sc->as.sorted.comparator, reverse,
+                       &head, &tail);
+        return head;
+    }
+    {
         mino_val_t *p = args->as.cons.cdr;
         mino_val_t *start_test = p->as.cons.car; p = p->as.cons.cdr;
         mino_val_t *start_key  = p->as.cons.car; p = p->as.cons.cdr;
         mino_val_t *end_test   = p->as.cons.car; p = p->as.cons.cdr;
         mino_val_t *end_key    = p->as.cons.car;
-        int is_gt, inclusive;
-        if (!classify_subseq_test(start_test, &is_gt, &inclusive) || !is_gt) {
+        int start_is_gt, start_inclusive;
+        int end_is_gt, end_inclusive;
+        mino_val_t *raw_head = mino_nil(S);
+        mino_val_t *raw_tail = NULL;
+        mino_val_t *result_head = mino_nil(S);
+        mino_val_t *result_tail = NULL;
+        mino_val_t *pivot_key;
+        int pivot_inclusive;
+        int filter_is_gt, filter_inclusive;
+        mino_val_t *filter_key;
+        mino_val_t *cur;
+        if (!classify_subseq_test(start_test, &start_is_gt, &start_inclusive)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 reverse
-                  ? "rsubseq: start-test must be > or >="
-                  : "subseq: start-test must be > or >=");
+                  ? "rsubseq: start-test must be <, <=, > or >="
+                  : "subseq: start-test must be <, <=, > or >=");
         }
-        has_lo = 1; lo_inclusive = inclusive; lo_key = start_key;
-        if (!classify_subseq_test(end_test, &is_gt, &inclusive) || is_gt) {
+        if (!classify_subseq_test(end_test, &end_is_gt, &end_inclusive)) {
             return prim_throw_classified(S, "eval/type", "MTY001",
                 reverse
-                  ? "rsubseq: end-test must be < or <="
-                  : "subseq: end-test must be < or <=");
+                  ? "rsubseq: end-test must be <, <=, > or >="
+                  : "subseq: end-test must be <, <=, > or >=");
         }
-        has_hi = 1; hi_inclusive = inclusive; hi_key = end_key;
+        if (sc->as.sorted.len == 0) return mino_nil(S);
+        /* Step 1: seqFrom(pivot, direction). For subseq the pivot is
+         * start-key (ascending lower bound, inclusive); for rsubseq it's
+         * end-key (descending upper bound, inclusive). The first cell may
+         * be dropped in step 2 if the pivot-test fails on it. */
+        if (!reverse) {
+            rb_bounded_seq(S, sc->as.sorted.root, is_map,
+                           1, 1, start_key,
+                           0, 0, NULL,
+                           sc->as.sorted.comparator, 0,
+                           &raw_head, &raw_tail);
+            pivot_key       = start_key;
+            pivot_inclusive = start_inclusive;
+            filter_is_gt    = end_is_gt;
+            filter_inclusive= end_inclusive;
+            filter_key      = end_key;
+        } else {
+            rb_bounded_seq(S, sc->as.sorted.root, is_map,
+                           0, 0, NULL,
+                           1, 1, end_key,
+                           sc->as.sorted.comparator, 1,
+                           &raw_head, &raw_tail);
+            pivot_key       = end_key;
+            pivot_inclusive = end_inclusive;
+            filter_is_gt    = start_is_gt;
+            filter_inclusive= start_inclusive;
+            filter_key      = start_key;
+        }
+        cur = raw_head;
+        /* Step 2: drop the first element if the pivot-test fails on it.
+         * Only happens when first-key equals pivot-key and the pivot-test
+         * is exclusive (> or <). */
+        if (cur != NULL && mino_type_of(cur) == MINO_CONS && !pivot_inclusive) {
+            mino_val_t *first_entry = cur->as.cons.car;
+            mino_val_t *first_key   = is_map
+                ? vec_nth(first_entry, 0)
+                : first_entry;
+            int cmp = rb_compare(S, first_key, pivot_key,
+                                 sc->as.sorted.comparator);
+            if (cmp == 0) cur = cur->as.cons.cdr;
+        }
+        /* Step 3: takeWhile the other filter. */
+        while (cur != NULL && mino_type_of(cur) == MINO_CONS) {
+            mino_val_t *entry = cur->as.cons.car;
+            mino_val_t *key   = is_map ? vec_nth(entry, 0) : entry;
+            int cmp = rb_compare(S, key, filter_key,
+                                 sc->as.sorted.comparator);
+            int keep;
+            if (filter_is_gt) {
+                keep = filter_inclusive ? (cmp >= 0) : (cmp > 0);
+            } else {
+                keep = filter_inclusive ? (cmp <= 0) : (cmp < 0);
+            }
+            if (!keep) break;
+            {
+                mino_val_t *cell = mino_cons(S, entry, mino_nil(S));
+                if (result_tail == NULL) result_head = cell;
+                else mino_cons_cdr_set(S, result_tail, cell);
+                result_tail = cell;
+            }
+            cur = cur->as.cons.cdr;
+        }
+        /* JVM Clojure's 5-arg subseq/rsubseq returns nil only when
+         * seqFrom yielded no elements (when-let binding failed). When
+         * seqFrom was non-empty but takeWhile drained the result to
+         * nothing, the result is `()`, not nil. */
+        if (result_head == NULL || mino_type_of(result_head) == MINO_NIL) {
+            if (raw_head != NULL && mino_type_of(raw_head) == MINO_CONS) {
+                return mino_empty_list(S);
+            }
+            return mino_nil(S);
+        }
+        return result_head;
     }
-    if (sc->as.sorted.len == 0) return mino_nil(S);
-    rb_bounded_seq(S, sc->as.sorted.root, is_map,
-                   has_lo, lo_inclusive, lo_key,
-                   has_hi, hi_inclusive, hi_key,
-                   sc->as.sorted.comparator, reverse,
-                   &head, &tail);
-    return head;
 }
 
 mino_val_t *prim_subseq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
