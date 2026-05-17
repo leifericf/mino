@@ -5,6 +5,16 @@
 
 ;; --- identity ---
 
+(deftest clj-symbol-as-function
+  ;; JVM Clojure makes Symbols callable as keyword-style lookups.
+  (is (= 1   ('inc {'inc 1 'dec 2})))
+  (is (= 2   ('dec {'inc 1 'dec 2})))
+  (is (= nil ('missing {'a 1})))
+  (is (= 99  ('missing {'a 1} 99)))
+  ;; Non-map collections return the default (nil) — matches JVM.
+  (is (= '(nil nil nil)
+         (map (fn [s] (s 0)) '(inc dec zero?)))))
+
 (deftest clj-identity
   (is (= (identity nil) nil))
   (is (= (identity false) false))

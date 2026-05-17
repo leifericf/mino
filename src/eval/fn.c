@@ -985,6 +985,41 @@ mino_val_t *apply_non_fn_callable(mino_state_t *S, mino_val_t *fn,
             return def_val;
         }
     }
+    if (mino_type_of(fn) == MINO_SYMBOL) {
+        /* ('sym m) => (get m 'sym); ('sym m default) => (get m 'sym default).
+         * Mirrors JVM Clojure: Symbols implement IFn through getLookup,
+         * yielding nil for non-map collections. */
+        if (nargs < 1 || nargs > 2) {
+            set_eval_diag(S, form, "eval/arity", "MAR001",
+                "symbol as function takes 1 or 2 arguments");
+            return NULL;
+        }
+        {
+            mino_val_t *coll    = args->as.cons.car;
+            mino_val_t *def_val = nargs == 2
+                ? args->as.cons.cdr->as.cons.car
+                : mino_nil(S);
+            if (coll != NULL && mino_type_of(coll) == MINO_MAP) {
+                mino_val_t *v = map_get_val(coll, fn);
+                return v == NULL ? def_val : v;
+            }
+            if (coll != NULL && mino_type_of(coll) == MINO_SORTED_MAP) {
+                mino_val_t *v = rb_get(S, coll->as.sorted.root, fn,
+                                        coll->as.sorted.comparator);
+                return v == NULL ? def_val : v;
+            }
+            if (coll != NULL && mino_type_of(coll) == MINO_RECORD) {
+                int idx = record_field_index(coll, fn);
+                if (idx >= 0) return coll->as.record.vals[idx];
+                if (coll->as.record.ext != NULL) {
+                    mino_val_t *v = map_get_val(coll->as.record.ext, fn);
+                    if (v != NULL) return v;
+                }
+                return def_val;
+            }
+            return def_val;
+        }
+    }
     if (mino_type_of(fn) == MINO_MAP) {
         /* ({:a 1} :k) => (get {:a 1} :k). */
         if (nargs < 1 || nargs > 2) {

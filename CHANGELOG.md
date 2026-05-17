@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.266.0 — Symbols callable as keyword-style lookups
+
+`('sym m)` and `('sym m default)` now return the value at the
+symbol-keyed entry in `m`, or the default (nil if absent). For
+non-map collections the lookup falls through to the default,
+matching JVM Clojure: `(map (fn [s] (s 0)) '(inc dec zero?))`
+yields `(nil nil nil)` instead of erroring. Sorted-map and
+record lookups are also handled.
+
 ## v0.265.0 — Map destructuring evaluates the key expression
 
 `{sym k}` previously used `k` as a literal key, so destructuring
