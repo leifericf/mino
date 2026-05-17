@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.316.0 — JIT-2 cycle close
+
+Twelve-release JIT cycle wrapping. Six 10/10 targets reviewed:
+four met, one partially met (pipeline reaches 1.24x of the 1.3x
+JIT-on/off target), two unmeasured pending side-exit which was
+itself deferred to a follow-up sub-cycle with a captured design.
+
+Headline movers:
+- `OP_LOOP_INT_LT` re-enable (v0.308): 35% JIT-on win on
+  `lt-only` 10M (19.4ms vs 29.8ms interpreter).
+- Adaptive tiering (v0.313): AUTO mode promotes callees of
+  JIT'd callers at threshold 1, closing the warmup gap on
+  short-lived scripts.
+- Real-workloads pipeline 50k ints (v0.315): 1.24x JIT-on/off.
+- Invalidation/deopt torture suite (v0.314): 8 groups, 21
+  assertions, all green on 4-mode parity.
+
+Full close doc at `mino/.local/jit-2-cycle-close.md`. Side-exit
+design at `mino/.local/side-exit-design.md` for the follow-up
+sub-cycle.
+
 ## v0.315.0 — Real-workload bench corpus
 
 Companion `mino-bench` gains a `real_workloads.clj` suite that
