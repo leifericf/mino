@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.313.0 — Adaptive JIT tiering for callsite-aware promotion
+
+`MINO_JIT=auto` mode previously gated every fn behind the same
+`jit_hot_threshold` (default 100 invocations). A callsite inside
+a JIT-compiled fn now picks up an effective threshold of 1 for
+its callees -- the callee is on a path that's already paying
+compile cost, so promoting it eagerly amortizes immediately.
+
+Implementation: `mino_jit_invoke` bumps a new `jit_invoke_depth`
+counter on `mino_thread_ctx_t` for the duration of the native
+call. `invoke_bc_fn_argv` reads it: when `> 0`, threshold is 1
+regardless of the state's setting. The counter lives at the
+struct tail so JIT-pinned offsets stay stable.
+
+`MINO_JIT=on` and `MINO_JIT=off` behavior is unchanged. Short
+script timings sit at the noise floor on the micro-benches that
+exercise this path (the dispatch saving is real but the
+absolute time is too small to differentiate). The win shows up
+on longer-running scripts whose total runtime would otherwise
+finish before the inner-fn threshold trips.
+
 ## v0.312.0 — Safepoint cadence audit
 
 Audit finding: the interpreter's per-backjump safepoint poll

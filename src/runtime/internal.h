@@ -503,6 +503,16 @@ typedef struct mino_thread_ctx {
     size_t          bc_regs_storage_cap; /* capacity of bc_regs_storage */
     size_t          bc_top_snapshot;     /* this ctx's bc_top at yield */
     int             bc_snapshot_valid;   /* 1 once first run installs */
+    /* Reentrant depth of mino_jit_invoke on this thread. Bumped on
+     * entry, decremented on exit. invoke_bc_fn_argv reads it through
+     * the adaptive-tier path: when > 0, the callee being invoked sits
+     * inside a JIT-active call chain and gets a threshold of 1
+     * regardless of the state's jit_hot_threshold setting. This
+     * accelerates the warm-up of frequently-called callees on
+     * short-running scripts where the default threshold would
+     * otherwise gate compile attempts past the script's wall time.
+     * Placed at the tail to keep JIT-pinned offsets above stable. */
+    int             jit_invoke_depth;
 } mino_thread_ctx_t;
 
 /* TLS pointer to the per-thread ctx for the current worker.

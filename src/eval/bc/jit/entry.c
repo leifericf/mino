@@ -753,7 +753,14 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
      * `ctx->dyn_stack` via a fixed offset from S without touching
      * the Darwin __thread machinery the extractor doesn't model. */
     S->jit_invoke_ctx = ctx;
+    /* Adaptive tiering: any callee invoked from inside this native
+     * region picks up a threshold of 1 via invoke_bc_fn_argv's
+     * jit_invoke_depth check. Bumped before f() and restored after
+     * so nested JIT-from-JIT calls (currently unreachable, but the
+     * counter is reentrant-safe) accumulate depth correctly. */
+    ctx->jit_invoke_depth++;
     mino_val_t *r = f(regs, consts, S);
+    ctx->jit_invoke_depth--;
     S->jit_invoke_ctx = saved_ctx;
     ctx->jit_invoke_env = saved_env;
     return r;

@@ -828,8 +828,20 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
         && bc_rec->hot_counter < (unsigned)-1
         && S->jit_mode != (int)MINO_JIT_MODE_OFF) {
         bc_rec->hot_counter++;
-        unsigned thresh = (S->jit_mode == (int)MINO_JIT_MODE_ON)
-            ? 1u : S->jit_hot_threshold;
+        /* Adaptive tiering: a callee invoked from inside a JIT'd
+         * region (jit_invoke_depth > 0) is on the hot path of
+         * something already paying compile cost, so the threshold
+         * collapses to 1. AUTO without a JIT'd caller keeps the
+         * state's hot-threshold setting; ON mode threshold stays at
+         * 1 unconditionally. */
+        unsigned thresh;
+        if (S->jit_mode == (int)MINO_JIT_MODE_ON) {
+            thresh = 1u;
+        } else if (mino_current_ctx(S)->jit_invoke_depth > 0) {
+            thresh = 1u;
+        } else {
+            thresh = S->jit_hot_threshold;
+        }
         if (bc_rec->hot_counter >= thresh) {
             if (mino_jit_compile(S, fn) < 0) {
                 bc_rec->hot_counter = (unsigned)-1;
