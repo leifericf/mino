@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.257.0 — `drop` always returns a seq, never the source collection
+
+`(drop n coll)` for `n <= 0` previously short-circuited and returned
+`coll` as-is. When `coll` was a vector / map / set / chunked source,
+the returned value was still a vector / map / set — so `(pr-str (drop
+0 [1 2 3 4]))` printed `[1 2 3 4]` instead of `(1 2 3 4)`, and
+`(vector? (drop 0 [1 2 3 4]))` was true. The C `prim_drop_seq`
+fast-path now routes through `prim_seq` for the `n <= 0` case so the
+result has the same seq type as the positive-`n` path.
+
+`take` was already correct (its `n <= 0` path returns an empty list)
+and stays unchanged.
+
 ## v0.256.0 — `clojure.string/replace` accepts regex match and fn replacement
 
 `(clojure.string/replace s match repl)` now accepts a regex as the

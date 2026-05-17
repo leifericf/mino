@@ -185,6 +185,18 @@
   (is (= (drop -1 [1 2 3 4 5]) '(1 2 3 4 5)))
   (is (= (drop -2 [1 2 3 4 5]) '(1 2 3 4 5))))
 
+(deftest clj-drop-returns-seq-not-source-collection
+  ;; drop's contract is to return a seq regardless of the source collection
+  ;; type or the count value. Value-equality conflates vector and seq, so
+  ;; pr-str / vector? are the load-bearing checks.
+  (is (= "(1 2 3 4)" (pr-str (drop 0 [1 2 3 4]))))
+  (is (= "(1 2 3 4)" (pr-str (drop -1 [1 2 3 4]))))
+  (is (= "(3 4)"     (pr-str (drop 2 [1 2 3 4]))))
+  (is (= "()"        (pr-str (drop 0 []))))
+  (is (= "()"        (pr-str (drop 0 nil))))
+  (is (false? (vector? (drop 0 [1 2 3 4]))))
+  (is (false? (vector? (drop -1 [1 2 3 4])))))
+
 ;; --- take-while ---
 
 (deftest clj-take-while

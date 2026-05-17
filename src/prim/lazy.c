@@ -500,8 +500,17 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     }
     coll = args->as.cons.cdr->as.cons.car;
     if (n <= 0) {
+        mino_val_t *seq_args;
+        mino_val_t *seqd;
         if (coll == NULL || mino_type_of(coll) == MINO_NIL) return mino_empty_list(S);
-        return coll;
+        /* `drop` always returns a seq, never the source collection. A
+         * vector / map / set / chunked source becomes its seq view so
+         * downstream `pr-str`, `vector?`, etc. see the seq type. */
+        seq_args = mino_cons(S, coll, mino_nil(S));
+        seqd     = prim_seq(S, seq_args, env);
+        if (seqd == NULL) return NULL;
+        if (mino_type_of(seqd) == MINO_NIL) return mino_empty_list(S);
+        return seqd;
     }
     while (n > 0) {
         if (coll != NULL && mino_type_of(coll) == MINO_LAZY) {
