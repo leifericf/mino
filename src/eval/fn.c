@@ -526,7 +526,7 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
             size_t      n_locals = 0;
             mino_val_t *form_for_env = NULL;
             if (mino_current_ctx(S)->eval_current_form != NULL) {
-                form_for_env = mino_current_ctx(S)->eval_current_form;
+                form_for_env = (mino_val_t *)mino_current_ctx(S)->eval_current_form;
             }
             /* Walk lexical frames; stop at the namespace root env so
              * we don't enumerate the (large) set of Vars. The ns root

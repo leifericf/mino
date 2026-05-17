@@ -1641,6 +1641,118 @@ mino_val_t *prim_math_atan2(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return mino_float(S, atan2(y, x));
 }
 
+/* Extra unary math wrappers for the clojure.math namespace (Clojure
+ * 1.11+). Each is a thin libm bridge identical in shape to the
+ * existing math_unary calls above. */
+mino_val_t *prim_math_asin(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, asin, "math-asin"); }
+mino_val_t *prim_math_acos(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, acos, "math-acos"); }
+mino_val_t *prim_math_atan(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, atan, "math-atan"); }
+mino_val_t *prim_math_sinh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, sinh, "math-sinh"); }
+mino_val_t *prim_math_cosh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, cosh, "math-cosh"); }
+mino_val_t *prim_math_tanh(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, tanh, "math-tanh"); }
+mino_val_t *prim_math_log10(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, log10, "math-log10"); }
+mino_val_t *prim_math_log1p(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, log1p, "math-log1p"); }
+mino_val_t *prim_math_expm1(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, expm1, "math-expm1"); }
+mino_val_t *prim_math_cbrt(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{ (void)env; return math_unary(S, args, cbrt, "math-cbrt"); }
+mino_val_t *prim_math_signum(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-signum requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-signum expects a number");
+    if (x != x) return mino_float(S, x);       /* NaN -> NaN */
+    if (x == 0.0) return mino_float(S, x);     /* +0/-0 preserved */
+    return mino_float(S, x > 0.0 ? 1.0 : -1.0);
+}
+mino_val_t *prim_math_to_radians(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-to-radians requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-to-radians expects a number");
+    return mino_float(S, x * (3.14159265358979323846 / 180.0));
+}
+mino_val_t *prim_math_to_degrees(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-to-degrees requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-to-degrees expects a number");
+    return mino_float(S, x * (180.0 / 3.14159265358979323846));
+}
+mino_val_t *prim_math_hypot(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-hypot requires two arguments");
+    if (!as_double(args->as.cons.car, &a)
+        || !as_double(args->as.cons.cdr->as.cons.car, &b))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-hypot expects numbers");
+    return mino_float(S, hypot(a, b));
+}
+mino_val_t *prim_math_copy_sign(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double mag, sgn;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-copy-sign requires two arguments");
+    if (!as_double(args->as.cons.car, &mag)
+        || !as_double(args->as.cons.cdr->as.cons.car, &sgn))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-copy-sign expects numbers");
+    return mino_float(S, copysign(mag, sgn));
+}
+mino_val_t *prim_math_next_up(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-up requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-next-up expects a number");
+    return mino_float(S, nextafter(x, +1.0/0.0));
+}
+mino_val_t *prim_math_next_down(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double x;
+    (void)env;
+    if (!mino_is_cons(args) || mino_is_cons(args->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-next-down requires one argument");
+    if (!as_double(args->as.cons.car, &x))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-next-down expects a number");
+    return mino_float(S, nextafter(x, -1.0/0.0));
+}
+mino_val_t *prim_math_ieee_remainder(mino_state_t *S, mino_val_t *args, mino_env_t *env)
+{
+    double a, b;
+    (void)env;
+    if (!mino_is_cons(args) || !mino_is_cons(args->as.cons.cdr)
+        || mino_is_cons(args->as.cons.cdr->as.cons.cdr))
+        return prim_throw_classified(S, "eval/arity", "MAR001", "math-ieee-remainder requires two arguments");
+    if (!as_double(args->as.cons.car, &a)
+        || !as_double(args->as.cons.cdr->as.cons.car, &b))
+        return prim_throw_classified(S, "eval/type", "MTY001", "math-ieee-remainder expects numbers");
+    return mino_float(S, remainder(a, b));
+}
+
 /* ------------------------------------------------------------------------- */
 /* Bitwise operations                                                        */
 /* ------------------------------------------------------------------------- */
@@ -2577,6 +2689,42 @@ const mino_prim_def k_prims_numeric[] = {
      "Returns the tangent of n (in radians)."},
     {"math-atan2", prim_math_atan2,
      "Returns the angle in radians between the positive x-axis and the point (x, y)."},
+    {"math-asin",  prim_math_asin,
+     "Returns the arc-sine of n; n in [-1, 1]; result in [-PI/2, PI/2]."},
+    {"math-acos",  prim_math_acos,
+     "Returns the arc-cosine of n; n in [-1, 1]; result in [0, PI]."},
+    {"math-atan",  prim_math_atan,
+     "Returns the arc-tangent of n; result in [-PI/2, PI/2]."},
+    {"math-sinh",  prim_math_sinh,
+     "Returns the hyperbolic sine of n."},
+    {"math-cosh",  prim_math_cosh,
+     "Returns the hyperbolic cosine of n."},
+    {"math-tanh",  prim_math_tanh,
+     "Returns the hyperbolic tangent of n."},
+    {"math-log10", prim_math_log10,
+     "Returns the base-10 logarithm of n."},
+    {"math-log1p", prim_math_log1p,
+     "Returns the natural logarithm of (1 + n), accurate for small n."},
+    {"math-expm1", prim_math_expm1,
+     "Returns exp(n) - 1, accurate for small n."},
+    {"math-cbrt",  prim_math_cbrt,
+     "Returns the cube root of n."},
+    {"math-signum", prim_math_signum,
+     "Returns -1.0, 0.0, or 1.0 depending on the sign of n (preserves -0.0)."},
+    {"math-to-radians", prim_math_to_radians,
+     "Converts the angle n (in degrees) to radians."},
+    {"math-to-degrees", prim_math_to_degrees,
+     "Converts the angle n (in radians) to degrees."},
+    {"math-hypot",      prim_math_hypot,
+     "Returns sqrt(a^2 + b^2) avoiding intermediate overflow."},
+    {"math-copy-sign",  prim_math_copy_sign,
+     "Returns a value with the magnitude of mag and the sign of sgn."},
+    {"math-next-up",    prim_math_next_up,
+     "Returns the next representable double greater than n (toward +Inf)."},
+    {"math-next-down",  prim_math_next_down,
+     "Returns the next representable double less than n (toward -Inf)."},
+    {"math-ieee-remainder", prim_math_ieee_remainder,
+     "Returns IEEE 754 remainder of a by b."},
     {"bit-and", prim_bit_and,
      "Returns the bitwise AND of the arguments."},
     {"bit-or",  prim_bit_or,

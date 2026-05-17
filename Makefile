@@ -55,6 +55,7 @@ BUNDLED = \
     core_mino:src/core.clj \
     lib_clojure_string:lib/clojure/string.clj \
     lib_clojure_set:lib/clojure/set.clj \
+    lib_clojure_math:lib/clojure/math.clj \
     lib_clojure_walk:lib/clojure/walk.clj \
     lib_clojure_edn:lib/clojure/edn.clj \
     lib_clojure_pprint:lib/clojure/pprint.clj \

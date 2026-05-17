@@ -28,6 +28,7 @@
 #endif
 #include "lib_clojure_string.h"
 #include "lib_clojure_set.h"
+#include "lib_clojure_math.h"
 #include "lib_clojure_walk.h"
 #include "lib_clojure_edn.h"
 #include "lib_clojure_pprint.h"
@@ -64,6 +65,12 @@ void mino_install_clojure_set(mino_state_t *S, mino_env_t *env)
 {
     (void)env;
     mino_register_bundled_lib(S, "clojure.set", lib_clojure_set_src);
+}
+
+void mino_install_clojure_math(mino_state_t *S, mino_env_t *env)
+{
+    (void)env;
+    mino_register_bundled_lib(S, "clojure.math", lib_clojure_math_src);
 }
 
 void mino_install_clojure_walk(mino_state_t *S, mino_env_t *env)

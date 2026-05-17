@@ -57,6 +57,7 @@ static const cap_dispatch_t k_cap_dispatch[] = {
      * gated sections resolves correctly. */
     { MINO_CAP_STRING_LIB,  mino_install_clojure_string },
     { MINO_CAP_SET_LIB,     mino_install_clojure_set    },
+    { MINO_CAP_MATH_LIB,    mino_install_clojure_math   },
     { MINO_CAP_WALK,        mino_install_clojure_walk   },
     { MINO_CAP_EDN,         mino_install_clojure_edn    },
     { MINO_CAP_PPRINT,      mino_install_clojure_pprint },

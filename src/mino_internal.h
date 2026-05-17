@@ -402,6 +402,7 @@ void mino_install_async       (mino_state_t *S, mino_env_t *env);
  * clojure.test.check). */
 void mino_install_clojure_string    (mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_set       (mino_state_t *S, mino_env_t *env);
+void mino_install_clojure_math      (mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_walk      (mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_edn       (mino_state_t *S, mino_env_t *env);
 void mino_install_clojure_pprint    (mino_state_t *S, mino_env_t *env);

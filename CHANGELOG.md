@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.279.0 — `clojure.math` namespace
+
+Ships the Clojure 1.11+ `clojure.math` surface as a bundled
+library: `PI`, `E`, all the trig (`sin`/`cos`/`tan` + `asin`/
+`acos`/`atan` + `sinh`/`cosh`/`tanh` + `atan2`), logarithm /
+exponential family (`sqrt`, `cbrt`, `log`, `log10`, `log1p`,
+`exp`, `expm1`, `pow`), rounding (`floor`, `ceil`, `round`),
+angle conversion (`to-radians`, `to-degrees`), and the IEEE 754
+utility set (`signum`, `hypot`, `copy-sign`, `next-up`,
+`next-down`, `IEEE-remainder`). New `math-*` C primitives back
+the entries that weren't already covered.
+
+Gated by the new `MINO_CAP_MATH_LIB` capability (included in
+`MINO_CAP_DEFAULT`). Loaded via `(require 'clojure.math)`.
+
 ## v0.278.0 — Macros receive `&env` (map of locals) and `&form`
 
 Inside a macro body, `&env` is now a map whose keys are every
