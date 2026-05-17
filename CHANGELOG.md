@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.309.0 — `OP_BINOP_INT` reachability audit
+
+Audit follow-up to the v0.308 re-enable: `OP_BINOP_INT` is the
+generic-fallback opcode that historically would have been emitted
+when the compiler couldn't pick a specialised `OP_*_II` variant.
+The current compiler always picks the specialised variant when
+the type tags are known, and falls through to the prim call when
+they aren't -- it never actually emits `OP_BINOP_INT`. The
+bytecode interpreter still carries a handler (vm.c:928) for any
+hypothetical future emission; the JIT entry table still excludes
+it.
+
+`MINO_CPJIT_STATS=tracing` over the bench corpus confirms 0 fns
+rejected on this op. The release-gate dashboard reports no
+blockers from `OP_BINOP_INT` either. This closes the "actionable
+missing op" line item for the cycle without shipping a stencil
+that would be reachable only through dead code.
+
+The seven control-flow / dynamic-scope ops (PUSHCATCH, POPCATCH,
+THROW, PUSHDYN, POPDYN, GETGLOBAL, SETGLOBAL) remain eligibility
+blockers when fns use them; they are deferred to the side-exit
+machinery landing in v0.310.
+
 ## v0.308.0 — `OP_LOOP_INT_LT` stencil re-enabled
 
 The forward-counted single-binding loop stencil
