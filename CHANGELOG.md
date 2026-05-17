@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.280.0 — `eval` recurses through lazy / chunked call forms
+
+A call form built via `concat` / `sequence` (the shape macros
+ship when they synthesize an expansion with `~@` unquote-splicing)
+came back to `eval_impl` as either a `MINO_LAZY` value or a
+`MINO_CONS` whose cdr was lazy. The previous self-evaluating
+branches for those types treated the seq as data and returned
+it unchanged, and the `MINO_CONS` branch read the cdr without
+forcing — so `quote`, `if`, and every other special form saw
+"no args" and either errored or returned the wrong value.
+
+The eval kernel now:
+
+- Forces a `MINO_LAZY` form into its realized head, then routes
+  through the call-form path (or returns nil/empty-list).
+- Coerces `MINO_CHUNKED_CONS` into a `CONS` spine through
+  `val_to_seq`.
+- After entering the `CONS` branch, walks the cdr chain forcing
+  any `MINO_LAZY` cells and converting `MINO_CHUNKED_CONS` into
+  cons so special-form dispatchers see a normal args list.
+
+This unblocks the macro idiom that ClojureDocs uses everywhere —
+`(clojure.core/sequence (clojure.core/seq (clojure.core/concat ...)))` —
+plus the `local-context` / `check-call` / `def+` style of macros
+that synthesize their expansion from runtime data.
+
 ## v0.279.0 — `clojure.math` namespace
 
 Ships the Clojure 1.11+ `clojure.math` surface as a bundled

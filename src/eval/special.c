@@ -1044,9 +1044,7 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
     case MINO_HANDLE:
     case MINO_ATOM:
     case MINO_VOLATILE:
-    case MINO_LAZY:
     case MINO_CHUNK:
-    case MINO_CHUNKED_CONS:
     case MINO_RECUR:
     case MINO_TAIL_CALL:
     case MINO_REDUCED:
@@ -1075,9 +1073,55 @@ mino_val_t *eval_impl(mino_state_t *S, mino_val_t *form, mino_env_t *env, int ta
         return eval_map_literal(S, form, env);
     case MINO_SET:
         return eval_set_literal(S, form, env);
-    case MINO_CONS: {
+    case MINO_LAZY: {
+        /* A lazy seq used as a form (typical macro-built shape via
+         * concat / sequence) — force it into a CONS chain so the
+         * call-form path below handles it the same way a literal
+         * list would. JVM Clojure's eval treats any ISeq as a call
+         * form when the head is callable. */
+        mino_val_t *forced = lazy_force(S, form);
+        if (forced == NULL || mino_type_of(forced) == MINO_NIL
+            || mino_type_of(forced) == MINO_EMPTY_LIST) {
+            return forced;
+        }
+        if (mino_type_of(forced) == MINO_CONS) {
+            form = forced;
+            goto eval_cons_label;
+        }
+        /* CHUNKED_CONS or another seq shape: fall through to
+         * CHUNKED_CONS handling below. */
+        form = forced;
+        if (mino_type_of(form) != MINO_CHUNKED_CONS) return form;
+    }
+    /* fallthrough */
+    case MINO_CHUNKED_CONS: {
+        mino_val_t *as_cons = val_to_seq(S, form);
+        if (as_cons == NULL) return NULL;
+        if (mino_type_of(as_cons) != MINO_CONS) return as_cons;
+        form = as_cons;
+        goto eval_cons_label;
+    }
+    /* fallthrough */
+    case MINO_CONS:
+    eval_cons_label: {
         mino_val_t *head = form->as.cons.car;
         mino_val_t *args = form->as.cons.cdr;
+        /* Macros that build call forms via concat / sequence often
+         * leave a lazy seq as the cdr; special forms (`quote`, `if`,
+         * etc.) probe args with mino_is_cons and would treat a lazy
+         * cdr as "no args". Force the cdr-chain into a CONS spine
+         * here so the downstream dispatchers see a normal call form. */
+        while (args != NULL && mino_type_of(args) == MINO_LAZY) {
+            args = lazy_force(S, args);
+            if (args == NULL) return NULL;
+        }
+        if (args != NULL && mino_type_of(args) == MINO_CHUNKED_CONS) {
+            args = val_to_seq(S, args);
+            if (args == NULL) return NULL;
+        }
+        if (args != NULL && mino_type_of(args) == MINO_EMPTY_LIST) {
+            args = mino_nil(S);
+        }
         mino_val_t *host_result;
         mino_val_t *result;
         /* Save and restore eval_current_form around the recursive
