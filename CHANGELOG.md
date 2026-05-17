@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.269.0 — Doubles print at the shortest round-trippable precision
+
+`pr-str` on a double used `%g` with the C default of 6 sig figs,
+so `(mod 475.095 7)` printed as `6.095` even though the actual
+value is `6.095000000000027`. The printer now picks the shortest
+precision whose result re-parses to the same double, mirroring
+`Double.toString` semantics. Fixed notation is used in the
+`[1e-3, 1e7)` range (signed magnitude) and scientific elsewhere.
+Clean values (`1.5`, `100.0`, `0.1`) still print short; floats
+born of imprecise arithmetic now surface their full extent.
+
 ## v0.268.0 — `seq-to-map-for-destructuring` helper
 
 Adds the JVM 1.11+ helper used by varargs kwargs destructuring:

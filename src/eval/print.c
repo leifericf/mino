@@ -83,19 +83,48 @@ void mino_print_to(mino_state_t *S, FILE *out, const mino_val_t *v)
     case MINO_FLOAT:
     case MINO_FLOAT32: {
         char buf[64];
-        int n, needs_dot, i;
-        if (isnan(v->as.f)) { fputs("##NaN", out); return; }
-        if (isinf(v->as.f)) {
-            fputs(v->as.f > 0 ? "##Inf" : "##-Inf", out);
+        int n, needs_dot, i, p;
+        double x = v->as.f;
+        if (isnan(x)) { fputs("##NaN", out); return; }
+        if (isinf(x)) {
+            fputs(x > 0 ? "##Inf" : "##-Inf", out);
             return;
         }
-        /*
-         * Always include a decimal point so the printed form re-reads as a
-         * float, not an int. %g may drop the dot for whole numbers.
-         */
-        n = snprintf(buf, sizeof(buf), "%g", v->as.f);
-        needs_dot = 1;
+        /* Shortest round-trippable representation. JVM Double.toString
+         * uses fixed notation in [1e-3, 1e7) (signed magnitude) and
+         * scientific elsewhere; pick the shortest precision (after the
+         * decimal for fixed, significand digits for scientific) that
+         * still re-parses to the same double. */
+        {
+            double absx = (x < 0.0) ? -x : x;
+            int use_sci = (x != 0.0) && (absx < 1e-3 || absx >= 1e7);
+            n = 0;
+            if (use_sci) {
+                for (p = 0; p <= 17; p++) {
+                    double back;
+                    n = snprintf(buf, sizeof(buf), "%.*e", p, x);
+                    if (n < 0 || n >= (int)sizeof(buf)) { n = -1; break; }
+                    back = strtod(buf, NULL);
+                    if (back == x) break;
+                }
+            } else {
+                /* Fixed: %f precision is fractional-digit count. */
+                for (p = 0; p <= 17; p++) {
+                    double back;
+                    n = snprintf(buf, sizeof(buf), "%.*f", p, x);
+                    if (n < 0 || n >= (int)sizeof(buf)) { n = -1; break; }
+                    back = strtod(buf, NULL);
+                    if (back == x) break;
+                }
+            }
+        }
         if (n < 0) { fputs("0.0", out); return; }
+        /* Always include a decimal point so the printed form re-reads
+         * as a float. For fixed, p=0 has no point; for scientific,
+         * the format is like "1e+05" or "1.5e+02" — we want "1.0E5" /
+         * "1.5E2"-style. Rewrite e[+]?digits → E<digits> for JVM-ish
+         * surface; leading-zero scrubbing keeps small exponents clean. */
+        needs_dot = 1;
         for (i = 0; i < n; i++) {
             if (buf[i] == '.' || buf[i] == 'e' || buf[i] == 'E') {
                 needs_dot = 0;
