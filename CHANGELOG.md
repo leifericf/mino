@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.259.0 — `mapv` gains the multi-collection arity
+
+`(mapv f c1 c2 ...)` previously raised `MAR001 mapv requires 2
+arguments`. The 2-arg arity is heavily optimized (pipeline fast
+lane, transient builder) and stays unchanged. A second path in the
+same C primitive handles N >= 3: walk all collections in parallel
+through `seq_iter_t`, call `fn` with one element from each per
+step, and stop at the shortest. Up to 32 collections.
+
+Examples that now work:
+`(mapv + [1 2 3] [4 5 6])` → `[5 7 9]`,
+`(mapv + [1 2 3] (iterate inc 1))` → `[2 4 6]`,
+`(apply mapv vector [[:a :b :c] [:d :e :f] [:g :h :i]])` →
+`[[:a :d :g] [:b :e :h] [:c :f :i]]`.
+
 ## v0.258.0 — `sequence` gains the 1-arg coerce-to-seq arity
 
 `(sequence coll)` was missing — only the 2- and N-arg transducer

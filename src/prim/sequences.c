@@ -1810,6 +1810,8 @@ static int tvec_conj_step(mino_state_t *S, void *ctx_,
     return 0;
 }
 
+#define MAPV_MAX_COLLS 32
+
 mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *fn, *coll;
@@ -1820,10 +1822,67 @@ mino_val_t *prim_mapv(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     int         pin_slot;
     size_t n;
     arg_count(S, args, &n);
-    if (n != 2) {
-        return prim_throw_classified(S, "eval/arity", "MAR001", "mapv requires 2 arguments: function and collection");
+    if (n < 2) {
+        return prim_throw_classified(S, "eval/arity", "MAR001", "mapv requires at least 2 arguments: function and one or more collections");
     }
-    fn   = args->as.cons.car;
+    fn = args->as.cons.car;
+    /* Multi-collection arity: walk N collections in parallel, calling
+     * fn with one element from each per step; stop at the shortest. */
+    if (n > 2) {
+        size_t n_colls = n - 1;
+        seq_iter_t   iters[MAPV_MAX_COLLS];
+        mino_val_t  *argv[MAPV_MAX_COLLS];
+        if (n_colls > MAPV_MAX_COLLS) {
+            return prim_throw_classified(
+                S, "eval/arity", "MAR001",
+                "mapv: too many collections (max 32)");
+        }
+        {
+            mino_val_t *p = args->as.cons.cdr;
+            size_t i;
+            for (i = 0; i < n_colls; i++) {
+                mino_val_t *c = p->as.cons.car;
+                if (c == NULL || mino_is_nil(c)) {
+                    return mino_vector(S, NULL, 0);
+                }
+                seq_iter_init(S, &iters[i], c);
+                p = p->as.cons.cdr;
+            }
+        }
+        items = (mino_val_t **)gc_alloc_typed(S, GC_T_PTRARR,
+                                              cap * sizeof(mino_val_t *));
+        if (items == NULL) return NULL;
+        pin_slot = mino_current_ctx(S)->gc_save_len;
+        gc_pin((mino_val_t *)items);
+        for (;;) {
+            size_t i;
+            for (i = 0; i < n_colls; i++) {
+                if (seq_iter_done(&iters[i])) goto mapv_multi_done;
+            }
+            for (i = 0; i < n_colls; i++) {
+                argv[i] = seq_iter_val(S, &iters[i]);
+            }
+            {
+                mino_val_t *val = apply_callable_argv(
+                    S, fn, argv, (int)n_colls, env);
+                if (val == NULL) { gc_unpin(1); return NULL; }
+                if (len >= cap) {
+                    cap *= 2;
+                    items = ptrarr_grow(S, items, len, cap, pin_slot);
+                    if (items == NULL) { gc_unpin(1); return NULL; }
+                }
+                gc_valarr_set(S, items, len, val);
+                len++;
+            }
+            for (i = 0; i < n_colls; i++) {
+                seq_iter_next(S, &iters[i]);
+            }
+        }
+        mapv_multi_done:
+        result = mino_vector(S, items, len);
+        gc_unpin(1);
+        return result;
+    }
     coll = args->as.cons.cdr->as.cons.car;
     if (coll == NULL || mino_is_nil(coll)) {
         return mino_vector(S, NULL, 0);

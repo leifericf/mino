@@ -159,6 +159,16 @@
   (is (= [2 4 6] (mapv (fn [x] (* x 2)) [1 2 3])))
   (is (vector? (mapv inc [1]))))
 
+(deftest mapv-multi-coll
+  (is (= [5 7 9]      (mapv + [1 2 3] [4 5 6])))
+  (is (= [2 4 6]      (mapv + [1 2 3] (iterate inc 1))))
+  (is (= [12 15 18]   (mapv + [1 2 3] [4 5 6] [7 8 9])))
+  (is (= [5 7]        (mapv + [1 2 3] [4 5])))
+  (is (= []           (mapv + [] [1 2 3])))
+  (is (= [[:a :d :g] [:b :e :h] [:c :f :i]]
+         (apply mapv vector [[:a :b :c] [:d :e :f] [:g :h :i]])))
+  (is (vector? (mapv + [1 2] [3 4]))))
+
 (deftest filterv-fn
   (is (= [2 4] (filterv even? [1 2 3 4 5])))
   (is (vector? (filterv even? [1 2]))))
