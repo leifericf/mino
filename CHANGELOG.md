@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.312.0 — Safepoint cadence audit
+
+Audit finding: the interpreter's per-backjump safepoint poll
+(`mino_bc_safepoint`) is already a minimal fast path -- one TLS
+load + branch + counter increment + return. The JIT-compiled
+loop stencils do not poll at all (no backjump goes through a
+safepoint call), so the cycle's planned dec-only / lt-only
+speedup target for this lever is not reachable through cadence
+work: the JIT path doesn't have a poll to thin.
+
+Two follow-up opportunities surface from the audit, both
+deferred:
+
+1. **JIT loop cancellability.** Today a JIT'd infinite loop is
+   not cancellable because the loop stencils don't poll. This
+   is a correctness concern for embedded scenarios with worker
+   futures; the cycle that adds it should also re-measure the
+   tight-loop cost to confirm the cadence stays cheap enough.
+2. **Interpreter poll inlining.** `mino_bc_safepoint` is a
+   non-inline function call. Inlining it into vm.c's backjump
+   sites saves ~2-4 cycles per backjump on the interpreter
+   path. The interpreter is already a slow lane vs. JIT;
+   spending a release on that path doesn't compose with the
+   cycle's JIT-2 focus.
+
 ## v0.311.0 — Non-IC call routes through known-bc fast helper
 
 `mino_jit_call_slow` (the uncached OP_CALL helper) now invokes
