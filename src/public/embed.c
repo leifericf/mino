@@ -9,8 +9,7 @@
  */
 
 #include "mino.h"
-#include "runtime/internal.h"
-#include "prim/internal.h"
+#include "public/internal_bridge.h"
 
 #include <setjmp.h>
 #include <stdarg.h>

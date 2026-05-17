@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Internals: `src/public` borrows internals through one explicit bridge
+
+`src/public/embed.c` and `src/public/gc.c` previously included
+`runtime/internal.h` and `prim/internal.h` directly. The public
+ABI in `src/mino.h` is unaffected; the dependency was an
+implementation-side maintainability concern -- a runtime refactor
+could touch a file under `src/public/` and that lookalike-looking
+dependency was the only signal.
+
+Both files now include `src/public/internal_bridge.h`, a thin
+re-export of the two internal headers. Any new internal that a
+public function reaches for now surfaces in the bridge first,
+making the borrow explicit at the include line. No ABI or runtime
+behavior change.
+
 ### Fix: per-ctx BC register stack + `pmap` re-enabled
 
 Concurrent fn calls that yield `state_lock` (e.g. via `thread-sleep`)
