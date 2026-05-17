@@ -1427,7 +1427,43 @@ mino_val_t *prim_keys(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return head;
     }
     if (mino_type_of(coll) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "keys: argument must be a map");
+        /* JVM Clojure accepts any seqable whose elements are MapEntries
+         * (or [k v] vectors), so `(keys (remove pred (frequencies m)))`
+         * works on the seq of entries that filter/remove yield. */
+        if (mino_type_of(coll) == MINO_CONS
+            || mino_type_of(coll) == MINO_VECTOR
+            || mino_type_of(coll) == MINO_LAZY) {
+            seq_iter_t it;
+            seq_iter_init(S, &it, coll);
+            while (!seq_iter_done(&it)) {
+                mino_val_t *entry = seq_iter_val(S, &it);
+                mino_val_t *k;
+                if (entry == NULL) {
+                    return prim_throw_classified(
+                        S, "eval/type", "MTY001",
+                        "keys: seq element is not a map entry (expected [k v])");
+                }
+                if (mino_type_of(entry) == MINO_MAP_ENTRY) {
+                    k = entry->as.map_entry.k;
+                } else if (mino_type_of(entry) == MINO_VECTOR
+                           && entry->as.vec.len == 2) {
+                    k = vec_nth(entry, 0);
+                } else {
+                    return prim_throw_classified(
+                        S, "eval/type", "MTY001",
+                        "keys: seq element is not a map entry (expected [k v])");
+                }
+                {
+                    mino_val_t *cell = mino_cons(S, k, mino_nil(S));
+                    if (tail == NULL) head = cell;
+                    else mino_cons_cdr_set(S, tail, cell);
+                    tail = cell;
+                }
+                seq_iter_next(S, &it);
+            }
+            return head;
+        }
+        return prim_throw_classified(S, "eval/type", "MTY001", "keys: argument must be a map or seq of map entries");
     }
     for (i = 0; i < coll->as.map.len; i++) {
         mino_val_t *cell = mino_cons(S, vec_nth(coll->as.map.key_order, i),
@@ -1500,7 +1536,40 @@ mino_val_t *prim_vals(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         return head;
     }
     if (mino_type_of(coll) != MINO_MAP) {
-        return prim_throw_classified(S, "eval/type", "MTY001", "vals: argument must be a map");
+        if (mino_type_of(coll) == MINO_CONS
+            || mino_type_of(coll) == MINO_VECTOR
+            || mino_type_of(coll) == MINO_LAZY) {
+            seq_iter_t it;
+            seq_iter_init(S, &it, coll);
+            while (!seq_iter_done(&it)) {
+                mino_val_t *entry = seq_iter_val(S, &it);
+                mino_val_t *v;
+                if (entry == NULL) {
+                    return prim_throw_classified(
+                        S, "eval/type", "MTY001",
+                        "vals: seq element is not a map entry (expected [k v])");
+                }
+                if (mino_type_of(entry) == MINO_MAP_ENTRY) {
+                    v = entry->as.map_entry.v;
+                } else if (mino_type_of(entry) == MINO_VECTOR
+                           && entry->as.vec.len == 2) {
+                    v = vec_nth(entry, 1);
+                } else {
+                    return prim_throw_classified(
+                        S, "eval/type", "MTY001",
+                        "vals: seq element is not a map entry (expected [k v])");
+                }
+                {
+                    mino_val_t *cell = mino_cons(S, v, mino_nil(S));
+                    if (tail == NULL) head = cell;
+                    else mino_cons_cdr_set(S, tail, cell);
+                    tail = cell;
+                }
+                seq_iter_next(S, &it);
+            }
+            return head;
+        }
+        return prim_throw_classified(S, "eval/type", "MTY001", "vals: argument must be a map or seq of map entries");
     }
     for (i = 0; i < coll->as.map.len; i++) {
         mino_val_t *key  = vec_nth(coll->as.map.key_order, i);

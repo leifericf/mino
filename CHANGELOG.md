@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.264.0 — `keys` / `vals` accept seqs of map entries
+
+`(keys coll)` and `(vals coll)` previously demanded a map and
+rejected sequences. JVM Clojure routes anything seqable through
+RT/keys / RT/vals, which iterate elements as MapEntry / `[k v]`
+vectors. Mino now does the same: vectors, cons lists, lazy seqs
+of `MINO_MAP_ENTRY` or 2-vectors are walked element-wise.
+This unblocks idioms like
+`(keys (remove (fn [[_ v]] (= v 1)) (frequencies xs)))`.
+
 ## v0.263.0 — `keep-indexed` gains the 1-arg transducer arity
 
 `(keep-indexed pred)` returns a transducer that calls `pred` with

@@ -155,6 +155,18 @@
   (is (= '(:a :b) (keys {:a 1 :b 2})))
   (is (= '(1 2) (vals {:a 1 :b 2}))))
 
+(deftest keys-vals-on-seq-of-entries
+  ;; JVM Clojure's keys/vals accept any seq whose elements are
+  ;; MapEntry or [k v] vectors, so chained map ops like
+  ;; (keys (remove pred (frequencies xs))) work without re-into.
+  (let [m {:a 1 :b 2 :c 3}
+        entries (filter (fn [[_ v]] (odd? v)) m)]
+    (is (= #{:a :c} (set (keys entries))))
+    (is (= #{1 3}   (set (vals entries)))))
+  (is (= '(:a :b) (keys [[:a 1] [:b 2]])))
+  (is (= '(1 2)   (vals [[:a 1] [:b 2]])))
+  (is (= '(:a :b) (keys (list [:a 1] [:b 2])))))
+
 (deftest contains-fn
   (is (contains? {:a 1} :a))
   (is (contains? [10 20 30] 1)))
