@@ -312,6 +312,12 @@ extern mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S,
 extern mino_val_t **mino_jit_assoc_slow(mino_state_t *S,
                                          mino_val_t **regs,
                                          unsigned a, unsigned b);
+/* OP_ASSOC_BANG slow helper. 3-arg transient shape: [tcoll, k, v]
+ * at regs[b..b+2]. Routes a valid transient to mino_assoc_bang;
+ * other shapes fall through to prim_assoc_bang. */
+extern mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S,
+                                              mino_val_t **regs,
+                                              unsigned a, unsigned b);
 extern mino_val_t **mino_jit_dissoc_slow(mino_state_t *S,
                                           mino_val_t **regs,
                                           unsigned a, unsigned b,

@@ -1,5 +1,47 @@
 # Changelog
 
+## v0.333.0 — OP_ASSOC_BANG inline fast lane
+
+`(assoc! t k v)` arity-3 call sites compiled to a 2-instruction
+sequence: OP_GETGLOBAL_CACHED to resolve `assoc!`, then OP_CALL_CACHED
+to dispatch. The cached call routed through `apply_callable_argv` and
+hit the prim's standard cons-list entry. The reducer bodies the
+v0.330 rewrite produces use this exact 3-arg shape — `(assoc! acc k
+v)` after the transient rewrite — and the cached call path was the
+hottest 2-instruction sequence on bump-5k after v0.332 closed.
+
+Add OP_ASSOC_BANG, mirroring OP_ASSOC's shape (A=dst, B=base with
+[coll, k, v] at consecutive regs). Interpreter routes a valid
+transient to `mino_assoc_bang` directly; invalidated transients and
+persistent colls fall through to `prim_assoc_bang` for the
+Clojure-canonical diagnostic. JIT side ships a matching stencil; the
+slow helper mirrors the interpreter dispatch.
+
+This completes the write-side fast-lane family alongside OP_ASSOC,
+OP_DISSOC, and OP_CONJ_VEC. The compiler emits OP_ASSOC_BANG when
+the head resolves to canonical `assoc!`; user shadows defeat it the
+same way they defeat the other write-side lanes.
+
+### realistic_bench, median of 3, arm64-darwin
+
+| row | v0.332 JIT off | v0.333 JIT off | Δ | v0.332 JIT on | v0.333 JIT on | Δ |
+|-----|---------------:|---------------:|--:|--------------:|--------------:|--:|
+| bump 5k int-map | 16.64 ms | 16.59 ms | flat | 17.27 ms | 17.25 ms | flat |
+| build 5k int-map | 10.25 ms | 10.27 ms | flat | 9.52 ms | 9.61 ms | flat |
+| nested 500x100 | 17.88 ms | 17.88 ms | flat | 17.07 ms | 17.00 ms | flat |
+
+Measurement-neutral release: the opcode cuts the 2-instruction
+dispatch to one and saves the cached-call resolve, but the per-call
+saving sits well below the row's GC + HAMT-walk floor. The change
+ships because (a) it completes the write-side fast-lane family, (b)
+later releases that further reduce per-call dispatch cost (forward
+stencil hooks, control-flow stencils) compose on top of it.
+
+The earlier v0.332 changelog entry quoted bump-5k row numbers from a
+work-in-progress snapshot that didn't survive re-measurement; the
+v0.332 → v0.333 row here reflects the actual numbers on this
+hardware.
+
 ## v0.332.0 — OP_GET_KW_MAP transient fast lane
 
 `(get coll k)` already has direct opcode fast lanes for the persistent

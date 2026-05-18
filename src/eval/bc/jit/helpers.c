@@ -214,6 +214,42 @@ mino_val_t **mino_jit_assoc_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_ASSOC_BANG. Mirrors the interpreter's transient
+ * fast lane: a valid MINO_TRANSIENT routes to mino_assoc_bang
+ * directly; anything else (invalidated transient, persistent coll,
+ * variadic arity through a forced-rewrite path) falls through to
+ * prim_assoc_bang for the Clojure-canonical diagnostic. */
+mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S, mino_val_t **regs,
+                                      unsigned a, unsigned b)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *k    = S->bc_regs[base + b + 1];
+    mino_val_t *v    = S->bc_regs[base + b + 2];
+    if (coll != NULL
+        && mino_type_of(coll) == MINO_TRANSIENT
+        && coll->as.transient.valid) {
+        mino_val_t *r = mino_assoc_bang(S, coll, k, v);
+        if (r == NULL) return NULL;
+        regs    = S->bc_regs + base;
+        regs[a] = r;
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, v, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, k, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_assoc_bang(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Slow path for OP_DISSOC. MINO_MAP fast lane via mino_map_dissoc1
  * (allocates -- regs base may relocate); other coll types fall through
  * to prim_dissoc which raises a type diagnostic. Mirrors the

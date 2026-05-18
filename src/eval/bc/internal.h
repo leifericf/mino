@@ -136,6 +136,14 @@ typedef enum {
     OP_CONJ_VEC,         /* A=dst, B=vec, C=item                           */
     OP_ASSOC,            /* A=dst, B=base; coll/k/v at regs[B..B+2]        */
     OP_DISSOC,           /* A=dst, B=map, C=key; arity-2 dissoc fast lane  */
+    /* (assoc! tcoll k v) arity-3 transient fast lane. Same operand
+     * shape as OP_ASSOC -- three consecutive registers at B carry
+     * [tcoll, k, v], A is the destination. Fast path checks the coll
+     * is a valid transient and calls mino_assoc_bang directly; misses
+     * (invalidated transient, persistent coll, variadic) fall through
+     * to prim_assoc_bang. Eliminates the per-step apply_callable +
+     * arg-cons dispatch in (reduce #(assoc! % k v) ...) loops. */
+    OP_ASSOC_BANG,       /* A=dst, B=base; tcoll/k/v at regs[B..B+2]       */
     /* Read-side small-prim fast lanes. ABC form, A=dst, B=src_reg.
      * Fast path requires MINO_VECTOR; misses fall back to the
      * canonical prim so lazy seqs, chunked conses, strings, maps,

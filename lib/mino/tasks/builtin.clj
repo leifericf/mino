@@ -513,6 +513,7 @@
                    ["get_kw_map.c"       "stencil_op_get_kw_map"]
                    ["conj_vec.c"         "stencil_op_conj_vec"]
                    ["assoc.c"            "stencil_op_assoc"]
+                   ["assoc_bang.c"       "stencil_op_assoc_bang"]
                    ["dissoc.c"           "stencil_op_dissoc"]
                    ["deopt_to_interp.c"  "stencil_op_deopt_to_interp"]]
         stencil-dir "src/eval/bc/stencils"
@@ -936,6 +937,7 @@
    ["get_kw_map.c"       "stencil_op_get_kw_map"]
    ["conj_vec.c"         "stencil_op_conj_vec"]
    ["assoc.c"            "stencil_op_assoc"]
+   ["assoc_bang.c"       "stencil_op_assoc_bang"]
    ["dissoc.c"           "stencil_op_dissoc"]
    ["deopt_to_interp.c"  "stencil_op_deopt_to_interp"]])
 

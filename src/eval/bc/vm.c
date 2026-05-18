@@ -247,6 +247,7 @@ const char *mino_bc_op_name(unsigned op)
     case OP_CONJ_VEC: return "OP_CONJ_VEC";
     case OP_ASSOC: return "OP_ASSOC";
     case OP_DISSOC: return "OP_DISSOC";
+    case OP_ASSOC_BANG: return "OP_ASSOC_BANG";
     case OP_FIRST_VEC: return "OP_FIRST_VEC";
     case OP_COUNT_VEC: return "OP_COUNT_VEC";
     case OP_EMPTY_VEC: return "OP_EMPTY_VEC";
@@ -1835,6 +1836,41 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             list = mino_cons(S, coll, list);
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_assoc(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_ASSOC_BANG: {
+            /* Fast lane for the 3-arg (assoc! tcoll k v) shape used in
+             * the transient reducer bodies the builder rewrite emits.
+             * Three consecutive registers at B carry [tcoll, k, v]; A
+             * is the destination. The fast path requires a valid
+             * transient and calls mino_assoc_bang directly. Anything
+             * else -- invalidated transient, persistent coll, variadic
+             * arity -- falls back to prim_assoc_bang which raises the
+             * Clojure-correct diagnostic. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *k    = regs[b + 1];
+            mino_val_t *v    = regs[b + 2];
+            if (coll != NULL
+                && mino_type_of(coll) == MINO_TRANSIENT
+                && coll->as.transient.valid) {
+                mino_val_t *r = mino_assoc_bang(S, coll, k, v);
+                if (r == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = r;
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, v, list);
+            list = mino_cons(S, k, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_assoc_bang(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
             regs = S->bc_regs + base;
             regs[a] = r;

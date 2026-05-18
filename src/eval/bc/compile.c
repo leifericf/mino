@@ -3046,6 +3046,9 @@ static const pure_prim_t PURE_PRIMS[] = {
     {"conj",    prim_conj,    1, -1},
     {"assoc",   prim_assoc,   3, -1},
     {"dissoc",  prim_dissoc,  1, -1},
+    /* assoc! shares the gating shape: head must resolve to the
+     * canonical prim, used by the OP_ASSOC_BANG emission site. */
+    {"assoc!",  prim_assoc_bang, 3, -1},
     /* Read-side seq prims used by the OP_FIRST_VEC / OP_COUNT_VEC /
      * OP_EMPTY_VEC emission sites. count's result is an int -- can
      * be folded for literal vec args; first / empty? on literal
@@ -3653,6 +3656,40 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 }
                 emit_abc(c, OP_DISSOC, (unsigned)dst,
                          (unsigned)coll_reg, (unsigned)key_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* (assoc! t k v) arity-3 transient fast lane. Variadic forms
+         * (assoc! t k1 v1 k2 v2 ...) keep the OP_CALL path so prim_assoc_bang
+         * walks the key/value pairs; the arity-3 case is the dominant
+         * shape inside the builder rewrite's reducer body and earns its
+         * own opcode. Three consecutive regs at base carry [tcoll, k, v]
+         * the same way OP_ASSOC does. */
+        if (strcmp(head->as.s.data, "assoc!") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 3) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                mino_val_t *a3 = form->as.cons.cdr->as.cons.cdr
+                                     ->as.cons.cdr->as.cons.car;
+                int base_reg = alloc_reg(c);
+                if (base_reg < 0) return -1;
+                int k_reg = alloc_reg(c);
+                if (k_reg < 0) return -1;
+                int v_reg = alloc_reg(c);
+                if (v_reg < 0) return -1;
+                if (compile_expr(c, a1, base_reg, 0) < 0) return -1;
+                if (compile_expr(c, a2, k_reg, 0)    < 0) return -1;
+                if (compile_expr(c, a3, v_reg, 0)    < 0) return -1;
+                if (dst > 0xFF || base_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_ASSOC_BANG, (unsigned)dst,
+                         (unsigned)base_reg, 0);
                 c->next_reg = saved_next;
                 return 0;
             }

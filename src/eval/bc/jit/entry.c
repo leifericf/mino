@@ -559,6 +559,13 @@ const stencil_desc_t mino_jit_stencils[] = {
         0u
     },
     {
+        OP_ASSOC_BANG,
+        stencil_op_assoc_bang_bytes, stencil_op_assoc_bang_size,
+        stencil_op_assoc_bang_symbols, stencil_op_assoc_bang_nsymbols,
+        stencil_op_assoc_bang_relocs, stencil_op_assoc_bang_nrelocs,
+        0u
+    },
+    {
         OP_DISSOC,
         stencil_op_dissoc_bytes, stencil_op_dissoc_size,
         stencil_op_dissoc_symbols, stencil_op_dissoc_nsymbols,
@@ -734,6 +741,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_get_kw_map_slow",       (void *)(uintptr_t)mino_jit_get_kw_map_slow},
     {"mino_jit_conj_vec_slow",         (void *)(uintptr_t)mino_jit_conj_vec_slow},
     {"mino_jit_assoc_slow",            (void *)(uintptr_t)mino_jit_assoc_slow},
+    {"mino_jit_assoc_bang_slow",       (void *)(uintptr_t)mino_jit_assoc_bang_slow},
     {"mino_jit_dissoc_slow",           (void *)(uintptr_t)mino_jit_dissoc_slow},
     {"mino_jit_call_slow",             (void *)(uintptr_t)mino_jit_call_slow},
     {"mino_jit_tailcall_slow",         (void *)(uintptr_t)mino_jit_tailcall_slow},
