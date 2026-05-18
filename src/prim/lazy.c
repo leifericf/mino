@@ -418,8 +418,15 @@ static mino_val_t *range_thunk(mino_state_t *S, mino_val_t *ctx)
         range_make_lazy(S, cur, end, step, infinite));
 }
 
-/* Lazy take: ctx = cons(n, coll_state). Each force decrements n and
- * yields (first coll) until n reaches zero or coll is exhausted. */
+/* Lazy take: ctx = cons(n, coll_state). Each force yields up to one
+ * chunk (for chunked sources) or one element (for cons / lazy sources)
+ * and continues with a fresh lazy bound to the remaining count.
+ *
+ * Chunked fast path: when the underlying coll is MINO_CHUNKED_CONS,
+ * forward the whole chunk in a single emit (sub-chunk if `n` falls
+ * inside the chunk). One allocation per chunk instead of one per
+ * element. Realising `(take 10000 (range))` produces ~313 chunk-cons
+ * cells instead of 10000. */
 static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
 {
     long long n   = mino_val_int_get(ctx->as.cons.car);
@@ -432,6 +439,50 @@ static mino_val_t *lazy_take_thunk(mino_state_t *S, mino_val_t *ctx)
     coll = normalize_seq(S, coll);
     if (coll == NULL) return NULL;
     if (mino_type_of(coll) == MINO_NIL) return mino_nil(S);
+    if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
+        const mino_val_t *src = coll->as.chunked_cons.chunk;
+        unsigned          off = coll->as.chunked_cons.off;
+        unsigned          avail = src->as.chunk.len - off;
+        if ((long long)avail <= n) {
+            /* Use the whole remaining chunk; emit a fresh chunked-cons
+             * that preserves the source offset and either points at the
+             * rest (recursing through a fresh lazy) or terminates when
+             * we've taken all we need. */
+            mino_val_t *more = coll->as.chunked_cons.more;
+            long long   left = n - (long long)avail;
+            mino_val_t *cell = alloc_val(S, MINO_CHUNKED_CONS);
+            if (cell == NULL) return NULL;
+            cell->as.chunked_cons.chunk = (mino_val_t *)src;
+            cell->as.chunked_cons.off   = off;
+            if (left <= 0 || more == NULL || mino_type_of(more) == MINO_NIL
+                || mino_type_of(more) == MINO_EMPTY_LIST) {
+                cell->as.chunked_cons.more = mino_nil(S);
+            } else {
+                next_ctx = mino_cons(S, mino_int(S, left),
+                            mino_cons(S, more, mino_nil(S)));
+                next_lz = alloc_val(S, MINO_LAZY);
+                if (next_lz == NULL) return NULL;
+                next_lz->as.lazy.body    = next_ctx;
+                next_lz->as.lazy.c_thunk = lazy_take_thunk;
+                cell->as.chunked_cons.more = next_lz;
+            }
+            return cell;
+        } else {
+            /* `n < avail`: materialise a fresh chunk of exactly `n`
+             * elements so the resulting seq stops at the boundary. */
+            mino_val_t *buf;
+            long long   i;
+            buf = mino_chunk_buffer(S, (unsigned)n);
+            if (buf == NULL) return NULL;
+            for (i = 0; i < n; i++) {
+                if (!mino_chunk_append(buf, src->as.chunk.vals[off + (unsigned)i])) {
+                    return NULL;
+                }
+            }
+            mino_chunk_seal(buf);
+            return mino_chunked_cons(S, buf, mino_nil(S));
+        }
+    }
     if (!seq_head_rest(S, coll, &head, &rest)) return mino_nil(S);
     if (n == 1) {
         return mino_cons(S, head, mino_nil(S));
@@ -522,10 +573,30 @@ mino_val_t *prim_drop_seq(mino_state_t *S, mino_val_t *args, mino_env_t *env)
             return mino_empty_list(S);
         }
         if (mino_type_of(coll) == MINO_CHUNKED_CONS) {
-            coll = mino_chunked_cons_advance(S, coll);
-            if (coll == NULL) return mino_empty_list(S);
-            n--;
-            continue;
+            /* Bulk-skip the head chunk when `n` exceeds its remaining
+             * elements. One advance walks past the whole chunk instead
+             * of `len - off` per-element advances. */
+            const mino_val_t *src = coll->as.chunked_cons.chunk;
+            unsigned          off = coll->as.chunked_cons.off;
+            unsigned          avail = src->as.chunk.len - off;
+            if ((long long)avail <= n) {
+                coll = coll->as.chunked_cons.more;
+                n   -= (long long)avail;
+                if (coll == NULL || mino_type_of(coll) == MINO_NIL
+                    || mino_type_of(coll) == MINO_EMPTY_LIST) {
+                    return mino_empty_list(S);
+                }
+                continue;
+            }
+            /* `n < avail`: rebase the head chunk's offset. */
+            {
+                mino_val_t *cell = alloc_val(S, MINO_CHUNKED_CONS);
+                if (cell == NULL) return NULL;
+                cell->as.chunked_cons.chunk = (mino_val_t *)src;
+                cell->as.chunked_cons.off   = off + (unsigned)n;
+                cell->as.chunked_cons.more  = coll->as.chunked_cons.more;
+                return cell;
+            }
         }
         if (mino_type_of(coll) != MINO_CONS) {
             coll = prim_seq(S, mino_cons(S, coll, mino_nil(S)), NULL);

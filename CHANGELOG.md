@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.325.0 — Chunked-aware take and drop
+
+`lazy-take` and `drop-seq` now forward whole chunks when the
+underlying source is a chunked seq, instead of stepping one
+element at a time. For `(doall (take 10000 (range)))`:
+
+| measure                             | before     | after    | ratio   |
+|-------------------------------------|-----------:|---------:|--------:|
+| realize 10k of lazy range (per op)  | 4.43 ms    | 4.85 µs  | 0.001x  |
+| chunk-cons allocations per op       | ~9,688     | ~313     | 0.032x  |
+| heap bytes per op                   | ~4.0 MB    | ~9.9 KB  | 0.002x  |
+
+`take` allocates a fresh chunked-cons cell carrying the source
+offset when the requested count covers the head chunk in full, and
+materialises a small sub-chunk when the count falls mid-chunk so
+the seq terminates cleanly at the boundary. `drop` jumps past the
+head chunk in one step when the drop count exceeds its remaining
+elements; otherwise it rebases the offset.
+
+JIT-parity tests byte-identical across modes. release-gate clean.
+Other realistic_bench rows unchanged within run-to-run noise.
+
 ## v0.324.0 — Move-coalescing peephole for recur
 
 `compile_recur` now writes a recur argument directly into its target
