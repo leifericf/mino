@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.336.0 — Lower non-const vector literals to `(vector ...)` calls
+
+`compile_expr` already const-pools vector literals whose elements
+are all self-evaluating, but vectors with at least one non-const
+element fell through to the tree-walk fallback, dropping the whole
+defn body off the bytecode path. `(defn vlit [n] [n n n])` is the
+canonical instance.
+
+Lower the non-const case to `(vector e0 e1 ...)` at compile time
+so the existing call path evaluates each element per-invocation and
+constructs a fresh vector. The lowering is local to compile_expr's
+literal dispatch; the recursive call sees the same compiler context
+so locals stay in scope.
+
+Map and set literals with non-empty contents still decline. A
+parallel attempt to lower them as `(hash-map ...)` / `(hash-set ...)`
+calls broke `defmacro defprotocol`'s template at core boot -- the
+syntax-quoted parts of macro bodies treat literal maps as data,
+not as expressions to evaluate. Worth a focused investigation
+before that lane lands; tracked in `.local/BUGS.md`.
+
+### Direct measurement (microbench: 100 calls of `[n n n]`)
+
+| metric | before | after |
+|--------|-------:|------:|
+| bc-dispatches per call | 0 (tree-walk fallback) | ~5 |
+
+### realistic_bench, median of 2, arm64-darwin
+
+| row | v0.335 JIT off | v0.336 JIT off | Δ | v0.335 JIT on | v0.336 JIT on | Δ |
+|-----|---------------:|---------------:|--:|--------------:|--------------:|--:|
+| bump 5k int-map | 16.94 ms | 17.03 ms | flat | 17.64 ms | 17.43 ms | flat |
+| build 5k int-map | 10.18 ms | 10.43 ms | flat noise | 9.55 ms | 9.65 ms | flat |
+| nested 500x100 | 18.09 ms | 18.14 ms | flat | 17.18 ms | 17.18 ms | flat |
+
+Measurement-neutral on realistic_bench rows; the workloads don't
+use the now-BC-compiled `[a b c]` pattern in their hot path. The
+fix lands because it removes a silent fall-back path -- any defn
+body containing `[expr expr]` now stays on bytecode.
+
 ## v0.335.0 — Const-pool empty map / set literals
 
 `compile_expr` declined every MINO_MAP and MINO_SET literal (and

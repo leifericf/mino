@@ -3996,6 +3996,23 @@ static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
                 emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
                 return 0;
             }
+            /* Constructor lane: lower `[a b c]` with non-const
+             * elements to `(vector a b c)` so the enclosing fn keeps
+             * compiling to BC. Without this every `[a b c]` literal
+             * in a defn body forces tree-walk eval. */
+            {
+                mino_state_t *S = c->S;
+                mino_val_t *head = mino_symbol(S, "vector");
+                mino_val_t *args = mino_nil(S);
+                if (head == NULL) return -1;
+                for (size_t i = form->as.vec.len; i > 0; i--) {
+                    args = mino_cons(S, vec_nth(form, i - 1), args);
+                    if (args == NULL) return -1;
+                }
+                mino_val_t *call = mino_cons(S, head, args);
+                if (call == NULL) return -1;
+                return compile_expr(c, call, dst, tail);
+            }
         } else if (mino_type_of(form) == MINO_MAP
                    && form->as.map.len == 0) {
             int k = add_const(c, form);
