@@ -380,13 +380,17 @@ static void gc_mark_stack_push_raw(mino_state_t *S, gc_hdr_t *h)
         if (S->gc_mark_stack_cap == 0) {
             new_cap = GC_MARK_STACK_INIT;
         } else if (S->gc_mark_stack_cap > SIZE_MAX / 2 / sizeof(*ns)) {
+            S->gc_mark_stack_overflows++;
             return; /* Cap overflow: drop the push (collector falls back
                      * on conservative scan as a backstop). */
         } else {
             new_cap = S->gc_mark_stack_cap * 2;
         }
         ns = (gc_hdr_t **)realloc(S->gc_mark_stack, new_cap * sizeof(*ns));
-        if (ns == NULL) return;
+        if (ns == NULL) {
+            S->gc_mark_stack_overflows++;
+            return;
+        }
         S->gc_mark_stack = ns;
         S->gc_mark_stack_cap = new_cap;
     }

@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[27];
-    mino_val_t *vs[27];
+    mino_val_t *ks[30];
+    mino_val_t *vs[30];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1270,7 +1270,14 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[25] = mino_int(S, (long long)st.major_sweep_ns);
     ks[26] = mino_keyword(S, "root-scan-ns");
     vs[26] = mino_int(S, (long long)st.root_scan_ns);
-    return mino_map(S, ks, vs, 27);
+    /* Write-barrier hit counters and mark-stack overflow drops. */
+    ks[27] = mino_keyword(S, "barrier-satb-pushes");
+    vs[27] = mino_int(S, (long long)st.barrier_satb_pushes);
+    ks[28] = mino_keyword(S, "barrier-dijkstra-pushes");
+    vs[28] = mino_int(S, (long long)st.barrier_dijkstra_pushes);
+    ks[29] = mino_keyword(S, "mark-stack-overflows");
+    vs[29] = mino_int(S, (long long)st.mark_stack_overflows);
+    return mino_map(S, ks, vs, 30);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

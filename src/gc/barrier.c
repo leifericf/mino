@@ -163,13 +163,19 @@ void gc_write_barrier(mino_state_t *S, void *container,
             && ((uintptr_t)old_value & MINO_TAG_MASK) == 0
             && !gc_ptr_is_state_embedded(S, old_value)) {
             gc_hdr_t *h_old = ((gc_hdr_t *)old_value) - 1;
-            if (!h_old->mark) gc_mark_push(S, h_old);
+            if (!h_old->mark) {
+                gc_mark_push(S, h_old);
+                S->gc_barrier_satb_pushes++;
+            }
         }
         if (new_value != NULL
             && ((uintptr_t)new_value & MINO_TAG_MASK) == 0
             && !gc_ptr_is_state_embedded(S, new_value)) {
             gc_hdr_t *h_new_satb = ((gc_hdr_t *)new_value) - 1;
-            if (!h_new_satb->mark) gc_mark_push(S, h_new_satb);
+            if (!h_new_satb->mark) {
+                gc_mark_push(S, h_new_satb);
+                S->gc_barrier_dijkstra_pushes++;
+            }
         }
     }
     if (container == NULL) {

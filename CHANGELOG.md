@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.345.1 — GC barrier + overflow counters
+
+Three new cumulative counters surfaced through `mino_gc_stats_t`
+and `(gc-stats)`:
+
+- `:barrier-satb-pushes` — ticks each time the old-value snapshot
+  push during MAJOR_MARK actually enqueues onto the mark stack
+  (Yuasa half of the hybrid barrier). Skipped when the value is
+  NULL, tagged, state-embedded, or already marked.
+- `:barrier-dijkstra-pushes` — ticks each time the new-value
+  insertion push enqueues (the half that catches edges whose
+  snapshot path was overwritten in the same store). Same skip
+  conditions.
+- `:mark-stack-overflows` — counts silent-drop events in
+  `gc_mark_stack_push_raw`. Fires on capacity overflow at
+  `SIZE_MAX/2/sizeof(*ns)` or on realloc failure; in either case
+  the collector falls back to conservative stack scan as a
+  backstop, so a non-zero count is also a hint that the cycle
+  may have over-paid for scanning.
+
+The plan's `gc_remset_overflows` counter is intentionally
+omitted: mino aborts on a remset realloc failure rather than
+silently dropping the entry, so the event is unobservable from
+the surviving runtime. The plan's `gc_card_dirties` counter is
+omitted because mino has no card-marking variant (the
+remembered set + SATB / Dijkstra pair handles the same job).
+
+Probe (atom + swap! cycles under an in-flight major):
+- 2 minors + 1 major triggered 1 SATB push and 578 Dijkstra
+  pushes, with 0 mark-stack overflows.
+
+The dominance of Dijkstra over SATB in this microbench is
+expected for a Yuasa-with-insertion barrier: most slots being
+written are the just-installed pointer, while the old-value
+path is rarer (snapshot already covered it via root scan).
+Future cycles can use the SATB/Dijkstra ratio across the corpus
+to evaluate whether barrier work can be reshaped.
+
+`task release-gate` is OK. No new perf-gate regressions
+introduced; same one pre-existing `small-map` row.
+
 ## v0.345.0 — Per-phase GC timers
 
 First release in the instrumentation cycle that started after

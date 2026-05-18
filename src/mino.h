@@ -28,7 +28,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 345
-#define MINO_VERSION_PATCH 0
+#define MINO_VERSION_PATCH 1
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1583,6 +1583,19 @@ typedef struct {
     size_t major_mark_ns;
     size_t major_sweep_ns;
     size_t root_scan_ns;
+    /* Write-barrier hit counters (cumulative since state creation).
+     * barrier_satb_pushes ticks for each old-value snapshot push
+     * during MAJOR_MARK (Yuasa half of the hybrid barrier);
+     * barrier_dijkstra_pushes ticks for each new-value insertion
+     * push (the half that catches edges whose snapshot path was
+     * overwritten in the same store). mark_stack_overflows counts
+     * silent-drop events when gc_mark_stack_push_raw could not grow
+     * the stack -- the collector then leans on conservative stack
+     * scan as a backstop, so the count is also a hint that the cycle
+     * may have over-paid for scanning. */
+    size_t barrier_satb_pushes;
+    size_t barrier_dijkstra_pushes;
+    size_t mark_stack_overflows;
     size_t remset_entries;     /* current remembered-set size */
     size_t remset_cap;         /* remembered-set capacity */
     size_t remset_high_water;  /* peak remset size this state */
