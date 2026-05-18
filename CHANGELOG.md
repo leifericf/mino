@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.342.0 — Predicate+branch fusion deferred
+
+Doc-only marker. The architectural investigation for fusing the
+`<cmp>_II → JMPIFNOT` and `CALL_CACHED → JMPIFNOT` bigrams
+identified two structural blockers:
+
+- `bc_has_branches` (`src/eval/bc/jit/emit.c:321`) gates fusion
+  off entirely for any function containing a JMP / JMPIFNOT.
+  The bigrams the v0.338 counter surfaced come from exactly
+  those branching bodies; lifting the gate needs a
+  per-fusion-site branch-target safety pass, not a per-bc one.
+- The chain-return mechanism patches a single fall-through
+  edge. A fused predicate+branch stencil needs two patch
+  destinations (chain to next stencil OR branch to bytecode
+  target). Multi-class chain markers across the stencil
+  descriptor, the chain pass, and the patch table generator
+  is a multi-cycle restructuring.
+
+Expected upside per the bigram data: 2-3% on loop-heavy
+workloads -- borderline above the gate the plan set. Combined
+with the infrastructure cost, a future cycle picks this up with
+a refined design (per-site safety pass first, then prototype
+one fused pair, then mirror only on measured win).
+
+No production code change in this release.
+
 ## v0.341.0 — Workload corpus expansion (mino-bench)
 
 Doc-only marker. Three new benches land in mino-bench:
