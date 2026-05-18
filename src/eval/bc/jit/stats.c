@@ -276,7 +276,10 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
 {
     if (!cpjit_stats_enabled()) return;
     g_cpjit_stats.fns_attempted++;
-    if (reason == CPJIT_REASON_OK) g_cpjit_stats.fns_eligible++;
+    if (reason == CPJIT_REASON_OK
+        || reason == CPJIT_REASON_OK_WITH_DEOPT) {
+        g_cpjit_stats.fns_eligible++;
+    }
     if (compiled) {
         g_cpjit_stats.fns_compiled++;
         g_cpjit_stats.native_bytes_total += native_bytes;

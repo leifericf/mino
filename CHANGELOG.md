@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.320.0 — Side-exit measurement
+
+Companion `mino-bench` adds `benchmarks/side_exit_micro.clj`, a
+four-row probe that measures the round-trip cost of a single
+deopt per call. Each row is 1M iterations on Apple Silicon (M3):
+
+| row                              | JIT-off  | JIT-on   | delta  |
+|----------------------------------|---------:|---------:|-------:|
+| pure-prefix (no deopt, baseline) | 4.83 us  | 4.76 us  | -1.5%  |
+| dyn-at-pc0 (classifier rejects)  | 5.03 us  | 4.95 us  | -1.6%  |
+| deopt-tiny (~3-op prefix)        | 5.10 us  | 5.06 us  | -0.8%  |
+| deopt-medium (~30-op prefix)     | 5.28 us  | 5.21 us  | -1.3%  |
+
+The pure-prefix row shows the JIT delivers a small win on a
+short stenciled body even amid the per-iteration GC noise
+(~14% GC time on these rows). The dyn-at-pc0 row -- where the
+PUSHDYN sits at PC 0 and the classifier rejects the fn outright
+-- shows the same JIT-on vs JIT-off delta (~-2%) is just
+runner noise on these microbenches.
+
+Side-exit round-trip cost: roughly 100 ns per deopt. Reading
+that from `deopt-tiny - dyn-at-pc0` under JIT-on
+(5.06 - 4.95 = ~110 ns) gives the per-call overhead the deopt
+stencil + `mino_bc_run_resume` chain adds on top of running the
+whole body through the interpreter. The cost amortises against
+the cost of running the prefix through the interpreter at
+roughly the 30-op prefix length.
+
+`MINO_CPJIT_STATS=summary` on the bench corpus reports
+`compiled=70/70 eligible=70 top_blockers=OP_PUSHDYN(3)`: the
+three deopt fns compile via the OK_WITH_DEOPT path; nothing
+falls back to the interpreter. The stats sink also now counts
+OK_WITH_DEOPT toward the eligible total so the engagement
+metric stays an accurate ratio.
+
 ## v0.319.0 — Side-exit deopt stencil
 
 Fns whose first unstenciled op sits past PC 0 now compile to a
