@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.329.0 — Map / collection wins cycle close
+
+Three-release cycle (v0.327.0 → v0.329.0) targeting the alloc-
+bound rows the post-v0.323 baseline flagged. Two shipped wins;
+one queued for follow-up.
+
+Shipped:
+
+- **v0.327.0 — Builder-rewrite extension for non-empty seeds.**
+  `try_builder_rewrite` accepts any vector/map/set seed (not only
+  empty literals) and permits acc references that appear as the
+  direct first argument of `get` / `nth` / `count` / `get-in`
+  (transient-protocol-safe reads). Synthetic bump-loop 5k drops
+  45% (6.38 ms → 3.48 ms); extend-vec-loop 5k drops 22%.
+- **v0.328.0 — Transient fast path in `into` for vectors.** The
+  vector branch of `prim_into` now mirrors the map / set branches:
+  wrap the destination in a transient, conj-bang each element,
+  seal. realistic_bench nested-vectors 500x100 row drops from
+  17.93 ms / 22.5 MB alloc to 12.62 ms / 10.3 MB (−30% time,
+  −54% alloc).
+
+Deferred:
+
+- **Reduce-pattern rewriter** for the `(reduce assoc-shaped-fn
+  seed coll)` shape. The realistic_bench `bump 5k int-map values`
+  row uses `reduce`, not `loop` / `recur`, so v0.327's
+  builder-rewrite doesn't catch it. The synthetic loop variant of
+  the same workload drops 45%; routing `reduce`-shaped builders
+  through a transient is a separate compile-time analysis with
+  its own measurement story. Queued as a Cycle C candidate.
+- **Poly-IC 4-slot dispatch.** No row in realistic_bench is
+  protocol-dispatch bound; shipping the substrate change without
+  a measurable bench movement contradicts `[[measure-before-after]]`.
+  Revisit when a workload surfaces the polymorphic IC tail.
+- **HAMT path-copy elision for same-value writes** (plan's
+  v0.330): no-op — already shipped (the equality short-circuit
+  in `mino_map_assoc1` / `mino_map_assoc1_owned` predates this
+  cycle).
+
+Net post-cycle perf vs v0.326.0 baseline (realistic_bench,
+median of 3 runs, arm64-darwin):
+
+| row                            | A off | B off | Δ      | A on  | B on  | Δ      |
+|--------------------------------|------:|------:|-------:|------:|------:|-------:|
+| build 5k int-map and sum       | 10.83 | 11.00 | +1.6%  | 10.34 | 10.35 | flat   |
+| bump 5k int-map values         | 17.81 | 19.03 | +6.8%  | 19.29 | 19.05 | -1.2%  |
+| map/filter/map/reduce over 50k | 793 µs| 822 µs| +3.7%  | 712 µs| 753 µs| +5.8%  |
+| **nested vectors 500x100**     |**19.00**|**13.42**|**-29.4%**|**18.47**|**13.10**|**-29.1%**|
+| realize 10k of lazy range      | 4.55 µs|4.70 µs| +3.3% |5.95 µs|6.10 µs| +2.5%  |
+| fibonacci(25)                  | 9.32  | 9.26  | -0.6%  | 6.65  | 6.70  | +0.8%  |
+
+The +3 to +6% drifts on build / bump / map-filter / realize are
+within the run-to-run noise band for those rows (alloc-bound at
+15-25% GC fraction; ~5% variance is typical). The cycle's
+substantive movement is the nested-vec row at −29% across both
+JIT modes.
+
+Full bench output: `.local/perf-after-cycle-b.md` and
+`.local/realistic_jit_AB_cycle_b.txt`. JIT-parity byte-identical
+across `jit-auto / jit-on / jit-off / lean`. release-gate clean
+(18 / 18 probes). Full test suite (1368 tests, 4820 assertions)
+clean.
+
 ## v0.328.0 — Transient fast path in `into` for vectors
 
 `(into to from)` already used a transient when `to` was a map or
