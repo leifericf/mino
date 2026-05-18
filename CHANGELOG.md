@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.340.0 — Loop matcher accepts (+ counter 1) as inc-equivalent
+
+The counted-loop matcher in `compile.c` recognises three step
+shapes for a loop counter: `(inc counter)`, `(+ counter 1)`, and
+`(+ 1 counter)`. Previously only `(inc counter)` qualified; user
+code that writes `(+ i 1)` -- a common Clojure-canonical form --
+fell through to the unfused LT_II / JMPIFNOT / ADD_IK / JMP
+sequence.
+
+A 10M-iter microbench on arm64-darwin confirms the three forms
+run within noise of each other when the fused op fires
+(16.8-16.9ms each). The recur-shape bench (mino-bench)
+adds three new rows demonstrating that `(+ i 1)` and `(+ 1 i)`
+match the `(inc i)` baseline in both 1-binding and 2-binding
+shapes.
+
+Honest scope note: across the workload corpus surveyed for this
+release, no row that previously rejected for "counter step not
+(inc counter)" ALSO has its non-counter binding step in
+inc-equivalent form. The realistic_bench loops that motivated
+this change still reject at the non-counter-step check (they
+have `(assoc m i ...)` / `(conj v i)` as the second step).
+Fusing those is gated on the predicate+branch fusion landing in
+a later release; this change positions the matcher to recognise
+the counter-step shape so the later fusion work doesn't quietly
+miss arithmetic-counter loops.
+
 ## v0.339.0 — Perf cycle close
 
 Marker for the close of the v0.330 → v0.338 perf cycle. The

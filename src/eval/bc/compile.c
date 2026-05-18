@@ -1167,6 +1167,52 @@ static int find_binding_idx(mino_val_t *bindings, int n_bindings,
     return -1;
 }
 
+/* True when `form` is `(+ bind 1)` or `(+ 1 bind)` resolving the head
+ * to the canonical `+` prim, with the named binding on one side and a
+ * literal 1 on the other. Used as an inc-equivalent for counter steps
+ * since Clojure-canonical user code often writes `(+ i 1)` rather than
+ * `(inc i)` -- both produce the same value for tagged-int counters and
+ * the fused loop op needs both shapes to fire. */
+static int is_plus_one_of_local(compiler_t *c, mino_val_t *form,
+                                const char *expected_name)
+{
+    if (!mino_is_cons(form)) return 0;
+    mino_val_t *h = form->as.cons.car;
+    if (h == NULL || mino_type_of(h) != MINO_SYMBOL) return 0;
+    if (strcmp(h->as.s.data, "+") != 0) return 0;
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) return 0;
+    mino_val_t *a1 = args->as.cons.car;
+    mino_val_t *rest = args->as.cons.cdr;
+    if (!mino_is_cons(rest)) return 0;
+    mino_val_t *a2 = rest->as.cons.car;
+    if (rest->as.cons.cdr != NULL
+        && mino_type_of(rest->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(rest->as.cons.cdr)) return 0;
+    }
+    if (a1 == NULL || a2 == NULL) return 0;
+    /* Exactly one operand is the binding symbol; the other is integer 1. */
+    int a1_sym = (mino_type_of(a1) == MINO_SYMBOL
+                  && strcmp(a1->as.s.data, expected_name) == 0);
+    int a2_sym = (mino_type_of(a2) == MINO_SYMBOL
+                  && strcmp(a2->as.s.data, expected_name) == 0);
+    int a1_one = (mino_val_int_p(a1) && mino_val_int_get(a1) == 1);
+    int a2_one = (mino_val_int_p(a2) && mino_val_int_get(a2) == 1);
+    if (!((a1_sym && a2_one) || (a2_sym && a1_one))) return 0;
+    return head_is_canonical_pure_prim(c, h);
+}
+
+/* Recognise the inc-equivalent step for a loop counter binding:
+ *   (inc bname)      -- canonical
+ *   (+ bname 1)      -- Clojure-canonical user-side equivalent
+ *   (+ 1 bname)      -- commutative arg order. */
+static int is_inc_step_of_local(compiler_t *c, mino_val_t *step,
+                                const char *bname)
+{
+    return is_unary_call_of_local(c, step, "inc", bname)
+        || is_plus_one_of_local(c, step, bname);
+}
+
 /* Match the backward-counted shape:
  *   (if (zero? bX) <exit> (recur step0 step1 ...))
  * where each step is (inc bi) / (dec bi) self-referencing its own
@@ -1210,7 +1256,7 @@ static int try_match_dec_shape(compiler_t *c,
         if (bn == NULL || mino_type_of(bn) != MINO_SYMBOL) return 0;
         const char *bname = bn->as.s.data;
         int is_dec = is_unary_call_of_local(c, step, "dec", bname);
-        int is_inc = is_unary_call_of_local(c, step, "inc", bname);
+        int is_inc = is_inc_step_of_local(c, step, bname);
         if (!is_dec && !is_inc) return 0;
         if (i == test_idx && !is_dec) return 0;
         if (i != test_idx && !is_inc) return 0;
@@ -1347,7 +1393,8 @@ static int try_match_lt_shape(compiler_t *c,
     }
 
     /* recur_form must be (recur step0 step1 ...) with the counter
-     * binding's step = (inc counter_sym) and any other binding step
+     * binding's step = (inc counter_sym) (or (+ counter 1) -- both
+     * accepted as inc-equivalents) and any other binding step
      * = (inc itself). */
     if (!mino_is_cons(recur_form)) return 0;
     mino_val_t *rh = recur_form->as.cons.car;
@@ -1360,7 +1407,7 @@ static int try_match_lt_shape(compiler_t *c,
         mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
         if (bn == NULL || mino_type_of(bn) != MINO_SYMBOL) return 0;
         const char *bname = bn->as.s.data;
-        if (!is_unary_call_of_local(c, step, "inc", bname)) return 0;
+        if (!is_inc_step_of_local(c, step, bname)) return 0;
         steps = steps->as.cons.cdr;
     }
     if (steps != NULL && mino_type_of(steps) != MINO_NIL) {
