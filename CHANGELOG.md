@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.341.0 — Workload corpus expansion (mino-bench)
+
+Doc-only marker. Three new benches land in mino-bench:
+
+- `jit_blocker_workloads.clj` — try/catch hot loops (never-throw
+  and sometimes-throw variants) and dynamic-binding hot loops.
+  Exercises the OP_PUSHCATCH / OP_POPCATCH / OP_THROW and
+  OP_PUSHDYN / OP_POPDYN bytecode ops the JIT eligibility
+  classifier rejects today.
+- `alloc_pressure_bench.clj` — per-op allocation sweep at
+  ~64 B / ~1 KB / ~16 KB buckets so GC profile work can be
+  measured against object-size variation rather than just
+  object-count.
+- `protocol_hot_loop.clj` — three IC shapes inside a hot loop
+  (mono / bi / tri) for inline-cache hit/miss characterisation.
+
+Running `MINO_CPJIT_STATS=tracing` over `jit_blocker_workloads`
+now reports one `ok-with-deopt` fn (the `compute-or-throw`
+helper at line 27, blocked at OP_THROW@pc=11). The corpus
+clears the > 10% `OK_WITH_DEOPT` gate that the forward stencil
+hook work has waited on since v0.339.0.
+
+No source change in mino itself. The companion bench commits
+live on mino-bench's `perf-cycle-d` branch.
+
 ## v0.340.0 — Loop matcher accepts (+ counter 1) as inc-equivalent
 
 The counted-loop matcher in `compile.c` recognises three step
