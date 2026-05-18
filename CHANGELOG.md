@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.323.0 — Post-JIT-2 cycle close
+
+Seven-release sub-cycle (v0.317.0 → v0.323.0) on the
+`jit-roi-cycle` branch, stacked on top of the prior JIT-2
+close at v0.316.
+
+Headline shipped:
+
+- **Side-exit deopt stencil** (v0.317–v0.320): fns whose first
+  unstenciled op sits past PC 0 now compile to native prefix +
+  deopt stencil. Round-trip cost roughly 100 ns per deopt
+  (measured against the `dyn-at-pc0` interpreter baseline).
+  Cross-host stencil tables (arm64-darwin, arm64-linux,
+  x86_64-darwin, x86_64-linux, x86_64-windows) all carry the
+  new entry.
+- **JIT loop cancellability** (v0.321): each fused-loop
+  stencil polls `mino_bc_safepoint` on a 256-iter downcounter.
+  Closes the v0.312 audit gap. A 1B-iter JIT'd spin responds
+  to `(future-cancel f)` within bounded wall time.
+- **Control-flow stencil measurement** (v0.322): zero new
+  stencils shipped per the 7% movement gate; the dashboard
+  split (`hard` vs `ok-with-deopt`) makes the decision
+  auditable.
+
+Real-workload eligibility now sits at 100% reason=OK on the
+`realistic_bench.clj` and `real_workloads.clj` corpora.
+
+Full close notes at `mino/.local/post-jit-2-cycle-close.md`.
+Updated `mino/.local/jit-2-targets.md` marks the native-coverage
+and cancellability rows closed.
+
 ## v0.322.0 — Control-flow stencil measurement decision
 
 The plan slotted v0.322 for per-op stencils on the seven
