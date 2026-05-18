@@ -1973,30 +1973,91 @@ out:
     return -1;
 }
 
+/* Conservative free-name scan: does `ast` reference any symbol whose
+ * lookup, in the current local scope, resolves to register `target_reg`?
+ * Walks cons-cells and vector-literals; treats persistent-coll literals
+ * as possible references rather than iterating them (rare in recur arg
+ * position, walker simpler). Doesn't model shadowing forms -- a `let`
+ * inside an arg that rebinds the loop's name is treated as still
+ * referring to the loop's register, which is over-conservative (keeps
+ * the move) but correct. Used by compile_recur to decide which
+ * temp/move pairs can collapse into a direct write. */
+static int recur_arg_reads_reg(compiler_t *c, mino_val_t *ast,
+                               int target_reg)
+{
+    if (ast == NULL) return 0;
+    switch (mino_type_of(ast)) {
+    case MINO_SYMBOL:
+        return find_local(c, ast->as.s.data) == target_reg;
+    case MINO_CONS:
+        if (recur_arg_reads_reg(c, ast->as.cons.car, target_reg)) return 1;
+        return recur_arg_reads_reg(c, ast->as.cons.cdr, target_reg);
+    case MINO_VECTOR:
+        for (size_t i = 0; i < ast->as.vec.len; i++) {
+            mino_val_t *elt = vec_nth(ast, i);
+            if (recur_arg_reads_reg(c, elt, target_reg)) return 1;
+        }
+        return 0;
+    case MINO_MAP:
+    case MINO_SET:
+    case MINO_SORTED_MAP:
+    case MINO_SORTED_SET:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int compile_recur(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     (void)dst; (void)tail;  /* recur never produces a value -- it jumps. */
     if (c->loop == NULL) { c->ok = 0; return -1; }
-    /* Walk the recur args. They must match the loop's binding count.
-     * Evaluate each into a fresh temp register so a recur arg can
-     * reference a loop binding without being clobbered by an earlier
-     * MOVE; only after all temps are filled do we copy them onto the
-     * loop binding slots. */
     int n = c->loop->n_bindings;
-    mino_val_t *cur = form->as.cons.cdr;
-    int saved_next = c->next_reg;
-    int temp_base  = c->next_reg;
-    for (int i = 0; i < n; i++) {
-        if (!mino_is_cons(cur)) { c->ok = 0; return -1; }
-        int t = alloc_reg(c);
-        if (t < 0) return -1;
-        if (compile_expr(c, cur->as.cons.car, t, 0) < 0) return -1;
-        cur = cur->as.cons.cdr;
+    /* Walk the recur args. They must match the loop's binding count.
+     * Gather pointers first so we can look ahead when picking the
+     * compile destination for each arg. */
+    mino_val_t *args[BC_MAX_LOCALS];
+    {
+        mino_val_t *cur = form->as.cons.cdr;
+        for (int i = 0; i < n; i++) {
+            if (!mino_is_cons(cur)) { c->ok = 0; return -1; }
+            args[i] = cur->as.cons.car;
+            cur = cur->as.cons.cdr;
+        }
+        if (mino_is_cons(cur)) { c->ok = 0; return -1; }  /* too many */
     }
-    if (mino_is_cons(cur)) { c->ok = 0; return -1; }  /* too many */
+    int saved_next = c->next_reg;
+    /* For each binding, decide whether arg i can write directly to
+     * bind_regs[i] (no intermediate temp + move). Safe when no later
+     * arg reads bind_regs[i] under the current local scope -- because
+     * any earlier arg's read of bind_regs[i] inside its own subtree
+     * sees the OLD value (a register write only takes effect after
+     * compile_expr's final emit, by which point the read has already
+     * happened). Args 0..n-1 are compiled in order; pre-writing
+     * bind_regs[i] is the OP_MOVE-elision win. */
+    int temp_regs[BC_MAX_LOCALS];
     for (int i = 0; i < n; i++) {
+        int target = c->loop->bind_regs[i];
+        int needs_temp = 0;
+        for (int j = i + 1; j < n; j++) {
+            if (recur_arg_reads_reg(c, args[j], target)) {
+                needs_temp = 1; break;
+            }
+        }
+        if (needs_temp) {
+            int t = alloc_reg(c);
+            if (t < 0) return -1;
+            temp_regs[i] = t;
+            if (compile_expr(c, args[i], t, 0) < 0) return -1;
+        } else {
+            temp_regs[i] = -1;
+            if (compile_expr(c, args[i], target, 0) < 0) return -1;
+        }
+    }
+    for (int i = 0; i < n; i++) {
+        if (temp_regs[i] < 0) continue;
         emit_abc(c, OP_MOVE, (unsigned)c->loop->bind_regs[i],
-                 (unsigned)(temp_base + i), 0);
+                 (unsigned)temp_regs[i], 0);
     }
 
     /* If the enclosing loop wrapped its bindings in an OP_PUSH_ENV /

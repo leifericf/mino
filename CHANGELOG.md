@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.324.0 — Move-coalescing peephole for recur
+
+`compile_recur` now writes a recur argument directly into its target
+loop binding when no later argument under the same recur reads that
+binding. Each elided pair drops one OP_MOVE and one temp register
+slot from the iteration body.
+
+Workload deltas (Apple Silicon, arm64-darwin, 5x1M iters, median of
+3 runs):
+
+| workload                               | JIT-off before | JIT-off after | ratio  | JIT-on before | JIT-on after | ratio  |
+|----------------------------------------|---------------:|--------------:|-------:|--------------:|-------------:|-------:|
+| `(recur (+ i 1) (+ acc i))` sum-to     | 91.9 ms        | 81.6 ms       | 0.89x  | 17.2 ms       | 19.2 ms      | 1.12x  |
+| 5-binding `(recur (+ a 1) ...)` walk   | 6088.6 ms      | 5217.9 ms     | 0.86x  | 5676 ms       | 5609 ms      | 0.99x  |
+
+realistic_bench rows (build/bump/nested/realize/fib/map-filter)
+sit within run-to-run noise on both modes. JIT-parity tests
+byte-identical across `jit-auto / jit-on / jit-off / lean`.
+release-gate clean.
+
+The interpreter wins come from loops with mutually independent
+recur arguments. The small JIT-on regression on the tightest
+sum-to shape (`acc <- acc + i`) traces to read-write-same-register
+dependency chains in the resulting fused stencil chain; the
+absolute cost is ~0.4 ns/iter.
+
 ## v0.323.0 — Post-JIT-2 cycle close
 
 Seven-release sub-cycle (v0.317.0 → v0.323.0) on the
