@@ -3972,9 +3972,16 @@ static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
         || mino_type_of(form) == MINO_SET) {
         /* Vector literal with only self-evaluating elements is a
          * constant: stash the whole vector in the pool and emit a
-         * single OP_LOAD_K. Vectors with non-const elements and
-         * non-empty maps / sets still decline (their tree-walker
-         * lowering handles element evaluation). */
+         * single OP_LOAD_K. Vectors with non-const elements still
+         * decline (their tree-walker lowering handles element
+         * evaluation). Empty map / set literals are trivially
+         * constant and pool-safe -- this lets the builder rewrite's
+         * `(transient {})` / `(transient #{})` shapes compile to BC
+         * rather than falling back to tree-walk eval for the whole
+         * enclosing fn. Non-empty maps / sets keep declining: the
+         * cross-thread future-exception path observed loss of
+         * pooled-map fields when their const-pool entry is reached
+         * from a worker thread; see .local/BUGS.md for the audit. */
         if (mino_type_of(form) == MINO_VECTOR) {
             int all_const = 1;
             for (size_t i = 0; i < form->as.vec.len; i++) {
@@ -3989,6 +3996,18 @@ static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
                 emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
                 return 0;
             }
+        } else if (mino_type_of(form) == MINO_MAP
+                   && form->as.map.len == 0) {
+            int k = add_const(c, form);
+            if (k < 0) return -1;
+            emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+            return 0;
+        } else if (mino_type_of(form) == MINO_SET
+                   && form->as.set.len == 0) {
+            int k = add_const(c, form);
+            if (k < 0) return -1;
+            emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+            return 0;
         }
         c->ok = 0;
         return -1;

@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.335.0 — Const-pool empty map / set literals
+
+`compile_expr` declined every MINO_MAP and MINO_SET literal (and
+non-all-const vector). Any defn whose body contained one --
+including the rewritten loops the builder rewrite emits as
+`(persistent! (loop [acc (transient {})] ...))` -- fell back to
+tree-walk eval for the entire fn. Confirmed via alloc profile:
+`build-int-map`'s 5000 `(assoc m i v)` calls hit `mino_map_assoc1`
+(persistent path) 5000 times despite the rewrite firing, because
+the rewritten form never reached bytecode.
+
+Treat empty map / set literals as const-poolable. An empty map has
+no element forms to evaluate; const-pool storage is trivially safe.
+This unblocks the rewrite chain: `(loop [acc {}] ...)` rewrites to
+`(persistent! (loop [acc (transient {})] ...))`, which now BC-
+compiles and routes through `mino_assoc_bang` /
+`mino_map_assoc1_owned`.
+
+Non-empty maps / sets still decline. The all-self-evaluating-
+elements case would be safe in theory, but a focused investigation
+into cross-thread const-pool visibility for future-exception data
+maps (see `.local/BUGS.md`) is required before that lane lands.
+
+### Direct measurement (microbench: 5 × build-int-map 5000)
+
+| metric | before | after | Δ |
+|--------|-------:|------:|--:|
+| `mino_map_assoc1` (persistent) calls | 5008/iter | 0 | -100% |
+| `mino_map_assoc1_owned` (transient) calls | 0 | 5001/iter | new |
+| total allocs / op | ~4 KB | ~407 B | **-90%** |
+| total bytes allocated (5 iters) | ~30 MB | 10.2 MB | **-66%** |
+
+### realistic_bench, median of 3, arm64-darwin
+
+| row | v0.334 JIT off | v0.335 JIT off | Δ | v0.334 JIT on | v0.335 JIT on | Δ |
+|-----|---------------:|---------------:|--:|--------------:|--------------:|--:|
+| bump 5k int-map | 16.94 ms | 16.94 ms | flat | 17.30 ms | 17.64 ms | flat noise |
+| build 5k int-map | 10.27 ms | 10.18 ms | flat | 9.60 ms | 9.55 ms | flat |
+| nested 500x100 | 18.23 ms | 18.09 ms | flat | 17.10 ms | 17.18 ms | flat |
+
+Wall-time movement on realistic_bench rows sits in run-to-run
+noise; the workloads' floors are now dominated by something other
+than the prior tree-walk-eval overhead. The 90% allocation
+reduction will compose with future GC throughput work.
+
 ## v0.334.0 — OP_CONJ_BANG / OP_DISSOC_BANG / OP_DISJ_BANG complete the family
 
 Mirror v0.333's OP_ASSOC_BANG across the three remaining transient
