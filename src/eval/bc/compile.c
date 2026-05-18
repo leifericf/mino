@@ -951,6 +951,31 @@ static int count_symbol_uses(mino_val_t *form, const char *name)
         }
         return total;
     }
+    if (mino_type_of(form) == MINO_MAP) {
+        /* A map literal as a body form is itself an expression: walk
+         * its keys and values so dead-binding elimination doesn't
+         * drop a let-binding whose only use sits inside the map. */
+        size_t n = form->as.map.len;
+        int    total = 0;
+        for (size_t i = 0; i < n; i++) {
+            mino_val_t *k = vec_nth(form->as.map.key_order, i);
+            mino_val_t *v = (form->as.map.val_order != NULL)
+                            ? vec_nth(form->as.map.val_order, i)
+                            : map_get_val(form, k);
+            total += count_symbol_uses(k, name);
+            total += count_symbol_uses(v, name);
+        }
+        return total;
+    }
+    if (mino_type_of(form) == MINO_SET) {
+        size_t n = form->as.set.len;
+        int    total = 0;
+        for (size_t i = 0; i < n; i++) {
+            total += count_symbol_uses(vec_nth(form->as.set.key_order, i),
+                                       name);
+        }
+        return total;
+    }
     return 0;
 }
 
@@ -4013,21 +4038,69 @@ static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
                 if (call == NULL) return -1;
                 return compile_expr(c, call, dst, tail);
             }
-        } else if (mino_type_of(form) == MINO_MAP
-                   && form->as.map.len == 0) {
-            int k = add_const(c, form);
-            if (k < 0) return -1;
-            emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
-            return 0;
-        } else if (mino_type_of(form) == MINO_SET
-                   && form->as.set.len == 0) {
-            int k = add_const(c, form);
-            if (k < 0) return -1;
-            emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
-            return 0;
+        } else if (mino_type_of(form) == MINO_MAP) {
+            if (form->as.map.len == 0) {
+                int k = add_const(c, form);
+                if (k < 0) return -1;
+                emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+                return 0;
+            }
+            /* Constructor lane: lower `{:k0 v0 :k1 v1 ...}` to
+             * `(hash-map :k0 v0 :k1 v1 ...)` so the call site builds
+             * a fresh map per invocation with each value evaluated
+             * in the current local scope. Without this lowering a
+             * defn body returning a literal map with non-self-eval
+             * values falls back to tree-walk eval. The literal's
+             * keys are iterated in insertion order via key_order /
+             * val_order (flat-map representation; promotes to HAMT
+             * only above MINO_FLATMAP_THRESHOLD which the reader
+             * doesn't cross for typical source literals). */
+            {
+                mino_state_t *S = c->S;
+                mino_val_t *head = mino_symbol(S, "hash-map");
+                mino_val_t *call_args = mino_nil(S);
+                size_t      i;
+                if (head == NULL) return -1;
+                for (i = form->as.map.len; i > 0; i--) {
+                    mino_val_t *kk = vec_nth(form->as.map.key_order, i - 1);
+                    mino_val_t *vv = (form->as.map.val_order != NULL)
+                                     ? vec_nth(form->as.map.val_order, i - 1)
+                                     : map_get_val(form, kk);
+                    call_args = mino_cons(S, vv, call_args);
+                    if (call_args == NULL) return -1;
+                    call_args = mino_cons(S, kk, call_args);
+                    if (call_args == NULL) return -1;
+                }
+                mino_val_t *call = mino_cons(S, head, call_args);
+                if (call == NULL) return -1;
+                return compile_expr(c, call, dst, tail);
+            }
+        } else { /* MINO_SET */
+            if (form->as.set.len == 0) {
+                int k = add_const(c, form);
+                if (k < 0) return -1;
+                emit_abx(c, OP_LOAD_K, (unsigned)dst, (unsigned)k);
+                return 0;
+            }
+            /* Constructor lane: lower `#{a b c}` to
+             * `(hash-set a b c)`. Same shape as the map lowering;
+             * iteration follows insertion order via key_order. */
+            {
+                mino_state_t *S = c->S;
+                mino_val_t *head = mino_symbol(S, "hash-set");
+                mino_val_t *call_args = mino_nil(S);
+                size_t      i;
+                if (head == NULL) return -1;
+                for (i = form->as.set.len; i > 0; i--) {
+                    mino_val_t *e = vec_nth(form->as.set.key_order, i - 1);
+                    call_args = mino_cons(S, e, call_args);
+                    if (call_args == NULL) return -1;
+                }
+                mino_val_t *call = mino_cons(S, head, call_args);
+                if (call == NULL) return -1;
+                return compile_expr(c, call, dst, tail);
+            }
         }
-        c->ok = 0;
-        return -1;
     }
     if (!mino_is_cons(form)) {
         c->ok = 0;

@@ -1022,7 +1022,10 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         /* No enclosing try -- format as a fatal user error and bail
          * through the standard error path. Mirror prim_throw's
          * "unhandled exception: <value>" shape so the original
-         * thrown value survives in the diagnostic message. */
+         * thrown value survives in the diagnostic message. ex-info-
+         * style maps that carry a :data (or :mino/data) payload route
+         * through set_eval_diag_with_data so future workers preserve
+         * the data field on consumer-side rethrow. */
         if (exc != NULL && mino_type_of(exc) == MINO_MAP) {
             mino_val_t *msg  = map_get_val(exc,
                 mino_keyword(S, "mino/message"));
@@ -1030,16 +1033,30 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
                 mino_keyword(S, "mino/kind"));
             mino_val_t *code = map_get_val(exc,
                 mino_keyword(S, "mino/code"));
+            mino_val_t *data = map_get_val(exc,
+                mino_keyword(S, "mino/data"));
             if (msg == NULL || mino_type_of(msg) != MINO_STRING) {
                 msg = map_get_val(exc, mino_keyword(S, "message"));
             }
-            prim_throw_classified(S,
+            if (data == NULL) {
+                data = map_get_val(exc, mino_keyword(S, "data"));
+            }
+            const char *kind_str =
                 (kind != NULL && mino_type_of(kind) == MINO_KEYWORD)
-                    ? kind->as.s.data : "user",
+                    ? kind->as.s.data : "user";
+            const char *code_str =
                 (code != NULL && mino_type_of(code) == MINO_STRING)
-                    ? code->as.s.data : "MUS001",
+                    ? code->as.s.data : "MUS001";
+            const char *msg_str =
                 (msg != NULL && mino_type_of(msg) == MINO_STRING)
-                    ? msg->as.s.data : "unhandled exception");
+                    ? msg->as.s.data : "unhandled exception";
+            if (data != NULL) {
+                set_eval_diag_with_data(S, ctx->eval_current_form,
+                                        kind_str, code_str, msg_str,
+                                        data, NULL);
+            } else {
+                prim_throw_classified(S, kind_str, code_str, msg_str);
+            }
         } else if (exc != NULL && mino_type_of(exc) == MINO_STRING) {
             char msg[512];
             snprintf(msg, sizeof(msg), "unhandled exception: %.*s",

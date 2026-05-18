@@ -137,3 +137,38 @@
   ;; `:foo/` is genuinely malformed: name part is empty after the
   ;; slash. The reader must still reject it.
   (is (thrown? (read-string ":foo/"))))
+
+(deftest non-empty-map-literal-uses-local-bindings
+  ;; A defn body whose value is a literal map with non-self-evaluating
+  ;; values (here: a symbol bound by the surrounding let) must build a
+  ;; fresh map at each invocation, with the locals resolved to their
+  ;; current values. The pattern shows up in macro bodies that emit
+  ;; per-call result maps -- e.g., `defprotocol`'s method-meta builds
+  ;; `{:mname mname :params params :dsym ...}` per method.
+  (defn build-record__mt [n]
+    (let [doubled (* n 2)]
+      {:val n :doubled doubled :inc (+ n 1)}))
+  (is (= {:val 3 :doubled 6 :inc 4} (build-record__mt 3)))
+  (is (= {:val 7 :doubled 14 :inc 8} (build-record__mt 7)))
+  ;; Each call returns a distinct map -- not a shared const-pool entry.
+  (is (not (identical? (build-record__mt 1) (build-record__mt 1)))))
+
+(deftest non-empty-set-literal-uses-local-bindings
+  ;; Same as the map case but for set literals.
+  (defn build-set__mt [a b]
+    #{a b (+ a b)})
+  (is (= #{1 2 3} (build-set__mt 1 2)))
+  (is (= #{10 20 30} (build-set__mt 10 20)))
+  (is (not (identical? (build-set__mt 1 2) (build-set__mt 1 2)))))
+
+(deftest nested-literals-inside-macro-template
+  ;; The original regression: a defmacro whose body uses a literal map
+  ;; with symbol values from a let in the macro body. `defprotocol`
+  ;; broke this way during construction-lane experiments. Verifies the
+  ;; map / vec / set literal lowerings keep let scopes intact.
+  (defmacro mk-pair__mt [a b]
+    (let [tag :pair
+          payload `(vector ~a ~b)]
+      `(hash-map :tag ~tag :payload ~payload)))
+  (is (= {:tag :pair :payload [1 2]} (mk-pair__mt 1 2)))
+  (is (= {:tag :pair :payload [:x :y]} (mk-pair__mt :x :y))))

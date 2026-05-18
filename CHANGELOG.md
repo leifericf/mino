@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.337.0 — Non-empty map / set literals BC-compile
+
+Three related fixes that together let defn bodies containing
+non-empty map / set literals stay on the bytecode path.
+
+**Constructor-call lowering.** `compile_expr` previously bailed
+to tree-walk eval for any non-empty map / set literal in a defn
+body. The whole enclosing fn ran through the interpreter, which
+defeated builder-rewrite and any per-element optimisation. Lower
+`{:k0 v0 :k1 v1 ...}` to `(hash-map :k0 v0 :k1 v1 ...)` and
+`#{a b c}` to `(hash-set a b c)` at compile time so the call site
+builds a fresh collection per invocation with values evaluated in
+the current local scope.
+
+**`count_symbol_uses` traversal.** Dead-binding elimination in
+`compile_let` calls `count_symbol_uses` to decide if a binding can
+be dropped. The walker handled SYMBOL, CONS, and VECTOR but not
+MAP / SET. After the lowering above, a let body that's a literal
+map referencing a let-bound symbol survives the lowering -- but
+the dead-elim heuristic, blind to map values, would drop the
+binding as unused. The recursive walker now traverses MAP keys
+and values and SET elements.
+
+**OP_THROW parity with `prim_throw` data extraction.** The
+bytecode OP_THROW handled the no-enclosing-try fallback by
+extracting `:mino/message` / `:mino/kind` / `:mino/code` and
+routing through `prim_throw_classified` -- dropping any
+`:data` / `:mino/data` payload. `prim_throw` had grown a
+`set_eval_diag_with_data` path specifically so future workers
+preserve ex-info data through their consumer-side rethrow.
+OP_THROW had missed that fix. With the BC path now lighting up
+for defn bodies that throw ex-info-style maps (because the
+map-literal lowering above lets them compile), OP_THROW dropped
+the data field on future-throw scenarios. Mirror prim_throw's
+extraction.
+
+### Failure surface that prior cycle attempts hit
+
+A v0.336 experiment along the same lines broke `defmacro
+defprotocol` at core boot with `unbound symbol: mname` because
+the underlying `count_symbol_uses` gap was invisible while every
+non-empty map kept falling to tree-walk -- the dead-elim path
+never ran. Lowering exposed the gap. The full fix is the
+two-part change above plus the OP_THROW parity, all in one
+commit.
+
+### realistic_bench, median of 2, arm64-darwin
+
+Wall-time deltas sit in run-to-run noise; the row floors are
+dominated by HAMT walk + GC. The fix lands because it removes
+three silent silent-fallback paths that prior cycle releases
+silently lost to tree-walk; future workloads that lean on
+map-returning fns now stay on bytecode.
+
 ## v0.336.0 — Lower non-const vector literals to `(vector ...)` calls
 
 `compile_expr` already const-pools vector literals whose elements
