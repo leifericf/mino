@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.343.0 — GC discovery, no production change
+
+Doc-only release. Captured GC fraction across ten workloads
+spanning small / medium / large object-size buckets plus the
+`protocol state machine 5k ticks` real-shape baseline. The GC
+fraction lands in a 10-20% band across allocation-heavy rows
+with allocation rate, not collection cost, as the apparent
+driver. Whether mark / sweep / promote dominates inside that
+band cannot be answered with the current `mino_gc_stats`
+surface (total ns + collection counts only).
+
+The honest output of this phase is that a productive future GC
+cycle starts with per-phase timer instrumentation in
+`src/gc/{minor,major}.c` and a write-barrier hit counter, then
+re-runs this corpus with the finer data. The Phase 4 verdict is
+"spin out a follow-up cycle gated on instrumentation"; this
+release ships the discovery doc as the only artifact.
+
+The `alloc_pressure_bench` rows from v0.341.0 carry over as the
+working corpus for the next attempt.
+
 ## v0.342.0 — Predicate+branch fusion deferred
 
 Doc-only marker. The architectural investigation for fusing the
