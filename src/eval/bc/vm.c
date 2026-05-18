@@ -149,6 +149,13 @@ static const char *call_shape_prim_name(mino_prim_fn fn)
  * VM design experiments to identify which opcodes dominate the
  * dispatch loop (hot/cold partition decisions). Not for production. */
 static size_t g_op_counts[OP__COUNT];
+/* Adjacent-pair (bigram) counts in the dispatch loop. g_op_bigrams[a][b]
+ * is incremented when op b dispatches immediately after op a within the
+ * same dispatch session (one mino_bc_run frame); cross-frame transitions
+ * are NOT counted because they don't correspond to a fusable pair in
+ * the same bytecode stream. Used to rank candidate superinstructions
+ * for stencil fusion. */
+static size_t g_op_bigrams[OP__COUNT][OP__COUNT];
 static int    g_op_counts_atexit_registered;
 
 static void op_counts_dump(void)
@@ -182,6 +189,42 @@ static void op_counts_dump(void)
                 mino_bc_op_name(rows[i].op), rows[i].count,
                 100.0 * (double)rows[i].count / (double)total,
                 100.0 * (double)cumulative / (double)total);
+    }
+    /* Top-30 bigrams ranked by absolute frequency. A bigram is one
+     * "if I fuse these two ops into one stencil, this many dispatches
+     * collapse to one". */
+    typedef struct { unsigned a; unsigned b; size_t count; } pair_t;
+    enum { TOP_N = 30 };
+    pair_t top[TOP_N];
+    int    top_n = 0;
+    size_t total_pairs = 0;
+    for (int a = 0; a < OP__COUNT; a++) {
+        for (int b = 0; b < OP__COUNT; b++) {
+            size_t c = g_op_bigrams[a][b];
+            if (c == 0) continue;
+            total_pairs += c;
+            int insert = top_n;
+            for (int k = 0; k < top_n; k++) {
+                if (c > top[k].count) { insert = k; break; }
+            }
+            if (insert < TOP_N) {
+                int end = top_n < TOP_N ? top_n : TOP_N - 1;
+                for (int j = end; j > insert; j--) top[j] = top[j - 1];
+                top[insert].a = (unsigned)a;
+                top[insert].b = (unsigned)b;
+                top[insert].count = c;
+                if (top_n < TOP_N) top_n++;
+            }
+        }
+    }
+    fprintf(stderr, "bc-op-bigrams: total pairs = %zu\n", total_pairs);
+    if (total_pairs == 0) return;
+    for (i = 0; i < top_n; i++) {
+        fprintf(stderr, "  %-25s -> %-25s %12zu  %6.2f%%\n",
+                mino_bc_op_name(top[i].a),
+                mino_bc_op_name(top[i].b),
+                top[i].count,
+                100.0 * (double)top[i].count / (double)total_pairs);
     }
 }
 
@@ -1190,6 +1233,11 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
     size_t pc = start_pc;
     mino_val_t *retval = NULL;
     int ok = 1;
+#ifdef MINO_BC_OP_COUNTS
+    /* Per-frame previous-op tracker so bigram counts only span adjacent
+     * dispatches within the same bytecode stream. Sentinel = OP__COUNT. */
+    unsigned prev_op = OP__COUNT;
+#endif
 
     while (pc < bc->code_len) {
         /* Refresh the window pointer every cycle. Any op that can
@@ -1213,7 +1261,11 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             atexit(op_counts_dump);
             g_op_counts_atexit_registered = 1;
         }
-        if (op < OP__COUNT) g_op_counts[op]++;
+        if (op < OP__COUNT) {
+            g_op_counts[op]++;
+            if (prev_op < OP__COUNT) g_op_bigrams[prev_op][op]++;
+            prev_op = op;
+        }
 #endif
         switch (op) {
         case OP_MOVE: {

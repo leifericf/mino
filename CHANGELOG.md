@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.338.0 — Bigram discovery instrumentation, no fusions shipped
+
+Discovery-only release. The bytecode dispatch loop now records
+opcode-pair (bigram) frequencies alongside the existing per-op
+counter when the binary is built with `-DMINO_BC_OP_COUNTS=1`.
+Output at process exit ranks adjacent op pairs by absolute
+dispatch frequency so a future cycle can identify candidates for
+superinstruction fusion. Zero runtime cost on the default build
+(the instrumentation is compile-gated).
+
+**Findings.** Running the workload corpus (`real_workloads.clj`,
+`realistic_bench.clj`, `jit_bench.clj`, `diff_clojuredocs.clj`)
+surfaced three classes of dominant bigrams: predicate + branch
+(`GE_II → JMPIFNOT`, `LT_II → JMPIFNOT`), call-site setup
+(`MOVE → CALL_CACHED`, `GETGLOBAL_CACHED → LOAD_K`), and
+trivial-tail (`MOVE → RETURN`, `<arith> → RETURN`). The
+predicate-branch family can't be JIT-fused without restructuring
+the JMP / JMPIFNOT direct-emit lane. The call-site family can't
+shed the MOVE because OP_CALL_CACHED reads its args from a
+contiguous regs window. The trivial-tail family fuses cleanly,
+but a prototype `OP_FUSED_MOVE_RETURN` showed -0.4% to +2.4%
+movement across `realistic_bench` rows -- all within run-to-run
+noise and well below the 7% gate. Prototype reverted; the
+instrumentation stays in for future discovery work.
+
+No production code path changed in this release. The bigram
+counter is dev-only and the default build is byte-identical to
+v0.337.0.
+
 ## v0.337.0 — Non-empty map / set literals BC-compile
 
 Three related fixes that together let defn bodies containing
