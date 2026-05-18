@@ -518,5 +518,6 @@ void gc_minor_collect(mino_state_t *S)
     if (elapsed_ns > S->gc_max_ns) {
         S->gc_max_ns = elapsed_ns;
     }
+    gc_record_pause(S, elapsed_ns);
     mino_current_ctx(S)->gc_depth--;
 }

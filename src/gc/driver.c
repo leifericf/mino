@@ -46,6 +46,32 @@ int gc_freelist_class(size_t size)
     }
 }
 
+/* Record one STW pause sample. Saturates the ring slot at UINT32_MAX
+ * ns; bucket-clamps the log2 histogram at index 23 ([8.4ms, ...)). */
+void gc_record_pause(mino_state_t *S, size_t ns)
+{
+    unsigned idx;
+    unsigned bucket;
+    size_t   n;
+    uint32_t sample;
+    sample = (ns > (size_t)UINT32_MAX) ? UINT32_MAX : (uint32_t)ns;
+    idx = S->gc_pause_ring_idx;
+    S->gc_pause_ring[idx] = sample;
+    S->gc_pause_ring_idx = (idx + 1u) & 0xffu;
+    if (S->gc_pause_ring_count < 256u) {
+        S->gc_pause_ring_count++;
+    }
+    /* Log2 bucket: floor(log2(ns)). ns == 0 lands in bucket 0; any
+     * value at or above 2^23 ns (~8.4 ms) clamps to bucket 23. */
+    bucket = 0u;
+    n = ns;
+    while ((n >> 1) > 0u && bucket < 23u) {
+        n >>= 1;
+        bucket++;
+    }
+    S->gc_pause_hist[bucket]++;
+}
+
 /* True when bytes_old has grown enough past the post-last-major
  * baseline to warrant starting a new major cycle. The tenths math
  * lets the default 1.5x multiplier be expressed without float. The
@@ -83,6 +109,7 @@ static void gc_major_slice(mino_state_t *S)
     if (elapsed_ns > S->gc_max_ns) {
         S->gc_max_ns = elapsed_ns;
     }
+    gc_record_pause(S, elapsed_ns);
 }
 
 /* Force any in-flight major to completion, with the mutator paused.
@@ -105,6 +132,7 @@ void gc_force_finish_major(mino_state_t *S)
     if (elapsed_ns > S->gc_max_ns) {
         S->gc_max_ns = elapsed_ns;
     }
+    gc_record_pause(S, elapsed_ns);
 }
 
 /* Suppress collection: collection is only safe when this thread holds
@@ -818,4 +846,5 @@ void gc_major_collect(mino_state_t *S)
     if (elapsed_ns > S->gc_max_ns) {
         S->gc_max_ns = elapsed_ns;
     }
+    gc_record_pause(S, elapsed_ns);
 }

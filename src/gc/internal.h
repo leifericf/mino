@@ -410,4 +410,11 @@ void gc_remset_purge_dead(mino_state_t *S);
 /* GC marking (used by gc_major_collect and by root enumeration). */
 void gc_mark_interior(mino_state_t *S, const void *p);
 
+/* Append one pause sample to the 256-ring (saturating at UINT32_MAX
+ * ns) and tick the log2 histogram bucket [2^i, 2^(i+1)) ns clamped to
+ * bucket 23. Called from each collection / slice site that already
+ * computed elapsed_ns. Lifetime histogram + recent-window ring
+ * together support both percentile + distribution queries. */
+void gc_record_pause(mino_state_t *S, size_t ns);
+
 #endif /* GC_INTERNAL_H */

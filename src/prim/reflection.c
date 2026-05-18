@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[32];
-    mino_val_t *vs[32];
+    mino_val_t *ks[36];
+    mino_val_t *vs[36];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1291,7 +1291,30 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         ks[31] = mino_keyword(S, "young-age-buckets");
         vs[31] = mino_vector(S, buckets, 8);
     }
-    return mino_map(S, ks, vs, 32);
+    /* Pause-time distribution. Percentiles are computed from the
+     * last 256 samples in the ring; the 24-bucket lifetime histogram
+     * sits alongside under :pause-hist. */
+    {
+        uint64_t p50 = 0, p95 = 0, p99 = 0, pmax = 0;
+        uint32_t hist[24];
+        unsigned hist_count = 0;
+        mino_val_t *hist_vals[24];
+        size_t i;
+        mino_gc_stats_pauses(S, &p50, &p95, &p99, &pmax);
+        mino_gc_pause_hist(S, hist, &hist_count);
+        ks[32] = mino_keyword(S, "pause-p50-ns");
+        vs[32] = mino_int(S, (long long)p50);
+        ks[33] = mino_keyword(S, "pause-p95-ns");
+        vs[33] = mino_int(S, (long long)p95);
+        ks[34] = mino_keyword(S, "pause-p99-ns");
+        vs[34] = mino_int(S, (long long)p99);
+        for (i = 0; i < 24; i++) {
+            hist_vals[i] = mino_int(S, (long long)hist[i]);
+        }
+        ks[35] = mino_keyword(S, "pause-hist");
+        vs[35] = mino_vector(S, hist_vals, 24);
+    }
+    return mino_map(S, ks, vs, 36);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

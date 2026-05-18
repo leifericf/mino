@@ -1031,6 +1031,21 @@ struct mino_state {
     size_t          gc_bytes_promoted_minor;
     uint64_t        gc_young_age_bucket[8];
 
+    /* Pause-time distribution. gc_pause_ring is a circular buffer of
+     * the last 256 pause durations (one entry per minor collect, per
+     * major-slice, per force-finish, per fully-STW major); each value
+     * saturates at UINT32_MAX (~4.29s). gc_pause_ring_idx is the next
+     * write slot (wraps at 256). gc_pause_ring_count is the number of
+     * valid entries written so far, clamped at 256. gc_pause_hist is
+     * a log2 histogram of all pauses seen this state -- bucket i is
+     * [2^i, 2^(i+1)) ns, bucket 23 catches anything >= 8.4ms. Combined
+     * the ring gives recent-window percentiles while the histogram
+     * gives a lifetime-wide distribution shape. */
+    uint32_t        gc_pause_ring[256];
+    unsigned        gc_pause_ring_idx;
+    unsigned        gc_pause_ring_count;
+    uint32_t        gc_pause_hist[24];
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;

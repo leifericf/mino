@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.345.3 — Pause-time distribution
+
+Adds the GC pause-time distribution surface. Every collection /
+slice / force-finish site that already computed `elapsed_ns`
+now also records the pause through `gc_record_pause`, which
+appends to a 256-entry ring (one slot per pause, saturating at
+UINT32_MAX ns) and ticks a 24-bucket log2 histogram
+`[2^i, 2^(i+1))` ns indexed by `floor(log2(ns))` clamped at 23.
+
+Two new public accessors land in `mino.h`:
+
+- `mino_gc_stats_pauses(state, *p50, *p95, *p99, *max)` —
+  computes nearest-rank percentiles on a temporary copy of the
+  ring (sorted with `qsort`). Any out-pointer may be NULL.
+- `mino_gc_pause_hist(state, out_buckets[24], *out_count)` —
+  copies the lifetime histogram plus the count of valid ring
+  entries.
+
+`(gc-stats)` surfaces the percentiles directly:
+
+- `:pause-p50-ns` / `:pause-p95-ns` / `:pause-p99-ns`
+- `:pause-hist` — length-24 vector of log2-bucket counts.
+
+`:max-gc-ns` (cumulative-since-state-creation max) keeps its
+existing meaning. The new percentiles are window-scoped to the
+last 256 pauses so a long-running embedder sees the recent
+shape, not the lifetime extreme.
+
+Probe (20 build-vec / build-map rounds, 16 minors + 3 majors):
+- max-gc-ns: 1.12 ms, p50: 347 us, p95: 944 us, p99: 1.12 ms
+- Histogram: 12 samples in bucket 15 (32 us..65 us), 3 in
+  bucket 16, 1 in bucket 17, 2 in bucket 18, 15 in bucket 19
+  (524 us..1 ms), 1 in bucket 20. Slice-driven major firings
+  produce multiple histogram hits per collection.
+
+`task release-gate` is OK.
+
 ## v0.345.2 — Bytes promoted + young-survival age histogram
 
 Two new surfaces on `mino_gc_stats_t` and `(gc-stats)`:

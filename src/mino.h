@@ -28,7 +28,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 345
-#define MINO_VERSION_PATCH 2
+#define MINO_VERSION_PATCH 3
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1612,6 +1612,30 @@ typedef struct {
 } mino_gc_stats_t;
 
 void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out);
+
+/*
+ * Pause-time distribution accessors. The GC keeps a circular buffer
+ * of the last 256 pause durations (one entry per minor / major slice
+ * / fully-STW major) and a log2 histogram covering buckets
+ * [2^i, 2^(i+1)) ns from i = 0 (1 ns) to i = 23 (>= 8.4 ms).
+ *
+ * `mino_gc_stats_pauses` populates the four percentile out-pointers
+ * from the recent-window ring (any of which may be NULL to skip).
+ * Percentiles are computed by sorting a temporary copy of the active
+ * ring entries; computed values are saturated at UINT32_MAX ns.
+ *
+ * `mino_gc_pause_hist` copies the 24-bucket lifetime histogram into
+ * the host-owned out array. `out_count` returns the number of valid
+ * entries currently in the ring (0..256).
+ */
+void mino_gc_stats_pauses(mino_state_t *S,
+                          uint64_t *out_p50_ns,
+                          uint64_t *out_p95_ns,
+                          uint64_t *out_p99_ns,
+                          uint64_t *out_max_ns);
+void mino_gc_pause_hist(mino_state_t *S,
+                        uint32_t out_buckets[24],
+                        unsigned *out_count);
 
 /* ------------------------------------------------------------------------- */
 /* Allocation profiler [MINO_UNSTABLE_ALLOC_PROFILE]                         */

@@ -7,6 +7,7 @@
  * one struct-out getter. All three calls are safe at any GC phase.
  */
 
+#include <stdlib.h>
 #include "mino.h"
 #include "public/internal_bridge.h"
 
@@ -168,4 +169,80 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
     out->mark_stack_cap        = S->gc_mark_stack_cap;
     out->mark_stack_high_water = S->gc_mark_stack_high_water;
     out->phase             = phase_to_public(S->gc_phase);
+}
+
+/* qsort comparator on uint32_t in ascending order. */
+static int u32_cmp(const void *a, const void *b)
+{
+    uint32_t ua = *(const uint32_t *)a;
+    uint32_t ub = *(const uint32_t *)b;
+    if (ua < ub) return -1;
+    if (ua > ub) return  1;
+    return 0;
+}
+
+void mino_gc_stats_pauses(mino_state_t *S,
+                          uint64_t *out_p50_ns,
+                          uint64_t *out_p95_ns,
+                          uint64_t *out_p99_ns,
+                          uint64_t *out_max_ns)
+{
+    uint32_t buf[256];
+    unsigned n, i;
+    if (S == NULL) {
+        if (out_p50_ns != NULL) *out_p50_ns = 0;
+        if (out_p95_ns != NULL) *out_p95_ns = 0;
+        if (out_p99_ns != NULL) *out_p99_ns = 0;
+        if (out_max_ns != NULL) *out_max_ns = 0;
+        return;
+    }
+    n = S->gc_pause_ring_count;
+    if (n > 256u) n = 256u;
+    for (i = 0; i < n; i++) {
+        buf[i] = S->gc_pause_ring[i];
+    }
+    if (n == 0u) {
+        if (out_p50_ns != NULL) *out_p50_ns = 0;
+        if (out_p95_ns != NULL) *out_p95_ns = 0;
+        if (out_p99_ns != NULL) *out_p99_ns = 0;
+        if (out_max_ns != NULL) *out_max_ns = 0;
+        return;
+    }
+    qsort(buf, n, sizeof(buf[0]), u32_cmp);
+    /* Nearest-rank percentile: ceil(p/100 * n) - 1. */
+    if (out_p50_ns != NULL) {
+        unsigned idx = (50u * n + 99u) / 100u;
+        if (idx == 0u) idx = 1u;
+        *out_p50_ns = (uint64_t)buf[idx - 1u];
+    }
+    if (out_p95_ns != NULL) {
+        unsigned idx = (95u * n + 99u) / 100u;
+        if (idx == 0u) idx = 1u;
+        *out_p95_ns = (uint64_t)buf[idx - 1u];
+    }
+    if (out_p99_ns != NULL) {
+        unsigned idx = (99u * n + 99u) / 100u;
+        if (idx == 0u) idx = 1u;
+        *out_p99_ns = (uint64_t)buf[idx - 1u];
+    }
+    if (out_max_ns != NULL) {
+        *out_max_ns = (uint64_t)buf[n - 1u];
+    }
+}
+
+void mino_gc_pause_hist(mino_state_t *S,
+                        uint32_t out_buckets[24],
+                        unsigned *out_count)
+{
+    size_t i;
+    if (S == NULL || out_buckets == NULL) {
+        if (out_count != NULL) *out_count = 0;
+        return;
+    }
+    for (i = 0; i < 24; i++) {
+        out_buckets[i] = S->gc_pause_hist[i];
+    }
+    if (out_count != NULL) {
+        *out_count = S->gc_pause_ring_count;
+    }
 }
