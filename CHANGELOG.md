@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.331.0 — Reduce slow-path uses argv directly
+
+`reduce_step`'s generic dispatch (used whenever the int+int arithmetic
+fast lane in the same function can't take over) was allocating a fresh
+two-element cons list every step just to hand `(acc elem)` to
+`apply_callable`. That allocation paid no purpose: `apply_callable_argv`
+takes a flat C array. Switch the slow path over.
+
+The bump-5k row is the realistic load this lands against: its reducer
+is `(fn [acc k] (assoc acc k (+ 1 (get acc k))))`. The v0.330 rewrite
+already routes that through `assoc!`, so the per-step `mino_cons` pair
+was the next-largest allocator on the row.
+
+### realistic_bench, median of 3, arm64-darwin
+
+| row | v0.330 JIT off | v0.331 JIT off | Δ | v0.330 JIT on | v0.331 JIT on | Δ |
+|-----|---------------:|---------------:|--:|--------------:|--------------:|--:|
+| bump 5k int-map | 18.80 ms | 15.77 ms | **-16.1%** | 15.99 ms | 14.39 ms | **-10.0%** |
+| build 5k int-map | 13.01 ms | 12.26 ms | -5.8% | 10.24 ms | 10.96 ms | +7% noise |
+| nested 500x100 | 16.42 ms | 15.56 ms | -5.2% | 14.34 ms | 14.83 ms | +3% noise |
+| map/filter 50k | 844 µs | 815 µs | flat | 757 µs | 759 µs | flat |
+| realize 10k lazy | 5.30 µs | 4.65 µs | -12% noise | 5.75 µs | 6.10 µs | +6% noise |
+| fib(25) | 9.65 ms | 9.55 ms | flat | 6.93 ms | 6.97 ms | flat |
+
+`bump 5k int-map` alloc: 11.1 MB/op → 10.4 MB/op (−6.3%). GC count on
+the row: 7 collections → 6 (−14%). The win compounds with v0.330's
+transient routing — the reducer body is now both transient-mutating
+and no-cons-per-step.
+
 ## v0.330.0 — Reduce-pattern compile-time rewrite
 
 The Cycle B follow-up: extend the loop/recur builder rewrite to the

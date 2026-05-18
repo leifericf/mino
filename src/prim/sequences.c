@@ -809,9 +809,10 @@ static int reduce_step(mino_state_t *S, mino_val_t *fn, mino_val_t **acc_io,
         if (handled) return 0;
     }
     {
-        mino_val_t *call_a = mino_cons(
-            S, acc, mino_cons(S, elem, mino_nil(S)));
-        *acc_io = apply_callable(S, fn, call_a, env);
+        mino_val_t *argv2[2];
+        argv2[0] = acc;
+        argv2[1] = elem;
+        *acc_io = apply_callable_argv(S, fn, argv2, 2, env);
     }
     if (*acc_io == NULL) return -1;
     if (mino_type_of(*acc_io) == MINO_REDUCED) {
