@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.339.0 — Perf cycle close
+
+Marker for the close of the v0.330 → v0.338 perf cycle. The
+cycle bundled three families of work: reduce / builder rewrites
+(v0.330–v0.332), the write-side bang fast-lane family
+(v0.333–v0.334), and BC-compile coverage for non-empty map / set
+literals (v0.335–v0.337), capped by bigram-discovery
+instrumentation (v0.338).
+
+Forward stencil hooks (native ← interpreter resume) gated on the
+classifier reporting `OK_WITH_DEOPT` at materially > 0% of
+compiled fns. Across the workload corpus (`real_workloads`,
+`realistic_bench`, `jit_bench`, `protocol_bench`, `eval_bench`,
+`lazy_bench`, `map_bench`), 100% of compiled fns landed at the
+plain `ok` reason -- the side-exit path is in place but the
+workload mix doesn't exercise unstenciled middles. Deferred.
+
+No code change in this release.
+
 ## v0.338.0 — Bigram discovery instrumentation, no fusions shipped
 
 Discovery-only release. The bytecode dispatch loop now records
