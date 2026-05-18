@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.326.0 — Interpreter-foundations cycle close
+
+Three-release cycle (v0.324.0 → v0.326.0) targeting the floor that
+every workload pays into. Two foundation wins shipped; one planned
+item deferred after evaluation.
+
+Shipped:
+
+- **v0.324.0 — Recur move-coalescing peephole.** `compile_recur`
+  writes directly to the loop binding when no later argument reads
+  it. Wins from 11% to 14% on interpreter-bound recur loops; small
+  JIT-on regression on the tightest fused stencil chain (sum-to)
+  that traces to read-write-same-register dependency chains.
+- **v0.325.0 — Chunked-aware `take` and `drop`.** Both now forward
+  whole chunks through a chunked-cons source. The
+  `realize 10k of lazy range` row in realistic_bench drops from
+  4.43 ms/op to 4.55 µs/op — roughly 1000x — with chunk-cons
+  allocations going from ~9,688 to ~313 per pass.
+
+Deferred:
+
+- **Computed-goto interpreter dispatch.** Modern Apple Silicon's
+  indirect-branch predictor handles the existing switch dispatch
+  well; the plan's expected uplift band (3–10%) is at the optimistic
+  end for a runtime with non-trivial case bodies. The 50-case
+  refactor is mechanical but invasive, and the risk of regressing
+  branch-prediction patterns under load is real. Kept as a future
+  candidate; revisit when a profile shows the dispatch table as a
+  measurable share of interpreter time.
+
+Net post-cycle perf vs v0.323.0 baseline (realistic_bench, Apple
+Silicon arm64-darwin, median of 3 runs):
+
+| row                                | JIT-off before | JIT-off after | JIT-on before | JIT-on after |
+|------------------------------------|---------------:|--------------:|--------------:|-------------:|
+| build 5k int-map and sum           | 10.34 ms       | 10.83 ms      | 10.05 ms      | 10.34 ms     |
+| bump 5k int-map values             | 16.94 ms       | 17.81 ms      | 17.97 ms      | 19.29 ms     |
+| map/filter/map/reduce over 50k     | 779 µs         | 793 µs        | 757 µs        | 712 µs       |
+| nested vectors 500x100             | 18.67 ms       | 19.00 ms      | 18.03 ms      | 18.47 ms     |
+| **realize 10k of lazy range**      | **4.48 ms**    | **4.55 µs**   | **4.19 ms**   | **5.95 µs**  |
+| fibonacci(25)                      | 9.21 ms        | 9.32 ms       | 6.65 ms       | 6.65 ms      |
+
+Alloc-bound rows (build, bump, nested) move within run-to-run
+noise — those rows are dominated by HAMT path-copy and minor-GC
+churn rather than interpreter floor; Cycle B (map / collection
+wins) targets those next.
+
+JIT-parity tests byte-identical across `jit-auto / jit-on / jit-off
+/ lean`. release-gate clean (18 / 18 probes).
+
 ## v0.325.0 — Chunked-aware take and drop
 
 `lazy-take` and `drop-seq` now forward whole chunks when the
