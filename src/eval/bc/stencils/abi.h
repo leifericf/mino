@@ -413,4 +413,13 @@ extern mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
  * directly; only its address-as-symbol matters. */
 extern void mino_jit_loop_continue_marker(void);
 
+/* Cancel-poll callable from inside JIT loop stencils. Returns 1 to
+ * continue the loop, 0 to bail (a cancel landed and the stencil
+ * should propagate NULL up the chain). Each loop stencil decrements
+ * a local downcounter per iteration and only calls this on rollover,
+ * so the per-iter cost stays at one decrement + one branch on the
+ * hot path. Cancel-response latency is bounded by the downcounter's
+ * reload value (currently 256 iterations). */
+extern int mino_bc_safepoint(mino_state_t *S);
+
 #endif /* MINO_BC_STENCIL_ABI_H */

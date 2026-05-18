@@ -747,6 +747,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_pop_env_slow",          (void *)(uintptr_t)mino_jit_pop_env_slow},
     {"mino_jit_env_bind_slow",         (void *)(uintptr_t)mino_jit_env_bind_slow},
     {"mino_jit_deopt_exit",            (void *)(uintptr_t)mino_jit_deopt_exit},
+    {"mino_bc_safepoint",              (void *)(uintptr_t)mino_bc_safepoint},
     {NULL, NULL}
 };
 

@@ -15,7 +15,14 @@ void stencil_op_loop_int_dec(mino_val_t **regs,
                               mino_val_t **consts,
                               mino_state_t *S)
 {
+    unsigned long ticks = 256;
     for (;;) {
+        if (__builtin_expect(--ticks == 0, 0)) {
+            if (!mino_bc_safepoint(S)) {
+                MINO_STENCIL_CHAIN_RETURN(NULL, consts, S);
+            }
+            ticks = 256;
+        }
         mino_val_t *v = regs[IMM_A];
         uintptr_t uv = (uintptr_t)v;
         if (__builtin_expect(((uv ^ 1) & 7) == 0

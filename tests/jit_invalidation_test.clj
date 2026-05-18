@@ -118,4 +118,38 @@
   (def shift-target (fn [a] (* a 3)))
   (is (= 15 (shift-caller 5))))
 
+;; ---- JIT loop cancellability -----------------------------------------
+
+;; Each loop stencil polls mino_bc_safepoint every 256 iterations.
+;; A spinning JIT'd loop must wake on (future-cancel f) within bounded
+;; time even when the body is entirely native.
+
+(defn long-dec-spin [n]
+  (loop [i n] (if (zero? i) :done (recur (dec i)))))
+(defn long-lt-spin [n]
+  (loop [i 0] (if (< i n) (recur (inc i)) :done)))
+
+(deftest jit-loop-cancel-dec
+  (dotimes [_ +warm+] (long-dec-spin 100))
+  (let [f     (future (long-dec-spin 1000000000))
+        start (time-ms)]
+    (thread-sleep 30)
+    (future-cancel f)
+    (thread-sleep 100)
+    (is (future-cancelled? f))
+    (is (future-done? f))
+    ;; Full run would take seconds; cancel must land well below that.
+    (is (< (- (time-ms) start) 500))))
+
+(deftest jit-loop-cancel-lt
+  (dotimes [_ +warm+] (long-lt-spin 100))
+  (let [f     (future (long-lt-spin 1000000000))
+        start (time-ms)]
+    (thread-sleep 30)
+    (future-cancel f)
+    (thread-sleep 100)
+    (is (future-cancelled? f))
+    (is (future-done? f))
+    (is (< (- (time-ms) start) 500))))
+
 (run-tests-and-exit)

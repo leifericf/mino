@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.321.0 — JIT loop cancellability
+
+The four fused-loop stencils (loop_int_lt, loop_int_dec,
+loop_int_lt_inc, loop_int_dec_inc) now poll `mino_bc_safepoint`
+on a 256-iteration downcounter. A spinning JIT'd loop wakes on
+`(future-cancel f)` within bounded time even when the body is
+entirely native; before this release the cancel would land in
+the TLS flag but the loop kept running because the native code
+never read it. The audit at v0.312 flagged the gap; this
+release closes it.
+
+Per-iteration cost on the hot path is one `--ticks` decrement
+and one branch. Polled iterations (1 in 256) call into
+`mino_bc_safepoint` which short-circuits when no cancel is
+live. Tight-loop measurement on Apple Silicon (M3):
+
+| row                  | JIT-off  | JIT-on   |
+|----------------------|---------:|---------:|
+| dec-only 10M         | 29.9 ms  | 15.0 ms  |
+| lt-only 10M          | 29.8 ms  | 16.9 ms  |
+
+JIT-on numbers are within noise of v0.320 (no regression
+beyond the measurement floor).
+
+Two parity tests added to `tests/jit_invalidation_test.clj`:
+each spawns a future running a JIT'd 1B-iter loop, fires
+`future-cancel` after 30 ms, and asserts cancellation lands
+within 500 ms total. Both pass.
+
 ## v0.320.0 — Side-exit measurement
 
 Companion `mino-bench` adds `benchmarks/side_exit_micro.clj`, a
