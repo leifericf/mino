@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.344.0 — Perf cycle close
+
+Doc-only marker closing the v0.340 → v0.343 cycle. Only v0.340
+ships a measurable code change (loop matcher accepts
+`(+ counter 1)` and `(+ 1 counter)` shapes for the counter step,
+measurement-neutral on the current corpus but unblocks future
+fusion work from quietly missing arithmetic-counter loops).
+v0.341 shipped corpus expansion in mino-bench (3 new bench
+files). v0.342 and v0.343 ship rationale-only deferrals on
+predicate+branch fusion (architectural blockers) and GC
+discovery (insufficient `mino_gc_stats` resolution to choose a
+lever).
+
+The next cycles, ordered by leverage:
+
+1. GC instrumentation cycle — add per-phase timers and write-
+   barrier counters in `src/gc/{minor,major}.c`, re-run the
+   `alloc_pressure_bench` + protocol-state-machine corpus.
+2. Predicate+branch fusion — wait for a cycle that can commit
+   to the per-fusion-site safety pass + multi-class chain
+   marker work.
+3. mino-site documentation refresh — cover v0.323 → v0.343 of
+   accumulated cycle deltas on `/performance/` and add a
+   side-exit / deopt section.
+
+No production code change in this release.
+
 ## v0.343.0 — GC discovery, no production change
 
 Doc-only release. Captured GC fraction across ten workloads
