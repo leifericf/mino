@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.345.0 — Per-phase GC timers
+
+First release in the instrumentation cycle that started after
+the previous close. Adds five per-phase GC timer fields to the
+state and surfaces them through `mino_gc_stats_t` plus the
+`(gc-stats)` reflection primitive:
+
+- `:minor-mark-ns` — cumulative time inside the minor mark phase
+  (precise roots + remset + conservative stack scan + drains).
+- `:minor-sweep-ns` — cumulative time inside `gc_minor_sweep`,
+  which performs the young-list sweep and age-based promotion as
+  one interleaved loop, plus the immediately-adjacent range-
+  index compact and remset reset.
+- `:major-mark-ns` — sum of `gc_major_begin` mark-roots, every
+  incremental `gc_major_step`, and `gc_major_remark`'s stack
+  scan + drain.
+- `:major-sweep-ns` — `gc_major_sweep_phase`, including the
+  optional root-mark verify and the dead-OLD remset purge.
+- `:root-scan-ns` — sub-timer measuring only precise-root
+  enumeration (`gc_mark_roots`) across both collectors. Overlaps
+  with the two `_mark_ns` fields rather than adding to them.
+
+Two plan fields are intentionally omitted: `gc_minor_flip_ns`
+(mino's nursery is mark-and-sweep with age-based promotion, not
+a copying semispace -- there is no flip phase) and
+`gc_minor_promote_ns` (promotion is interleaved into the minor
+sweep loop, not a separable phase). A separate byte-count
+surface for promotion volume lands in a later release.
+
+Acceptance: sum of the four `_mark_ns` + `_sweep_ns` fields
+tracks `:total-gc-ns` within 5%. Verified on a synthetic
+collect-heavy probe (3 minors + 1 major over 5 build-vec /
+build-map cycles): sum / total = 1.025. Verified on a heavier
+corpus (31 minors + 4 majors over 30 cycles): sum / total =
+1.011.
+
+| metric (3 minor + 1 major run) | value |
+|---|---|
+| `:total-gc-ns` | 3.52 ms |
+| `:minor-mark-ns` | 1.01 ms |
+| `:minor-sweep-ns` | 2.05 ms |
+| `:major-mark-ns` | 0.44 ms |
+| `:major-sweep-ns` | 0.10 ms |
+| `:root-scan-ns` | 0.42 ms |
+
+`task release-gate` is OK. `task perf-gate` reports the same one
+pre-existing `small-map` allocation regression as v0.344.0 (see
+`mino/.local/BUGS.md`); no new perf-gate regressions were
+introduced.
+
+The new state fields are placed past `jit_hot_threshold` so
+`runtime_layout.h` offsets used by the JIT stencils do not
+shift.
+
 ## v0.344.0 — Perf cycle close
 
 Doc-only marker closing the v0.340 → v0.343 cycle. Only v0.340

@@ -147,6 +147,11 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
     out->bytes_freed       = S->gc_total_freed;
     out->total_gc_ns       = S->gc_total_ns;
     out->max_gc_ns         = S->gc_max_ns;
+    out->minor_mark_ns     = S->gc_minor_mark_ns;
+    out->minor_sweep_ns    = S->gc_minor_sweep_ns;
+    out->major_mark_ns     = S->gc_major_mark_ns;
+    out->major_sweep_ns    = S->gc_major_sweep_ns;
+    out->root_scan_ns      = S->gc_root_scan_ns;
     out->remset_entries    = S->gc_remset_len;
     out->remset_cap        = S->gc_remset_cap;
     out->remset_high_water = S->gc_remset_high_water;

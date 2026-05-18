@@ -27,6 +27,7 @@
  * whatever was live at the start. */
 void gc_major_begin(mino_state_t *S)
 {
+    long long t0, troots;
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_IDLE) {
         return;
     }
@@ -36,7 +37,11 @@ void gc_major_begin(mino_state_t *S)
     if (!S->gc_ranges_valid) {
         gc_build_range_index(S);
     }
+    t0     = mino_monotonic_ns();
+    troots = t0;
     gc_mark_roots(S);
+    S->gc_root_scan_ns += (size_t)(mino_monotonic_ns() - troots);
+    S->gc_major_mark_ns += (size_t)(mino_monotonic_ns() - t0);
     S->gc_major_step_alloc = 0;
     mino_current_ctx(S)->gc_depth--;
 }
@@ -48,16 +53,19 @@ void gc_major_begin(mino_state_t *S)
  * Callers that want a full drain pass (size_t)-1. */
 void gc_major_step(mino_state_t *S, size_t budget_words)
 {
-    size_t popped = 0;
+    long long t0;
+    size_t    popped = 0;
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
     mino_current_ctx(S)->gc_depth++;
+    t0 = mino_monotonic_ns();
     while (S->gc_mark_stack_len > 0 && popped < budget_words) {
         gc_hdr_t *h = S->gc_mark_stack[--S->gc_mark_stack_len];
         gc_trace_children(S, h);
         popped++;
     }
+    S->gc_major_mark_ns += (size_t)(mino_monotonic_ns() - t0);
     mino_current_ctx(S)->gc_depth--;
 }
 
@@ -69,7 +77,8 @@ void gc_major_step(mino_state_t *S, size_t budget_words)
  * remark and sweep. */
 void gc_major_remark(mino_state_t *S)
 {
-    jmp_buf jb;
+    jmp_buf   jb;
+    long long t0;
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
@@ -81,8 +90,10 @@ void gc_major_remark(mino_state_t *S)
     if (!S->gc_ranges_valid) {
         gc_build_range_index(S);
     }
+    t0 = mino_monotonic_ns();
     gc_scan_stack(S);
     gc_drain_mark_stack(S);
+    S->gc_major_mark_ns += (size_t)(mino_monotonic_ns() - t0);
     mino_current_ctx(S)->gc_depth--;
 }
 
@@ -134,19 +145,22 @@ static void gc_verify_roots_marked(mino_state_t *S)
 
 void gc_major_sweep_phase(mino_state_t *S)
 {
+    long long t0;
     if (mino_current_ctx(S)->gc_depth > 0 || S->gc_phase != GC_PHASE_MAJOR_MARK) {
         return;
     }
     mino_current_ctx(S)->gc_depth++;
     S->gc_phase = GC_PHASE_MAJOR_SWEEP;
     gc_evt_record(S, GC_EVT_MAJOR_SWEEP, NULL, NULL, NULL, 0, 0);
+    /* Sweep phase: optional root-mark verify (env-gated), remset purge
+     * over dead containers, and the OLD sweep itself. All three are
+     * sweep-side housekeeping; lumped together so the phase sum tracks
+     * gc_total_ns closely. */
+    t0 = mino_monotonic_ns();
     gc_verify_roots_marked(S);
-    /* Purge remset entries whose container is about to be freed, but
-     * keep the rest with their dirty bits intact. OLD->YOUNG edges
-     * installed by the mutator during MAJOR_MARK must survive so the
-     * next minor can trace the YOUNG targets. */
     gc_remset_purge_dead(S);
     gc_sweep(S);
+    S->gc_major_sweep_ns += (size_t)(mino_monotonic_ns() - t0);
     /* Invalidate the range index. gc_range_compact would filter by
      * mark bit, but gc_sweep leaves YOUNG alive regardless of mark,
      * so compact would wrongly drop unmarked YOUNG survivors from the

@@ -421,6 +421,9 @@ void gc_minor_collect(mino_state_t *S)
 {
     jmp_buf   jb;
     long long start_ns;
+    long long mark_start_ns;
+    long long roots_start_ns;
+    long long sweep_start_ns;
     size_t    elapsed_ns;
     int       saved_phase;
     size_t    mark_floor;
@@ -459,12 +462,24 @@ void gc_minor_collect(mino_state_t *S)
     if (!S->gc_ranges_valid) {
         gc_build_range_index(S);
     }
+    /* Mark phase: precise roots + remset + conservative stack scan,
+     * each followed by a drain to floor. gc_root_scan_ns is the sub-
+     * timer for the precise-root enumeration; it overlaps with the
+     * outer mark_ns rather than adding to it. */
+    mark_start_ns  = mino_monotonic_ns();
+    roots_start_ns = mark_start_ns;
     gc_mark_roots(S);
+    S->gc_root_scan_ns += (size_t)(mino_monotonic_ns() - roots_start_ns);
     gc_drain_mark_stack_to(S, mark_floor);
     gc_mark_remset(S);
     gc_drain_mark_stack_to(S, mark_floor);
     gc_scan_stack(S);
     gc_drain_mark_stack_to(S, mark_floor);
+    S->gc_minor_mark_ns += (size_t)(mino_monotonic_ns() - mark_start_ns);
+    /* Sweep phase: range-index compaction, remset reset, and the actual
+     * young-list sweep. These three are sweep-side housekeeping; lumped
+     * together so the phase sum tracks gc_total_ns closely. */
+    sweep_start_ns = mino_monotonic_ns();
     /* Drop entries for YOUNG headers that sweep is about to free. OLD
      * entries and marked YOUNG survivors stay; the main array remains
      * sorted, so no rebuild at the top of the next cycle. */
@@ -476,6 +491,7 @@ void gc_minor_collect(mino_state_t *S)
      * barrier on a container promoted mid-fill. */
     gc_remset_reset(S);
     gc_minor_sweep(S, saved_phase);
+    S->gc_minor_sweep_ns += (size_t)(mino_monotonic_ns() - sweep_start_ns);
     S->gc_collections_minor++;
     S->gc_phase = saved_phase;
     gc_evt_record(S, GC_EVT_MINOR_END, NULL, NULL, NULL, 0, 0);

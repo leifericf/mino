@@ -983,6 +983,32 @@ struct mino_state {
      * tighten the warm-up window per workload. */
     unsigned        jit_hot_threshold;
 
+    /* === Instrumentation: per-phase GC timers ============================
+     *
+     * Cumulative ns since state creation. gc_minor_mark_ns counts time
+     * inside the minor mark phase (precise roots + remset + conservative
+     * stack scan + drains); gc_minor_sweep_ns counts time in
+     * gc_minor_sweep, which also performs age-based promotion as an
+     * interleaved branch of the sweep loop. gc_major_mark_ns sums
+     * gc_major_begin's mark_roots + every incremental gc_major_step +
+     * gc_major_remark; gc_major_sweep_ns counts gc_major_sweep_phase.
+     * gc_root_scan_ns is a sub-timer that measures only precise-root
+     * enumeration (gc_mark_roots) across both collectors -- it overlaps
+     * with the two _mark_ns fields rather than adding to them.
+     *
+     * mino's nursery is mark-and-sweep with age-based promotion (not a
+     * copying semispace), so there is no flip phase and promotion is
+     * interleaved into the minor sweep loop. The plan's gc_minor_flip_ns
+     * and gc_minor_promote_ns counters are intentionally omitted;
+     * promotion volume gets a separate byte-count surface in a later
+     * release. Placed past jit_hot_threshold so the runtime_layout.h
+     * offset constants the stencil bytes depend on do not shift. */
+    size_t          gc_minor_mark_ns;
+    size_t          gc_minor_sweep_ns;
+    size_t          gc_major_mark_ns;
+    size_t          gc_major_sweep_ns;
+    size_t          gc_root_scan_ns;
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;

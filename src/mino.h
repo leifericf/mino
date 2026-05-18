@@ -27,7 +27,7 @@
  * rebuilding the runtime) is available at runtime via mino_version_string().
  */
 #define MINO_VERSION_MAJOR 0
-#define MINO_VERSION_MINOR 344
+#define MINO_VERSION_MINOR 345
 #define MINO_VERSION_PATCH 0
 
 /*
@@ -1569,6 +1569,20 @@ typedef struct {
     size_t bytes_freed;        /* monotonic: total ever swept */
     size_t total_gc_ns;
     size_t max_gc_ns;
+    /* Per-phase timers (cumulative ns since state creation). minor_mark
+     * counts time inside the minor's mark phase (precise roots + remset
+     * + conservative stack scan + drains); minor_sweep counts time in
+     * gc_minor_sweep, which also performs age-based promotion. major_mark
+     * sums begin + every incremental step + remark; major_sweep counts
+     * gc_major_sweep_phase. root_scan is a sub-timer of the mark phases
+     * that measures just precise-root enumeration (gc_mark_roots) across
+     * both collectors and overlaps with minor_mark_ns + major_mark_ns
+     * rather than adding to them. */
+    size_t minor_mark_ns;
+    size_t minor_sweep_ns;
+    size_t major_mark_ns;
+    size_t major_sweep_ns;
+    size_t root_scan_ns;
     size_t remset_entries;     /* current remembered-set size */
     size_t remset_cap;         /* remembered-set capacity */
     size_t remset_high_water;  /* peak remset size this state */

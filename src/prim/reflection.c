@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[22];
-    mino_val_t *vs[22];
+    mino_val_t *ks[27];
+    mino_val_t *vs[27];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1257,7 +1257,20 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[20] = mino_int(S, (long long)S->gc_bump_alloc_hits);
     ks[21] = mino_keyword(S, "alloc-bump-slab-refills");
     vs[21] = mino_int(S, (long long)S->gc_bump_slab_refills);
-    return mino_map(S, ks, vs, 22);
+    /* Per-phase GC timers. Sub-timer note: root-scan-ns measures the
+     * precise-root enumeration that runs inside the mark phases, so it
+     * overlaps minor-mark-ns + major-mark-ns instead of adding to them. */
+    ks[22] = mino_keyword(S, "minor-mark-ns");
+    vs[22] = mino_int(S, (long long)st.minor_mark_ns);
+    ks[23] = mino_keyword(S, "minor-sweep-ns");
+    vs[23] = mino_int(S, (long long)st.minor_sweep_ns);
+    ks[24] = mino_keyword(S, "major-mark-ns");
+    vs[24] = mino_int(S, (long long)st.major_mark_ns);
+    ks[25] = mino_keyword(S, "major-sweep-ns");
+    vs[25] = mino_int(S, (long long)st.major_sweep_ns);
+    ks[26] = mino_keyword(S, "root-scan-ns");
+    vs[26] = mino_int(S, (long long)st.root_scan_ns);
+    return mino_map(S, ks, vs, 27);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests
