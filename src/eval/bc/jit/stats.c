@@ -61,15 +61,21 @@ static struct {
     unsigned long        fns_eligible;
     unsigned long        fns_compiled;
     unsigned long        reason_count[CPJIT_REASON__COUNT];
+    /* op_reject_count / op_reject_code_bytes aggregate both pools
+     * (UNKNOWN_OP and OK_WITH_DEOPT) so the bytes-blocked dashboard
+     * ranks the same way it did before side-exit. The split counters
+     * below break that aggregate apart so the dashboard reader can
+     * tell, per op, how many fns are HARD blocked (no native prefix
+     * at all -- UNKNOWN_OP) versus PARTIALLY blocked (a prefix
+     * compiled with deopt at this op -- OK_WITH_DEOPT). The split
+     * matters when triaging stencil work: hard blockers cost a full
+     * fn worth of interpreter dispatch, while OK_WITH_DEOPT fns
+     * pay only the tail-of-body interpreter cost plus a one-time
+     * deopt round-trip per call. */
     unsigned long        op_reject_count[OP__COUNT];
-    /* Per blocking op, sum of the code_len of every fn that was
-     * rejected with that op as the first_unknown_op. Bytes-blocked
-     * is a better lost-lane proxy than fn-count: a 300-op fn
-     * carrying one OP_THROW loses 300 ops worth of native coverage,
-     * while a 10-op leaf fn loses only 10. Populated by
-     * mino_jit_stats_record on every recorded entry; surfaced by
-     * the tracing dump. */
     unsigned long long   op_reject_code_bytes[OP__COUNT];
+    unsigned long        op_deopt_count[OP__COUNT];
+    unsigned long long   op_deopt_code_bytes[OP__COUNT];
     size_t               native_bytes_total;
     cpjit_stat_entry_t  *entries;
     int                  atexit_registered;
@@ -159,11 +165,15 @@ static void cpjit_stats_dump_tracing_op_table(void)
     }
     for (i = 0; i < n; i++) {
         int op = order[i];
+        unsigned long deopt   = g_cpjit_stats.op_deopt_count[op];
+        unsigned long total   = g_cpjit_stats.op_reject_count[op];
+        unsigned long hard    = total - deopt;
         fprintf(stderr,
-                "  op=%-3d  %-30s  %llu bytes blocked  %lu fns\n",
+                "  op=%-3d  %-30s  %llu bytes blocked  %lu fns "
+                "(hard=%lu, ok-with-deopt=%lu)\n",
                 op, mino_bc_op_name((unsigned)op),
                 g_cpjit_stats.op_reject_code_bytes[op],
-                g_cpjit_stats.op_reject_count[op]);
+                total, hard, deopt);
     }
 }
 
@@ -287,8 +297,12 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
     g_cpjit_stats.reason_count[reason]++;
     /* Both UNKNOWN_OP (no native prefix) and OK_WITH_DEOPT (some prefix
      * compileable, tail blocked at first_unknown_pc) credit the
-     * blocking op so the bytes-blocked table ranks both pools. The
-     * tracing dump distinguishes the two reasons inline. */
+     * aggregate bytes-blocked table so the dashboard ranks the
+     * combined pool. Each reason also feeds a split counter
+     * (op_reject_* for UNKNOWN_OP, op_deopt_* for OK_WITH_DEOPT) so
+     * the tracing dump can break the totals apart and surface which
+     * blockers side-exit picked up vs which are still leaving native
+     * coverage on the table. */
     if ((reason == CPJIT_REASON_UNKNOWN_OP
          || reason == CPJIT_REASON_OK_WITH_DEOPT)
         && first_unknown_op < OP__COUNT) {
@@ -296,6 +310,11 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
         g_cpjit_stats.op_reject_count[first_unknown_op]++;
         g_cpjit_stats.op_reject_code_bytes[first_unknown_op] +=
             (unsigned long long)code_len;
+        if (reason == CPJIT_REASON_OK_WITH_DEOPT) {
+            g_cpjit_stats.op_deopt_count[first_unknown_op]++;
+            g_cpjit_stats.op_deopt_code_bytes[first_unknown_op] +=
+                (unsigned long long)code_len;
+        }
     }
     /* Summary mode skips the per-fn ring: the one-line dump only
      * reads the aggregate counters, so the alloc + the borrowed

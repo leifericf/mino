@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.322.0 — Control-flow stencil measurement decision
+
+The plan slotted v0.322 for per-op stencils on the seven
+unstenciled control-flow / dyn-scope ops (PUSHCATCH, POPCATCH,
+THROW, PUSHDYN, POPDYN, GETGLOBAL, SETGLOBAL), gated on the
+op landing in the top 5 bytes-blocked AND its workload row
+moving ≥ 7%. Measurement under
+`MINO_CPJIT_STATS=tracing ./mino tests/run.clj`:
+
+| op            | bytes blocked | hard | ok-with-deopt |
+|---------------|--------------:|-----:|--------------:|
+| OP_PUSHCATCH  |            12 |    0 |             1 |
+
+Every other op is at 0. Across ~30k tests, 251 attempted
+compiles, the single OK_WITH_DEOPT fn (a try/catch body whose
+PUSHCATCH sits at PC > 0) already compiles to native prefix +
+deopt stencil via the v0.319 path. No op meets the gate; the
+cycle ships zero new stencils.
+
+What does ship: the tracing dashboard's bytes-blocked table
+now splits each op's total into `hard` (UNKNOWN_OP -- no
+native prefix at all) and `ok-with-deopt` counts so the reader
+can tell which side-exit-eligible fns are pulling their weight
+vs which are still leaving native coverage on the table. Two
+new state counters (`op_deopt_count`, `op_deopt_code_bytes`)
+feed the split; the aggregate `op_reject_*` totals stay the
+same so the top-blockers summary stays stable.
+
+Captured in `mino/.local/post-jit-2-control-flow-stencils.md`.
+
 ## v0.321.0 — JIT loop cancellability
 
 The four fused-loop stencils (loop_int_lt, loop_int_dec,
