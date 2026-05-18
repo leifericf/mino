@@ -1294,6 +1294,29 @@ struct mino_state {
     struct gc_bump_slab *gc_bump_slabs;
     size_t          gc_bump_alloc_hits;
     size_t          gc_bump_slab_refills;
+
+    /* Side-exit hand-off from JIT'd code back to the interpreter. The
+     * JIT plants an OP_DEOPT_TO_INTERP stencil at the first PC its
+     * compiled region cannot handle natively. The stencil routes
+     * through mino_jit_deopt_exit which sets jit_deopt_pending = 1
+     * and writes the resume PC to jit_deopt_pc, then returns NULL.
+     * mino_jit_invoke checks the flag after the native call returns;
+     * on deopt it clears the flag and tail-calls mino_bc_run_resume.
+     *
+     * jit_resume_saved_* hold the per-fn snapshots mino_bc_run captured
+     * at fn entry (try_depth, bc_catch_depth, dyn_stack at fn entry).
+     * mino_bc_run publishes them right before invoking the JIT so the
+     * resume dispatch can pass them as the saved_* args to
+     * bc_run_dispatch_from -- matching the bounds-check semantics the
+     * interpreter path would use for the same body.
+     *
+     * Placed at the very tail to preserve JIT-pinned offsets for
+     * ic_gen, bc_regs, jit_invoke_ctx (runtime_layout.h). */
+    size_t                   jit_deopt_pc;
+    int                      jit_deopt_pending;
+    int                      jit_resume_saved_try_depth;
+    int                      jit_resume_saved_bc_catch_depth;
+    struct dyn_frame        *jit_resume_saved_dyn_stack;
 };
 
 /* Resolve the active per-thread ctx for state S.

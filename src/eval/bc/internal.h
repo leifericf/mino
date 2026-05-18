@@ -492,6 +492,21 @@ mino_val_t *mino_bc_run_known_native(struct mino_state *S,
                                       mino_val_t **argv, int argc,
                                       mino_env_t *env);
 
+/* Side-exit resume entry. Drives the dispatch loop from `pc` over a
+ * register window the caller (typically mino_jit_invoke on JIT deopt)
+ * has already populated. The per-fn snapshots come from the outer
+ * mino_bc_run / mino_bc_run_known_native frame -- mino_jit_invoke
+ * captured them right before invoking the native code so cleanup of
+ * try / dyn frames pushed during execution still rolls back to the
+ * pre-fn anchor. The struct dyn_frame is opaque here; its layout lives
+ * in runtime/internal.h. */
+struct dyn_frame;
+mino_val_t *mino_bc_run_resume(struct mino_state *S, struct mino_bc_fn *bc,
+                                size_t base, mino_env_t *env, size_t pc,
+                                int saved_try_depth,
+                                int saved_bc_catch_depth,
+                                struct dyn_frame *saved_dyn_stack);
+
 /* Tagged-int fast lanes. Externalised so JIT stencils can BL into them
  * the same way the interpreter dispatch does. The contract is "return
  * NULL on a tag miss or arithmetic overflow; the caller falls back to

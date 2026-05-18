@@ -1053,6 +1053,19 @@ mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
     return regs;
 }
 
+/* Side-exit runtime helper. The deopt stencil tail-calls this when the
+ * native prefix reaches the first PC the JIT couldn't compile; it
+ * records the resume PC on the state and returns NULL so the native
+ * region's final ret carries the deopt-sentinel value back to
+ * mino_jit_invoke, which then continues dispatch through the
+ * interpreter at S->jit_deopt_pc. */
+mino_val_t *mino_jit_deopt_exit(mino_state_t *S, size_t resume_pc)
+{
+    S->jit_deopt_pc      = resume_pc;
+    S->jit_deopt_pending = 1;
+    return NULL;
+}
+
 #endif /* MINO_CPJIT_HOST */
 
 /* Keep this TU non-empty under -Werror=pedantic when MINO_CPJIT_HOST

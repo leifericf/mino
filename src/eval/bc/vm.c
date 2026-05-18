@@ -2154,6 +2154,14 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
      * frame on epilogue. */
     if (bc->native != NULL && bc->native_gen == S->ic_gen
         && match->entry_pc == 0) {
+        /* Publish the per-fn snapshots so mino_jit_invoke can pass
+         * them to mino_bc_run_resume on a side-exit deopt. The locals
+         * here are the values at fn entry; the JIT prefix may push
+         * additional try / dyn frames before deopt fires, and the
+         * resume's cleanup must roll back to these anchors. */
+        S->jit_resume_saved_try_depth      = saved_try_depth;
+        S->jit_resume_saved_bc_catch_depth = saved_bc_catch_depth;
+        S->jit_resume_saved_dyn_stack      = saved_dyn_stack;
         retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc, regs,
                                  (mino_val_t **)bc->consts, env);
         ok = (retval != NULL);
@@ -2195,6 +2203,29 @@ bc_done:
     bc_pop_window(S, base);
     ctx->bc_current_bc = saved_bc_current;
     ctx->bc_current_pc = saved_bc_current_pc;
+    if (!ok) return NULL;
+    return retval != NULL ? retval : mino_nil(S);
+}
+
+/* Side-exit resume entry. Called from mino_jit_invoke when the JIT'd
+ * native region took the deopt-to-interp exit. The caller (mino_jit_invoke)
+ * owns the regs window push, dyn / try / cursor snapshots, and the
+ * cleanup tail -- those live in the outer mino_bc_run frame that
+ * invoked the JIT in the first place. This entry only drives the
+ * dispatch loop from `pc` over the existing window and returns the
+ * result; nothing here pushes / pops state. */
+mino_val_t *mino_bc_run_resume(mino_state_t *S, mino_bc_fn_t *bc,
+                                size_t base, mino_env_t *env, size_t pc,
+                                int saved_try_depth,
+                                int saved_bc_catch_depth,
+                                dyn_frame_t *saved_dyn_stack)
+{
+    if (bc == NULL || bc->code == NULL) return NULL;
+    mino_thread_ctx_t *ctx = mino_current_ctx(S);
+    mino_val_t *retval = NULL;
+    int ok = bc_run_dispatch_from(S, bc, base, ctx, &env, pc, &retval,
+                                  saved_try_depth, saved_bc_catch_depth,
+                                  saved_dyn_stack);
     if (!ok) return NULL;
     return retval != NULL ? retval : mino_nil(S);
 }
@@ -2244,6 +2275,14 @@ mino_val_t *mino_bc_run_known_native(mino_state_t *S, mino_val_t *fn_val,
     ctx->bc_current_bc = bc;
     ctx->bc_current_pc = 0;
 
+    /* Publish the per-fn snapshots so mino_jit_invoke can pass them
+     * to mino_bc_run_resume on a side-exit deopt. The locals captured
+     * above are the values at fn entry; the resume's cleanup tail
+     * lives back in this function below, and bc_run_dispatch_from's
+     * cold-op handler reads them for POPCATCH / POPDYN bounds checks. */
+    S->jit_resume_saved_try_depth      = saved_try_depth;
+    S->jit_resume_saved_bc_catch_depth = saved_bc_catch_depth;
+    S->jit_resume_saved_dyn_stack      = saved_dyn_stack;
     mino_val_t *retval = mino_jit_invoke(S, (mino_bc_fn_t *)bc,
                                           S->bc_regs + base,
                                           (mino_val_t **)bc->consts, env);

@@ -1700,3 +1700,19 @@ static const unsigned int stencil_op_dissoc_relocs[5][4] = {
     {64, 7, 4, -4}
 };
 static const unsigned long stencil_op_dissoc_nrelocs = 5;
+
+static const unsigned char stencil_op_deopt_to_interp_bytes[25] = {
+    0x48, 0x83, 0xec, 0x28, 0x4c, 0x89, 0xc1, 0x48, 0x8d, 0x15, 0x00, 0x00, 0x00, 0x00, 0xe8, 0x00,
+    0x00, 0x00, 0x00, 0x90, 0x48, 0x83, 0xc4, 0x28, 0xc3 
+};
+static const unsigned long stencil_op_deopt_to_interp_size = 25;
+static const char *const stencil_op_deopt_to_interp_symbols[2] = {
+    "MINO_STENCIL_IMM_BX",
+    "mino_jit_deopt_exit"
+};
+static const unsigned long stencil_op_deopt_to_interp_nsymbols = 2;
+static const unsigned int stencil_op_deopt_to_interp_relocs[2][4] = {
+    {10, 7, 0, -4},
+    {15, 7, 1, -4}
+};
+static const unsigned long stencil_op_deopt_to_interp_nrelocs = 2;

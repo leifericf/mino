@@ -70,6 +70,15 @@
  * real bytecode opcode emitted by the compiler. */
 #define OP_FUSED_LOAD_K_RETURN ((unsigned)(OP__COUNT + 1))
 
+/* Pseudo-opcode for the side-exit / deopt-to-interp stencil. The
+ * compile path inserts it after the supported native prefix when the
+ * classifier returns OK_WITH_DEOPT; the stencil's body sets
+ * S->jit_deopt_pending = 1 and S->jit_deopt_pc = the resume PC, then
+ * returns NULL. mino_jit_invoke detects the deopt signal and continues
+ * dispatch through the interpreter at the recorded PC. Never emitted
+ * by the bytecode compiler. */
+#define OP_DEOPT_TO_INTERP ((unsigned)(OP__COUNT + 2))
+
 /* Continue-marker symbol names as the extractor records them
  * (after the Mach-O / ELF underscore stripping the tool does).
  * Matched in emit_stencil to short-circuit the extern-fn lookup:
@@ -252,8 +261,14 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
                             size_t first_unknown_pc,
                             int compiled, size_t native_bytes);
 
-/* Compile pipeline (defined in emit.c; called from entry.c). */
-int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val);
+/* Compile pipeline (defined in emit.c; called from entry.c). The
+ * `deopt_at_pc` argument is (size_t)-1 for a full-body compile and a
+ * PC < bc->code_len for a compile-with-deopt: the compile path emits
+ * stencils for pcs [0, deopt_at_pc) and an OP_DEOPT_TO_INTERP stencil
+ * at deopt_at_pc; the resulting native region falls through to deopt
+ * if execution reaches the unstenciled tail. */
+int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
+                            size_t deopt_at_pc);
 
 /* Slow-path helpers (defined in helpers.c; referenced by name from
  * stencils through the extern-fn table in entry.c, and addressed
@@ -354,6 +369,11 @@ void         mino_jit_loop_continue_marker(void);
 void         mino_jit_chain_continue_marker(mino_val_t **regs,
                                              mino_val_t **consts,
                                              mino_state_t *S);
+/* Side-exit runtime helper. The deopt stencil tail-calls into this
+ * function: it sets S->jit_deopt_pending = 1, writes the resume PC to
+ * S->jit_deopt_pc, then returns NULL. mino_jit_invoke checks the
+ * pending flag after the native region returns. */
+mino_val_t  *mino_jit_deopt_exit(mino_state_t *S, size_t resume_pc);
 
 #endif /* MINO_CPJIT_HOST */
 

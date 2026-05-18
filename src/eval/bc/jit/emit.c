@@ -371,12 +371,21 @@ typedef struct {
     const stencil_desc_t *st;
 } inst_t;
 
-int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
+int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
+                            size_t deopt_at_pc)
 {
     mino_bc_fn_t *bc = fn_val->as.fn.bc;
     /* Caller (mino_jit_compile) has already validated fn_val / bc and
      * confirmed eligibility, so the head guards from the public entry
      * point are not repeated here. */
+
+    /* effective_code_len caps the compile walk at deopt_at_pc when
+     * the caller asked for a compile-with-deopt; the deopt stencil is
+     * emitted right after the prefix loop below. (size_t)-1 marks a
+     * plain full-body compile. */
+    int    is_deopt_compile  = (deopt_at_pc != (size_t)-1);
+    size_t effective_code_len = is_deopt_compile ? deopt_at_pc
+                                                  : bc->code_len;
 
     /* Fusion fires only on branch-free bodies: a fused LOAD_K + RETURN
      * is atomic, so any direct-emit branch landing on the RETURN-half
@@ -385,6 +394,12 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
      * without a pre-scan of every branch's target. */
     int allow_fusion = !bc_has_branches(bc);
 
+    /* Locate the deopt stencil descriptor once; the size + symbols are
+     * added to the budget below when is_deopt_compile is set. */
+    const stencil_desc_t *deopt_st = is_deopt_compile
+        ? mino_jit_find_stencil(OP_DEOPT_TO_INTERP) : NULL;
+    if (is_deopt_compile && deopt_st == NULL) return -1;
+
     /* First pass: classify every symbol of every stencil to size the
      * code / trampoline / pool regions. The pass also validates that
      * every extern fn symbol resolves to a known host helper, so the
@@ -392,7 +407,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
     size_t code_size   = 0;
     size_t pool_slots  = 0;
     size_t tramp_count = 0;
-    for (size_t pc = 0; pc < bc->code_len; pc++) {
+    for (size_t pc = 0; pc < effective_code_len; pc++) {
         unsigned op = OP_OF(bc->code[pc]);
         if (op == OP_JMP) {
             code_size += MINO_JIT_JMP_SIZE;
@@ -426,6 +441,27 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         }
         if (fused) pc++;
         pc += (size_t)mino_jit_op_extra_words(op);
+    }
+    /* Account for the deopt stencil (final): same pool / tramp
+     * bookkeeping as a regular stencil. The deopt stencil reads
+     * IMM_BX (one pool slot) and calls mino_jit_deopt_exit (one
+     * trampoline). The marker counts are derived from its symbol
+     * table so a future stencil refactor stays consistent. */
+    if (is_deopt_compile) {
+        code_size += deopt_st->size;
+        for (unsigned long s = 0; s < deopt_st->nsymbols; s++) {
+            const char *name = deopt_st->symbols[s];
+            int k = mino_jit_imm_kind_from_name(name);
+            if (k >= 0) {
+                pool_slots++;
+            } else if (strcmp(name, MINO_JIT_LOOP_MARKER_NAME) == 0
+                       || strcmp(name, MINO_JIT_CHAIN_MARKER_NAME) == 0) {
+                /* Marker symbols don't get pool / tramp slots. */
+            } else {
+                if (mino_jit_lookup_extern_fn(name) == NULL) return -1;
+                tramp_count++;
+            }
+        }
     }
 
     /* Layout: [code] [trampolines, 16-byte aligned] [pool, 8-byte
@@ -481,7 +517,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
     size_t pos       = 0;
     size_t pool_pos  = 0;
     size_t tramp_pos = 0;
-    for (size_t pc = 0; pc < bc->code_len; pc++) {
+    for (size_t pc = 0; pc < effective_code_len; pc++) {
         pc_offsets[pc] = (unsigned)pos;
         unsigned op = OP_OF(bc->code[pc]);
         if (op == OP_JMP) {
@@ -548,6 +584,52 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
              * native span with its primary word. */
             pc_offsets[pc + 1] = pc_offsets[pc];
             pc++;
+        }
+    }
+
+    /* Emit the deopt stencil at deopt_at_pc when compiling a prefix.
+     * The synthesized insn carries the resume PC in its Bx field; the
+     * stencil's IMM_BX read pulls it out and passes it to the runtime
+     * helper that flags the side-exit. Pass A (chain patch) walks the
+     * prefix's last non-final stencil and patches its chain-marker
+     * relocation to land here automatically. */
+    if (is_deopt_compile) {
+        pc_offsets[deopt_at_pc] = (unsigned)pos;
+        /* Synthesize (OP_DEOPT_TO_INTERP, Bx=deopt_at_pc). The Bx
+         * field is 16 bits; the caller (mino_jit_compile) gated
+         * eligibility on deopt_at_pc fitting. */
+        mino_bc_insn_t deopt_insn =
+            (mino_bc_insn_t)(OP_DEOPT_TO_INTERP & 0xFFu)
+            | (mino_bc_insn_t)((deopt_at_pc & 0xFFFFu) << 16);
+        size_t new_pool_pos  = pool_pos;
+        size_t new_tramp_pos = tramp_pos;
+        long n = emit_stencil(code, pos, code_size,
+                              pool, pool_pos, pool_slots, &new_pool_pos,
+                              tramp_buf, tramp_pos, tramp_bytes, &new_tramp_pos,
+                              deopt_st, deopt_insn, 0, bc,
+                              code_base, pool_base, tramp_base);
+        if (n < 0) {
+            free(insts);
+            free(pc_offsets);
+            jit_region_free(region, total_size);
+            return -1;
+        }
+        insts[n_inst].native_start = pos;
+        insts[n_inst].bc_pc        = deopt_at_pc;
+        insts[n_inst].kind         = INST_STENCIL_FINAL;
+        insts[n_inst].st           = deopt_st;
+        n_inst++;
+        pos       += (size_t)n;
+        pool_pos   = new_pool_pos;
+        tramp_pos  = new_tramp_pos;
+        /* Initialise pc_offsets for pcs past deopt_at_pc to the same
+         * deopt-stencil offset so mino_jit_offset_to_pc lookups on
+         * uncompiled tails still resolve to something defined; no
+         * code emit reads these slots, but a stack-trace introspection
+         * on an out-of-range native_off shouldn't read uninitialized
+         * memory. */
+        for (size_t pc = deopt_at_pc + 1; pc < bc->code_len; pc++) {
+            pc_offsets[pc] = (unsigned)pos;
         }
     }
 
@@ -648,7 +730,12 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val)
         size_t      bc_pc      = insts[i].bc_pc;
         mino_bc_insn_t ins     = bc->code[bc_pc];
         long        target_pc  = (long)bc_pc + 1 + sBx_OF(ins);
-        if (target_pc < 0 || (size_t)target_pc >= bc->code_len) {
+        /* Branches must land inside the compiled prefix. For a plain
+         * compile that's bc->code_len; for a compile-with-deopt the
+         * caller's prefix_has_escaping_branch already validated this,
+         * but the cap also stops mis-compiles cold on the unlikely
+         * path where the input bc is inconsistent. */
+        if (target_pc < 0 || (size_t)target_pc >= effective_code_len) {
             free(insts);
             free(pc_offsets);
             jit_region_free(region, total_size);

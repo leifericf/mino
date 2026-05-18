@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.319.0 — Side-exit deopt stencil
+
+Fns whose first unstenciled op sits past PC 0 now compile to a
+native prefix plus a deopt stencil. The native code runs the
+supported region; when execution reaches the deopt instruction
+the stencil sets `S->jit_deopt_pending = 1`, writes the resume
+PC to `S->jit_deopt_pc`, and returns NULL. `mino_jit_invoke`
+detects the deopt sentinel, clears the flag, and tail-calls
+`mino_bc_run_resume` to drive the interpreter over the same
+regs window from the recorded PC.
+
+Pieces shipped:
+
+- New stencil `src/eval/bc/stencils/deopt_to_interp.c` plus its
+  byte tables in all five generated host headers (arm64-darwin,
+  arm64-linux, x86_64-darwin, x86_64-linux, x86_64-windows).
+- Synthetic opcode `OP_DEOPT_TO_INTERP` sitting above OP__COUNT
+  so the bytecode compiler never emits it.
+- New runtime fields at the tail of `mino_state_t`:
+  `jit_deopt_pc`, `jit_deopt_pending`, plus three
+  `jit_resume_saved_*` slots the outer `mino_bc_run` populates
+  with the per-fn try / dyn / catch snapshots so the resumed
+  dispatch's cleanup tail rolls back to the right anchor.
+- `mino_bc_run_resume` in `vm.c` drives `bc_run_dispatch_from`
+  with the caller-supplied snapshots; called from
+  `mino_jit_invoke` on detected deopt.
+- `mino_jit_eligible` now accepts `CPJIT_REASON_OK_WITH_DEOPT`
+  when the resume PC fits in the 16-bit Bx slot AND no
+  direct-emit branch in the prefix would land past it.
+
+Smoke-tested with `(defn mixed [x] (let [a (inc x)] (binding
+[*ns* *ns*] (+ a 1))))`: the fn was previously rejected at the
+PUSHDYN op; it now compiles (16k native bytes, ok-with-deopt
+in `MINO_CPJIT_STATS=tracing`) and produces the same answer
+under jit-auto / jit-on / jit-off / lean. `task release-gate`
+green (18 of 18 adv probes); `task test-jit-parity`
+byte-identical across the four modes.
+
 ## v0.318.0 — Eligibility annotation for partial native coverage
 
 `mino_jit_classify_eligibility` now distinguishes two flavours of

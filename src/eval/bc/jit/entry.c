@@ -564,6 +564,16 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_dissoc_symbols, stencil_op_dissoc_nsymbols,
         stencil_op_dissoc_relocs, stencil_op_dissoc_nrelocs,
         0u
+    },
+    {
+        OP_DEOPT_TO_INTERP,
+        stencil_op_deopt_to_interp_bytes, stencil_op_deopt_to_interp_size,
+        stencil_op_deopt_to_interp_symbols,
+        stencil_op_deopt_to_interp_nsymbols,
+        stencil_op_deopt_to_interp_relocs,
+        stencil_op_deopt_to_interp_nrelocs,
+        1u  /* final: native region terminates here, ret carries the
+             * NULL deopt sentinel back to mino_jit_invoke */
     }
 };
 const int mino_jit_stencils_count =
@@ -657,13 +667,37 @@ cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
     return CPJIT_REASON_OK;
 }
 
+/* Check that no JMP/JMPIFNOT in `bc->code[0..deopt_pc)` would land at
+ * a target outside the prefix. Pass B of the compile pipeline patches
+ * direct-emit branches against `pc_offsets[target_pc]`, which is only
+ * defined for pcs we actually compiled. A target past deopt_pc would
+ * read uninitialised memory and miscompile silently, so reject the
+ * fn here -- the interpreter takes it intact. Returns 0 when the
+ * prefix is safe to compile, 1 when any branch escapes. */
+static int prefix_has_escaping_branch(const mino_bc_fn_t *bc, size_t deopt_pc)
+{
+    for (size_t pc = 0; pc < deopt_pc; pc++) {
+        unsigned op = OP_OF(bc->code[pc]);
+        if (op != OP_JMP && op != OP_JMPIFNOT) continue;
+        long target_pc = (long)pc + 1 + sBx_OF(bc->code[pc]);
+        if (target_pc < 0 || (size_t)target_pc >= deopt_pc) return 1;
+    }
+    return 0;
+}
+
 int mino_jit_eligible(const mino_bc_fn_t *bc)
 {
-    /* OK_WITH_DEOPT does NOT yet enable native compile: the
-     * compile-with-deopt path lands separately. This release ships
-     * only the classifier annotation so the tracing dashboard can
-     * surface the pending opportunity. */
-    return mino_jit_classify_eligibility(bc, NULL, NULL) == CPJIT_REASON_OK;
+    unsigned       first_unknown_op = 0;
+    size_t         first_unknown_pc = 0;
+    cpjit_reason_t r = mino_jit_classify_eligibility(bc, &first_unknown_op,
+                                                      &first_unknown_pc);
+    if (r == CPJIT_REASON_OK) return 1;
+    if (r == CPJIT_REASON_OK_WITH_DEOPT
+        && first_unknown_pc <= 0xFFFFu
+        && !prefix_has_escaping_branch(bc, first_unknown_pc)) {
+        return 1;
+    }
+    return 0;
 }
 
 /* ----- Extern-symbol resolution table ------------------------------------ */
@@ -712,6 +746,7 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_push_env_slow",         (void *)(uintptr_t)mino_jit_push_env_slow},
     {"mino_jit_pop_env_slow",          (void *)(uintptr_t)mino_jit_pop_env_slow},
     {"mino_jit_env_bind_slow",         (void *)(uintptr_t)mino_jit_env_bind_slow},
+    {"mino_jit_deopt_exit",            (void *)(uintptr_t)mino_jit_deopt_exit},
     {NULL, NULL}
 };
 
@@ -739,16 +774,31 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     cpjit_reason_t reason = mino_jit_classify_eligibility(bc,
                                                           &first_unknown_op,
                                                           &first_unknown_pc);
-    if (reason != CPJIT_REASON_OK) {
-        mino_jit_stats_record(bc, reason, first_unknown_op,
-                              first_unknown_pc, 0, 0);
-        return -1;
+    /* Plain OK -- compile the whole body, no deopt stencil. */
+    if (reason == CPJIT_REASON_OK) {
+        int rc = mino_jit_compile_inner(S, fn_val, (size_t)-1);
+        mino_jit_stats_record(bc, CPJIT_REASON_OK, 0, 0,
+                              rc == 0, rc == 0 ? bc->native_size : 0);
+        return rc;
     }
-
-    int rc = mino_jit_compile_inner(S, fn_val);
-    mino_jit_stats_record(bc, CPJIT_REASON_OK, 0, 0,
-                          rc == 0, rc == 0 ? bc->native_size : 0);
-    return rc;
+    /* OK_WITH_DEOPT -- compile the prefix and plant a deopt stencil
+     * at first_unknown_pc. Two safety gates: the resume PC must fit
+     * in the 16-bit Bx slot the stencil reads, and the prefix must
+     * not contain a branch whose target lands past it. Failures fall
+     * through to the rejection record so the tracing dashboard still
+     * sees the entry attributed to the blocking op. */
+    if (reason == CPJIT_REASON_OK_WITH_DEOPT
+        && first_unknown_pc <= 0xFFFFu
+        && !prefix_has_escaping_branch(bc, first_unknown_pc)) {
+        int rc = mino_jit_compile_inner(S, fn_val, first_unknown_pc);
+        mino_jit_stats_record(bc, CPJIT_REASON_OK_WITH_DEOPT,
+                              first_unknown_op, first_unknown_pc,
+                              rc == 0, rc == 0 ? bc->native_size : 0);
+        return rc;
+    }
+    mino_jit_stats_record(bc, reason, first_unknown_op,
+                          first_unknown_pc, 0, 0);
+    return -1;
 }
 
 mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
@@ -770,6 +820,15 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
      * `ctx->dyn_stack` via a fixed offset from S without touching
      * the Darwin __thread machinery the extractor doesn't model. */
     S->jit_invoke_ctx = ctx;
+    /* Capture the side-exit snapshot inputs into locals before f() so
+     * a nested mino_bc_run (triggered by an OP_CALL stencil that
+     * recurses into a JIT'd callee) can overwrite S->jit_resume_saved_*
+     * without losing the values this invoke needs on deopt. The outer
+     * mino_bc_run / mino_bc_run_known_native populated these fields
+     * with this body's per-fn snapshots right before invoking us. */
+    int          saved_try_depth      = S->jit_resume_saved_try_depth;
+    int          saved_bc_catch_depth = S->jit_resume_saved_bc_catch_depth;
+    dyn_frame_t *saved_dyn_stack      = S->jit_resume_saved_dyn_stack;
     /* Adaptive tiering: any callee invoked from inside this native
      * region picks up a threshold of 1 via invoke_bc_fn_argv's
      * jit_invoke_depth check. Bumped before f() and restored after
@@ -778,6 +837,21 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
     ctx->jit_invoke_depth++;
     mino_val_t *r = f(regs, consts, S);
     ctx->jit_invoke_depth--;
+    /* Side-exit detection: when the deopt stencil fires, it sets
+     * jit_deopt_pending = 1 and returns NULL. Clear the flag, then
+     * resume the dispatch loop from the recorded PC over the same
+     * regs window. Resume runs inside the same jit_invoke_env /
+     * jit_invoke_ctx publish window the native code held, so an
+     * OP_CALL inside the resumed body that re-enters JIT sees the
+     * same context this call would have. */
+    if (r == NULL && S->jit_deopt_pending) {
+        size_t resume_pc = S->jit_deopt_pc;
+        S->jit_deopt_pending = 0;
+        size_t base = (size_t)(regs - S->bc_regs);
+        r = mino_bc_run_resume(S, bc, base, env, resume_pc,
+                               saved_try_depth, saved_bc_catch_depth,
+                               saved_dyn_stack);
+    }
     S->jit_invoke_ctx = saved_ctx;
     ctx->jit_invoke_env = saved_env;
     return r;
