@@ -155,6 +155,13 @@ void mino_gc_stats(mino_state_t *S, mino_gc_stats_t *out)
     out->barrier_satb_pushes     = S->gc_barrier_satb_pushes;
     out->barrier_dijkstra_pushes = S->gc_barrier_dijkstra_pushes;
     out->mark_stack_overflows    = S->gc_mark_stack_overflows;
+    out->bytes_promoted_minor    = S->gc_bytes_promoted_minor;
+    {
+        size_t i;
+        for (i = 0; i < 8; i++) {
+            out->young_age_bucket[i] = S->gc_young_age_bucket[i];
+        }
+    }
     out->remset_entries    = S->gc_remset_len;
     out->remset_cap        = S->gc_remset_cap;
     out->remset_high_water = S->gc_remset_high_water;

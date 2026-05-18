@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.345.2 — Bytes promoted + young-survival age histogram
+
+Two new surfaces on `mino_gc_stats_t` and `(gc-stats)`:
+
+- `:bytes-promoted-minor` — cumulative bytes that flipped
+  YOUNG -> OLD across all minor sweeps. The rate (delta over a
+  window) feeds nursery / promotion-age tuning decisions.
+- `:young-age-buckets` — length-8 vector. Index `i` is the
+  cumulative count of YOUNG survivors observed at age bucket
+  `clamp(floor(log2(age)), 0..7)` where `age` is the post-
+  increment survival count at the moment minor sweep visited
+  the header. High-bucket counts are evidence that workload
+  has long-lived young objects that should consider bypassing
+  the nursery via a tuned `gc-promotion-age` or direct-OLD
+  allocation path.
+
+Probe (vector atom + 200 conj rounds × 10 churn calls):
+- 1 minor + 1 major, 1.9 MB promoted, 21499 bucket-0 survivors.
+  All survivors clustered in bucket 0 because the default
+  `gc-promotion-age` is short -- workloads with longer-lived
+  young objects will populate higher buckets, surfacing the
+  long-lived-but-not-OLD population.
+
+`task release-gate` is OK.
+
 ## v0.345.1 — GC barrier + overflow counters
 
 Three new cumulative counters surfaced through `mino_gc_stats_t`

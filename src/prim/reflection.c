@@ -1198,8 +1198,8 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_gc_stats_t st;
     const char *phase_name;
-    mino_val_t *ks[30];
-    mino_val_t *vs[30];
+    mino_val_t *ks[32];
+    mino_val_t *vs[32];
     (void)env;
     if (mino_is_cons(args)) {
         return prim_throw_classified(S, "eval/arity", "MAR001",
@@ -1277,7 +1277,21 @@ mino_val_t *prim_gc_stats(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     vs[28] = mino_int(S, (long long)st.barrier_dijkstra_pushes);
     ks[29] = mino_keyword(S, "mark-stack-overflows");
     vs[29] = mino_int(S, (long long)st.mark_stack_overflows);
-    return mino_map(S, ks, vs, 30);
+    /* Generational promotion bookkeeping. :young-age-buckets is a
+     * length-8 vector of cumulative survivor counts indexed by
+     * clamp(log2(age+1), 0..7). */
+    ks[30] = mino_keyword(S, "bytes-promoted-minor");
+    vs[30] = mino_int(S, (long long)st.bytes_promoted_minor);
+    {
+        mino_val_t *buckets[8];
+        size_t i;
+        for (i = 0; i < 8; i++) {
+            buckets[i] = mino_int(S, (long long)st.young_age_bucket[i]);
+        }
+        ks[31] = mino_keyword(S, "young-age-buckets");
+        vs[31] = mino_vector(S, buckets, 8);
+    }
+    return mino_map(S, ks, vs, 32);
 }
 
 /* (gc!) -- force a full (minor + major) collection. Useful for tests

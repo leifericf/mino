@@ -28,7 +28,7 @@
  */
 #define MINO_VERSION_MAJOR 0
 #define MINO_VERSION_MINOR 345
-#define MINO_VERSION_PATCH 1
+#define MINO_VERSION_PATCH 2
 
 /*
  * Human-readable version string of the *linked* runtime, e.g. "0.48.0".
@@ -1596,6 +1596,13 @@ typedef struct {
     size_t barrier_satb_pushes;
     size_t barrier_dijkstra_pushes;
     size_t mark_stack_overflows;
+    /* Generational promotion bookkeeping. bytes_promoted_minor is a
+     * cumulative running total of YOUNG -> OLD byte volume across
+     * minor cycles. young_age_bucket[i] increments once per minor-
+     * survivor in bucket i = clamp(log2(age+1), 0..7); high-bucket
+     * counts identify candidates for promotion-age / nursery tuning. */
+    size_t   bytes_promoted_minor;
+    uint64_t young_age_bucket[8];
     size_t remset_entries;     /* current remembered-set size */
     size_t remset_cap;         /* remembered-set capacity */
     size_t remset_high_water;  /* peak remset size this state */

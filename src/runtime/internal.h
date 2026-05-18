@@ -1021,6 +1021,16 @@ struct mino_state {
     size_t          gc_barrier_dijkstra_pushes;
     size_t          gc_mark_stack_overflows;
 
+    /* Generational promotion bookkeeping. bytes_promoted_minor is a
+     * running total of bytes that flipped YOUNG -> OLD during minor
+     * sweep; the rate (delta over a window) feeds nursery / promotion-
+     * age tuning. young_age_bucket[i] increments whenever a YOUNG
+     * header survives a minor cycle into age bucket i (0..7 mapped as
+     * log2(age+1), clamped at 7). The accumulated histogram identifies
+     * long-lived young objects that should bypass the nursery. */
+    size_t          gc_bytes_promoted_minor;
+    uint64_t        gc_young_age_bucket[8];
+
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;

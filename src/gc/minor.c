@@ -52,10 +52,27 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
     while (*pp != NULL) {
         gc_hdr_t *h = *pp;
         if (h->mark) {
+            unsigned age_post;
+            unsigned bucket;
             h->mark = 0;
             if (h->age < 0xffu) {
                 h->age++;
             }
+            /* Survival age bucket: log2(age+1) clamped to [0..7]. Tracks
+             * the distribution of young-generation survival depth across
+             * a workload's lifetime; long-lived young objects that
+             * accumulate in the high buckets are promotion-age tuning
+             * candidates. */
+            age_post = (unsigned)h->age;
+            if (age_post == 0u) {
+                bucket = 0u;
+            } else {
+                bucket = 0u;
+                while ((age_post >> bucket) > 1u && bucket < 7u) {
+                    bucket++;
+                }
+            }
+            S->gc_young_age_bucket[bucket]++;
             if (h->age >= S->gc_promotion_age) {
                 /* Promote: unlink from young list, prepend to old list,
                  * flip the gen tag, and keep accounting consistent. */
@@ -64,6 +81,7 @@ static void gc_minor_sweep(mino_state_t *S, int saved_phase)
                 h->next         = S->gc_all_old;
                 S->gc_all_old   = h;
                 promoted_bytes += h->size;
+                S->gc_bytes_promoted_minor += h->size;
                 gc_evt_record(S, GC_EVT_PROMOTE, h, NULL, NULL,
                               (uintptr_t)h->size, (uint16_t)h->type_tag);
                 /* One-cycle safety net: every newly-promoted header
