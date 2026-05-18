@@ -1147,6 +1147,851 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
     }
 }
 
+
+/* Dispatch loop body extracted from mino_bc_run so a future caller
+ * can resume execution at an arbitrary PC with a pre-populated regs
+ * window. The caller owns the per-fn snapshots (try_depth, bc_catch_depth,
+ * dyn_stack) used for bounds checks in the cold-op handler. Returns 1
+ * on a normal completion (with *retval_out set), 0 on error. The env
+ * pointer is in/out because OP_PUSH_ENV / OP_POP_ENV mutate it via
+ * bc_cold_op's env_p. */
+static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
+                                size_t base, mino_thread_ctx_t *ctx,
+                                mino_env_t **env_p, size_t start_pc,
+                                mino_val_t **retval_out,
+                                int saved_try_depth,
+                                int saved_bc_catch_depth,
+                                dyn_frame_t *saved_dyn_stack)
+{
+    mino_val_t **regs = S->bc_regs + base;
+    const mino_bc_insn_t *code = bc->code;
+    mino_env_t *env = *env_p;
+    size_t pc = start_pc;
+    mino_val_t *retval = NULL;
+    int ok = 1;
+
+    while (pc < bc->code_len) {
+        /* Refresh the window pointer every cycle. Any op that can
+         * trigger user code (OP_CALL/TAILCALL via apply_callable,
+         * OP_GETGLOBAL via eval_impl, OP_CLOSURE via make_fn that
+         * may collect, OP_SETGLOBAL via var_intern) can cascade into
+         * a recursive mino_bc_run that grows S->bc_regs and frees
+         * the prior buffer. Recomputing from base on each iteration
+         * keeps the window pointer correct without per-op clutter. */
+        regs = S->bc_regs + base;
+        /* Publish the about-to-execute pc to the bc cursor. Error
+         * paths that fire from primitives invoked by this op resolve
+         * a precise source span via mino_bc_source_lookup against
+         * (bc_current_bc, bc_current_pc). One write per opcode, well
+         * inside per-cycle noise on every benchmark measured. */
+        ctx->bc_current_pc = pc;
+        mino_bc_insn_t ins = code[pc++];
+        unsigned op = OP_OF(ins);
+#ifdef MINO_BC_OP_COUNTS
+        if (!g_op_counts_atexit_registered) {
+            atexit(op_counts_dump);
+            g_op_counts_atexit_registered = 1;
+        }
+        if (op < OP__COUNT) g_op_counts[op]++;
+#endif
+        switch (op) {
+        case OP_MOVE: {
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            regs[a] = regs[b];
+            break;
+        }
+
+        case OP_LOAD_K: {
+            unsigned a  = A_OF(ins);
+            unsigned bx = Bx_OF(ins);
+            if (bx >= bc->consts_len) { ok = 0; goto dispatch_done; }
+            regs[a] = bc->consts[bx];
+            break;
+        }
+
+        case OP_GETGLOBAL_CACHED: {
+            /* Inline cache for global symbol resolution. The slot is
+             * filled on first miss with (cached, gen=S->ic_gen) and
+             * re-read while the gen still matches; bumps to ic_gen
+             * (def / ns-unmap / var_set_root / var_unintern)
+             * invalidate naturally. The shared ic_resolve_global
+             * helper carries the dyn / env / cache / resolve cascade
+             * and the on-miss write-barrier refill; this case is the
+             * pure-read consumer (no apply afterwards) so any
+             * resolved value -- shadowed dyn, lexical env hit, or
+             * cached var -- is written to regs[a] uniformly. */
+            unsigned a  = A_OF(ins);
+            unsigned bx = Bx_OF(ins);
+            if ((int)bx >= bc->ic_slots_len) { ok = 0; goto dispatch_done; }
+            mino_bc_ic_slot_t *slot = &bc->ic_slots[bx];
+            int dyn_active = (ctx->dyn_stack != NULL);
+            mino_val_t *v = ic_resolve_global(S, bc, slot, env, dyn_active);
+            if (v == NULL) { ok = 0; goto dispatch_done; }
+            regs[a] = v;
+            break;
+        }
+
+        case OP_JMP: {
+            int off = sBx_OF(ins);
+            pc = (size_t)((long)pc + off);
+            /* Backward jump: poll for cancel + auto-yield. Forward
+             * jumps skip the poll since they don't form a loop. */
+            if (off < 0 && !mino_bc_safepoint(S)) {
+                ok = 0; goto dispatch_done;
+            }
+            break;
+        }
+
+        case OP_JMPIFNOT: {
+            unsigned a = A_OF(ins);
+            int off = sBx_OF(ins);
+            if (!mino_is_truthy_inline(regs[a])) {
+                pc = (size_t)((long)pc + off);
+                if (off < 0 && !mino_bc_safepoint(S)) {
+                    ok = 0; goto dispatch_done;
+                }
+            }
+            break;
+        }
+
+        case OP_CALL_CACHED: {
+            /* Fused (resolve-global + call) for sites whose head is an
+             * unqualified or qualified global symbol with no static
+             * local binding. Shares ic_resolve_global with the
+             * read-only OP_GETGLOBAL_CACHED consumer: same dyn / env /
+             * cache / resolve cascade, same write-barrier refill on
+             * miss. Two-word encoding: word-1 carries A=arg_base /
+             * B=argc / C=dst, word-2 carries the slot index in Bx
+             * and is consumed via pc++ below so the main dispatch
+             * never sees it. Args live at regs[A..A+B-1] -- no fn-reg
+             * shift since the callee comes from the slot, not a
+             * register. */
+            unsigned a    = A_OF(ins);   /* arg_base */
+            unsigned argn = B_OF(ins);   /* argc     */
+            unsigned ret  = C_OF(ins);   /* dst      */
+            if (pc >= bc->code_len) { ok = 0; goto dispatch_done; }
+            mino_bc_insn_t slot_word = code[pc++];
+            unsigned slot_idx = Bx_OF(slot_word);
+            if ((int)slot_idx >= bc->ic_slots_len) {
+                ok = 0; goto dispatch_done;
+            }
+            mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
+            int dyn_active = (ctx->dyn_stack != NULL);
+            mino_val_t *callee = ic_resolve_global(S, bc, slot, env,
+                                                    dyn_active);
+            if (callee == NULL) { ok = 0; goto dispatch_done; }
+#ifdef MINO_CALL_SITE_SHAPES
+            call_shape_record(slot, callee, regs + a, (int)argn);
+#endif
+            mino_val_t *r = apply_callable_argv(S, callee, regs + a,
+                                                (int)argn, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            S->bc_regs[base + ret] = r;
+            break;
+        }
+
+        case OP_PROTOCOL_CALL_CACHED:
+        case OP_PROTOCOL_TAILCALL_CACHED: {
+            /* Protocol-method dispatch fast lane. Shares
+             * ic_resolve_protocol with the tail variant: deref the
+             * captured atom (one pointer load), compute the
+             * type-discriminator for the first argument, pointer-
+             * compare against the cached (atom_map, type_disc) state,
+             * and on hit return the cached impl directly. On miss the
+             * helper performs map_get_val with a :default fallback,
+             * refills the IC under write barriers, or surfaces the
+             * MPR001 / MPR002 diagnostic for no-impl / bad-table
+             * shape. Tail variant invokes the impl directly via
+             * apply_callable_argv -- self-tail-recursive protocol
+             * methods grow the C stack linearly, a deliberate
+             * trade-off against the cons-spine build the
+             * MINO_TAIL_CALL sentinel path would otherwise pay. */
+            int is_tail = (OP_OF(ins) == OP_PROTOCOL_TAILCALL_CACHED);
+            unsigned a    = A_OF(ins);
+            unsigned argn = B_OF(ins);
+            unsigned ret  = C_OF(ins);
+            if (pc >= bc->code_len) { ok = 0; goto dispatch_done; }
+            mino_bc_insn_t slot_word = code[pc++];
+            unsigned slot_idx = Bx_OF(slot_word);
+            if ((int)slot_idx >= bc->ic_slots_len) {
+                ok = 0; goto dispatch_done;
+            }
+            mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
+            if (argn < 1 || slot->atom == NULL
+                || mino_type_of(slot->atom) != MINO_ATOM) {
+                ok = 0; goto dispatch_done;
+            }
+            mino_val_t *impl = mino_bc_ic_resolve_protocol(S, bc, slot, regs[a]);
+            if (impl == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = apply_callable_argv(S, impl, regs + a,
+                                                (int)argn, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            if (is_tail) {
+                retval = r;
+                goto dispatch_done;
+            }
+            S->bc_regs[base + ret] = r;
+            break;
+        }
+
+        case OP_TAILCALL: {
+            unsigned a    = A_OF(ins);
+            unsigned argn = B_OF(ins);
+            mino_val_t *callee = regs[a];
+            mino_val_t *args   = args_from_regs(S, regs + a + 1, argn);
+            if (args == NULL) { ok = 0; goto dispatch_done; }
+            /* Hand off via the MINO_TAIL_CALL sentinel; the outer
+             * apply_callable trampoline picks up the new (fn, args)
+             * without growing the C stack. The sentinel's args field
+             * stays in cons-format for legacy callers that read it
+             * directly; the trampoline inside apply_callable_argv
+             * walks it back to argv for bc-FN targets. */
+            S->tail_call_sentinel.as.tail_call.fn   = callee;
+            S->tail_call_sentinel.as.tail_call.args = args;
+            retval = &S->tail_call_sentinel;
+            goto dispatch_done;
+        }
+
+        case OP_RETURN: {
+            unsigned a = A_OF(ins);
+            retval = regs[a];
+            goto dispatch_done;
+        }
+
+        case OP_ADD_II:
+        case OP_SUB_II:
+        case OP_MUL_II:
+        case OP_LT_II:
+        case OP_LE_II:
+        case OP_GT_II:
+        case OP_GE_II:
+        case OP_EQ_II:
+        case OP_MOD_II:
+        case OP_QUOT_II:
+        case OP_REM_II:
+        case OP_BAND_II:
+        case OP_BOR_II:
+        case OP_BXOR_II:
+        case OP_SHL_II:
+        case OP_SHR_II:
+        case OP_USHR_II: {
+            /* Speculative int+int fast lanes for the binary arith /
+             * compare / bitwise / div-class ops. On a type miss or a
+             * bail (div-by-zero, shift-out-of-range, MIN/-1 overflow)
+             * we fall through to the corresponding prim with the same
+             * argv ABI as a regular OP_CALL so the prim raises the
+             * Clojure-correct diagnostic or promotes through the
+             * numeric tower. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned c = C_OF(ins);
+            unsigned subop;
+            mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
+            switch (op) {
+            case OP_ADD_II:  subop = BINOP_ADD;  fallback = prim_add; break;
+            case OP_SUB_II:  subop = BINOP_SUB;  fallback = prim_sub; break;
+            case OP_MUL_II:  subop = BINOP_MUL;  fallback = prim_mul; break;
+            case OP_LT_II:   subop = BINOP_LT;   fallback = prim_lt;  break;
+            case OP_LE_II:   subop = BINOP_LE;   fallback = prim_lte; break;
+            case OP_GT_II:   subop = BINOP_GT;   fallback = prim_gt;  break;
+            case OP_GE_II:   subop = BINOP_GE;   fallback = prim_gte; break;
+            case OP_EQ_II:   subop = BINOP_EQ;   fallback = prim_eq;  break;
+            case OP_MOD_II:  subop = BINOP_MOD;  fallback = prim_mod; break;
+            case OP_QUOT_II: subop = BINOP_QUOT; fallback = prim_quot; break;
+            case OP_REM_II:  subop = BINOP_REM;  fallback = prim_rem; break;
+            case OP_BAND_II: subop = BINOP_BAND; fallback = prim_bit_and; break;
+            case OP_BOR_II:  subop = BINOP_BOR;  fallback = prim_bit_or;  break;
+            case OP_BXOR_II: subop = BINOP_BXOR; fallback = prim_bit_xor; break;
+            case OP_SHL_II:  subop = BINOP_SHL;  fallback = prim_bit_shift_left; break;
+            case OP_SHR_II:  subop = BINOP_SHR;  fallback = prim_bit_shift_right; break;
+            case OP_USHR_II: subop = BINOP_USHR; fallback = prim_unsigned_bit_shift_right; break;
+            default: ok = 0; goto dispatch_done;
+            }
+            mino_val_t *r = binop_int_fast(S, regs[b], regs[c], subop);
+            if (r == NULL) {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[c], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                list = mino_cons(S, regs[b], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                r = fallback(S, list, env);
+                if (r == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+            }
+            regs[a] = r;
+            break;
+        }
+
+        case OP_INC_I:
+        case OP_DEC_I:
+        case OP_ZERO_INT_P:
+        case OP_POS_P_I:
+        case OP_NEG_P_I:
+        case OP_EVEN_P_I:
+        case OP_ODD_P_I:
+        case OP_BNOT_I: {
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned subop;
+            mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
+            switch (op) {
+            case OP_INC_I:      subop = UNOP_INC;    fallback = prim_inc;    break;
+            case OP_DEC_I:      subop = UNOP_DEC;    fallback = prim_dec;    break;
+            case OP_ZERO_INT_P: subop = UNOP_ZERO_P; fallback = prim_zero_p; break;
+            case OP_POS_P_I:    subop = UNOP_POS_P;  fallback = prim_pos_p;  break;
+            case OP_NEG_P_I:    subop = UNOP_NEG_P;  fallback = prim_neg_p;  break;
+            case OP_EVEN_P_I:   subop = UNOP_EVEN_P; fallback = prim_even_p; break;
+            case OP_ODD_P_I:    subop = UNOP_ODD_P;  fallback = prim_odd_p;  break;
+            case OP_BNOT_I:     subop = UNOP_BNOT;   fallback = prim_bit_not; break;
+            default: ok = 0; goto dispatch_done;
+            }
+            mino_val_t *r = unop_int_fast(S, regs[b], subop);
+            if (r == NULL) {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[b], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                r = fallback(S, list, env);
+                if (r == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+            }
+            regs[a] = r;
+            break;
+        }
+
+        case OP_LOOP_INT_DEC: {
+            /* Fused counted-loop step (single binding):
+             *   if regs[A] == 0: fall through (exit branch follows).
+             *   else: regs[A]-- and re-fetch (pc-=1).
+             * Hot path: tagged-int test, in-range decrement, single
+             * back-jump. Cold paths (non-int test, MIN_INT decrement)
+             * delegate to prim_zero_p / prim_dec so the user-visible
+             * diagnostic ("zero? requires a number", "integer
+             * overflow") fires exactly as the unfused emission
+             * would have. */
+            unsigned a = A_OF(ins);
+            mino_val_t *v = regs[a];
+            if (v != NULL && MINO_IS_INT(v)) {
+                long long t = MINO_INT_VAL(v);
+                if (t == 0) break;
+                if (t != MINO_INT_MIN) {
+                    regs[a] = MINO_MAKE_INT(t - 1);
+                    pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    break;
+                }
+                /* MIN_INT: fall through to the prim_dec slow path so
+                 * the throw fires. */
+            }
+            /* Slow path: call prim_zero_p first to decide the branch
+             * and to surface any non-number diagnostic. Then on
+             * non-zero, call prim_dec which raises on overflow. */
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *zp = prim_zero_p(S, list, env);
+                if (zp == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                if (mino_is_truthy(zp)) {
+                    /* Fall through to the exit branch (no recur). */
+                    break;
+                }
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *decv = prim_dec(S, list2, env);
+                if (decv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = decv;
+                pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                break;
+            }
+        }
+
+        case OP_LOOP_INT_DEC_INC: {
+            /* Fused counted-loop step (two bindings). Hot path is the
+             * tagged-int / in-range case; everything else delegates to
+             * prim_zero_p / prim_dec / prim_inc so the
+             * non-number / overflow diagnostics still fire. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *vt = regs[a];
+            mino_val_t *vi = regs[b];
+            if (vt != NULL && vi != NULL
+                && MINO_IS_INT(vt) && MINO_IS_INT(vi)) {
+                long long t = MINO_INT_VAL(vt);
+                if (t == 0) break;
+                long long i = MINO_INT_VAL(vi);
+                if (t != MINO_INT_MIN && i != MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(t - 1);
+                    regs[b] = MINO_MAKE_INT(i + 1);
+                    pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    break;
+                }
+                /* Overflow on dec or inc: fall through to the prim
+                 * slow path so the throw fires. */
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *zp = prim_zero_p(S, list, env);
+                if (zp == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                if (mino_is_truthy(zp)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *decv = prim_dec(S, list2, env);
+                if (decv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                mino_val_t *list3 = mino_nil(S);
+                list3 = mino_cons(S, regs[b], list3);
+                if (list3 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *incv = prim_inc(S, list3, env);
+                if (incv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = decv;
+                regs[b] = incv;
+                pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                break;
+            }
+        }
+
+        case OP_LOOP_INT_LT: {
+            /* Forward-counted single-binding loop step:
+             *   if regs[A] < regs[B]: regs[A]++ and back-jump
+             *   else: fall through to the compiled exit branch.
+             * Hot path is the tagged-int in-range case. Cold paths
+             * (non-int operand, MAX_INT counter) delegate to prim_lt /
+             * prim_inc so the canonical diagnostic still fires. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *vc = regs[a];
+            mino_val_t *vl = regs[b];
+            if (vc != NULL && vl != NULL
+                && MINO_IS_INT(vc) && MINO_IS_INT(vl)) {
+                long long c_ = MINO_INT_VAL(vc);
+                long long l_ = MINO_INT_VAL(vl);
+                if (c_ >= l_) break;
+                if (c_ != MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(c_ + 1);
+                    pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    break;
+                }
+                /* MAX_INT: fall through to the prim_inc slow path so
+                 * the overflow throw fires. */
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[b], list);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *ltv = prim_lt(S, list, env);
+                if (ltv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                if (!mino_is_truthy(ltv)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *incv = prim_inc(S, list2, env);
+                if (incv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = incv;
+                pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                break;
+            }
+        }
+
+        case OP_LOOP_INT_LT_INC: {
+            /* Forward-counted two-binding loop step: counter A < limit
+             * B, with carry C incremented in lockstep with A. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned c = C_OF(ins);
+            mino_val_t *vc = regs[a];
+            mino_val_t *vl = regs[b];
+            mino_val_t *vk = regs[c];
+            if (vc != NULL && vl != NULL && vk != NULL
+                && MINO_IS_INT(vc) && MINO_IS_INT(vl)
+                && MINO_IS_INT(vk)) {
+                long long c_ = MINO_INT_VAL(vc);
+                long long l_ = MINO_INT_VAL(vl);
+                if (c_ >= l_) break;
+                long long k_ = MINO_INT_VAL(vk);
+                if (c_ != MINO_INT_MAX && k_ != MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(c_ + 1);
+                    regs[c] = MINO_MAKE_INT(k_ + 1);
+                    pc -= 1;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    break;
+                }
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[b], list);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *ltv = prim_lt(S, list, env);
+                if (ltv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                if (!mino_is_truthy(ltv)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *incv = prim_inc(S, list2, env);
+                if (incv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                mino_val_t *list3 = mino_nil(S);
+                list3 = mino_cons(S, regs[c], list3);
+                if (list3 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *incv2 = prim_inc(S, list3, env);
+                if (incv2 == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = incv;
+                regs[c] = incv2;
+                pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                break;
+            }
+        }
+
+        case OP_GET_KW_MAP: {
+            /* Fast lane for (get coll k) on maps and records.
+             * For MINO_MAP: any hashable key (string, keyword, int,
+             * symbol, ...) routes through mino_map_lookup. For
+             * MINO_RECORD: declared-fields are interned by keyword
+             * identity, so the slot index lookup requires a keyword
+             * key; other key types fall through to prim_get which
+             * scans the optional ext-map. Misses fall back to prim_get
+             * so non-map / non-record collections, sorted-maps,
+             * 3-arg default forms, and records carrying the key in
+             * the ext-map keep their full semantics. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *key  = regs[cc];
+            if (coll != NULL && key != NULL) {
+                int t = mino_type_of(coll);
+                if (t == MINO_MAP) {
+                    mino_val_t *v = map_get_val(coll, key);
+                    regs[a] = v == NULL ? mino_nil(S) : v;
+                    break;
+                }
+                if (t == MINO_RECORD && mino_type_of(key) == MINO_KEYWORD) {
+                    int idx = record_field_index(coll, key);
+                    if (idx >= 0) {
+                        regs[a] = coll->as.record.vals[idx];
+                        break;
+                    }
+                    /* Keyword isn't a declared field. The slow path
+                     * also checks the optional ext-map and returns
+                     * nil for an absent key, so we route there
+                     * instead of returning nil ourselves. */
+                }
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, key, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_get(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_FIRST_VEC: {
+            /* Fast lane for (first v) on a vector. Empty vector
+             * returns nil; non-empty returns vec_nth(coll, 0). Any
+             * other type (lazy, chunked-cons, string, map, set,
+             * sorted-coll, host-array, map-entry, nil/empty-list)
+             * falls back through prim_first so the full semantics --
+             * lazy-seq force, string code-point decode, map-entry
+             * key, etc. -- stay intact. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+                regs[a] = coll->as.vec.len == 0
+                            ? mino_nil(S)
+                            : vec_nth(coll, 0);
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_first(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_COUNT_VEC: {
+            /* Fast lane for (count v) on a vector. Returns the
+             * vector's .len as a tagged int directly; tag_or_box_int
+             * handles the rare path where .len overflows the tagged
+             * range. Other coll types fall through to prim_count so
+             * lazy-seq walk, string code-point count, map / set / host
+             * array len read, etc. stay correct. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
+                regs[a] = tag_or_box_int(S, (long long)coll->as.vec.len);
+                if (regs[a] == NULL) { ok = 0; goto dispatch_done; }
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_count(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_ASSOC: {
+            /* Fast lane for the 3-arg (assoc coll k v) shape. The
+             * compiler arranges three consecutive registers starting
+             * at B for [coll, k, v]; A is the destination. Two fast
+             * paths fire: vector (when coll is MINO_VECTOR and k is
+             * a tagged int with 0 <= idx <= len; equality with len
+             * triggers the conj-style append that vec_assoc1
+             * handles transparently) and map (when coll is
+             * MINO_MAP). Any other shape -- sorted-map, record,
+             * transient, non-int vec key, out-of-range vec idx,
+             * variadic forms -- falls back to prim_assoc which
+             * raises the Clojure-correct diagnostic. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *k    = regs[b + 1];
+            mino_val_t *v    = regs[b + 2];
+            if (coll != NULL && k != NULL) {
+                int t = mino_type_of(coll);
+                if (t == MINO_VECTOR
+                    && MINO_IS_INT(k)) {
+                    long long idx = MINO_INT_VAL(k);
+                    if (idx >= 0 && (size_t)idx <= coll->as.vec.len) {
+                        mino_val_t *r = vec_assoc1(S, coll, (size_t)idx, v);
+                        if (r == NULL) { ok = 0; goto dispatch_done; }
+                        regs = S->bc_regs + base;
+                        regs[a] = r;
+                        break;
+                    }
+                }
+                if (t == MINO_MAP) {
+                    mino_val_t *r = mino_map_assoc1(S, coll, k, v);
+                    if (r == NULL) { ok = 0; goto dispatch_done; }
+                    regs = S->bc_regs + base;
+                    regs[a] = r;
+                    break;
+                }
+            }
+            /* Miss: cons args head-first and call prim_assoc. */
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, v, list);
+            list = mino_cons(S, k, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_assoc(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_ADD_IK:
+        case OP_SUB_IK:
+        case OP_LT_IK:
+        case OP_LE_IK:
+        case OP_EQ_IK: {
+            /* Immediate-operand variants: lhs in B reg, signed 8-bit
+             * imm in C. The imm is by-construction an int (compile-time
+             * literal), so only the lhs register needs a tag check. On
+             * a tag miss we synthesize the literal back into a tagged
+             * int and reuse the existing prim fallback path. */
+            unsigned a    = A_OF(ins);
+            unsigned b    = B_OF(ins);
+            long long imm = (long long)(int8_t)C_OF(ins);
+            mino_val_t *lhs = regs[b];
+            mino_val_t *r;
+            if (MINO_IS_INT(lhs)) {
+                long long la = MINO_INT_VAL(lhs);
+                long long out;
+                switch (op) {
+                case OP_ADD_IK:
+#if defined(__GNUC__) || defined(__clang__)
+                    if (__builtin_saddll_overflow(la, imm, &out)) { r = NULL; break; }
+#else
+                    out = la + imm;
+#endif
+                    r = tag_or_box_int(S, out); break;
+                case OP_SUB_IK:
+#if defined(__GNUC__) || defined(__clang__)
+                    if (__builtin_ssubll_overflow(la, imm, &out)) { r = NULL; break; }
+#else
+                    out = la - imm;
+#endif
+                    r = tag_or_box_int(S, out); break;
+                case OP_LT_IK: r = (la <  imm) ? mino_true(S) : mino_false(S); break;
+                case OP_LE_IK: r = (la <= imm) ? mino_true(S) : mino_false(S); break;
+                case OP_EQ_IK: r = (la == imm) ? mino_true(S) : mino_false(S); break;
+                default: ok = 0; goto dispatch_done;
+                }
+            } else {
+                r = NULL;
+            }
+            if (r == NULL) {
+                /* Fallback path: rebuild a cons-spine arg list with the
+                 * literal as a freshly-tagged int and call the prim. */
+                mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
+                mino_val_t *list, *imv;
+                switch (op) {
+                case OP_ADD_IK: fallback = prim_add; break;
+                case OP_SUB_IK: fallback = prim_sub; break;
+                case OP_LT_IK:  fallback = prim_lt;  break;
+                case OP_LE_IK:  fallback = prim_lte; break;
+                case OP_EQ_IK:  fallback = prim_eq;  break;
+                default: ok = 0; goto dispatch_done;
+                }
+                imv  = mino_int(S, imm);
+                if (imv == NULL) { ok = 0; goto dispatch_done; }
+                list = mino_cons(S, imv, mino_nil(S));
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                list = mino_cons(S, regs[b], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                r = fallback(S, list, env);
+                if (r == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+            }
+            regs[a] = r;
+            break;
+        }
+
+        case OP_PUSHCATCH: {
+            unsigned a  = A_OF(ins);
+            int off     = sBx_OF(ins);
+            int td      = ctx->try_depth;
+            size_t hpc  = (size_t)((long)pc + off);
+            if (td >= MAX_TRY_DEPTH
+                || ctx->bc_catch_depth >= MAX_TRY_DEPTH) {
+                /* Surface the same MLM002 diagnostic the tree-walker
+                 * raises at this cap. Without the explicit set, a
+                 * deeply recursive `(try ... (catch ...))` body just
+                 * unwinds with no message and the user sees a silent
+                 * NULL. */
+                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
+                              "limit", "MLM002", "try nesting too deep");
+                ok = 0; goto dispatch_done;
+            }
+            /* Record the BC-side resume state BEFORE the setjmp call.
+             * The longjmp-return branch only reads from S/ctx; no
+             * post-setjmp writes need to survive the longjmp. The
+             * local `td` is intentionally NOT used after setjmp -- a
+             * sibling PUSHCATCH frame may share its stack slot, so by
+             * the time longjmp lands we cannot trust `td` to still
+             * carry our value. `bc_catch_stack[d].try_depth_at_push`
+             * holds the same value in heap-backed storage. */
+            ctx->bc_catch_stack[ctx->bc_catch_depth].handler_pc        = hpc;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].reg_window_base   = base;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].try_depth_at_push = td;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].ex_reg            = a;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].env_at_push       = env;
+            ctx->bc_catch_stack[ctx->bc_catch_depth].dyn_stack_at_push = ctx->dyn_stack;
+            ctx->bc_catch_depth++;
+
+            ctx->try_stack[td].exception      = NULL;
+            ctx->try_stack[td].saved_ns       = S->current_ns;
+            ctx->try_stack[td].saved_ambient  = S->fn_ambient_ns;
+            ctx->try_stack[td].saved_load_len = S->load_stack_len;
+
+            if (setjmp(ctx->try_stack[td].buf) == 0) {
+                /* Normal entry: arm the try frame and run the body. */
+                ctx->try_depth = td + 1;
+            } else {
+                /* longjmp landed here: a throw inside the body (BC or
+                 * tree-walker callee) targeted our setjmp. Recover the
+                 * VM state from the catch entry, drop the try frame,
+                 * stash the normalized exception in ex_reg, and resume
+                 * at the handler pc. Locals modified between setjmp
+                 * and longjmp (pc, env, regs, retval, ok) are
+                 * overwritten here; base / bc / code / match never
+                 * change after fn entry so they survive untouched.
+                 *
+                 * Restore ctx->bc_current_bc to this fn -- an inner
+                 * BC fn that threw may have left it pointing at the
+                 * inner fn (whose mino_bc_run never reached its
+                 * normal exit-time restore). Without this, any code
+                 * reading bc_current_bc on the catch-handler side
+                 * (including normalize_exception's mino_bc_source_lookup
+                 * for :mino/location) would dereference a stale
+                 * pointer once the inner fn's allocation is freed. */
+                ctx->bc_current_bc = bc;
+                ctx->bc_current_pc = (size_t)ctx->bc_catch_stack[ctx->bc_catch_depth - 1].handler_pc;
+                int d         = --ctx->bc_catch_depth;
+                int my_td     = ctx->bc_catch_stack[d].try_depth_at_push;
+                mino_val_t *ex = ctx->try_stack[my_td].exception;
+                S->current_ns    = ctx->try_stack[my_td].saved_ns;
+                S->fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
+                load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
+                ctx->try_depth = my_td;
+                /* Pop any dyn frames that the body PUSHDYN'd but never
+                 * POPDYN'd because the throw bypassed the matching
+                 * cleanup. Matches eval_try's saved_dyn unwind so a
+                 * `(binding [...] (throw ...))` body doesn't leave its
+                 * binding visible to the catch handler. */
+                {
+                    dyn_frame_t *anchor =
+                        ctx->bc_catch_stack[d].dyn_stack_at_push;
+                    while (ctx->dyn_stack != anchor) {
+                        dyn_frame_t *f = ctx->dyn_stack;
+                        if (f == NULL) break;
+                        ctx->dyn_stack = f->prev;
+                        dyn_binding_list_free(f->bindings);
+                        free(f);
+                    }
+                }
+                pc      = ctx->bc_catch_stack[d].handler_pc;
+                env     = ctx->bc_catch_stack[d].env_at_push;
+                regs    = S->bc_regs + base;
+                regs[ctx->bc_catch_stack[d].ex_reg] =
+                    normalize_exception(S, ex);
+                retval  = NULL;
+                ok      = 1;
+                clear_error(S);
+            }
+            break;
+        }
+
+        default:
+            if (!bc_cold_op(S, bc, base, ctx,
+                            saved_try_depth, saved_bc_catch_depth,
+                            saved_dyn_stack,
+                            ins, op, &env, &ok)) {
+                goto dispatch_done;
+            }
+            break;
+        }
+    }
+
+dispatch_done:
+    *env_p = env;
+    *retval_out = retval;
+    return ok;
+}
+
+
 mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
                         mino_val_t **argv, int argc, mino_env_t *env)
 {
@@ -1254,7 +2099,6 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     }
 
     mino_val_t **regs = S->bc_regs + base;
-    const mino_bc_insn_t *code = bc->code;
     size_t pc = (size_t)match->entry_pc;
     mino_val_t *retval = NULL;
     int ok = 1;
@@ -1317,820 +2161,9 @@ mino_val_t *mino_bc_run(mino_state_t *S, mino_val_t *fn_val,
     }
 #endif
 
-    while (pc < bc->code_len) {
-        /* Refresh the window pointer every cycle. Any op that can
-         * trigger user code (OP_CALL/TAILCALL via apply_callable,
-         * OP_GETGLOBAL via eval_impl, OP_CLOSURE via make_fn that
-         * may collect, OP_SETGLOBAL via var_intern) can cascade into
-         * a recursive mino_bc_run that grows S->bc_regs and frees
-         * the prior buffer. Recomputing from base on each iteration
-         * keeps the window pointer correct without per-op clutter. */
-        regs = S->bc_regs + base;
-        /* Publish the about-to-execute pc to the bc cursor. Error
-         * paths that fire from primitives invoked by this op resolve
-         * a precise source span via mino_bc_source_lookup against
-         * (bc_current_bc, bc_current_pc). One write per opcode, well
-         * inside per-cycle noise on every benchmark measured. */
-        ctx->bc_current_pc = pc;
-        mino_bc_insn_t ins = code[pc++];
-        unsigned op = OP_OF(ins);
-#ifdef MINO_BC_OP_COUNTS
-        if (!g_op_counts_atexit_registered) {
-            atexit(op_counts_dump);
-            g_op_counts_atexit_registered = 1;
-        }
-        if (op < OP__COUNT) g_op_counts[op]++;
-#endif
-        switch (op) {
-        case OP_MOVE: {
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            regs[a] = regs[b];
-            break;
-        }
-
-        case OP_LOAD_K: {
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if (bx >= bc->consts_len) { ok = 0; goto bc_done; }
-            regs[a] = bc->consts[bx];
-            break;
-        }
-
-        case OP_GETGLOBAL_CACHED: {
-            /* Inline cache for global symbol resolution. The slot is
-             * filled on first miss with (cached, gen=S->ic_gen) and
-             * re-read while the gen still matches; bumps to ic_gen
-             * (def / ns-unmap / var_set_root / var_unintern)
-             * invalidate naturally. The shared ic_resolve_global
-             * helper carries the dyn / env / cache / resolve cascade
-             * and the on-miss write-barrier refill; this case is the
-             * pure-read consumer (no apply afterwards) so any
-             * resolved value -- shadowed dyn, lexical env hit, or
-             * cached var -- is written to regs[a] uniformly. */
-            unsigned a  = A_OF(ins);
-            unsigned bx = Bx_OF(ins);
-            if ((int)bx >= bc->ic_slots_len) { ok = 0; goto bc_done; }
-            mino_bc_ic_slot_t *slot = &bc->ic_slots[bx];
-            int dyn_active = (ctx->dyn_stack != NULL);
-            mino_val_t *v = ic_resolve_global(S, bc, slot, env, dyn_active);
-            if (v == NULL) { ok = 0; goto bc_done; }
-            regs[a] = v;
-            break;
-        }
-
-        case OP_JMP: {
-            int off = sBx_OF(ins);
-            pc = (size_t)((long)pc + off);
-            /* Backward jump: poll for cancel + auto-yield. Forward
-             * jumps skip the poll since they don't form a loop. */
-            if (off < 0 && !mino_bc_safepoint(S)) {
-                ok = 0; goto bc_done;
-            }
-            break;
-        }
-
-        case OP_JMPIFNOT: {
-            unsigned a = A_OF(ins);
-            int off = sBx_OF(ins);
-            if (!mino_is_truthy_inline(regs[a])) {
-                pc = (size_t)((long)pc + off);
-                if (off < 0 && !mino_bc_safepoint(S)) {
-                    ok = 0; goto bc_done;
-                }
-            }
-            break;
-        }
-
-        case OP_CALL_CACHED: {
-            /* Fused (resolve-global + call) for sites whose head is an
-             * unqualified or qualified global symbol with no static
-             * local binding. Shares ic_resolve_global with the
-             * read-only OP_GETGLOBAL_CACHED consumer: same dyn / env /
-             * cache / resolve cascade, same write-barrier refill on
-             * miss. Two-word encoding: word-1 carries A=arg_base /
-             * B=argc / C=dst, word-2 carries the slot index in Bx
-             * and is consumed via pc++ below so the main dispatch
-             * never sees it. Args live at regs[A..A+B-1] -- no fn-reg
-             * shift since the callee comes from the slot, not a
-             * register. */
-            unsigned a    = A_OF(ins);   /* arg_base */
-            unsigned argn = B_OF(ins);   /* argc     */
-            unsigned ret  = C_OF(ins);   /* dst      */
-            if (pc >= bc->code_len) { ok = 0; goto bc_done; }
-            mino_bc_insn_t slot_word = code[pc++];
-            unsigned slot_idx = Bx_OF(slot_word);
-            if ((int)slot_idx >= bc->ic_slots_len) {
-                ok = 0; goto bc_done;
-            }
-            mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
-            int dyn_active = (ctx->dyn_stack != NULL);
-            mino_val_t *callee = ic_resolve_global(S, bc, slot, env,
-                                                    dyn_active);
-            if (callee == NULL) { ok = 0; goto bc_done; }
-#ifdef MINO_CALL_SITE_SHAPES
-            call_shape_record(slot, callee, regs + a, (int)argn);
-#endif
-            mino_val_t *r = apply_callable_argv(S, callee, regs + a,
-                                                (int)argn, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            S->bc_regs[base + ret] = r;
-            break;
-        }
-
-        case OP_PROTOCOL_CALL_CACHED:
-        case OP_PROTOCOL_TAILCALL_CACHED: {
-            /* Protocol-method dispatch fast lane. Shares
-             * ic_resolve_protocol with the tail variant: deref the
-             * captured atom (one pointer load), compute the
-             * type-discriminator for the first argument, pointer-
-             * compare against the cached (atom_map, type_disc) state,
-             * and on hit return the cached impl directly. On miss the
-             * helper performs map_get_val with a :default fallback,
-             * refills the IC under write barriers, or surfaces the
-             * MPR001 / MPR002 diagnostic for no-impl / bad-table
-             * shape. Tail variant invokes the impl directly via
-             * apply_callable_argv -- self-tail-recursive protocol
-             * methods grow the C stack linearly, a deliberate
-             * trade-off against the cons-spine build the
-             * MINO_TAIL_CALL sentinel path would otherwise pay. */
-            int is_tail = (OP_OF(ins) == OP_PROTOCOL_TAILCALL_CACHED);
-            unsigned a    = A_OF(ins);
-            unsigned argn = B_OF(ins);
-            unsigned ret  = C_OF(ins);
-            if (pc >= bc->code_len) { ok = 0; goto bc_done; }
-            mino_bc_insn_t slot_word = code[pc++];
-            unsigned slot_idx = Bx_OF(slot_word);
-            if ((int)slot_idx >= bc->ic_slots_len) {
-                ok = 0; goto bc_done;
-            }
-            mino_bc_ic_slot_t *slot = &bc->ic_slots[slot_idx];
-            if (argn < 1 || slot->atom == NULL
-                || mino_type_of(slot->atom) != MINO_ATOM) {
-                ok = 0; goto bc_done;
-            }
-            mino_val_t *impl = mino_bc_ic_resolve_protocol(S, bc, slot, regs[a]);
-            if (impl == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = apply_callable_argv(S, impl, regs + a,
-                                                (int)argn, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            if (is_tail) {
-                retval = r;
-                goto bc_done;
-            }
-            S->bc_regs[base + ret] = r;
-            break;
-        }
-
-        case OP_TAILCALL: {
-            unsigned a    = A_OF(ins);
-            unsigned argn = B_OF(ins);
-            mino_val_t *callee = regs[a];
-            mino_val_t *args   = args_from_regs(S, regs + a + 1, argn);
-            if (args == NULL) { ok = 0; goto bc_done; }
-            /* Hand off via the MINO_TAIL_CALL sentinel; the outer
-             * apply_callable trampoline picks up the new (fn, args)
-             * without growing the C stack. The sentinel's args field
-             * stays in cons-format for legacy callers that read it
-             * directly; the trampoline inside apply_callable_argv
-             * walks it back to argv for bc-FN targets. */
-            S->tail_call_sentinel.as.tail_call.fn   = callee;
-            S->tail_call_sentinel.as.tail_call.args = args;
-            retval = &S->tail_call_sentinel;
-            goto bc_done;
-        }
-
-        case OP_RETURN: {
-            unsigned a = A_OF(ins);
-            retval = regs[a];
-            goto bc_done;
-        }
-
-        case OP_ADD_II:
-        case OP_SUB_II:
-        case OP_MUL_II:
-        case OP_LT_II:
-        case OP_LE_II:
-        case OP_GT_II:
-        case OP_GE_II:
-        case OP_EQ_II:
-        case OP_MOD_II:
-        case OP_QUOT_II:
-        case OP_REM_II:
-        case OP_BAND_II:
-        case OP_BOR_II:
-        case OP_BXOR_II:
-        case OP_SHL_II:
-        case OP_SHR_II:
-        case OP_USHR_II: {
-            /* Speculative int+int fast lanes for the binary arith /
-             * compare / bitwise / div-class ops. On a type miss or a
-             * bail (div-by-zero, shift-out-of-range, MIN/-1 overflow)
-             * we fall through to the corresponding prim with the same
-             * argv ABI as a regular OP_CALL so the prim raises the
-             * Clojure-correct diagnostic or promotes through the
-             * numeric tower. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            unsigned c = C_OF(ins);
-            unsigned subop;
-            mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
-            switch (op) {
-            case OP_ADD_II:  subop = BINOP_ADD;  fallback = prim_add; break;
-            case OP_SUB_II:  subop = BINOP_SUB;  fallback = prim_sub; break;
-            case OP_MUL_II:  subop = BINOP_MUL;  fallback = prim_mul; break;
-            case OP_LT_II:   subop = BINOP_LT;   fallback = prim_lt;  break;
-            case OP_LE_II:   subop = BINOP_LE;   fallback = prim_lte; break;
-            case OP_GT_II:   subop = BINOP_GT;   fallback = prim_gt;  break;
-            case OP_GE_II:   subop = BINOP_GE;   fallback = prim_gte; break;
-            case OP_EQ_II:   subop = BINOP_EQ;   fallback = prim_eq;  break;
-            case OP_MOD_II:  subop = BINOP_MOD;  fallback = prim_mod; break;
-            case OP_QUOT_II: subop = BINOP_QUOT; fallback = prim_quot; break;
-            case OP_REM_II:  subop = BINOP_REM;  fallback = prim_rem; break;
-            case OP_BAND_II: subop = BINOP_BAND; fallback = prim_bit_and; break;
-            case OP_BOR_II:  subop = BINOP_BOR;  fallback = prim_bit_or;  break;
-            case OP_BXOR_II: subop = BINOP_BXOR; fallback = prim_bit_xor; break;
-            case OP_SHL_II:  subop = BINOP_SHL;  fallback = prim_bit_shift_left; break;
-            case OP_SHR_II:  subop = BINOP_SHR;  fallback = prim_bit_shift_right; break;
-            case OP_USHR_II: subop = BINOP_USHR; fallback = prim_unsigned_bit_shift_right; break;
-            default: ok = 0; goto bc_done;
-            }
-            mino_val_t *r = binop_int_fast(S, regs[b], regs[c], subop);
-            if (r == NULL) {
-                mino_val_t *list = mino_nil(S);
-                list = mino_cons(S, regs[c], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                list = mino_cons(S, regs[b], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                r = fallback(S, list, env);
-                if (r == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-            }
-            regs[a] = r;
-            break;
-        }
-
-        case OP_INC_I:
-        case OP_DEC_I:
-        case OP_ZERO_INT_P:
-        case OP_POS_P_I:
-        case OP_NEG_P_I:
-        case OP_EVEN_P_I:
-        case OP_ODD_P_I:
-        case OP_BNOT_I: {
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            unsigned subop;
-            mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
-            switch (op) {
-            case OP_INC_I:      subop = UNOP_INC;    fallback = prim_inc;    break;
-            case OP_DEC_I:      subop = UNOP_DEC;    fallback = prim_dec;    break;
-            case OP_ZERO_INT_P: subop = UNOP_ZERO_P; fallback = prim_zero_p; break;
-            case OP_POS_P_I:    subop = UNOP_POS_P;  fallback = prim_pos_p;  break;
-            case OP_NEG_P_I:    subop = UNOP_NEG_P;  fallback = prim_neg_p;  break;
-            case OP_EVEN_P_I:   subop = UNOP_EVEN_P; fallback = prim_even_p; break;
-            case OP_ODD_P_I:    subop = UNOP_ODD_P;  fallback = prim_odd_p;  break;
-            case OP_BNOT_I:     subop = UNOP_BNOT;   fallback = prim_bit_not; break;
-            default: ok = 0; goto bc_done;
-            }
-            mino_val_t *r = unop_int_fast(S, regs[b], subop);
-            if (r == NULL) {
-                mino_val_t *list = mino_nil(S);
-                list = mino_cons(S, regs[b], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                r = fallback(S, list, env);
-                if (r == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-            }
-            regs[a] = r;
-            break;
-        }
-
-        case OP_LOOP_INT_DEC: {
-            /* Fused counted-loop step (single binding):
-             *   if regs[A] == 0: fall through (exit branch follows).
-             *   else: regs[A]-- and re-fetch (pc-=1).
-             * Hot path: tagged-int test, in-range decrement, single
-             * back-jump. Cold paths (non-int test, MIN_INT decrement)
-             * delegate to prim_zero_p / prim_dec so the user-visible
-             * diagnostic ("zero? requires a number", "integer
-             * overflow") fires exactly as the unfused emission
-             * would have. */
-            unsigned a = A_OF(ins);
-            mino_val_t *v = regs[a];
-            if (v != NULL && MINO_IS_INT(v)) {
-                long long t = MINO_INT_VAL(v);
-                if (t == 0) break;
-                if (t != MINO_INT_MIN) {
-                    regs[a] = MINO_MAKE_INT(t - 1);
-                    pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                    break;
-                }
-                /* MIN_INT: fall through to the prim_dec slow path so
-                 * the throw fires. */
-            }
-            /* Slow path: call prim_zero_p first to decide the branch
-             * and to surface any non-number diagnostic. Then on
-             * non-zero, call prim_dec which raises on overflow. */
-            {
-                mino_val_t *list = mino_nil(S);
-                list = mino_cons(S, regs[a], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *zp = prim_zero_p(S, list, env);
-                if (zp == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                if (mino_is_truthy(zp)) {
-                    /* Fall through to the exit branch (no recur). */
-                    break;
-                }
-                mino_val_t *list2 = mino_nil(S);
-                list2 = mino_cons(S, regs[a], list2);
-                if (list2 == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *decv = prim_dec(S, list2, env);
-                if (decv == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                regs[a] = decv;
-                pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                break;
-            }
-        }
-
-        case OP_LOOP_INT_DEC_INC: {
-            /* Fused counted-loop step (two bindings). Hot path is the
-             * tagged-int / in-range case; everything else delegates to
-             * prim_zero_p / prim_dec / prim_inc so the
-             * non-number / overflow diagnostics still fire. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            mino_val_t *vt = regs[a];
-            mino_val_t *vi = regs[b];
-            if (vt != NULL && vi != NULL
-                && MINO_IS_INT(vt) && MINO_IS_INT(vi)) {
-                long long t = MINO_INT_VAL(vt);
-                if (t == 0) break;
-                long long i = MINO_INT_VAL(vi);
-                if (t != MINO_INT_MIN && i != MINO_INT_MAX) {
-                    regs[a] = MINO_MAKE_INT(t - 1);
-                    regs[b] = MINO_MAKE_INT(i + 1);
-                    pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                    break;
-                }
-                /* Overflow on dec or inc: fall through to the prim
-                 * slow path so the throw fires. */
-            }
-            {
-                mino_val_t *list = mino_nil(S);
-                list = mino_cons(S, regs[a], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *zp = prim_zero_p(S, list, env);
-                if (zp == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                if (mino_is_truthy(zp)) break;
-                mino_val_t *list2 = mino_nil(S);
-                list2 = mino_cons(S, regs[a], list2);
-                if (list2 == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *decv = prim_dec(S, list2, env);
-                if (decv == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                mino_val_t *list3 = mino_nil(S);
-                list3 = mino_cons(S, regs[b], list3);
-                if (list3 == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *incv = prim_inc(S, list3, env);
-                if (incv == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                regs[a] = decv;
-                regs[b] = incv;
-                pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                break;
-            }
-        }
-
-        case OP_LOOP_INT_LT: {
-            /* Forward-counted single-binding loop step:
-             *   if regs[A] < regs[B]: regs[A]++ and back-jump
-             *   else: fall through to the compiled exit branch.
-             * Hot path is the tagged-int in-range case. Cold paths
-             * (non-int operand, MAX_INT counter) delegate to prim_lt /
-             * prim_inc so the canonical diagnostic still fires. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            mino_val_t *vc = regs[a];
-            mino_val_t *vl = regs[b];
-            if (vc != NULL && vl != NULL
-                && MINO_IS_INT(vc) && MINO_IS_INT(vl)) {
-                long long c_ = MINO_INT_VAL(vc);
-                long long l_ = MINO_INT_VAL(vl);
-                if (c_ >= l_) break;
-                if (c_ != MINO_INT_MAX) {
-                    regs[a] = MINO_MAKE_INT(c_ + 1);
-                    pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                    break;
-                }
-                /* MAX_INT: fall through to the prim_inc slow path so
-                 * the overflow throw fires. */
-            }
-            {
-                mino_val_t *list = mino_nil(S);
-                list = mino_cons(S, regs[b], list);
-                list = mino_cons(S, regs[a], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *ltv = prim_lt(S, list, env);
-                if (ltv == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                if (!mino_is_truthy(ltv)) break;
-                mino_val_t *list2 = mino_nil(S);
-                list2 = mino_cons(S, regs[a], list2);
-                if (list2 == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *incv = prim_inc(S, list2, env);
-                if (incv == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                regs[a] = incv;
-                pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                break;
-            }
-        }
-
-        case OP_LOOP_INT_LT_INC: {
-            /* Forward-counted two-binding loop step: counter A < limit
-             * B, with carry C incremented in lockstep with A. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            unsigned c = C_OF(ins);
-            mino_val_t *vc = regs[a];
-            mino_val_t *vl = regs[b];
-            mino_val_t *vk = regs[c];
-            if (vc != NULL && vl != NULL && vk != NULL
-                && MINO_IS_INT(vc) && MINO_IS_INT(vl)
-                && MINO_IS_INT(vk)) {
-                long long c_ = MINO_INT_VAL(vc);
-                long long l_ = MINO_INT_VAL(vl);
-                if (c_ >= l_) break;
-                long long k_ = MINO_INT_VAL(vk);
-                if (c_ != MINO_INT_MAX && k_ != MINO_INT_MAX) {
-                    regs[a] = MINO_MAKE_INT(c_ + 1);
-                    regs[c] = MINO_MAKE_INT(k_ + 1);
-                    pc -= 1;
-                    if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                    break;
-                }
-            }
-            {
-                mino_val_t *list = mino_nil(S);
-                list = mino_cons(S, regs[b], list);
-                list = mino_cons(S, regs[a], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *ltv = prim_lt(S, list, env);
-                if (ltv == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                if (!mino_is_truthy(ltv)) break;
-                mino_val_t *list2 = mino_nil(S);
-                list2 = mino_cons(S, regs[a], list2);
-                if (list2 == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *incv = prim_inc(S, list2, env);
-                if (incv == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                mino_val_t *list3 = mino_nil(S);
-                list3 = mino_cons(S, regs[c], list3);
-                if (list3 == NULL) { ok = 0; goto bc_done; }
-                mino_val_t *incv2 = prim_inc(S, list3, env);
-                if (incv2 == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-                regs[a] = incv;
-                regs[c] = incv2;
-                pc -= 1;
-                if (!mino_bc_safepoint(S)) { ok = 0; goto bc_done; }
-                break;
-            }
-        }
-
-        case OP_GET_KW_MAP: {
-            /* Fast lane for (get coll k) on maps and records.
-             * For MINO_MAP: any hashable key (string, keyword, int,
-             * symbol, ...) routes through mino_map_lookup. For
-             * MINO_RECORD: declared-fields are interned by keyword
-             * identity, so the slot index lookup requires a keyword
-             * key; other key types fall through to prim_get which
-             * scans the optional ext-map. Misses fall back to prim_get
-             * so non-map / non-record collections, sorted-maps,
-             * 3-arg default forms, and records carrying the key in
-             * the ext-map keep their full semantics. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            unsigned cc = C_OF(ins);
-            mino_val_t *coll = regs[b];
-            mino_val_t *key  = regs[cc];
-            if (coll != NULL && key != NULL) {
-                int t = mino_type_of(coll);
-                if (t == MINO_MAP) {
-                    mino_val_t *v = map_get_val(coll, key);
-                    regs[a] = v == NULL ? mino_nil(S) : v;
-                    break;
-                }
-                if (t == MINO_RECORD && mino_type_of(key) == MINO_KEYWORD) {
-                    int idx = record_field_index(coll, key);
-                    if (idx >= 0) {
-                        regs[a] = coll->as.record.vals[idx];
-                        break;
-                    }
-                    /* Keyword isn't a declared field. The slow path
-                     * also checks the optional ext-map and returns
-                     * nil for an absent key, so we route there
-                     * instead of returning nil ourselves. */
-                }
-            }
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, key, list);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_get(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
-        case OP_FIRST_VEC: {
-            /* Fast lane for (first v) on a vector. Empty vector
-             * returns nil; non-empty returns vec_nth(coll, 0). Any
-             * other type (lazy, chunked-cons, string, map, set,
-             * sorted-coll, host-array, map-entry, nil/empty-list)
-             * falls back through prim_first so the full semantics --
-             * lazy-seq force, string code-point decode, map-entry
-             * key, etc. -- stay intact. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            mino_val_t *coll = regs[b];
-            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
-                regs[a] = coll->as.vec.len == 0
-                            ? mino_nil(S)
-                            : vec_nth(coll, 0);
-                break;
-            }
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_first(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
-        case OP_COUNT_VEC: {
-            /* Fast lane for (count v) on a vector. Returns the
-             * vector's .len as a tagged int directly; tag_or_box_int
-             * handles the rare path where .len overflows the tagged
-             * range. Other coll types fall through to prim_count so
-             * lazy-seq walk, string code-point count, map / set / host
-             * array len read, etc. stay correct. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            mino_val_t *coll = regs[b];
-            if (coll != NULL && mino_type_of(coll) == MINO_VECTOR) {
-                regs[a] = tag_or_box_int(S, (long long)coll->as.vec.len);
-                if (regs[a] == NULL) { ok = 0; goto bc_done; }
-                break;
-            }
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_count(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
-        case OP_ASSOC: {
-            /* Fast lane for the 3-arg (assoc coll k v) shape. The
-             * compiler arranges three consecutive registers starting
-             * at B for [coll, k, v]; A is the destination. Two fast
-             * paths fire: vector (when coll is MINO_VECTOR and k is
-             * a tagged int with 0 <= idx <= len; equality with len
-             * triggers the conj-style append that vec_assoc1
-             * handles transparently) and map (when coll is
-             * MINO_MAP). Any other shape -- sorted-map, record,
-             * transient, non-int vec key, out-of-range vec idx,
-             * variadic forms -- falls back to prim_assoc which
-             * raises the Clojure-correct diagnostic. */
-            unsigned a = A_OF(ins);
-            unsigned b = B_OF(ins);
-            mino_val_t *coll = regs[b];
-            mino_val_t *k    = regs[b + 1];
-            mino_val_t *v    = regs[b + 2];
-            if (coll != NULL && k != NULL) {
-                int t = mino_type_of(coll);
-                if (t == MINO_VECTOR
-                    && MINO_IS_INT(k)) {
-                    long long idx = MINO_INT_VAL(k);
-                    if (idx >= 0 && (size_t)idx <= coll->as.vec.len) {
-                        mino_val_t *r = vec_assoc1(S, coll, (size_t)idx, v);
-                        if (r == NULL) { ok = 0; goto bc_done; }
-                        regs = S->bc_regs + base;
-                        regs[a] = r;
-                        break;
-                    }
-                }
-                if (t == MINO_MAP) {
-                    mino_val_t *r = mino_map_assoc1(S, coll, k, v);
-                    if (r == NULL) { ok = 0; goto bc_done; }
-                    regs = S->bc_regs + base;
-                    regs[a] = r;
-                    break;
-                }
-            }
-            /* Miss: cons args head-first and call prim_assoc. */
-            mino_val_t *list = mino_nil(S);
-            list = mino_cons(S, v, list);
-            list = mino_cons(S, k, list);
-            list = mino_cons(S, coll, list);
-            if (list == NULL) { ok = 0; goto bc_done; }
-            mino_val_t *r = prim_assoc(S, list, env);
-            if (r == NULL) { ok = 0; goto bc_done; }
-            regs = S->bc_regs + base;
-            regs[a] = r;
-            break;
-        }
-
-        case OP_ADD_IK:
-        case OP_SUB_IK:
-        case OP_LT_IK:
-        case OP_LE_IK:
-        case OP_EQ_IK: {
-            /* Immediate-operand variants: lhs in B reg, signed 8-bit
-             * imm in C. The imm is by-construction an int (compile-time
-             * literal), so only the lhs register needs a tag check. On
-             * a tag miss we synthesize the literal back into a tagged
-             * int and reuse the existing prim fallback path. */
-            unsigned a    = A_OF(ins);
-            unsigned b    = B_OF(ins);
-            long long imm = (long long)(int8_t)C_OF(ins);
-            mino_val_t *lhs = regs[b];
-            mino_val_t *r;
-            if (MINO_IS_INT(lhs)) {
-                long long la = MINO_INT_VAL(lhs);
-                long long out;
-                switch (op) {
-                case OP_ADD_IK:
-#if defined(__GNUC__) || defined(__clang__)
-                    if (__builtin_saddll_overflow(la, imm, &out)) { r = NULL; break; }
-#else
-                    out = la + imm;
-#endif
-                    r = tag_or_box_int(S, out); break;
-                case OP_SUB_IK:
-#if defined(__GNUC__) || defined(__clang__)
-                    if (__builtin_ssubll_overflow(la, imm, &out)) { r = NULL; break; }
-#else
-                    out = la - imm;
-#endif
-                    r = tag_or_box_int(S, out); break;
-                case OP_LT_IK: r = (la <  imm) ? mino_true(S) : mino_false(S); break;
-                case OP_LE_IK: r = (la <= imm) ? mino_true(S) : mino_false(S); break;
-                case OP_EQ_IK: r = (la == imm) ? mino_true(S) : mino_false(S); break;
-                default: ok = 0; goto bc_done;
-                }
-            } else {
-                r = NULL;
-            }
-            if (r == NULL) {
-                /* Fallback path: rebuild a cons-spine arg list with the
-                 * literal as a freshly-tagged int and call the prim. */
-                mino_val_t *(*fallback)(mino_state_t *, mino_val_t *, mino_env_t *);
-                mino_val_t *list, *imv;
-                switch (op) {
-                case OP_ADD_IK: fallback = prim_add; break;
-                case OP_SUB_IK: fallback = prim_sub; break;
-                case OP_LT_IK:  fallback = prim_lt;  break;
-                case OP_LE_IK:  fallback = prim_lte; break;
-                case OP_EQ_IK:  fallback = prim_eq;  break;
-                default: ok = 0; goto bc_done;
-                }
-                imv  = mino_int(S, imm);
-                if (imv == NULL) { ok = 0; goto bc_done; }
-                list = mino_cons(S, imv, mino_nil(S));
-                if (list == NULL) { ok = 0; goto bc_done; }
-                list = mino_cons(S, regs[b], list);
-                if (list == NULL) { ok = 0; goto bc_done; }
-                r = fallback(S, list, env);
-                if (r == NULL) { ok = 0; goto bc_done; }
-                regs = S->bc_regs + base;
-            }
-            regs[a] = r;
-            break;
-        }
-
-        case OP_PUSHCATCH: {
-            unsigned a  = A_OF(ins);
-            int off     = sBx_OF(ins);
-            int td      = ctx->try_depth;
-            size_t hpc  = (size_t)((long)pc + off);
-            if (td >= MAX_TRY_DEPTH
-                || ctx->bc_catch_depth >= MAX_TRY_DEPTH) {
-                /* Surface the same MLM002 diagnostic the tree-walker
-                 * raises at this cap. Without the explicit set, a
-                 * deeply recursive `(try ... (catch ...))` body just
-                 * unwinds with no message and the user sees a silent
-                 * NULL. */
-                set_eval_diag(S, mino_current_ctx(S)->eval_current_form,
-                              "limit", "MLM002", "try nesting too deep");
-                ok = 0; goto bc_done;
-            }
-            /* Record the BC-side resume state BEFORE the setjmp call.
-             * The longjmp-return branch only reads from S/ctx; no
-             * post-setjmp writes need to survive the longjmp. The
-             * local `td` is intentionally NOT used after setjmp -- a
-             * sibling PUSHCATCH frame may share its stack slot, so by
-             * the time longjmp lands we cannot trust `td` to still
-             * carry our value. `bc_catch_stack[d].try_depth_at_push`
-             * holds the same value in heap-backed storage. */
-            ctx->bc_catch_stack[ctx->bc_catch_depth].handler_pc        = hpc;
-            ctx->bc_catch_stack[ctx->bc_catch_depth].reg_window_base   = base;
-            ctx->bc_catch_stack[ctx->bc_catch_depth].try_depth_at_push = td;
-            ctx->bc_catch_stack[ctx->bc_catch_depth].ex_reg            = a;
-            ctx->bc_catch_stack[ctx->bc_catch_depth].env_at_push       = env;
-            ctx->bc_catch_stack[ctx->bc_catch_depth].dyn_stack_at_push = ctx->dyn_stack;
-            ctx->bc_catch_depth++;
-
-            ctx->try_stack[td].exception      = NULL;
-            ctx->try_stack[td].saved_ns       = S->current_ns;
-            ctx->try_stack[td].saved_ambient  = S->fn_ambient_ns;
-            ctx->try_stack[td].saved_load_len = S->load_stack_len;
-
-            if (setjmp(ctx->try_stack[td].buf) == 0) {
-                /* Normal entry: arm the try frame and run the body. */
-                ctx->try_depth = td + 1;
-            } else {
-                /* longjmp landed here: a throw inside the body (BC or
-                 * tree-walker callee) targeted our setjmp. Recover the
-                 * VM state from the catch entry, drop the try frame,
-                 * stash the normalized exception in ex_reg, and resume
-                 * at the handler pc. Locals modified between setjmp
-                 * and longjmp (pc, env, regs, retval, ok) are
-                 * overwritten here; base / bc / code / match never
-                 * change after fn entry so they survive untouched.
-                 *
-                 * Restore ctx->bc_current_bc to this fn -- an inner
-                 * BC fn that threw may have left it pointing at the
-                 * inner fn (whose mino_bc_run never reached its
-                 * normal exit-time restore). Without this, any code
-                 * reading bc_current_bc on the catch-handler side
-                 * (including normalize_exception's mino_bc_source_lookup
-                 * for :mino/location) would dereference a stale
-                 * pointer once the inner fn's allocation is freed. */
-                ctx->bc_current_bc = bc;
-                ctx->bc_current_pc = (size_t)ctx->bc_catch_stack[ctx->bc_catch_depth - 1].handler_pc;
-                int d         = --ctx->bc_catch_depth;
-                int my_td     = ctx->bc_catch_stack[d].try_depth_at_push;
-                mino_val_t *ex = ctx->try_stack[my_td].exception;
-                S->current_ns    = ctx->try_stack[my_td].saved_ns;
-                S->fn_ambient_ns = ctx->try_stack[my_td].saved_ambient;
-                load_stack_truncate(S, ctx->try_stack[my_td].saved_load_len);
-                ctx->try_depth = my_td;
-                /* Pop any dyn frames that the body PUSHDYN'd but never
-                 * POPDYN'd because the throw bypassed the matching
-                 * cleanup. Matches eval_try's saved_dyn unwind so a
-                 * `(binding [...] (throw ...))` body doesn't leave its
-                 * binding visible to the catch handler. */
-                {
-                    dyn_frame_t *anchor =
-                        ctx->bc_catch_stack[d].dyn_stack_at_push;
-                    while (ctx->dyn_stack != anchor) {
-                        dyn_frame_t *f = ctx->dyn_stack;
-                        if (f == NULL) break;
-                        ctx->dyn_stack = f->prev;
-                        dyn_binding_list_free(f->bindings);
-                        free(f);
-                    }
-                }
-                pc      = ctx->bc_catch_stack[d].handler_pc;
-                env     = ctx->bc_catch_stack[d].env_at_push;
-                regs    = S->bc_regs + base;
-                regs[ctx->bc_catch_stack[d].ex_reg] =
-                    normalize_exception(S, ex);
-                retval  = NULL;
-                ok      = 1;
-                clear_error(S);
-            }
-            break;
-        }
-
-        default:
-            if (!bc_cold_op(S, bc, base, ctx,
-                            saved_try_depth, saved_bc_catch_depth,
-                            saved_dyn_stack,
-                            ins, op, &env, &ok)) {
-                goto bc_done;
-            }
-            break;
-        }
-    }
+    ok = bc_run_dispatch_from(S, bc, base, ctx, &env, pc, &retval,
+                              saved_try_depth, saved_bc_catch_depth,
+                              saved_dyn_stack);
 
 bc_done:
     /* Roll any BC catch frames that survived back so the try_stack is

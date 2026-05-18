@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.317.0 — Dispatch loop extraction
+
+`mino_bc_run`'s dispatch loop body is now a static helper
+`bc_run_dispatch_from(S, bc, base, ctx, &env, pc, &retval,
+saved_try_depth, saved_bc_catch_depth, saved_dyn_stack)` that
+returns an OK/ERR status with `*retval_out` filled. `mino_bc_run`
+keeps clause matching, regs window push, dyn / try / cursor
+snapshots, the native fast-path branch, and the cleanup tail
+exactly as before; the loop body is identical to the previous
+version with `goto bc_done` rewritten as `goto dispatch_done`
+inside the helper. No behavior change — release-gate (18 of 18
+adv probes, 4-mode parity) green, `task test-jit-parity` byte-
+identical across jit-auto / jit-on / jit-off / lean.
+
+The helper exists so a future caller can resume execution at an
+arbitrary PC over a regs window the JIT has already populated.
+This release ships only the refactor; the resume entry plus
+deopt stencil land in the next two releases.
+
 ## v0.316.0 — JIT-2 cycle close
 
 Twelve-release JIT cycle wrapping. Six 10/10 targets reviewed:
