@@ -592,6 +592,7 @@ const char *mino_jit_reason_name(cpjit_reason_t r)
 {
     switch (r) {
     case CPJIT_REASON_OK:             return "ok";
+    case CPJIT_REASON_OK_WITH_DEOPT:  return "ok-with-deopt";
     case CPJIT_REASON_NULL_BC:        return "null-bc";
     case CPJIT_REASON_CAPTURES:       return "captures";
     case CPJIT_REASON_IC_SLOTS:       return "ic-slots";
@@ -605,9 +606,15 @@ const char *mino_jit_reason_name(cpjit_reason_t r)
 }
 
 /* Sets *first_unknown_op to the op number that triggered an
- * UNKNOWN_OP rejection; left untouched for any other reason. */
+ * UNKNOWN_OP or OK_WITH_DEOPT classification; *first_unknown_pc to its
+ * PC. Both out params are optional (NULL skips the write). The PC=0
+ * miss returns UNKNOWN_OP -- compiling no prefix gains nothing -- so
+ * the interpreter takes that fn directly. A PC>0 miss returns
+ * OK_WITH_DEOPT so a future compile path knows to plant a deopt
+ * stencil at first_unknown_pc and run the supported prefix natively. */
 cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
-                                              unsigned *first_unknown_op)
+                                              unsigned *first_unknown_op,
+                                              size_t   *first_unknown_pc)
 {
     if (bc == NULL || bc->code == NULL) return CPJIT_REASON_NULL_BC;
     /* captures no longer blocks: OP_CLOSURE / OP_PUSH_ENV / OP_POP_ENV /
@@ -630,7 +637,9 @@ cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
         if (mino_jit_is_direct_emit_op(op)) continue;
         if (mino_jit_find_stencil(op) == NULL) {
             if (first_unknown_op != NULL) *first_unknown_op = op;
-            return CPJIT_REASON_UNKNOWN_OP;
+            if (first_unknown_pc != NULL) *first_unknown_pc = pc;
+            return pc == 0 ? CPJIT_REASON_UNKNOWN_OP
+                           : CPJIT_REASON_OK_WITH_DEOPT;
         }
         /* Skip the trailing word of multi-word ops so the eligibility
          * scan doesn't classify the slot's encoded NOP byte as an
@@ -650,7 +659,11 @@ cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
 
 int mino_jit_eligible(const mino_bc_fn_t *bc)
 {
-    return mino_jit_classify_eligibility(bc, NULL) == CPJIT_REASON_OK;
+    /* OK_WITH_DEOPT does NOT yet enable native compile: the
+     * compile-with-deopt path lands separately. This release ships
+     * only the classifier annotation so the tracing dashboard can
+     * surface the pending opportunity. */
+    return mino_jit_classify_eligibility(bc, NULL, NULL) == CPJIT_REASON_OK;
 }
 
 /* ----- Extern-symbol resolution table ------------------------------------ */
@@ -722,14 +735,18 @@ int mino_jit_compile(mino_state_t *S, mino_val_t *fn_val)
     if (bc->native != NULL) return 0;
 
     unsigned       first_unknown_op = 0;
-    cpjit_reason_t reason = mino_jit_classify_eligibility(bc, &first_unknown_op);
+    size_t         first_unknown_pc = 0;
+    cpjit_reason_t reason = mino_jit_classify_eligibility(bc,
+                                                          &first_unknown_op,
+                                                          &first_unknown_pc);
     if (reason != CPJIT_REASON_OK) {
-        mino_jit_stats_record(bc, reason, first_unknown_op, 0, 0);
+        mino_jit_stats_record(bc, reason, first_unknown_op,
+                              first_unknown_pc, 0, 0);
         return -1;
     }
 
     int rc = mino_jit_compile_inner(S, fn_val);
-    mino_jit_stats_record(bc, CPJIT_REASON_OK, 0,
+    mino_jit_stats_record(bc, CPJIT_REASON_OK, 0, 0,
                           rc == 0, rc == 0 ? bc->native_size : 0);
     return rc;
 }

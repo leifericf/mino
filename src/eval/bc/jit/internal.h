@@ -149,9 +149,16 @@ typedef enum {
 } imm_kind_t;
 
 /* Eligibility reason taxonomy. Returned by classify_eligibility so the
- * stats dumper can attribute every rejection to a specific blocker. */
+ * stats dumper can attribute every rejection to a specific blocker.
+ *
+ * OK_WITH_DEOPT marks a fn whose first unstenciled op sits at PC > 0:
+ * the native prefix is worth compiling and the unstenciled tail can
+ * run through the interpreter via a side-exit hand-off. The actual
+ * compile-with-deopt path lands separately; the classifier surfaces
+ * the annotation here so the tracing dashboard can rank pending wins. */
 typedef enum {
     CPJIT_REASON_OK = 0,
+    CPJIT_REASON_OK_WITH_DEOPT,
     CPJIT_REASON_NULL_BC,
     CPJIT_REASON_CAPTURES,
     CPJIT_REASON_IC_SLOTS,
@@ -171,9 +178,13 @@ const stencil_desc_t *mino_jit_find_stencil(unsigned opcode);
 int                   mino_jit_op_extra_words(unsigned op);
 int                   mino_jit_is_direct_emit_op(unsigned op);
 
-/* Eligibility classifier (defined in entry.c). */
+/* Eligibility classifier (defined in entry.c). Both out-params are
+ * optional (pass NULL to skip). *first_unknown_op records the op that
+ * tripped the classifier; *first_unknown_pc records its PC so a future
+ * compile-with-deopt path can plant a side-exit at exactly that offset. */
 cpjit_reason_t mino_jit_classify_eligibility(const mino_bc_fn_t *bc,
-                                              unsigned *first_unknown_op);
+                                              unsigned *first_unknown_op,
+                                              size_t   *first_unknown_pc);
 const char    *mino_jit_reason_name(cpjit_reason_t r);
 
 /* Symbol-name decoding (defined in entry.c). */
@@ -238,6 +249,7 @@ void mino_jit_emit_jmpifnot_bytes(unsigned char *code, size_t pos,
 void mino_jit_stats_record(const mino_bc_fn_t *bc,
                             cpjit_reason_t reason,
                             unsigned first_unknown_op,
+                            size_t first_unknown_pc,
                             int compiled, size_t native_bytes);
 
 /* Compile pipeline (defined in emit.c; called from entry.c). */

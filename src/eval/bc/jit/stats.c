@@ -30,7 +30,8 @@ typedef struct cpjit_stat_entry {
     int                      column;
     size_t                   code_len;
     cpjit_reason_t           reason;
-    unsigned                 first_unknown_op; /* valid only when reason == UNKNOWN_OP */
+    unsigned                 first_unknown_op; /* valid only when reason == UNKNOWN_OP or OK_WITH_DEOPT */
+    size_t                   first_unknown_pc; /* valid only when reason == UNKNOWN_OP or OK_WITH_DEOPT */
     int                      compiled;
     size_t                   native_bytes;
     struct cpjit_stat_entry *next;
@@ -218,13 +219,15 @@ static void cpjit_stats_dump(void)
             const char *file = e->file ? e->file : "?";
             const char *base = strrchr(file, '/');
             base = base ? base + 1 : file;
-            char loc[160];
-            if (e->reason == CPJIT_REASON_UNKNOWN_OP) {
+            char loc[200];
+            if (e->reason == CPJIT_REASON_UNKNOWN_OP
+                || e->reason == CPJIT_REASON_OK_WITH_DEOPT) {
                 snprintf(loc, sizeof loc,
-                         "%s:%d:%d  code_len=%zu  reason=%s(op=%u)  native=%zu",
+                         "%s:%d:%d  code_len=%zu  reason=%s(op=%u@pc=%zu)  native=%zu",
                          base, e->line, e->column, e->code_len,
                          mino_jit_reason_name(e->reason),
-                         e->first_unknown_op, e->native_bytes);
+                         e->first_unknown_op, e->first_unknown_pc,
+                         e->native_bytes);
             } else {
                 snprintf(loc, sizeof loc,
                          "%s:%d:%d  code_len=%zu  reason=%-16s  %s native=%zu",
@@ -268,6 +271,7 @@ static int cpjit_stats_enabled(void)
 void mino_jit_stats_record(const mino_bc_fn_t *bc,
                             cpjit_reason_t reason,
                             unsigned first_unknown_op,
+                            size_t first_unknown_pc,
                             int compiled, size_t native_bytes)
 {
     if (!cpjit_stats_enabled()) return;
@@ -278,7 +282,13 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
         g_cpjit_stats.native_bytes_total += native_bytes;
     }
     g_cpjit_stats.reason_count[reason]++;
-    if (reason == CPJIT_REASON_UNKNOWN_OP && first_unknown_op < OP__COUNT) {
+    /* Both UNKNOWN_OP (no native prefix) and OK_WITH_DEOPT (some prefix
+     * compileable, tail blocked at first_unknown_pc) credit the
+     * blocking op so the bytes-blocked table ranks both pools. The
+     * tracing dump distinguishes the two reasons inline. */
+    if ((reason == CPJIT_REASON_UNKNOWN_OP
+         || reason == CPJIT_REASON_OK_WITH_DEOPT)
+        && first_unknown_op < OP__COUNT) {
         size_t code_len = bc != NULL ? bc->code_len : 0;
         g_cpjit_stats.op_reject_count[first_unknown_op]++;
         g_cpjit_stats.op_reject_code_bytes[first_unknown_op] +=
@@ -297,6 +307,7 @@ void mino_jit_stats_record(const mino_bc_fn_t *bc,
     ent->code_len = bc != NULL ? bc->code_len : 0;
     ent->reason   = reason;
     ent->first_unknown_op = first_unknown_op;
+    ent->first_unknown_pc = first_unknown_pc;
     ent->compiled    = compiled;
     ent->native_bytes = native_bytes;
     if (bc != NULL && bc->source_map.positions != NULL

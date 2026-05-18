@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.318.0 — Eligibility annotation for partial native coverage
+
+`mino_jit_classify_eligibility` now distinguishes two flavours of
+"fn has unstenciled ops" outcome:
+
+- The first unstenciled op at PC 0 still returns
+  `CPJIT_REASON_UNKNOWN_OP` — no native prefix is worth compiling,
+  so the interpreter takes the whole fn.
+- The first unstenciled op at PC > 0 returns the new
+  `CPJIT_REASON_OK_WITH_DEOPT` — a future compile path can plant
+  a deopt stencil at the recorded PC and run the supported prefix
+  natively.
+
+The classifier's signature gains a `size_t *first_unknown_pc`
+out-param so the deopt position survives back to the compile
+pipeline. `MINO_CPJIT_STATS=tracing` per-fn rows now show the
+PC: `reason=ok-with-deopt(op=15@pc=2)` and the bytes-blocked
+table credits both `UNKNOWN_OP` and `OK_WITH_DEOPT` totals
+together so the dashboard ranks both pools side by side.
+
+No code-generation change in this release: `mino_jit_eligible`
+still returns true only for plain `CPJIT_REASON_OK`. The
+compile-with-deopt path lands in the next release. Existing
+4-mode parity + release-gate clean.
+
 ## v0.317.0 — Dispatch loop extraction
 
 `mino_bc_run`'s dispatch loop body is now a static helper
