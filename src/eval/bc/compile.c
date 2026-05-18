@@ -1501,13 +1501,14 @@ static mino_val_t *list_from_array(mino_state_t *S, mino_val_t **items,
     return out;
 }
 
-/* Recursive symbol-occurrence walker. Returns 1 if `form`'s code tree
- * dereferences a symbol named `name` anywhere. Quote-forms are data
- * and don't dereference symbols. Used by the builder rewriter to
- * reject loops that read the accumulator outside the recognized step,
- * since under transient semantics those reads would diverge from the
- * persistent shape the user wrote. */
-static int form_contains_symbol(mino_val_t *form, const char *name)
+/* Returns 1 if `form` dereferences a symbol named `name` in a way
+ * that would diverge under transient semantics. The transient
+ * protocol covers `get` / `nth` / `count` / `get-in` reads where
+ * the acc is the *direct* first argument; those calls are
+ * semantics-preserving when acc is a transient. Any other shape
+ * (e.g., `(seq acc)`, `(reduce f acc)`, `(= acc x)`) is rejected.
+ * Quote-forms are data and don't dereference symbols. */
+static int form_contains_unsafe_acc(mino_val_t *form, const char *name)
 {
     if (form == NULL) return 0;
     if (mino_type_of(form) == MINO_SYMBOL) {
@@ -1515,17 +1516,44 @@ static int form_contains_symbol(mino_val_t *form, const char *name)
     }
     if (mino_type_of(form) == MINO_VECTOR) {
         for (size_t i = 0; i < form->as.vec.len; i++) {
-            if (form_contains_symbol(vec_nth(form, i), name)) return 1;
+            if (form_contains_unsafe_acc(vec_nth(form, i), name)) return 1;
         }
         return 0;
     }
     if (mino_is_cons(form)) {
         mino_val_t *head = form->as.cons.car;
         if (head != NULL && mino_type_of(head) == MINO_SYMBOL) {
-            if (sym_is(head, "quote") || sym_is(head, "quote*")) return 0;
+            const char *hname = head->as.s.data;
+            if (strcmp(hname, "quote") == 0
+                || strcmp(hname, "quote*") == 0) return 0;
+            if (strcmp(hname, "get") == 0
+                || strcmp(hname, "nth") == 0
+                || strcmp(hname, "count") == 0
+                || strcmp(hname, "get-in") == 0) {
+                mino_val_t *args = form->as.cons.cdr;
+                if (mino_is_cons(args)) {
+                    mino_val_t *first = args->as.cons.car;
+                    int first_is_acc =
+                        (first != NULL
+                         && mino_type_of(first) == MINO_SYMBOL
+                         && strcmp(first->as.s.data, name) == 0);
+                    if (first_is_acc) {
+                        /* Direct acc read via transient-supported op.
+                         * Skip the first-arg check; only later args
+                         * (k / default) need scanning. */
+                        mino_val_t *rest = args->as.cons.cdr;
+                        while (mino_is_cons(rest)) {
+                            if (form_contains_unsafe_acc(
+                                    rest->as.cons.car, name)) return 1;
+                            rest = rest->as.cons.cdr;
+                        }
+                        return 0;
+                    }
+                }
+            }
         }
         while (mino_is_cons(form)) {
-            if (form_contains_symbol(form->as.cons.car, name)) return 1;
+            if (form_contains_unsafe_acc(form->as.cons.car, name)) return 1;
             form = form->as.cons.cdr;
         }
         if (form != NULL && mino_type_of(form) == MINO_SYMBOL) {
@@ -1629,11 +1657,15 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
     acc_sym  = vec_nth(bindings, blen - 2);
     acc_init = vec_nth(bindings, blen - 1);
     if (acc_sym == NULL || mino_type_of(acc_sym) != MINO_SYMBOL) return NULL;
-    if (!is_empty_vec_literal(acc_init)
-        && !is_empty_map_literal(acc_init)
-        && !is_empty_set_literal(acc_init)) {
-        return NULL;
-    }
+    /* Init can be an empty literal (fast path, statically shape-checked
+     * against the step) or an arbitrary expression (runtime-typed).
+     * Non-literal seeds wrap as (transient <expr>) and let transient,
+     * conj!, and assoc! validate the shape at runtime. */
+    int acc_is_empty_vec = is_empty_vec_literal(acc_init);
+    int acc_is_empty_map = is_empty_map_literal(acc_init);
+    int acc_is_empty_set = is_empty_set_literal(acc_init);
+    int acc_is_empty_literal =
+        acc_is_empty_vec || acc_is_empty_map || acc_is_empty_set;
     /* Body is exactly one form: (if <test> <then> <else>). */
     if (!mino_is_cons(body) || mino_is_cons(body->as.cons.cdr)) return NULL;
     if_form = body->as.cons.car;
@@ -1664,27 +1696,30 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
     }
     step_pos = find_acc_step(recur_args, acc_sym, &step_kind);
     if (step_pos < 0) return NULL;
-    /* assoc step only makes sense when init is `{}`. */
-    if (step_kind == 1 && !is_empty_map_literal(acc_init)) return NULL;
-    /* conj step accepts `[]` and `#{}` -- both have a transient that
-     * supports conj!. Maps are conj-able via [k v] pairs but the
-     * transient assoc! path is more efficient; the rewriter routes
-     * map-builder loops through the assoc step (step_kind=1). */
-    if (step_kind == 0
-        && !is_empty_vec_literal(acc_init)
-        && !is_empty_set_literal(acc_init)) return NULL;
+    /* When init is an empty literal we know the runtime shape; reject
+     * step/init mismatches that the user clearly didn't intend
+     * (e.g., (assoc [] k v) on an empty vector, an indexed-assoc the
+     * rewriter doesn't model). Non-literal seeds defer to runtime. */
+    if (acc_is_empty_literal) {
+        if (step_kind == 1 && !acc_is_empty_map) return NULL;
+        if (step_kind == 0 && !acc_is_empty_vec && !acc_is_empty_set) {
+            return NULL;
+        }
+    }
     /* Safety: the rewrite reinterprets acc as a transient inside the
      * loop body. The transient protocol covers `count` / `nth` / `get`
      * but not `seq` / `reduce` / `=` / `contains?`. Any read of the
      * accumulator outside the recognized step is a divergence risk.
      * Conservative gate: reject if acc-sym is referenced in <test> at
-     * all, or in any recur-arg position outside the step. The bare-
-     * exit branch (already validated above) is the only place acc is
-     * read as a value, and it's read *after* the loop exits so the
+     * all, or in any recur-arg position outside the step, unless the
+     * acc-ref is the direct first arg of a transient-supported read
+     * (`get` / `nth` / `count` / `get-in`). The bare-exit branch
+     * (already validated above) is the only place acc is read as
+     * a whole value, and it's read *after* the loop exits so the
      * persistent-wrap promotes it back. */
     {
         const char *name = acc_sym->as.s.data;
-        if (form_contains_symbol(test, name)) return NULL;
+        if (form_contains_unsafe_acc(test, name)) return NULL;
         {
             mino_val_t *cur2 = recur_args;
             int         pos2 = 0;
@@ -1693,21 +1728,20 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
                 if (pos2 == step_pos) {
                     /* The step is structurally (conj acc <x>) or
                      * (assoc acc <k> <v>). Skip the head and the acc
-                     * reference; the remaining args must not reference
-                     * acc either, or we'd read it through transient
-                     * semantics inside <x>/<k>/<v>. */
+                     * reference; the remaining args may only reference
+                     * acc via transient-supported reads. */
                     mino_val_t *after_head = arg->as.cons.cdr;
                     if (mino_is_cons(after_head)) {
                         mino_val_t *after_acc = after_head->as.cons.cdr;
                         while (mino_is_cons(after_acc)) {
-                            if (form_contains_symbol(
+                            if (form_contains_unsafe_acc(
                                     after_acc->as.cons.car, name)) {
                                 return NULL;
                             }
                             after_acc = after_acc->as.cons.cdr;
                         }
                     }
-                } else if (form_contains_symbol(arg, name)) {
+                } else if (form_contains_unsafe_acc(arg, name)) {
                     return NULL;
                 }
                 pos2++;

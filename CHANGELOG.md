@@ -1,5 +1,43 @@
 # Changelog
 
+## v0.327.0 — Builder-rewrite extension for non-empty seeds
+
+`try_builder_rewrite` now accepts arbitrary acc-init expressions,
+not only empty literals (`[]` / `{}` / `#{}`). A `(loop [acc seed]
+... (recur (conj acc x)) acc)` shape with any runtime seed value
+now compiles to `(persistent! (loop [acc (transient seed)] ...
+(recur (conj! acc x)) acc))`. The transient wrap copies-on-first-
+write through `assoc!` / `conj!`, so the original seed reference
+is never mutated.
+
+The conservative safety check that rejected any acc reference
+outside the step is loosened: `(get acc k)`, `(get acc k default)`,
+`(nth acc i)`, `(count acc)`, and `(get-in acc path)` are
+transient-protocol-safe reads and now allowed in step args and
+the loop test. Other shapes (`seq`, `reduce`, `=`, `contains?`)
+still reject — those aren't covered by the transient protocol.
+
+Synthetic measurement (5000-element seed, median of 3 × 20 iters,
+arm64-darwin):
+
+| pattern                                    | before  | after   | ratio   |
+|--------------------------------------------|--------:|--------:|--------:|
+| bump-loop 5k map (assoc + get inside step) | 6.38 ms | 3.48 ms | **−45%** |
+| extend-vec-loop 5k (pure conj)             | 1.23 ms | 0.96 ms | **−22%** |
+| extend-set-loop 5k                         | 0.75 ms | 0.84 ms | ~noise  |
+
+Coverage gap: realistic_bench's `bump 5k int-map values` row is
+`(reduce (fn [m k] (assoc m k ...)) seed ks)`, not `(loop ...
+(recur (assoc m ...)))`. The rewriter only catches `loop` / `recur`
+shapes; a `reduce`-pattern rewriter is a separate optimization
+opportunity. The row remains at ~16.6 ms.
+
+Seed-mutation safety verified end-to-end: every test in the full
+suite (1368 tests, 4820 assertions) passes, including the existing
+transient ownership / `mino_map_assoc1_owned` paths. The release-
+gate's 18 probes pass; JIT parity is byte-identical across
+`jit-auto / jit-on / jit-off / lean`.
+
 ## v0.326.0 — Interpreter-foundations cycle close
 
 Three-release cycle (v0.324.0 → v0.326.0) targeting the floor that
