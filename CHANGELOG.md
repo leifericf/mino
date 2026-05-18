@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.332.0 — OP_GET_KW_MAP transient fast lane
+
+`(get coll k)` already has direct opcode fast lanes for the persistent
+shapes — MINO_MAP, MINO_RECORD with a keyword key — bypassing
+apply_callable_argv entirely. The reducer bodies the v0.330 rewrite
+produces call `(get tcoll k)` where `tcoll` is a transient over a map
+(or vector), and that branch fell through to prim_get with the
+cons-list path. The bump-5k reducer is the hot consumer.
+
+Extend OP_GET_KW_MAP (and the JIT side, `mino_jit_get_kw_map_slow`)
+with a MINO_TRANSIENT branch that unwraps to the backing collection
+and reuses the existing MAP and VECTOR inline lookups. Invalidated
+transients (read after persistent!) still fall through to prim_get
+for the MST001 diagnostic.
+
+### realistic_bench, median of 3, arm64-darwin
+
+| row | v0.331 JIT off | v0.332 JIT off | Δ | v0.331 JIT on | v0.332 JIT on | Δ |
+|-----|---------------:|---------------:|--:|--------------:|--------------:|--:|
+| bump 5k int-map | 13.23 ms | 12.81 ms | -3.2% | 12.75 ms | 12.93 ms | +1.4% noise |
+| build 5k int-map | 11.61 ms | 10.27 ms | -11.5% noise | 10.04 ms | 9.61 ms | -4.3% noise |
+| nested 500x100 | 15.96 ms | 13.37 ms | noise | 16.91 ms | 13.02 ms | noise |
+| fib(25) | 9.49 ms | 9.36 ms | flat | 7.10 ms | 6.61 ms | -6.9% noise |
+
+`bump 5k int-map` alloc: 10.4 MB/op → 9.6 MB/op (**−7.7%**), which is
+the change the fast lane caused — the 5000 `(get tcoll k)` steps each
+skipped two cons cells (a 2-elt list around `(coll, k)`). The other
+rows' deltas are run-to-run system load.
+
 ## v0.331.0 — Reduce slow-path uses argv directly
 
 `reduce_step`'s generic dispatch (used whenever the int+int arithmetic

@@ -1680,6 +1680,36 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             mino_val_t *key  = regs[cc];
             if (coll != NULL && key != NULL) {
                 int t = mino_type_of(coll);
+                /* Transient unwrap to the persistent backing collection
+                 * so the bump-5k reducer-body shape `(get tcoll k)` hits
+                 * the same MAP / VECTOR inline path the persistent
+                 * lookup uses. An invalidated transient (sealed via
+                 * persistent! and then read) falls through to prim_get
+                 * for the diagnostic. */
+                if (t == MINO_TRANSIENT && coll->as.transient.valid) {
+                    mino_val_t *inner = coll->as.transient.current;
+                    if (inner != NULL) {
+                        int it = mino_type_of(inner);
+                        if (it == MINO_MAP) {
+                            mino_val_t *v = map_get_val(inner, key);
+                            regs[a] = v == NULL ? mino_nil(S) : v;
+                            break;
+                        }
+                        if (it == MINO_VECTOR && mino_val_int_p(key)) {
+                            long long idx = mino_val_int_get(key);
+                            if (idx >= 0
+                                && (size_t)idx < inner->as.vec.len) {
+                                regs[a] = vec_nth(inner, (size_t)idx);
+                                break;
+                            }
+                            /* Out-of-range idx on a transient vector
+                             * returns nil per Clojure's (get t-vec i)
+                             * contract. */
+                            regs[a] = mino_nil(S);
+                            break;
+                        }
+                    }
+                }
                 if (t == MINO_MAP) {
                     mino_val_t *v = map_get_val(coll, key);
                     regs[a] = v == NULL ? mino_nil(S) : v;

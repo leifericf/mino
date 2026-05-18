@@ -276,9 +276,9 @@ mino_val_t **mino_jit_conj_vec_slow(mino_state_t *S, mino_val_t **regs,
 
 /* Slow path for OP_GET_KW_MAP. Mirrors the interpreter handler:
  * MINO_MAP fast lane via map_get_val; MINO_RECORD + MINO_KEYWORD
- * fast lane via record_field_index; everything else
- * (3-arg-default get, sorted-map, transient, set, vector, etc.)
- * falls through to prim_get's full semantics. */
+ * fast lane via record_field_index; MINO_TRANSIENT unwraps to its
+ * backing collection and reuses the MAP / VECTOR inline path;
+ * everything else falls through to prim_get's full semantics. */
 mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
                                       unsigned a, unsigned b, unsigned c)
 {
@@ -287,6 +287,28 @@ mino_val_t **mino_jit_get_kw_map_slow(mino_state_t *S, mino_val_t **regs,
     mino_val_t *key  = S->bc_regs[base + c];
     if (coll != NULL && key != NULL) {
         int t = mino_type_of(coll);
+        if (t == MINO_TRANSIENT && coll->as.transient.valid) {
+            mino_val_t *inner = coll->as.transient.current;
+            if (inner != NULL) {
+                int it = mino_type_of(inner);
+                if (it == MINO_MAP) {
+                    mino_val_t *v = map_get_val(inner, key);
+                    regs    = S->bc_regs + base;
+                    regs[a] = v == NULL ? mino_nil(S) : v;
+                    return regs;
+                }
+                if (it == MINO_VECTOR && mino_val_int_p(key)) {
+                    long long idx = mino_val_int_get(key);
+                    regs = S->bc_regs + base;
+                    if (idx >= 0 && (size_t)idx < inner->as.vec.len) {
+                        regs[a] = vec_nth(inner, (size_t)idx);
+                    } else {
+                        regs[a] = mino_nil(S);
+                    }
+                    return regs;
+                }
+            }
+        }
         if (t == MINO_MAP) {
             mino_val_t *v = map_get_val(coll, key);
             regs    = S->bc_regs + base;
