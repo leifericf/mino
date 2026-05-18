@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.328.0 — Transient fast path in `into` for vectors
+
+`(into to from)` already used a transient when `to` was a map or
+set, but the vector branch was running persistent `vec_conj1` per
+element for non-pipeline sources. Every element allocated a new
+intermediate vector — a path-copy per step — which dominated the
+nested-vec row's allocation profile (102k VAL allocations per
+500×100 build, per the v0.323.0 alloc profile).
+
+The vector branch now mirrors the map/set branches: wrap `to` in
+a transient, conj-bang each element through the iterator, seal
+with `persistent!`. The pipeline fast lane that already routes
+chained map/filter sources through a transient stays in front.
+
+Synthetic measurement (median of 3, arm64-darwin):
+
+| pattern                         | before  | after   | ratio    |
+|---------------------------------|--------:|--------:|---------:|
+| nested-vec 500×100              | 17.24 ms| 11.69 ms| **−32%** |
+| `(into [] (range 10000))`       | 2.40 ms | 0.91 ms | **−62%** |
+| `(into [1 2 3] (range 10000))`  | 2.41 ms | 1.05 ms | **−56%** |
+
+realistic_bench nested-vec row matches:
+
+| measure              | before    | after     | ratio    |
+|----------------------|----------:|----------:|---------:|
+| time/iter            | 17.93 ms  | 12.62 ms  | **−30%** |
+| alloc/op             | 22.5 MB   | 10.3 MB   | **−54%** |
+| GC collections       | 29 + 2    | 13 + 1    | half     |
+
+JIT-parity tests byte-identical across all four modes. Full test
+suite (1368 tests, 4820 assertions) passes; release-gate's 18
+probes pass.
+
 ## v0.327.0 — Builder-rewrite extension for non-empty seeds
 
 `try_builder_rewrite` now accepts arbitrary acc-init expressions,

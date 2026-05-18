@@ -2046,12 +2046,27 @@ mino_val_t *prim_into(mino_state_t *S, mino_val_t *args, mino_env_t *env)
                 return mino_persistent(S, ctx.t);
             }
         }
-        mino_val_t *acc = to;
+        /* Transient fast path for non-pipeline sources: conj-bang each
+         * element onto an owner-tagged tail / trie, then seal. The
+         * first conj! against a fresh transient clones the tail once;
+         * subsequent conj!s within the same 32-slot chunk write a
+         * single slot + bump the count with no allocation. Pinning is
+         * the same -O2 register-scan defense as the map / set branches
+         * below. */
+        mino_val_t *t = mino_transient(S, to);
+        mino_val_t *acc;
+        if (t == NULL) return NULL;
+        gc_pin(t);
         seq_iter_init(S, &it, from);
         while (!seq_iter_done(&it)) {
-            acc = vec_conj1(S, acc, seq_iter_val(S, &it));
+            if (mino_conj_bang(S, t, seq_iter_val(S, &it)) == NULL) {
+                gc_unpin(1);
+                return NULL;
+            }
             seq_iter_next(S, &it);
         }
+        acc = mino_persistent(S, t);
+        gc_unpin(1);
         return acc;
     }
     if (mino_type_of(to) == MINO_MAP) {
