@@ -250,6 +250,95 @@ mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S, mino_val_t **regs,
     return regs;
 }
 
+/* Slow path for OP_CONJ_BANG. Mirrors the interpreter's transient fast
+ * lane: valid MINO_TRANSIENT routes to mino_conj_bang; anything else
+ * falls through to prim_conj_bang. */
+mino_val_t **mino_jit_conj_bang_slow(mino_state_t *S, mino_val_t **regs,
+                                     unsigned a, unsigned b, unsigned c)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *item = S->bc_regs[base + c];
+    if (coll != NULL
+        && mino_type_of(coll) == MINO_TRANSIENT
+        && coll->as.transient.valid) {
+        mino_val_t *r = mino_conj_bang(S, coll, item);
+        if (r == NULL) return NULL;
+        regs    = S->bc_regs + base;
+        regs[a] = r;
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, item, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_conj_bang(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* Slow path for OP_DISSOC_BANG. */
+mino_val_t **mino_jit_dissoc_bang_slow(mino_state_t *S, mino_val_t **regs,
+                                       unsigned a, unsigned b, unsigned c)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *key  = S->bc_regs[base + c];
+    if (coll != NULL
+        && mino_type_of(coll) == MINO_TRANSIENT
+        && coll->as.transient.valid) {
+        mino_val_t *r = mino_dissoc_bang(S, coll, key);
+        if (r == NULL) return NULL;
+        regs    = S->bc_regs + base;
+        regs[a] = r;
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, key, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_dissoc_bang(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
+/* Slow path for OP_DISJ_BANG. */
+mino_val_t **mino_jit_disj_bang_slow(mino_state_t *S, mino_val_t **regs,
+                                     unsigned a, unsigned b, unsigned c)
+{
+    ptrdiff_t   base = regs - S->bc_regs;
+    mino_val_t *coll = S->bc_regs[base + b];
+    mino_val_t *item = S->bc_regs[base + c];
+    if (coll != NULL
+        && mino_type_of(coll) == MINO_TRANSIENT
+        && coll->as.transient.valid) {
+        mino_val_t *r = mino_disj_bang(S, coll, item);
+        if (r == NULL) return NULL;
+        regs    = S->bc_regs + base;
+        regs[a] = r;
+        return regs;
+    }
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, item, list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, coll, list);
+    if (list == NULL) return NULL;
+    mino_val_t *r = prim_disj_bang(S, list, NULL);
+    if (r == NULL) return NULL;
+    regs    = S->bc_regs + base;
+    regs[a] = r;
+    return regs;
+}
+
 /* Slow path for OP_DISSOC. MINO_MAP fast lane via mino_map_dissoc1
  * (allocates -- regs base may relocate); other coll types fall through
  * to prim_dissoc which raises a type diagnostic. Mirrors the

@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.334.0 — OP_CONJ_BANG / OP_DISSOC_BANG / OP_DISJ_BANG complete the family
+
+Mirror v0.333's OP_ASSOC_BANG across the three remaining transient
+write prims:
+
+  - `(conj! tcoll x)` arity-2: A=dst, B=tcoll, C=item.
+  - `(dissoc! tcoll k)` arity-2: A=dst, B=tcoll, C=key.
+  - `(disj! tcoll x)` arity-2: A=dst, B=tcoll, C=item.
+
+Each follows the OP_DISSOC shape (A=dst, B=coll, C=key) since they
+take exactly two consecutive operands rather than the three the
+assoc shape needs. Interpreter routes a valid MINO_TRANSIENT to the
+matching canonical helper (`mino_conj_bang` / `mino_dissoc_bang` /
+`mino_disj_bang`); misses fall through to the prim with the
+Clojure-canonical diagnostic.
+
+JIT side: three new stencils mirror the assoc_bang.c shape, three
+new slow helpers in helpers.c, three new entries in entry.c's
+stencil + slow-helper tables. Stencil byte tables regenerated across
+the five host targets.
+
+### realistic_bench, median of 3, arm64-darwin
+
+| row | v0.333 JIT off | v0.334 JIT off | Δ | v0.333 JIT on | v0.334 JIT on | Δ |
+|-----|---------------:|---------------:|--:|--------------:|--------------:|--:|
+| bump 5k int-map | 16.59 ms | 17.26 ms | +4% noise | 17.25 ms | 17.30 ms | flat |
+| nested 500x100 | 17.88 ms | 18.23 ms | +2% noise | 17.00 ms | 17.10 ms | flat |
+
+Measurement-neutral, same shape as v0.333 — the existing
+`reduce`/`loop` rewrites already produced `conj!` / `dissoc!` /
+`disj!` calls through OP_CALL_CACHED; the new opcodes replace the
+2-instruction dispatch with one, but the per-call saving sits below
+the row's GC + collection-modify floor. The family is complete:
+every transient write prim now has a dedicated opcode in the same
+shape as its persistent counterpart (OP_CONJ_VEC, OP_ASSOC, OP_DISSOC).
+
 ## v0.333.0 — OP_ASSOC_BANG inline fast lane
 
 `(assoc! t k v)` arity-3 call sites compiled to a 2-instruction

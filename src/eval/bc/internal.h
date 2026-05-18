@@ -144,6 +144,18 @@ typedef enum {
      * to prim_assoc_bang. Eliminates the per-step apply_callable +
      * arg-cons dispatch in (reduce #(assoc! % k v) ...) loops. */
     OP_ASSOC_BANG,       /* A=dst, B=base; tcoll/k/v at regs[B..B+2]       */
+    /* (conj! tcoll x) arity-2 transient fast lane. Mirrors OP_CONJ_VEC's
+     * shape (A=dst, B=coll, C=item). Routes a valid transient to
+     * mino_conj_bang; misses fall through to prim_conj_bang. */
+    OP_CONJ_BANG,        /* A=dst, B=tcoll, C=item                          */
+    /* (dissoc! tcoll k) arity-2 transient fast lane. Mirrors OP_DISSOC's
+     * shape (A=dst, B=coll, C=key). Routes a valid transient to
+     * mino_dissoc_bang; misses fall through to prim_dissoc_bang. */
+    OP_DISSOC_BANG,      /* A=dst, B=tcoll, C=key                           */
+    /* (disj! tcoll x) arity-2 transient fast lane. Mirrors OP_DISSOC's
+     * shape (A=dst, B=coll, C=item). Routes a valid transient to
+     * mino_disj_bang; misses fall through to prim_disj_bang. */
+    OP_DISJ_BANG,        /* A=dst, B=tcoll, C=item                          */
     /* Read-side small-prim fast lanes. ABC form, A=dst, B=src_reg.
      * Fast path requires MINO_VECTOR; misses fall back to the
      * canonical prim so lazy seqs, chunked conses, strings, maps,

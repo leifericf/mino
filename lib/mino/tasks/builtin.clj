@@ -514,6 +514,9 @@
                    ["conj_vec.c"         "stencil_op_conj_vec"]
                    ["assoc.c"            "stencil_op_assoc"]
                    ["assoc_bang.c"       "stencil_op_assoc_bang"]
+                   ["conj_bang.c"        "stencil_op_conj_bang"]
+                   ["dissoc_bang.c"      "stencil_op_dissoc_bang"]
+                   ["disj_bang.c"        "stencil_op_disj_bang"]
                    ["dissoc.c"           "stencil_op_dissoc"]
                    ["deopt_to_interp.c"  "stencil_op_deopt_to_interp"]]
         stencil-dir "src/eval/bc/stencils"
@@ -938,6 +941,9 @@
    ["conj_vec.c"         "stencil_op_conj_vec"]
    ["assoc.c"            "stencil_op_assoc"]
    ["assoc_bang.c"       "stencil_op_assoc_bang"]
+   ["conj_bang.c"        "stencil_op_conj_bang"]
+   ["dissoc_bang.c"      "stencil_op_dissoc_bang"]
+   ["disj_bang.c"        "stencil_op_disj_bang"]
    ["dissoc.c"           "stencil_op_dissoc"]
    ["deopt_to_interp.c"  "stencil_op_deopt_to_interp"]])
 

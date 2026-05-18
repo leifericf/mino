@@ -248,6 +248,9 @@ const char *mino_bc_op_name(unsigned op)
     case OP_ASSOC: return "OP_ASSOC";
     case OP_DISSOC: return "OP_DISSOC";
     case OP_ASSOC_BANG: return "OP_ASSOC_BANG";
+    case OP_CONJ_BANG: return "OP_CONJ_BANG";
+    case OP_DISSOC_BANG: return "OP_DISSOC_BANG";
+    case OP_DISJ_BANG: return "OP_DISJ_BANG";
     case OP_FIRST_VEC: return "OP_FIRST_VEC";
     case OP_COUNT_VEC: return "OP_COUNT_VEC";
     case OP_EMPTY_VEC: return "OP_EMPTY_VEC";
@@ -1871,6 +1874,89 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             list = mino_cons(S, coll, list);
             if (list == NULL) { ok = 0; goto dispatch_done; }
             mino_val_t *r = prim_assoc_bang(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_CONJ_BANG: {
+            /* (conj! tcoll x) arity-2 transient fast lane. Valid
+             * transient routes to mino_conj_bang directly; miss falls
+             * through to prim_conj_bang. */
+            unsigned a  = A_OF(ins);
+            unsigned b  = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *item = regs[cc];
+            if (coll != NULL
+                && mino_type_of(coll) == MINO_TRANSIENT
+                && coll->as.transient.valid) {
+                mino_val_t *r = mino_conj_bang(S, coll, item);
+                if (r == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = r;
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, item, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_conj_bang(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_DISSOC_BANG: {
+            /* (dissoc! tcoll k) arity-2 transient fast lane. */
+            unsigned a  = A_OF(ins);
+            unsigned b  = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *key  = regs[cc];
+            if (coll != NULL
+                && mino_type_of(coll) == MINO_TRANSIENT
+                && coll->as.transient.valid) {
+                mino_val_t *r = mino_dissoc_bang(S, coll, key);
+                if (r == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = r;
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, key, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_dissoc_bang(S, list, env);
+            if (r == NULL) { ok = 0; goto dispatch_done; }
+            regs = S->bc_regs + base;
+            regs[a] = r;
+            break;
+        }
+
+        case OP_DISJ_BANG: {
+            /* (disj! tcoll x) arity-2 transient fast lane. */
+            unsigned a  = A_OF(ins);
+            unsigned b  = B_OF(ins);
+            unsigned cc = C_OF(ins);
+            mino_val_t *coll = regs[b];
+            mino_val_t *item = regs[cc];
+            if (coll != NULL
+                && mino_type_of(coll) == MINO_TRANSIENT
+                && coll->as.transient.valid) {
+                mino_val_t *r = mino_disj_bang(S, coll, item);
+                if (r == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = r;
+                break;
+            }
+            mino_val_t *list = mino_nil(S);
+            list = mino_cons(S, item, list);
+            list = mino_cons(S, coll, list);
+            if (list == NULL) { ok = 0; goto dispatch_done; }
+            mino_val_t *r = prim_disj_bang(S, list, env);
             if (r == NULL) { ok = 0; goto dispatch_done; }
             regs = S->bc_regs + base;
             regs[a] = r;

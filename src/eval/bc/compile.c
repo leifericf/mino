@@ -3046,9 +3046,14 @@ static const pure_prim_t PURE_PRIMS[] = {
     {"conj",    prim_conj,    1, -1},
     {"assoc",   prim_assoc,   3, -1},
     {"dissoc",  prim_dissoc,  1, -1},
-    /* assoc! shares the gating shape: head must resolve to the
-     * canonical prim, used by the OP_ASSOC_BANG emission site. */
+    /* assoc! / conj! / dissoc! / disj! share the gating shape with
+     * the persistent-side write prims: head must resolve to the
+     * canonical bang prim, used by the OP_ASSOC_BANG / OP_CONJ_BANG /
+     * OP_DISSOC_BANG / OP_DISJ_BANG emission sites. */
     {"assoc!",  prim_assoc_bang, 3, -1},
+    {"conj!",   prim_conj_bang,  1, -1},
+    {"dissoc!", prim_dissoc_bang, 2, -1},
+    {"disj!",   prim_disj_bang,  2, -1},
     /* Read-side seq prims used by the OP_FIRST_VEC / OP_COUNT_VEC /
      * OP_EMPTY_VEC emission sites. count's result is an int -- can
      * be folded for literal vec args; first / empty? on literal
@@ -3690,6 +3695,75 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
                 }
                 emit_abc(c, OP_ASSOC_BANG, (unsigned)dst,
                          (unsigned)base_reg, 0);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* (conj! tcoll x) arity-2 transient fast lane. Variadic forms
+         * keep the OP_CALL path so prim_conj_bang walks the trailing
+         * values; the arity-2 case is the dominant builder-rewrite
+         * shape. */
+        if (strcmp(head->as.s.data, "conj!") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                int coll_reg = compile_operand_inplace(c, a1);
+                if (coll_reg < 0) return -1;
+                int item_reg = compile_operand_inplace(c, a2);
+                if (item_reg < 0) return -1;
+                if (dst > 0xFF || coll_reg > 0xFF || item_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_CONJ_BANG, (unsigned)dst,
+                         (unsigned)coll_reg, (unsigned)item_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* (dissoc! tcoll k) arity-2 transient fast lane. */
+        if (strcmp(head->as.s.data, "dissoc!") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                int coll_reg = compile_operand_inplace(c, a1);
+                if (coll_reg < 0) return -1;
+                int key_reg = compile_operand_inplace(c, a2);
+                if (key_reg < 0) return -1;
+                if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_DISSOC_BANG, (unsigned)dst,
+                         (unsigned)coll_reg, (unsigned)key_reg);
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+        /* (disj! tcoll x) arity-2 transient fast lane. */
+        if (strcmp(head->as.s.data, "disj!") == 0) {
+            int argc_check = 0;
+            mino_val_t *p = form->as.cons.cdr;
+            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
+            if (argc_check == 2) {
+                int saved_next = c->next_reg;
+                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+                int coll_reg = compile_operand_inplace(c, a1);
+                if (coll_reg < 0) return -1;
+                int item_reg = compile_operand_inplace(c, a2);
+                if (item_reg < 0) return -1;
+                if (dst > 0xFF || coll_reg > 0xFF || item_reg > 0xFF) {
+                    c->ok = 0; return -1;
+                }
+                emit_abc(c, OP_DISJ_BANG, (unsigned)dst,
+                         (unsigned)coll_reg, (unsigned)item_reg);
                 c->next_reg = saved_next;
                 return 0;
             }

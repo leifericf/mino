@@ -318,6 +318,20 @@ extern mino_val_t **mino_jit_assoc_slow(mino_state_t *S,
 extern mino_val_t **mino_jit_assoc_bang_slow(mino_state_t *S,
                                               mino_val_t **regs,
                                               unsigned a, unsigned b);
+/* OP_CONJ_BANG / OP_DISSOC_BANG / OP_DISJ_BANG slow helpers. Arity-2
+ * shape: tcoll in regs[b], second arg in regs[c]. */
+extern mino_val_t **mino_jit_conj_bang_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a, unsigned b,
+                                             unsigned c);
+extern mino_val_t **mino_jit_dissoc_bang_slow(mino_state_t *S,
+                                               mino_val_t **regs,
+                                               unsigned a, unsigned b,
+                                               unsigned c);
+extern mino_val_t **mino_jit_disj_bang_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a, unsigned b,
+                                             unsigned c);
 extern mino_val_t **mino_jit_dissoc_slow(mino_state_t *S,
                                           mino_val_t **regs,
                                           unsigned a, unsigned b,
