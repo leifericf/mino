@@ -659,6 +659,7 @@ static int compile_expr(compiler_t *c, mino_val_t *form, int dst, int tail);
 static int compile_expr_dispatch(compiler_t *c, mino_val_t *form,
                                  int dst, int tail);
 static int compile_body(compiler_t *c, mino_val_t *body, int dst, int tail);
+static mino_val_t *probe_head_value(compiler_t *c, mino_val_t *head);
 /* Forward decl: defined alongside try_fold_call further down. Used by
  * compile_let to compute the compile-time-known value of a binding's
  * right-hand side, if any. */
@@ -1816,6 +1817,192 @@ static mino_val_t *try_builder_rewrite(mino_state_t *S, mino_val_t *form)
             S, p_sym, mino_cons(S, new_loop, mino_nil(S)));
     }
     return new_persistent;
+}
+
+/* Match (fn [a b] body) or (fn name [a b] body) or (fn* ...). Returns
+ * 1 and fills *out_params (the param vector) + *out_body (the body cons
+ * cell) on match; 0 otherwise. */
+static int match_simple_fn(mino_val_t *fn_form,
+                           mino_val_t **out_params,
+                           mino_val_t **out_body)
+{
+    mino_val_t *head;
+    mino_val_t *rest;
+    mino_val_t *params_or_name;
+    if (!mino_is_cons(fn_form)) return 0;
+    head = fn_form->as.cons.car;
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return 0;
+    if (strcmp(head->as.s.data, "fn") != 0
+        && strcmp(head->as.s.data, "fn*") != 0) return 0;
+    rest = fn_form->as.cons.cdr;
+    if (!mino_is_cons(rest)) return 0;
+    params_or_name = rest->as.cons.car;
+    if (params_or_name != NULL
+        && mino_type_of(params_or_name) == MINO_SYMBOL) {
+        rest = rest->as.cons.cdr;
+        if (!mino_is_cons(rest)) return 0;
+        params_or_name = rest->as.cons.car;
+    }
+    if (params_or_name == NULL
+        || mino_type_of(params_or_name) != MINO_VECTOR) return 0;
+    *out_params = params_or_name;
+    *out_body   = rest->as.cons.cdr;
+    return 1;
+}
+
+/* Recognise (assoc acc ...) / (conj acc ...) / (dissoc acc ...) /
+ * (disj acc ...) tail call. Fills *out_bang with the matching *!
+ * symbol name. */
+static int match_reduce_step(mino_val_t *step, const char *acc_name,
+                             const char **out_bang)
+{
+    mino_val_t *step_args;
+    if (!mino_is_cons(step)) return 0;
+    {
+        mino_val_t *head = step->as.cons.car;
+        const char *hname;
+        if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return 0;
+        hname = head->as.s.data;
+        if (strcmp(hname, "assoc") == 0)       *out_bang = "assoc!";
+        else if (strcmp(hname, "conj") == 0)   *out_bang = "conj!";
+        else if (strcmp(hname, "dissoc") == 0) *out_bang = "dissoc!";
+        else if (strcmp(hname, "disj") == 0)   *out_bang = "disj!";
+        else return 0;
+    }
+    step_args = step->as.cons.cdr;
+    if (!mino_is_cons(step_args)) return 0;
+    if (!is_symbol_named(step_args->as.cons.car, acc_name)) return 0;
+    return 1;
+}
+
+/* try_reduce_rewrite -- recognise
+ *   (reduce (fn [acc x] (assoc/conj/dissoc/disj acc ...)) seed coll)
+ * shapes and rewrite to
+ *   (persistent!
+ *     (reduce (fn [acc x] (assoc!/conj!/dissoc!/disj! acc ...))
+ *             (transient seed) coll))
+ *
+ * The fn must be a literal anonymous fn (named or unnamed) with
+ * exactly 2 plain-symbol params and exactly one body form whose tail
+ * call is the supported step. Any acc reference in non-first-arg
+ * positions of the step must be a transient-protocol-safe read
+ * (`get` / `nth` / `count` / `get-in`); otherwise decline. Head must
+ * resolve to canonical `prim_reduce` -- a user shadow defeats the
+ * rewrite. */
+static mino_val_t *try_reduce_rewrite(compiler_t *c, mino_val_t *form)
+{
+    mino_val_t   *head;
+    mino_val_t   *args;
+    mino_val_t   *fn_form;
+    mino_val_t   *seed;
+    mino_val_t   *coll;
+    mino_val_t   *params;
+    mino_val_t   *body;
+    mino_val_t   *step;
+    mino_val_t   *acc_sym;
+    mino_val_t   *x_sym;
+    mino_val_t   *hv;
+    const char   *bang_name = NULL;
+    mino_state_t *S = c->S;
+    head = form->as.cons.car;
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return NULL;
+    if (strcmp(head->as.s.data, "reduce") != 0) return NULL;
+    if (find_local(c, head->as.s.data) >= 0) return NULL;
+    hv = probe_head_value(c, head);
+    if (hv == NULL) return NULL;
+    /* The shipped reduce is a Lisp-side wrapper (clojure.core/reduce)
+     * dispatching to prim_reduce after a CollReduce protocol check.
+     * Bless the rewrite when hv is exactly that var's root -- the
+     * canonical entry point -- so a user (defn reduce ...) shadow in
+     * any namespace declines the rewrite. */
+    {
+        mino_val_t *canon_var = var_find(S, "clojure.core", "reduce");
+        if (canon_var == NULL || mino_type_of(canon_var) != MINO_VAR) {
+            return NULL;
+        }
+        if (hv != canon_var->as.var.root) return NULL;
+    }
+    args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) return NULL;
+    fn_form = args->as.cons.car;
+    if (!mino_is_cons(args->as.cons.cdr)) return NULL;
+    seed = args->as.cons.cdr->as.cons.car;
+    if (!mino_is_cons(args->as.cons.cdr->as.cons.cdr)) return NULL;
+    coll = args->as.cons.cdr->as.cons.cdr->as.cons.car;
+    /* Reject trailing args. */
+    if (mino_is_cons(args->as.cons.cdr->as.cons.cdr->as.cons.cdr)) {
+        return NULL;
+    }
+    if (!match_simple_fn(fn_form, &params, &body)) return NULL;
+    if (params->as.vec.len != 2) return NULL;
+    acc_sym = vec_nth(params, 0);
+    x_sym   = vec_nth(params, 1);
+    if (acc_sym == NULL || mino_type_of(acc_sym) != MINO_SYMBOL) return NULL;
+    if (x_sym   == NULL || mino_type_of(x_sym)   != MINO_SYMBOL) return NULL;
+    if (!mino_is_cons(body)) return NULL;
+    /* Single body form required: the tail step must be the only form so
+     * each iteration is exactly one assoc!/conj!/dissoc!/disj! call. A
+     * multi-form body (let / when / threading) needs deeper analysis to
+     * prove every return path is a transient-supported mutation; defer. */
+    if (mino_is_cons(body->as.cons.cdr)) return NULL;
+    step = body->as.cons.car;
+    if (!match_reduce_step(step, acc_sym->as.s.data, &bang_name)) return NULL;
+    /* Safety: acc must not be read in a transient-unsafe way inside
+     * the non-first-arg positions of the step. */
+    {
+        const char *name = acc_sym->as.s.data;
+        mino_val_t *after_head = step->as.cons.cdr;
+        mino_val_t *after_acc  = after_head->as.cons.cdr;
+        while (mino_is_cons(after_acc)) {
+            if (form_contains_unsafe_acc(after_acc->as.cons.car, name)) {
+                return NULL;
+            }
+            after_acc = after_acc->as.cons.cdr;
+        }
+    }
+    /* The param `x` may not be the same symbol as `acc` (would be a
+     * user error, but the rewrite would still be safe; keep the
+     * structural check defensive). */
+    if (strcmp(acc_sym->as.s.data, x_sym->as.s.data) == 0) return NULL;
+
+    /* Build the rewritten form. */
+    {
+        mino_val_t *bang_sym = mino_symbol(S, bang_name);
+        mino_val_t *new_step;
+        mino_val_t *new_body;
+        mino_val_t *fn_sym;
+        mino_val_t *new_fn;
+        mino_val_t *transient_sym;
+        mino_val_t *transient_seed;
+        mino_val_t *reduce_sym;
+        mino_val_t *new_reduce;
+        mino_val_t *persist_sym;
+        if (bang_sym == NULL) return NULL;
+        new_step = mino_cons(S, bang_sym, step->as.cons.cdr);
+        if (new_step == NULL) return NULL;
+        new_body = mino_cons(S, new_step, mino_nil(S));
+        if (new_body == NULL) return NULL;
+        fn_sym = mino_symbol(S, "fn");
+        if (fn_sym == NULL) return NULL;
+        new_fn = mino_cons(S, fn_sym, mino_cons(S, params, new_body));
+        if (new_fn == NULL) return NULL;
+        transient_sym = mino_symbol(S, "transient");
+        if (transient_sym == NULL) return NULL;
+        transient_seed = mino_cons(
+            S, transient_sym, mino_cons(S, seed, mino_nil(S)));
+        if (transient_seed == NULL) return NULL;
+        reduce_sym = mino_symbol(S, "reduce");
+        if (reduce_sym == NULL) return NULL;
+        new_reduce = mino_cons(
+            S, reduce_sym, mino_cons(
+                S, new_fn, mino_cons(
+                    S, transient_seed, mino_cons(S, coll, mino_nil(S)))));
+        if (new_reduce == NULL) return NULL;
+        persist_sym = mino_symbol(S, "persistent!");
+        if (persist_sym == NULL) return NULL;
+        return mino_cons(
+            S, persist_sym, mino_cons(S, new_reduce, mino_nil(S)));
+    }
 }
 
 #ifdef MINO_BUILDER_REWRITE_COUNTS
@@ -3097,6 +3284,17 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     mino_val_t *head = form->as.cons.car;
     if (head_resolves_to_macro(c, head)) { c->ok = 0; return -1; }
+
+    /* Reduce-pattern rewrite: (reduce (fn [acc x] (assoc acc ...)) seed coll)
+     * routes through a transient like the loop-builder rewrite, but
+     * for the (reduce ...) call shape. Skips when the head is shadowed
+     * or the matcher declines. */
+    {
+        mino_val_t *rewritten = try_reduce_rewrite(c, form);
+        if (rewritten != NULL) {
+            return compile_expr(c, rewritten, dst, tail);
+        }
+    }
 
     /* Literal-arg pure-fn fold (Clojure semantics: pure prims with
      * self-evaluating literal args have an answer the compiler can

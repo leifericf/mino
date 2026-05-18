@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.330.0 — Reduce-pattern compile-time rewrite
+
+The Cycle B follow-up: extend the loop/recur builder rewrite to the
+`(reduce assoc-shaped-fn seed coll)` shape that the realistic_bench
+`bump 5k int-map values` row uses. `compile_call_impl` now intercepts
+`reduce` calls whose head resolves to canonical `clojure.core/reduce`,
+whose `f` is a literal `(fn [acc x] (assoc/conj/dissoc/disj acc ...))`
+with a single tail-call body, and whose acc references in the step's
+non-first-arg positions are transient-protocol-safe reads (`get`,
+`nth`, `count`, `get-in`). On match the rewrite produces
+`(persistent! (reduce (fn [acc x] (assoc!/conj!/dissoc!/disj! acc ...))
+(transient seed) coll))`. A user shadow of `reduce` in any namespace
+declines the rewrite, since the head probe compares against
+`clojure.core/reduce`'s root value pointer.
+
+The rewrite never widens its matcher to multi-form fn bodies, `let`
+or `if` wrapping, or `#(...)` reader sugar. Those cases would each
+need their own safety proof on the acc-reference pattern; defer
+behind their own measurement gate.
+
+### realistic_bench, median of 3, arm64-darwin
+
+| row | v0.329 JIT off | v0.330 JIT off | Δ | v0.329 JIT on | v0.330 JIT on | Δ |
+|-----|---------------:|---------------:|--:|--------------:|--------------:|--:|
+| bump 5k int-map | 18.99 ms | 15.49 ms | **-18.4%** | 18.27 ms | 14.92 ms | **-18.3%** |
+| build 5k int-map | 11.00 ms | 10.98 ms | flat | 10.35 ms | 10.28 ms | flat |
+| nested 500x100 | 13.42 ms | 13.87 ms | +3.4% noise | 13.10 ms | 13.75 ms | +5% noise |
+| fib(25) | 9.26 ms | 9.40 ms | noise | 6.70 ms | 6.89 ms | noise |
+| map/filter 50k | 822 µs | 819 µs | flat | 753 µs | 752 µs | flat |
+| realize 10k lazy | 4.70 µs | 4.65 µs | flat | 6.10 µs | 5.75 µs | flat |
+
+`bump 5k int-map` alloc: 12.3 MB/op → 11.1 MB/op (−10%). GC count
+on the row: 9 collections → 7 collections (−22%). The shipped
+delta is smaller than the v0.327 builder-rewrite synthetic (loop
+variant: −45%) because the `clojure.core/reduce` Lisp wrapper
+still does one fn-call hop per step on top of the transient
+mutation. Closing that gap is a separate `internal-reduce` /
+direct-stencil item — gated on whether it surfaces in a future
+real workload.
+
 ## v0.329.0 — Map / collection wins cycle close
 
 Three-release cycle (v0.327.0 → v0.329.0) targeting the alloc-
