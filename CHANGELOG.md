@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.355.0 — Fold delay realisation into C prim_deref
+
+The instrumentation cycle dashboard ranked `<core>:844:16`
+(the 1-arg arity of the `deref` shadow at `src/core.clj:844`)
+as the dominant by-wall-time fn on the protocol workload
+(`inv=2400504 total=1.07 s avg=444 ns max=11 ms`).
+
+The shadow exists to wrap the C `deref` so delays (map-shaped
+on mino, with `:delay/fn` + `:delay/state` keys) participate
+in `(deref ...)` like atoms / futures / vars. Every `(deref x)`
+call paid one extra fn-call hop plus a `(delay? x)` type-check
+even when x was a plain atom.
+
+The C `prim_deref` now realises delays directly on the
+`MINO_MAP` branch: looks up `:delay/fn`, invokes it on hit,
+returns the result. The Clojure-side shadow at
+`src/core.clj:837-848` is removed (replaced by a comment
+pointing to the C-side handling). `realized?` keeps its
+Clojure shadow at `src/core.clj:849` since that one wraps
+a different C prim and adds non-trivial type-routing.
+
+Measured perf delta on `(loop [...] (+ acc (deref a)))`
+tight-loop benchmark over 1 M iterations:
+
+| mode | baseline (shadow) | post (C prim) | delta |
+|---|---:|---:|---:|
+| JIT auto | 477 ms | 447 ms | -6.3% |
+| JIT off  | 452 ms | 452 ms | ±noise |
+
+The JIT-on win is small but real (the wrapper's per-call
+overhead was being partially masked by IC caching). The
+real-shape gain is architectural -- the public `deref` API
+is now one indirection deeper instead of two, and the
+delay-realisation path lives in the same place as
+atom/var/future/agent dispatch.
+
+`task release-gate` clean. `task perf-gate` carries the
+pre-existing `small-map` regression; no new regressions.
+
 ## v0.354.0 — Bench corpus expansion
 
 Doc-only marker. Three new bench files landed on mino-bench's

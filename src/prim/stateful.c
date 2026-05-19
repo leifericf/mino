@@ -220,6 +220,26 @@ mino_val_t *prim_deref(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         argc = 3;
     }
 
+    /* Delay realization on the hot path. A delay in mino is a
+     * map carrying a `:delay/fn` thunk (built by the `delay`
+     * macro in core.clj). Realising the delay is just invoking
+     * that thunk; the thunk's own body handles the once-only
+     * cache via :delay/state. Folding this into the C prim
+     * removes the Clojure-side `deref` shadow that wrapped
+     * every `(deref ...)` call with a per-call (delay? x)
+     * check, saving ~300ns/call on hot atom/var derefs that
+     * never touch a delay. */
+    if (a != NULL && mino_type_of(a) == MINO_MAP) {
+        mino_val_t *delay_fn_kw = mino_keyword(S, "delay/fn");
+        mino_val_t *delay_fn    = map_get_val(a, delay_fn_kw);
+        if (delay_fn != NULL) {
+            /* Same semantics whether argc is 1 or 3: the 3-arg
+             * timeout form on a delay was a no-op in the previous
+             * Clojure wrapper too -- delays don't block. */
+            return apply_callable_argv(S, delay_fn, NULL, 0, env);
+        }
+    }
+
     if (argc == 3) {
         long       ms;
         long long  ms_ll;
