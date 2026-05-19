@@ -518,9 +518,9 @@ static inline mino_thread_ctx_t *mino_current_ctx(mino_state_t *S)
 
 /* Inline fast paths for the coordination primitives. Live here, not in
  * coordination.h, because they reach into struct mino_state and
- * mino_thread_ctx_t. Once Cycle 4 decomposes mino_state into per-
- * subsystem sub-structs these can move to coordination.h alongside
- * their declarations. */
+ * mino_thread_ctx_t. Once mino_state is broken into per-subsystem
+ * sub-structs these can move to coordination.h alongside their
+ * declarations. */
 
 /* Safepoint fast path: the branch inlines into every alloc /
  * eval-impl-entry / loop-recur site. */

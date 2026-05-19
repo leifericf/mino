@@ -368,11 +368,11 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                               || tt == MINO_CHUNK);
         }
         /* Lazy compile-on-first-call. Macros stay tree-walked; their
-         * call frequency is low and the bc compiler's macro-body
-         * handling lives in Phase 2. Plain fns get one compile attempt
-         * the first time they're invoked; the attempt either populates
-         * fn->as.fn.bc with a runnable program or leaves the
-         * declined sentinel so the next call skips the retry. */
+         * call frequency is low and the bc compiler doesn't handle
+         * macro bodies. Plain fns get one compile attempt the first
+         * time they're invoked; the attempt either populates
+         * fn->as.fn.bc with a runnable program or leaves the declined
+         * sentinel so the next call skips the retry. */
         if (mino_type_of(fn) == MINO_FN && fn->as.fn.bc == NULL) {
             (void)mino_bc_compile_fn(S, fn);
         }
