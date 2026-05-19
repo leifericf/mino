@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.354.0 — Bench corpus expansion
+
+Doc-only marker. Three new bench files landed on mino-bench's
+`perf-cycle-d` branch to close the dark spots the v0.349
+synthesis dashboard surfaced:
+
+- `counter_only_loops.clj` -- single-binding tight loops in
+  three shapes (forward-lt, reverse-dec, commuted-plus).
+  Lights up the native sampler at the matched op on the
+  one-binding floor that the existing jit_loops_advanced
+  rows (all two-binding) didn't reach.
+- `deopt_trigger.clj` -- three workloads with stencilled
+  prefix + cold-op tail (throw-after-loop, loop-then-coldmap,
+  rare-throw). Lights up the per-fn `jit_deopt_exits` counter
+  that stayed at 0 across the existing corpus.
+- `alloc_site_saturation.clj` -- six workloads covering
+  val / valarr / hamt-node / hamt-entry / rb-node / bc tag
+  classes in roughly equal volumes. Sharpens the alloc-site
+  sampler dump beyond the val-heavy fingerprint the existing
+  mix workload produces.
+
+Each bench file runs cleanly under the four instrumentation
+env-flag combinations from
+`mino/.local/instrumentation-dashboard.md`.
+
+mino-side: no runtime change. Future cycles that want a
+before / after measurement against the dashboard's
+dark-spot coverage now have a stable corpus.
+
 ## v0.353.0 — Protocol-call cached fast lane deferred
 
 Cycle F items 1 + 9 ("Per-call argv allocation in the protocol
