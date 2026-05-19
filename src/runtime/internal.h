@@ -67,6 +67,11 @@
 
 #include "runtime/agent_queue.h"
 
+/* gc_state_t alias — fields stay inline in struct mino_state until
+ * the deferred byte-level decomposition lands. See
+ * .local/cycle-4-followups.md. */
+#include "gc/state.h"
+
 /* ------------------------------------------------------------------------- */
 /* Runtime state                                                             */
 /* ------------------------------------------------------------------------- */

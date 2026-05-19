@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.373.0 — Architecture Cycle 4 (Scope-Reduced)
+
+Cycle 4's original ambition was to decompose `struct mino_state`
+into 10 per-subsystem sub-structs. On audit the cycle was descoped:
+`runtime_layout.h` `static_assert`s pin the `sf_*` block at fixed
+byte offsets that the JIT stencil ABI bakes in, and several
+`mino_thread_ctx_t` and `mino_state_t` field offsets are also
+JIT-pinned. A byte-level reorganization needs a dedicated cycle with
+full GC-stress matrix, bench corpus, and JIT cross-target parity
+validation at every step.
+
+This ship lands the safe subset:
+
+- `src/gc/state.h` declares `gc_state_t` as the type alias for the
+  GC subsection of `mino_state`. The fields still live inline in
+  `struct mino_state` so no byte layout shifts; new gc-side code
+  can take a `gc_state_t *` to express the intent without coupling
+  to the full state surface, and the alias cuts cleanly when the
+  body moves.
+
+- `.local/cycle-4-followups.md` captures every cluster that
+  remains, the field counts, the recommended extraction order, the
+  stencil ABI / JIT-pinned-offset constraints, and the
+  per-cluster verification list. The work resumes from this file in
+  a future cycle.
+
+No code change beyond the new alias header; the deferred work is
+visible without polluting `mino_state` itself.
+
+**Verification.** Full test suite green (1371 tests, 4828
+assertions). Build clean.
+
 ## v0.372.0 — gc/collections Coupling Broken
 
 The last real bidirectional cycle in the architecture, `gc <->
