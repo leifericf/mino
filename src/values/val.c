@@ -1272,7 +1272,11 @@ int mino_eq(const mino_val_t *a, const mino_val_t *b)
         return 1;
     }
     case MINO_PRIM:
-        return a->as.prim.fn == b->as.prim.fn;
+        /* Each primitive is allocated once per state by prim_install_table,
+         * so two MINO_PRIM values denote the same prim iff they are the
+         * same allocation. Pointer equality avoids comparing through
+         * either ABI's function-pointer field. */
+        return a == b;
     case MINO_FN:
     case MINO_MACRO:
         /* Callables compare by identity. Structural equality on bodies and

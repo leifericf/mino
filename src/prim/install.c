@@ -30,14 +30,13 @@ void prim_install_table_with_capability(mino_state_t *S, mino_env_t *env,
     size_t i;
     int has_cap = capability != NULL && capability[0] != '\0';
     for (i = 0; i < count; i++) {
+        /* Each def carries one or both ABI pointers. fn2 takes
+         * precedence when set; fn is the fallback cons-spine
+         * dispatch path. Identity checks against a prim use its
+         * stable registered name rather than these pointers. */
         mino_val_t *pv = (defs[i].fn2 != NULL)
                          ? mino_prim_argv(S, defs[i].name, defs[i].fn2)
                          : mino_prim(S, defs[i].name, defs[i].fn);
-        /* When a def supplies both ABIs, keep the cons-spine fn
-         * pointer populated so identity-by-fn checks (e.g.
-         * classify_subseq_test) still recognise the prim. The argv
-         * dispatch path runs first because it checks fn2 != NULL
-         * before falling back. */
         if (defs[i].fn2 != NULL && defs[i].fn != NULL) {
             pv->as.prim.fn = defs[i].fn;
         }

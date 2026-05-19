@@ -297,14 +297,14 @@ typedef enum {
 static reduce_int_kind_t reduce_int_kind_from_fn(mino_val_t *fn)
 {
     if (fn == NULL || mino_type_of(fn) != MINO_PRIM) return REDUCE_KIND_NONE;
-    mino_prim_fn p = fn->as.prim.fn;
-    if (p == NULL)              return REDUCE_KIND_NONE;
-    if (p == prim_add)          return REDUCE_KIND_ADD;
-    if (p == prim_mul)          return REDUCE_KIND_MUL;
-    if (p == prim_sub)          return REDUCE_KIND_SUB;
-    if (p == prim_bit_and)      return REDUCE_KIND_BAND;
-    if (p == prim_bit_or)       return REDUCE_KIND_BOR;
-    if (p == prim_bit_xor)      return REDUCE_KIND_BXOR;
+    const char *name = fn->as.prim.name;
+    if (name == NULL)               return REDUCE_KIND_NONE;
+    if (strcmp(name, "+")       == 0) return REDUCE_KIND_ADD;
+    if (strcmp(name, "*")       == 0) return REDUCE_KIND_MUL;
+    if (strcmp(name, "-")       == 0) return REDUCE_KIND_SUB;
+    if (strcmp(name, "bit-and") == 0) return REDUCE_KIND_BAND;
+    if (strcmp(name, "bit-or")  == 0) return REDUCE_KIND_BOR;
+    if (strcmp(name, "bit-xor") == 0) return REDUCE_KIND_BXOR;
     return REDUCE_KIND_NONE;
 }
 
@@ -515,54 +515,58 @@ static mino_val_t *reduce_int_range(mino_state_t *S, mino_val_t *fn,
 }
 
 /* Inner reduction step: combine acc and elem under fn, honoring the
- * int+int arithmetic fast lane and MINO_REDUCED early-exit. Returns
- * 0 = continue, 1 = stop (acc holds the final), -1 = error. */
-static int reduce_step(mino_state_t *S, mino_val_t *fn, mino_val_t **acc_io,
+ * int+int arithmetic fast lane and MINO_REDUCED early-exit. `kind` is
+ * the caller-classified arithmetic reducer kind (or REDUCE_KIND_NONE
+ * to skip the fast lane). Returns 0 = continue, 1 = stop (acc holds
+ * the final), -1 = error. */
+static int reduce_step(mino_state_t *S, mino_val_t *fn,
+                       reduce_int_kind_t kind, mino_val_t **acc_io,
                        mino_val_t *elem, mino_env_t *env)
 {
     mino_val_t *acc = *acc_io;
 #ifdef MINO_REDUCE_STEP_COUNTS
     rstep_count(fn);
 #endif
-    if (fn != NULL && mino_type_of(fn) == MINO_PRIM
-        && fn->as.prim.fn != NULL
+    if (kind != REDUCE_KIND_NONE
         && acc != NULL && mino_val_int_p(acc)
         && elem != NULL && mino_val_int_p(elem)) {
-        mino_prim_fn p  = fn->as.prim.fn;
-        long long    ai = mino_val_int_get(acc);
-        long long    bi = mino_val_int_get(elem);
-        long long    r;
-        int          handled = 0;
-        if (p == prim_add) {
+        long long ai = mino_val_int_get(acc);
+        long long bi = mino_val_int_get(elem);
+        long long r;
+        int       handled = 0;
+        switch (kind) {
+        case REDUCE_KIND_ADD:
 #if defined(__GNUC__) || defined(__clang__)
             if (!__builtin_add_overflow(ai, bi, &r)) {
                 *acc_io = mino_int(S, r);
                 handled = 1;
             }
 #endif
-        } else if (p == prim_mul) {
+            break;
+        case REDUCE_KIND_MUL:
 #if defined(__GNUC__) || defined(__clang__)
             if (!__builtin_mul_overflow(ai, bi, &r)) {
                 *acc_io = mino_int(S, r);
                 handled = 1;
             }
 #endif
-        } else if (p == prim_sub) {
+            break;
+        case REDUCE_KIND_SUB:
 #if defined(__GNUC__) || defined(__clang__)
             if (!__builtin_sub_overflow(ai, bi, &r)) {
                 *acc_io = mino_int(S, r);
                 handled = 1;
             }
 #endif
-        } else if (p == prim_bit_and) {
-            *acc_io = mino_int(S, ai & bi);
-            handled = 1;
-        } else if (p == prim_bit_or) {
-            *acc_io = mino_int(S, ai | bi);
-            handled = 1;
-        } else if (p == prim_bit_xor) {
-            *acc_io = mino_int(S, ai ^ bi);
-            handled = 1;
+            break;
+        case REDUCE_KIND_BAND:
+            *acc_io = mino_int(S, ai & bi); handled = 1; break;
+        case REDUCE_KIND_BOR:
+            *acc_io = mino_int(S, ai | bi); handled = 1; break;
+        case REDUCE_KIND_BXOR:
+            *acc_io = mino_int(S, ai ^ bi); handled = 1; break;
+        case REDUCE_KIND_NONE:
+            break;
         }
         if (handled) return 0;
     }
@@ -642,7 +646,7 @@ static int reduce_ctx_step(mino_state_t *S, reduce_ctx_t *ctx,
         ctx->acc         = mino_int(S, ctx->acc_int);
         ctx->has_int_acc = 0;
     }
-    return reduce_step(S, ctx->fn, &ctx->acc, elem, env);
+    return reduce_step(S, ctx->fn, ctx->kind, &ctx->acc, elem, env);
 }
 
 static mino_val_t *reduce_ctx_finalize(mino_state_t *S,
@@ -668,6 +672,7 @@ static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
 {
     size_t      i, n = m->as.map.len;
     int         is_flat = (m->as.map.val_order != NULL);
+    reduce_int_kind_t kind = reduce_int_kind_from_fn(fn);
     mino_val_t *ko, *vo;
     if (n == 0) {
         if (has_init) return acc;
@@ -687,7 +692,7 @@ static mino_val_t *reduce_map_direct(mino_state_t *S, mino_val_t *fn,
         mino_val_t *k = vec_nth(ko, i);
         mino_val_t *v = is_flat ? vec_nth(vo, i) : map_get_val(m, k);
         mino_val_t *entry = mino_map_entry(S, k, v);
-        int rc = reduce_step(S, fn, &acc, entry, env);
+        int rc = reduce_step(S, fn, kind, &acc, entry, env);
         if (rc == -1) return NULL;
         if (rc == 1)  return acc;
     }
@@ -931,15 +936,15 @@ static pipeline_fast_kind_t pipeline_fast_callable(mino_val_t *callable)
     }
     if (mino_type_of(callable) == MINO_KEYWORD) return PIPELINE_FAST_KW;
     if (mino_type_of(callable) != MINO_PRIM) return PIPELINE_FAST_NONE;
-    mino_prim_fn2 fn2 = callable->as.prim.fn2;
-    if (fn2 == NULL) return PIPELINE_FAST_NONE;
-    if (fn2 == prim_inc_argv)     return PIPELINE_FAST_INC;
-    if (fn2 == prim_dec_argv)     return PIPELINE_FAST_DEC;
-    if (fn2 == prim_odd_p_argv)   return PIPELINE_FAST_ODD_P;
-    if (fn2 == prim_even_p_argv)  return PIPELINE_FAST_EVEN_P;
-    if (fn2 == prim_pos_p_argv)   return PIPELINE_FAST_POS_P;
-    if (fn2 == prim_neg_p_argv)   return PIPELINE_FAST_NEG_P;
-    if (fn2 == prim_zero_p_argv)  return PIPELINE_FAST_ZERO_P;
+    const char *name = callable->as.prim.name;
+    if (name == NULL) return PIPELINE_FAST_NONE;
+    if (strcmp(name, "inc")    == 0) return PIPELINE_FAST_INC;
+    if (strcmp(name, "dec")    == 0) return PIPELINE_FAST_DEC;
+    if (strcmp(name, "odd?")   == 0) return PIPELINE_FAST_ODD_P;
+    if (strcmp(name, "even?")  == 0) return PIPELINE_FAST_EVEN_P;
+    if (strcmp(name, "pos?")   == 0) return PIPELINE_FAST_POS_P;
+    if (strcmp(name, "neg?")   == 0) return PIPELINE_FAST_NEG_P;
+    if (strcmp(name, "zero?")  == 0) return PIPELINE_FAST_ZERO_P;
     return PIPELINE_FAST_NONE;
 }
 
@@ -2488,17 +2493,19 @@ mino_val_t *prim_sorted_set_by(mino_state_t *S, mino_val_t *args, mino_env_t *en
     return mino_sorted_set_by(S, comparator, tmp, items);
 }
 
-/* Classify one of the four comparison primitives (<, <=, >, >=) by function
- * pointer. On success, *is_gt tells whether the test is a > family test and
- * *inclusive tells whether the boundary value itself is included. Returns 0
- * if v is not one of the four accepted tests. */
+/* Classify one of the four comparison primitives (<, <=, >, >=) by
+ * registered name. On success, *is_gt tells whether the test is a >
+ * family test and *inclusive tells whether the boundary value itself
+ * is included. Returns 0 if v is not one of the four accepted tests. */
 static int classify_subseq_test(const mino_val_t *v, int *is_gt, int *inclusive)
 {
     if (v == NULL || mino_type_of(v) != MINO_PRIM) return 0;
-    if (v->as.prim.fn == prim_lt)  { *is_gt = 0; *inclusive = 0; return 1; }
-    if (v->as.prim.fn == prim_lte) { *is_gt = 0; *inclusive = 1; return 1; }
-    if (v->as.prim.fn == prim_gt)  { *is_gt = 1; *inclusive = 0; return 1; }
-    if (v->as.prim.fn == prim_gte) { *is_gt = 1; *inclusive = 1; return 1; }
+    const char *name = v->as.prim.name;
+    if (name == NULL) return 0;
+    if (strcmp(name, "<")  == 0) { *is_gt = 0; *inclusive = 0; return 1; }
+    if (strcmp(name, "<=") == 0) { *is_gt = 0; *inclusive = 1; return 1; }
+    if (strcmp(name, ">")  == 0) { *is_gt = 1; *inclusive = 0; return 1; }
+    if (strcmp(name, ">=") == 0) { *is_gt = 1; *inclusive = 1; return 1; }
     return 0;
 }
 

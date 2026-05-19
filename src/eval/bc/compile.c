@@ -3386,7 +3386,14 @@ static const pure_prim_t *should_fold_call(compiler_t *c, mino_val_t *head)
     if (pp == NULL) return NULL;
     mino_val_t *hv = probe_head_value(c, head);
     if (hv == NULL || mino_type_of(hv) != MINO_PRIM) return NULL;
-    if (hv->as.prim.fn != pp->prim) return NULL;
+    /* Shadow check: the resolved value must be the canonical prim
+     * with this name, not a different prim or a user redefinition
+     * with the same name. Two MINO_PRIM values with the same stable
+     * registered name denote the same primitive. */
+    if (hv->as.prim.name == NULL
+        || strcmp(hv->as.prim.name, pp->name) != 0) {
+        return NULL;
+    }
     return pp;
 }
 
@@ -3405,7 +3412,8 @@ static int head_is_canonical_pure_prim(compiler_t *c, mino_val_t *head)
     if (pp == NULL) return 0;
     mino_val_t *hv = probe_head_value(c, head);
     if (hv == NULL || mino_type_of(hv) != MINO_PRIM) return 0;
-    return hv->as.prim.fn == pp->prim;
+    return hv->as.prim.name != NULL
+        && strcmp(hv->as.prim.name, pp->name) == 0;
 }
 
 /* Try to resolve a compile-time-known value for `form`. Returns 1 and
