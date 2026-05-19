@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.349.0 — Synthesis dashboard
+
+Doc-only release. Ran the v0.345..v0.348 instrumentation
+surfaces over a representative workload mix and synthesised the
+output into a ranked-levers dashboard at
+`mino/.local/instrumentation-dashboard.md`.
+
+Seven dashboard sections per the cycle plan: GC profile, JIT
+profile, allocation breakdown, compile-side declines, sampler
+hot regions, cross-cut ranked levers, next-cycle
+recommendation.
+
+Headline findings:
+
+- **JIT region waste is the single biggest measured lever**:
+  every JIT'd fn pays a full 16 KB mmap page; code size is
+  92-788 B; dead-byte ratio runs 94-99% per fn. 14 JIT'd fns
+  in the proto workload waste ~220 KB of RX bytes.
+- **Promotion-age tuning has zero headroom**: every surviving
+  young object lands in age bucket 0 across every workload.
+  Skip this lever.
+- **SATB-side barrier optimizations have zero corpus
+  footprint**: Dijkstra accounts for ~100% of barrier
+  enqueues (933/933 on mix, 578/579 on atom-churn). Skip
+  SATB-only work; any barrier lever should target the
+  insertion path.
+- **Loop matcher extension to multi-binding shapes unblocks
+  native sampler coverage**: the sampler shows zero native
+  samples on real-shape `(loop [i 0 acc 0] (recur (inc i)
+  (+ acc i)))` workloads because the matcher rejects them
+  and the JIT loop stencil's safepoint downcounter never
+  fires.
+- **Predicate+branch fusion and forward stencil hooks lack
+  measured pressure**: defer further per the dashboard's
+  ranking.
+
+Top-three recommended next moves: JIT region sub-allocator,
+loop matcher extension, pipeline allocation audit.
+
+No production code change. The dashboard is the deliverable.
+
 ## v0.348.2 — Allocation-site sampler (env-gated light)
 
 Complements the compile-gated `MINO_ALLOC_PROFILE` with an
