@@ -1,5 +1,65 @@
 # Changelog
 
+## v0.369.0 — Perf cycle G close
+
+Closes the seven-tag v0.363.0 -> v0.369.0 cycle. Plan called
+for five design-heavy follow-ons that cycle F deferred; all
+five shipped:
+
+| tag      | item                                       | result    |
+|---|---|---|
+| v0.363.0 | OLD-VALARR write-barrier retrofit          | shipped   |
+| v0.364.0 | SATB drop + end-of-mark gc_mark_roots      | shipped   |
+| v0.365.0 | JIT slab pool: infra + small-fn wire-up    | shipped   |
+| v0.366.0 | JIT slab pool: per-fn slot invalidate      | shipped   |
+| v0.367.0 | Template-aware bc recompile                | shipped   |
+| v0.368.0 | Weak intern table, skip MAJOR_MARK walk    | shipped   |
+
+The cycle covers four cross-cutting design lines that
+v0.362's audit ranked as high-leverage but not single-
+release-sized:
+
+- **GC barrier shape**: Phase 1 fixed the OLD-VALARR
+  remset miss that `MINO_GC_VERIFY=1` surfaced at the end
+  of cycle F, then dropped the SATB push from the hybrid
+  write barrier and grew major remark with a precise
+  `gc_mark_roots` pass so the snapshot-at-begin invariant
+  is replaced by incremental-update soundness Dijkstra +
+  end-of-mark re-rooting already cover. Halves the per-op
+  barrier work in MAJOR_MARK; pays one extra root walk per
+  major cycle.
+- **JIT footprint**: Phase 2 packs small fns into shared
+  pages instead of one mmap per fn, with refcounted
+  invalidation that munmaps a slab once every slot has been
+  released. Cuts the 92-99 % per-page waste on every JIT'd
+  body to roughly slot density × slab size.
+- **bc dedup**: Phase 3 added a closure -> template
+  back-pointer so the fold-staleness recompile fires once
+  on the template instead of producing per-closure `bc`
+  copies that silently undid `OP_CLOSURE`'s dedup.
+- **Intern lifetime**: Phase 3 made the symbol / keyword
+  intern tables weak. Entries survive only when reached
+  through some other root; major sweep tombstones unreached
+  slots and the regular OLD sweep frees the header. Cached
+  special-form symbols got a precise root walk so the
+  `eval_try_special_form` pointer-identity dispatch stays
+  valid across cycles.
+
+**Verification.**
+
+- `task release-gate` clean across the cycle.
+- `MINO_GC_VERIFY=1 task release-gate` clean -- the trap
+  v0.361's audit surfaced is closed.
+- `task test-jit-parity` byte-identical across all 4
+  binaries at every tag.
+- `mino-tests adv-test` + `diff-test` against the cycle G
+  HEAD: 18/18 + 7/7 probes pass.
+
+The seven new tags stack on top of the v0.330..v0.362 work
+on `perf-cycle-a` that has been awaiting a coordinated push
+since cycle C. The standing `no-push-without-ask` rule still
+applies.
+
 ## v0.368.0 — Weak intern table, skip MAJOR_MARK walk
 
 The symbol and keyword intern tables stop pinning every
