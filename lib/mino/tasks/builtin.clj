@@ -493,6 +493,8 @@
                    ["loop_int_dec.c"     "stencil_op_loop_int_dec"]
                    ["loop_int_lt_inc.c"  "stencil_op_loop_int_lt_inc"]
                    ["loop_int_dec_inc.c" "stencil_op_loop_int_dec_inc"]
+                   ["loop_int_lt_acc.c"  "stencil_op_loop_int_lt_acc"]
+                   ["loop_int_dec_acc.c" "stencil_op_loop_int_dec_acc"]
                    ["getglobal_cached.c" "stencil_op_getglobal_cached"]
                    ["call_cached.c"      "stencil_op_call_cached"]
                    ["protocol_call_cached.c"
@@ -920,6 +922,8 @@
    ["loop_int_dec.c"     "stencil_op_loop_int_dec"]
    ["loop_int_lt_inc.c"  "stencil_op_loop_int_lt_inc"]
    ["loop_int_dec_inc.c" "stencil_op_loop_int_dec_inc"]
+   ["loop_int_lt_acc.c"  "stencil_op_loop_int_lt_acc"]
+   ["loop_int_dec_acc.c" "stencil_op_loop_int_dec_acc"]
    ["getglobal_cached.c" "stencil_op_getglobal_cached"]
    ["call_cached.c"      "stencil_op_call_cached"]
    ["protocol_call_cached.c"

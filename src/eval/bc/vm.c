@@ -301,6 +301,8 @@ const char *mino_bc_op_name(unsigned op)
     case OP_LOOP_INT_DEC_INC: return "OP_LOOP_INT_DEC_INC";
     case OP_LOOP_INT_LT: return "OP_LOOP_INT_LT";
     case OP_LOOP_INT_LT_INC: return "OP_LOOP_INT_LT_INC";
+    case OP_LOOP_INT_LT_ACC: return "OP_LOOP_INT_LT_ACC";
+    case OP_LOOP_INT_DEC_ACC: return "OP_LOOP_INT_DEC_ACC";
     case OP_PUSH_ENV: return "OP_PUSH_ENV";
     case OP_POP_ENV: return "OP_POP_ENV";
     case OP_ENV_BIND: return "OP_ENV_BIND";
@@ -1778,6 +1780,128 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
                 regs[a] = incv;
                 regs[c] = incv2;
                 pc -= 1;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                break;
+            }
+        }
+
+        case OP_LOOP_INT_LT_ACC: {
+            /* Forward-counted two-binding loop step where the second
+             * binding is an arithmetic-step accumulator:
+             *   regs[A] < regs[B]  &&  regs[A]++, regs[C] += regs[D]
+             * where D is the step-source register carried in word-2's
+             * Bx field. */
+            unsigned a = A_OF(ins);
+            unsigned b = B_OF(ins);
+            unsigned c = C_OF(ins);
+            mino_bc_insn_t step_word = code[pc++];
+            unsigned d = Bx_OF(step_word);
+            mino_val_t *vc = regs[a];
+            mino_val_t *vl = regs[b];
+            mino_val_t *vk = regs[c];
+            mino_val_t *vs = regs[d];
+            if (vc != NULL && vl != NULL && vk != NULL && vs != NULL
+                && MINO_IS_INT(vc) && MINO_IS_INT(vl)
+                && MINO_IS_INT(vk) && MINO_IS_INT(vs)) {
+                long long c_ = MINO_INT_VAL(vc);
+                long long l_ = MINO_INT_VAL(vl);
+                if (c_ >= l_) break;
+                long long k_ = MINO_INT_VAL(vk);
+                long long s_ = MINO_INT_VAL(vs);
+                long long new_k = k_ + s_;
+                if (c_ != MINO_INT_MAX
+                    && new_k >= MINO_INT_MIN && new_k <= MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(c_ + 1);
+                    regs[c] = MINO_MAKE_INT(new_k);
+                    pc -= 2;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    break;
+                }
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[b], list);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *ltv = prim_lt(S, list, env);
+                if (ltv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                if (!mino_is_truthy(ltv)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *incv = prim_inc(S, list2, env);
+                if (incv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                mino_val_t *list3 = mino_nil(S);
+                list3 = mino_cons(S, regs[d], list3);
+                list3 = mino_cons(S, regs[c], list3);
+                if (list3 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *addv = prim_add(S, list3, env);
+                if (addv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = incv;
+                regs[c] = addv;
+                pc -= 2;
+                if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                break;
+            }
+        }
+
+        case OP_LOOP_INT_DEC_ACC: {
+            /* Reverse-counted two-binding loop step where the second
+             * binding is an arithmetic-step accumulator:
+             *   if (regs[A] == 0) exit
+             *   regs[A]--, regs[C] += regs[D]
+             * where D is the step-source register carried in word-2's
+             * Bx field. */
+            unsigned a = A_OF(ins);
+            unsigned c = C_OF(ins);
+            mino_bc_insn_t step_word = code[pc++];
+            unsigned d = Bx_OF(step_word);
+            mino_val_t *vt = regs[a];
+            mino_val_t *vk = regs[c];
+            mino_val_t *vs = regs[d];
+            if (vt != NULL && vk != NULL && vs != NULL
+                && MINO_IS_INT(vt) && MINO_IS_INT(vk) && MINO_IS_INT(vs)) {
+                long long t_ = MINO_INT_VAL(vt);
+                if (t_ == 0) break;
+                long long k_ = MINO_INT_VAL(vk);
+                long long s_ = MINO_INT_VAL(vs);
+                long long new_k = k_ + s_;
+                if (t_ != MINO_INT_MIN
+                    && new_k >= MINO_INT_MIN && new_k <= MINO_INT_MAX) {
+                    regs[a] = MINO_MAKE_INT(t_ - 1);
+                    regs[c] = MINO_MAKE_INT(new_k);
+                    pc -= 2;
+                    if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
+                    break;
+                }
+            }
+            {
+                mino_val_t *list = mino_nil(S);
+                list = mino_cons(S, regs[a], list);
+                if (list == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *zp = prim_zero_p(S, list, env);
+                if (zp == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                if (mino_is_truthy(zp)) break;
+                mino_val_t *list2 = mino_nil(S);
+                list2 = mino_cons(S, regs[a], list2);
+                if (list2 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *decv = prim_dec(S, list2, env);
+                if (decv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                mino_val_t *list3 = mino_nil(S);
+                list3 = mino_cons(S, regs[d], list3);
+                list3 = mino_cons(S, regs[c], list3);
+                if (list3 == NULL) { ok = 0; goto dispatch_done; }
+                mino_val_t *addv = prim_add(S, list3, env);
+                if (addv == NULL) { ok = 0; goto dispatch_done; }
+                regs = S->bc_regs + base;
+                regs[a] = decv;
+                regs[c] = addv;
+                pc -= 2;
                 if (!mino_bc_safepoint(S)) { ok = 0; goto dispatch_done; }
                 break;
             }

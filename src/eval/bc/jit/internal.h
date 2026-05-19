@@ -373,6 +373,12 @@ mino_val_t **mino_jit_loop_int_lt_inc_slow(mino_state_t *S, mino_val_t **regs,
                                            unsigned c);
 mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S, mino_val_t **regs,
                                             unsigned a, unsigned b);
+mino_val_t **mino_jit_loop_int_lt_acc_slow(mino_state_t *S, mino_val_t **regs,
+                                            unsigned a, unsigned b,
+                                            unsigned c, unsigned d);
+mino_val_t **mino_jit_loop_int_dec_acc_slow(mino_state_t *S, mino_val_t **regs,
+                                             unsigned a, unsigned c,
+                                             unsigned d);
 void         mino_jit_loop_continue_marker(void);
 void         mino_jit_chain_continue_marker(mino_val_t **regs,
                                              mino_val_t **consts,

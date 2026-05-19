@@ -146,6 +146,8 @@ int mino_jit_op_extra_words(unsigned op)
     case OP_CALL_CACHED:
     case OP_PROTOCOL_CALL_CACHED:
     case OP_PROTOCOL_TAILCALL_CACHED:
+    case OP_LOOP_INT_LT_ACC:
+    case OP_LOOP_INT_DEC_ACC:
         return 1;
     default:
         return 0;
@@ -421,6 +423,20 @@ const stencil_desc_t mino_jit_stencils[] = {
         stencil_op_loop_int_lt_inc_bytes, stencil_op_loop_int_lt_inc_size,
         stencil_op_loop_int_lt_inc_symbols, stencil_op_loop_int_lt_inc_nsymbols,
         stencil_op_loop_int_lt_inc_relocs, stencil_op_loop_int_lt_inc_nrelocs,
+        0u
+    },
+    {
+        OP_LOOP_INT_LT_ACC,
+        stencil_op_loop_int_lt_acc_bytes, stencil_op_loop_int_lt_acc_size,
+        stencil_op_loop_int_lt_acc_symbols, stencil_op_loop_int_lt_acc_nsymbols,
+        stencil_op_loop_int_lt_acc_relocs, stencil_op_loop_int_lt_acc_nrelocs,
+        0u
+    },
+    {
+        OP_LOOP_INT_DEC_ACC,
+        stencil_op_loop_int_dec_acc_bytes, stencil_op_loop_int_dec_acc_size,
+        stencil_op_loop_int_dec_acc_symbols, stencil_op_loop_int_dec_acc_nsymbols,
+        stencil_op_loop_int_dec_acc_relocs, stencil_op_loop_int_dec_acc_nrelocs,
         0u
     },
     {
@@ -749,6 +765,8 @@ static const extern_fn_t g_extern_fns[] = {
     {"mino_jit_loop_int_dec_slow",    (void *)(uintptr_t)mino_jit_loop_int_dec_slow},
     {"mino_jit_loop_int_lt_inc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_inc_slow},
     {"mino_jit_loop_int_dec_inc_slow",(void *)(uintptr_t)mino_jit_loop_int_dec_inc_slow},
+    {"mino_jit_loop_int_lt_acc_slow", (void *)(uintptr_t)mino_jit_loop_int_lt_acc_slow},
+    {"mino_jit_loop_int_dec_acc_slow",(void *)(uintptr_t)mino_jit_loop_int_dec_acc_slow},
     {"mino_jit_getglobal_cached_slow", (void *)(uintptr_t)mino_jit_getglobal_cached_slow},
     {"mino_jit_call_cached_slow",      (void *)(uintptr_t)mino_jit_call_cached_slow},
     {"mino_jit_call_resolved_slow",    (void *)(uintptr_t)mino_jit_call_resolved_slow},

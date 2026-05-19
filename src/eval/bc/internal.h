@@ -190,6 +190,17 @@ typedef enum {
      * so the canonical diagnostic still fires on non-int / overflow. */
     OP_LOOP_INT_LT,      /* A=counter, B=limit. One-binding form.       */
     OP_LOOP_INT_LT_INC,  /* A=counter, B=limit, C=inc-carry. Two-binding. */
+    /* Two-binding forward / reverse counted loops where the second
+     * binding's step is an arithmetic add against another register
+     * (typically `(+ acc i)`): the accumulator reads its own value plus
+     * the value of the step-source register each iteration. Two-word
+     * encoding; word-2's Bx carries the step-source register index.
+     *   word 1: ABC -> A=counter, B=limit (LT) or unused (DEC), C=acc
+     *   word 2: OP_NOP Bx=step_src_reg
+     * The acc binding's overflow check exits to the slow helper so the
+     * canonical prim diagnostic fires on overflow. */
+    OP_LOOP_INT_LT_ACC,  /* A=counter, B=limit, C=acc; word-2 Bx=src    */
+    OP_LOOP_INT_DEC_ACC, /* A=test_reg (decremented), C=acc; word-2 Bx=src */
     /* Lexical-env management for compiled closures. OP_PUSH_ENV and
      * OP_POP_ENV bracket let scopes when the enclosing fn captures
      * (its body contains an inner fn literal); OP_ENV_BIND publishes

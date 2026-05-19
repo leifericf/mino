@@ -1200,6 +1200,89 @@ mino_val_t **mino_jit_loop_int_dec_inc_slow(mino_state_t *S,
     return regs;
 }
 
+/* Slow path for OP_LOOP_INT_LT_ACC: forward-counted loop where the
+ * accumulator's step is (+ acc <reg-d>). Mirrors the interpreter's
+ * cons + prim_lt + prim_inc + prim_add dance. Returns the same
+ * low-bit-tagged signal as the other loop helpers. */
+mino_val_t **mino_jit_loop_int_lt_acc_slow(mino_state_t *S,
+                                            mino_val_t **regs,
+                                            unsigned a, unsigned b,
+                                            unsigned c, unsigned d)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + b], list);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *ltv = prim_lt(S, list, NULL);
+    if (ltv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (!mino_is_truthy_inline(ltv)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *incv = prim_inc(S, list2, NULL);
+    if (incv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    mino_val_t *list3 = mino_nil(S);
+    if (list3 == NULL) return NULL;
+    list3 = mino_cons(S, regs[d], list3);
+    if (list3 == NULL) return NULL;
+    list3 = mino_cons(S, regs[c], list3);
+    if (list3 == NULL) return NULL;
+    mino_val_t *addv = prim_add(S, list3, NULL);
+    if (addv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = incv;
+    regs[c] = addv;
+    return regs;
+}
+
+/* Slow path for OP_LOOP_INT_DEC_ACC: reverse-counted loop where the
+ * accumulator's step is (+ acc <reg-d>). Mirrors the interpreter's
+ * cons + prim_zero_p + prim_dec + prim_add dance. */
+mino_val_t **mino_jit_loop_int_dec_acc_slow(mino_state_t *S,
+                                             mino_val_t **regs,
+                                             unsigned a, unsigned c,
+                                             unsigned d)
+{
+    ptrdiff_t base = regs - S->bc_regs;
+    mino_val_t *list = mino_nil(S);
+    if (list == NULL) return NULL;
+    list = mino_cons(S, S->bc_regs[base + a], list);
+    if (list == NULL) return NULL;
+    mino_val_t *zp = prim_zero_p(S, list, NULL);
+    if (zp == NULL) return NULL;
+    regs = S->bc_regs + base;
+    if (mino_is_truthy_inline(zp)) {
+        return loop_tag_exit(regs);
+    }
+    mino_val_t *list2 = mino_nil(S);
+    if (list2 == NULL) return NULL;
+    list2 = mino_cons(S, regs[a], list2);
+    if (list2 == NULL) return NULL;
+    mino_val_t *decv = prim_dec(S, list2, NULL);
+    if (decv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    mino_val_t *list3 = mino_nil(S);
+    if (list3 == NULL) return NULL;
+    list3 = mino_cons(S, regs[d], list3);
+    if (list3 == NULL) return NULL;
+    list3 = mino_cons(S, regs[c], list3);
+    if (list3 == NULL) return NULL;
+    mino_val_t *addv = prim_add(S, list3, NULL);
+    if (addv == NULL) return NULL;
+    regs = S->bc_regs + base;
+    regs[a] = decv;
+    regs[c] = addv;
+    return regs;
+}
+
 /* Side-exit runtime helper. The deopt stencil tail-calls this when the
  * native prefix reaches the first PC the JIT couldn't compile; it
  * records the resume PC on the state and returns NULL so the native

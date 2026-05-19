@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.351.0 — JIT loop matcher: arithmetic-step accumulator
+
+Extends the counted-loop matcher to the canonical Clojure-shape
+arithmetic-step accumulator
+
+    (loop [i 0 acc 0]
+      (if (< i N) (recur (inc i) (+ acc i)) acc))
+
+and its reverse-counted sibling. Two new opcodes carry the
+shape into the JIT:
+
+- `OP_LOOP_INT_LT_ACC`: forward counter + register-step
+  accumulator. Two-word op; word-2's Bx carries the step-source
+  register.
+- `OP_LOOP_INT_DEC_ACC`: reverse counter + register-step
+  accumulator. Same two-word encoding.
+
+Both opcodes get a copy-and-patch stencil that inlines the
+tagged-int fast path with the safepoint downcounter; the slow
+path conses through `prim_lt` / `prim_zero_p` / `prim_inc` /
+`prim_dec` / `prim_add` so the canonical diagnostic still fires
+on overflow or non-int operands. Stencil byte tables regenerated
+for all 5 hosts.
+
+Before this release these shapes fell through to generic
+recur-driven body compile, and the v0.348 native sampler showed
+zero coverage on real-shape accumulator counter loops.
+
+| workload | jit-off | jit-on | speedup |
+|---|---:|---:|---:|
+| `(loop [i 0 acc 0] (if (< i 100k) (recur (inc i) (+ acc i)) acc))` × 200 | 71 ms | 40 ms | 1.77x |
+
+The existing `OP_LOOP_INT_LT_INC` / `OP_LOOP_INT_DEC_INC`
+step=1 fast paths are unchanged. Lifts the dashboard's loop
+matcher blind spot on real-shape counter loops.
+
+`task test-jit-parity` byte-identical across all 4 binaries.
+`task release-gate` clean. `task perf-gate` carries the
+pre-existing `small-map` allocation regression from v0.344.0
+(logged in `.local/BUGS.md`); no new regressions.
+
 ## v0.350.0 — Perf cycle E close
 
 Doc-only marker closing the v0.345.0 → v0.349.0 pure-

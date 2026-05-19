@@ -1213,6 +1213,46 @@ static int is_inc_step_of_local(compiler_t *c, mino_val_t *step,
         || is_plus_one_of_local(c, step, bname);
 }
 
+/* True when `form` is `(+ this_name other_name)` or `(+ other_name
+ * this_name)` resolving the head to the canonical `+` prim. Used to
+ * recognise an accumulator step `(+ acc i)` where `acc` is the
+ * accumulator binding and `i` is some other loop binding (typically
+ * the counter). `*out_other_name` receives the matched other-side
+ * symbol's name (a borrowed pointer into the form). */
+static int is_plus_two_locals_of(compiler_t *c, mino_val_t *form,
+                                 const char *this_name,
+                                 const char **out_other_name)
+{
+    if (!mino_is_cons(form)) return 0;
+    mino_val_t *h = form->as.cons.car;
+    if (h == NULL || mino_type_of(h) != MINO_SYMBOL) return 0;
+    if (strcmp(h->as.s.data, "+") != 0) return 0;
+    mino_val_t *args = form->as.cons.cdr;
+    if (!mino_is_cons(args)) return 0;
+    mino_val_t *a1 = args->as.cons.car;
+    mino_val_t *rest = args->as.cons.cdr;
+    if (!mino_is_cons(rest)) return 0;
+    mino_val_t *a2 = rest->as.cons.car;
+    if (rest->as.cons.cdr != NULL
+        && mino_type_of(rest->as.cons.cdr) != MINO_NIL) {
+        if (mino_is_cons(rest->as.cons.cdr)) return 0;
+    }
+    if (a1 == NULL || a2 == NULL) return 0;
+    if (mino_type_of(a1) != MINO_SYMBOL) return 0;
+    if (mino_type_of(a2) != MINO_SYMBOL) return 0;
+    const char *n1 = a1->as.s.data;
+    const char *n2 = a2->as.s.data;
+    if (strcmp(n1, this_name) == 0 && strcmp(n2, this_name) != 0) {
+        if (out_other_name != NULL) *out_other_name = n2;
+        return head_is_canonical_pure_prim(c, h);
+    }
+    if (strcmp(n2, this_name) == 0 && strcmp(n1, this_name) != 0) {
+        if (out_other_name != NULL) *out_other_name = n1;
+        return head_is_canonical_pure_prim(c, h);
+    }
+    return 0;
+}
+
 /* Match the backward-counted shape:
  *   (if (zero? bX) <exit> (recur step0 step1 ...))
  * where each step is (inc bi) / (dec bi) self-referencing its own
@@ -1243,7 +1283,13 @@ static int try_match_dec_shape(compiler_t *c,
                                     test_sym->as.s.data);
     if (test_idx < 0) return 0;
 
-    /* else must be (recur step0 step1 ...). */
+    /* else must be (recur step0 step1 ...). For each binding the step is:
+     *   test (counter) binding: (dec bname)
+     *   acc binding:            (inc bname) / (+ bname 1) / (+ 1 bname)
+     *                           OR (+ bname OTHER) / (+ OTHER bname)
+     *                           where OTHER is another loop binding (the
+     *                           ACC shape that emits OP_LOOP_INT_DEC_ACC). */
+    int acc_step_src_idx = -1;
     if (!mino_is_cons(else_form)) return 0;
     mino_val_t *eh = else_form->as.cons.car;
     if (eh == NULL || mino_type_of(eh) != MINO_SYMBOL) return 0;
@@ -1255,12 +1301,28 @@ static int try_match_dec_shape(compiler_t *c,
         mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
         if (bn == NULL || mino_type_of(bn) != MINO_SYMBOL) return 0;
         const char *bname = bn->as.s.data;
-        int is_dec = is_unary_call_of_local(c, step, "dec", bname);
-        int is_inc = is_inc_step_of_local(c, step, bname);
-        if (!is_dec && !is_inc) return 0;
-        if (i == test_idx && !is_dec) return 0;
-        if (i != test_idx && !is_inc) return 0;
-        steps = steps->as.cons.cdr;
+        if (i == test_idx) {
+            if (!is_unary_call_of_local(c, step, "dec", bname)) return 0;
+            steps = steps->as.cons.cdr;
+            continue;
+        }
+        if (is_inc_step_of_local(c, step, bname)) {
+            steps = steps->as.cons.cdr;
+            continue;
+        }
+        if (n_bindings == 2 && acc_step_src_idx < 0) {
+            const char *other = NULL;
+            if (is_plus_two_locals_of(c, step, bname, &other)) {
+                int other_idx = find_binding_idx(bindings, n_bindings,
+                                                  other);
+                if (other_idx >= 0 && other_idx != i) {
+                    acc_step_src_idx = other_idx;
+                    steps = steps->as.cons.cdr;
+                    continue;
+                }
+            }
+        }
+        return 0;
     }
     if (steps != NULL && mino_type_of(steps) != MINO_NIL) {
         if (mino_is_cons(steps)) return 0;
@@ -1272,6 +1334,13 @@ static int try_match_dec_shape(compiler_t *c,
     int test_reg = this_loop->bind_regs[test_idx];
     if (n_bindings == 1) {
         emit_abc(c, OP_LOOP_INT_DEC, (unsigned)test_reg, 0, 0);
+    } else if (acc_step_src_idx >= 0) {
+        int acc_idx = 1 - test_idx;
+        int acc_reg = this_loop->bind_regs[acc_idx];
+        int src_reg = this_loop->bind_regs[acc_step_src_idx];
+        emit_abc(c, OP_LOOP_INT_DEC_ACC,
+                 (unsigned)test_reg, 0, (unsigned)acc_reg);
+        emit_abx(c, OP_NOP, 0, (unsigned)src_reg);
     } else {
         int inc_idx = 1 - test_idx;
         int inc_reg = this_loop->bind_regs[inc_idx];
@@ -1392,10 +1461,16 @@ static int try_match_lt_shape(compiler_t *c,
         exit_form  = else_form;
     }
 
-    /* recur_form must be (recur step0 step1 ...) with the counter
-     * binding's step = (inc counter_sym) (or (+ counter 1) -- both
-     * accepted as inc-equivalents) and any other binding step
-     * = (inc itself). */
+    /* recur_form must be (recur step0 step1 ...). For each binding the
+     * step is one of:
+     *   counter binding:  (inc bname) / (+ bname 1) / (+ 1 bname)
+     *   acc binding:      same as counter (carry-by-1 fast path) OR
+     *                     (+ bname OTHER) / (+ OTHER bname) where OTHER
+     *                     is another loop binding (the ACC shape that
+     *                     emits OP_LOOP_INT_LT_ACC).
+     * `acc_step_src_idx` stays -1 in the inc-only path; on ACC match it
+     * holds the binding index whose register feeds the accumulator. */
+    int acc_step_src_idx = -1;
     if (!mino_is_cons(recur_form)) return 0;
     mino_val_t *rh = recur_form->as.cons.car;
     if (rh == NULL || mino_type_of(rh) != MINO_SYMBOL) return 0;
@@ -1407,8 +1482,23 @@ static int try_match_lt_shape(compiler_t *c,
         mino_val_t *bn = vec_nth(bindings, (size_t)(i * 2));
         if (bn == NULL || mino_type_of(bn) != MINO_SYMBOL) return 0;
         const char *bname = bn->as.s.data;
-        if (!is_inc_step_of_local(c, step, bname)) return 0;
-        steps = steps->as.cons.cdr;
+        if (is_inc_step_of_local(c, step, bname)) {
+            steps = steps->as.cons.cdr;
+            continue;
+        }
+        if (n_bindings == 2 && i != counter_idx && acc_step_src_idx < 0) {
+            const char *other = NULL;
+            if (is_plus_two_locals_of(c, step, bname, &other)) {
+                int other_idx = find_binding_idx(bindings, n_bindings,
+                                                  other);
+                if (other_idx >= 0 && other_idx != i) {
+                    acc_step_src_idx = other_idx;
+                    steps = steps->as.cons.cdr;
+                    continue;
+                }
+            }
+        }
+        return 0;
     }
     if (steps != NULL && mino_type_of(steps) != MINO_NIL) {
         if (mino_is_cons(steps)) return 0;
@@ -1427,6 +1517,17 @@ static int try_match_lt_shape(compiler_t *c,
     if (n_bindings == 1) {
         emit_abc(c, OP_LOOP_INT_LT,
                  (unsigned)counter_reg, (unsigned)limit_reg, 0);
+    } else if (acc_step_src_idx >= 0) {
+        int acc_idx = 1 - counter_idx;
+        int acc_reg = this_loop->bind_regs[acc_idx];
+        int src_reg = this_loop->bind_regs[acc_step_src_idx];
+        emit_abc(c, OP_LOOP_INT_LT_ACC,
+                 (unsigned)counter_reg, (unsigned)limit_reg,
+                 (unsigned)acc_reg);
+        /* Trailing word: Bx carries the step-source register index so
+         * the stencil reads it via IMM_BX2 / the interpreter via
+         * Bx_OF(code[pc++]). OP_NOP keeps a stray decode harmless. */
+        emit_abx(c, OP_NOP, 0, (unsigned)src_reg);
     } else {
         int carry_idx = 1 - counter_idx;
         int carry_reg = this_loop->bind_regs[carry_idx];
