@@ -6,7 +6,12 @@
  * alongside MINO_RECORD's slots[] array.
  */
 
-#include "runtime/internal.h"
+#include "mino.h"
+#include "mino_internal.h"
+#include "gc/internal.h"
+#include "runtime/value_assert.h"
+
+#include <stdlib.h>
 
 mino_val_t *mino_chunk_buffer(mino_state_t *S, unsigned cap)
 {

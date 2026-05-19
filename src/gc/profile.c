@@ -21,8 +21,10 @@
  * harnesses, and the data carries no state-specific identity.
  */
 
-#include "runtime/internal.h"
+#include "mino.h"
+#include "gc/internal.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

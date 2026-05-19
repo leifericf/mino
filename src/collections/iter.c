@@ -16,9 +16,11 @@
  * `mino_iter_done` releases.
  */
 
-#include "runtime/internal.h"
-#include "eval/internal.h"
+#include "mino.h"
+#include "mino_internal.h"
 #include "collections/internal.h"
+#include "eval/internal.h"          /* lazy_force */
+#include "runtime/value_assert.h"   /* mino_type_of */
 
 /* Sorted maps and sets walk an in-order red-black tree via a small
  * fixed-size stack instead of materialising the keys vector. The RB

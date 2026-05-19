@@ -13,7 +13,9 @@
  * at a time.
  */
 
-#include "runtime/internal.h"
+#include "mino.h"
+
+#include <stdlib.h>
 
 struct mino_vec_builder { mino_state_t *S; mino_ref_t *ref; };
 struct mino_map_builder { mino_state_t *S; mino_ref_t *ref; };
