@@ -956,19 +956,23 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
 
 void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn_val)
 {
-    (void)S;
     if (fn_val == NULL || mino_type_of(fn_val) != MINO_FN) return;
     mino_bc_fn_t *bc = fn_val->as.fn.bc;
     if (bc == NULL) return;
     if (bc->native == NULL) return;
-    /* The mmap'd region and offset table stay owned by the state's
-     * jit_regions list -- they're reaped at state teardown. Dropping
-     * the runtime-visible pointers is the publication-visible deopt
-     * step; the hot counter rewinds so the next compile attempt is
-     * gated by the full threshold. */
+    /* Legacy path: the mmap'd region and offset table stay owned by
+     * the state's jit_regions list and are reaped at state teardown.
+     * Slab path: release the slot's claim on the slab; munmap fires
+     * once every slot in the slab has been released. The pc_offsets
+     * table for slab compiles is tracked on jit_regions with a NULL
+     * region pointer, so state teardown still frees it. */
+    if (bc->native_slab != NULL) {
+        mino_jit_slab_release(S, bc->native_slab);
+    }
     bc->native            = NULL;
     bc->native_size       = 0;
     bc->native_pc_offsets = NULL;
+    bc->native_slab       = NULL;
     bc->hot_counter       = 0;
 }
 
@@ -1031,6 +1035,11 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
 void mino_jit_invalidate(mino_state_t *S, mino_val_t *fn)
 {
     (void)S; (void)fn;
+}
+
+void mino_jit_slab_release(mino_state_t *S, struct mino_jit_slab *slab)
+{
+    (void)S; (void)slab;
 }
 
 long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned native_off)

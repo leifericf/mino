@@ -136,6 +136,12 @@ struct mino_val *mino_jit_invoke(struct mino_state *S,
  * mino_state_free. */
 void mino_jit_free_all(struct mino_state *S);
 
+/* Release one slot's claim on a slab. Decrements live_slots; on the
+ * last claim, unlinks the slab from S->jit_slabs and munmaps the
+ * page. Called from mino_jit_invalidate when a slab-allocated bc
+ * record gives up its native slot. */
+void mino_jit_slab_release(struct mino_state *S, struct mino_jit_slab *slab);
+
 /* Reverse-lookup: which bytecode pc owns the stencil whose bytes cover
  * `native_off` in bc->native? Returns -1 when the offset is out of
  * range or the fn has no offset table. Cold path; intended for stack
@@ -172,6 +178,10 @@ static inline struct mino_val *mino_jit_invoke(struct mino_state *S,
     (void)S; (void)bc; (void)regs; (void)consts; return NULL;
 }
 static inline void mino_jit_free_all(struct mino_state *S) { (void)S; }
+static inline void mino_jit_slab_release(struct mino_state *S,
+                                          struct mino_jit_slab *slab) {
+    (void)S; (void)slab;
+}
 static inline long mino_jit_offset_to_pc(const mino_bc_fn_t *bc, unsigned off) {
     (void)bc; (void)off; return -1;
 }

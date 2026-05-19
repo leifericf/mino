@@ -214,8 +214,31 @@ static void jit_compile_cleanup(struct mino_jit_slab *slab, void *region,
     if (slab != NULL) {
         (void)jit_slab_make_rx(slab);
     } else {
-        jit_compile_cleanup(slab, region, total_size);
+        jit_region_free(region, total_size);
     }
+}
+
+/* Per-fn slot release. Called from mino_jit_invalidate when a bc
+ * record gives up its native slot (deopt, IC-gen mismatch, redef).
+ * Decrements the owning slab's live_slots refcount; on the last
+ * release, unlinks the slab from S->jit_slabs and munmaps the page.
+ * The bump cursor inside the slab is never rewound -- slots are
+ * append-only within a slab, and reclamation happens at slab
+ * granularity, not slot granularity. */
+void mino_jit_slab_release(mino_state_t *S, struct mino_jit_slab *slab)
+{
+    struct mino_jit_slab **pp;
+    if (slab == NULL) return;
+    if (slab->live_slots > 0) slab->live_slots--;
+    if (slab->live_slots != 0) return;
+    for (pp = &S->jit_slabs; *pp != NULL; pp = &(*pp)->next) {
+        if (*pp == slab) {
+            *pp = slab->next;
+            break;
+        }
+    }
+    if (slab->page != NULL) jit_region_free(slab->page, slab->page_size);
+    free(slab);
 }
 
 void mino_jit_free_all(mino_state_t *S)
@@ -961,14 +984,19 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
         }
     }
 
-    /* Legacy path: track the region for state-teardown munmap. Slab
-     * path: the slab itself is tracked on S->jit_slabs and the
-     * pc_offsets table is freed by per-fn invalidate (see
-     * mino_jit_invalidate). */
+    /* Legacy path: track the region for state-teardown munmap (region_
+     * track also takes ownership of pc_offsets via aux_ptr).
+     * Slab path: track only pc_offsets so state teardown frees it; the
+     * slab page itself is on S->jit_slabs. */
     if (slab == NULL) {
         if (region_track(S, region, total_size, pc_offsets) != 0) {
             free(pc_offsets);
             jit_compile_cleanup(slab, region, total_size);
+            return -1;
+        }
+    } else {
+        if (region_track(S, NULL, 0, pc_offsets) != 0) {
+            free(pc_offsets);
             return -1;
         }
     }

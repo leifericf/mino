@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.366.0 — JIT slab pool: per-fn slot invalidate
+
+`mino_jit_invalidate` now releases a slab-allocated fn's slot
+claim through the new `mino_jit_slab_release` helper:
+decrement `live_slots` on the owning slab; on the last
+release, unlink the slab from `S->jit_slabs` and munmap the
+page. Legacy one-page-per-fn compiles are unchanged
+(their region keeps its lifetime on the `jit_regions` list
+until state teardown).
+
+The slot bump cursor inside a slab is never rewound -- slots
+are append-only within a slab, and reclamation is at slab
+granularity rather than slot granularity. The tradeoff is
+simplicity: a slab that has any live slot left holds its
+whole page; a slab that loses every slot frees its page
+immediately. For a typical workload this approximates the
+"live slot density" cleanly, since invalidations tend to
+cluster (a `def` storm or a load that invalidates the whole
+ic generation).
+
+Slab-path `native_pc_offsets` is tracked on the
+`jit_regions` list with a NULL region pointer, so state
+teardown reaps the malloc'd table even for slabs that
+weren't fully released during the run.
+
+**Verification.**
+
+- `task release-gate` clean.
+- `MINO_GC_VERIFY=1 task release-gate` clean.
+- `task test-jit-parity` byte-identical across all 4 binaries.
+- def-redef storm under verify: clean (each redef releases the
+  previous slot, the slab munmaps once empty).
+
 ## v0.365.0 — JIT slab pool: infra + small-fn wire-up
 
 Small JIT'd fns (`need_bytes <= 4 KB` pre-page-rounding) now
