@@ -832,6 +832,211 @@ static void install_crash_handler(mino_state_t *S)
 #endif
 }
 
+/* Interactive REPL loop. Runs until stdin reaches EOF, the user types
+ * :quit, or an unrecoverable allocation failure aborts. `specials`
+ * carries the *1/*2/*3/*e bookkeeping inherited from main; the env is
+ * mino's default user-environment seeded with the standard library. */
+static int run_repl(mino_state_t *S, mino_env_t *env,
+                    repl_specials_t *specials)
+{
+    char  *buf       = NULL;
+    size_t cap       = 0;
+    size_t len       = 0;
+    /* Session-wide history of REPL input. The parse buffer (buf/len)
+     * is truncated each time a form is consumed; the history buffer
+     * (hist_buf/hist_len) is append-only so source_cache_store can
+     * publish every line the user has typed for snippet rendering.
+     * Without it, errors that name a line number past the first form
+     * land in a cache that no longer contains the relevant line. */
+    char  *hist_buf  = NULL;
+    size_t hist_cap  = 0;
+    size_t hist_len  = 0;
+    int    awaiting_continuation = 0;
+    int    exit_code = 0;
+
+    {
+        const mino_capability_info_t *p;
+        int total = 0, installed = 0;
+        for (p = mino_capability_list(); p->name != NULL; p++) {
+            total++;
+            if (mino_capability_installed(S, p->bit)) installed++;
+        }
+        if (installed < total) {
+            fprintf(stderr,
+                "mino %s (embedded, %d of %d capabilities installed)\n",
+                mino_version_string(), installed, total);
+            fputs("Type :capabilities to see the full list, "
+                  ":help for help, :quit to exit\n", stderr);
+        } else {
+            fprintf(stderr, "mino %s\n", mino_version_string());
+            fputs("Type :help for help, :quit to exit\n", stderr);
+        }
+    }
+    fputs("mino=> ", stderr);
+    fflush(stderr);
+
+    for (;;) {
+        char line[MINO_LINE_MAX];
+        if (fgets(line, sizeof(line), stdin) == NULL) {
+            break;
+        }
+        {
+            size_t add = strlen(line);
+            if (len + add + 1 > cap) {
+                size_t new_cap = cap == 0 ? 256 : cap;
+                while (new_cap < len + add + 1) {
+                    new_cap *= 2;
+                }
+                buf = (char *)realloc(buf, new_cap);
+                if (buf == NULL) {
+                    fputs("mino: out of memory\n", stderr);
+                    exit_code = 1;
+                    goto cleanup;
+                }
+                cap = new_cap;
+            }
+            memcpy(buf + len, line, add + 1);
+            len += add;
+
+            /* Mirror the line into the append-only history buffer
+             * used for source-snippet rendering. Errors reference
+             * reader_line, which counts every line typed since
+             * session start, so the cache needs the full history,
+             * not just the bytes still pending parse. */
+            if (hist_len + add + 1 > hist_cap) {
+                size_t new_cap = hist_cap == 0 ? 256 : hist_cap;
+                while (new_cap < hist_len + add + 1) {
+                    new_cap *= 2;
+                }
+                hist_buf = (char *)realloc(hist_buf, new_cap);
+                if (hist_buf == NULL) {
+                    fputs("mino: out of memory\n", stderr);
+                    exit_code = 1;
+                    goto cleanup;
+                }
+                hist_cap = new_cap;
+            }
+            memcpy(hist_buf + hist_len, line, add + 1);
+            hist_len += add;
+        }
+
+        /* Drain as many complete forms as we have. */
+        for (;;) {
+            const char *cursor = buf;
+            const char *end    = buf;
+            mino_val_t *form;
+            mino_val_t *result;
+
+            if (has_only_whitespace(buf)) {
+                /* Don't discard trailing whitespace: newlines in it feed
+                 * the reader's line counter on the next call. */
+                awaiting_continuation = 0;
+                break;
+            }
+
+            /* Cache REPL input for diagnostic source snippets. Publish
+             * the full session history, not just the parse buffer: the
+             * parse buffer is truncated whenever a form is consumed,
+             * but reader_line keeps accumulating across forms. */
+            source_cache_store(S, S->reader.reader_file, hist_buf, hist_len);
+
+            form = mino_read(S, cursor, &end);
+            if (form != NULL && form->type == MINO_KEYWORD) {
+                const char *name = form->as.s.data;
+                if (strcmp(name, "quit") == 0) {
+                    fputc('\n', stderr);
+                    exit_code = 0;
+                    goto cleanup;
+                }
+                if (strcmp(name, "help") == 0) {
+                    print_repl_help(stderr);
+                    {
+                        size_t consumed  = (size_t)(end - buf);
+                        size_t remaining = len - consumed;
+                        memmove(buf, end, remaining + 1);
+                        len = remaining;
+                    }
+                    awaiting_continuation = 0;
+                    continue;
+                }
+                if (strcmp(name, "capabilities") == 0
+                    || strcmp(name, "caps") == 0) {
+                    print_repl_capabilities(stderr, S);
+                    {
+                        size_t consumed  = (size_t)(end - buf);
+                        size_t remaining = len - consumed;
+                        memmove(buf, end, remaining + 1);
+                        len = remaining;
+                    }
+                    awaiting_continuation = 0;
+                    continue;
+                }
+            }
+            if (form == NULL) {
+                const char *err = mino_last_error(S);
+                if (is_unterminated_error(err)) {
+                    awaiting_continuation = 1;
+                    break;
+                }
+                {
+                    const mino_diag_t *d = mino_last_diag(S);
+                    if (d != NULL) {
+                        char dbuf[2048];
+                        mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
+                                         dbuf, sizeof(dbuf));
+                        fprintf(stderr, "%s", dbuf);
+                    } else {
+                        fprintf(stderr, "read error: %s\n",
+                                err ? err : "unknown");
+                    }
+                }
+                len = 0;
+                buf[0] = '\0';
+                awaiting_continuation = 0;
+                break;
+            }
+
+            result = mino_eval(S, form, env);
+            if (result == NULL) {
+                const mino_diag_t *d = mino_last_diag(S);
+                if (d != NULL) {
+                    char dbuf[2048];
+                    mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
+                                     dbuf, sizeof(dbuf));
+                    fprintf(stderr, "%s", dbuf);
+                } else {
+                    const char *err = mino_last_error(S);
+                    fprintf(stderr, "eval error: %s\n",
+                            err ? err : "unknown");
+                }
+                repl_specials_capture_error(S, specials);
+            } else {
+                repl_specials_rotate(S, specials, result);
+                mino_println(S, result);
+            }
+
+            /* Shift unread bytes to the front of the buffer. */
+            {
+                size_t consumed = (size_t)(end - buf);
+                size_t remaining = len - consumed;
+                memmove(buf, end, remaining + 1);
+                len = remaining;
+            }
+            awaiting_continuation = 0;
+        }
+
+        fputs(awaiting_continuation ? "  #_=> " : "mino=> ", stderr);
+        fflush(stderr);
+    }
+
+    fputc('\n', stderr);
+
+cleanup:
+    free(buf);
+    free(hist_buf);
+    return exit_code;
+}
+
 int main(int argc, char **argv)
 {
     mino_state_t *S;
@@ -964,21 +1169,8 @@ int main(int argc, char **argv)
     }
 
     install_crash_handler(S);
-    mino_env_t   *env = mino_env_new(S);
-    char *buf  = NULL;
-    size_t cap = 0;
-    size_t len = 0;
-    /* Session-wide history of REPL input. The parse buffer (buf/len)
-     * is truncated each time a form is consumed; the history buffer
-     * (hist_buf/hist_len) is append-only so source_cache_store can
-     * publish every line the user has typed for snippet rendering.
-     * Without it, errors that name a line number past the first form
-     * land in a cache that no longer contains the relevant line. */
-    char *hist_buf = NULL;
-    size_t hist_cap = 0;
-    size_t hist_len = 0;
-    int    awaiting_continuation = 0;
-    int    exit_code = 0;
+    mino_env_t *env = mino_env_new(S);
+    int exit_code   = 0;
 
     /* Development knobs. These override the collector defaults before
      * any allocation happens. Range errors silently fall back to the
@@ -1136,186 +1328,7 @@ int main(int argc, char **argv)
         return exit_code;
     }
 
-    {
-        const mino_capability_info_t *p;
-        int total = 0, installed = 0;
-        for (p = mino_capability_list(); p->name != NULL; p++) {
-            total++;
-            if (mino_capability_installed(S, p->bit)) installed++;
-        }
-        if (installed < total) {
-            fprintf(stderr,
-                "mino %s (embedded, %d of %d capabilities installed)\n",
-                mino_version_string(), installed, total);
-            fputs("Type :capabilities to see the full list, "
-                  ":help for help, :quit to exit\n", stderr);
-        } else {
-            fprintf(stderr, "mino %s\n", mino_version_string());
-            fputs("Type :help for help, :quit to exit\n", stderr);
-        }
-    }
-    fputs("mino=> ", stderr);
-    fflush(stderr);
-
-    for (;;) {
-        char line[MINO_LINE_MAX];
-        if (fgets(line, sizeof(line), stdin) == NULL) {
-            break;
-        }
-        {
-            size_t add = strlen(line);
-            if (len + add + 1 > cap) {
-                size_t new_cap = cap == 0 ? 256 : cap;
-                while (new_cap < len + add + 1) {
-                    new_cap *= 2;
-                }
-                buf = (char *)realloc(buf, new_cap);
-                if (buf == NULL) {
-                    fputs("mino: out of memory\n", stderr);
-                    exit_code = 1;
-                    goto cleanup;
-                }
-                cap = new_cap;
-            }
-            memcpy(buf + len, line, add + 1);
-            len += add;
-
-            /* Mirror the line into the append-only history buffer
-             * used for source-snippet rendering. Errors reference
-             * reader_line, which counts every line typed since
-             * session start, so the cache needs the full history,
-             * not just the bytes still pending parse. */
-            if (hist_len + add + 1 > hist_cap) {
-                size_t new_cap = hist_cap == 0 ? 256 : hist_cap;
-                while (new_cap < hist_len + add + 1) {
-                    new_cap *= 2;
-                }
-                hist_buf = (char *)realloc(hist_buf, new_cap);
-                if (hist_buf == NULL) {
-                    fputs("mino: out of memory\n", stderr);
-                    exit_code = 1;
-                    goto cleanup;
-                }
-                hist_cap = new_cap;
-            }
-            memcpy(hist_buf + hist_len, line, add + 1);
-            hist_len += add;
-        }
-
-        /* Drain as many complete forms as we have. */
-        for (;;) {
-            const char *cursor = buf;
-            const char *end    = buf;
-            mino_val_t *form;
-            mino_val_t *result;
-
-            if (has_only_whitespace(buf)) {
-                /* Don't discard trailing whitespace: newlines in it feed
-                 * the reader's line counter on the next call. */
-                awaiting_continuation = 0;
-                break;
-            }
-
-            /* Cache REPL input for diagnostic source snippets. Publish
-             * the full session history, not just the parse buffer: the
-             * parse buffer is truncated whenever a form is consumed,
-             * but reader_line keeps accumulating across forms. */
-            source_cache_store(S, S->reader.reader_file, hist_buf, hist_len);
-
-            form = mino_read(S, cursor, &end);
-            if (form != NULL && form->type == MINO_KEYWORD) {
-                const char *name = form->as.s.data;
-                if (strcmp(name, "quit") == 0) {
-                    fputc('\n', stderr);
-                    exit_code = 0;
-                    goto cleanup;
-                }
-                if (strcmp(name, "help") == 0) {
-                    print_repl_help(stderr);
-                    {
-                        size_t consumed  = (size_t)(end - buf);
-                        size_t remaining = len - consumed;
-                        memmove(buf, end, remaining + 1);
-                        len = remaining;
-                    }
-                    awaiting_continuation = 0;
-                    continue;
-                }
-                if (strcmp(name, "capabilities") == 0
-                    || strcmp(name, "caps") == 0) {
-                    print_repl_capabilities(stderr, S);
-                    {
-                        size_t consumed  = (size_t)(end - buf);
-                        size_t remaining = len - consumed;
-                        memmove(buf, end, remaining + 1);
-                        len = remaining;
-                    }
-                    awaiting_continuation = 0;
-                    continue;
-                }
-            }
-            if (form == NULL) {
-                const char *err = mino_last_error(S);
-                if (is_unterminated_error(err)) {
-                    awaiting_continuation = 1;
-                    break;
-                }
-                {
-                    const mino_diag_t *d = mino_last_diag(S);
-                    if (d != NULL) {
-                        char dbuf[2048];
-                        mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
-                                         dbuf, sizeof(dbuf));
-                        fprintf(stderr, "%s", dbuf);
-                    } else {
-                        fprintf(stderr, "read error: %s\n",
-                                err ? err : "unknown");
-                    }
-                }
-                len = 0;
-                buf[0] = '\0';
-                awaiting_continuation = 0;
-                break;
-            }
-
-            result = mino_eval(S, form, env);
-            if (result == NULL) {
-                const mino_diag_t *d = mino_last_diag(S);
-                if (d != NULL) {
-                    char dbuf[2048];
-                    mino_render_diag(S, d, MINO_DIAG_RENDER_PRETTY,
-                                     dbuf, sizeof(dbuf));
-                    fprintf(stderr, "%s", dbuf);
-                } else {
-                    const char *err = mino_last_error(S);
-                    fprintf(stderr, "eval error: %s\n",
-                            err ? err : "unknown");
-                }
-                repl_specials_capture_error(S, &specials);
-            } else {
-                repl_specials_rotate(S, &specials, result);
-                mino_println(S, result);
-            }
-
-            /* Shift unread bytes to the front of the buffer. */
-            {
-                size_t consumed = (size_t)(end - buf);
-                size_t remaining = len - consumed;
-                memmove(buf, end, remaining + 1);
-                len = remaining;
-            }
-            awaiting_continuation = 0;
-        }
-
-        fputs(awaiting_continuation ? "  #_=> " : "mino=> ", stderr);
-        fflush(stderr);
-    }
-
-    fputc('\n', stderr);
-
-cleanup:
-    free(buf);
-    free(hist_buf);
+    exit_code = run_repl(S, env, &specials);
     mino_env_free(S, env);
     mino_state_free(S);
     return exit_code;
