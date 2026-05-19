@@ -593,7 +593,18 @@ void gc_mark_interior(mino_state_t *S, const void *p)
  * (NULL / state-embedded singleton), so the range-index resolve of
  * gc_mark_interior_push is unnecessary here. Skipping it lets
  * gc_major_step avoid rebuilding the range index between slices,
- * which dominates the tracing cost at small heap sizes. */
+ * which dominates the tracing cost at small heap sizes.
+ *
+ * Tracers in component-owned files (collections/gc_handlers.c,
+ * eval/bc/gc_handlers.c, values/val.c) call through this entry
+ * point via gc_mark_child_push_exported. */
+static void gc_mark_child_push(mino_state_t *S, const void *p);
+
+void gc_mark_child_push_exported(mino_state_t *S, const void *p)
+{
+    gc_mark_child_push(S, p);
+}
+
 static void gc_mark_child_push(mino_state_t *S, const void *p)
 {
     gc_hdr_t *h;
@@ -851,35 +862,9 @@ static void trace_env(mino_state_t *S, gc_hdr_t *h)
     gc_mark_child_push(S, env->ht_buckets);
 }
 
-static void trace_vec_node(mino_state_t *S, gc_hdr_t *h)
-{
-    mino_vec_node_t *n = (mino_vec_node_t *)(h + 1);
-    unsigned i;
-    for (i = 0; i < n->count; i++) {
-        gc_mark_child_push(S, n->slots[i]);
-    }
-}
-
-static void trace_hamt_node(mino_state_t *S, gc_hdr_t *h)
-{
-    mino_hamt_node_t *n = (mino_hamt_node_t *)(h + 1);
-    unsigned count, i;
-    gc_mark_child_push(S, n->slots);
-    count = (n->collision_count > 0) ? n->collision_count
-                                     : popcount32(n->bitmap);
-    if (n->slots != NULL) {
-        for (i = 0; i < count; i++) {
-            gc_mark_child_push(S, n->slots[i]);
-        }
-    }
-}
-
-static void trace_hamt_entry(mino_state_t *S, gc_hdr_t *h)
-{
-    hamt_entry_t *e = (hamt_entry_t *)(h + 1);
-    gc_mark_child_push(S, e->key);
-    gc_mark_child_push(S, e->val);
-}
+/* trace_vec_node / trace_hamt_node / trace_hamt_entry / trace_rb_node
+ * live in src/collections/gc_handlers.c and register themselves via
+ * mino_collections_register_gc_handlers(S). */
 
 /* Walks GC_T_VALARR and GC_T_PTRARR alike: both layouts are a flat
  * array of void *. */
@@ -891,15 +876,6 @@ static void trace_pointer_array(mino_state_t *S, gc_hdr_t *h)
     for (i = 0; i < n; i++) {
         gc_mark_child_push(S, arr[i]);
     }
-}
-
-static void trace_rb_node(mino_state_t *S, gc_hdr_t *h)
-{
-    mino_rb_node_t *rb = (mino_rb_node_t *)(h + 1);
-    gc_mark_child_push(S, rb->key);
-    gc_mark_child_push(S, rb->val);
-    gc_mark_child_push(S, rb->left);
-    gc_mark_child_push(S, rb->right);
 }
 
 /* The bc record carries pointers to its code, consts, clauses, and
@@ -954,16 +930,17 @@ void gc_register_finalizer(mino_state_t *S, unsigned char tag,
 void gc_register_default_tracers(mino_state_t *S)
 {
     /* GC_T_RAW intentionally stays NULL: a POD buffer has nothing to
-     * trace; gc_trace_children no-ops on NULL slots. */
-    gc_register_tracer(S, GC_T_VAL,        trace_val);
-    gc_register_tracer(S, GC_T_ENV,        trace_env);
-    gc_register_tracer(S, GC_T_VEC_NODE,   trace_vec_node);
-    gc_register_tracer(S, GC_T_HAMT_NODE,  trace_hamt_node);
-    gc_register_tracer(S, GC_T_HAMT_ENTRY, trace_hamt_entry);
-    gc_register_tracer(S, GC_T_PTRARR,     trace_pointer_array);
-    gc_register_tracer(S, GC_T_VALARR,     trace_pointer_array);
-    gc_register_tracer(S, GC_T_RB_NODE,    trace_rb_node);
-    gc_register_tracer(S, GC_T_BC,         trace_bc);
+     * trace; gc_trace_children no-ops on NULL slots.
+     *
+     * Component-owned slots (GC_T_VEC_NODE, GC_T_HAMT_NODE,
+     * GC_T_HAMT_ENTRY, GC_T_RB_NODE, GC_T_BC, GC_T_VAL) are
+     * populated by each component's register hook called from
+     * runtime/state.c::state_init. */
+    gc_register_tracer(S, GC_T_VAL,    trace_val);
+    gc_register_tracer(S, GC_T_ENV,    trace_env);
+    gc_register_tracer(S, GC_T_PTRARR, trace_pointer_array);
+    gc_register_tracer(S, GC_T_VALARR, trace_pointer_array);
+    gc_register_tracer(S, GC_T_BC,     trace_bc);
 }
 
 /* Drain the mark stack until its length drops to floor_len. The floor

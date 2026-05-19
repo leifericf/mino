@@ -121,6 +121,12 @@ struct mino_rb_node {
  * lives in values/internal.h. */
 #include "values/internal.h"
 
+/* Register per-tag GC tracers for the collection node layouts
+ * (vec/hamt/hamt_entry/rb). Called from runtime/state.c::state_init
+ * before the first allocation. Implemented in
+ * src/collections/gc_handlers.c. */
+void mino_collections_register_gc_handlers(mino_state_t *S);
+
 /* ------------------------------------------------------------------------- */
 /* vec.c: persistent vector operations                                       */
 /* ------------------------------------------------------------------------- */
