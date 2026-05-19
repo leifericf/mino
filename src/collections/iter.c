@@ -64,10 +64,157 @@ void mino_iter_done(mino_iter_t *it)
     it->cursor = NULL;
 }
 
+/* Per-collection-kind step. Each handler returns 1 and writes
+ * *out_k / *out_v on a successful step; returns 0 (and typically
+ * clears it->cursor) when the walk is exhausted. The dispatcher
+ * resolves lazies and looks up the handler via k_iter_dispatch[]. */
+typedef int (*iter_step_fn)(mino_iter_t *it, mino_val_t *cur,
+                            mino_type_t kind,
+                            mino_val_t **out_k, mino_val_t **out_v);
+
+static int iter_step_finish(mino_iter_t *it, mino_val_t *cur,
+                            mino_type_t kind,
+                            mino_val_t **out_k, mino_val_t **out_v)
+{
+    (void)cur; (void)kind; (void)out_k; (void)out_v;
+    it->cursor = NULL;
+    return 0;
+}
+
+static int iter_step_cons(mino_iter_t *it, mino_val_t *cur,
+                          mino_type_t kind,
+                          mino_val_t **out_k, mino_val_t **out_v)
+{
+    (void)kind; (void)out_v;
+    if (out_k != NULL) *out_k = cur->as.cons.car;
+    it->cursor = cur->as.cons.cdr;
+    return 1;
+}
+
+static int iter_step_vector(mino_iter_t *it, mino_val_t *cur,
+                            mino_type_t kind,
+                            mino_val_t **out_k, mino_val_t **out_v)
+{
+    (void)kind; (void)out_v;
+    if (it->idx >= cur->as.vec.len) { it->cursor = NULL; return 0; }
+    if (out_k != NULL) *out_k = vec_nth(cur, it->idx);
+    it->idx++;
+    return 1;
+}
+
+static int iter_step_map(mino_iter_t *it, mino_val_t *cur,
+                         mino_type_t kind,
+                         mino_val_t **out_k, mino_val_t **out_v)
+{
+    mino_val_t *ko = cur->as.map.key_order;
+    mino_val_t *k;
+    (void)kind;
+    if (ko == NULL || it->idx >= cur->as.map.len) {
+        it->cursor = NULL; return 0;
+    }
+    k = vec_nth(ko, it->idx);
+    if (out_k != NULL) *out_k = k;
+    if (out_v != NULL) *out_v = map_get_val(cur, k);
+    it->idx++;
+    return 1;
+}
+
+static int iter_step_set(mino_iter_t *it, mino_val_t *cur,
+                         mino_type_t kind,
+                         mino_val_t **out_k, mino_val_t **out_v)
+{
+    mino_val_t *ko = cur->as.set.key_order;
+    (void)kind; (void)out_v;
+    if (ko == NULL || it->idx >= cur->as.set.len) {
+        it->cursor = NULL; return 0;
+    }
+    if (out_k != NULL) *out_k = vec_nth(ko, it->idx);
+    it->idx++;
+    return 1;
+}
+
+static int iter_step_sorted(mino_iter_t *it, mino_val_t *cur,
+                            mino_type_t kind,
+                            mino_val_t **out_k, mino_val_t **out_v)
+{
+    const mino_rb_node_t *node;
+    /* Seed the in-order walk on the first call: push the leftmost
+     * spine starting from the root. */
+    if (!it->rb_started) {
+        const mino_rb_node_t *n = cur->as.sorted.root;
+        it->rb_started = 1;
+        while (n != NULL && it->rb_top < MINO_ITER_RB_STACK_DEPTH) {
+            it->rb_stack[it->rb_top++] = n;
+            n = n->left;
+        }
+    }
+    if (it->rb_top == 0) { it->cursor = NULL; return 0; }
+    node = it->rb_stack[--it->rb_top];
+    if (out_k != NULL) *out_k = node->key;
+    if (out_v != NULL && kind == MINO_SORTED_MAP) *out_v = node->val;
+    /* Push the leftmost spine of the right subtree so the next call
+     * yields the next in-order node. */
+    {
+        const mino_rb_node_t *n = node->right;
+        while (n != NULL && it->rb_top < MINO_ITER_RB_STACK_DEPTH) {
+            it->rb_stack[it->rb_top++] = n;
+            n = n->left;
+        }
+    }
+    return 1;
+}
+
+static int iter_step_chunk(mino_iter_t *it, mino_val_t *cur,
+                           mino_type_t kind,
+                           mino_val_t **out_k, mino_val_t **out_v)
+{
+    (void)kind; (void)out_v;
+    if (it->idx >= cur->as.chunk.len) { it->cursor = NULL; return 0; }
+    if (out_k != NULL) *out_k = cur->as.chunk.vals[it->idx];
+    it->idx++;
+    return 1;
+}
+
+static int iter_step_chunked_cons(mino_iter_t *it, mino_val_t *cur,
+                                  mino_type_t kind,
+                                  mino_val_t **out_k, mino_val_t **out_v)
+{
+    mino_val_t *chunk = cur->as.chunked_cons.chunk;
+    unsigned    off   = cur->as.chunked_cons.off + (unsigned)it->idx;
+    (void)kind;
+    if (chunk == NULL || off >= chunk->as.chunk.len) {
+        /* Walk into the `more` cell, resetting idx for the new
+         * cursor's shape. */
+        it->cursor = cur->as.chunked_cons.more;
+        it->idx    = 0;
+        return mino_iter_next(it, out_k, out_v);
+    }
+    if (out_k != NULL) *out_k = chunk->as.chunk.vals[off];
+    it->idx++;
+    return 1;
+}
+
+static const struct {
+    mino_type_t  kind;
+    iter_step_fn fn;
+} k_iter_dispatch[] = {
+    {MINO_NIL,          iter_step_finish},
+    {MINO_EMPTY_LIST,   iter_step_finish},
+    {MINO_CONS,         iter_step_cons},
+    {MINO_VECTOR,       iter_step_vector},
+    {MINO_MAP,          iter_step_map},
+    {MINO_SET,          iter_step_set},
+    {MINO_SORTED_MAP,   iter_step_sorted},
+    {MINO_SORTED_SET,   iter_step_sorted},
+    {MINO_CHUNK,        iter_step_chunk},
+    {MINO_CHUNKED_CONS, iter_step_chunked_cons},
+};
+
 int mino_iter_next(mino_iter_t *it, mino_val_t **out_k, mino_val_t **out_v)
 {
     mino_val_t *cur;
     mino_type_t kind;
+    size_t      i;
 
     if (out_k != NULL) *out_k = NULL;
     if (out_v != NULL) *out_v = NULL;
@@ -83,103 +230,12 @@ int mino_iter_next(mino_iter_t *it, mino_val_t **out_k, mino_val_t **out_v)
     }
     kind = mino_type_of(cur);
 
-    switch (kind) {
-    case MINO_NIL:
-    case MINO_EMPTY_LIST:
-        it->cursor = NULL;
-        return 0;
-
-    case MINO_CONS: {
-        if (out_k != NULL) *out_k = cur->as.cons.car;
-        it->cursor = cur->as.cons.cdr;
-        return 1;
-    }
-
-    case MINO_VECTOR: {
-        if (it->idx >= cur->as.vec.len) { it->cursor = NULL; return 0; }
-        if (out_k != NULL) *out_k = vec_nth(cur, it->idx);
-        it->idx++;
-        return 1;
-    }
-
-    case MINO_MAP: {
-        mino_val_t *ko = cur->as.map.key_order;
-        if (ko == NULL || it->idx >= cur->as.map.len) {
-            it->cursor = NULL; return 0;
+    for (i = 0; i < sizeof(k_iter_dispatch) / sizeof(k_iter_dispatch[0]); i++) {
+        if (k_iter_dispatch[i].kind == kind) {
+            return k_iter_dispatch[i].fn(it, cur, kind, out_k, out_v);
         }
-        {
-            mino_val_t *k = vec_nth(ko, it->idx);
-            if (out_k != NULL) *out_k = k;
-            if (out_v != NULL) *out_v = map_get_val(cur, k);
-        }
-        it->idx++;
-        return 1;
     }
-
-    case MINO_SET: {
-        mino_val_t *ko = cur->as.set.key_order;
-        if (ko == NULL || it->idx >= cur->as.set.len) {
-            it->cursor = NULL; return 0;
-        }
-        if (out_k != NULL) *out_k = vec_nth(ko, it->idx);
-        it->idx++;
-        return 1;
-    }
-
-    case MINO_SORTED_MAP:
-    case MINO_SORTED_SET: {
-        const mino_rb_node_t *node;
-        /* Seed the in-order walk on the first call: push the leftmost
-         * spine starting from the root. */
-        if (!it->rb_started) {
-            const mino_rb_node_t *n = cur->as.sorted.root;
-            it->rb_started = 1;
-            while (n != NULL && it->rb_top < MINO_ITER_RB_STACK_DEPTH) {
-                it->rb_stack[it->rb_top++] = n;
-                n = n->left;
-            }
-        }
-        if (it->rb_top == 0) { it->cursor = NULL; return 0; }
-        node = it->rb_stack[--it->rb_top];
-        if (out_k != NULL) *out_k = node->key;
-        if (out_v != NULL && kind == MINO_SORTED_MAP) *out_v = node->val;
-        /* Push the leftmost spine of the right subtree so the next
-         * call yields the next in-order node. */
-        {
-            const mino_rb_node_t *n = node->right;
-            while (n != NULL && it->rb_top < MINO_ITER_RB_STACK_DEPTH) {
-                it->rb_stack[it->rb_top++] = n;
-                n = n->left;
-            }
-        }
-        return 1;
-    }
-
-    case MINO_CHUNK: {
-        if (it->idx >= cur->as.chunk.len) { it->cursor = NULL; return 0; }
-        if (out_k != NULL) *out_k = cur->as.chunk.vals[it->idx];
-        it->idx++;
-        return 1;
-    }
-
-    case MINO_CHUNKED_CONS: {
-        mino_val_t *chunk = cur->as.chunked_cons.chunk;
-        unsigned    off   = cur->as.chunked_cons.off + (unsigned)it->idx;
-        if (chunk == NULL || off >= chunk->as.chunk.len) {
-            /* Walk into the `more` cell, resetting idx for the new
-             * cursor's shape. */
-            it->cursor = cur->as.chunked_cons.more;
-            it->idx    = 0;
-            return mino_iter_next(it, out_k, out_v);
-        }
-        if (out_k != NULL) *out_k = chunk->as.chunk.vals[off];
-        it->idx++;
-        return 1;
-    }
-
-    default:
-        /* Not a sequential value -- finish. */
-        it->cursor = NULL;
-        return 0;
-    }
+    /* Not a sequential value -- finish. */
+    it->cursor = NULL;
+    return 0;
 }
