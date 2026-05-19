@@ -1,5 +1,52 @@
 # Changelog
 
+## v0.372.0 — gc/collections Coupling Broken
+
+The last real bidirectional cycle in the architecture, `gc <->
+collections`, is gone. Previously `gc_trace_children` in
+`src/gc/driver.c` was a 280-line switch over every collection node
+layout (`mino_vec_node_t`, `mino_hamt_node_t`, `hamt_entry_t`,
+`mino_rb_node_t`), the bc record (`struct mino_bc_fn`), and the
+union body of `struct mino_val`. gc had to know every downstream
+component's storage shape.
+
+The dispatch now goes through `S->gc_tracers[GC_T__COUNT]`, a
+per-tag function-pointer table populated during state init. Each
+component owns its own tracers and registers them through a small
+hook:
+
+| Component       | Tracer file                          | Tags                                            |
+|-----------------|--------------------------------------|-------------------------------------------------|
+| collections     | `src/collections/gc_handlers.c`      | `GC_T_VEC_NODE`, `GC_T_HAMT_NODE`, `GC_T_HAMT_ENTRY`, `GC_T_RB_NODE` |
+| eval/bc         | `src/eval/bc/gc_handlers.c`          | `GC_T_BC`                                       |
+| values          | `src/values/gc_handlers.c`           | `GC_T_VAL`                                      |
+| gc (residual)   | `src/gc/driver.c`                    | `GC_T_ENV`, `GC_T_PTRARR`, `GC_T_VALARR`        |
+
+The values-side `trace_val` knows the union body, but the two field
+accesses that point into downstream-component structs delegate to
+component-owned helpers:
+
+- `MINO_FN / MINO_MACRO` bc walk → `mino_bc_trace_fn_bc`
+- `MINO_FUTURE` impl walk → `mino_future_trace_impl`
+
+so values/ never has to import `struct mino_bc_fn` or `struct
+mino_future` layouts.
+
+The same registration pattern covers finalizers: `gc_minor_collect`
+and `gc_major_sweep_phase` call `S->gc_finalizers[h->type_tag]`
+instead of hardcoding the `mino_type` dispatch for `MINO_HANDLE` /
+`MINO_BIGINT` / `MINO_RECORD` / `MINO_CHUNK` / `MINO_HOST_ARRAY` /
+`MINO_FUTURE` cleanup.
+
+`src/gc/layout.h` carves the shared substrate (`gc_hdr_t`, `GC_T_*`,
+`GC_GEN_*`, `GC_PHASE_*`, `gc_range_t`, `gc_bump_slab_t`, plus the
+`gc_tracer_fn` / `gc_finalizer_fn` typedefs) into a dedicated header
+that component-side tracers include without dragging the rest of
+`gc/internal.h`.
+
+**Verification.** Full test suite green (1371 tests, 4828 assertions).
+Build clean.
+
 ## v0.371.0 — Values Component
 
 The pointer-tagged value system becomes a first-class component
