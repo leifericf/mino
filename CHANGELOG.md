@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.375.0 — Architecture Cycle 6 (Audit, Splits Deferred)
+
+Cycle 6 set out to split the four mega `prim/` files into per-domain
+sub-folders. On audit the split was descoped: each mega file holds
+40-60 primitives plus per-file `k_<domain>_table[]` registries that
+`prim/install.c` references; a clean cut needs careful per-function
+sub-domain attribution, registry split, and shared-helper rehoming.
+
+| File                    | Lines | Verdict                                      |
+|-------------------------|-------|----------------------------------------------|
+| `prim/sequences.c`      | 3499  | Split into `sequences/{lazy,reduce,seq_fns,transducer,collection_ops}.c` (deferred) |
+| `prim/numeric.c`        | 2806  | Split into `numeric/{tower,math,preds,coerce}.c` (deferred) |
+| `prim/collections.c`    | 2312  | Split into `collections/{vec_ops,map_ops,set_ops,seq_ops}.c` (deferred) |
+| `prim/bignum.c`         | 1797  | Keep as-is; the imath wrapper is one logical unit |
+| `prim/agent.c`          | 1604  | Keep as-is; the agent runtime is one logical unit |
+| `prim/stateful.c`       | 1469  | Optional split (atoms/volatiles/refs); low priority |
+| `prim/string.c`         | 1541  | Optional split; weak sub-domain boundaries |
+
+`.local/cycle-6-followups.md` captures the per-file sub-domain
+breakdown with line ranges, the registry split plan, the recommended
+extraction order, and the verification list. The work resumes from
+that file in a future cycle.
+
+No code change beyond CHANGELOG / version bump.
+
 ## v0.374.0 — mino.h Audited for Embedder Fit
 
 mino is an embeddable Lisp. A single `#include <mino.h>` is the
