@@ -974,6 +974,7 @@ static int bc_cold_op(mino_state_t *S, const mino_bc_fn_t *bc,
         closure->as.fn.defining_ns = child->as.fn.defining_ns;
         *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
         closure->as.fn.shape = child->as.fn.shape;
+        closure->as.fn.template_fn = child;
         regs = S->bc_regs + base;
         regs[a] = closure;
         return 1;

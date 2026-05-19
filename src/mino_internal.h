@@ -219,6 +219,13 @@ struct mino_val {
              * fn is opaque (custom body, multi-arity, captures, etc.)
              * and must use the regular call path. */
             mino_val_t *wraps_prim;
+            /* Closure -> template back-pointer. Closures created by
+             * OP_CLOSURE point at the template fn whose bc / clauses
+             * they inherit; templates and plain fns leave this NULL.
+             * Used by invoke_bc_fn_argv's fold-staleness recompile to
+             * recompile once via the template instead of per-closure.
+             * GC-traced through the MINO_FN walker. */
+            mino_val_t *template_fn;
         } fn;
         struct {          /* MINO_HANDLE: opaque host pointer + tag */
             void       *ptr;

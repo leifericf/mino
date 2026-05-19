@@ -678,6 +678,7 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
             gc_mark_child_push(S, v->as.fn.params);
             gc_mark_child_push(S, v->as.fn.body);
             gc_mark_child_push(S, v->as.fn.env);
+            gc_mark_child_push(S, v->as.fn.template_fn);
             /* Compiled bytecode: the bc record and its code/consts
              * buffers are separate GC allocations reachable only
              * through this field, so each one needs an explicit

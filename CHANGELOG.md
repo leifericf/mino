@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.367.0 — Template-aware bc recompile
+
+Closures share their template's `bc` record by reference
+through `OP_CLOSURE`. The fold-staleness recompile path in
+`invoke_bc_fn_argv` used to null the closure's `bc` and call
+`mino_bc_compile_fn(S, fn)` on the closure itself, producing
+a fresh per-closure `bc`. After many closures from the same
+template hit the staleness branch, each one ended up with
+its own `bc` copy and the dedup that `OP_CLOSURE` set up was
+silently undone.
+
+`mino_val_t.as.fn` grows a `template_fn` back-pointer that
+`OP_CLOSURE` (both the interpreter handler and the JIT slow
+helper) populates with the template fn. The staleness branch
+checks the back-pointer: when set and still pointing at the
+template that owns the stale `bc`, recompile the template
+once and copy its fresh `bc` to every sibling closure that
+hits the branch later. Plain templates and non-closure fns
+leave `template_fn` NULL and follow the legacy recompile-on-
+self path.
+
+The new field is GC-traced through the MINO_FN walker (both
+the production `gc_trace_children` and the `MINO_GC_VERIFY=1`
+walker pick it up) so a closure cannot outlive its template.
+
+**Verification.**
+
+- `task release-gate` clean.
+- `MINO_GC_VERIFY=1 task release-gate` clean.
+- `task test-jit-parity` byte-identical across all 4 binaries.
+
 ## v0.366.0 — JIT slab pool: per-fn slot invalidate
 
 `mino_jit_invalidate` now releases a slab-allocated fn's slot

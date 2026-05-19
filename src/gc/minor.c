@@ -280,7 +280,8 @@ static void gc_verify_remset_complete(mino_state_t *S)
             case MINO_FN: case MINO_MACRO:
                 gc_verify_check(S, h, v->as.fn.params);
                 gc_verify_check(S, h, v->as.fn.body);
-                gc_verify_check(S, h, v->as.fn.env); break;
+                gc_verify_check(S, h, v->as.fn.env);
+                gc_verify_check(S, h, v->as.fn.template_fn); break;
             case MINO_ATOM:
                 gc_verify_check(S, h, v->as.atom.val);
                 gc_verify_check(S, h, v->as.atom.watches);

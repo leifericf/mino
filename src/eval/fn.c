@@ -825,8 +825,20 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
         && fn->as.fn.bc != &mino_bc_declined
         && fn->as.fn.bc->has_folds
         && fn->as.fn.bc->compile_ic_gen != S->ic_gen) {
-        fn->as.fn.bc = NULL;
-        (void)mino_bc_compile_fn(S, fn);
+        /* Template-aware recompile: closures share their template's
+         * bc, so the recompile fires once on the template and every
+         * sibling closure inherits the fresh bc through the back-
+         * pointer. Without this, every closure with stale folds would
+         * rebuild its own bc per call, defeating dedup. */
+        mino_val_t *tmpl = fn->as.fn.template_fn;
+        if (tmpl != NULL && tmpl->as.fn.bc == fn->as.fn.bc) {
+            tmpl->as.fn.bc = NULL;
+            (void)mino_bc_compile_fn(S, tmpl);
+            fn->as.fn.bc = tmpl->as.fn.bc;
+        } else {
+            fn->as.fn.bc = NULL;
+            (void)mino_bc_compile_fn(S, fn);
+        }
     }
     mino_bc_check_require(S, fn);
     if (!MINO_BC_RUNNABLE(fn)) {

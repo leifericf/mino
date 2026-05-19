@@ -656,6 +656,7 @@ mino_val_t **mino_jit_closure_slow(mino_state_t *S, mino_val_t **regs,
     closure->as.fn.defining_ns = child->as.fn.defining_ns;
     *(const mino_bc_fn_t **)&closure->as.fn.bc = child->as.fn.bc;
     closure->as.fn.shape = child->as.fn.shape;
+    closure->as.fn.template_fn = child;
     regs    = S->bc_regs + base;
     regs[a] = closure;
     return regs;
