@@ -598,6 +598,8 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
                  * gc_mark_bc_ic_slots is the single authority on the
                  * slot-kind -> field mapping. */
                 gc_mark_bc_ic_slots(S, bc);
+                /* Optional ic_stats POD buffer (MINO_JIT_IC_STATS=1). */
+                gc_mark_child_push(S, bc->ic_stats);
             }
             break;
         case MINO_ATOM:
@@ -784,6 +786,10 @@ void gc_trace_children(mino_state_t *S, gc_hdr_t *h)
         gc_mark_child_push(S, bc->clauses);
         gc_mark_child_push(S, bc->source_map.positions);
         gc_mark_bc_ic_slots(S, bc);
+        /* Optional ic_stats POD buffer (allocated only under
+         * MINO_JIT_IC_STATS=1). Plain GC_T_RAW counters; no embedded
+         * pointers, so the buffer itself is the only thing to mark. */
+        gc_mark_child_push(S, bc->ic_stats);
         break;
     }
     case GC_T_RAW:

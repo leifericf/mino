@@ -691,12 +691,48 @@ static unsigned char classify_callable_kind(mino_val_t *v,
  * On a fresh resolve the slot is refilled under a write barrier so
  * the slot array, which may be OLD after a minor cycle, keeps a
  * correct remset entry for the freshly resolved YOUNG value. */
+/* Env-gated lazy alloc of the per-IC-site stat buffer. Returns the
+ * slot's triple, or NULL if MINO_JIT_IC_STATS is not set. Process-
+ * global tri-state so the env probe runs once. */
+static mino_bc_ic_stat_t *ic_stat_for(mino_state_t *S,
+                                       const mino_bc_fn_t *bc,
+                                       int slot_idx)
+{
+    static int ic_stats_enabled = -1;
+    if (ic_stats_enabled == -1) {
+        const char *e = getenv("MINO_JIT_IC_STATS");
+        ic_stats_enabled = (e != NULL && e[0] != '\0' && e[0] != '0')
+                           ? 1 : 0;
+    }
+    if (!ic_stats_enabled) return NULL;
+    if (bc == NULL || bc->ic_slots_len <= 0) return NULL;
+    if (slot_idx < 0 || slot_idx >= bc->ic_slots_len) return NULL;
+    if (bc->ic_stats == NULL) {
+        /* GC_T_RAW: pure POD counters, no GC pointers inside. The
+         * GC_T_BC walker keeps the buffer alive while bc is alive
+         * via an explicit gc_mark_child_push. */
+        size_t bytes = sizeof(mino_bc_ic_stat_t)
+                       * (size_t)bc->ic_slots_len;
+        mino_bc_ic_stat_t *buf = (mino_bc_ic_stat_t *)gc_alloc_typed(
+            S, GC_T_RAW, bytes);
+        if (buf == NULL) return NULL;
+        memset(buf, 0, bytes);
+        /* Write barrier: bc may be OLD. The buffer is YOUNG until the
+         * next major; the barrier installs the remset entry so the
+         * next minor can reach it. */
+        gc_write_barrier(S, (void *)bc, NULL, buf);
+        ((mino_bc_fn_t *)bc)->ic_stats = buf;
+    }
+    return &bc->ic_stats[slot_idx];
+}
+
 static mino_val_t *ic_resolve_global(mino_state_t *S,
                                       const mino_bc_fn_t *bc,
                                       mino_bc_ic_slot_t *slot,
                                       mino_env_t *env,
                                       int dyn_active)
 {
+    int slot_idx = (int)(slot - bc->ic_slots);
     if (dyn_active && slot->sym != NULL) {
         mino_val_t *dyn_v = dyn_lookup(S, slot->sym->as.s.data);
         if (dyn_v != NULL) return dyn_v;
@@ -708,11 +744,23 @@ static mino_val_t *ic_resolve_global(mino_state_t *S,
     if (!dyn_active
         && slot->cached != NULL
         && slot->gen == S->ic_gen) {
+        mino_bc_ic_stat_t *st = ic_stat_for(S, bc, slot_idx);
+        if (st != NULL) st->hits++;
         return slot->cached;
     }
     mino_val_t *v = resolve_global(S, slot->sym, env);
     if (v == NULL) return NULL;
     if (!dyn_active) {
+        /* Count this as miss; if the cached pointer was non-NULL and
+         * different from the new value, also count as thrash (the
+         * "previously cached X, now cached Y" megamorphism signal). */
+        mino_bc_ic_stat_t *st = ic_stat_for(S, bc, slot_idx);
+        if (st != NULL) {
+            st->misses++;
+            if (slot->cached != NULL && slot->cached != v) {
+                st->thrash++;
+            }
+        }
         unsigned char  has_rest = 0;
         unsigned short n_params = 0;
         unsigned char  kind     = classify_callable_kind(v, &has_rest,

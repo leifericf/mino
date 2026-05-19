@@ -1,5 +1,42 @@
 # Changelog
 
+## v0.346.2 — Per-site IC stats (env-gated)
+
+`MINO_JIT_IC_STATS=1` lazily allocates a parallel POD buffer of
+`mino_bc_ic_stat_t { uint64_t hits; uint64_t misses; uint64_t
+thrash; }` triples sized to `ic_slots_len` on the first IC
+resolve per bc. The buffer is `GC_T_RAW` and reached via
+`gc_trace_children` in both the `MINO_FN` and `GC_T_BC` cases so
+it stays alive while bc lives.
+
+Counters tick inside `ic_resolve_global` only — the JIT inline
+fast path (slot hit verified in machine code, slow helper never
+called) does NOT increment. This means:
+
+- **Misses**: accurate across interpreter + JIT (every cold or
+  invalidated slot goes through `ic_resolve_global`).
+- **Thrash**: accurate (same path; `cached != v` distinguishes a
+  re-resolved-to-different-value miss).
+- **Hits**: interpreter only. JIT-inline-cached hits don't fire
+  the slow helper, so they are uncounted. Hit rate computed from
+  this surface is therefore a lower bound; combine with the
+  v0.346.0 invocation counter to estimate (`invocations -
+  misses` ≈ effective hits across all paths).
+
+The `MINO_CPJIT_STATS=tracing` per-fn dump now prints an
+`ic-sites (slot: hits / misses / thrash)` block for fns whose
+`ic_stats` buffer has any non-zero entries, ordered by slot
+index for stable diffs across runs.
+
+Probe (caller -> helper via 200-iter loop with 3 interpreter
+warmups): slot 0 reports `98 / 1 / 0`. The miss is the cold
+resolve; the 98 hits are the interpreter calls before the JIT
+threshold trips. Post-JIT calls (~100) are uncounted because
+the inline path serves them.
+
+`task release-gate` is OK. Default builds carry zero overhead
+(env probe is a single static-initialised tri-state check).
+
 ## v0.346.1 — Per-fn JIT wall-time (env-gated)
 
 Two new `mino_bc_fn_t` fields, populated only when

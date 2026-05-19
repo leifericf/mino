@@ -268,6 +268,24 @@ static void cpjit_stats_dump(void)
                         "    wall: total=%llu ns  avg=%llu ns  max=%llu ns\n",
                         tns, avg, mns);
             }
+            /* Per-site IC stats addendum: printed only when ic_stats is
+             * populated (MINO_JIT_IC_STATS=1 was set early enough to
+             * cover any resolve on this bc). Per-site, ordered by
+             * slot index so the dump remains stable across runs. */
+            if (e->bc->ic_stats != NULL && e->bc->ic_slots_len > 0) {
+                fprintf(stderr,
+                        "    ic-sites (slot: hits / misses / thrash):\n");
+                for (int s = 0; s < e->bc->ic_slots_len; s++) {
+                    mino_bc_ic_stat_t *st = &e->bc->ic_stats[s];
+                    if (st->hits == 0 && st->misses == 0) continue;
+                    fprintf(stderr,
+                            "      [%2d]  %llu / %llu / %llu\n",
+                            s,
+                            (unsigned long long)st->hits,
+                            (unsigned long long)st->misses,
+                            (unsigned long long)st->thrash);
+                }
+            }
             n++;
         }
         fprintf(stderr, "[cpjit-stats] ---- %zu fns tracked ----\n", n);

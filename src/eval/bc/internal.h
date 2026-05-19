@@ -470,7 +470,22 @@ typedef struct mino_bc_fn {
      * is cumulative; native_max_ns is the slowest single invocation. */
     uint64_t         jit_native_total_ns;
     uint32_t         jit_native_max_ns;
+    /* Per-IC-site hit / miss / thrash counters. NULL by default; when
+     * MINO_JIT_IC_STATS=1 is set in the environment, the first IC
+     * resolve on a fn allocates this as a GC_T_RAW buffer of
+     * mino_bc_ic_stat_t triples sized to ic_slots_len. The GC walk in
+     * driver.c's GC_T_BC case keeps the buffer alive while bc is alive.
+     * Each tick adds one increment on the hot path; per-site rather
+     * than per-op so the dashboard can rank specific call sites. */
+    struct mino_bc_ic_stat *ic_stats;
 } mino_bc_fn_t;
+
+typedef struct mino_bc_ic_stat {
+    uint64_t hits;
+    uint64_t misses;
+    uint64_t thrash; /* misses with a different resolved target than
+                      * the previous miss (megamorphism signal) */
+} mino_bc_ic_stat_t;
 
 /* Stencil ABI boundary invariant.
  *
