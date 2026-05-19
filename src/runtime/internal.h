@@ -1448,6 +1448,16 @@ struct mino_state {
     int                      jit_resume_saved_try_depth;
     int                      jit_resume_saved_bc_catch_depth;
     struct dyn_frame        *jit_resume_saved_dyn_stack;
+
+    /* JIT slab pool: small fns (need_bytes <= MINO_JIT_SLAB_CUTOFF)
+     * share host pages instead of mmap'ing one page per fn. Reduces
+     * per-fn JIT memory footprint from one page-worth of waste to
+     * (slab_size - aggregate-slot-bytes) per slab. Slabs are RX-
+     * sealed between compiles and RW-flipped for the duration of
+     * each fill via mprotect; mino_jit_slab_alloc/seal manage the
+     * cycle. Tail-placed so the runtime_layout.h JIT-pinned offsets
+     * stay stable. */
+    struct mino_jit_slab    *jit_slabs;
 };
 
 /* Resolve the active per-thread ctx for state S.

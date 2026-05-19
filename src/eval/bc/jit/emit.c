@@ -43,6 +43,7 @@
 
 #ifdef MINO_CPJIT_HOST
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -117,6 +118,106 @@ static int region_track(mino_state_t *S, void *ptr, size_t size, void *aux_ptr)
     return 0;
 }
 
+/* ----- slab pool ----------------------------------------------------------- */
+
+/* Cutoff for slab-pool eligibility. Fns whose pre-page-rounding
+ * `need_bytes` fits under this size go through the slab pool; larger
+ * fns keep the one-page-per-fn allocator. Sized just below the
+ * smallest host page (Linux x86_64 = 4 KB) so the same cutoff is
+ * meaningful across all hosts; on macOS arm64 with a 16 KB page,
+ * multiple slots fit per slab. */
+#define MINO_JIT_SLAB_CUTOFF      ((size_t)4096)
+
+/* Per-slot alignment. Stencil-emitted code is read by the host CPU;
+ * keeping slots 16-byte-aligned matches the alignment trampoline /
+ * pool layout already assumes inside a single fn. */
+#define MINO_JIT_SLAB_SLOT_ALIGN  ((size_t)16)
+
+static struct mino_jit_slab *jit_slab_alloc_new(mino_state_t *S, size_t need)
+{
+    struct mino_jit_slab *slab;
+    long                  page_l;
+    size_t                page;
+    void                 *p;
+    page_l = jit_region_page_size();
+    if (page_l <= 0) return NULL;
+    page = (size_t)page_l;
+    /* For requests larger than one host page, span enough pages. */
+    if (need > page) {
+        page = (need + page - 1) & ~(page - 1);
+    }
+    p = jit_region_alloc(page);
+    if (p == MINO_JIT_REGION_ALLOC_FAILED) return NULL;
+    slab = (struct mino_jit_slab *)malloc(sizeof(*slab));
+    if (slab == NULL) {
+        jit_region_free(p, page);
+        return NULL;
+    }
+    slab->page        = p;
+    slab->page_size   = page;
+    slab->bump_offset = 0;
+    slab->live_slots  = 0;
+    slab->next        = S->jit_slabs;
+    S->jit_slabs      = slab;
+    return slab;
+}
+
+/* Find a slab with room for `need` aligned bytes; allocate a new
+ * slab when no fit. Returns the slab whose `page` + current
+ * `bump_offset` is the slot start. Caller is responsible for the
+ * RW/RX cycle around the fill. */
+static struct mino_jit_slab *jit_slab_acquire(mino_state_t *S, size_t need)
+{
+    struct mino_jit_slab *slab;
+    size_t                aligned;
+    aligned = (need + MINO_JIT_SLAB_SLOT_ALIGN - 1)
+              & ~(MINO_JIT_SLAB_SLOT_ALIGN - 1);
+    for (slab = S->jit_slabs; slab != NULL; slab = slab->next) {
+        if (slab->bump_offset + aligned <= slab->page_size) {
+            return slab;
+        }
+    }
+    return jit_slab_alloc_new(S, aligned);
+}
+
+static int jit_slab_make_rw(struct mino_jit_slab *slab)
+{
+#ifdef _WIN32
+    DWORD old;
+    return VirtualProtect(slab->page, slab->page_size,
+                          PAGE_READWRITE, &old) ? 0 : -1;
+#else
+    return mprotect(slab->page, slab->page_size,
+                    PROT_READ | PROT_WRITE);
+#endif
+}
+
+static int jit_slab_make_rx(struct mino_jit_slab *slab)
+{
+#ifdef _WIN32
+    DWORD old;
+    return VirtualProtect(slab->page, slab->page_size,
+                          PAGE_EXECUTE_READ, &old) ? 0 : -1;
+#else
+    return mprotect(slab->page, slab->page_size,
+                    PROT_READ | PROT_EXEC);
+#endif
+}
+
+/* Compile failure cleanup: release the JIT memory acquired for the
+ * compile. Slab path: re-seal the page to RX (the bump cursor stays
+ * unchanged, so the just-attempted slot bytes are reusable by the
+ * next compile). Legacy path: munmap the fn's dedicated page. */
+static void jit_compile_cleanup(struct mino_jit_slab *slab, void *region,
+                                size_t total_size)
+{
+    if (slab != NULL) {
+        (void)jit_slab_make_rx(slab);
+    } else {
+        jit_compile_cleanup(slab, region, total_size);
+    }
+}
+
 void mino_jit_free_all(mino_state_t *S)
 {
     struct mino_jit_region *node = S->jit_regions;
@@ -128,6 +229,16 @@ void mino_jit_free_all(mino_state_t *S)
         node = next;
     }
     S->jit_regions = NULL;
+    {
+        struct mino_jit_slab *slab = S->jit_slabs;
+        while (slab != NULL) {
+            struct mino_jit_slab *next = slab->next;
+            if (slab->page != NULL) jit_region_free(slab->page, slab->page_size);
+            free(slab);
+            slab = next;
+        }
+        S->jit_slabs = NULL;
+    }
 }
 
 /* ----- emit one stencil instance ----------------------------------------- */
@@ -483,8 +594,27 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
     size_t page       = (size_t)page_l;
     size_t total_size = (need_bytes + page - 1) & ~(page - 1);
 
-    void *region = jit_region_alloc(total_size);
-    if (region == MINO_JIT_REGION_ALLOC_FAILED) return -1;
+    /* Allocation: small fns (need_bytes <= MINO_JIT_SLAB_CUTOFF) come
+     * out of the slab pool; the slab is flipped RW for the duration
+     * of this fill and back to RX after the I-cache flush. Larger fns
+     * keep the legacy one-page-per-fn mmap path so a single oversized
+     * compile cannot lock a slab into RW for an extended window. */
+    struct mino_jit_slab *slab        = NULL;
+    size_t                slot_offset = 0;
+    size_t                slot_size   = 0;
+    void                 *region;
+    if (need_bytes <= MINO_JIT_SLAB_CUTOFF) {
+        slab = jit_slab_acquire(S, need_bytes);
+        if (slab == NULL) return -1;
+        if (jit_slab_make_rw(slab) != 0) return -1;
+        slot_offset = slab->bump_offset;
+        slot_size   = (need_bytes + MINO_JIT_SLAB_SLOT_ALIGN - 1)
+                      & ~(MINO_JIT_SLAB_SLOT_ALIGN - 1);
+        region      = (unsigned char *)slab->page + slot_offset;
+    } else {
+        region = jit_region_alloc(total_size);
+        if (region == MINO_JIT_REGION_ALLOC_FAILED) return -1;
+    }
 
     /* Per-pc → native offset side table. Sized to code_len; written
      * during the layout walk below. Held in a malloc'd buffer because
@@ -492,7 +622,11 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
      * scan would otherwise treat the integer slots as live edges. */
     unsigned *pc_offsets = (unsigned *)malloc(bc->code_len * sizeof(unsigned));
     if (pc_offsets == NULL) {
-        jit_region_free(region, total_size);
+        if (slab != NULL) {
+            (void)jit_slab_make_rx(slab);
+        } else {
+            jit_compile_cleanup(slab, region, total_size);
+        }
         return -1;
     }
 
@@ -502,7 +636,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
     inst_t *insts = (inst_t *)malloc(bc->code_len * sizeof(*insts));
     if (insts == NULL) {
         free(pc_offsets);
-        jit_region_free(region, total_size);
+        jit_compile_cleanup(slab, region, total_size);
         return -1;
     }
     size_t n_inst = 0;
@@ -560,7 +694,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
         if (n < 0) {
             free(insts);
             free(pc_offsets);
-            jit_region_free(region, total_size);
+            jit_compile_cleanup(slab, region, total_size);
             return -1;
         }
         insts[n_inst].native_start = pos;
@@ -611,7 +745,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
         if (n < 0) {
             free(insts);
             free(pc_offsets);
-            jit_region_free(region, total_size);
+            jit_compile_cleanup(slab, region, total_size);
             return -1;
         }
         insts[n_inst].native_start = pos;
@@ -667,7 +801,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
             if (sym >= st->nsymbols) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
             if (strcmp(st->symbols[sym], MINO_JIT_CHAIN_MARKER_NAME) != 0) {
@@ -679,21 +813,21 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
             if (kind != MINO_STENCIL_RELOC_ARM64_BRANCH26) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
             if (mino_jit_patch_b_unconditional((uint32_t *)insn_p, insn_addr,
                                                 next_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
 #elif defined(MINO_CPJIT_HOST_X86_64)
             if (kind != MINO_STENCIL_RELOC_X86_64_PC32) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
             /* The musttail call landed as `e9 <rel32>` (5 bytes).
@@ -705,7 +839,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
                                           next_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
 #endif
@@ -714,7 +848,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
         if (!any) {
             free(insts);
             free(pc_offsets);
-            jit_region_free(region, total_size);
+            jit_compile_cleanup(slab, region, total_size);
             return -1;
         }
     }
@@ -738,7 +872,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
         if (target_pc < 0 || (size_t)target_pc >= effective_code_len) {
             free(insts);
             free(pc_offsets);
-            jit_region_free(region, total_size);
+            jit_compile_cleanup(slab, region, total_size);
             return -1;
         }
         uintptr_t target_addr = code_base + pc_offsets[target_pc];
@@ -750,7 +884,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
                                                 insn_addr, target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
 #elif defined(MINO_CPJIT_HOST_X86_64)
@@ -758,7 +892,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
                                          target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
 #endif
@@ -775,7 +909,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
              || mino_jit_patch_imm19(bls_p, base_a + 16, target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
 #elif defined(MINO_CPJIT_HOST_X86_64)
@@ -789,7 +923,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
                                          target_addr) != 0) {
                 free(insts);
                 free(pc_offsets);
-                jit_region_free(region, total_size);
+                jit_compile_cleanup(slab, region, total_size);
                 return -1;
             }
 #endif
@@ -801,40 +935,69 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
      * instructions. On ARM64 the data and instruction caches are
      * coherent only after explicit maintenance; clang's builtin
      * issues `dc cvau` + `dsb ish` + `ic ivau` + `dsb ish` + `isb`
-     * the way the architecture requires. */
-    __builtin___clear_cache((char *)region, (char *)region + total_size);
-
-    /* Switch the whole region to RX. The literal pool is read-only at
-     * this point too -- the patcher already populated it. */
-    if (jit_region_make_rx(region, total_size) != 0) {
-        jit_region_free(region, total_size);
-        return -1;
+     * the way the architecture requires. The range is the slot for
+     * slab fns (so a slab past slot 0 doesn't clear past its page)
+     * and the whole region for legacy fns. */
+    {
+        size_t flush_bytes = (slab != NULL) ? slot_size : total_size;
+        __builtin___clear_cache((char *)region,
+                                (char *)region + flush_bytes);
     }
 
-    if (region_track(S, region, total_size, pc_offsets) != 0) {
-        free(pc_offsets);
-        jit_region_free(region, total_size);
-        return -1;
+    /* Re-seal the JIT memory. Slab path: mprotect the whole slab page
+     * back to RX (one syscall covers every slot in the page, so the
+     * cost amortises across compiles). Legacy path: mprotect the fn's
+     * dedicated page to RX. The literal pool is read-only at this
+     * point too -- the patcher already populated it. */
+    if (slab != NULL) {
+        if (jit_slab_make_rx(slab) != 0) {
+            free(pc_offsets);
+            return -1;
+        }
+    } else {
+        if (jit_region_make_rx(region, total_size) != 0) {
+            jit_compile_cleanup(slab, region, total_size);
+            return -1;
+        }
     }
 
+    /* Legacy path: track the region for state-teardown munmap. Slab
+     * path: the slab itself is tracked on S->jit_slabs and the
+     * pc_offsets table is freed by per-fn invalidate (see
+     * mino_jit_invalidate). */
+    if (slab == NULL) {
+        if (region_track(S, region, total_size, pc_offsets) != 0) {
+            free(pc_offsets);
+            jit_compile_cleanup(slab, region, total_size);
+            return -1;
+        }
+    }
+
+    if (slab != NULL) {
+        slab->bump_offset = slot_offset + slot_size;
+        slab->live_slots++;
+    }
     bc->native            = region;
-    bc->native_size       = total_size;
+    bc->native_size       = (slab != NULL) ? slot_size : total_size;
     bc->native_gen        = S->ic_gen;
-    /* The offsets table is owned by the jit_regions node so a prior
-     * compile's table is still reachable through the list. Pointing
-     * bc here to the fresh table is the visible-to-runtime atomic. */
+    bc->native_slab       = slab;
+    /* The offsets table is owned by the jit_regions node (legacy) or
+     * the bc record itself (slab path; freed by mino_jit_invalidate).
+     * Pointing bc here to the fresh table is the visible-to-runtime
+     * atomic. */
     bc->native_pc_offsets = pc_offsets;
     /* Instrumentation: record the code-stream size (no tramp / pool /
-     * slack) and the dead-byte slack at the end of the region.
-     * (region_bytes - code - tramp - pool) is the slack the region
-     * allocator left because it rounds up to page boundaries. */
+     * slack) and the dead-byte slack at the end of the region. The
+     * slack is the per-slot intra-alignment padding for slab fns and
+     * the page-rounding waste for legacy fns. */
     {
-        size_t used = pos + tramp_pos + pool_pos;
+        size_t used  = pos + tramp_pos + pool_pos;
+        size_t total = (slab != NULL) ? slot_size : total_size;
         bc->jit_code_bytes        = (pos > UINT32_MAX) ? UINT32_MAX
                                                        : (uint32_t)pos;
-        bc->jit_code_region_dead  = (total_size > used)
-            ? ((total_size - used > UINT32_MAX) ? UINT32_MAX
-                                                : (uint32_t)(total_size - used))
+        bc->jit_code_region_dead  = (total > used)
+            ? ((total - used > UINT32_MAX) ? UINT32_MAX
+                                            : (uint32_t)(total - used))
             : 0u;
     }
     /* Optional diagnostic: emit a stderr line on each compile when

@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.365.0 — JIT slab pool: infra + small-fn wire-up
+
+Small JIT'd fns (`need_bytes <= 4 KB` pre-page-rounding) now
+share host pages from a per-state slab pool instead of
+mmap'ing a dedicated page per fn. The previous one-page-per-fn
+allocator left 92-99 % of each page dead -- a 200-byte body
+on macOS arm64 (16 KB pages) wasted 16 184 bytes. The slab
+pool packs slot-by-slot until a page fills, then allocates a
+fresh slab.
+
+**What changes.**
+
+- `struct mino_jit_slab` carries one mmap'd page, a 16-byte-
+  aligned bump cursor, a `live_slots` refcount, and a chain
+  link into the per-state `jit_slabs` list.
+- `jit_slab_acquire` walks the chain, returns the first slab
+  with room, or allocates a fresh one. Slots are aligned to
+  16 bytes; the [code|tramp|pool] layout that the legacy
+  path uses fits unchanged inside each slot.
+- Each compile flips the chosen slab RW via `mprotect`,
+  fills the slot, runs `__builtin___clear_cache` over the
+  slot range, then flips the slab back to RX. The cycle is
+  per-compile; running code in other slots stays sealed RX
+  outside the fill window.
+- Fns above the cutoff keep the legacy one-page-per-fn
+  `jit_region_alloc` path -- no compile-time path change for
+  the rare oversized body, and a single jumbo compile cannot
+  lock a slab into RW.
+
+`mino_bc_fn_t` grows one new pointer (`native_slab`) so the
+per-fn invalidate path scheduled for v0.366.0 can locate the
+owning slab. The `jit_regions` list keeps tracking legacy
+allocations; slab pages live on the new `jit_slabs` list and
+are munmap'd at state teardown.
+
+**Verification.**
+
+- `task release-gate` clean.
+- `MINO_GC_VERIFY=1 task release-gate` clean.
+- `task test-jit-parity` byte-identical across all 4 binaries.
+
+The measured win on JIT footprint surfaces once v0.366's
+invalidate path lands (so a redef storm doesn't pin every
+slot's contribution to the slab).
+
 ## v0.364.0 — SATB drop, end-of-mark re-rooting
 
 The hybrid Yuasa-plus-Dijkstra write barrier drops its
