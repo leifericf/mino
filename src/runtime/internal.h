@@ -1015,48 +1015,7 @@ static inline void mino_unlock(mino_state_t *S)
 #include "runtime/error_diag.h"
 #include "runtime/env_api.h"
 
-/* ------------------------------------------------------------------------- */
-/* ns_env.c: per-namespace root env table.                                   */
-/*                                                                           */
-/* Each ns has a root env owning that ns's def/refer bindings. Every ns env  */
-/* except clojure.core has parent → clojure.core, so unqualified lookup     */
-/* walks lexical → current-ns env → clojure.core env.                        */
-/* ------------------------------------------------------------------------- */
-
-void load_stack_truncate(mino_state_t *S, size_t len);
-mino_env_t *ns_env_lookup(mino_state_t *S, const char *name);   /* borrowed */
-mino_env_t *ns_env_ensure(mino_state_t *S, const char *name);   /* GC-owned, rooted */
-mino_val_t *ns_symbol_with_meta(mino_state_t *S, const char *name);
-void        mino_publish_current_ns(mino_state_t *S);
-mino_val_t *ns_env_get_meta(mino_state_t *S, const char *name);
-void        ns_env_set_meta(mino_state_t *S, const char *name, mino_val_t *meta);
-mino_env_t *current_ns_env(mino_state_t *S);                    /* GC-owned, rooted */
-
-/* ------------------------------------------------------------------------- */
-/* var.c: var registry helpers                                               */
-/* ------------------------------------------------------------------------- */
-
-mino_val_t    *var_intern(mino_state_t *S, const char *ns, const char *name);
-void           var_set_root(mino_state_t *S, mino_val_t *var, mino_val_t *val);
-mino_val_t    *var_find(mino_state_t *S, const char *ns, const char *name);
-void           var_unintern(mino_state_t *S, const char *ns, const char *name);
-
-/* ------------------------------------------------------------------------- */
-/* state.c: per-state PRNG. Seeds lazily on first call.                      */
-/* ------------------------------------------------------------------------- */
-
-uint64_t state_rand64(mino_state_t *S);
-
-/* ------------------------------------------------------------------------- */
-/* module.c: shared module-resolution helpers used by the                    */
-/* ns special form (eval/defs.c) and the require primitive                   */
-/* (prim/module.c).                                                          */
-/* ------------------------------------------------------------------------- */
-
-int  runtime_module_dotted_to_path(const char *name, size_t nlen,
-                                   char *buf, size_t bufsize);
-int  runtime_module_add_alias(mino_state_t *S,
-                              const char *alias, const char *full);
+#include "runtime/var_module.h"
 
 /* ------------------------------------------------------------------------- */
 /* Monotonic wall-clock nanoseconds. Uses CLOCK_MONOTONIC on POSIX,          */
