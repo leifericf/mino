@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.358.0 — Anonymous-fn bc dedup deferred (diagnostic logged)
+
+Cycle F item 4 ("Anonymous-fn bc dedup cache") was scoped to
+address the pipeline workload's 168 `:bc` per pipeline run.
+Diagnostic instrumentation localised the actual mechanism:
+when a closure inherits its template's bc and the bc carries
+`has_folds == true`, the `compile_ic_gen != S->ic_gen` check
+in `invoke_bc_fn_argv` (src/eval/fn.c:805) recompiles bc
+**per closure** -- one `GC_T_BC` alloc per closure invocation
+whose template's bc has been invalidated by an interleaved
+`ic_gen` advance.
+
+The trace on a 100-iter pipeline workload confirms it:
+~100 `[bc-compile-fn]` events, all sharing the same
+`params` / `body` pointer pair (i.e., the same source
+template). Each event allocates a fresh `mino_bc_fn_t`,
+because the recompile path overwrites the *closure's* bc
+field, never reaching the template's bc.
+
+The plan's content-hashed fn-template cache solves the
+problem in the general case, but the simpler fix --
+template-aware recompile, where invalidation re-runs
+`mino_bc_compile_fn` against the *template* and rebroadcasts
+the fresh bc pointer to all closures created since the last
+`ic_gen` advance -- is local and well-bounded.
+
+Either path is more than a single-release cycle. Combined
+with the v0.356 / v0.357 JIT slab pool deferral, the
+follow-on cycle's two clearest entries are now:
+
+1. JIT slab pool (W^X-aware sub-allocator).
+2. Template-aware bc recompile (closure invalidation
+   propagates via the template, not per-closure).
+
+Both have measurement-evidence-backed leverage at this
+runtime layer. The diagnostic that surfaced item 2 is
+captured here so the follow-on cycle starts with the root
+cause, not the symptom.
+
 ## v0.357.0 — JIT per-fn slot invalidate (folded into v0.356 deferral)
 
 Part 2 of the JIT slab pool work. The per-fn invalidate path
