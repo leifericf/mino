@@ -221,6 +221,7 @@ static void state_init(mino_state_t *S)
      * all-NULL; the defaults populate every gc-owned tag, then each
      * component register hook populates its own. */
     gc_register_default_tracers(S);
+    mino_values_register_gc_handlers(S);
     mino_collections_register_gc_handlers(S);
     mino_bc_register_gc_handlers(S);
 }

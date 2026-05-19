@@ -845,6 +845,21 @@ void mino_future_gc_trace(mino_val_t *fut)
  * decremented thread_count and is past its last lock acquire, so a
  * pthread_join here is safe and never blocks indefinitely. impl->mu is
  * destroyed only after the join. */
+void gc_mark_child_push_exported(mino_state_t *S, const void *p);
+
+void mino_future_trace_impl(mino_state_t *S, const mino_val_t *fut)
+{
+    mino_future_t *impl;
+    if (fut == NULL || mino_type_of(fut) != MINO_FUTURE) return;
+    impl = fut->as.future.impl;
+    if (impl == NULL) return;
+    gc_mark_child_push_exported(S, impl->result);
+    gc_mark_child_push_exported(S, impl->exception);
+    gc_mark_child_push_exported(S, impl->thunk);
+    gc_mark_child_push_exported(S, impl->body_env);
+    gc_mark_child_push_exported(S, impl->dyn_snapshot);
+}
+
 void mino_future_gc_sweep(mino_val_t *fut)
 {
     mino_future_t *impl;

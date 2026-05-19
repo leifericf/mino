@@ -733,5 +733,9 @@ void mino_bc_check_require(struct mino_state *S, mino_val_t *fn);
  * re-implementing the slot-kind dispatch. */
 void mino_bc_register_gc_handlers(mino_state_t *S);
 void mino_bc_trace_ic_slots(mino_state_t *S, const struct mino_bc_fn *bc);
+/* Walk a MINO_FN.bc field (and its sub-buffers) when present. The
+ * argument is typed `const void *` so callers in upstream components
+ * (values/gc_handlers.c) don't need struct mino_bc_fn in scope. */
+void mino_bc_trace_fn_bc(mino_state_t *S, const void *bc_ptr);
 
 #endif /* MINO_EVAL_BC_INTERNAL_H */

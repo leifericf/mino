@@ -53,6 +53,10 @@ int mino_eq_force(mino_state_t *S, const mino_val_t *a, const mino_val_t *b);
 mino_val_t *mino_mk_var(mino_state_t *S, const char *ns, const char *name,
                         mino_val_t *root);
 
+/* Register the GC tracer for GC_T_VAL. Called from
+ * runtime/state.c::state_init before the first allocation. */
+void mino_values_register_gc_handlers(mino_state_t *S);
+
 #ifdef __cplusplus
 }
 #endif

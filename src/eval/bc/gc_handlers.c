@@ -59,6 +59,40 @@ static void trace_bc(mino_state_t *S, gc_hdr_t *h)
     PUSH(bc->ic_stats);
 }
 
+/* Walk a MINO_FN's bc record (and its sub-buffers) when present.
+ * The values-side trace_val tracer delegates here so it doesn't
+ * have to know struct mino_bc_fn's layout. Compiled bytecode: the
+ * bc record and its code/consts/clauses buffers are separate GC
+ * allocations reachable only through MINO_FN.bc, so each one needs
+ * an explicit push. The const pool is GC_T_VALARR so the GC's
+ * tag-walk scans its slots automatically once the buffer itself
+ * is marked. */
+void mino_bc_trace_fn_bc(mino_state_t *S, const void *bc_ptr)
+{
+    const struct mino_bc_fn *bc = (const struct mino_bc_fn *)bc_ptr;
+    int i;
+    if (bc == NULL || bc == &mino_bc_declined) return;
+    PUSH(bc);
+    PUSH(bc->code);
+    PUSH(bc->consts);
+    PUSH(bc->clauses);
+    /* Clause params_vec: when the compiler rewrites a destructuring
+     * param list it mints a fresh gensym vector and stores it on the
+     * clause. The original (pre-rewrite) params vector still hangs
+     * off fn.params, but the gensym vector is reachable ONLY via
+     * clauses[i].params_vec. clauses is GC_T_RAW (POD), so the GC's
+     * tag-walk can't see its embedded value pointers -- push them
+     * explicitly here so gensym slots survive the next major cycle. */
+    if (bc->clauses != NULL && bc->n_clauses > 0) {
+        for (i = 0; i < bc->n_clauses; i++) {
+            PUSH(bc->clauses[i].params_vec);
+        }
+    }
+    mino_bc_trace_ic_slots(S, bc);
+    /* Optional ic_stats POD buffer (MINO_JIT_IC_STATS=1). */
+    PUSH(bc->ic_stats);
+}
+
 void mino_bc_register_gc_handlers(mino_state_t *S)
 {
     gc_register_tracer(S, GC_T_BC, trace_bc);

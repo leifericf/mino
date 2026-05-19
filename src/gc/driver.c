@@ -632,198 +632,18 @@ static void gc_mark_child_push(mino_state_t *S, const void *p)
 /* Per-tag tracer functions                                                  */
 /*                                                                           */
 /* One function per GC_T_* tag, registered into S->gc_tracers at boot.       */
-/* gc_trace_children dispatches through that table. Future cycles move the   */
-/* component-specific tracers (vec/hamt/rb -> collections, bc -> eval/bc,    */
-/* val -> values) out into their owning components.                          */
+/* gc_trace_children dispatches through that table. Component-owned tracers  */
+/* register from their own gc_handlers.c file:                               */
+/*   GC_T_VAL       -> values/gc_handlers.c                                  */
+/*   GC_T_VEC_NODE,                                                          */
+/*   GC_T_HAMT_NODE,                                                         */
+/*   GC_T_HAMT_ENTRY,                                                        */
+/*   GC_T_RB_NODE   -> collections/gc_handlers.c                             */
+/*   GC_T_BC        -> eval/bc/gc_handlers.c                                 */
+/* gc/driver.c only owns the gc-internal tags: GC_T_ENV (env layout that     */
+/* runtime/collections share), GC_T_VALARR + GC_T_PTRARR (generic pointer    */
+/* arrays). GC_T_RAW intentionally has no tracer.                            */
 /* ------------------------------------------------------------------------- */
-
-static void trace_val(mino_state_t *S, gc_hdr_t *h)
-{
-    mino_val_t *v = (mino_val_t *)(h + 1);
-        gc_mark_child_push(S, v->meta);
-        switch (mino_type_of(v)) {
-        case MINO_STRING:
-        case MINO_SYMBOL:
-        case MINO_KEYWORD:
-            gc_mark_child_push(S, v->as.s.data);
-            break;
-        case MINO_CONS:
-            gc_mark_child_push(S, v->as.cons.car);
-            gc_mark_child_push(S, v->as.cons.cdr);
-            break;
-        case MINO_VECTOR:
-            gc_mark_child_push(S, v->as.vec.root);
-            gc_mark_child_push(S, v->as.vec.tail);
-            break;
-        case MINO_MAP:
-            gc_mark_child_push(S, v->as.map.root);
-            gc_mark_child_push(S, v->as.map.key_order);
-            gc_mark_child_push(S, v->as.map.val_order);
-            break;
-        case MINO_SET:
-            gc_mark_child_push(S, v->as.set.root);
-            gc_mark_child_push(S, v->as.set.key_order);
-            break;
-        case MINO_SORTED_MAP:
-        case MINO_SORTED_SET:
-            gc_mark_child_push(S, v->as.sorted.root);
-            gc_mark_child_push(S, v->as.sorted.comparator);
-            break;
-        case MINO_FN:
-        case MINO_MACRO:
-            gc_mark_child_push(S, v->as.fn.params);
-            gc_mark_child_push(S, v->as.fn.body);
-            gc_mark_child_push(S, v->as.fn.env);
-            gc_mark_child_push(S, v->as.fn.template_fn);
-            /* Compiled bytecode: the bc record and its code/consts
-             * buffers are separate GC allocations reachable only
-             * through this field, so each one needs an explicit
-             * push. The const pool is GC_T_VALARR so the GC's
-             * tag-walk scans its slots automatically once the buffer
-             * itself is marked. */
-            if (v->as.fn.bc != NULL && v->as.fn.bc != &mino_bc_declined) {
-                const struct mino_bc_fn *bc = v->as.fn.bc;
-                gc_mark_child_push(S, bc);
-                gc_mark_child_push(S, bc->code);
-                gc_mark_child_push(S, bc->consts);
-                gc_mark_child_push(S, bc->clauses);
-                /* Clause params_vec: when the compiler rewrites a
-                 * destructuring param list it mints a fresh gensym
-                 * vector and stores it on the clause. The original
-                 * (pre-rewrite) params vector still hangs off
-                 * fn.params, but the gensym vector is reachable ONLY
-                 * via clauses[i].params_vec. clauses is GC_T_RAW
-                 * (POD), so the GC's tag-walk can't see its embedded
-                 * value pointers -- push them explicitly here so
-                 * gensym slots survive the next major cycle. Without
-                 * this push, mino_bc_run later sees NULL slots when
-                 * binding params, returns NULL silently, and the
-                 * misleading error surfaces several frames upstream
-                 * as e.g. "seq requires one argument". */
-                if (bc->clauses != NULL && bc->n_clauses > 0) {
-                    for (int i = 0; i < bc->n_clauses; i++) {
-                        gc_mark_child_push(S, bc->clauses[i].params_vec);
-                    }
-                }
-                /* IC slots: a GC_T_RAW POD buffer whose embedded value
-                 * pointers the GC can't see without an explicit walk.
-                 * mino_bc_trace_ic_slots is the single authority on the
-                 * slot-kind -> field mapping. */
-                mino_bc_trace_ic_slots(S, bc);
-                /* Optional ic_stats POD buffer (MINO_JIT_IC_STATS=1). */
-                gc_mark_child_push(S, bc->ic_stats);
-            }
-            break;
-        case MINO_ATOM:
-            gc_mark_child_push(S, v->as.atom.val);
-            gc_mark_child_push(S, v->as.atom.watches);
-            gc_mark_child_push(S, v->as.atom.validator);
-            break;
-        case MINO_VOLATILE:
-            gc_mark_child_push(S, v->as.volatile_.val);
-            break;
-        case MINO_CHUNK: {
-            unsigned k;
-            for (k = 0; k < v->as.chunk.len; k++) {
-                gc_mark_child_push(S, v->as.chunk.vals[k]);
-            }
-            break;
-        }
-        case MINO_HOST_ARRAY: {
-            size_t k;
-            for (k = 0; k < v->as.host_array.len; k++) {
-                gc_mark_child_push(S, v->as.host_array.vals[k]);
-            }
-            break;
-        }
-        case MINO_MAP_ENTRY:
-            gc_mark_child_push(S, v->as.map_entry.k);
-            gc_mark_child_push(S, v->as.map_entry.v);
-            break;
-        case MINO_CHUNKED_CONS:
-            gc_mark_child_push(S, v->as.chunked_cons.chunk);
-            gc_mark_child_push(S, v->as.chunked_cons.more);
-            break;
-        case MINO_LAZY:
-            if (v->as.lazy.realized) {
-                gc_mark_child_push(S, v->as.lazy.cached);
-            } else {
-                gc_mark_child_push(S, v->as.lazy.body);
-                gc_mark_child_push(S, v->as.lazy.env);
-            }
-            break;
-        case MINO_RECUR:
-            gc_mark_child_push(S, v->as.recur.args);
-            break;
-        case MINO_TAIL_CALL:
-            gc_mark_child_push(S, v->as.tail_call.fn);
-            gc_mark_child_push(S, v->as.tail_call.args);
-            break;
-        case MINO_REDUCED:
-            gc_mark_child_push(S, v->as.reduced.val);
-            break;
-        case MINO_VAR:
-            gc_mark_child_push(S, v->as.var.root);
-            gc_mark_child_push(S, v->as.var.watches);
-            gc_mark_child_push(S, v->as.var.validator);
-            break;
-        case MINO_TRANSIENT:
-            gc_mark_child_push(S, v->as.transient.current);
-            break;
-        case MINO_RATIO:
-            gc_mark_child_push(S, v->as.ratio.num);
-            gc_mark_child_push(S, v->as.ratio.denom);
-            break;
-        case MINO_BIGDEC:
-            gc_mark_child_push(S, v->as.bigdec.unscaled);
-            break;
-        case MINO_TYPE:
-            gc_mark_child_push(S, v->as.record_type.fields);
-            break;
-        case MINO_RECORD: {
-            size_t i, n;
-            gc_mark_child_push(S, v->as.record.type);
-            gc_mark_child_push(S, v->as.record.ext);
-            n = (v->as.record.type->as.record_type.fields != NULL)
-                ? v->as.record.type->as.record_type.fields->as.vec.len : 0;
-            for (i = 0; i < n; i++) {
-                gc_mark_child_push(S, v->as.record.vals[i]);
-            }
-            break;
-        }
-        case MINO_FUTURE: {
-            /* The impl struct is malloc-owned; the only GC-owned values
-             * are the result/exception/thunk/body_env/dyn_snapshot
-             * slots inside it. */
-            mino_future_t *impl = v->as.future.impl;
-            if (impl != NULL) {
-                gc_mark_child_push(S, impl->result);
-                gc_mark_child_push(S, impl->exception);
-                gc_mark_child_push(S, impl->thunk);
-                gc_mark_child_push(S, impl->body_env);
-                gc_mark_child_push(S, impl->dyn_snapshot);
-            }
-            break;
-        }
-        case MINO_REGEX:
-            gc_mark_child_push(S, v->as.regex.source);
-            break;
-        case MINO_TX_REF:
-            gc_mark_child_push(S, v->as.tx_ref.val);
-            gc_mark_child_push(S, v->as.tx_ref.watches);
-            gc_mark_child_push(S, v->as.tx_ref.validator);
-            break;
-        case MINO_AGENT:
-            gc_mark_child_push(S, v->as.agent.val);
-            gc_mark_child_push(S, v->as.agent.watches);
-            gc_mark_child_push(S, v->as.agent.validator);
-            gc_mark_child_push(S, v->as.agent.err);
-            gc_mark_child_push(S, v->as.agent.err_handler);
-            break;
-        default:
-            break;
-    }
-}
 
 static void trace_env(mino_state_t *S, gc_hdr_t *h)
 {
@@ -897,7 +717,6 @@ void gc_register_default_tracers(mino_state_t *S)
      * GC_T_HAMT_ENTRY, GC_T_RB_NODE, GC_T_BC, GC_T_VAL) are
      * populated by each component's register hook called from
      * runtime/state.c::state_init. */
-    gc_register_tracer(S, GC_T_VAL,    trace_val);
     gc_register_tracer(S, GC_T_ENV,    trace_env);
     gc_register_tracer(S, GC_T_PTRARR, trace_pointer_array);
     gc_register_tracer(S, GC_T_VALARR, trace_pointer_array);

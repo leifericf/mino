@@ -62,4 +62,9 @@ void mino_host_threads_quiesce(mino_state_t *S);
  * minor and major sweep when a MINO_FUTURE val is collected. */
 void mino_future_gc_sweep(mino_val_t *fut);
 
+/* Walk a MINO_FUTURE.impl's GC-owned slots (result, exception, thunk,
+ * body_env, dyn_snapshot). The values-side trace_val tracer delegates
+ * here so it doesn't have to know struct mino_future's layout. */
+void mino_future_trace_impl(mino_state_t *S, const mino_val_t *fut);
+
 #endif
