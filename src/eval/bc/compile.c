@@ -3578,9 +3578,463 @@ static int unop_subop_for_name(const char *name)
     return -1;
 }
 
+/* Count the args in a call form's cdr (cons-spine). Caller must have
+ * already validated the head; returns the arg count. */
+static int count_call_args(mino_val_t *form)
+{
+    mino_val_t *p = form->as.cons.cdr;
+    int n = 0;
+    while (mino_is_cons(p)) { n++; p = p->as.cons.cdr; }
+    return n;
+}
+
+/* Speculative unary-arith fast lane (inc, dec, zero?, pos?, neg?, even?,
+ * odd?, bit-not). Returns 0 if handled, -1 if handled with error, 1 to
+ * fall through. The caller must have verified the head is the canonical
+ * non-shadowed pure prim. */
+static int try_emit_unop_fast(compiler_t *c, mino_val_t *form,
+                              mino_val_t *head, int dst)
+{
+    int usubop = unop_subop_for_name(head->as.s.data);
+    mino_val_t *a1;
+    int saved_next, src_reg;
+    if (usubop < 0) return 1;
+    if (count_call_args(form) != 1) return 1;
+    saved_next = c->next_reg;
+    a1 = form->as.cons.cdr->as.cons.car;
+    src_reg = compile_operand_inplace(c, a1);
+    if (src_reg < 0) return -1;
+    if (dst > 0xFF || src_reg > 0xFF) { c->ok = 0; return -1; }
+    {
+        static const mino_bc_op_t unop_op[UNOP__COUNT] = {
+            OP_INC_I,    OP_DEC_I,    OP_ZERO_INT_P,
+            OP_POS_P_I,  OP_NEG_P_I,
+            OP_EVEN_P_I, OP_ODD_P_I,  OP_BNOT_I,
+        };
+        emit_abc(c, unop_op[usubop], (unsigned)dst, (unsigned)src_reg, 0);
+    }
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* N-arity left-associative expansion of (+, -, *) on 3+ args. Emits
+ * an accumulator-style chain of OP_*_II ops; each step keeps the
+ * intrinsic overflow check from the two-operand opcode so literal
+ * wrap behavior matches the prim. Returns 0 if handled, -1 on error,
+ * 1 to fall through. */
+static int try_emit_nary_binop(compiler_t *c, mino_val_t *form,
+                               int subop, int argc, int dst)
+{
+    mino_val_t *args[64];
+    int n = 0;
+    mino_val_t *q;
+    int saved_next, acc, a1, a2, i;
+    static const mino_bc_op_t binop_op_nary[] = {
+        OP_ADD_II, OP_SUB_II, OP_MUL_II,
+    };
+    if (subop != BINOP_ADD && subop != BINOP_SUB && subop != BINOP_MUL)
+        return 1;
+    if (argc < 3) return 1;
+    q = form->as.cons.cdr;
+    while (mino_is_cons(q) && n < (int)(sizeof(args)/sizeof(args[0]))) {
+        args[n++] = q->as.cons.car;
+        q = q->as.cons.cdr;
+    }
+    if (n != argc) {
+        /* Overflow: too many args; fall back to prim. */
+        return 1;
+    }
+    saved_next = c->next_reg;
+    /* Accumulator reg holds the running result. */
+    acc = alloc_reg(c);
+    if (acc < 0) return -1;
+    a1 = compile_operand_inplace(c, args[0]);
+    if (a1 < 0) return -1;
+    a2 = compile_operand_inplace(c, args[1]);
+    if (a2 < 0) return -1;
+    if (acc > 0xFF || a1 > 0xFF || a2 > 0xFF) { c->ok = 0; return -1; }
+    emit_abc(c, binop_op_nary[subop],
+             (unsigned)acc, (unsigned)a1, (unsigned)a2);
+    for (i = 2; i < n; i++) {
+        int ai = compile_operand_inplace(c, args[i]);
+        if (ai < 0) return -1;
+        if (ai > 0xFF) { c->ok = 0; return -1; }
+        emit_abc(c, binop_op_nary[subop],
+                 (unsigned)acc, (unsigned)acc, (unsigned)ai);
+    }
+    if (dst > 0xFF) { c->ok = 0; return -1; }
+    if (dst != acc) {
+        emit_abc(c, OP_MOVE, (unsigned)dst, (unsigned)acc, 0);
+    }
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* Two-operand binop fast lane (+, -, *, <, <=, >, >=, =, mod, quot,
+ * rem, bit-*, shifts) with an immediate-operand sub-path for ops that
+ * have an IK form. Returns 0 if handled, -1 on error, 1 to fall
+ * through. */
+static int try_emit_binop_two_arg(compiler_t *c, mino_val_t *form,
+                                  int subop, int dst)
+{
+    int saved_next = c->next_reg;
+    mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+    mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+    int lhs_reg, rhs_reg;
+    /* Immediate-operand fast lane. If one operand is a compile-time
+     * int literal that fits in signed 8 bits and the op has an IK
+     * form, emit it directly -- sparing the OP_LOAD_K + register slot
+     * for the literal. Commutative ops (+, =) tolerate the literal on
+     * either side; subtract and comparators require the literal on
+     * the right (a < lit, not lit < a). */
+    {
+        int ik_op = -1;
+        mino_val_t *lit_val = NULL;
+        mino_val_t *reg_val = NULL;
+        switch (subop) {
+        case BINOP_ADD: ik_op = OP_ADD_IK; break;
+        case BINOP_SUB: ik_op = OP_SUB_IK; break;
+        case BINOP_LT:  ik_op = OP_LT_IK;  break;
+        case BINOP_LE:  ik_op = OP_LE_IK;  break;
+        case BINOP_EQ:  ik_op = OP_EQ_IK;  break;
+        default: break;
+        }
+        if (ik_op >= 0) {
+            int commutative = (subop == BINOP_ADD || subop == BINOP_EQ);
+            if (MINO_IS_INT(a2)) {
+                long long n = MINO_INT_VAL(a2);
+                if (n >= -128 && n <= 127) { lit_val = a2; reg_val = a1; }
+            } else if (commutative && MINO_IS_INT(a1)) {
+                long long n = MINO_INT_VAL(a1);
+                if (n >= -128 && n <= 127) { lit_val = a1; reg_val = a2; }
+            }
+            if (lit_val != NULL) {
+                int rg = compile_operand_inplace(c, reg_val);
+                long long n;
+                if (rg < 0) return -1;
+                if (dst > 0xFF || rg > 0xFF) { c->ok = 0; return -1; }
+                n = MINO_INT_VAL(lit_val);
+                emit_abc(c, (mino_bc_op_t)ik_op,
+                         (unsigned)dst, (unsigned)rg,
+                         (unsigned)(n & 0xFF));
+                c->next_reg = saved_next;
+                return 0;
+            }
+        }
+    }
+    lhs_reg = compile_operand_inplace(c, a1);
+    if (lhs_reg < 0) return -1;
+    rhs_reg = compile_operand_inplace(c, a2);
+    if (rhs_reg < 0) return -1;
+    if (dst > 0xFF || lhs_reg > 0xFF || rhs_reg > 0xFF) {
+        c->ok = 0; return -1;
+    }
+    /* Per-op specialized opcode. ABC form: A=dst, B=lhs, C=rhs. The
+     * B/C operands are independent reg indices so
+     * compile_operand_inplace can return locals' registers directly,
+     * sparing the alloc + OP_MOVE pair for the common (op local
+     * local) shape. */
+    {
+        static const mino_bc_op_t binop_op[BINOP__COUNT] = {
+            OP_ADD_II,  OP_SUB_II,  OP_MUL_II,
+            OP_LT_II,   OP_LE_II,   OP_GT_II,
+            OP_GE_II,   OP_EQ_II,
+            OP_MOD_II,  OP_QUOT_II, OP_REM_II,
+            OP_BAND_II, OP_BOR_II,  OP_BXOR_II,
+            OP_SHL_II,  OP_SHR_II,  OP_USHR_II,
+        };
+        emit_abc(c, binop_op[subop], (unsigned)dst,
+                 (unsigned)lhs_reg, (unsigned)rhs_reg);
+    }
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* Speculative arith fast lane. Tries the unary subset first, then
+ * the variadic N-arity expansion of +, -, *, then the two-arg binop
+ * IK / II forms. Returns 0 if handled, -1 on error, 1 to fall
+ * through. */
+static int try_emit_arith_fast(compiler_t *c, mino_val_t *form,
+                               mino_val_t *head, int dst)
+{
+    int r;
+    int subop;
+    int argc;
+    r = try_emit_unop_fast(c, form, head, dst);
+    if (r <= 0) return r;
+    subop = binop_subop_for_name(head->as.s.data);
+    if (subop < 0) return 1;
+    argc = count_call_args(form);
+    r = try_emit_nary_binop(c, form, subop, argc, dst);
+    if (r <= 0) return r;
+    if (argc == 2) return try_emit_binop_two_arg(c, form, subop, dst);
+    return 1;
+}
+
+/* Two-operand collection-op fast lane. Each entry pairs a prim name
+ * to its specialised ABC opcode; the lane fires only when the call's
+ * argc matches. nth/get/dissoc/conj!/dissoc!/disj! are the
+ * persistent + transient family that takes (coll, key-or-item) and
+ * emits a single ABC opcode whose runtime checks for the expected
+ * collection shape and falls back to the prim on miss. */
+static const struct {
+    const char  *name;
+    mino_bc_op_t op;
+} k_collection_bin_ops[] = {
+    {"nth",     OP_NTH_VEC},
+    {"get",     OP_GET_KW_MAP},
+    {"conj",    OP_CONJ_VEC},
+    {"dissoc",  OP_DISSOC},
+    {"conj!",   OP_CONJ_BANG},
+    {"dissoc!", OP_DISSOC_BANG},
+    {"disj!",   OP_DISJ_BANG},
+};
+
+/* Single-arg read-side fast lane. (first / count / empty?) on a
+ * MINO_VECTOR fall through to OP_*_VEC; runtime checks the type and
+ * routes to the canonical prim for anything else. */
+static const struct {
+    const char  *name;
+    mino_bc_op_t op;
+} k_collection_unary_ops[] = {
+    {"first",  OP_FIRST_VEC},
+    {"count",  OP_COUNT_VEC},
+    {"empty?", OP_EMPTY_VEC},
+};
+
+static int emit_abc_two_arg(compiler_t *c, mino_bc_op_t op,
+                            mino_val_t *a1, mino_val_t *a2, int dst)
+{
+    int saved_next = c->next_reg;
+    int r1 = compile_operand_inplace(c, a1);
+    int r2;
+    if (r1 < 0) return -1;
+    r2 = compile_operand_inplace(c, a2);
+    if (r2 < 0) return -1;
+    if (dst > 0xFF || r1 > 0xFF || r2 > 0xFF) { c->ok = 0; return -1; }
+    emit_abc(c, op, (unsigned)dst, (unsigned)r1, (unsigned)r2);
+    c->next_reg = saved_next;
+    return 0;
+}
+
+static int emit_abc_one_arg(compiler_t *c, mino_bc_op_t op,
+                            mino_val_t *a1, int dst)
+{
+    int saved_next = c->next_reg;
+    int r1 = compile_operand_inplace(c, a1);
+    if (r1 < 0) return -1;
+    if (dst > 0xFF || r1 > 0xFF) { c->ok = 0; return -1; }
+    emit_abc(c, op, (unsigned)dst, (unsigned)r1, 0);
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* Three-arg coll-k-v fast lane shared by `assoc` and `assoc!`.
+ * Both opcodes consume three consecutive regs at `base` and emit one
+ * OP_ASSOC / OP_ASSOC_BANG into dst. */
+static int try_emit_assoc_three(compiler_t *c, mino_val_t *form,
+                                mino_bc_op_t op, int dst)
+{
+    int saved_next = c->next_reg;
+    mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+    mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+    mino_val_t *a3 = form->as.cons.cdr->as.cons.cdr
+                         ->as.cons.cdr->as.cons.car;
+    int base_reg, k_reg, v_reg;
+    /* OP_ASSOC / OP_ASSOC_BANG need three consecutive regs for
+     * coll, k, v starting at `base`. Allocate them up front so the
+     * slots can't be aliased by sub-expressions. */
+    base_reg = alloc_reg(c);
+    if (base_reg < 0) return -1;
+    k_reg = alloc_reg(c);
+    if (k_reg < 0) return -1;
+    v_reg = alloc_reg(c);
+    if (v_reg < 0) return -1;
+    if (compile_expr(c, a1, base_reg, 0) < 0) return -1;
+    if (compile_expr(c, a2, k_reg, 0)    < 0) return -1;
+    if (compile_expr(c, a3, v_reg, 0)    < 0) return -1;
+    if (dst > 0xFF || base_reg > 0xFF) { c->ok = 0; return -1; }
+    emit_abc(c, op, (unsigned)dst, (unsigned)base_reg, 0);
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* Collection-op fast lanes. nth/get/conj/dissoc/conj!/dissoc!/disj!
+ * gate on arity 2; first/count/empty? gate on arity 1;
+ * assoc/assoc! gate on arity 3. Returns 0 if handled, -1 on error,
+ * 1 to fall through. Variadic call forms (e.g. (dissoc m k1 k2 k3))
+ * stay on the regular OP_CALL path so the prim's loop handles them. */
+static int try_emit_collection_fast(compiler_t *c, mino_val_t *form,
+                                    mino_val_t *head, int dst)
+{
+    int argc = count_call_args(form);
+    const char *name = head->as.s.data;
+    size_t i;
+
+    if (argc == 2) {
+        mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+        mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
+        for (i = 0; i < sizeof(k_collection_bin_ops)
+                                 / sizeof(k_collection_bin_ops[0]); i++) {
+            if (strcmp(name, k_collection_bin_ops[i].name) == 0) {
+                return emit_abc_two_arg(c, k_collection_bin_ops[i].op,
+                                        a1, a2, dst);
+            }
+        }
+    }
+    if (argc == 1) {
+        mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
+        for (i = 0; i < sizeof(k_collection_unary_ops)
+                                 / sizeof(k_collection_unary_ops[0]); i++) {
+            if (strcmp(name, k_collection_unary_ops[i].name) == 0) {
+                return emit_abc_one_arg(c, k_collection_unary_ops[i].op,
+                                        a1, dst);
+            }
+        }
+    }
+    if (argc == 3) {
+        if (strcmp(name, "assoc") == 0) {
+            return try_emit_assoc_three(c, form, OP_ASSOC, dst);
+        }
+        if (strcmp(name, "assoc!") == 0) {
+            return try_emit_assoc_three(c, form, OP_ASSOC_BANG, dst);
+        }
+    }
+    return 1;
+}
+
+/* Keyword-as-fn fast lane: `(:kw coll)` with a literal keyword head
+ * and exactly one arg compiles to OP_LOAD_K + OP_GET_KW_MAP. Returns
+ * 0 if handled, -1 on error, 1 to fall through. */
+static int try_emit_keyword_call(compiler_t *c, mino_val_t *form,
+                                 mino_val_t *head, int argc, int dst)
+{
+    int saved_next, coll_reg, key_k, key_reg;
+    if (argc != 1) return 1;
+    if (head == NULL || mino_type_of(head) != MINO_KEYWORD) return 1;
+    saved_next = c->next_reg;
+    coll_reg = compile_operand_inplace(c, form->as.cons.cdr->as.cons.car);
+    if (coll_reg < 0) return -1;
+    key_k = add_const(c, head);
+    if (key_k < 0) return -1;
+    key_reg = alloc_reg(c);
+    if (key_reg < 0) return -1;
+    if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
+        c->ok = 0; return -1;
+    }
+    emit_abx(c, OP_LOAD_K, (unsigned)key_reg, (unsigned)key_k);
+    emit_abc(c, OP_GET_KW_MAP, (unsigned)dst,
+             (unsigned)coll_reg, (unsigned)key_reg);
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* Inline-cache fast lane for calls whose head is a global symbol with
+ * no static local binding. Two-word encoding (ABC + slot index in
+ * word-2's Bx) shared by three opcodes:
+ *   non-tail head=fn          -> OP_CALL_CACHED
+ *   non-tail head=protocol fn -> OP_PROTOCOL_CALL_CACHED
+ *   tail     head=protocol fn -> OP_PROTOCOL_TAILCALL_CACHED
+ *
+ * Non-protocol tail calls fall through to the slow path's
+ * OP_TAILCALL emit (no cached tail-call variant for plain heads
+ * yet). The non-protocol non-tail branch skips the
+ * OP_GETGLOBAL_CACHED step entirely (callee resolution + caching
+ * fuses into the call opcode itself). Qualified symbols (foo/bar)
+ * are eligible -- the runtime's resolve_global handles both forms.
+ * Returns 0 if handled, -1 on error, 1 to fall through. */
+static int try_emit_cached_call(compiler_t *c, mino_val_t *form,
+                                mino_val_t *head, int argc, int dst,
+                                int tail)
+{
+    mino_val_t *proto_mname = NULL;
+    mino_val_t *proto_atom  = NULL;
+    int is_proto;
+    int saved_next, arg_base, slot, i;
+    mino_val_t *cur;
+    mino_bc_op_t op;
+    if (head == NULL || mino_type_of(head) != MINO_SYMBOL) return 1;
+    if (find_local(c, head->as.s.data) >= 0) return 1;
+    is_proto = (argc >= 1)
+        && try_protocol_method(c, head, &proto_mname, &proto_atom);
+    if (tail && !is_proto) return 1;
+    saved_next = c->next_reg;
+    arg_base = c->next_reg;
+    for (i = 0; i < argc; i++) {
+        if (alloc_reg(c) < 0) return -1;
+    }
+    cur = form->as.cons.cdr;
+    for (i = 0; i < argc; i++) {
+        if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0)
+            return -1;
+        cur = cur->as.cons.cdr;
+    }
+    if (is_proto) {
+        slot = alloc_protocol_ic_slot(c, proto_mname, proto_atom);
+        op   = tail ? OP_PROTOCOL_TAILCALL_CACHED
+                    : OP_PROTOCOL_CALL_CACHED;
+    } else {
+        slot = alloc_ic_slot(c, head);
+        op   = OP_CALL_CACHED;
+    }
+    if (slot < 0) return -1;
+    if (arg_base > 0xFF || dst > 0xFF) { c->ok = 0; return -1; }
+    emit_abc(c, op, (unsigned)arg_base, (unsigned)argc, (unsigned)dst);
+    /* Second instruction word: carries the slot index in Bx so the
+     * handler can fetch it via code[pc++]. The main dispatch never
+     * sees this word -- the handler consumes it before the loop
+     * reads its next op. The op byte is OP_NOP so a stray decode
+     * (e.g., a bytecode dumper) is harmless. */
+    emit_abx(c, OP_NOP, 0, (unsigned)slot);
+    c->next_reg = saved_next;
+    return 0;
+}
+
+/* Plain OP_CALL / OP_TAILCALL fallback. Allocates fn_reg + argc
+ * consecutive arg slots, compiles head + args, emits the opcode.
+ * Returns 0 on success, -1 on error. */
+static int emit_plain_call(compiler_t *c, mino_val_t *form,
+                           mino_val_t *head, int argc, int dst, int tail)
+{
+    int saved_next = c->next_reg;
+    int fn_reg, arg_base, i;
+    mino_val_t *cur;
+    fn_reg = alloc_reg(c);
+    if (fn_reg < 0) return -1;
+    arg_base = c->next_reg;
+    for (i = 0; i < argc; i++) {
+        if (alloc_reg(c) < 0) return -1;
+    }
+    /* Compile the head into fn_reg. */
+    if (compile_expr(c, head, fn_reg, 0) < 0) return -1;
+    /* Compile each argument into its slot. */
+    cur = form->as.cons.cdr;
+    for (i = 0; i < argc; i++) {
+        if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0) return -1;
+        cur = cur->as.cons.cdr;
+    }
+    if (tail) {
+        /* OP_TAILCALL: A=fn, B=argc. Returns MINO_TAIL_CALL sentinel;
+         * the apply_callable trampoline picks up (fn, args) without
+         * growing the C stack. dst is ignored -- the body's OP_RETURN
+         * is dead code after a tail call. */
+        emit_abc(c, OP_TAILCALL, (unsigned)fn_reg, (unsigned)argc, 0);
+    } else {
+        /* OP_CALL: A=fn, B=argc, C=ret. Result lands at register `dst`. */
+        if (dst > 0xFF) { c->ok = 0; return -1; }
+        emit_abc(c, OP_CALL, (unsigned)fn_reg, (unsigned)argc, (unsigned)dst);
+    }
+    c->next_reg = saved_next;
+    return 0;
+}
+
 static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
 {
     mino_val_t *head = form->as.cons.car;
+    mino_val_t *cur;
+    int argc;
+    int r;
+
     if (head_resolves_to_macro(c, head)) { c->ok = 0; return -1; }
 
     /* Reduce-pattern rewrite: (reduce (fn [acc x] (assoc acc ...)) seed coll)
@@ -3614,7 +4068,7 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
         }
     }
 
-    /* Speculative fast lane for the unary and binary arith / compare
+    /* Speculative fast lanes for unary and binary arith / compare
      * calls. The head must be the named prim (non-local, non-macro,
      * and the var must still point at the canonical C prim -- a user
      * shadow like `(defn + [a b] ...)` makes head_is_canonical_pure_prim
@@ -3623,574 +4077,33 @@ static int compile_call_impl(compiler_t *c, mino_val_t *form, int dst, int tail)
     if (head != NULL && mino_type_of(head) == MINO_SYMBOL
         && find_local(c, head->as.s.data) < 0
         && head_is_canonical_pure_prim(c, head)) {
-        int usubop = unop_subop_for_name(head->as.s.data);
-        if (usubop >= 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 1) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                int src_reg = compile_operand_inplace(c, a1);
-                if (src_reg < 0) return -1;
-                if (dst > 0xFF || src_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                static const mino_bc_op_t unop_op[UNOP__COUNT] = {
-                    OP_INC_I,    OP_DEC_I,    OP_ZERO_INT_P,
-                    OP_POS_P_I,  OP_NEG_P_I,
-                    OP_EVEN_P_I, OP_ODD_P_I,  OP_BNOT_I,
-                };
-                emit_abc(c, unop_op[usubop], (unsigned)dst,
-                         (unsigned)src_reg, 0);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        int subop = binop_subop_for_name(head->as.s.data);
-        if (subop >= 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            /* N-arity expansion. Clojure's variadic arithmetic
-             * primitives (+, -, *) are left-associative, so
-             * `(+ a b c d)` evaluates as `(+ (+ (+ a b) c) d)`. The
-             * compiler emits this chain directly: two-operand
-             * fast-lane opcode for the leftmost pair into an
-             * accumulator register, then a fold of each subsequent
-             * operand. Each step still goes through OP_*_II / OP_*_IK
-             * with its overflow check, so a literal sum that wraps
-             * still throws (vs. silent wrap that a right-associative
-             * folder might mask). Comparators and bitwise ops aren't
-             * expanded -- their variadic semantics differ ((< a b c)
-             * is `(and (< a b) (< b c))`) and stay on the prim. */
-            int n_ary_expand = (subop == BINOP_ADD
-                                || subop == BINOP_SUB
-                                || subop == BINOP_MUL)
-                && argc_check >= 3;
-            if (n_ary_expand) {
-                int saved_next = c->next_reg;
-                /* Walk into an array so we can index. */
-                mino_val_t *args[64];
-                int n = 0;
-                mino_val_t *q = form->as.cons.cdr;
-                while (mino_is_cons(q) && n < (int)(sizeof(args)/sizeof(args[0]))) {
-                    args[n++] = q->as.cons.car;
-                    q = q->as.cons.cdr;
-                }
-                if (n != argc_check) {
-                    /* Overflow: too many args; fall back to prim. */
-                    n_ary_expand = 0;
-                }
-                if (n_ary_expand) {
-                    /* Accumulator reg holds the running result. */
-                    int acc = alloc_reg(c);
-                    if (acc < 0) return -1;
-                    int a1 = compile_operand_inplace(c, args[0]);
-                    if (a1 < 0) return -1;
-                    int a2 = compile_operand_inplace(c, args[1]);
-                    if (a2 < 0) return -1;
-                    if (acc > 0xFF || a1 > 0xFF || a2 > 0xFF) {
-                        c->ok = 0; return -1;
-                    }
-                    static const mino_bc_op_t binop_op_nary[] = {
-                        OP_ADD_II, OP_SUB_II, OP_MUL_II,
-                    };
-                    emit_abc(c, binop_op_nary[subop],
-                             (unsigned)acc, (unsigned)a1, (unsigned)a2);
-                    for (int i = 2; i < n; i++) {
-                        int ai = compile_operand_inplace(c, args[i]);
-                        if (ai < 0) return -1;
-                        if (ai > 0xFF) { c->ok = 0; return -1; }
-                        emit_abc(c, binop_op_nary[subop],
-                                 (unsigned)acc, (unsigned)acc, (unsigned)ai);
-                    }
-                    if (dst > 0xFF) { c->ok = 0; return -1; }
-                    if (dst != acc) {
-                        emit_abc(c, OP_MOVE, (unsigned)dst, (unsigned)acc, 0);
-                    }
-                    c->next_reg = saved_next;
-                    return 0;
-                }
-            }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                /* Immediate-operand fast lane. If one operand is a
-                 * compile-time int literal that fits in signed 8 bits
-                 * and the op has an IK form, emit it directly --
-                 * sparing the OP_LOAD_K + register slot for the
-                 * literal. The compile-time `subop` BINOP_ADD / SUB /
-                 * LT / LE / EQ map to OP_*_IK. Commutative ops (+, =)
-                 * tolerate the literal on either side; subtract and
-                 * the comparators require the literal on the right
-                 * (a < lit not lit < a). */
-                {
-                    int ik_op = -1;
-                    mino_val_t *lit_val  = NULL;
-                    mino_val_t *reg_val  = NULL;
-                    switch (subop) {
-                    case BINOP_ADD: ik_op = OP_ADD_IK; break;
-                    case BINOP_SUB: ik_op = OP_SUB_IK; break;
-                    case BINOP_LT:  ik_op = OP_LT_IK;  break;
-                    case BINOP_LE:  ik_op = OP_LE_IK;  break;
-                    case BINOP_EQ:  ik_op = OP_EQ_IK;  break;
-                    default: break;
-                    }
-                    if (ik_op >= 0) {
-                        int commutative = (subop == BINOP_ADD || subop == BINOP_EQ);
-                        if (MINO_IS_INT(a2)) {
-                            long long n = MINO_INT_VAL(a2);
-                            if (n >= -128 && n <= 127) {
-                                lit_val = a2; reg_val = a1;
-                            }
-                        } else if (commutative && MINO_IS_INT(a1)) {
-                            long long n = MINO_INT_VAL(a1);
-                            if (n >= -128 && n <= 127) {
-                                lit_val = a1; reg_val = a2;
-                            }
-                        }
-                        if (lit_val != NULL) {
-                            int rg = compile_operand_inplace(c, reg_val);
-                            if (rg < 0) return -1;
-                            if (dst > 0xFF || rg > 0xFF) {
-                                c->ok = 0; return -1;
-                            }
-                            long long n = MINO_INT_VAL(lit_val);
-                            emit_abc(c, (mino_bc_op_t)ik_op,
-                                     (unsigned)dst, (unsigned)rg,
-                                     (unsigned)(n & 0xFF));
-                            c->next_reg = saved_next;
-                            return 0;
-                        }
-                    }
-                }
-                int lhs_reg = compile_operand_inplace(c, a1);
-                if (lhs_reg < 0) return -1;
-                int rhs_reg = compile_operand_inplace(c, a2);
-                if (rhs_reg < 0) return -1;
-                if (dst > 0xFF || lhs_reg > 0xFF || rhs_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                /* Per-op specialized opcode. ABC form: A=dst, B=lhs,
-                 * C=rhs. The B/C operands are independent reg indices
-                 * so compile_operand_inplace can return locals'
-                 * registers directly, sparing the alloc + OP_MOVE pair
-                 * for the common (op local local) shape. */
-                static const mino_bc_op_t binop_op[BINOP__COUNT] = {
-                    OP_ADD_II,  OP_SUB_II,  OP_MUL_II,
-                    OP_LT_II,   OP_LE_II,   OP_GT_II,
-                    OP_GE_II,   OP_EQ_II,
-                    OP_MOD_II,  OP_QUOT_II, OP_REM_II,
-                    OP_BAND_II, OP_BOR_II,  OP_BXOR_II,
-                    OP_SHL_II,  OP_SHR_II,  OP_USHR_II,
-                };
-                emit_abc(c, binop_op[subop], (unsigned)dst,
-                         (unsigned)lhs_reg, (unsigned)rhs_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* Collection fast lanes: (nth v idx) and (get m :kw) get
-         * compile-time specialized opcodes that read the vector / map
-         * directly when types match and fall back to prim_nth / prim_get
-         * for any miss (lazy seq nth, non-keyword key, etc.). */
-        if (strcmp(head->as.s.data, "nth") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                int vec_reg = compile_operand_inplace(c, a1);
-                if (vec_reg < 0) return -1;
-                int idx_reg = compile_operand_inplace(c, a2);
-                if (idx_reg < 0) return -1;
-                if (dst > 0xFF || vec_reg > 0xFF || idx_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_NTH_VEC, (unsigned)dst,
-                         (unsigned)vec_reg, (unsigned)idx_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        if (strcmp(head->as.s.data, "get") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                int coll_reg = compile_operand_inplace(c, a1);
-                if (coll_reg < 0) return -1;
-                int key_reg = compile_operand_inplace(c, a2);
-                if (key_reg < 0) return -1;
-                if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_GET_KW_MAP, (unsigned)dst,
-                         (unsigned)coll_reg, (unsigned)key_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* Read-side small-prim fast lanes. Single-arg shapes for
-         * `(first v)`, `(count v)`, `(empty? v)` -- the runtime
-         * checks for MINO_VECTOR and falls back to the canonical
-         * prim on anything else (lazy seqs, strings, maps, sets,
-         * sorted-colls, host-arrays). The emission gate is shared
-         * with the other write-side lanes below: head must be the
-         * non-shadowed canonical prim, validated by
-         * head_is_canonical_pure_prim above. */
-        if (strcmp(head->as.s.data, "first") == 0
-            || strcmp(head->as.s.data, "count") == 0
-            || strcmp(head->as.s.data, "empty?") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 1) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                int src_reg = compile_operand_inplace(c, a1);
-                if (src_reg < 0) return -1;
-                if (dst > 0xFF || src_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                mino_bc_op_t op;
-                switch (head->as.s.data[0]) {
-                case 'f': op = OP_FIRST_VEC; break;
-                case 'c': op = OP_COUNT_VEC; break;
-                default:  op = OP_EMPTY_VEC; break;   /* "empty?" */
-                }
-                emit_abc(c, op, (unsigned)dst, (unsigned)src_reg, 0);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* Write-side fast lanes. (conj v x) -> OP_CONJ_VEC when arity
-         * is 2 (variadic conj falls through to OP_CALL). (assoc coll
-         * k v) -> OP_ASSOC when arity is 3; the runtime dispatches to
-         * vec_assoc1 / mino_map_assoc1 by collection type. Compile-
-         * time emission is unconditional within the arity gate; user
-         * shadows defeat us via head_is_canonical_pure_prim above,
-         * not here. */
-        if (strcmp(head->as.s.data, "conj") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                int coll_reg = compile_operand_inplace(c, a1);
-                if (coll_reg < 0) return -1;
-                int item_reg = compile_operand_inplace(c, a2);
-                if (item_reg < 0) return -1;
-                if (dst > 0xFF || coll_reg > 0xFF || item_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_CONJ_VEC, (unsigned)dst,
-                         (unsigned)coll_reg, (unsigned)item_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        if (strcmp(head->as.s.data, "assoc") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 3) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                mino_val_t *a3 = form->as.cons.cdr->as.cons.cdr
-                                     ->as.cons.cdr->as.cons.car;
-                /* OP_ASSOC needs three consecutive regs for coll, k,
-                 * v starting at `base`. Allocate them up front so
-                 * the slots can't be aliased by sub-expressions. */
-                int base_reg = alloc_reg(c);
-                if (base_reg < 0) return -1;
-                int k_reg = alloc_reg(c);
-                if (k_reg < 0) return -1;
-                int v_reg = alloc_reg(c);
-                if (v_reg < 0) return -1;
-                if (compile_expr(c, a1, base_reg, 0) < 0) return -1;
-                if (compile_expr(c, a2, k_reg, 0)    < 0) return -1;
-                if (compile_expr(c, a3, v_reg, 0)    < 0) return -1;
-                if (dst > 0xFF || base_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_ASSOC, (unsigned)dst,
-                         (unsigned)base_reg, 0);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* (dissoc m k) arity-2 fast lane on maps. Variadic forms
-         * (dissoc m k1 k2 ...) fall through to OP_CALL so prim_dissoc's
-         * loop handles them; the arity-2 case is the dominant shape
-         * in destructure-and-rewrite code and gets its own opcode. */
-        if (strcmp(head->as.s.data, "dissoc") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                int coll_reg = compile_operand_inplace(c, a1);
-                if (coll_reg < 0) return -1;
-                int key_reg = compile_operand_inplace(c, a2);
-                if (key_reg < 0) return -1;
-                if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_DISSOC, (unsigned)dst,
-                         (unsigned)coll_reg, (unsigned)key_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* (assoc! t k v) arity-3 transient fast lane. Variadic forms
-         * (assoc! t k1 v1 k2 v2 ...) keep the OP_CALL path so prim_assoc_bang
-         * walks the key/value pairs; the arity-3 case is the dominant
-         * shape inside the builder rewrite's reducer body and earns its
-         * own opcode. Three consecutive regs at base carry [tcoll, k, v]
-         * the same way OP_ASSOC does. */
-        if (strcmp(head->as.s.data, "assoc!") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 3) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                mino_val_t *a3 = form->as.cons.cdr->as.cons.cdr
-                                     ->as.cons.cdr->as.cons.car;
-                int base_reg = alloc_reg(c);
-                if (base_reg < 0) return -1;
-                int k_reg = alloc_reg(c);
-                if (k_reg < 0) return -1;
-                int v_reg = alloc_reg(c);
-                if (v_reg < 0) return -1;
-                if (compile_expr(c, a1, base_reg, 0) < 0) return -1;
-                if (compile_expr(c, a2, k_reg, 0)    < 0) return -1;
-                if (compile_expr(c, a3, v_reg, 0)    < 0) return -1;
-                if (dst > 0xFF || base_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_ASSOC_BANG, (unsigned)dst,
-                         (unsigned)base_reg, 0);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* (conj! tcoll x) arity-2 transient fast lane. Variadic forms
-         * keep the OP_CALL path so prim_conj_bang walks the trailing
-         * values; the arity-2 case is the dominant builder-rewrite
-         * shape. */
-        if (strcmp(head->as.s.data, "conj!") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                int coll_reg = compile_operand_inplace(c, a1);
-                if (coll_reg < 0) return -1;
-                int item_reg = compile_operand_inplace(c, a2);
-                if (item_reg < 0) return -1;
-                if (dst > 0xFF || coll_reg > 0xFF || item_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_CONJ_BANG, (unsigned)dst,
-                         (unsigned)coll_reg, (unsigned)item_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* (dissoc! tcoll k) arity-2 transient fast lane. */
-        if (strcmp(head->as.s.data, "dissoc!") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                int coll_reg = compile_operand_inplace(c, a1);
-                if (coll_reg < 0) return -1;
-                int key_reg = compile_operand_inplace(c, a2);
-                if (key_reg < 0) return -1;
-                if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_DISSOC_BANG, (unsigned)dst,
-                         (unsigned)coll_reg, (unsigned)key_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
-        /* (disj! tcoll x) arity-2 transient fast lane. */
-        if (strcmp(head->as.s.data, "disj!") == 0) {
-            int argc_check = 0;
-            mino_val_t *p = form->as.cons.cdr;
-            while (mino_is_cons(p)) { argc_check++; p = p->as.cons.cdr; }
-            if (argc_check == 2) {
-                int saved_next = c->next_reg;
-                mino_val_t *a1 = form->as.cons.cdr->as.cons.car;
-                mino_val_t *a2 = form->as.cons.cdr->as.cons.cdr->as.cons.car;
-                int coll_reg = compile_operand_inplace(c, a1);
-                if (coll_reg < 0) return -1;
-                int item_reg = compile_operand_inplace(c, a2);
-                if (item_reg < 0) return -1;
-                if (dst > 0xFF || coll_reg > 0xFF || item_reg > 0xFF) {
-                    c->ok = 0; return -1;
-                }
-                emit_abc(c, OP_DISJ_BANG, (unsigned)dst,
-                         (unsigned)coll_reg, (unsigned)item_reg);
-                c->next_reg = saved_next;
-                return 0;
-            }
-        }
+        r = try_emit_arith_fast(c, form, head, dst);
+        if (r <= 0) return r;
+        r = try_emit_collection_fast(c, form, head, dst);
+        if (r <= 0) return r;
     }
 
     /* Walk the cdr, counting args while validating each is a cons. */
-    mino_val_t *cur = form->as.cons.cdr;
-    int argc = 0;
+    cur = form->as.cons.cdr;
+    argc = 0;
     while (mino_is_cons(cur)) {
         argc++;
         cur = cur->as.cons.cdr;
     }
-    if (cur != NULL && mino_type_of(cur) != MINO_NIL && mino_type_of(cur) != MINO_EMPTY_LIST) {
+    if (cur != NULL && mino_type_of(cur) != MINO_NIL
+        && mino_type_of(cur) != MINO_EMPTY_LIST) {
         /* Improper list form -- not a regular call. */
         c->ok = 0; return -1;
     }
     if (argc > 0xFF) { c->ok = 0; return -1; }   /* B operand is 8 bits */
 
-    /* Keyword-as-fn shape `(:kw coll)` with a literal keyword head
-     * and exactly one arg compiles straight to OP_GET_KW_MAP, which
-     * fast-paths both maps and records. Avoids the OP_LOAD_K of the
-     * keyword + OP_CALL + apply_callable's keyword-as-fn dispatch. */
-    if (argc == 1
-        && head != NULL && mino_type_of(head) == MINO_KEYWORD) {
-        int saved_next_kw = c->next_reg;
-        int coll_reg = compile_operand_inplace(c, form->as.cons.cdr->as.cons.car);
-        if (coll_reg < 0) return -1;
-        int key_k = add_const(c, head);
-        if (key_k < 0) return -1;
-        int key_reg = alloc_reg(c);
-        if (key_reg < 0) return -1;
-        if (dst > 0xFF || coll_reg > 0xFF || key_reg > 0xFF) {
-            c->ok = 0; return -1;
-        }
-        emit_abx(c, OP_LOAD_K, (unsigned)key_reg, (unsigned)key_k);
-        emit_abc(c, OP_GET_KW_MAP, (unsigned)dst,
-                 (unsigned)coll_reg, (unsigned)key_reg);
-        c->next_reg = saved_next_kw;
-        return 0;
-    }
+    r = try_emit_keyword_call(c, form, head, argc, dst);
+    if (r <= 0) return r;
 
-    /* Inline-cache fast lane for calls whose head is a global symbol
-     * with no static local binding. Two-word encoding (ABC + slot
-     * index in word-2's Bx) shared by four opcodes:
-     *   non-tail head=fn          -> OP_CALL_CACHED
-     *   non-tail head=protocol fn -> OP_PROTOCOL_CALL_CACHED
-     *   tail     head=protocol fn -> OP_PROTOCOL_TAILCALL_CACHED
-     * Non-protocol tail calls fall through to the slow path's
-     * OP_TAILCALL emit (no cached tail-call variant for plain heads
-     * yet -- a follow-up). The non-protocol non-tail branch skips the
-     * OP_GETGLOBAL_CACHED step entirely (callee resolution + caching
-     * fuses into the call opcode itself). Qualified symbols (foo/bar)
-     * are eligible -- the runtime's resolve_global handles both
-     * forms. If the head resolves to a defprotocol-emitted dispatcher
-     * fn, the protocol-shaped IC slot pins the dispatch atom at
-     * compile time so the hot path skips the protocol-dispatch
-     * trampoline entirely. */
-    if (head != NULL && mino_type_of(head) == MINO_SYMBOL
-        && find_local(c, head->as.s.data) < 0) {
-        mino_val_t *proto_mname = NULL;
-        mino_val_t *proto_atom  = NULL;
-        int is_proto = (argc >= 1)
-            && try_protocol_method(c, head, &proto_mname, &proto_atom);
+    r = try_emit_cached_call(c, form, head, argc, dst, tail);
+    if (r <= 0) return r;
 
-        if (!tail || is_proto) {
-            int saved_next_c = c->next_reg;
-            int arg_base = c->next_reg;
-            for (int i = 0; i < argc; i++) {
-                if (alloc_reg(c) < 0) return -1;
-            }
-            cur = form->as.cons.cdr;
-            for (int i = 0; i < argc; i++) {
-                if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0) {
-                    return -1;
-                }
-                cur = cur->as.cons.cdr;
-            }
-            int slot;
-            mino_bc_op_t op;
-            if (is_proto) {
-                slot = alloc_protocol_ic_slot(c, proto_mname, proto_atom);
-                op   = tail ? OP_PROTOCOL_TAILCALL_CACHED
-                            : OP_PROTOCOL_CALL_CACHED;
-            } else {
-                slot = alloc_ic_slot(c, head);
-                op   = OP_CALL_CACHED;
-            }
-            if (slot < 0) return -1;
-            if (arg_base > 0xFF || dst > 0xFF) { c->ok = 0; return -1; }
-            emit_abc(c, op,
-                     (unsigned)arg_base, (unsigned)argc, (unsigned)dst);
-            /* Second instruction word: carries the slot index in Bx so the
-             * handler can fetch it via code[pc++]. The main dispatch never
-             * sees this word -- the handler consumes it before the loop
-             * reads its next op. The op byte is OP_NOP so a stray decode
-             * (e.g., a bytecode dumper) is harmless. */
-            emit_abx(c, OP_NOP, 0, (unsigned)slot);
-            c->next_reg = saved_next_c;
-            return 0;
-        }
-    }
-
-    /* Allocate consecutive regs: fn slot then argc arg slots. The OP_CALL
-     * ABI requires args at A+1..A+argc. */
-    int saved_next = c->next_reg;
-    int fn_reg = alloc_reg(c);
-    if (fn_reg < 0) return -1;
-    int arg_base = c->next_reg;
-    for (int i = 0; i < argc; i++) {
-        if (alloc_reg(c) < 0) return -1;
-    }
-
-    /* Compile the head into fn_reg. */
-    if (compile_expr(c, head, fn_reg, 0) < 0) return -1;
-
-    /* Compile each argument into its slot. */
-    cur = form->as.cons.cdr;
-    for (int i = 0; i < argc; i++) {
-        if (compile_expr(c, cur->as.cons.car, arg_base + i, 0) < 0) return -1;
-        cur = cur->as.cons.cdr;
-    }
-
-    if (tail) {
-        /* OP_TAILCALL: A=fn, B=argc. Returns MINO_TAIL_CALL sentinel;
-         * the apply_callable trampoline picks up (fn, args) without
-         * growing the C stack. dst is ignored -- the body's OP_RETURN
-         * is dead code after a tail call. */
-        emit_abc(c, OP_TAILCALL, (unsigned)fn_reg, (unsigned)argc, 0);
-    } else {
-        /* OP_CALL: A=fn, B=argc, C=ret. Result lands at register `dst`. */
-        if (dst > 0xFF) { c->ok = 0; return -1; }
-        emit_abc(c, OP_CALL, (unsigned)fn_reg, (unsigned)argc, (unsigned)dst);
-    }
-
-    c->next_reg = saved_next;
-    return 0;
+    return emit_plain_call(c, form, head, argc, dst, tail);
 }
 
 
