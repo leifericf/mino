@@ -869,6 +869,46 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
      * counter is reentrant-safe) accumulate depth correctly. */
     ctx->jit_invoke_depth++;
     bc->jit_invocations++;
+    /* Optional per-fn wall-time: env-gated to keep the default hot
+     * path at the same cost as v0.346.0 (1 load + 1 branch on the
+     * tri-state when off). Two mino_monotonic_ns() reads add ~5-10
+     * ns/call when on, well within perf-gate noise for warm fns. */
+    {
+        static int jit_time_fns = -1;
+        if (jit_time_fns == -1) {
+            const char *e = getenv("MINO_JIT_TIME_FNS");
+            jit_time_fns = (e != NULL && e[0] != '\0' && e[0] != '0')
+                           ? 1 : 0;
+        }
+        if (jit_time_fns) {
+            long long t0 = mino_monotonic_ns();
+            mino_val_t *r1 = f(regs, consts, S);
+            uint64_t dt = (uint64_t)(mino_monotonic_ns() - t0);
+            bc->jit_native_total_ns += dt;
+            if (dt > (uint64_t)bc->jit_native_max_ns) {
+                bc->jit_native_max_ns = (dt > (uint64_t)UINT32_MAX)
+                                        ? UINT32_MAX
+                                        : (uint32_t)dt;
+            }
+            ctx->jit_invoke_depth--;
+            mino_val_t *r = r1;
+            /* Side-exit detection is identical to the untimed path;
+             * fall through to the shared block below. */
+            if (r == NULL && S->jit_deopt_pending) {
+                size_t resume_pc = S->jit_deopt_pc;
+                S->jit_deopt_pending = 0;
+                bc->jit_deopt_exits++;
+                size_t base = (size_t)(regs - S->bc_regs);
+                r = mino_bc_run_resume(S, bc, base, env, resume_pc,
+                                       saved_try_depth,
+                                       saved_bc_catch_depth,
+                                       saved_dyn_stack);
+            }
+            S->jit_invoke_ctx = saved_ctx;
+            ctx->jit_invoke_env = saved_env;
+            return r;
+        }
+    }
     mino_val_t *r = f(regs, consts, S);
     ctx->jit_invoke_depth--;
     /* Side-exit detection: when the deopt stencil fires, it sets

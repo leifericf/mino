@@ -237,6 +237,9 @@ static void cpjit_stats_dump(void)
              * never enter the native path, so the counters are 0). */
             unsigned long long inv = (unsigned long long)e->bc->jit_invocations;
             unsigned long long dx  = (unsigned long long)e->bc->jit_deopt_exits;
+            unsigned long long tns = (unsigned long long)e->bc->jit_native_total_ns;
+            unsigned long long mns = (unsigned long long)e->bc->jit_native_max_ns;
+            (void)tns; (void)mns; /* used below when MINO_JIT_TIME_FNS=1 */
             if (e->reason == CPJIT_REASON_UNKNOWN_OP
                 || e->reason == CPJIT_REASON_OK_WITH_DEOPT) {
                 snprintf(loc, sizeof loc,
@@ -254,6 +257,17 @@ static void cpjit_stats_dump(void)
                          e->native_bytes, inv, dx);
             }
             fprintf(stderr, "  %s\n", loc);
+            /* Wall-time addendum: only printed when MINO_JIT_TIME_FNS=1
+             * actually populated the counters (the env-gate keeps the
+             * fields at 0 otherwise). The avg / max are useful enough
+             * even without the inv-rate, so we print whenever
+             * native_total_ns is non-zero. */
+            if (tns > 0) {
+                unsigned long long avg = inv > 0 ? (tns / inv) : 0;
+                fprintf(stderr,
+                        "    wall: total=%llu ns  avg=%llu ns  max=%llu ns\n",
+                        tns, avg, mns);
+            }
             n++;
         }
         fprintf(stderr, "[cpjit-stats] ---- %zu fns tracked ----\n", n);

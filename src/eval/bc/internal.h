@@ -462,6 +462,14 @@ typedef struct mino_bc_fn {
      * a global registry to dump them. */
     uint64_t         jit_invocations;
     uint64_t         jit_deopt_exits;
+    /* Per-fn JIT wall-time. Populated only when MINO_JIT_TIME_FNS=1 is
+     * set in the environment at the first mino_jit_invoke; otherwise
+     * left at zero and the timing path is skipped. The flag gate is
+     * read once into a process-global tri-state so the per-call cost
+     * is one load + one branch when the feature is off. native_total_ns
+     * is cumulative; native_max_ns is the slowest single invocation. */
+    uint64_t         jit_native_total_ns;
+    uint32_t         jit_native_max_ns;
 } mino_bc_fn_t;
 
 /* Stencil ABI boundary invariant.

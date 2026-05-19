@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.346.1 — Per-fn JIT wall-time (env-gated)
+
+Two new `mino_bc_fn_t` fields, populated only when
+`MINO_JIT_TIME_FNS=1` is set in the environment:
+
+- `jit_native_total_ns` (uint64_t) — cumulative ns inside the
+  bc's native body across all invocations.
+- `jit_native_max_ns` (uint32_t, saturated at UINT32_MAX) — the
+  slowest single invocation.
+
+`mino_jit_invoke` reads the env flag once into a static
+tri-state so the default path stays at v0.346.0 cost (one load
++ one branch per call). When the flag is on, two
+`mino_monotonic_ns()` reads bracket the native `f()` call;
+overhead measured at ~5-10 ns per call, which the perf-gate
+budget tolerates for warm fns.
+
+The `MINO_CPJIT_STATS=tracing` per-fn dump adds a `wall:
+total=N ns  avg=M ns  max=K ns` follow-up line whenever
+`native_total_ns > 0`, so an embedder running both env flags
+together sees per-fn cost-per-call alongside the invocation
+count.
+
+Probe (1000-iter `fib`-50 loop with both env flags on):
+- inv=901 native=16 KB total=151 us avg=167 ns max=3 us.
+
+`task release-gate` is OK.
+
 ## v0.346.0 — Per-fn JIT invocation + deopt counters
 
 Two `uint64_t` counters per compiled bc record:
