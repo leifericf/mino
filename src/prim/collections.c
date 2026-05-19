@@ -1239,11 +1239,143 @@ mino_val_t *prim_get(mino_state_t *S, mino_val_t *args, mino_env_t *env)
     return def_val;
 }
 
+/* Per-collection-kind conj implementations. `items` is a cons-list of
+ * arguments to prepend / append, in left-to-right argument order. */
+
+static mino_val_t *conj_list(mino_state_t *S, mino_val_t *coll,
+                             mino_val_t *items)
+{
+    /* List/nil/empty-list: prepend each item so
+     * (conj '(1 2) 3 4) => (4 3 1 2). */
+    mino_val_t *out = (coll == NULL || mino_type_of(coll) == MINO_NIL
+                       || mino_type_of(coll) == MINO_EMPTY_LIST)
+        ? mino_nil(S) : coll;
+    while (mino_is_cons(items)) {
+        out = mino_cons(S, items->as.cons.car, out);
+        items = items->as.cons.cdr;
+    }
+    if (out == NULL || mino_type_of(out) == MINO_NIL) return mino_empty_list(S);
+    return out;
+}
+
+static mino_val_t *conj_vector(mino_state_t *S, mino_val_t *coll,
+                               mino_val_t *items)
+{
+    mino_val_t *acc = coll;
+    while (mino_is_cons(items)) {
+        acc = vec_conj1(S, acc, items->as.cons.car);
+        items = items->as.cons.cdr;
+    }
+    return acc;
+}
+
+static mino_val_t *conj_map_entry(mino_state_t *S, mino_val_t *coll,
+                                  mino_val_t *items)
+{
+    /* (conj entry x ...) is JVM-equivalent to (conj [k v] x ...).
+     * Promote to a 2-vector then fall through to vector conj. */
+    mino_val_t *kv[2];
+    kv[0] = coll->as.map_entry.k;
+    kv[1] = coll->as.map_entry.v;
+    return conj_vector(S, mino_vector(S, kv, 2), items);
+}
+
+static mino_val_t *conj_map(mino_state_t *S, mino_val_t *coll,
+                            mino_val_t *items)
+{
+    /* Each added item must be a 2-element vector [k v], a map
+     * (entries are merged), a map-entry, or nil (no-op, per Clojure's
+     * (conj coll nil) returning coll unchanged). Assoc each onto the
+     * accumulator so successor maps share structure with the source. */
+    mino_val_t *acc = coll;
+    while (mino_is_cons(items)) {
+        mino_val_t *item = items->as.cons.car;
+        if (item == NULL || mino_type_of(item) == MINO_NIL) {
+            items = items->as.cons.cdr;
+            continue;
+        }
+        if (mino_type_of(item) == MINO_MAP) {
+            /* Merge map entries: (conj {:a 0} {:b 1}) */
+            size_t j;
+            for (j = 0; j < item->as.map.len; j++) {
+                mino_val_t *k = vec_nth(item->as.map.key_order, j);
+                mino_val_t *v = map_get_val(item, k);
+                mino_val_t *pair_args =
+                    mino_cons(S, k, mino_cons(S, v, mino_nil(S)));
+                acc = map_assoc_pairs(S, acc, pair_args, 1);
+            }
+        } else if (mino_type_of(item) == MINO_VECTOR
+                   && item->as.vec.len == 2) {
+            mino_val_t *pair_args =
+                mino_cons(S, vec_nth(item, 0),
+                    mino_cons(S, vec_nth(item, 1), mino_nil(S)));
+            acc = map_assoc_pairs(S, acc, pair_args, 1);
+        } else if (mino_type_of(item) == MINO_MAP_ENTRY) {
+            mino_val_t *pair_args =
+                mino_cons(S, item->as.map_entry.k,
+                    mino_cons(S, item->as.map_entry.v, mino_nil(S)));
+            acc = map_assoc_pairs(S, acc, pair_args, 1);
+        } else {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "conj on map requires map entries or 2-element vectors");
+        }
+        items = items->as.cons.cdr;
+    }
+    return acc;
+}
+
+static mino_val_t *conj_set(mino_state_t *S, mino_val_t *coll,
+                            mino_val_t *items)
+{
+    mino_val_t *acc = coll;
+    while (mino_is_cons(items)) {
+        acc = set_conj1(S, acc, items->as.cons.car);
+        items = items->as.cons.cdr;
+    }
+    return acc;
+}
+
+static mino_val_t *conj_sorted_map(mino_state_t *S, mino_val_t *coll,
+                                   mino_val_t *items)
+{
+    mino_val_t *v = coll;
+    while (mino_is_cons(items)) {
+        mino_val_t *item = items->as.cons.car;
+        mino_val_t *ek, *ev;
+        if (item != NULL && mino_type_of(item) == MINO_VECTOR
+            && item->as.vec.len == 2) {
+            ek = vec_nth(item, 0);
+            ev = vec_nth(item, 1);
+        } else if (item != NULL && mino_type_of(item) == MINO_MAP_ENTRY) {
+            ek = item->as.map_entry.k;
+            ev = item->as.map_entry.v;
+        } else {
+            return prim_throw_classified(S, "eval/type", "MTY001",
+                "conj on sorted-map requires map entries or 2-element vectors");
+        }
+        v = sorted_map_assoc1(S, v, ek, ev);
+        items = items->as.cons.cdr;
+    }
+    return v;
+}
+
+static mino_val_t *conj_sorted_set(mino_state_t *S, mino_val_t *coll,
+                                   mino_val_t *items)
+{
+    mino_val_t *v = coll;
+    while (mino_is_cons(items)) {
+        v = sorted_set_conj1(S, v, items->as.cons.car);
+        items = items->as.cons.cdr;
+    }
+    return v;
+}
+
 mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
 {
     mino_val_t *coll;
     size_t      n;
-    mino_val_t *p;
+    mino_val_t *items;
+    mino_type_t kind;
     (void)env;
     arg_count(S, args, &n);
     if (n == 0) {
@@ -1254,135 +1386,34 @@ mino_val_t *prim_conj(mino_state_t *S, mino_val_t *args, mino_env_t *env)
         /* (conj coll) => coll — single arg returns the collection. */
         return args->as.cons.car;
     }
-    coll = args->as.cons.car;
-    p    = args->as.cons.cdr;
-    if (coll == NULL || mino_type_of(coll) == MINO_NIL
-        || mino_type_of(coll) == MINO_EMPTY_LIST
-        || mino_type_of(coll) == MINO_CONS
-        || mino_type_of(coll) == MINO_LAZY) {
-        /* List/nil/empty-list: prepend each item so
-         * (conj '(1 2) 3 4) => (4 3 1 2). */
-        mino_val_t *out = (coll == NULL || mino_type_of(coll) == MINO_NIL
-                           || mino_type_of(coll) == MINO_EMPTY_LIST)
-            ? mino_nil(S) : coll;
-        while (mino_is_cons(p)) {
-            out = mino_cons(S, p->as.cons.car, out);
-            p = p->as.cons.cdr;
-        }
-        if (out == NULL || mino_type_of(out) == MINO_NIL) return mino_empty_list(S);
-        return out;
-    }
-    if (mino_type_of(coll) == MINO_VECTOR) {
-        size_t extra = n - 1;
-        mino_val_t *acc = coll;
-        size_t i;
-        for (i = 0; i < extra; i++) {
-            acc = vec_conj1(S, acc, p->as.cons.car);
-            p = p->as.cons.cdr;
-        }
-        return acc;
-    }
-    if (mino_type_of(coll) == MINO_MAP_ENTRY) {
-        /* (conj entry x ...) is JVM-equivalent to (conj [k v] x ...).
-         * Promote to a 2-vector then fall through to vector conj. */
-        size_t extra = n - 1;
-        mino_val_t *kv[2];
-        mino_val_t *acc;
-        size_t i;
-        kv[0] = coll->as.map_entry.k;
-        kv[1] = coll->as.map_entry.v;
-        acc = mino_vector(S, kv, 2);
-        for (i = 0; i < extra; i++) {
-            acc = vec_conj1(S, acc, p->as.cons.car);
-            p = p->as.cons.cdr;
-        }
-        return acc;
-    }
-    if (mino_type_of(coll) == MINO_MAP) {
-        /* Each added item must be a 2-element vector [k v], a map
-         * (entries are merged), or nil (no-op, per Clojure's
-         * (conj coll nil) returning coll unchanged). Assoc each
-         * onto the accumulator so successor maps share structure
-         * with the source. */
-        size_t      extra = n - 1;
-        mino_val_t *acc   = coll;
-        size_t      i;
-        for (i = 0; i < extra; i++) {
-            mino_val_t *item = p->as.cons.car;
-            if (item == NULL || mino_type_of(item) == MINO_NIL) {
-                /* nil is a no-op for conj on any collection. */
-                p = p->as.cons.cdr;
-                continue;
-            }
-            if (item != NULL && mino_type_of(item) == MINO_MAP) {
-                /* Merge map entries: (conj {:a 0} {:b 1}) */
-                size_t j;
-                for (j = 0; j < item->as.map.len; j++) {
-                    mino_val_t *k = vec_nth(item->as.map.key_order, j);
-                    mino_val_t *v = map_get_val(item, k);
-                    mino_val_t *pair_args = mino_cons(S, k, mino_cons(S, v, mino_nil(S)));
-                    acc = map_assoc_pairs(S, acc, pair_args, 1);
-                }
-            } else if (item != NULL && mino_type_of(item) == MINO_VECTOR
-                       && item->as.vec.len == 2) {
-                mino_val_t *pair_args = mino_cons(S, vec_nth(item, 0),
-                                       mino_cons(S, vec_nth(item, 1), mino_nil(S)));
-                acc = map_assoc_pairs(S, acc, pair_args, 1);
-            } else if (item != NULL && mino_type_of(item) == MINO_MAP_ENTRY) {
-                mino_val_t *pair_args =
-                    mino_cons(S, item->as.map_entry.k,
-                        mino_cons(S, item->as.map_entry.v, mino_nil(S)));
-                acc = map_assoc_pairs(S, acc, pair_args, 1);
-            } else {
-                return prim_throw_classified(S, "eval/type", "MTY001", "conj on map requires map entries or 2-element vectors");
-            }
-            p = p->as.cons.cdr;
-        }
-        return acc;
-    }
-    if (mino_type_of(coll) == MINO_SET) {
-        mino_val_t *acc = coll;
-        while (mino_is_cons(p)) {
-            acc = set_conj1(S, acc, p->as.cons.car);
-            p = p->as.cons.cdr;
-        }
-        return acc;
-    }
-    if (mino_type_of(coll) == MINO_SORTED_MAP) {
-        mino_val_t *v = coll;
-        while (mino_is_cons(p)) {
-            mino_val_t *item = p->as.cons.car;
-            mino_val_t *ek, *ev;
-            if (item != NULL && mino_type_of(item) == MINO_VECTOR
-                && item->as.vec.len == 2) {
-                ek = vec_nth(item, 0);
-                ev = vec_nth(item, 1);
-            } else if (item != NULL && mino_type_of(item) == MINO_MAP_ENTRY) {
-                ek = item->as.map_entry.k;
-                ev = item->as.map_entry.v;
-            } else {
-                return prim_throw_classified(S, "eval/type", "MTY001",
-                    "conj on sorted-map requires map entries or 2-element vectors");
-            }
-            v = sorted_map_assoc1(S, v, ek, ev);
-            p = p->as.cons.cdr;
-        }
-        return v;
-    }
-    if (mino_type_of(coll) == MINO_SORTED_SET) {
-        mino_val_t *v = coll;
-        while (mino_is_cons(p)) {
-            v = sorted_set_conj1(S, v, p->as.cons.car);
-            p = p->as.cons.cdr;
-        }
-        return v;
-    }
-    {
+    coll  = args->as.cons.car;
+    items = args->as.cons.cdr;
+    kind  = (coll == NULL) ? MINO_NIL : mino_type_of(coll);
+    switch (kind) {
+    case MINO_NIL:
+    case MINO_EMPTY_LIST:
+    case MINO_CONS:
+    case MINO_LAZY:
+        return conj_list(S, coll, items);
+    case MINO_VECTOR:
+        return conj_vector(S, coll, items);
+    case MINO_MAP_ENTRY:
+        return conj_map_entry(S, coll, items);
+    case MINO_MAP:
+        return conj_map(S, coll, items);
+    case MINO_SET:
+        return conj_set(S, coll, items);
+    case MINO_SORTED_MAP:
+        return conj_sorted_map(S, coll, items);
+    case MINO_SORTED_SET:
+        return conj_sorted_set(S, coll, items);
+    default: {
         char msg[96];
         snprintf(msg, sizeof(msg),
                  "conj: expected a list, vector, map, or set, got %s",
                  type_tag_str(coll));
         return prim_throw_classified(S, "eval/type", "MTY001", msg);
+    }
     }
 }
 
