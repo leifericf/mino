@@ -492,11 +492,10 @@ typedef struct mino_bc_fn {
     unsigned         native_gen;
     size_t           native_size;
     unsigned         hot_counter;
-    /* Backing slab for slab-pool compiles. NULL for legacy
-     * one-page-per-fn compiles (which the jit_regions list owns).
-     * mino_jit_invalidate uses this to decrement the slab's
-     * live_slots refcount; when the count reaches zero the slab is
-     * unlinked and its page munmap'd. */
+    /* Backing slab for slab-pool compiles. NULL for one-page-per-fn
+     * compiles (which the jit_regions list owns). mino_jit_invalidate
+     * uses this to decrement the slab's live_slots refcount; when the
+     * count reaches zero the slab is unlinked and its page munmap'd. */
     struct mino_jit_slab *native_slab;
     /* Per-pc → native byte offset map. native_pc_offsets[i] gives the
      * offset (in bytes from `native`) at which the i-th bytecode

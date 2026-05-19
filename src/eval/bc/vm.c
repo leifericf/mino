@@ -428,11 +428,11 @@ static mino_val_t *bc_protocol_type_disc(mino_state_t *S, mino_val_t *v)
 
 /* Build a cons list head-first from `argc` register slots starting at
  * `base`. Used by OP_CALL / OP_TAILCALL to hand off arguments to
- * apply_callable, which still consumes the cons-spine ABI. The new
- * cells are reachable through the GC root walk because the register
- * slots in [base, base+argc) keep their referents alive, and the new
- * head cells are themselves stored into a temporary that the
- * conservative stack scan covers. */
+ * apply_callable along the cons-spine ABI path. The new cells are
+ * reachable through the GC root walk because the register slots in
+ * [base, base+argc) keep their referents alive, and the new head
+ * cells are themselves stored into a temporary that the conservative
+ * stack scan covers. */
 static mino_val_t *args_from_regs(mino_state_t *S, mino_val_t **regs,
                                   unsigned argc)
 {
@@ -511,8 +511,8 @@ mino_val_t *unop_int_fast(mino_state_t *S, mino_val_t *v,
     }
 }
 
-/* Integer fast-lane for OP_BINOP_INT. Same Phase D tag-extract shape
- * as unop_int_fast: a single MINO_IS_INT check per operand replaces
+/* Integer fast-lane for OP_BINOP_INT. Same tag-extract shape as
+ * unop_int_fast: a single MINO_IS_INT check per operand replaces
  * mino_val_int_p's NULL + tag + type chain, and MINO_INT_VAL decodes
  * inline without the boxed-fallback branch. Overflow stays on the
  * __builtin_*_overflow intrinsics; the encoded result rides through
@@ -884,10 +884,10 @@ mino_val_t *mino_bc_ic_resolve_protocol(mino_state_t *S,
     return impl;
 }
 
-/* Cold-op handler. The E1 op-count profile shows 18 of 63 opcodes
+/* Cold-op handler. The op-count profile shows 18 of 63 opcodes
  * carry ~99% of dispatches; the long tail (NOP, GETGLOBAL non-cached,
  * CALL non-cached, closure build, env push/pop/bind, try/throw/dyn
- * frames, legacy BINOP_INT, infrequent vec ops) accounts for the
+ * frames, BINOP_INT, infrequent vec ops) accounts for the
  * remaining <1%. Splitting those out of the main dispatch switch
  * keeps the hot dispatch's case ladder small enough for clang to lay
  * out a tight jump table and keep the hot-op locals in registers
@@ -1468,9 +1468,10 @@ static int bc_run_dispatch_from(mino_state_t *S, const mino_bc_fn_t *bc,
             /* Hand off via the MINO_TAIL_CALL sentinel; the outer
              * apply_callable trampoline picks up the new (fn, args)
              * without growing the C stack. The sentinel's args field
-             * stays in cons-format for legacy callers that read it
-             * directly; the trampoline inside apply_callable_argv
-             * walks it back to argv for bc-FN targets. */
+             * stays in cons-format for the cons-spine consumers that
+             * read it directly; the trampoline inside
+             * apply_callable_argv walks it back to argv for bc-FN
+             * targets. */
             S->tail_call_sentinel.as.tail_call.fn   = callee;
             S->tail_call_sentinel.as.tail_call.args = args;
             retval = &S->tail_call_sentinel;

@@ -90,10 +90,10 @@ struct mino_jit_region {
 
 /* One JIT slab: a host-page-sized RW/RX-cycled buffer that bump-
  * allocates [code|tramps|pool] slots for multiple small fns. The
- * legacy `mino_jit_region` path mmaps one page per fn, leaving
- * 95%+ of each page dead for sub-KB bodies; the slab pool packs
- * those bodies together so the per-fn JIT memory footprint drops
- * to roughly slot density × page size.
+ * `mino_jit_region` path mmaps one page per fn -- fine for large
+ * bodies but leaves 95%+ of each page dead for sub-KB ones. The
+ * slab pool packs the sub-KB bodies together so the per-fn JIT
+ * memory footprint drops to roughly slot density × page size.
  *
  * `live_slots` is the refcount of bc records that still own a slot
  * inside `page`; once it reaches zero, the next sweep can munmap

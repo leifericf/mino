@@ -262,8 +262,9 @@ struct mino_val {
              * S->ns_vars.transient_owner_next++; written into the owner field
              * of every owner-tagged vec/HAMT node so the transient's
              * *_bang mutators can recognise their own nodes and mutate
-             * them in place. 0 means "no in-place editing tier", which
-             * is the legacy wrapper behaviour. */
+             * them in place. 0 means "no in-place editing tier" -- the
+             * wrapper-mode fallback that allocates a fresh persistent
+             * value and swaps it in. */
             uintptr_t   owner_id;
         } transient;
         struct {          /* MINO_BIGINT */

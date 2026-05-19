@@ -62,8 +62,8 @@ const char *intern_filename(mino_state_t *S, const char *name)
  * list/vector/map walkers' per-element state takes ~250-300 bytes,
  * so ~30k nesting levels exhaust the stack and SIGSEGV the embedder
  * with no diagnostic. 1024 is well above any legitimate source
- * (legacy macro expansion peaks at ~50; pathological hand-written
- * data peaks at a few hundred) and well below the overflow point. */
+ * (macro expansion peaks at ~50; pathological hand-written data
+ * peaks at a few hundred) and well below the overflow point. */
 #define MINO_READER_MAX_DEPTH 1024
 
 static void set_reader_diag(mino_state_t *S, const char *code,

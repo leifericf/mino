@@ -208,9 +208,10 @@ static int gc_tick_should_suppress(mino_state_t *S)
         || __atomic_load_n(&S->threading.thread_count, __ATOMIC_RELAXED) > 0;
 }
 
-/* Stress mode: every alloc forces a full STW major, preserving the
- * legacy stress-mode test coverage. Any in-flight incremental major is
- * driven to completion first so the stress major starts from IDLE. */
+/* Stress mode: every alloc forces a full STW major, exercising the
+ * collector aggressively for finalizer / barrier tests. Any in-flight
+ * incremental major is driven to completion first so the stress major
+ * starts from IDLE. */
 static void gc_tick_stress(mino_state_t *S)
 {
     if (S->gc.phase == GC_PHASE_MAJOR_MARK) {

@@ -19,9 +19,10 @@ mino_val_t *mino_regex_from_source(mino_state_t *S, mino_val_t *source)
     return v;
 }
 
-/* Pull out the pattern bytes from either a MINO_REGEX (canonical) or a
- * MINO_STRING (legacy / explicit-string callers). Returns 0 if the
- * argument is neither. */
+/* Pull out the pattern bytes from either a MINO_REGEX (canonical) or
+ * a MINO_STRING (callers that pass a pattern source directly, such as
+ * (re-find #"..." s) shorthand variants). Returns 0 if the argument
+ * is neither. */
 static int regex_source_view(const mino_val_t *v, const char **data, size_t *len)
 {
     if (v == NULL) return 0;

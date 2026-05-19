@@ -4621,7 +4621,7 @@ static int compile_clause(compiler_t *c, mino_val_t *params, mino_val_t *body,
 {
     /* Vector params with one or more destructure patterns get
      * rewritten into plain gensym params + a wrapping let.
-     * Non-vector params (legacy list form, NULL, etc.) and pure
+     * Non-vector params (Lisp-style list form, NULL, etc.) and pure
      * plain-vector params skip the rewrite -- the latter is the hot
      * path, the former lets params_simple_plain decline below. */
     if (params != NULL && mino_type_of(params) == MINO_VECTOR

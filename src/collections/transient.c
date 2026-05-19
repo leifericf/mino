@@ -279,8 +279,9 @@ mino_val_t *mino_conj_bang(mino_state_t *S, mino_val_t *t,
     }
     /* Set branch: owner-tagged HAMT + key_order. conj! on a map
      * transient with a 2-element pair value falls through to
-     * mino_assoc_bang via the legacy prim_conj dispatch -- routing
-     * here would force a fast/slow split for that uncommon shape. */
+     * mino_assoc_bang via prim_conj's wrapper-style dispatch --
+     * routing here would force a fast/slow split for that uncommon
+     * shape. */
     if (mino_type_of(inner) == MINO_SET
         && t->as.transient.owner_id != 0) {
         result = set_conj1_owned(S, inner, val, t->as.transient.owner_id);

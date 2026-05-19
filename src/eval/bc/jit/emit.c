@@ -619,8 +619,8 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
 
     /* Allocation: small fns (need_bytes <= MINO_JIT_SLAB_CUTOFF) come
      * out of the slab pool; the slab is flipped RW for the duration
-     * of this fill and back to RX after the I-cache flush. Larger fns
-     * keep the legacy one-page-per-fn mmap path so a single oversized
+     * of this fill and back to RX after the I-cache flush. Larger
+     * fns take the one-page-per-fn mmap path so a single oversized
      * compile cannot lock a slab into RW for an extended window. */
     struct mino_jit_slab *slab        = NULL;
     size_t                slot_offset = 0;
@@ -960,7 +960,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
      * issues `dc cvau` + `dsb ish` + `ic ivau` + `dsb ish` + `isb`
      * the way the architecture requires. The range is the slot for
      * slab fns (so a slab past slot 0 doesn't clear past its page)
-     * and the whole region for legacy fns. */
+     * and the whole region for mmap'd fns. */
     {
         size_t flush_bytes = (slab != NULL) ? slot_size : total_size;
         __builtin___clear_cache((char *)region,
@@ -969,7 +969,7 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
 
     /* Re-seal the JIT memory. Slab path: mprotect the whole slab page
      * back to RX (one syscall covers every slot in the page, so the
-     * cost amortises across compiles). Legacy path: mprotect the fn's
+     * cost amortises across compiles). Mmap path: mprotect the fn's
      * dedicated page to RX. The literal pool is read-only at this
      * point too -- the patcher already populated it. */
     if (slab != NULL) {
@@ -984,8 +984,8 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
         }
     }
 
-    /* Legacy path: track the region for state-teardown munmap (region_
-     * track also takes ownership of pc_offsets via aux_ptr).
+    /* Mmap path: track the region for state-teardown munmap
+     * (region_track also takes ownership of pc_offsets via aux_ptr).
      * Slab path: track only pc_offsets so state teardown frees it; the
      * slab page itself is on S->jit_slabs. */
     if (slab == NULL) {
@@ -1009,15 +1009,15 @@ int mino_jit_compile_inner(mino_state_t *S, mino_val_t *fn_val,
     bc->native_size       = (slab != NULL) ? slot_size : total_size;
     bc->native_gen        = S->ns_vars.ic_gen;
     bc->native_slab       = slab;
-    /* The offsets table is owned by the jit_regions node (legacy) or
-     * the bc record itself (slab path; freed by mino_jit_invalidate).
+    /* The offsets table is owned by the jit_regions node (mmap path)
+     * or the bc record itself (slab path; freed by mino_jit_invalidate).
      * Pointing bc here to the fresh table is the visible-to-runtime
      * atomic. */
     bc->native_pc_offsets = pc_offsets;
     /* Instrumentation: record the code-stream size (no tramp / pool /
      * slack) and the dead-byte slack at the end of the region. The
      * slack is the per-slot intra-alignment padding for slab fns and
-     * the page-rounding waste for legacy fns. */
+     * the page-rounding waste for mmap'd fns. */
     {
         size_t used  = pos + tramp_pos + pool_pos;
         size_t total = (slab != NULL) ? slot_size : total_size;
