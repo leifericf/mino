@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.353.0 — Protocol-call cached fast lane deferred
+
+Cycle F items 1 + 9 ("Per-call argv allocation in the protocol
+dispatch slow path" and "Protocol per-call env-bind overhead")
+were planned as a fast lane that routes the cached protocol
+impl through `mino_bc_run_known_native`, bypassing
+`apply_callable_argv`'s `env_child` / `env_bind` / argv-copy
+overhead. The instrumentation cycle dashboard cited 4.8 M
+`:valarr` + 2.4 M `:env` + 2.4 M `:raw` allocations across 600
+protocol-method outer calls on the cycle E baseline as the
+motivating evidence (`mino/.local/top-10-priorities.md`).
+
+A prototype of the fast lane was implemented and verified
+correct (the IC slot classifies the impl's callable kind on
+refill; the dispatch hot path checks the kind and routes
+single-clause / no-rest / argc-matching impls through
+`mino_bc_run_known_native`). `task test-jit-parity` was
+byte-identical across all four binaries with the prototype in
+place.
+
+Local measurement, however, showed no win:
+
+| workload | baseline | prototype | delta |
+|---|---:|---:|---:|
+| 1-arg protocol × 5 M iters (JIT on) | 467 ms | 466 ms | ±noise |
+| 3-arg protocol × 5 M iters (JIT on) | 215 ms | 217 ms | ±noise |
+| 1-arg protocol × 5 M iters (JIT off) | 510 ms | 510 ms | ±noise |
+| :env alloc delta over 5 M calls | 114 | 114 | identical |
+| :valarr alloc delta over 5 M calls | 106 | 106 | identical |
+
+The dashboard's heavy `:valarr` footprint is not reproducible
+on the current corpus -- the most likely explanation is that
+the protocol-dispatch stencil added after cycle E close already
+captured most of the win the fast lane was meant to address.
+`apply_callable_argv`'s `MINO_FN` lane goes through
+`invoke_bc_fn_argv` which does no `:valarr` alloc on the
+hot path for single-clause callees.
+
+Per the project's "every perf change must have a before/after
+bench" / "do not ship noise-level wins" rule, the prototype is
+reverted. The IC slot already carries `cached_callable_kind`
+and `cached_bc` on the GLOBAL path; extending the PROTOCOL
+path is straightforward when a future workload surfaces actual
+alloc pressure here.
+
+Honest follow-up note: a workload that DOES reproduce the
+dashboard's 8000 `:valarr` per outer call would re-open the
+case; the implementation is documented and ready.
+
 ## v0.352.0 — JIT loop matcher: constant-step accumulator
 
 Extends the counted-loop matcher to accept literal-int
