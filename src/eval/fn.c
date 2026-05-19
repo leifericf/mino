@@ -329,7 +329,12 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     cap  = new_cap;
                     heap = grown;
                 }
-                argv[argc++] = cur->as.cons.car;
+                if (heap != NULL) {
+                    gc_valarr_set(S, argv, (size_t)argc, cur->as.cons.car);
+                    argc++;
+                } else {
+                    argv[argc++] = cur->as.cons.car;
+                }
                 cur = cur->as.cons.cdr;
             }
             result = fn->as.prim.fn2(S, argv, argc, env);
@@ -458,7 +463,12 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                     argv = grown;
                     cap  = new_cap;
                 }
-                argv[argc++] = cur->as.cons.car;
+                if (argv != scratch) {
+                    gc_valarr_set(S, argv, (size_t)argc, cur->as.cons.car);
+                    argc++;
+                } else {
+                    argv[argc++] = cur->as.cons.car;
+                }
                 cur = cur->as.cons.cdr;
             }
             if (fn->as.fn.defining_ns != NULL) {
@@ -532,7 +542,13 @@ mino_val_t *apply_callable(mino_state_t *S, mino_val_t *fn, mino_val_t *args,
                             argv = grown;
                             cap  = new_cap;
                         }
-                        argv[argc++] = cur->as.cons.car;
+                        if (argv != scratch) {
+                            gc_valarr_set(S, argv, (size_t)argc,
+                                          cur->as.cons.car);
+                            argc++;
+                        } else {
+                            argv[argc++] = cur->as.cons.car;
+                        }
                         cur = cur->as.cons.cdr;
                     }
                     fn = next_fn;
@@ -907,7 +923,13 @@ static inline mino_val_t *invoke_bc_fn_argv(mino_state_t *S, mino_val_t *fn,
                     cap       = new_cap;
                     heap      = 1;
                 }
-                call_argv[new_argc++] = cur->as.cons.car;
+                if (heap) {
+                    gc_valarr_set(S, call_argv, (size_t)new_argc,
+                                  cur->as.cons.car);
+                    new_argc++;
+                } else {
+                    call_argv[new_argc++] = cur->as.cons.car;
+                }
                 cur = cur->as.cons.cdr;
             }
             call_argc = new_argc;

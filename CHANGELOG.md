@@ -1,5 +1,55 @@
 # Changelog
 
+## v0.363.0 — OLD-VALARR write-barrier retrofit + bc-regs remset pin
+
+Closes the OLD-VALARR remset-miss bug surfaced under
+`MINO_GC_VERIFY=1` at the end of the previous cycle. Two
+fixes land together because they address the same invariant
+from opposite ends.
+
+**Argv write sites routed through the barrier.** The fn-apply
+trampolines built a scratch argv on the C stack and, on
+overflow, spilled to a heap-allocated `GC_T_VALARR`. The
+spilled buffer could survive a minor across nested
+`mino_bc_run` re-entries, get promoted to OLD, and then take
+fresh slot stores without going through `gc_write_barrier`.
+Four sites in `src/eval/fn.c` now route through
+`gc_valarr_set` whenever the buffer is heap-resident:
+
+- `apply_callable` arity-2 prim spill (line 332).
+- `eval_fn` bc trampoline initial argv build (line 461).
+- `eval_fn` bc trampoline tail-call rebuild (line 535).
+- `invoke_bc_fn_argv` tail-call growth (line 910).
+
+The stack-resident case keeps the direct assignment; the
+heap-resident case threads the remset entry.
+
+**bc_regs pinned in the remset.** The bytecode VM register
+stack (`S->bc_regs` plus per-worker `bc_regs_storage`) is a
+state-owned `GC_T_VALARR` whose slots receive YOUNG values
+from the inner-loop VM hot path WITHOUT a per-op barrier --
+the cost would be prohibitive on every register write. The
+existing design compensates by walking the live slot range
+from `gc_mark_roots`, but the remset itself stayed unaware of
+those edges. `MINO_GC_VERIFY=1` correctly flagged the
+unaware-remset state as an invariant violation.
+
+`gc_remset_reset` now re-adds each OLD bc-regs buffer to the
+remset after every clear. One remset entry per worker per
+cycle; minor's `gc_mark_remset` already covers the slot walk
+the verify pass was demanding. The cost is a single
+unconditional `gc_remset_add` per minor.
+
+**Verification.**
+
+- `MINO_GC_VERIFY=1 task release-gate`: clean (the verify
+  trap that surfaced under v0.361 no longer reproduces).
+- `task release-gate` (default mode): clean.
+- `task test-jit-parity`: byte-identical across all 4 binaries.
+
+This release is a precondition for the SATB drop scheduled
+for v0.364.0.
+
 ## v0.362.0 — Perf cycle F close (SATB drop deferred)
 
 Closes the 12-tag v0.351.0 -> v0.362.0 cycle. The plan called

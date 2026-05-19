@@ -211,6 +211,39 @@ void gc_write_barrier(mino_state_t *S, void *container,
     gc_remset_add(S, h_container);
 }
 
+/* Re-add the bytecode VM register stacks to the remset. These buffers
+ * are state-owned VALARRs whose slots receive YOUNG values from the
+ * VM hot path WITHOUT routing through gc_write_barrier (the per-op
+ * register write is the inner-loop cost that the design optimises
+ * for). The minor collector compensates by walking the live slot
+ * range from gc_mark_roots, but the remset itself stays unaware of
+ * those edges -- which is fine for marking (gc_mark_roots covers it)
+ * but trips MINO_GC_VERIFY=1 by leaving an OLD-with-YOUNG-slots
+ * container outside the remset. Re-adding here after every reset
+ * keeps the invariant "every OLD container with potential YOUNG
+ * slots is in the remset" intact while costing one remset entry per
+ * worker. */
+static void gc_remset_pin_bc_regs(mino_state_t *S)
+{
+    mino_thread_ctx_t *w;
+    if (S->bc_regs != NULL) {
+        gc_hdr_t *h = ((gc_hdr_t *)S->bc_regs) - 1;
+        if (h->gen == GC_GEN_OLD && !h->dirty) {
+            gc_remset_add(S, h);
+        }
+    }
+    mino_worker_list_lock_acquire(S);
+    for (w = S->worker_ctxs_head; w != NULL; w = w->next_worker) {
+        if (w->bc_regs_storage != NULL) {
+            gc_hdr_t *h = ((gc_hdr_t *)w->bc_regs_storage) - 1;
+            if (h->gen == GC_GEN_OLD && !h->dirty) {
+                gc_remset_add(S, h);
+            }
+        }
+    }
+    mino_worker_list_lock_release(S);
+}
+
 void gc_remset_reset(mino_state_t *S)
 {
     size_t i;
@@ -220,6 +253,7 @@ void gc_remset_reset(mino_state_t *S)
         S->gc_remset[i]->dirty = 0;
     }
     S->gc_remset_len = 0;
+    gc_remset_pin_bc_regs(S);
 }
 
 /* Drop remset entries whose container is about to be freed by sweep,
