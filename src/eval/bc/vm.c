@@ -639,10 +639,10 @@ static mino_val_t *resolve_global(mino_state_t *S, mino_val_t *sym,
  * something that can be called (or is a tree-walker fn whose bc has
  * declined or hasn't been compiled yet), returns CALLABLE_OTHER and
  * leaves *out_has_rest / *out_n_params at zero. Conservative on
- * purpose: the v0.221 fast path only fires on SINGLE/PRIM_ARGV, and
- * a misclassification toward OTHER costs one fallback dispatch
- * whereas a misclassification toward SINGLE/PRIM_ARGV would skip
- * the dispatch switch for the wrong callable. */
+ * purpose: the IC fast path only fires on SINGLE/PRIM_ARGV, and a
+ * misclassification toward OTHER costs one fallback dispatch whereas
+ * a misclassification toward SINGLE/PRIM_ARGV would skip the
+ * dispatch switch for the wrong callable. */
 static unsigned char classify_callable_kind(mino_val_t *v,
                                             unsigned char *out_has_rest,
                                             unsigned short *out_n_params)

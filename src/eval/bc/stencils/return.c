@@ -6,12 +6,12 @@
  * runtime supplies; A is encoded as an extern immediate that the JIT
  * patches per-instruction.
  *
- * The legacy stencil_op_return_arg0 form (no immediate) stays as the
- * minimal-shape smoke test the build pipeline pinned in v0.183.0; it
- * exercises the no-relocation extraction path. The new
- * stencil_op_return_imm form joins the byte table with one PAGE21 +
- * PAGEOFF12 relocation pair the JIT patches with the bytecode's A
- * field.
+ * The stencil_op_return_arg0 form (no immediate) is the build
+ * pipeline's minimal-shape smoke test: it exercises the no-relocation
+ * extraction path so a broken extractor surfaces here first. The
+ * stencil_op_return_imm form is the one the JIT actually emits, with
+ * one PAGE21 + PAGEOFF12 relocation pair the patcher fills in with
+ * the bytecode's A field.
  *
  * Build: compiled as part of the stencil pipeline only. The compiled .o
  * is fed to tools/stencil-extract, which writes the byte table + reloc

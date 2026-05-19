@@ -37,8 +37,8 @@
  *     not pretending to be a JVM class.
  *
  *  7. set-validator! does not validate the current value at install
- *     time. JVM matches this; mino's earlier behavior of throwing
- *     MCT001 on install was the deviation, removed in v0.101.0.
+ *     time. JVM matches this; throwing MCT001 at install time would
+ *     be the deviation.
  *
  *  8. alter-after-commute and ref-set-after-commute throw
  *     "Can't set after commute" (JVM canon). The commute-after-alter

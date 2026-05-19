@@ -66,12 +66,12 @@
  * pingpongs between definitions.
  *
  * Mid-execution invalidation (ic_gen bumped while a JIT'd fn is
- * still running on a stack frame) is not yet handled and is moot
- * for v0.187.0 because the only stencils that exist
- * (MOVE / LOAD_K / RETURN) cannot call back into mino-land and
- * therefore cannot observe a mid-frame `def`. When stencils that
- * call into user code arrive, each safe-point inside them will
- * snapshot ic_gen and bail to the interpreter on mismatch. */
+ * still running on a stack frame) is handled at safepoints: stencils
+ * that can call back into mino-land thread `mino_bc_safepoint`,
+ * which checks the current ic_gen against the region's `native_gen`
+ * and takes the side-exit / deopt-to-interp stencil on mismatch. The
+ * runtime then drops the native pointers so subsequent invocations
+ * fall through to the interpreter until the fn rewarms. */
 
 /* One JIT'd code region. Carried in a per-state linked list so
  * mino_state_free can munmap every page on teardown. The aux_ptr

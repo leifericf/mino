@@ -342,10 +342,6 @@ struct mino_state {
     size_t          gc_pause_target_ns;
     unsigned        gc_budget_slices_since_adjust;
 
-    /* (Removed in v0.362.0: gc_barrier_clear_only was a one-cycle
-     * verification counter for the SATB-drop audit. Field kept
-     * out of the struct now that the drop has shipped.) */
-
     /* Host interop */
     int             interop_enabled;
     host_type_t    *host_types;

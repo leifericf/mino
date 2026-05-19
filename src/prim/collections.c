@@ -320,9 +320,9 @@ mino_val_t *prim_cons_argv(mino_state_t *S, mino_val_t **argv, int argc,
 /* Collection primitives                                                     */
 /*                                                                           */
 /* All collection ops treat values as immutable: every operation that        */
-/* "modifies" a collection returns a freshly allocated value. v0.3 uses      */
-/* naïve array-backed representations; persistent tries arrive in v0.4/v0.5 */
-/* without changing the public primitive contracts.                          */
+/* "modifies" a collection returns a freshly allocated value. Concrete       */
+/* representations (array-backed list/vec/map, persistent tries) sit         */
+/* behind the public primitive contracts and may change without API drift.   */
 /* ------------------------------------------------------------------------- */
 
 size_t list_length(mino_state_t *S, mino_val_t *list)
@@ -383,9 +383,9 @@ static mino_val_t *prim_count_step(mino_state_t *S, mino_val_t *coll,
     }
     case MINO_LAZY: {
         /* Force the entire lazy seq and count it. The forced value may
-         * be a flat cons spine, a chunked-cons spine (e.g. lazy range
-         * since v0.98.3), or another lazy. Dispatch instead of
-         * assuming the cons-only walk. */
+         * be a flat cons spine, a chunked-cons spine (lazy range), or
+         * another lazy. Dispatch instead of assuming the cons-only
+         * walk. */
         mino_val_t *forced = lazy_force(S, coll);
         if (forced == NULL) return NULL;
         if (mino_type_of(forced) == MINO_NIL) return mino_int(S, 0);

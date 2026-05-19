@@ -884,12 +884,11 @@ void mino_future_gc_sweep(mino_val_t *fut)
      * the worker is reaped. mino_future_deref uses the same pattern
      * for cv_wait; this brings sweep into alignment.
      *
-     * Background: under the legacy gc_tick_should_suppress path the
-     * collector wouldn't fire while thread_count > 0, so this hang
-     * couldn't surface from auto-tick. But mino_gc_collect (the
-     * public (gc!) API) skips that suppression and runs sweep even
-     * with live workers -- which exposed the deadlock on the v0.255.x
-     * CI runs at transient-survives-gc-yield. */
+     * Background: gc_tick_should_suppress used to gate the collector
+     * out while thread_count > 0, so this hang couldn't surface from
+     * auto-tick. mino_gc_collect (the public (gc!) API) skips that
+     * suppression and runs sweep even with live workers -- which is
+     * how transient-survives-gc-yield exercises the path. */
     S = impl->state;
     if (impl->thread_started && !impl->thread_joined) {
         int depth = 0;

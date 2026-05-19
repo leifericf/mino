@@ -892,9 +892,9 @@ mino_val_t *mino_jit_invoke(mino_state_t *S, mino_bc_fn_t *bc,
     ctx->jit_invoke_depth++;
     bc->jit_invocations++;
     /* Optional per-fn wall-time: env-gated to keep the default hot
-     * path at the same cost as v0.346.0 (1 load + 1 branch on the
-     * tri-state when off). Two mino_monotonic_ns() reads add ~5-10
-     * ns/call when on, well within perf-gate noise for warm fns. */
+     * path at 1 load + 1 branch on the tri-state when off. Two
+     * mino_monotonic_ns() reads add ~5-10 ns/call when on, well within
+     * perf-gate noise for warm fns. */
     {
         static int jit_time_fns = -1;
         if (jit_time_fns == -1) {

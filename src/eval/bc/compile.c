@@ -1719,10 +1719,10 @@ static int try_compile_counted_loop(compiler_t *c,
  *   - then/else swapped: acc as the recur branch's other half.
  *
  * Returns the rewritten form, or NULL when no match (caller falls
- * through to the generic compile_loop). The substrate that makes
- * this pay off is v0.165.0's owner-tagged in-place transient
- * mutation; before that the rewritten form ran 2.5x slower than
- * the persistent baseline (see v0.160.0 defer note). */
+ * through to the generic compile_loop). The rewrite relies on
+ * owner-tagged in-place transient mutation to pay off; without that
+ * substrate the rewritten form runs slower than the persistent
+ * baseline. */
 
 static int is_symbol_named(const mino_val_t *v, const char *name)
 {

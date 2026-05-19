@@ -326,8 +326,9 @@ typedef enum {
 } mino_bc_ic_kind_t;
 
 /* Single CPU-sampler entry. flags low bit = 1 when the sample fired
- * inside JIT'd native code (set by the native-side tag in v0.348.1).
- * Compact (16 bytes) to keep the ring footprint modest. */
+ * inside JIT'd native code (set by the native-side tag in
+ * mino_sampler_fire). Compact (16 bytes) to keep the ring footprint
+ * modest. */
 typedef struct mino_sample {
     const struct mino_bc_fn *bc;
     uint32_t                 pc;

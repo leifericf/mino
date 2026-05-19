@@ -35,9 +35,9 @@
  * the canonical structs surfaces as a compile error before a stencil
  * could mis-read.
  *
- * No stencil .c file consumes this header yet at v0.210.0 -- the
- * generated stencil byte tables are unchanged. Subsequent releases
- * route their inlined hot paths through these macros.
+ * Stencils that need to read or write runtime-struct fields include
+ * this header; the offset macros + _Static_asserts keep their byte
+ * tables in lockstep with the canonical struct layout.
  */
 
 #ifndef MINO_BC_STENCIL_RUNTIME_LAYOUT_H
